@@ -1,0 +1,76 @@
+key base: termal-checkpoint:session-1:turn-check-grant:wait
+
+observations, as hashed:
+[{"observation_id":"834d4ee0c87fad92aeff72eb3d2c9d1969bc941cbb14689961f4c5d30e36cc86","action_fingerprint":"2d7cc0ce52623c3bde2cd355ea5a9f35001e657b72bf75d3fbca2a15d321b48c","effect":"observe","outcome":"succeeded","source_changed":false,"source_basis":{"workspace_id":"<WORKSPACE>","source_revision":"<REVISION>"},"observed_at":"<CHECK-COMPLETED-AT>"},{"observation_id":"b80bccf5f4ff314b5a34fbe2bde61dc576411ceb3df7b063ee95fc4948475d72","action_fingerprint":"46a0b2edf706f13192d98c6d7eb2e92a460da0f6139435f9d2ef3a117e68c684","effect":"observe","outcome":"succeeded","source_changed":false,"source_basis":{"workspace_id":"<WORKSPACE>","source_revision":"<REVISION>"},"observed_at":"<TURN-OBSERVED-AT>"}]
+
+evidence, as hashed:
+[[{"producer_observation":{"kind":"observation_id","observation_id":"834d4ee0c87fad92aeff72eb3d2c9d1969bc941cbb14689961f4c5d30e36cc86"},"check_kind":"test","environment":{"kind":"index","index":0},"summary":"`cargo test --test source_file_size -- --nocapture` exited 0\ntest result: ok. 3 passed","refs":["command:cargo test --test source_file_size -- --nocapture","exit:0"]}],[{"source_basis":{"workspace_id":"<WORKSPACE>","source_revision":"<REVISION>"},"environment_fingerprint":"<ENVIRONMENT-FINGERPRINT>","components":{"toolchain":"rustc 1.90.0 (fixture 2025-09-14); cargo 1.90.0 (fixture 2025-07-30)","sandbox":"workspace-write","workspace_id":"<WORKSPACE>","capability_map_revision":1},"observed_at":"<CHECK-COMPLETED-AT>"}]]
+
+request:
+{
+  "environment_evidence": [
+    {
+      "components": {
+        "capability_map_revision": 1,
+        "sandbox": "workspace-write",
+        "toolchain": "rustc 1.90.0 (fixture 2025-09-14); cargo 1.90.0 (fixture 2025-07-30)",
+        "workspace_id": "<WORKSPACE>"
+      },
+      "environment_fingerprint": "<ENVIRONMENT-FINGERPRINT>",
+      "observed_at": "<CHECK-COMPLETED-AT>",
+      "source_basis": {
+        "source_revision": "<REVISION>",
+        "workspace_id": "<WORKSPACE>"
+      }
+    }
+  ],
+  "grant_id": "turn-check-grant",
+  "idempotency_key": "termal-checkpoint:session-1:turn-check-grant:wait:observations:<OBSERVATIONS-SHA256>:evidence:<EVIDENCE-SHA256>",
+  "next_intent": "wait",
+  "observations": [
+    {
+      "action_fingerprint": "2d7cc0ce52623c3bde2cd355ea5a9f35001e657b72bf75d3fbca2a15d321b48c",
+      "effect": "observe",
+      "observation_id": "834d4ee0c87fad92aeff72eb3d2c9d1969bc941cbb14689961f4c5d30e36cc86",
+      "observed_at": "<CHECK-COMPLETED-AT>",
+      "outcome": "succeeded",
+      "source_basis": {
+        "source_revision": "<REVISION>",
+        "workspace_id": "<WORKSPACE>"
+      },
+      "source_changed": false
+    },
+    {
+      "action_fingerprint": "46a0b2edf706f13192d98c6d7eb2e92a460da0f6139435f9d2ef3a117e68c684",
+      "effect": "observe",
+      "observation_id": "b80bccf5f4ff314b5a34fbe2bde61dc576411ceb3df7b063ee95fc4948475d72",
+      "observed_at": "<TURN-OBSERVED-AT>",
+      "outcome": "succeeded",
+      "source_basis": {
+        "source_revision": "<REVISION>",
+        "workspace_id": "<WORKSPACE>"
+      },
+      "source_changed": false
+    }
+  ],
+  "operation": "turn_checkpoint",
+  "routing_token": "turn-check-token",
+  "verification_evidence": [
+    {
+      "check_kind": "test",
+      "environment": {
+        "index": 0,
+        "kind": "index"
+      },
+      "producer_observation": {
+        "kind": "observation_id",
+        "observation_id": "834d4ee0c87fad92aeff72eb3d2c9d1969bc941cbb14689961f4c5d30e36cc86"
+      },
+      "refs": [
+        "command:cargo test --test source_file_size -- --nocapture",
+        "exit:0"
+      ],
+      "summary": "`cargo test --test source_file_size -- --nocapture` exited 0\ntest result: ok. 3 passed"
+    }
+  ]
+}

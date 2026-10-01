@@ -1552,11 +1552,19 @@ operation and nothing else.
 
 1. **End to end.** A provider command that is a recognised test is driven
    through the recorder. The test asserts the execution record, then the
-   checkpoint request. With timestamps injected, the request's observations,
-   evidence and idempotency key equal those of a fixture captured from the
-   extraction's exact base commit for the same input. The base is `28e9ed5`
-   unless a correctness fix lands first; such a fix is part of the base and
-   is preserved, never compared away.
+   checkpoint request. The request's observations, evidence and idempotency
+   key equal those of a fixture captured from the extraction's exact base
+   commit for the same input. The values no two runs share (the worktree
+   root, its content revision, the environment fingerprint that hashes the
+   root, and the stamped times) are each checked on their own and compared
+   as placeholders, the times by the record that carries them: the base has
+   no clock to inject, and adding one would have changed production code
+   before the capture. The base is `28e9ed5` unless a correctness fix lands
+   first; such a fix is part of the base and is preserved, never compared
+   away. Fixes did land first: the extraction began at `cac212c`, and the
+   fixture test records that commit as the base it was captured at. The test
+   gains the execution record's assertion in the commit that introduces the
+   record.
 2. **The ingress seal, on the projection.** A recorder is paused between
    Admitted and Resolved. The observation projection's cut through a later
    position is `Incomplete` and names that admission. The same test asserts
@@ -1784,8 +1792,9 @@ answers at once and the evaluation is deferred.
   the alternative is a per-session publication order, which is a larger
   change.
 - The first extraction's byte-for-byte fixture (section 9.5) depends on a
-  report that is deterministic for a given input. Timestamps in observations
-  must be injected by the test.
+  report that is deterministic for a given input. The values that are not
+  (the root, its revision, the fingerprint that hashes it, the stamped
+  times) are checked on their own and compared as placeholders.
 - Assembling a module from existing fragments by `include!` has not been
   compiled.
 - The target keeps the rule that an unknown place counts everywhere and
