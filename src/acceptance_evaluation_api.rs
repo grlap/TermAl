@@ -830,8 +830,17 @@ impl AppState {
                 None
             }
         };
+        // After the executor's revision the failure must be named by an
+        // evaluator that never held the run, so the host's preference never
+        // selects same_session then; only the task's pin or a policy that
+        // admits nothing else can still lead there, and that is refused below.
+        let acknowledgement_required = task
+            .carried_failure
+            .as_ref()
+            .is_some_and(|carried| carried.supersedes_required);
         let preferred_mode = defaults.default_mode.filter(|mode| {
             *mode != AcceptanceEvaluationMode::SubAgent
+                && !(acknowledgement_required && *mode == AcceptanceEvaluationMode::SameSession)
                 && admitted.as_ref().is_some_and(|modes| {
                     modes
                         .iter()
@@ -954,6 +963,20 @@ impl AppState {
                 })
             }
             AcceptanceEvaluationMode::SameSession => {
+                // The tracker admits the acknowledgement of a failure whose
+                // criteria the run's executor revised only from an evaluator
+                // that never held the run, which this session is not.
+                if let Some(carried) = task
+                    .carried_failure
+                    .as_ref()
+                    .filter(|carried| carried.supersedes_required)
+                {
+                    return Err(ApiError::conflict(format!(
+                        "`{}`: the run's executor revised the criteria that evaluation {} failed, and the tracker accepts that failure's acknowledgement only from an evaluator that never held the run, which a same_session evaluation cannot be. Same_session was chosen because the task pins it or the project's Engram policy admits nothing else; unpin the task's evaluation mode or admit independent_session in the policy",
+                        acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
+                        carried.evaluation,
+                    )));
+                }
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
                 let unmeasured = unmeasured(&source_fingerprint);
                 let cuts = acceptance_same_session_brief_cuts(&task);

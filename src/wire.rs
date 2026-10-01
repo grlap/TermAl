@@ -1402,6 +1402,12 @@ struct DelegationAcceptanceEvaluation {
     /// record persisted before it was kept, which then submits as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     bindings: Vec<AcceptanceCriterionBinding>,
+    /// The carried failing evaluation this one acknowledges: a failing
+    /// evaluation whose criteria were revised on the run since. The
+    /// submission names it to the tracker as `--supersedes`. Absent when none
+    /// was carried, and on a record persisted before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    supersedes: Option<String>,
     /// One key per spawn (the delegation id): the tracker replays an identical
     /// resend and refuses different content once one is recorded.
     attempt_key: String,
@@ -1561,6 +1567,8 @@ struct PersistedDelegationAcceptanceEvaluation {
     criteria_count: usize,
     #[serde(default)]
     bindings: Vec<AcceptanceCriterionBinding>,
+    #[serde(default)]
+    supersedes: Option<String>,
     attempt_key: String,
     #[serde(default)]
     store: Option<EngramAuthorityStoreKey>,
@@ -1601,6 +1609,7 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             evidence_basis: persisted.evidence_basis,
             criteria_count: persisted.criteria_count,
             bindings: persisted.bindings,
+            supersedes: persisted.supersedes,
             attempt_key: persisted.attempt_key,
             store: persisted.store,
             source_fingerprint: persisted.source_fingerprint,

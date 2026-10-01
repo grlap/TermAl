@@ -16,6 +16,9 @@ mod omissions;
 #[path = "acceptance_evaluation_bindings.rs"]
 mod bindings;
 
+#[path = "acceptance_evaluation_carried_failure.rs"]
+mod carried_failure;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 fn modes(words: &[&str]) -> Vec<String> {
@@ -30,6 +33,7 @@ fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAc
         evidence_basis: 42,
         criteria_count,
         bindings: Vec::new(),
+        supersedes: None,
         attempt_key: delegation_id.to_owned(),
         store: None,
         source_fingerprint: None,

@@ -625,6 +625,8 @@ selected and what is recorded, is described in the
   `checkKind` and optional `fingerprint`; absent when none, and checked at
   submission, see
   [Engram host adapter](./engram-host-adapter.md#acceptance-evaluation)),
+  `supersedes` (the carried failing evaluation the submission acknowledges
+  with `--supersedes`; absent when none was carried),
   `attemptKey` (the delegation id), `store` (the tracker store the brief was
   read from), `sourceFingerprint` (the content revision of the evaluated
   worktree taken at the request; declared as `--source-fingerprint` only if
@@ -1487,6 +1489,8 @@ type DelegationRecord = {
     criteriaCount: number;
     // The criteria bound to a typed host check; absent when none.
     bindings?: { criterion: number; checkKind: string; fingerprint?: string }[];
+    // The carried failing evaluation the submission acknowledges.
+    supersedes?: string;
     attemptKey: string;
     // The tracker store the brief was read from.
     store?: { projectId: string; databasePath: string } | null;
