@@ -23,7 +23,7 @@ export function markLiveTransportActivity(
 
 export function syncLiveTransportActivityFromState(
   activityBySessionId: Map<string, number>,
-  sessions: Session[],
+  sessions: readonly Session[],
   now: number,
 ) {
   // Snapshot adoption seeds the baseline for every listed session immediately.
@@ -53,7 +53,7 @@ export function markLiveSessionResumeWatchdogBaseline(
 
 export function pruneLiveSessionResumeWatchdogBaselineSessions(
   baselineBySessionId: Map<string, number>,
-  sessions: Session[],
+  sessions: readonly Session[],
 ) {
   const liveSessionIds = new Set(sessions.map((session) => session.id));
   for (const sessionId of baselineBySessionId.keys()) {
@@ -65,7 +65,7 @@ export function pruneLiveSessionResumeWatchdogBaselineSessions(
 
 export function syncLiveSessionResumeWatchdogBaselines(
   baselineBySessionId: Map<string, number>,
-  sessions: Session[],
+  sessions: readonly Session[],
   now: number,
 ) {
   // Advance every currently known session so idle-to-active transitions do not

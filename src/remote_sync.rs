@@ -90,6 +90,12 @@ fn remote_delta_session_transcript_metadata(
             message_count,
             session_mutation_stamp,
             ..
+        }
+        | DeltaEvent::TestRunCardUpdated {
+            session_id,
+            message_count,
+            session_mutation_stamp,
+            ..
         } => Some((session_id.as_str(), *message_count, *session_mutation_stamp)),
         _ => None,
     }
@@ -417,12 +423,16 @@ fn apply_remote_session_to_record(
     let previous_messages_loaded = record.session.messages_loaded;
     let previous_prompt_history = record.session.prompt_history.clone();
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
+    let previous_body_seq = record.body_sequence.remote_applied;
+    let previous_epoch = record.body_sequence.remote_epoch.clone();
     record.session = localize_remote_session(
         remote_id,
         &local_session_id,
         local_project_id,
         remote_session,
     );
+    record.body_sequence.remote_applied = record.session.body_seq;
+    record.body_sequence.remote_epoch = record.session.body_seq_epoch.clone();
     record.engram_boot_recovery_pending = remote_session.engram_boot_recovery_pending;
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
@@ -442,7 +452,13 @@ fn apply_remote_session_to_record(
         );
         let has_complete_previous_transcript =
             previous_messages_loaded && count_matches && remote_mutation_stamp_matches;
-        if count_matches && remote_mutation_stamp_matches {
+        if count_matches
+            && remote_mutation_stamp_matches
+            && (record.session.body_seq.is_none()
+                || (previous_body_seq == record.session.body_seq
+                    && previous_epoch == record.session.body_seq_epoch))
+        {
+            record.body_sequence.remote_applied = record.session.body_seq.and(previous_body_seq);
             record.message_start_index = previous_message_start_index;
             record.session.messages = messages;
             record.session.messages_loaded = has_complete_previous_transcript;
@@ -450,6 +466,7 @@ fn apply_remote_session_to_record(
             record.message_start_index =
                 usize::try_from(record.session.message_count).unwrap_or(usize::MAX);
             record.session.messages.clear();
+            record.body_sequence.remote_applied = None;
             record.session.messages_loaded = record.session.message_count == 0;
         }
     } else if remote_session.messages_loaded {
@@ -478,12 +495,16 @@ fn apply_remote_session_summary_to_record(
     let previous_prompt_history = record.session.prompt_history.clone();
     let previous_pending_prompts = record.session.pending_prompts.clone();
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
+    let previous_body_seq = record.body_sequence.remote_applied;
+    let previous_epoch = record.body_sequence.remote_epoch.clone();
     record.session = localize_remote_session_summary(
         remote_id,
         &local_session_id,
         local_project_id,
         remote_session,
     );
+    record.body_sequence.remote_applied = record.session.body_seq;
+    record.body_sequence.remote_epoch = record.session.body_seq_epoch.clone();
     record.engram_boot_recovery_pending = remote_session.engram_boot_recovery_pending;
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
@@ -498,7 +519,13 @@ fn apply_remote_session_summary_to_record(
         previous_remote_mutation_stamp,
         remote_session.session_mutation_stamp,
     );
-    if count_matches && remote_mutation_stamp_matches {
+    if count_matches
+        && remote_mutation_stamp_matches
+        && (record.session.body_seq.is_none()
+            || (previous_body_seq == record.session.body_seq
+                && previous_epoch == record.session.body_seq_epoch))
+    {
+        record.body_sequence.remote_applied = record.session.body_seq.and(previous_body_seq);
         record.message_start_index = previous_message_start_index;
         record.session.messages = previous_messages;
         record.session.messages_loaded = previous_messages_loaded;
@@ -506,6 +533,7 @@ fn apply_remote_session_summary_to_record(
         record.message_start_index =
             usize::try_from(record.session.message_count).unwrap_or(usize::MAX);
         record.session.messages.clear();
+        record.body_sequence.remote_applied = None;
         record.session.messages_loaded = record.session.message_count == 0;
     }
     finish_remote_session_record_refresh(record);
@@ -652,6 +680,15 @@ fn push_remote_proxy_session_record(
         hidden: false,
         // Freshly created records start unstamped; subsequent edits
         // flow through `session_mut*` which stamps them on access.
+        body_sequence: SessionBodySequence {
+            remote_epoch: session.body_seq_epoch.clone(),
+            remote_applied: if session.messages_loaded || !session.messages.is_empty() {
+                session.body_seq
+            } else {
+                None
+            },
+            ..SessionBodySequence::default()
+        },
         mutation_stamp: 0,
         prompt_history_mutation_stamp: 0,
         session,
@@ -771,6 +808,7 @@ fn localize_remote_session(
     remote_session: &Session,
 ) -> Session {
     let mut session = remote_session.clone();
+    normalize_body_sequence_pair(&mut session.body_seq, &mut session.body_seq_epoch);
     session.id = local_session_id.to_owned();
     session.project_id = local_project_id;
     // Never trust an upstream wire `remote_id`; local SessionRecord metadata
@@ -816,7 +854,12 @@ fn localize_remote_session_summary(
     local_project_id: Option<String>,
     remote_session: &StateSessionSummary,
 ) -> Session {
+    let mut body_seq = remote_session.body_seq;
+    let mut body_seq_epoch = remote_session.body_seq_epoch.clone();
+    normalize_body_sequence_pair(&mut body_seq, &mut body_seq_epoch);
     Session {
+        body_seq,
+        body_seq_epoch,
         id: local_session_id.to_owned(),
         name: remote_session.name.clone(),
         emoji: remote_session.emoji.clone(),

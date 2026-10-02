@@ -13,6 +13,7 @@ import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { persistWorkspaceLayout } from "./workspace-storage";
 import type { UseAppWorkspaceLayoutParams } from "./app-workspace-layout";
 import type { WorkspaceState } from "./workspace-types";
+import type { Session } from "./types";
 
 export const localWorkspaceFixture: WorkspaceState = {
   lastContentPaneId: "pane-session", lastViewerPaneId: null,
@@ -22,7 +23,7 @@ export const localWorkspaceFixture: WorkspaceState = {
     viewMode: "session", lastSessionViewMode: "session", sourcePath: null }],
 };
 
-export function paramsForLocalWorkspace(): UseAppWorkspaceLayoutParams {
+export function paramsForLocalWorkspace(): UseAppWorkspaceLayoutParams & { sessionsRef: { current: Session[] } } {
   const workspaceViewId = "workspace-local-only";
   persistWorkspaceLayout(workspaceViewId, { controlPanelSide: "left", workspace: localWorkspaceFixture });
   const initial = createInitialWorkspaceBootstrap(workspaceViewId);

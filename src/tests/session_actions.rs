@@ -209,6 +209,8 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
     .expect("approval delta should decode");
     match delta {
         DeltaEvent::MessageUpdated {
+            session_seq: _,
+            body_seq_epoch: _,
             revision,
             session_id: delta_session_id,
             message_id: delta_message_id,
@@ -309,6 +311,8 @@ fn assert_no_state_and_one_message_updated_delta(
     .expect("interaction delta should decode");
     let message = match delta {
         DeltaEvent::MessageUpdated {
+            session_seq: _,
+            body_seq_epoch: _,
             revision,
             session_id: delta_session_id,
             message_id: delta_message_id,

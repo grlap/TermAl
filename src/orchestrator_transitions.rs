@@ -319,6 +319,7 @@ fn update_orchestrator_delivery_cursor(
 }
 
 fn referenced_sessions_for_orchestrators(
+    local_instance_id: &str,
     inner: &StateInner,
     orchestrators: &[OrchestratorInstance],
 ) -> Vec<StateSessionSummary> {
@@ -358,7 +359,7 @@ fn referenced_sessions_for_orchestrators(
         .sessions
         .iter()
         .filter(|record| referenced_session_ids.contains(record.session.id.as_str()))
-        .map(AppState::wire_session_summary_from_record)
+        .map(|record| AppState::wire_session_summary_from_record(local_instance_id, record))
         .collect()
 }
 

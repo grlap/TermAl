@@ -581,6 +581,10 @@ struct DeleteConversationMarkerResponse {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Session {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body_seq_epoch: Option<String>,
     /// Requested Kimi thinking value; None leaves the CLI's current choice alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     kimi_effort: Option<String>,
@@ -714,6 +718,10 @@ struct Session {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StateSessionSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body_seq_epoch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     kimi_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2752,6 +2760,10 @@ struct SessionResponse {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionHistoryResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body_seq_epoch: Option<String>,
     messages: Vec<Message>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     next_before: Option<String>,
@@ -3184,6 +3196,14 @@ enum DeltaEvent {
         session: StateSessionSummary,
     },
     MessageCreated {
+        #[serde(
+            rename = "sessionSeq",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_seq_epoch: Option<String>,
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -3206,6 +3226,14 @@ enum DeltaEvent {
         session_mutation_stamp: Option<u64>,
     },
     MessageUpdated {
+        #[serde(
+            rename = "sessionSeq",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_seq_epoch: Option<String>,
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -3226,6 +3254,14 @@ enum DeltaEvent {
         session_mutation_stamp: Option<u64>,
     },
     TextDelta {
+        #[serde(
+            rename = "sessionSeq",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_seq_epoch: Option<String>,
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -3248,6 +3284,14 @@ enum DeltaEvent {
         session_mutation_stamp: Option<u64>,
     },
     TextReplace {
+        #[serde(
+            rename = "sessionSeq",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_seq_epoch: Option<String>,
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -3268,6 +3312,14 @@ enum DeltaEvent {
         session_mutation_stamp: Option<u64>,
     },
     CommandUpdate {
+        #[serde(
+            rename = "sessionSeq",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_seq_epoch: Option<String>,
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -3293,6 +3345,14 @@ enum DeltaEvent {
         session_mutation_stamp: Option<u64>,
     },
     ParallelAgentsUpdate {
+        #[serde(
+            rename = "sessionSeq",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_seq_epoch: Option<String>,
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -3314,6 +3374,14 @@ enum DeltaEvent {
     /// A test-run card updated in place from the index. `run` replaces the
     /// snapshot whole; the message's other fields never change.
     TestRunCardUpdated {
+        #[serde(
+            rename = "sessionSeq",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_seq_epoch: Option<String>,
         revision: u64,
         session_id: String,
         message_id: String,

@@ -184,8 +184,9 @@ impl AppState {
             .find_session_index(&record.session.id)
             .and_then(|index| inner.sessions.get(index))
             .expect("just-created Codex session must be present in the index");
-        let session = AppState::wire_session_from_record(created_record);
-        let delta_session = AppState::wire_session_summary_from_record(created_record);
+        let session = AppState::wire_session_from_record(&self.server_instance_id, created_record);
+        let delta_session =
+            AppState::wire_session_summary_from_record(&self.server_instance_id, created_record);
         self.publish_delta_locked(
             &inner,
             DeltaEvent::SessionCreated {

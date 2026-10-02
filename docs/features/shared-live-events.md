@@ -17,6 +17,56 @@ one upstream EventSource for all subscribers. The hub forwards `state`, `delta`,
 `lagged` and `workspaceFilesChanged` in order. It stores no transcript or cached
 state snapshot.
 
+Body deltas carry `sessionSeq` and `bodySeqEpoch`; reads and summaries
+carry `bodySeq` and the same opaque epoch. The pair is present together or
+absent together. The server forwards an upstream pair without pretending the
+proxy mirror is an authoritative body snapshot.
+
+The client's proof is deliberately narrower: one local session, attached to
+the live tail. A remote session, an unpaired peer, or a pair whose epoch differs
+from the accepted local server instance follows ordinary master admission.
+The browser does not order opaque upstream epochs or certify detached history.
+
+The owner privately tracks uncertified, certified(appliedSeq), or dirty.
+An eligible body-bearing tail, creation or fork response establishes the
+certificate after contiguous kept deltas above its sequence have replayed.
+A parsed next body delta applies through the ordinary reducer and advances it;
+covered frames are ignored. A hole or unplaceable body makes it dirty.
+Ordinary older/newer pages use the existing history merges, never wait on a
+certificate and never advance one. Detaching navigation drops the certificate
+until another tail read.
+
+Dirty keeps the existing transcript visible. The owner's pure `needsTailRead`
+predicate asks for a read only for visible attached dirty sessions, or loaded
+uncertified sessions with an observed local pair. The existing hydration slot
+owns the single flight and bounded retries. Summary-ahead demand is checked at
+task end, allowing a following own delta to close it. Separate EventSource
+tasks may start one redundant request before that delta arrives.
+
+An admitted local tail replaces resident bodies at and after its starting
+position. A prefix is retained only when its global boundary id matches the
+read, positions fit and no prefix id overlaps the read; otherwise only the
+read is retained. Empty zero-count tails become fully loaded empty windows.
+Retaining a contiguous head does not certify that historical prefix's spatial
+currency. There is no loss eviction, exact-range repair, held-page admission,
+or second certification operation.
+
+Global continuity, session metadata freshness and body sequence are separate.
+Per-session paired local tail reads leave the global revision unchanged.
+Body frames still pass the global revision decision: forward gaps request
+metadata state resync, without discarding already placed bodies. Stale-global
+next body frames can apply without moving that ledger or restoring old
+metadata. Every resident publication passes one owner gate. For a local session
+with an admitted paired body snapshot in the current instance, it preserves
+newer metadata when both stamps are known numbers, including after captured
+old summaries, action responses and targeted reads. Absent or null stamps are
+incomparable; remote, foreign-epoch and never-paired sessions retain ordinary
+global admission. A captured null-stamp snapshot can therefore transiently
+roll back metadata until later ordered frames arrive; a per-session revision
+floor would be a separate extension. An accepted server-instance replacement
+clears the guard domain. Lagged marks certified local sessions dirty; an
+instance change makes them uncertified. Neither evicts bodies.
+
 A tab joining an OPEN stream receives `open` followed by `snapshotRequired`.
 The app fetches `/api/state` immediately using its existing server-instance and
 revision guards, then hydrates transcripts separately. A joining tab during

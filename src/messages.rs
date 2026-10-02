@@ -247,6 +247,7 @@ struct MessageUpdatedDeltaParts {
     preview: String,
     status: SessionStatus,
     session_mutation_stamp: u64,
+    session_seq: u64,
 }
 
 struct MessageCreatedDeltaParts {
@@ -259,10 +260,11 @@ struct MessageCreatedDeltaParts {
     status: SessionStatus,
     session_queue: Option<SessionQueueDelta>,
     session_mutation_stamp: u64,
+    session_seq: u64,
 }
 
 fn message_updated_delta_parts_for_indices(
-    record: &SessionRecord,
+    record: &mut SessionRecord,
     message_indices: Vec<usize>,
 ) -> Vec<MessageUpdatedDeltaParts> {
     let session_id = record.session.id.clone();
@@ -274,6 +276,7 @@ fn message_updated_delta_parts_for_indices(
         .into_iter()
         .filter_map(|message_index| {
             let message = record.session.messages.get(message_index)?.clone();
+            let session_seq = record.next_body_delta_seq(message.id());
             Some(MessageUpdatedDeltaParts {
                 session_id: session_id.clone(),
                 message_id: message.id().to_owned(),
@@ -283,13 +286,14 @@ fn message_updated_delta_parts_for_indices(
                 preview: preview.clone(),
                 status,
                 session_mutation_stamp,
+                session_seq,
             })
         })
         .collect()
 }
 
 fn message_created_delta_parts_for_indices(
-    record: &SessionRecord,
+    record: &mut SessionRecord,
     message_indices: Vec<usize>,
 ) -> Vec<MessageCreatedDeltaParts> {
     let session_id = record.session.id.clone();
@@ -325,6 +329,7 @@ fn message_created_delta_parts_for_indices(
             // Release-mode safeguard; debug assertions above prove this is
             // `Some` for every current caller's same-lock created suffix.
             let message = record.session.messages.get(message_index)?.clone();
+            let session_seq = record.next_body_delta_seq(message.id());
             Some(MessageCreatedDeltaParts {
                 session_id: session_id.clone(),
                 message_id: message.id().to_owned(),
@@ -335,6 +340,7 @@ fn message_created_delta_parts_for_indices(
                 status,
                 session_queue: None,
                 session_mutation_stamp,
+                session_seq,
             })
         })
         .collect()
@@ -361,6 +367,8 @@ impl AppState {
                     status: created.status,
                     session_queue: created.session_queue,
                     session_mutation_stamp: Some(created.session_mutation_stamp),
+                    session_seq: Some(created.session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             );
         }
@@ -385,6 +393,8 @@ impl AppState {
                     preview: update.preview,
                     status: update.status,
                     session_mutation_stamp: Some(update.session_mutation_stamp),
+                    session_seq: Some(update.session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             );
         }
@@ -444,6 +454,7 @@ fn cached_message_index_on_record(record: &SessionRecord, message_id: &str) -> O
 }
 
 fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {
+    record.mark_body_changed(message.id());
     let index = index.min(record.session.messages.len());
     let prompt = message.user_prompt_text().map(str::to_owned);
     let appended = index == record.session.messages.len();
@@ -556,6 +567,10 @@ fn replace_session_messages_on_record(
     messages: Vec<Message>,
     fallback_preview: Option<String>,
 ) {
+    if record.is_local_session() {
+        record.body_sequence.replacement_pending = true;
+        record.body_sequence.unrepresented_messages.clear();
+    }
     record.message_start_index = 0;
     record.session.messages = messages;
     set_prompt_history_on_record(

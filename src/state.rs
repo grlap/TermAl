@@ -404,14 +404,18 @@ impl<T> Drop for StateMutexGuard<'_, T> {
 enum StateBroadcastWork {
     Snapshot(StateResponse),
     Delta(DeltaEvent),
+    /// Pending work was dropped at capacity: consumers must resync. A loss
+    /// signal outside the commit order, with no revision of its own.
+    Lagged,
 }
 
 #[cfg(test)]
 impl StateBroadcastWork {
-    fn revision(&self) -> u64 {
+    fn revision(&self) -> Option<u64> {
         match self {
-            Self::Snapshot(snapshot) => snapshot.revision,
-            Self::Delta(event) => event.revision(),
+            Self::Snapshot(snapshot) => Some(snapshot.revision),
+            Self::Delta(event) => Some(event.revision()),
+            Self::Lagged => None,
         }
     }
 }
@@ -419,8 +423,34 @@ impl StateBroadcastWork {
 const STATE_BROADCAST_MAILBOX_CAPACITY: usize = 256;
 
 #[derive(Default)]
+struct StateBroadcastPending {
+    work: VecDeque<StateBroadcastWork>,
+    lagged: bool,
+}
+
+impl StateBroadcastPending {
+    fn enqueue(&mut self, work: StateBroadcastWork) {
+        if self.work.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
+            self.work.pop_front();
+            // Kept outside the bounded queue: further overflow cannot evict
+            // the recovery signal. The consumer sees it before retained work.
+            self.lagged = true;
+        }
+        self.work.push_back(work);
+    }
+
+    fn pop_front(&mut self) -> Option<StateBroadcastWork> {
+        if std::mem::take(&mut self.lagged) {
+            Some(StateBroadcastWork::Lagged)
+        } else {
+            self.work.pop_front()
+        }
+    }
+}
+
+#[derive(Default)]
 struct StateBroadcastMailbox {
-    pending: Mutex<VecDeque<StateBroadcastWork>>,
+    pending: Mutex<StateBroadcastPending>,
     work_available: Condvar,
 }
 
@@ -430,13 +460,10 @@ impl StateBroadcastMailbox {
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
-        if let Some(StateBroadcastWork::Snapshot(existing)) = pending.back_mut() {
+        if let Some(StateBroadcastWork::Snapshot(existing)) = pending.work.back_mut() {
             *existing = snapshot;
         } else {
-            if pending.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
-                pending.pop_front();
-            }
-            pending.push_back(StateBroadcastWork::Snapshot(snapshot));
+            pending.enqueue(StateBroadcastWork::Snapshot(snapshot));
         }
         self.work_available.notify_one();
     }
@@ -446,10 +473,7 @@ impl StateBroadcastMailbox {
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
-        if pending.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
-            pending.pop_front();
-        }
-        pending.push_back(StateBroadcastWork::Delta(event));
+        pending.enqueue(StateBroadcastWork::Delta(event));
         self.work_available.notify_one();
     }
 
@@ -489,6 +513,7 @@ impl StateBroadcastMailbox {
 enum SseStreamEvent {
     State(Arc<str>),
     Delta(Arc<str>),
+    Lagged,
 }
 
 /// The broadcast channels a published snapshot or delta goes to.
@@ -561,12 +586,80 @@ fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadca
                 );
             }
         },
+        StateBroadcastWork::Lagged => {
+            let _ = senders.stream_events.send(SseStreamEvent::Lagged);
+        }
     }
 }
 
 #[cfg(test)]
 mod state_broadcast_mailbox_tests {
     use super::*;
+
+    #[test]
+    fn state_broadcast_mailbox_overflow_preserves_a_recovery_notification() {
+        let mailbox = StateBroadcastMailbox::default();
+        for revision in 0..=STATE_BROADCAST_MAILBOX_CAPACITY as u64 {
+            mailbox.publish_delta(delta(revision));
+        }
+        let pending = mailbox.take_pending_for_test();
+        assert_eq!(
+            pending.len(),
+            STATE_BROADCAST_MAILBOX_CAPACITY + 1,
+            "retained work must include a recovery marker for the lost delta"
+        );
+        assert!(matches!(pending.first(), Some(StateBroadcastWork::Lagged)));
+        // The oldest delta was dropped; the retained ones keep their order.
+        assert_eq!(pending[1].revision(), Some(1));
+        assert_eq!(
+            pending.last().and_then(StateBroadcastWork::revision),
+            Some(STATE_BROADCAST_MAILBOX_CAPACITY as u64)
+        );
+        assert!(mailbox.take_pending_for_test().is_empty());
+    }
+
+    #[test]
+    fn state_broadcast_mailbox_keeps_the_loss_signal_through_coalescing_and_signals_again() {
+        let mailbox = StateBroadcastMailbox::default();
+        for revision in 0..=STATE_BROADCAST_MAILBOX_CAPACITY as u64 {
+            mailbox.publish_delta(delta(revision));
+        }
+        // Replacing an adjacent snapshot neither clears the flag nor counts
+        // as a new overflow.
+        mailbox.publish_snapshot(snapshot(1_000));
+        mailbox.publish_snapshot(snapshot(1_001));
+        let pending = mailbox.take_pending_for_test();
+        assert!(matches!(pending.first(), Some(StateBroadcastWork::Lagged)));
+        assert_eq!(
+            pending
+                .iter()
+                .filter(|work| matches!(work, StateBroadcastWork::Lagged))
+                .count(),
+            1
+        );
+        assert!(
+            matches!(pending.last(), Some(StateBroadcastWork::Snapshot(value)) if value.revision == 1_001)
+        );
+
+        // Once taken, a later overflow signals again.
+        for revision in 0..STATE_BROADCAST_MAILBOX_CAPACITY as u64 {
+            mailbox.publish_delta(delta(revision));
+        }
+        assert!(
+            !mailbox
+                .take_pending_for_test()
+                .iter()
+                .any(|work| matches!(work, StateBroadcastWork::Lagged)),
+            "a full queue without a loss carries no signal"
+        );
+        for revision in 0..=STATE_BROADCAST_MAILBOX_CAPACITY as u64 {
+            mailbox.publish_delta(delta(revision));
+        }
+        assert!(matches!(
+            mailbox.take_pending_for_test().first(),
+            Some(StateBroadcastWork::Lagged)
+        ));
+    }
 
     fn snapshot(revision: u64) -> StateResponse {
         StateResponse {
@@ -620,7 +713,7 @@ mod state_broadcast_mailbox_tests {
                 .iter()
                 .map(StateBroadcastWork::revision)
                 .collect::<Vec<_>>(),
-            [2, 3, 5]
+            [Some(2), Some(3), Some(5)]
         );
         assert!(
             matches!(&pending[1], StateBroadcastWork::Delta(DeltaEvent::TestRunRemoved { run_id, .. }) if run_id == "run-3")
@@ -690,6 +783,8 @@ enum RemoteDeltaReplayPayload {
         status: u8,
         session_queue_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,
+        session_seq: Option<u64>,
+        body_seq_epoch: Option<String>,
     },
     MessageUpdated {
         session_id: String,
@@ -700,6 +795,8 @@ enum RemoteDeltaReplayPayload {
         preview_fingerprint: String,
         status: u8,
         session_mutation_stamp: Option<u64>,
+        session_seq: Option<u64>,
+        body_seq_epoch: Option<String>,
     },
     TextDelta {
         session_id: String,
@@ -710,6 +807,8 @@ enum RemoteDeltaReplayPayload {
         delta_fingerprint: String,
         preview_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,
+        session_seq: Option<u64>,
+        body_seq_epoch: Option<String>,
     },
     TextReplace {
         session_id: String,
@@ -719,6 +818,8 @@ enum RemoteDeltaReplayPayload {
         text_fingerprint: String,
         preview_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,
+        session_seq: Option<u64>,
+        body_seq_epoch: Option<String>,
     },
     CommandUpdate {
         session_id: String,
@@ -732,6 +833,8 @@ enum RemoteDeltaReplayPayload {
         status: u8,
         preview_fingerprint: String,
         session_mutation_stamp: Option<u64>,
+        session_seq: Option<u64>,
+        body_seq_epoch: Option<String>,
     },
     ParallelAgentsUpdate {
         session_id: String,
@@ -741,6 +844,19 @@ enum RemoteDeltaReplayPayload {
         agents_fingerprint: String,
         preview_fingerprint: String,
         session_mutation_stamp: Option<u64>,
+        session_seq: Option<u64>,
+        body_seq_epoch: Option<String>,
+    },
+    TestRunCardUpdated {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        run_fingerprint: String,
+        preview_fingerprint: String,
+        session_mutation_stamp: Option<u64>,
+        session_seq: Option<u64>,
+        body_seq_epoch: Option<String>,
     },
     ConversationMarkerCreated {
         session_id: String,
@@ -1689,6 +1805,8 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
 /// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
+    /// Starts at zero when loaded; never persisted across server instances.
+    body_sequence: SessionBodySequence,
     /// Process-local barrier; persisted Archived state handles restart/resume.
     codex_delegation_release: Option<Arc<CodexDelegationRelease>>,
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
@@ -1814,6 +1932,7 @@ struct SessionRecord {
 /// where it was instead of leaving a half-started turn in memory: head gone,
 /// latch cleared, status Active, and nothing delivered to the runtime.
 struct QueuePromotionSnapshot {
+    body_sequence: SessionBodySequence,
     active_turn_generation: u64,
     status: SessionStatus,
     preview: String,
@@ -1837,6 +1956,7 @@ impl SessionRecord {
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {
         QueuePromotionSnapshot {
+            body_sequence: self.body_sequence.clone(),
             active_turn_generation: self.active_turn_generation,
             status: self.session.status,
             preview: self.session.preview.clone(),
@@ -1864,6 +1984,7 @@ impl SessionRecord {
         queued: QueuedPromptRecord,
         started_message_id: &str,
     ) {
+        self.body_sequence = snapshot.body_sequence;
         if let Some(position) = self
             .session
             .messages

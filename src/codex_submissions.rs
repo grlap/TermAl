@@ -293,7 +293,15 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let (message_index, message, message_count, preview, status, session_mutation_stamp) = {
+            let (
+                message_index,
+                message,
+                message_count,
+                preview,
+                status,
+                session_mutation_stamp,
+                session_seq,
+            ) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -307,6 +315,7 @@ impl AppState {
                     preview,
                     status,
                     session_mutation_stamp,
+                    record.next_body_delta_seq(message_id),
                 )
             };
             let revision = self
@@ -324,6 +333,8 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp: Some(session_mutation_stamp),
+                session_seq: Some(session_seq),
+                body_seq_epoch: Some(self.server_instance_id.clone()),
             };
             self.publish_delta_locked(&inner, event);
         };

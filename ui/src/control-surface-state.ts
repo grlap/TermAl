@@ -294,7 +294,7 @@ export function buildControlSurfaceSessionListEntries(
 }
 
 export function mergeOrchestratorDeltaSessions(
-  previousSessions: Session[],
+  previousSessions: readonly Session[],
   deltaSessions: StateSessionSummary[] | undefined,
 ) {
   if (!deltaSessions?.length) {

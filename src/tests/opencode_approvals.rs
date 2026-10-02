@@ -228,7 +228,7 @@ fn opencode_approval_defaults_overrides_and_sqlite_roundtrip() {
         let record = &inner.sessions[inner.find_session_index(id).unwrap()];
         assert_eq!(record.session.opencode_approval_mode, Some(expected));
         assert_eq!(
-            AppState::wire_session_summary_from_record(record).opencode_approval_mode,
+            AppState::wire_session_summary_from_record(&state.server_instance_id, record).opencode_approval_mode,
             Some(expected)
         );
     }

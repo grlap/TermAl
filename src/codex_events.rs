@@ -1319,8 +1319,9 @@ fn handle_shared_codex_thread_compacted(
 /// has already been streamed for the same `item_id`. If nothing was
 /// streamed, the trimmed text opens a streaming message so later final
 /// variants for the same item can still append/replace in place; otherwise
-/// completion reconciliation computes append/replace/no-change against
-/// the already-seen stream content. Finalizes any prior streaming text
+/// completion republishes the canonical body even when the server's stream
+/// already matches, so a client that missed a suffix can repair it.
+/// Finalizes any prior streaming text
 /// when switching to a new `item_id`.
 fn record_completed_codex_agent_message(
     turn_state: &mut CodexTurnState,
@@ -1349,6 +1350,7 @@ fn record_completed_codex_agent_message(
             .insert(item_id.to_owned(), trimmed.to_owned());
         begin_codex_assistant_output(turn_state, recorder)?;
         recorder.text_delta(trimmed)?;
+        recorder.replace_streaming_text(trimmed)?;
         return remember_codex_first_assistant_message_id(state, session_id, turn_state);
     }
 
@@ -1357,14 +1359,13 @@ fn record_completed_codex_agent_message(
         .entry(item_id.to_owned())
         .or_default();
     let update = next_completed_codex_text_update(entry, trimmed);
-    if matches!(update, CompletedTextUpdate::NoChange) {
-        return Ok(());
-    }
-
     begin_codex_assistant_output(turn_state, recorder)?;
     match update {
-        CompletedTextUpdate::NoChange => Ok(()),
-        CompletedTextUpdate::Append(unseen_suffix) => recorder.text_delta(&unseen_suffix),
+        CompletedTextUpdate::NoChange => recorder.republish_streaming_text(trimmed),
+        CompletedTextUpdate::Append(unseen_suffix) => {
+            recorder.text_delta(&unseen_suffix)?;
+            recorder.republish_streaming_text(trimmed)
+        }
         CompletedTextUpdate::Replace(replacement_text) => {
             recorder.replace_streaming_text(&replacement_text)
         }

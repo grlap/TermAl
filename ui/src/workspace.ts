@@ -225,7 +225,7 @@ export function normalizeWorkspaceStatePaths(
 
 export function reconcileWorkspaceState(
   current: WorkspaceState,
-  sessions: Session[],
+  sessions: readonly Session[],
   options: ReconcileWorkspaceStateOptions = {},
 ): WorkspaceState {
   const preservedSessionIds = new Set(options.preserveSessionIds ?? []);

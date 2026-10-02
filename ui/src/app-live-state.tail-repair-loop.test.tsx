@@ -8,9 +8,11 @@ import { useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
+import { ApiRequestError } from "./api-request";
 import { useAppLiveState } from "./app-live-state";
+import { withLiveSessionAuthority, type TestLiveStateParams } from "./session-publication-test-fixtures";
 import { SESSION_HYDRATION_RETRY_DELAYS_MS } from "./app-live-state-hydration";
-import { requestSessionHistoryStartPage } from "./session-history-demand";
+import { requestSessionHistoryPage, requestSessionHistoryOlderPage, requestSessionHistoryStartPage } from "./session-history-demand";
 import * as transport from "./app-live-state-transport";
 import type { UseAppLiveStateParams } from "./app-live-state-types";
 import * as deltas from "./live-updates";
@@ -47,8 +49,9 @@ class Stream extends EventTarget {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function summary(revision: number, total = TOTAL): api.StateResponse {
@@ -93,9 +96,9 @@ function textDelta(revision: number, textStartByte: number, delta = "x") {
   };
 }
 
-function makeParams(): UseAppLiveStateParams {
+function makeParams(): TestLiveStateParams {
   const set = vi.fn();
-  return {
+  return withLiveSessionAuthority({
     adoptionRefs: {
       isMountedRef: { current: true }, latestStateRevisionRef: { current: null },
       lastSeenServerInstanceIdRef: { current: null },
@@ -138,7 +141,7 @@ function makeParams(): UseAppLiveStateParams {
     requestBackendReconnectRef: { current: vi.fn() },
     requestActionRecoveryResyncRef: { current: vi.fn() },
     activeSession: null, activeTranscriptSessionId: null, visibleSessionHydrationTargets: [],
-  };
+  });
 }
 
 async function flush(ms = 0) {
@@ -169,15 +172,26 @@ function setup(
 ) {
   const params = makeParams();
   const tailRequests: Array<ReturnType<typeof deferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>> & {
-    stack: string; at: number;
+    stack: string; at: number; watchdog: boolean;
   }> = [];
+  const watchdogStartedAt = Date.now();
+  let inWatchdog = false;
+  let watchdogFirings = 0;
+  const setInterval = window.setInterval.bind(window);
+  // Observe the real interval callback without replacing its decisions.
+  vi.spyOn(window, "setInterval").mockImplementation((handler, delay, ...args) =>
+    setInterval(typeof handler === "function" && delay === 1000 ? () => {
+      watchdogFirings++;
+      inWatchdog = true;
+      try { handler(...args); } finally { inWatchdog = false; }
+    } : handler, delay, ...args));
   const historyRequests: Array<ReturnType<typeof deferred<Awaited<ReturnType<typeof api.fetchSessionHistory>>>>> = [];
   // Leave state recovery pending until a schedule explicitly sends a state
   // event. No hidden HTTP snapshot may change the revision baseline.
   vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
   const fetchTail = vi.spyOn(api, "fetchSessionTail").mockImplementation(() => {
     const request = { ...deferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>(),
-      stack: new Error().stack ?? "", at: Date.now() };
+      stack: new Error().stack ?? "", at: Date.now(), watchdog: inWatchdog };
     tailRequests.push(request);
     return request.promise;
   });
@@ -190,9 +204,11 @@ function setup(
   const classify = vi.spyOn(adoption, "classifyFetchedSessionAdoption");
   const revisionAction = vi.spyOn(revisions, "decideDeltaRevisionAction");
   const recoveryCalls: Array<Parameters<Parameters<typeof transport.useAppLiveStateTransport>[0]["startSessionHydration"]>> = [];
+  let startHydration!: Parameters<typeof transport.useAppLiveStateTransport>[0]["startSessionHydration"];
   const realTransport = transport.useAppLiveStateTransport;
-  vi.spyOn(transport, "useAppLiveStateTransport").mockImplementation((args) =>
-    realTransport({ ...args,
+  vi.spyOn(transport, "useAppLiveStateTransport").mockImplementation((args) => {
+    startHydration = args.startSessionHydration;
+    return realTransport({ ...args,
       hasPartialTailAppendProof: predicateMode === "absent" ? undefined
         : predicateMode === "throws" ? () => { throw new Error("Predicate failure"); }
           : args.hasPartialTailAppendProof,
@@ -202,17 +218,20 @@ function setup(
       startSessionHydration: (...call) => {
       recoveryCalls.push(call);
       return args.startSessionHydration(...call);
-    } }),
-  );
+    } });
+  });
+  let renderedSessions: Session[] = [];
   const rendered = renderHook(({ visible }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
+    renderedSessions = sessions;
+    params.stateSetters.setSessions = setSessions;
     const activeSession = visible ? sessions.find((entry) => entry.id === SESSION_ID) ?? null : null;
     // Match App: targets depend on the session-list identity, not only loaded.
     const targets = useMemo(() => activeSession
       ? [{ id: activeSession.id, messagesLoaded: activeSession.messagesLoaded }] : [],
     [sessions, visible]);
     return useAppLiveState({ ...params,
-      stateSetters: { ...params.stateSetters, setSessions }, activeSession,
+      stateSetters: params.stateSetters, activeSession,
       activeTranscriptSessionId: visible ? SESSION_ID : null,
       visibleSessionHydrationTargets: targets,
     });
@@ -232,6 +251,13 @@ function setup(
   expect(fetchTail).not.toHaveBeenCalled();
   return { ...rendered, emit, current, params, fetchTail, tailRequests, historyRequests,
     reducer, classify, revisionAction, recoveryCalls,
+    renderedSession: () => renderedSessions.find((entry) => entry.id === SESSION_ID),
+    watchdogFirings: () => watchdogFirings,
+    async beforeNextBackstop() {
+      const elapsed = Date.now() - watchdogStartedAt;
+      await flush((Math.floor(elapsed / 3000) + 1) * 3000 - elapsed - 1);
+    },
+    startHydration: (...args: Parameters<typeof startHydration>) => startHydration(...args),
     async visible(value: boolean) { rendered.rerender({ visible: value }); await flush(16); },
     async resolveTail(index: number, revision: number, text: string) {
       await act(async () => { tailRequests[index].resolve(tail(revision, text)); });
@@ -260,6 +286,393 @@ afterEach(() => {
 });
 
 const COMPOSITE_WINDOW_MS = 2559;
+
+// Seed proof through the real hook's first tail answer, not raw Session fields.
+async function pairedRetryFixture(fullyLoaded = true) {
+  const h = setup();
+  await h.visible(true);
+  const response = tail(101, "a");
+  if (fullyLoaded) response.session = { ...response.session,
+    messages: [...Array.from({ length: TOTAL - 1 }, (_, index) =>
+      message(`Loaded ${index}`, `loaded-${index}`)), message("a")],
+    messagesLoaded: true };
+  response.session = { ...response.session, bodySeq: 0, bodySeqEpoch: INSTANCE };
+  await act(async () => h.tailRequests[0].resolve(response));
+  await flush();
+  expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)?.appliedSeq).toBe(0);
+  h.expectTailCount(1);
+  return h;
+}
+
+async function startRejectedOwnerRead(h: Awaited<ReturnType<typeof pairedRetryFixture>>) {
+  const ahead = summary(102);
+  // Keep the queue disposition unchanged so this is owner demand, not the
+  // independent master queue-metadata hydration route.
+  ahead.sessions[0] = { ...ahead.sessions[0], bodySeq: 1, bodySeqEpoch: INSTANCE,
+    queuePaused: h.current().queuePaused === true };
+  h.emit("state", ahead);
+  await flush();
+  h.expectTailCount(2);
+  expect(h.tailRequests[1].stack, "the rejected flight must originate at the owner requester")
+    .toContain("requestSessionTailRead");
+  await act(async () => h.tailRequests[1].reject(new Error("Tail unavailable")));
+  expect(h.params.reportRequestError).toHaveBeenCalledTimes(1);
+}
+
+describe("owner retry initiation witnesses", () => {
+  it("W5c: keeps base retry after five stale excluded forced repairs", async () => {
+    const h = setup();
+    await h.visible(true);
+    await h.resolveTail(0, 101, "a");
+    expect(h.current().messagesLoaded).toBe(false);
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)).toBeNull();
+    expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+
+    act(() => h.startHydration(SESSION_ID, { forceTailRepair: true }));
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const forcedIndex = 1 + attempt * 2;
+      h.expectTailCount(forcedIndex + 1);
+      expect(h.tailRequests[forcedIndex].stack).not.toContain("requestSessionTailRead");
+      await act(async () => h.tailRequests[forcedIndex].resolve(tail(100, "Older")));
+      await flush();
+      expect(h.classify.mock.results[h.classify.mock.results.length - 1]?.value).toBe("stale");
+      expect(h.current().messagesLoaded).toBe(false);
+      const delay = SESSION_HYDRATION_RETRY_DELAYS_MS[Math.min(attempt, 3)];
+      await flush(delay - 1);
+      h.expectTailCount(forcedIndex + 1);
+      await flush(1);
+      // Stale master endings were uncapped on base, including the fifth.
+      h.expectTailCount(forcedIndex + 2);
+      if (attempt < 4) {
+        // A new transport repair arrives during the optionless timer flight.
+        // Its queued forced flight, rather than a test-created tail answer,
+        // supplies the next stale forced ending without resetting the budget.
+        act(() => h.startHydration(SESSION_ID, { forceTailRepair: true }));
+        await act(async () => h.tailRequests[forcedIndex + 1].resolve(tail(100, "Older")));
+        await flush();
+        expect(h.classify.mock.results[h.classify.mock.results.length - 1]?.value).toBe("stale");
+      }
+    }
+    expect(h.params.reportRequestError).not.toHaveBeenCalled();
+  });
+
+  it("W10: serves dirty demand at the next poll after a stale loaded master flight", async () => {
+    const h = await pairedRetryFixture();
+    const captured = tail(101, "a");
+    captured.session = { ...captured.session, bodySeq: 0, bodySeqEpoch: INSTANCE };
+    // Master's non-body recovery holds the sole hydration slot. Its answer
+    // was captured before the final body change whose frame never arrives.
+    act(() => h.startHydration(SESSION_ID, { forceTailRepair: true }));
+    h.expectTailCount(2);
+    expect(h.tailRequests[1].stack).not.toContain("requestSessionTailRead");
+    const ahead = summary(102);
+    ahead.sessions[0] = { ...ahead.sessions[0], sessionMutationStamp: 101,
+      bodySeq: 1, bodySeqEpoch: INSTANCE, queuePaused: h.current().queuePaused === true };
+    h.emit("state", ahead);
+    await flush();
+    h.emit("lagged", {});
+    // Recovery's unchanged stamp leaves the fully loaded window in place.
+    h.emit("state", ahead);
+    await flush();
+    expect(h.current().messagesLoaded).toBe(true);
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)).toBeNull();
+    expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(true);
+    h.expectTailCount(2);
+    const retained = h.current().messages;
+    await act(async () => h.tailRequests[1].resolve(captured));
+    await flush();
+    expect(h.current().messages).toBe(retained);
+    // Q6's suppressed handoff is unchanged. The periodic backstop does not
+    // depend on another stream event or on master having scheduled a timer.
+    h.expectTailCount(2);
+    await h.beforeNextBackstop();
+    h.expectTailCount(2);
+    await flush(1);
+    h.expectTailCount(3);
+    expect(h.tailRequests[2].watchdog).toBe(true);
+    expect(h.tailRequests[2].stack).toContain("requestSessionTailRead");
+    const newest = tail(102, "ax");
+    newest.session = { ...newest.session, sessionMutationStamp: 101,
+      bodySeq: 1, bodySeqEpoch: INSTANCE };
+    await act(async () => h.tailRequests[2].resolve(newest));
+    await flush(10000);
+    h.expectTailCount(3);
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)?.appliedSeq).toBe(1);
+    expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+    for (const session of [h.current(), getSessionRecordSnapshotForTesting(SESSION_ID), h.renderedSession()]) {
+      expect(session && session.messages[session.messages.length - 1]).toEqual(message("ax"));
+    }
+  });
+
+  it("W7: retries a stale captured answer after a newer summary", async () => {
+    const h = await pairedRetryFixture();
+    const ahead = summary(102);
+    ahead.sessions[0] = { ...ahead.sessions[0], bodySeq: 1, bodySeqEpoch: INSTANCE,
+      queuePaused: h.current().queuePaused === true };
+    h.emit("state", ahead);
+    await flush();
+    h.expectTailCount(2);
+    expect(h.tailRequests[1].stack).toContain("requestSessionTailRead");
+    const captured = tail(102, "ax");
+    captured.session = { ...captured.session, bodySeq: 1, bodySeqEpoch: INSTANCE };
+    const final = summary(103);
+    final.sessions[0] = { ...final.sessions[0], bodySeq: 2, bodySeqEpoch: INSTANCE,
+      queuePaused: h.current().queuePaused === true };
+    h.emit("state", final);
+    await flush();
+    const retained = h.current().messages;
+    await act(async () => h.tailRequests[1].resolve(captured));
+    await flush();
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)?.appliedSeq,
+      "the earlier answer cannot replay through the dropped final delta").toBe(0);
+    expect(h.current().messages).toBe(retained);
+    h.expectTailCount(2);
+    await flush(SESSION_HYDRATION_RETRY_DELAYS_MS[0] - 1);
+    h.expectTailCount(2);
+    await flush(1);
+    h.expectTailCount(3);
+    const newest = tail(103, "axx");
+    newest.session = { ...newest.session, bodySeq: 2, bodySeqEpoch: INSTANCE };
+    await act(async () => h.tailRequests[2].resolve(newest));
+    await flush();
+    const resident = h.current().messages;
+    const stored = getSessionRecordSnapshotForTesting(SESSION_ID)!.messages;
+    expect(resident[resident.length - 1]).toEqual(message("axx"));
+    expect(stored[stored.length - 1]).toEqual(message("axx"));
+  });
+
+  it("W8: serves standing demand on the next poll after fast-cap exhaustion", async () => {
+    const h = await pairedRetryFixture();
+    await startRejectedOwnerRead(h);
+    for (const [index, delay] of SESSION_HYDRATION_RETRY_DELAYS_MS.entries()) {
+      await flush(delay);
+      h.expectTailCount(index + 3);
+      await act(async () => h.tailRequests[index + 2].reject(new Error("Still unavailable")));
+    }
+    expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(true);
+    await h.beforeNextBackstop();
+    h.expectTailCount(6);
+    await flush(1);
+    h.expectTailCount(7);
+    expect(h.tailRequests[6].watchdog).toBe(true);
+  });
+
+  it("W9: requests one recovery without an immediate tail read after owner 404", async () => {
+    const h = await pairedRetryFixture();
+    const stateReadsBeforeRecovery = vi.mocked(api.fetchState).mock.calls.length;
+    const ahead = summary(102);
+    ahead.sessions[0] = { ...ahead.sessions[0], bodySeq: 1, bodySeqEpoch: INSTANCE,
+      queuePaused: h.current().queuePaused === true };
+    h.emit("state", ahead);
+    await flush();
+    h.expectTailCount(2);
+    await act(async () => h.tailRequests[1].reject(
+      new ApiRequestError("request-failed", "Not found", { status: 404 })));
+    await flush();
+    expect(api.fetchState).toHaveBeenCalledTimes(stateReadsBeforeRecovery + 1);
+    expect(h.params.reportRequestError).not.toHaveBeenCalled();
+    h.expectTailCount(2);
+  });
+
+  it.each(["unchanged", "failed", "pending"] as const)(
+    "W11: idle demand survives %s recovery until the next poll", async (recovery) => {
+      const h = await pairedRetryFixture();
+      const recoveryResponse = deferred<api.StateResponse>();
+      vi.mocked(api.fetchState).mockImplementation(() => recoveryResponse.promise);
+      const ahead = summary(102);
+      ahead.sessions[0] = { ...ahead.sessions[0], status: "idle", bodySeq: 1,
+        bodySeqEpoch: INSTANCE, queuePaused: h.current().queuePaused === true };
+      h.emit("state", ahead);
+      await flush();
+      h.expectTailCount(2);
+      await act(async () => h.tailRequests[1].reject(
+        new ApiRequestError("request-failed", "Not found", { status: 404 })));
+      const beforeRecovery = h.current();
+      if (recovery === "unchanged") await act(async () => recoveryResponse.resolve(ahead));
+      if (recovery === "failed") await act(async () => recoveryResponse.reject(new Error("Recovery unavailable")));
+      await flush();
+      if (recovery === "unchanged") expect(h.current(), "same-revision recovery is not adopted").toBe(beforeRecovery);
+      expect(h.current().status).toBe("idle");
+      expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(true);
+      h.expectTailCount(2);
+      await h.beforeNextBackstop();
+      h.expectTailCount(2);
+      await flush(1);
+      h.expectTailCount(3);
+      expect(h.tailRequests[2].watchdog).toBe(true);
+      const newest = tail(102, "ax");
+      newest.session = { ...newest.session, status: "idle", bodySeq: 1, bodySeqEpoch: INSTANCE };
+      await act(async () => h.tailRequests[2].resolve(newest));
+      await flush(6000);
+      h.expectTailCount(3);
+      expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+    },
+  );
+
+  it.each(["document-hidden", "navigator-offline"] as const)(
+    "W15: serves visible pane demand despite %s", async (policy) => {
+      const h = await pairedRetryFixture();
+      await startRejectedOwnerRead(h);
+      if (policy === "document-hidden") vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      else vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+      // Settle fast retries by rejecting them; no stream event is needed at
+      // cap exhaustion. Browser ticks continue despite the policy flag.
+      for (const [index, delay] of SESSION_HYDRATION_RETRY_DELAYS_MS.entries()) {
+        await flush(delay);
+        await act(async () => h.tailRequests[index + 2].reject(new Error("Still unavailable")));
+      }
+      await h.beforeNextBackstop();
+      h.expectTailCount(6);
+      await flush(1);
+      h.expectTailCount(7);
+      expect(h.tailRequests[6].watchdog).toBe(true);
+    },
+  );
+
+  it("W13: separates periodic issuance from fast retries across repeated failures", async () => {
+    const h = await pairedRetryFixture();
+    await startRejectedOwnerRead(h);
+    for (const [index, delay] of SESSION_HYDRATION_RETRY_DELAYS_MS.entries()) {
+      await flush(delay);
+      await act(async () => h.tailRequests[index + 2].reject(new Error("Still unavailable")));
+    }
+    expect(h.tailRequests.filter(request => request.watchdog)).toHaveLength(0);
+    for (let period = 0; period < 3; period++) {
+      await h.beforeNextBackstop();
+      h.expectTailCount(6 + period);
+      await flush(1);
+      h.expectTailCount(7 + period);
+      const request = h.tailRequests[6 + period];
+      expect(request.watchdog).toBe(true);
+      await act(async () => request.reject(new Error("Persistent endpoint failure")));
+    }
+    const polls = h.tailRequests.filter(request => request.watchdog);
+    expect(polls).toHaveLength(3);
+    expect(polls.map(request => request.at - polls[0].at)).toEqual([0, 3000, 6000]);
+    expect(h.watchdogFirings()).toBe(12);
+  });
+
+  it("W14: admission checks an early owner read after a joined page requests recovery", async () => {
+    const h = await pairedRetryFixture(false);
+    let completion!: Promise<boolean>;
+    act(() => { completion = requestSessionHistoryOlderPage(SESSION_ID); });
+    act(() => {
+      requestSessionHistoryPage(SESSION_ID);
+      Stream.latest.emit("delta", { ...textDelta(102, 1), sessionSeq: 2, bodySeqEpoch: INSTANCE });
+    });
+    await flush();
+    expect(h.historyRequests).toHaveLength(1);
+    h.expectTailCount(1);
+    const stateReads = vi.mocked(api.fetchState).mock.calls.length;
+    await act(async () => h.historyRequests[0].reject(
+      new ApiRequestError("request-failed", "Not found", { status: 404 })));
+    await flush();
+    expect(await completion).toBe(false);
+    expect(api.fetchState).toHaveBeenCalledTimes(stateReads + 1);
+    // The joining hydration did not own the page's recovery callback. Its
+    // normal slot release may initiate before that resync settles (G2).
+    h.expectTailCount(2);
+    expect(h.tailRequests[1].stack).toContain("requestSessionTailRead");
+    const retained = h.current().messages;
+    const stale = tail(101, "a");
+    stale.session = { ...stale.session, bodySeq: 0, bodySeqEpoch: INSTANCE };
+    await act(async () => h.tailRequests[1].resolve(stale));
+    await flush();
+    expect(h.current().messages).toBe(retained);
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)).toBeNull();
+    await flush(SESSION_HYDRATION_RETRY_DELAYS_MS[0]);
+    h.expectTailCount(3);
+    const newest = tail(102, "ax");
+    newest.session = { ...newest.session, bodySeq: 2, bodySeqEpoch: INSTANCE };
+    await act(async () => h.tailRequests[2].resolve(newest));
+    await flush();
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)?.appliedSeq).toBe(2);
+    expect(h.current().messages[h.current().messages.length - 1]).toEqual(message("ax"));
+  });
+
+  it.each(["closed", "hidden", "detached"] as const)(
+    "W12: does not issue retry or polling GET after demand becomes %s", async (cause) => {
+      const h = await pairedRetryFixture();
+      await startRejectedOwnerRead(h);
+      if (cause === "closed") {
+        h.emit("delta", { ...textDelta(102, 1), sessionSeq: 1, bodySeqEpoch: INSTANCE });
+        expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)?.appliedSeq).toBe(1);
+      } else if (cause === "hidden") {
+        await h.visible(false);
+      } else {
+        // Commit the detaching window through the actual owner publication gate.
+        act(() => h.params.sessionAuthority.commit([{ ...h.current(), hasNewerHistory: true }], "history"));
+      }
+      expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, cause !== "hidden")).toBe(false);
+      await flush(SESSION_HYDRATION_RETRY_DELAYS_MS[0]);
+      h.expectTailCount(2);
+      await flush(10000);
+      h.expectTailCount(2);
+      expect(h.historyRequests).toHaveLength(0);
+    },
+  );
+
+  it("issues exactly one timer GET while owner demand stands", async () => {
+    const h = await pairedRetryFixture();
+    await startRejectedOwnerRead(h);
+    expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(true);
+    await flush(SESSION_HYDRATION_RETRY_DELAYS_MS[0] - 1);
+    h.expectTailCount(2);
+    await flush(1);
+    h.expectTailCount(3);
+    const response = tail(102, "ax");
+    response.session = { ...response.session, bodySeq: 1, bodySeqEpoch: INSTANCE };
+    await act(async () => h.tailRequests[2].resolve(response));
+    await flush(1000);
+    h.expectTailCount(3);
+    const resident = h.current().messages;
+    const stored = getSessionRecordSnapshotForTesting(SESSION_ID)!.messages;
+    expect(resident[resident.length - 1]).toEqual(message("ax"));
+    expect(stored[stored.length - 1]).toEqual(message("ax"));
+  });
+
+  it.each([true, false])("preserves master excluded forced-repair retry (loaded %s)", async (loaded) => {
+    const h = setup();
+    await h.visible(true);
+    await h.resolveTail(0, 101, "a");
+    if (loaded) act(() => h.params.sessionAuthority.commit([{ ...h.current(),
+      messagesLoaded: true, messageCount: 20, messageStartIndex: 0, hasOlderHistory: false }], "history"));
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)).toBeNull();
+    // Invoke the real hook callback supplied to master's transport recovery.
+    act(() => h.startHydration(SESSION_ID, { forceTailRepair: true }));
+    h.expectTailCount(2);
+    await act(async () => h.tailRequests[1].reject(new Error("Master repair unavailable")));
+    await flush(SESSION_HYDRATION_RETRY_DELAYS_MS[0]);
+    h.expectTailCount(loaded ? 2 : 3);
+    expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+  });
+
+  it.each(["before", "during"] as const)(
+    "keeps older prefetch as a page when a hole arrives %s the flight", async (order) => {
+      const h = await pairedRetryFixture(false);
+      const hole = { ...textDelta(102, 1), sessionSeq: 2, bodySeqEpoch: INSTANCE };
+      act(() => {
+        if (order === "before") Stream.latest.emit("delta", hole);
+        requestSessionHistoryPage(SESSION_ID);
+        if (order === "during") Stream.latest.emit("delta", hole);
+      });
+      await flush();
+      expect(h.historyRequests).toHaveLength(1);
+      h.expectTailCount(1);
+      await act(async () => h.historyRequests[0].resolve({
+        revision: 102, serverInstanceId: INSTANCE, sessionMutationStamp: 102,
+        messageCount: TOTAL, messageStartIndex: TOTAL - 21,
+        messages: [message("Prefetched", "prefetched")], hasMore: true,
+        nextBefore: "prefetched", hasNewer: false, nextAfter: null,
+      }));
+      await flush();
+      // No manual rescue: publication/flight completion must serve the demand.
+      h.expectTailCount(2);
+      expect(h.current().messages[0].id).toBe("prefetched");
+      expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(true);
+    },
+  );
+});
 
 function coverageCase(warm = false) {
   const response = tail(101, "a");

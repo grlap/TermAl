@@ -311,7 +311,8 @@ impl AppState {
                 .and_then(|index| inner.sessions.get(index))
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let local_session = AppState::wire_session_from_record(&local_record);
+            let local_session =
+                AppState::wire_session_from_record(&self.server_instance_id, &local_record);
             let revision = if changed {
                 self.commit_remote_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
@@ -328,8 +329,9 @@ impl AppState {
                     })?;
                 inner.revision
             };
-            let delta_session =
-                changed.then(|| AppState::wire_session_summary_from_record(&local_record));
+            let delta_session = changed.then(|| {
+                AppState::wire_session_summary_from_record(&self.server_instance_id, &local_record)
+            });
             (
                 revision,
                 local_session_id,

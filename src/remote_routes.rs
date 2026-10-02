@@ -635,6 +635,8 @@ impl AppState {
                 status,
                 session_queue,
                 session_mutation_stamp,
+                session_seq,
+                body_seq_epoch,
                 ..
             } => RemoteDeltaReplayPayload::MessageCreated {
                 session_id: session_id.clone(),
@@ -649,6 +651,8 @@ impl AppState {
                     None => None,
                 },
                 session_mutation_stamp: *session_mutation_stamp,
+                session_seq: *session_seq,
+                body_seq_epoch: body_seq_epoch.clone(),
             },
             DeltaEvent::MessageUpdated {
                 session_id,
@@ -659,6 +663,8 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
+                session_seq,
+                body_seq_epoch,
                 ..
             } => RemoteDeltaReplayPayload::MessageUpdated {
                 session_id: session_id.clone(),
@@ -669,6 +675,8 @@ impl AppState {
                 preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 status: Self::session_status_replay_code(*status),
                 session_mutation_stamp: *session_mutation_stamp,
+                session_seq: *session_seq,
+                body_seq_epoch: body_seq_epoch.clone(),
             },
             DeltaEvent::TextDelta {
                 session_id,
@@ -679,6 +687,8 @@ impl AppState {
                 delta,
                 preview,
                 session_mutation_stamp,
+                session_seq,
+                body_seq_epoch,
                 ..
             } => RemoteDeltaReplayPayload::TextDelta {
                 session_id: session_id.clone(),
@@ -689,6 +699,8 @@ impl AppState {
                 delta_fingerprint: Self::remote_delta_text_fingerprint(delta),
                 preview_fingerprint: preview.as_deref().map(Self::remote_delta_text_fingerprint),
                 session_mutation_stamp: *session_mutation_stamp,
+                session_seq: *session_seq,
+                body_seq_epoch: body_seq_epoch.clone(),
             },
             DeltaEvent::TextReplace {
                 session_id,
@@ -698,6 +710,8 @@ impl AppState {
                 text,
                 preview,
                 session_mutation_stamp,
+                session_seq,
+                body_seq_epoch,
                 ..
             } => RemoteDeltaReplayPayload::TextReplace {
                 session_id: session_id.clone(),
@@ -707,6 +721,8 @@ impl AppState {
                 text_fingerprint: Self::remote_delta_text_fingerprint(text),
                 preview_fingerprint: preview.as_deref().map(Self::remote_delta_text_fingerprint),
                 session_mutation_stamp: *session_mutation_stamp,
+                session_seq: *session_seq,
+                body_seq_epoch: body_seq_epoch.clone(),
             },
             DeltaEvent::CommandUpdate {
                 session_id,
@@ -720,6 +736,8 @@ impl AppState {
                 status,
                 preview,
                 session_mutation_stamp,
+                session_seq,
+                body_seq_epoch,
                 ..
             } => RemoteDeltaReplayPayload::CommandUpdate {
                 session_id: session_id.clone(),
@@ -733,6 +751,8 @@ impl AppState {
                 status: Self::command_status_replay_code(*status),
                 preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 session_mutation_stamp: *session_mutation_stamp,
+                session_seq: *session_seq,
+                body_seq_epoch: body_seq_epoch.clone(),
             },
             DeltaEvent::ParallelAgentsUpdate {
                 session_id,
@@ -742,6 +762,8 @@ impl AppState {
                 agents,
                 preview,
                 session_mutation_stamp,
+                session_seq,
+                body_seq_epoch,
                 ..
             } => RemoteDeltaReplayPayload::ParallelAgentsUpdate {
                 session_id: session_id.clone(),
@@ -754,6 +776,30 @@ impl AppState {
                 agents_fingerprint: Self::remote_delta_payload_fingerprint(agents)?,
                 preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 session_mutation_stamp: *session_mutation_stamp,
+                session_seq: *session_seq,
+                body_seq_epoch: body_seq_epoch.clone(),
+            },
+            DeltaEvent::TestRunCardUpdated {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                run,
+                preview,
+                session_mutation_stamp,
+                session_seq,
+                body_seq_epoch,
+                ..
+            } => RemoteDeltaReplayPayload::TestRunCardUpdated {
+                session_id: session_id.clone(),
+                message_id: message_id.clone(),
+                message_index: *message_index,
+                message_count: *message_count,
+                run_fingerprint: Self::remote_delta_payload_fingerprint(run)?,
+                preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
+                session_mutation_stamp: *session_mutation_stamp,
+                session_seq: *session_seq,
+                body_seq_epoch: body_seq_epoch.clone(),
             },
             DeltaEvent::ConversationMarkerCreated {
                 session_id,
@@ -816,7 +862,6 @@ impl AppState {
             | DeltaEvent::DelegationCanceled { .. }
             | DeltaEvent::TestRunChanged { .. }
             | DeltaEvent::TestRunRemoved { .. }
-            | DeltaEvent::TestRunCardUpdated { .. }
             | DeltaEvent::TestRunWaitCreated { .. }
             | DeltaEvent::TestRunWaitConsumed { .. }
             | DeltaEvent::TestRunWaitResumeDispatchFailed { .. } => return None,
@@ -979,7 +1024,7 @@ impl AppState {
                         .ok_or_else(|| ApiError::not_found("session not found"))?;
                     return Ok(SessionResponse {
                         revision: inner.revision,
-                        session: Self::wire_session_from_record(record),
+                        session: Self::wire_session_from_record(&self.server_instance_id, record),
                         server_instance_id: self.server_instance_id.clone(),
                     });
                 }
@@ -1042,7 +1087,7 @@ impl AppState {
                     local_project_id,
                     &remote_response.session,
                 );
-                Self::wire_session_from_record(record)
+                Self::wire_session_from_record(&self.server_instance_id, record)
             };
             let bounded_tail_materialized = remote_response.session.message_count == 0
                 || !remote_response.session.messages.is_empty();
@@ -1079,6 +1124,7 @@ impl AppState {
         before: Option<&str>,
         after: Option<&str>,
         around: Option<usize>,
+        start: Option<usize>,
         from_start: bool,
         message_limit: usize,
         request_timeout: Duration,
@@ -1093,10 +1139,13 @@ impl AppState {
         if let Some(around) = around {
             query.push(("around".to_owned(), around.to_string()));
         }
+        if let Some(start) = start {
+            query.push(("start".to_owned(), start.to_string()));
+        }
         if from_start {
             query.push(("from".to_owned(), "start".to_owned()));
         }
-        let (remote_page, response_lease): (SessionHistoryResponse, RemoteRequestLease) =
+        let (mut remote_page, response_lease): (SessionHistoryResponse, RemoteRequestLease) =
             self.remote_registry.request_json_with_timeout_and_lease(
                 &target.remote,
                 Method::GET,
@@ -1108,6 +1157,7 @@ impl AppState {
                 None,
                 request_timeout,
             )?;
+        normalize_body_sequence_pair(&mut remote_page.body_seq, &mut remote_page.body_seq_epoch);
         let response_validation = (|| -> Result<(), ApiError> {
             if remote_page.messages.len() > message_limit {
                 return Err(ApiError::bad_gateway(format!(
@@ -1170,12 +1220,16 @@ impl AppState {
             record.session.session_mutation_stamp.is_none()
                 && remote_page.message_count == record.session.message_count
                 && remote_page.revision >= latest_remote_revision;
-        if !metadata_matches_current_session && !compatible_without_remote_mutation_stamp {
+        if !metadata_matches_current_session
+            && !compatible_without_remote_mutation_stamp
+        {
             return Err(ApiError::conflict(
                 "remote session history changed while the page was loading; retry the request",
             ));
         }
         Ok(SessionHistoryResponse {
+            body_seq: remote_page.body_seq,
+            body_seq_epoch: remote_page.body_seq_epoch,
             messages: remote_page.messages,
             next_before: remote_page.next_before,
             has_more: remote_page.has_more,

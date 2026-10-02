@@ -641,6 +641,8 @@ struct GetSessionHistoryQuery {
     #[serde(default)]
     around: Option<usize>,
     #[serde(default)]
+    start: Option<usize>,
+    #[serde(default)]
     from: Option<String>,
     #[serde(default = "default_session_history_page_limit")]
     limit: usize,
@@ -730,10 +732,11 @@ async fn get_session_history(
     let selector_count = usize::from(query.before.is_some())
         + usize::from(query.after.is_some())
         + usize::from(query.around.is_some())
+        + usize::from(query.start.is_some())
         + usize::from(query.from.is_some());
     if selector_count > 1 {
         return Err(ApiError::bad_request(
-            "session history accepts only one of before, after, around, or from",
+            "session history accepts only one of before, after, around, start, or from",
         ));
     }
     if query.from.as_deref().is_some_and(|from| from != "start") {
@@ -747,6 +750,7 @@ async fn get_session_history(
             query.before.as_deref(),
             query.after.as_deref(),
             query.around,
+            query.start,
             query.from.as_deref() == Some("start"),
             query.limit,
         )?;

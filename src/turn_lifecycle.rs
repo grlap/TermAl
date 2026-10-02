@@ -626,6 +626,7 @@ impl AppState {
                         None => "Turn stopped: Engram MCP configuration was revoked.".to_owned(),
                     };
                     let message_index = record.session.messages.len();
+                    record.mark_body_changed(&message_id);
                     record.session.messages.push(Message::Text {
                         attachments: Vec::new(),
                         id: message_id,
@@ -650,10 +651,14 @@ impl AppState {
                     }
                 }
                 finish_active_turn_file_change_tracking(record);
+                let created_parts =
+                    message_created_delta_parts_for_indices(record, created_message_indices);
+                let updated_parts =
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices);
                 (
                     !record.queued_prompts.is_empty(),
-                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
-                    message_created_delta_parts_for_indices(record, created_message_indices),
+                    updated_parts,
+                    created_parts,
                     failed_mailbox_notification,
                 )
             };
@@ -906,6 +911,7 @@ impl AppState {
             }
 
             if let Some(message_id) = message_id {
+                record.mark_body_changed(&message_id);
                 record.session.messages.push(Message::Text {
                     attachments: Vec::new(),
                     id: message_id,
@@ -1695,6 +1701,7 @@ impl AppState {
             .expect("session index should be valid");
 
         if let Some(message_id) = message_id {
+            record.mark_body_changed(&message_id);
             record.session.messages.push(Message::Text {
                 attachments: Vec::new(),
                 id: message_id,
@@ -2191,6 +2198,7 @@ impl AppState {
                 if let Some(detail) = detail.as_ref() {
                     if let Some(message_id) = message_id {
                         let failed_message_index = record.session.messages.len();
+                        record.mark_body_changed(&message_id);
                         record.session.messages.push(Message::Text {
                             attachments: Vec::new(),
                             id: message_id,
@@ -2212,10 +2220,14 @@ impl AppState {
                     }
                 }
                 finish_active_turn_file_change_tracking(record);
+                let created_parts =
+                    message_created_delta_parts_for_indices(record, created_message_indices);
+                let updated_parts =
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices);
                 (
                     !record.orchestrator_auto_dispatch_blocked && !record.queued_prompts.is_empty(),
-                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
-                    message_created_delta_parts_for_indices(record, created_message_indices),
+                    updated_parts,
+                    created_parts,
                     exited_mailbox_notification,
                 )
             };

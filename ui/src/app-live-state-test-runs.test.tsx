@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { useAppLiveState } from "./app-live-state";
+import { withLiveSessionAuthority, type TestLiveStateParams } from "./session-publication-test-fixtures";
 import type { UseAppLiveStateParams } from "./app-live-state-types";
 import { makeTestRun, makeTestRunCard, makeTestRunDetail, makeTestRunWait } from "./test-runs-fixtures";
 import type { Session, TestRunCardMessage } from "./types";
@@ -21,9 +22,9 @@ class Stream extends EventTarget {
   close() { this.readyState = 2; }
   emit(payload: unknown) { this.dispatchEvent(new MessageEvent("delta", { data: JSON.stringify(payload) })); }
 }
-function params(): UseAppLiveStateParams {
+function params(): TestLiveStateParams {
   const set = vi.fn();
-  return {
+  return withLiveSessionAuthority({
     adoptionRefs: {
       isMountedRef: { current: true }, latestStateRevisionRef: { current: null },
       lastSeenServerInstanceIdRef: { current: null }, seenServerInstanceIdsRef: { current: new Set() },
@@ -55,7 +56,7 @@ function params(): UseAppLiveStateParams {
     clearRecoveredBackendRequestError: vi.fn(), reportRequestError: vi.fn(),
     requestBackendReconnectRef: { current: vi.fn() }, requestActionRecoveryResyncRef: { current: vi.fn() },
     activeSession: null, activeTranscriptSessionId: null, visibleSessionHydrationTargets: [],
-  };
+  });
 }
 function snapshot(revision: number, testRuns?: api.StateResponse["testRuns"]): api.StateResponse {
   return {

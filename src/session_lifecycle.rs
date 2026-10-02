@@ -1151,6 +1151,7 @@ impl AppState {
                 record.session.status = terminal_status;
                 record.session.preview = make_preview(&terminal_text);
                 let stopped_message_index = record.session.messages.len();
+                record.mark_body_changed(&message_id);
                 record.session.messages.push(Message::Text {
                     attachments: Vec::new(),
                     id: message_id,
@@ -1260,6 +1261,15 @@ impl AppState {
                     });
                 match &result {
                     Ok(Some(_)) => {
+                        // This caller publishes the successor in the complete
+                        // stop batch below, not via StartedTurn.message_delta.
+                        // Discard its unpublished reservation while still under
+                        // the mutex, then allocate the batch in publish order.
+                        inner.sessions[index].body_sequence = post_stop_record
+                            .as_ref()
+                            .expect("stop snapshot exists")
+                            .body_sequence
+                            .clone();
                         let successor_message_index = inner.sessions[index]
                             .session
                             .messages
@@ -1300,12 +1310,16 @@ impl AppState {
                 Ok(None)
             };
 
+            // Building a part allocates its body sequence, so the parts are
+            // built in the order they are enqueued below: creates first, then
+            // updates. Sequence order then equals mailbox order.
             let (mut pending_interaction_updates, mut created_messages) = {
-                let record = &inner.sessions[index];
-                (
-                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
-                    message_created_delta_parts_for_indices(record, created_message_indices),
-                )
+                let record = &mut inner.sessions[index];
+                let created_parts =
+                    message_created_delta_parts_for_indices(record, created_message_indices);
+                let updated_parts =
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices);
+                (updated_parts, created_parts)
             };
 
             match self.commit_locked(&mut inner) {

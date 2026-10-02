@@ -14,8 +14,11 @@ import {
   type SetStateAction,
 } from "react";
 import type { StateResponse } from "./api";
+import type { SessionReadRef, TranscriptRepairAuthority } from "./transcript-repair-authority";
+import { isBodyDelta, bodySequenceProof } from "./transcript-body-sequence";
 import {
   applyDeltaToSessions,
+  applyMetadataOnlySessionDelta,
   pruneLiveTransportActivitySessions,
   sessionDeltaAdvancesCurrentMutationStamp,
   type DeltaApplyResult,
@@ -58,8 +61,11 @@ import type { SessionHydrationOptions } from "./app-live-state-hydration";
 import type { HydrationDeltaObservation } from "./session-hydration-adoption";
 
 type AppLiveStateTransportEventHandlersContext = {
+  sessionAuthority: TranscriptRepairAuthority;
+  requestSessionTailRead: (sessionId: string) => void;
   observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
   hasPartialTailAppendProof?: (sessionId?: string) => boolean;
+  markTranscriptsDirty?: () => void;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
   applyTestRunDeltaLocally?: (delta: DeltaEvent) => void;
@@ -67,7 +73,7 @@ type AppLiveStateTransportEventHandlersContext = {
   cancelStaleSendResponseRecoveryPollForSessions: (
     sessionIds: Iterable<string>,
   ) => void;
-  clearForceAdoptNextStateEvent: () => void;
+  clearForceAdoptNextStateEvent: (transcriptsRepaired?: boolean) => void;
   clearInitialStateResyncRetryTimeout: () => void;
   clearRecoveredBackendRequestError: () => void;
   clearReconnectStateResyncTimeoutAfterConfirmedReopen: () => void;
@@ -95,13 +101,13 @@ type AppLiveStateTransportEventHandlersContext = {
     options?: { clearWatchdogCooldown?: boolean },
   ) => void;
   orchestratorsRef: MutableRefObject<OrchestratorInstance[]>;
-  publishQueuedSessionSlices: (sessionSnapshot?: Session[]) => void;
+  publishQueuedSessionSlices: (sessionSnapshot?: readonly Session[]) => void;
   queueSessionSliceForRender: (sessionId: string) => void;
   requestStateResync: (options?: RequestStateResyncOptions) => void;
   scheduleCodexStateRender: () => void;
   scheduleSessionRender: () => void;
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>;
-  sessionsRef: MutableRefObject<Session[]>;
+  sessionsRef: SessionReadRef;
   setBackendConnectionIssueDetail: Dispatch<SetStateAction<string | null>>;
   setBackendConnectionState: (next: BackendConnectionState) => void;
   setIsLoading: Dispatch<SetStateAction<boolean>>;
@@ -113,11 +119,11 @@ type AppLiveStateTransportEventHandlersContext = {
     options?: SessionHydrationOptions,
   ) => void;
   syncLiveSessionResumeWatchdogBaselines: (
-    sessions: Session[],
+    sessions: readonly Session[],
     now?: number,
   ) => void;
   syncLiveTransportActivityFromState: (
-    sessions: Session[],
+    sessions: readonly Session[],
     now?: number,
     options?: { clearWatchdogCooldown?: boolean },
   ) => void;
@@ -176,6 +182,7 @@ export function createAppLiveStateTransportEventHandlers(
   }
   const {
     adoptState,
+    markTranscriptsDirty,
     applyDelegationWaitDeltaLocally,
     applyTestRunDeltaLocally,
     beginBadLiveEventRecovery,
@@ -219,6 +226,16 @@ export function createAppLiveStateTransportEventHandlers(
     triggerRecoveryForDelta,
   } = context;
 
+  function applyTranscriptDelta(delta: Parameters<typeof applyDeltaToSessions>[1], revisionAction: HydrationDeltaObservation["revisionAction"]) {
+    const result = applyDeltaToSessions(sessionsRef.current, delta);
+    // The append proof needs both the resident input and reducer output.
+    // Observe before the single publication gate replaces the live projection.
+    observeDelta(delta, revisionAction, result);
+    return "sessions" in result
+      ? { ...result, sessions: context.sessionAuthority.commit(result.sessions, "delta") }
+      : result;
+  }
+
   function handleStateEvent(event: MessageEvent<string>) {
     if (isCancelled()) {
       return;
@@ -239,7 +256,13 @@ export function createAppLiveStateTransportEventHandlers(
         payload,
         "_sseFallback",
       );
-      const forceStateEvent = shouldForceAdoptNextStateEvent();
+      const forceStateEvent = shouldForceAdoptNextStateEvent() ||
+        // A delta after the loss marker cancels rollback permission, not
+        // transcript repair from a snapshot covering that newer delta.
+        (laggedRecoveryBaselineRevisionRef.current !== null &&
+          rawRevision !== null &&
+          (latestStateRevisionRef.current === null ||
+            rawRevision >= latestStateRevisionRef.current));
       profiler?.mark("peek");
       if (
         rawRevision !== null &&
@@ -304,10 +327,13 @@ export function createAppLiveStateTransportEventHandlers(
         force,
         allowRevisionDowngrade: force,
         allowUnknownServerInstance: force,
+        // Loss marks local attached tails dirty without evicting their bodies.
+        // The ordinary hydration flight covers that demand separately.
+        forceMessagesUnloaded: false,
       });
       profiler?.mark("adoptState");
       profiledAdopted = adopted;
-      clearForceAdoptNextStateEvent();
+      clearForceAdoptNextStateEvent(adopted);
       // Confirm recovery after an adopted state. A parseable but rejected
       // state is still useful stream proof in ordinary reconnects, but it
       // must not clear pending bad-event recovery because it did not repair
@@ -399,6 +425,67 @@ export function createAppLiveStateTransportEventHandlers(
     try {
       const delta = JSON.parse(event.data) as DeltaEvent;
       const currentRevision = latestStateRevisionRef.current;
+      if (isBodyDelta(delta)) {
+        const beforeBody = sessionsRef.current;
+        // Global HTTP progress cannot hide a session frame from this ledger.
+        // The owner buffers it even when its revision would be ignored below.
+        const decision = context.sessionAuthority.receiveBodyDelta(delta);
+        if (decision === "legacy" && bodySequenceProof(delta)) {
+          // Let the legacy reducer publish first, including a first message in
+          // an empty creation response. The same read coalesces display/frame
+          // demand and starts only for a visible uncertified resident window.
+          queueMicrotask(() => {
+            if (!isCancelled()) context.requestSessionTailRead(delta.sessionId);
+          });
+        }
+        if (decision !== "legacy") {
+          // The two ledgers answer different questions. Body placement cannot
+          // account for a missing global frame (possibly session metadata).
+          const revisionAction = decideDeltaRevisionAction(currentRevision, delta.revision);
+          observeDelta(delta, revisionAction);
+          const metadataAllowed = revisionAction === "apply" ||
+            (revisionAction === "ignore" && delta.revision === currentRevision &&
+              isSameRevisionReplayableSessionDelta(delta)) ||
+            (revisionAction === "resync" && sessionDeltaAdvancesCurrentMutationStamp(beforeBody, delta));
+          // A duplicate body may still carry globally current metadata. The
+          // owner orders its stamp independently at the publication gate.
+          const previous = beforeBody.find(session => session.id === delta.sessionId);
+          if (metadataAllowed && previous) {
+            // Compute queue evidence against the pre-placement window, but
+            // publish through the owner which retains the already placed body.
+            const metadata = applyMetadataOnlySessionDelta(previous, delta);
+            context.sessionAuthority.commit(sessionsRef.current.map(session =>
+              session.id === delta.sessionId ? metadata : session), "metadata");
+          }
+          if (revisionAction === "apply") latestStateRevisionRef.current = delta.revision;
+          if (revisionAction === "resync") requestStateResync({ rearmOnFailure: true });
+          queueMicrotask(() => {
+            if (!isCancelled()) context.requestSessionTailRead(delta.sessionId);
+          });
+          if (decision === "applied") {
+            const appliedAt = Date.now();
+            cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
+            markLiveTransportActivity([delta.sessionId], appliedAt);
+            markLiveSessionResumeWatchdogBaseline([delta.sessionId], appliedAt);
+            queueSessionSliceForRender(delta.sessionId);
+            publishQueuedSessionSlices(sessionsRef.current);
+            scheduleSessionRender();
+          }
+          if (revisionAction !== "resync" &&
+              (revisionAction !== "ignore" || !transportState.pendingBadLiveEventRecovery ||
+                delta.revision === currentRevision)) {
+            void confirmReconnectRecoveryFromDeltaEvent();
+            setBackendConnectionIssueDetail(null);
+            clearRecoveredBackendRequestError();
+          }
+          if (metadataAllowed && decision !== "applied") {
+            queueSessionSliceForRender(delta.sessionId);
+            publishQueuedSessionSlices(sessionsRef.current);
+            scheduleSessionRender();
+          }
+          return;
+        }
+      }
       if (delta.type === "testRunWaitCreated" || delta.type === "testRunWaitConsumed" ||
           delta.type === "delegationWaitCreated" || delta.type === "delegationWaitConsumed") {
         const identity = classifyDeltaServerIdentity(
@@ -504,8 +591,7 @@ export function createAppLiveStateTransportEventHandlers(
           delta.revision === currentRevision &&
           isSameRevisionReplayableSessionDelta(delta)
         ) {
-          const result = applyDeltaToSessions(sessionsRef.current, delta);
-          observeDelta(delta, revisionAction, result);
+          const result = applyTranscriptDelta(delta, revisionAction);
           const replayableMaterialApply =
             result.kind === "applied" ||
             result.kind === "appliedNeedsResync";
@@ -519,7 +605,6 @@ export function createAppLiveStateTransportEventHandlers(
               appliedAt,
             );
             latestStateRevisionRef.current = delta.revision;
-            sessionsRef.current = result.sessions;
             const updatedSession =
               result.sessions.find(
                 (session) => session.id === delta.sessionId,
@@ -604,8 +689,7 @@ export function createAppLiveStateTransportEventHandlers(
             delta,
           )
         ) {
-          const result = applyDeltaToSessions(sessionsRef.current, delta);
-          observeDelta(delta, revisionAction, result);
+          const result = applyTranscriptDelta(delta, revisionAction);
           if (
             result.kind === "applied" ||
             result.kind === "appliedNeedsResync"
@@ -617,7 +701,6 @@ export function createAppLiveStateTransportEventHandlers(
               appliedAt,
             );
             latestStateRevisionRef.current = delta.revision;
-            sessionsRef.current = result.sessions;
             const updatedSession =
               result.sessions.find(
                 (session) => session.id === delta.sessionId,
@@ -706,11 +789,11 @@ export function createAppLiveStateTransportEventHandlers(
           markLiveSessionResumeWatchdogBaseline(deltaSessionIds, appliedAt);
         }
         latestStateRevisionRef.current = delta.revision;
-        const nextSessions = mergeOrchestratorDeltaSessions(
+        const mergedSessions = mergeOrchestratorDeltaSessions(
           sessionsRef.current,
           delta.sessions,
         );
-        sessionsRef.current = nextSessions;
+        const nextSessions = context.sessionAuthority.commit(mergedSessions, "metadata");
         const deltaSessionIds = new Set(
           (delta.sessions ?? []).map((session) => session.id),
         );
@@ -730,13 +813,11 @@ export function createAppLiveStateTransportEventHandlers(
 
       // Non-session deltas such as codexUpdated/orchestratorsUpdated are handled above; the
       // session reducer only accepts deltas that carry a concrete sessionId.
-      const result = applyDeltaToSessions(sessionsRef.current, delta);
-      observeDelta(delta, revisionAction, result);
+      const result = applyTranscriptDelta(delta, revisionAction);
       if (result.kind === "appliedNoOp") {
         void confirmReconnectRecoveryFromDeltaEvent();
         cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
         latestStateRevisionRef.current = delta.revision;
-        sessionsRef.current = result.sessions;
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
         return;
@@ -753,7 +834,6 @@ export function createAppLiveStateTransportEventHandlers(
         markLiveTransportActivity([delta.sessionId], appliedAt);
         markLiveSessionResumeWatchdogBaseline([delta.sessionId], appliedAt);
         latestStateRevisionRef.current = delta.revision;
-        sessionsRef.current = result.sessions;
         const updatedSession =
           result.sessions.find((session) => session.id === delta.sessionId) ??
           null;
@@ -841,6 +921,7 @@ export function createAppLiveStateTransportEventHandlers(
       return;
     }
     observeDelta(null, "resync");
+    markTranscriptsDirty?.();
     // The backend emits this when an SSE broadcast receiver fell past the
     // channel capacity and dropped events. A recovery state snapshot follows
     // immediately, but its revision may equal `latestStateRevisionRef.current`

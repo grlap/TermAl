@@ -67,7 +67,6 @@ import {
   sessionSupportsModelRefresh,
 } from "./app-session-settings-optimism";
 import { buildSessionSettingsPayload } from "./app-session-settings-payload";
-import { upsertSessionStoreSession } from "./session-store";
 import { syncActionComposerDraftSlice } from "./app-session-draft-sync";
 import { requestedModelForNewSession } from "./app-session-model-requests";
 import {
@@ -208,7 +207,6 @@ export function useAppSessionActions(
       refreshingAgentCommandSessionIdsRef,
     },
     setters: {
-      setSessions,
       setWorkspace,
       setRequestError,
       setIsCreating,
@@ -411,12 +409,7 @@ export function useAppSessionActions(
   }
 
   function syncSessionSlice(session: Session) {
-    upsertSessionStoreSession({
-      session,
-      committedDraft: draftsBySessionIdRef.current[session.id] ?? "",
-      draftAttachments:
-        draftAttachmentsBySessionIdRef.current[session.id] ?? [],
-    });
+    params.sessionAuthority.syncSlices([session.id]);
   }
 
   function updateSessionLocally(
@@ -437,13 +430,13 @@ export function useAppSessionActions(
       return;
     }
 
-    sessionsRef.current = nextSessions;
+    params.sessionAuthority.commit(nextSessions, "metadata");
     const updatedSession =
       nextSessions.find((entry) => entry.id === sessionId) ?? null;
     if (updatedSession) {
       syncSessionSlice(updatedSession);
     }
-    setSessions(nextSessions);
+    params.sessionAuthority.publish();
     setWorkspace((current) =>
       applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
     );
@@ -1221,13 +1214,13 @@ export function useAppSessionActions(
       (entry, index) => entry !== previousSessions[index],
     );
     if (hasChanged) {
-      sessionsRef.current = next;
+      params.sessionAuthority.commit(next, "metadata");
       const updatedSession =
         next.find((entry) => entry.id === sessionId) ?? null;
       if (updatedSession) {
         syncSessionSlice(updatedSession);
       }
-      setSessions(next);
+      params.sessionAuthority.publish();
     }
     // A local optimistic entry can outlive the server queue entry when the
     // prompt started running before targeted hydration completed. Removing
@@ -1401,7 +1394,8 @@ export function useAppSessionActions(
 
     setRequestError(null);
     if (hasOptimisticUpdate) {
-      updateSessionLocally(sessionId, () => optimisticSession);
+      updateSessionLocally(sessionId, current =>
+        buildOptimisticSessionSettingsUpdate(current, field, value));
     }
     setUpdatingSessionIds((current) =>
       setSessionFlag(current, sessionId, true),

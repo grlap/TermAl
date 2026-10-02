@@ -105,6 +105,8 @@ mod response_board;
 mod review;
 mod runtime_rpc;
 mod session_actions;
+mod session_body_sequence;
+mod session_history_snapshot;
 mod session_lifecycle;
 mod session_settings;
 mod session_stop;
@@ -1232,6 +1234,8 @@ fn sample_remote_orchestrator_state(
         .map(|template_session| {
             let agent = template_session.agent;
             let mut session = Session {
+                body_seq: None,
+                body_seq_epoch: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -1380,6 +1384,8 @@ fn sample_remote_orchestrator_state(
 
 fn test_state_session_summary_from_session(session: &Session) -> StateSessionSummary {
     StateSessionSummary {
+        body_seq: session.body_seq,
+        body_seq_epoch: session.body_seq_epoch.clone(),
         opencode_approval_mode: session.opencode_approval_mode,
         id: session.id.clone(),
         name: session.name.clone(),

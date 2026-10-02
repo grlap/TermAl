@@ -123,7 +123,7 @@ export type UseAppWorkspaceLayoutParams = {
   workspace: WorkspaceState;
   setWorkspace: Dispatch<SetStateAction<WorkspaceState>>;
   sessions: Session[];
-  sessionsRef: MutableRefObject<Session[]>;
+  sessionsRef: { readonly current: readonly Session[] };
   isSessionStateReady: boolean;
   controlPanelSide: ControlPanelSide;
   setControlPanelSide: Dispatch<SetStateAction<ControlPanelSide>>;

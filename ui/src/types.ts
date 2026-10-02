@@ -435,6 +435,9 @@ export type Session = {
   queueProjectionHash?: string | null;
   sessionMutationStamp?: number | null;
   parentDelegationId?: string | null;
+  /** Upstream per-session body snapshot sequence; absent on older peers. */
+  bodySeq?: number;
+  bodySeqEpoch?: string;
 };
 
 /** Transcript-free metadata returned by broad state snapshots and summary
@@ -1126,6 +1129,8 @@ export type CodexAppRequestMessage = BaseMessage & {
 };
 
 export type TextDeltaEvent = {
+  sessionSeq?: number;
+  bodySeqEpoch?: string;
   type: "textDelta";
   revision: number;
   sessionId: string;
@@ -1139,6 +1144,8 @@ export type TextDeltaEvent = {
 };
 
 export type TextReplaceEvent = {
+  sessionSeq?: number;
+  bodySeqEpoch?: string;
   type: "textReplace";
   revision: number;
   sessionId: string;
@@ -1151,6 +1158,8 @@ export type TextReplaceEvent = {
 };
 
 export type MessageCreatedEvent = {
+  sessionSeq?: number;
+  bodySeqEpoch?: string;
   type: "messageCreated";
   revision: number;
   sessionId: string;
@@ -1169,6 +1178,8 @@ export type MessageCreatedEvent = {
 };
 
 export type MessageUpdatedEvent = {
+  sessionSeq?: number;
+  bodySeqEpoch?: string;
   type: "messageUpdated";
   revision: number;
   sessionId: string;
@@ -1189,6 +1200,8 @@ export type SessionCreatedEvent = {
 };
 
 export type CommandUpdateEvent = {
+  sessionSeq?: number;
+  bodySeqEpoch?: string;
   type: "commandUpdate";
   revision: number;
   sessionId: string;
@@ -1212,6 +1225,8 @@ export type TestRunCardMessage = Omit<BaseMessage, "author"> & {
 };
 
 export type TestRunCardUpdatedEvent = {
+  sessionSeq?: number;
+  bodySeqEpoch?: string;
   type: "testRunCardUpdated";
   revision: number;
   sessionId: string;
@@ -1224,6 +1239,8 @@ export type TestRunCardUpdatedEvent = {
 };
 
 export type ParallelAgentsUpdateEvent = {
+  sessionSeq?: number;
+  bodySeqEpoch?: string;
   type: "parallelAgentsUpdate";
   revision: number;
   sessionId: string;

@@ -55,6 +55,7 @@ struct StartedTurnMessageDelta {
     preview: String,
     status: SessionStatus,
     session_mutation_stamp: u64,
+    session_seq: u64,
 }
 
 struct OrphanedWorkflowDispatch {
@@ -289,6 +290,8 @@ impl AppState {
                 status: delta.status,
                 session_queue: None,
                 session_mutation_stamp: Some(delta.session_mutation_stamp),
+                session_seq: Some(delta.session_seq),
+                body_seq_epoch: Some(self.server_instance_id.clone()),
             },
         );
     }
@@ -822,6 +825,7 @@ impl AppState {
             pending.dispatch_generation = record.engram.dispatch_generation;
         }
         record.engram.pending_dispatch = pending_engram;
+        let session_seq = record.next_body_delta_seq(&message_id);
         let message_delta = StartedTurnMessageDelta {
             session_id: record.session.id.clone(),
             message_id,
@@ -831,6 +835,7 @@ impl AppState {
             preview: record.session.preview.clone(),
             status: record.session.status,
             session_mutation_stamp: record.mutation_stamp,
+            session_seq,
         };
 
         Ok(StartedTurn {

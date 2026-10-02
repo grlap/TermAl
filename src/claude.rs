@@ -1571,12 +1571,19 @@ fn record_claude_completed_assistant_text(
         state.replay_became_unsafe = true;
         state.streamed_assistant_text.clear();
         state.streamed_assistant_text.push_str(trimmed);
-        return recorder.push_text(trimmed);
+        recorder.text_delta(trimmed)?;
+        recorder.replace_streaming_text(trimmed)?;
+        return recorder.finish_streaming_text();
     }
 
     match next_completed_codex_text_update(&mut state.streamed_assistant_text, trimmed) {
-        CompletedTextUpdate::NoChange => Ok(()),
-        CompletedTextUpdate::Append(unseen_suffix) => recorder.text_delta(&unseen_suffix),
+        // Completion is authoritative for the client, even if the server
+        // already accumulated every streamed byte.
+        CompletedTextUpdate::NoChange => recorder.republish_streaming_text(trimmed),
+        CompletedTextUpdate::Append(unseen_suffix) => {
+            recorder.text_delta(&unseen_suffix)?;
+            recorder.republish_streaming_text(trimmed)
+        }
         CompletedTextUpdate::Replace(replacement_text) => {
             recorder.replace_streaming_text(&replacement_text)
         }

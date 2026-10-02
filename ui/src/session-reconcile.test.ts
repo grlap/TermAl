@@ -1,9 +1,32 @@
 import type { Session } from "./types";
+import { TranscriptRepairAuthority } from "./transcript-repair-authority";
 import {
   applyDelegationParentIdsFromSummaries,
   reconcileSessions,
   reconcileSingleSession,
+  reconcileSingleStateSessionSummary,
 } from "./session-reconcile";
+
+describe("body sequence observations", () => {
+  it("observes a newer raw summary pair without treating it as metadata or advancing the certificate", () => {
+    const previous = makeSession("a", { messagesLoaded: true, messageCount: 0,
+      queuePaused: false, sessionMutationStamp: 7, bodySeq: 1, bodySeqEpoch: "A" });
+    const summary = { ...previous, messageCount: 0, queuePaused: false, bodySeq: 2 };
+    // Proof is owner output, never metadata to compare in the fast path.
+    expect(reconcileSingleStateSessionSummary(previous, summary)).toBe(previous);
+    expect(reconcileSingleSession(previous, summary)).toBe(previous);
+    expect(reconcileSingleSession(previous, summary, { disableMutationStampFastPath: true })).toBe(previous);
+    const owner = new TranscriptRepairAuthority(undefined, [previous]);
+    owner.setServerInstance("A");
+    owner.adoptTail(previous);
+    const resident = owner.sessionsRef.current;
+    owner.adoptSummaries([summary]);
+    expect(owner.sessionsRef.current).toBe(resident);
+    expect(owner.bodyCertificate("a")).toEqual({ epoch: "A", appliedSeq: 1 });
+    expect(owner.needsTailRead("a", true)).toBe(true);
+    expect(owner.needsTailRead("a", false)).toBe(false);
+  });
+});
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {

@@ -191,7 +191,10 @@ fn test_run_card_snapshot(
 
     // 1. The failed stage and the running stage.
     for (index, stage) in plan.iter().enumerate() {
-        if matches!(stage.state, TestRunStageState::Failed | TestRunStageState::Running) {
+        if matches!(
+            stage.state,
+            TestRunStageState::Failed | TestRunStageState::Running
+        ) {
             kept[index] = true;
             place(&mut snapshot, &kept);
             if !fits(&snapshot) {
@@ -291,8 +294,7 @@ fn test_run_card_failure(run_dir: &FsPath) -> TestRunCardFailureRead {
 /// `test_run_card_failure` with the diagnostics cut to `max_excerpt` bytes:
 /// a run wait's resume prompt allows more than a card (test_run_waits.rs).
 fn test_run_failure_read(run_dir: &FsPath, max_excerpt: usize) -> TestRunCardFailureRead {
-    let TestRunJson::Parsed(results, digest, _) =
-        test_run_read_json(&run_dir.join("results.json"))
+    let TestRunJson::Parsed(results, digest, _) = test_run_read_json(&run_dir.join("results.json"))
     else {
         return TestRunCardFailureRead::Unavailable;
     };
@@ -311,10 +313,13 @@ fn test_run_failure_read(run_dir: &FsPath, max_excerpt: usize) -> TestRunCardFai
                     .is_some_and(|code| code != 0),
             })
             .and_then(|item| {
-                let name = test_run_str(item, "name").filter(|name| test_run_valid_stage_name(name))?;
+                let name =
+                    test_run_str(item, "name").filter(|name| test_run_valid_stage_name(name))?;
                 let diagnostics = test_run_diagnostics(item.get("diagnostics"));
                 let (excerpt, cut) = test_run_card_cut(
-                    diagnostics.as_ref().map_or("", |diagnostics| &diagnostics.text),
+                    diagnostics
+                        .as_ref()
+                        .map_or("", |diagnostics| &diagnostics.text),
                     max_excerpt,
                 );
                 Some(TestRunCardFailure {
@@ -361,13 +366,14 @@ fn test_run_card_eligible(
     epoch: &str,
     first_sight: TestRunFirstSight,
 ) -> bool {
-    let (Some(started), Some(epoch)) = (started_at.and_then(test_run_card_time), test_run_card_time(epoch))
-    else {
+    let (Some(started), Some(epoch)) = (
+        started_at.and_then(test_run_card_time),
+        test_run_card_time(epoch),
+    ) else {
         return false;
     };
     started >= epoch
-        && (first_sight.non_terminal
-            || started >= first_sight.at - TEST_RUN_CARD_LATE_SIGHT_WINDOW)
+        && (first_sight.non_terminal || started >= first_sight.at - TEST_RUN_CARD_LATE_SIGHT_WINDOW)
 }
 
 /// A card delta to publish once its revision is allocated.
@@ -381,6 +387,7 @@ enum TestRunCardDelta {
         preview: String,
         status: SessionStatus,
         session_mutation_stamp: u64,
+        session_seq: u64,
     },
     Updated {
         session_id: String,
@@ -389,12 +396,13 @@ enum TestRunCardDelta {
         message_count: u32,
         preview: String,
         session_mutation_stamp: u64,
+        session_seq: u64,
         run: TestRunCardSnapshot,
     },
 }
 
 impl TestRunCardDelta {
-    fn into_event(self, revision: u64) -> DeltaEvent {
+    fn into_event(self, revision: u64, local_instance_id: &str) -> DeltaEvent {
         match self {
             Self::Created {
                 session_id,
@@ -405,6 +413,7 @@ impl TestRunCardDelta {
                 preview,
                 status,
                 session_mutation_stamp,
+                session_seq,
             } => DeltaEvent::MessageCreated {
                 revision,
                 session_id,
@@ -416,6 +425,8 @@ impl TestRunCardDelta {
                 status,
                 session_queue: None,
                 session_mutation_stamp: Some(session_mutation_stamp),
+                session_seq: Some(session_seq),
+                body_seq_epoch: Some(local_instance_id.to_owned()),
             },
             Self::Updated {
                 session_id,
@@ -424,6 +435,7 @@ impl TestRunCardDelta {
                 message_count,
                 preview,
                 session_mutation_stamp,
+                session_seq,
                 run,
             } => DeltaEvent::TestRunCardUpdated {
                 revision,
@@ -433,6 +445,8 @@ impl TestRunCardDelta {
                 message_count,
                 preview,
                 session_mutation_stamp: Some(session_mutation_stamp),
+                session_seq: Some(session_seq),
+                body_seq_epoch: Some(local_instance_id.to_owned()),
                 run,
             },
         }
@@ -469,6 +483,7 @@ fn create_test_run_card_locked(
         record.session.preview = preview;
     }
     let local_index = push_message_on_record(record, message.clone());
+    let session_seq = record.next_body_delta_seq(&message_id);
     let delta = TestRunCardDelta::Created {
         session_id: record.session.id.clone(),
         message_id: message_id.clone(),
@@ -478,6 +493,7 @@ fn create_test_run_card_locked(
         preview: record.session.preview.clone(),
         status: record.session.status,
         session_mutation_stamp: record.mutation_stamp,
+        session_seq,
     };
     inner.test_run_cards.insert(
         run_id,
@@ -550,6 +566,7 @@ fn update_test_run_card_locked(
     }
     let preview = test_run_card_preview_text(&snapshot);
     record.session.preview = preview.clone();
+    let session_seq = record.next_body_delta_seq(&card.message_id);
     let delta = TestRunCardDelta::Updated {
         session_id: record.session.id.clone(),
         message_id: card.message_id.clone(),
@@ -557,6 +574,7 @@ fn update_test_run_card_locked(
         message_count: session_message_count(record),
         preview,
         session_mutation_stamp: record.mutation_stamp,
+        session_seq,
         run: snapshot.clone(),
     };
     Some(delta)
@@ -565,14 +583,16 @@ fn update_test_run_card_locked(
 /// Whether a card's message is in its session's in-memory window, without
 /// repairing the position cache.
 fn test_run_card_is_resident(inner: &StateInner, card: &TestRunCardRef) -> bool {
-    inner.find_session_index(&card.session_id).is_some_and(|index| {
-        let record = &inner.sessions[index];
-        record
-            .message_positions
-            .get(&card.message_id)
-            .and_then(|local_index| record.session.messages.get(*local_index))
-            .is_some_and(|message| message.id() == card.message_id)
-    })
+    inner
+        .find_session_index(&card.session_id)
+        .is_some_and(|index| {
+            let record = &inner.sessions[index];
+            record
+                .message_positions
+                .get(&card.message_id)
+                .and_then(|local_index| record.session.messages.get(*local_index))
+                .is_some_and(|message| message.id() == card.message_id)
+        })
 }
 
 /// Enables card creation once the epoch is durable. Runs first published
@@ -659,7 +679,9 @@ impl AppState {
                     return false;
                 }
                 Some(Ok(())) => {
-                    enable_test_run_cards_locked(&mut self.inner.lock().expect("state mutex poisoned"));
+                    enable_test_run_cards_locked(
+                        &mut self.inner.lock().expect("state mutex poisoned"),
+                    );
                     return true;
                 }
                 Some(Err(err)) => {
@@ -686,7 +708,9 @@ impl AppState {
             TestRunCardsEpochProgress::Pending(waiter) => {
                 let durable = waiter.wait().is_ok();
                 if durable {
-                    enable_test_run_cards_locked(&mut self.inner.lock().expect("state mutex poisoned"));
+                    enable_test_run_cards_locked(
+                        &mut self.inner.lock().expect("state mutex poisoned"),
+                    );
                 }
                 durable
             }
@@ -714,19 +738,20 @@ impl AppState {
             .collect();
         // Once, on the scan after cards became enabled: runs first published
         // while they were not get a card if they qualify.
-        let reevaluate = inner.test_runs.cards_enabled
-            && std::mem::take(&mut inner.test_runs.cards_reevaluate);
+        let reevaluate =
+            inner.test_runs.cards_enabled && std::mem::take(&mut inner.test_runs.cards_reevaluate);
         let mut deltas = Vec::new();
         for entry in entries {
             let run_id = &entry.summary.run_id;
-            let first_sight = *inner
-                .test_runs
-                .first_sight
-                .entry(run_id.clone())
-                .or_insert(TestRunFirstSight {
-                    at: now,
-                    non_terminal: !entry.disk.is_terminal(),
-                });
+            let first_sight =
+                *inner
+                    .test_runs
+                    .first_sight
+                    .entry(run_id.clone())
+                    .or_insert(TestRunFirstSight {
+                        at: now,
+                        non_terminal: !entry.disk.is_terminal(),
+                    });
             let carded = inner.test_run_cards.contains_key(run_id);
             // A carded run whose excerpt was read (or was due and could not
             // be) is applied even when its summary did not change, so a
@@ -871,7 +896,10 @@ impl AppState {
             .retain(|run_id, _| indexed.contains(run_id.as_str()));
         for delta in deltas {
             match self.commit_persisted_delta_locked(inner) {
-                Ok(revision) => publish(&inner, &delta.into_event(revision)),
+                Ok(revision) => publish(
+                    &inner,
+                    &delta.into_event(revision, &self.server_instance_id),
+                ),
                 Err(err) => {
                     // The transcript and the map already changed in memory and
                     // are persisted by the next commit; clients resync on the

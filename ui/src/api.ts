@@ -111,6 +111,8 @@ export type SessionResponse = {
 };
 
 export type SessionHistoryResponse = {
+  bodySeq?: number;
+  bodySeqEpoch?: string;
   messages: Message[];
   nextBefore?: string | null;
   hasMore: boolean;
@@ -609,6 +611,7 @@ export function fetchSessionHistory(
     before?: string | null;
     after?: string | null;
     around?: number | null;
+    start?: number;
     from?: "start";
     limit: number;
   },
@@ -627,6 +630,9 @@ export function fetchSessionHistory(
   }
   if (options.from) {
     query.set("from", options.from);
+  }
+  if (options.start !== undefined) {
+    query.set("start", String(Math.max(0, Math.floor(options.start))));
   }
   return requestJsonFirst<SessionHistoryResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/history?${query.toString()}`,

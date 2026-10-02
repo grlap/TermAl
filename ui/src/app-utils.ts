@@ -511,7 +511,7 @@ export function pruneSessionFlagsWithInvalidation(
 }
 
 export function removeQueuedPromptFromSessions(
-  sessions: Session[],
+  sessions: readonly Session[],
   sessionId: string,
   promptId: string,
 ): Session[] {

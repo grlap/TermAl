@@ -1378,6 +1378,84 @@ fn stop_session_publishes_message_created_for_terminal_stop_after_pending_cancel
 }
 
 #[test]
+fn stop_session_batch_shares_one_revision_and_sequences_follow_enqueue_order() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-batch-order".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Approval;
+    }
+    let approval_message_id = push_pending_approval_message(&state, &session_id);
+    let before = state
+        .get_session_tail(&session_id, 20)
+        .unwrap()
+        .session
+        .body_seq
+        .unwrap();
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .stop_session(&session_id)
+        .expect("stop_session should succeed");
+
+    let revision = state.snapshot().revision;
+    let body_deltas = drain_delta_events(&mut delta_events)
+        .into_iter()
+        .filter_map(|event| {
+            let value = serde_json::to_value(&event).unwrap();
+            (value["sessionId"] == session_id.as_str() && value.get("sessionSeq").is_some())
+                .then_some(value)
+        })
+        .collect::<Vec<_>>();
+    // The successful Stop commits the terminal message and the cancelled
+    // interaction together: both deltas carry that one revision. Creates are
+    // enqueued before updates, and their sequences follow that order.
+    assert_eq!(
+        body_deltas
+            .iter()
+            .map(|delta| (
+                delta["type"].as_str().unwrap().to_owned(),
+                delta["revision"].as_u64().unwrap(),
+                delta["sessionSeq"].as_u64().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("messageCreated".to_owned(), revision, before + 1),
+            ("messageUpdated".to_owned(), revision, before + 2),
+        ]
+    );
+    assert_eq!(body_deltas[1]["messageId"], approval_message_id.as_str());
+    let tail = state.get_session_tail(&session_id, 20).unwrap().session;
+    assert_eq!(
+        tail.body_seq,
+        Some(before + 2),
+        "the read certifies both bodies"
+    );
+    assert!(tail.messages.iter().any(|message| matches!(
+        message,
+        Message::Approval { id, decision: ApprovalDecision::Rejected, .. } if id == &approval_message_id
+    )));
+    assert!(tail.messages.iter().any(
+        |message| matches!(message, Message::Text { text, .. } if text == "Turn stopped by user.")
+    ));
+
+    let _ = process.wait();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn stop_session_file_change_created_deltas_are_replayable_and_final_stamped() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);

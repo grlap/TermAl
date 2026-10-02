@@ -260,9 +260,10 @@ async fn state_events(
                         Ok(SseStreamEvent::Delta(payload)) => {
                             yield Ok(Event::default().event("delta").data(&*payload));
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                        Ok(SseStreamEvent::Lagged) | Err(broadcast::error::RecvError::Lagged(_)) => {
                             // Lagged means the consumer fell past the broadcast
-                            // channel capacity, so some events were dropped on the
+                            // channel capacity, or the producer mailbox overflowed,
+                            // so some events were dropped on the
                             // floor before the client could read them. The
                             // recovery snapshot below restores authoritative state,
                             // but its revision may equal the client's existing

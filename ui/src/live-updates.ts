@@ -106,7 +106,7 @@ export function sessionHasPotentiallyStaleTransport(
 // Mutates the effect-local transport-activity map in place.
 export function pruneLiveTransportActivitySessions(
   liveTransportActivityAtBySessionId: Map<string, number>,
-  sessions: Session[],
+  sessions: readonly Session[],
 ) {
   const activeSessionIds = new Set(sessions.map((session) => session.id));
   for (const sessionId of liveTransportActivityAtBySessionId.keys()) {
@@ -158,8 +158,8 @@ type RetainedMessageTargetDelta = Exclude<
 >;
 
 export type DeltaApplyResult =
-  | { kind: "applied"; sessions: Session[] }
-  | { kind: "appliedNoOp"; sessions: Session[] }
+  | { kind: "applied"; sessions: readonly Session[] }
+  | { kind: "appliedNoOp"; sessions: readonly Session[] }
   // Same shape as "applied" but signals that the metadata patch alone is not
   // enough — the caller must also schedule an authoritative state resync. Used
   // when the unhydrated metadata-only fallback fires for a delta whose target
@@ -170,7 +170,7 @@ export type DeltaApplyResult =
   // hydration is queued behind another retry or wedged on a mismatch — see
   // `docs/bugs.md`'s "Unhydrated session + missing-target delta silently
   // absorbs into metadata-only" entry.
-  | { kind: "appliedNeedsResync"; sessions: Session[] }
+  | { kind: "appliedNeedsResync"; sessions: readonly Session[] }
   | { kind: "needsResync" };
 
 function resolveSessionMutationStamp(
@@ -364,7 +364,7 @@ function pendingPromptsAfterMessageCreated(
   return merged.length > 0 ? merged : undefined;
 }
 
-function applyMetadataOnlySessionDelta(
+export function applyMetadataOnlySessionDelta(
   session: Session,
   delta: TranscriptDelta,
 ): Session {
@@ -686,7 +686,7 @@ type RetainedMessageTargetResult =
   | DeltaApplyResult;
 
 function resolveRetainedMessageTargetOrFallback(
-  sessions: Session[],
+  sessions: readonly Session[],
   sessionIndex: number,
   session: Session,
   delta: RetainedMessageTargetDelta,
@@ -725,7 +725,7 @@ function resolveRetainedMessageTargetOrFallback(
 }
 
 export function applyDeltaToSessions(
-  sessions: Session[],
+  sessions: readonly Session[],
   delta: SessionDeltaEvent,
 ): DeltaApplyResult {
   const sessionIndex = sessions.findIndex(
@@ -1235,7 +1235,7 @@ export function applyDeltaToSessions(
   }
 }
 
-function replaceSession(sessions: Session[], index: number, session: Session) {
+function replaceSession(sessions: readonly Session[], index: number, session: Session) {
   const updatedSessions = sessions.slice();
   updatedSessions[index] = session;
   return updatedSessions;

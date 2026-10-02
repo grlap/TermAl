@@ -24,6 +24,8 @@ fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
         &state,
         &remote,
         || DeltaEvent::TextDelta {
+            session_seq: None,
+            body_seq_epoch: None,
             revision: 3,
             session_id: "remote-session-1".to_owned(),
             message_id: "remote-message-1".to_owned(),
@@ -74,6 +76,8 @@ fn remote_text_delta_rejects_a_gap_before_mutating_the_local_proxy() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -248,6 +252,8 @@ fn remote_text_delta_persist_failure_replay_is_durable_and_not_duplicated() {
     assert_streaming_delta_persist_failure_replays_durably(
         vec![remote_text_message("remote-message-1", "Hello")],
         DeltaEvent::TextDelta {
+            session_seq: None,
+            body_seq_epoch: None,
             revision: 3,
             session_id: "remote-session-1".to_owned(),
             message_id: "remote-message-1".to_owned(),
@@ -273,6 +279,8 @@ fn remote_text_replace_persist_failure_replay_is_durable() {
     assert_streaming_delta_persist_failure_replays_durably(
         vec![remote_text_message("remote-message-1", "Before replace.")],
         DeltaEvent::TextReplace {
+            session_seq: None,
+            body_seq_epoch: None,
             revision: 3,
             session_id: "remote-session-1".to_owned(),
             message_id: "remote-message-1".to_owned(),
@@ -301,6 +309,8 @@ fn remote_command_update_persist_failure_replay_is_durable() {
             "checking",
         )],
         DeltaEvent::CommandUpdate {
+            session_seq: None,
+            body_seq_epoch: None,
             revision: 3,
             session_id: "remote-session-1".to_owned(),
             message_id: "remote-command-1".to_owned(),
@@ -333,6 +343,8 @@ fn remote_parallel_agents_update_persist_failure_replay_is_durable() {
             Vec::new(),
         )],
         DeltaEvent::ParallelAgentsUpdate {
+            session_seq: None,
+            body_seq_epoch: None,
             revision: 3,
             session_id: "remote-session-1".to_owned(),
             message_id: "remote-parallel-1".to_owned(),
@@ -407,6 +419,8 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
             &state,
             &remote,
             || DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -441,6 +455,8 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
             &state,
             &remote,
             || DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -474,6 +490,8 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
             &state,
             &remote,
             || DeltaEvent::TextReplace {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -510,6 +528,8 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
             &state,
             &remote,
             || DeltaEvent::CommandUpdate {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-command-1".to_owned(),
@@ -549,6 +569,8 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
             &state,
             &remote,
             || DeltaEvent::ParallelAgentsUpdate {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-parallel-1".to_owned(),
@@ -779,6 +801,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
     );
 
     let message_created = |message_text: &str, preview: &str| DeltaEvent::MessageCreated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 4,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -803,6 +827,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
     assert_ne!(
         replay_key(message_created("same text", "same preview")),
         replay_key(DeltaEvent::MessageCreated {
+            session_seq: None,
+            body_seq_epoch: None,
             revision: 4,
             session_id: "remote-session-1".to_owned(),
             message_id: "remote-message-1".to_owned(),
@@ -822,6 +848,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
     );
 
     let message_updated = |message_text: &str, preview: &str| DeltaEvent::MessageUpdated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 4,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -844,6 +872,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
     );
 
     let text_delta = |delta: &str, preview: Option<&str>| DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 5,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -865,6 +895,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         "TextDelta replay identity must include preview changes"
     );
     let text_delta_at = |text_start_byte| DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 5,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -882,6 +914,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
     );
 
     let text_replace = |text: &str, preview: Option<&str>| DeltaEvent::TextReplace {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 5,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -906,6 +940,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
     );
 
     let command_update = |output: &str, preview: &str| DeltaEvent::CommandUpdate {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 6,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-command-1".to_owned(),
@@ -931,6 +967,8 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
     );
 
     let parallel_agents_update = |detail: &str, preview: &str| DeltaEvent::ParallelAgentsUpdate {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 7,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-parallel-1".to_owned(),
@@ -1068,6 +1106,8 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
     };
 
     let text_delta = |delta: &str, preview: Option<&str>| DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 5,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -1100,6 +1140,8 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
     );
 
     let message_created = |message_text: &str, preview: &str| DeltaEvent::MessageCreated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 4,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -1123,6 +1165,8 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
     );
 
     let message_updated = |message_text: &str, preview: &str| DeltaEvent::MessageUpdated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 4,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -1145,6 +1189,8 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
     );
 
     let text_replace = |text: &str, preview: Option<&str>| DeltaEvent::TextReplace {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 5,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -1171,6 +1217,8 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
                           output_language: Option<&str>,
                           status: CommandStatus,
                           preview: &str| DeltaEvent::CommandUpdate {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 6,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-command-1".to_owned(),
@@ -1305,6 +1353,8 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
          detail: Option<&str>,
          status: ParallelAgentStatus,
          preview: &str| DeltaEvent::ParallelAgentsUpdate {
+            session_seq: None,
+            body_seq_epoch: None,
             revision: 7,
             session_id: "remote-session-1".to_owned(),
             message_id: "remote-parallel-1".to_owned(),
@@ -1488,6 +1538,8 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
                            message_count: u32,
                            session_mutation_stamp: Option<u64>| {
         DeltaEvent::MessageCreated {
+            session_seq: None,
+            body_seq_epoch: None,
             revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
@@ -1538,6 +1590,8 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
                            message_count: u32,
                            stamp: Option<u64>| {
         DeltaEvent::MessageUpdated {
+            session_seq: None,
+            body_seq_epoch: None,
             revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
@@ -1587,6 +1641,8 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
                       message_count: u32,
                       stamp: Option<u64>| {
         DeltaEvent::TextDelta {
+            session_seq: None,
+            body_seq_epoch: None,
             revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
@@ -1629,6 +1685,8 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
         "TextDelta replay identity must include session_mutation_stamp",
     );
     let text_delta_at = |text_start_byte| DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 5,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -1652,6 +1710,8 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
                         message_count: u32,
                         stamp: Option<u64>| {
         DeltaEvent::TextReplace {
+            session_seq: None,
+            body_seq_epoch: None,
             revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
@@ -1700,6 +1760,8 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
                           message_count: u32,
                           stamp: Option<u64>| {
         DeltaEvent::CommandUpdate {
+            session_seq: None,
+            body_seq_epoch: None,
             revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
@@ -1752,6 +1814,8 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
                                   message_count: u32,
                                   stamp: Option<u64>| {
         DeltaEvent::ParallelAgentsUpdate {
+            session_seq: None,
+            body_seq_epoch: None,
             revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
@@ -2114,6 +2178,8 @@ fn cleared_remote_replay_cache_still_rejects_duplicate_text_by_offset() {
     materialize_remote_proxy_session_transcript_for_test(&state, &remote, &full_remote_session);
 
     let text_delta = || DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 3,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),

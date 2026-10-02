@@ -83,6 +83,7 @@ import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
 import { useAppWorkspaceLayout } from "./app-workspace-layout";
 import { useAppLiveState } from "./app-live-state";
+import { TranscriptRepairAuthority } from "./transcript-repair-authority";
 import { type SessionHydrationTarget } from "./app-live-state-types";
 import { useAppSessionActions } from "./app-session-actions";
 import { type ActionStateClassifierContext } from "./app-session-actions-types";
@@ -520,7 +521,12 @@ export default function App() {
   const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
   const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
-  const sessionsRef = useRef<Session[]>([]);
+  const [sessionAuthority] = useState(() => new TranscriptRepairAuthority({
+    publish: setSessions,
+    drafts: () => draftsRef.current,
+    attachments: () => draftAttachmentsRef.current,
+  }));
+  const sessionsRef = sessionAuthority.sessionsRef;
   const workspaceRef = useRef(workspace);
   const codexStateRef = useRef(codexState);
   const agentReadinessRef = useRef(agentReadiness);
@@ -903,6 +909,7 @@ export default function App() {
     workspaceFilesChangedEventFlushTimeoutRef,
     resetWorkspaceFilesChangedEventGate,
   } = useAppLiveState({
+    sessionAuthority,
     adoptionRefs: {
       isMountedRef,
       latestStateRevisionRef,
@@ -923,7 +930,6 @@ export default function App() {
       activePromptPollSessionIdRef,
     },
     stateSetters: {
-      setSessions,
       setWorkspace,
       setCodexState,
       setAgentReadiness,
@@ -1014,6 +1020,7 @@ export default function App() {
     handleCreateConversationMarker,
     handleDeleteConversationMarker,
   } = useAppSessionActions({
+    sessionAuthority,
     lookups: {
       sessionLookup,
       projectLookup,
@@ -1054,7 +1061,6 @@ export default function App() {
       refreshingAgentCommandSessionIdsRef,
     },
     setters: {
-      setSessions,
       setWorkspace,
       setRequestError,
       setIsCreating,
@@ -1638,9 +1644,6 @@ export default function App() {
     );
   }, [activeSession?.agent, activeSession?.id]);
 
-  useEffect(() => {
-    sessionsRef.current = sessions;
-  }, [sessions]);
 
   useEffect(() => {
     workspaceRef.current = workspace;

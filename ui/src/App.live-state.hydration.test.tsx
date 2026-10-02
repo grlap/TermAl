@@ -37,7 +37,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
-import { requestSessionHistoryAroundPage } from "./session-history-demand";
+import { requestSessionHistoryAroundPage, requestSessionHistoryNewerPage } from "./session-history-demand";
+import { SESSION_HISTORY_PAGE_MESSAGE_COUNT } from "./session-tail-policy";
 import { getSessionRecordSnapshotForTesting } from "./session-store";
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
@@ -449,6 +450,183 @@ describe("App live state - delta-gap core", () => {
         expect(stack.scrollTop).toBe(topBeforeRepair);
         expect(stack).not.toHaveTextContent("Recent response");
         expect(scrollTo).not.toHaveBeenCalled();
+      } finally {
+        context.cleanup();
+        restoreGeometry();
+      }
+    });
+  });
+
+
+  it("keeps a detached historical window unchanged after loss and a disjoint tail read", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const restoreGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollTo = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      try {
+        const initial = getSessionRecordSnapshotForTesting("session-1")!;
+        const summary = {
+          ...initial,
+          queuePaused: initial.queuePaused ?? false,
+          messageCount: 1000,
+          sessionMutationStamp: 8,
+          bodySeqEpoch: "test-instance", bodySeq: 8,
+        };
+        const historicalMessages = Array.from({ length: 100 }, (_, index) => ({
+          id: `historical-message-${index}`,
+          type: "text" as const,
+          author: "assistant" as const,
+          timestamp: "10:00",
+          text: index === 10 ? "Resident body before lost update" : `History body ${index}`,
+        }));
+        const repairedMessages = historicalMessages.map(message =>
+          message.id === "historical-message-10"
+            ? { ...message, text: "Resident body after lost update" }
+            : message,
+        );
+        const historyResponse = {
+          messages: historicalMessages,
+          messageStartIndex: 0,
+          messageCount: 1000,
+          hasMore: false,
+          hasNewer: true,
+          nextBefore: null,
+          nextAfter: "historical-message-99",
+          revision: 2,
+          bodySeqEpoch: "test-instance", bodySeq: 8,
+          sessionMutationStamp: 8,
+          serverInstanceId: "test-instance",
+        };
+        const fetchHistory = vi.spyOn(api, "fetchSessionHistory")
+          .mockResolvedValueOnce({ ...historyResponse,
+            messages: historicalMessages.slice(0, SESSION_HISTORY_PAGE_MESSAGE_COUNT),
+            nextAfter: `historical-message-${SESSION_HISTORY_PAGE_MESSAGE_COUNT - 1}`,
+          })
+          .mockResolvedValueOnce({ ...historyResponse,
+            messages: historicalMessages.slice(SESSION_HISTORY_PAGE_MESSAGE_COUNT),
+            messageStartIndex: SESSION_HISTORY_PAGE_MESSAGE_COUNT, hasMore: true,
+            nextBefore: `historical-message-${SESSION_HISTORY_PAGE_MESSAGE_COUNT}`,
+          })
+          .mockResolvedValueOnce({ ...historyResponse,
+            messages: historicalMessages.slice(0, SESSION_HISTORY_PAGE_MESSAGE_COUNT),
+            nextAfter: `historical-message-${SESSION_HISTORY_PAGE_MESSAGE_COUNT - 1}`,
+          })
+          .mockResolvedValue({
+            ...historyResponse,
+            messages: repairedMessages.slice(0, SESSION_HISTORY_PAGE_MESSAGE_COUNT),
+            nextAfter: `historical-message-${SESSION_HISTORY_PAGE_MESSAGE_COUNT - 1}`,
+            revision: 3,
+            sessionMutationStamp: 9,
+            bodySeqEpoch: "test-instance", bodySeq: 9,
+          });
+        const warmTail = createDeferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>();
+        const recoveryTail = createDeferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>();
+        const fetchTail = vi.spyOn(api, "fetchSessionTail")
+          .mockImplementationOnce(() => warmTail.promise)
+          .mockImplementation(() => recoveryTail.promise);
+        const tailResponse = (revision: number, sessionMutationStamp: number) => ({
+          revision,
+          serverInstanceId: "test-instance",
+          session: {
+            ...summary,
+            sessionMutationStamp,
+            bodySeqEpoch: "test-instance", bodySeq: sessionMutationStamp,
+            messagesLoaded: false,
+            messageStartIndex: 980,
+            hasOlderHistory: true,
+            hasNewerHistory: false,
+            messages: Array.from({ length: 20 }, (_, index) => ({
+              ...historicalMessages[0],
+              id: `recent-message-${980 + index}`,
+              text: `Recent body ${980 + index}`,
+            })),
+          },
+        });
+        await dispatchStateEvent(latestEventSource(), makeStateResponse({
+          revision: 2,
+          serverInstanceId: "test-instance",
+          sessions: [summary],
+          projects: [], orchestrators: [], workspaces: [],
+        }));
+        await waitFor(() => expect(fetchTail).toHaveBeenCalledTimes(1));
+        await act(async () => {
+          warmTail.resolve(tailResponse(2, 8));
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        const stack = document.querySelector<HTMLElement>(
+          ".workspace-pane.active .message-stack",
+        )!;
+        act(() => {
+          fireEvent.wheel(stack, { deltaY: -400 });
+          fireEvent.scroll(stack);
+        });
+        await act(async () => {
+          expect(await requestSessionHistoryAroundPage(initial.id, 0)).toBe(true);
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        await act(async () => {
+          expect(await requestSessionHistoryNewerPage(initial.id)).toBe(true);
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        expect(fetchHistory).toHaveBeenCalledTimes(2);
+        expect(getSessionRecordSnapshotForTesting(initial.id)?.messages).toHaveLength(100);
+        // The newer-page demand anchored its last index. Explicitly select the
+        // window being read before losing body 10, rather than treating a
+        // response's start as navigation input during repair.
+        await act(async () => {
+          expect(await requestSessionHistoryAroundPage(initial.id, 0)).toBe(true);
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        expect(stack).toHaveTextContent("Resident body before lost update");
+        act(() => {
+          fireEvent.wheel(stack, { deltaY: 80 });
+          fireEvent.scroll(stack);
+        });
+        const residentBeforeLoss = getSessionRecordSnapshotForTesting(initial.id)!;
+        const topBeforeLoss = stack.scrollTop;
+        expect(topBeforeLoss).toBeGreaterThan(0);
+        expect(stack).not.toHaveClass("is-tail-following");
+        scrollTo.mockClear();
+
+        // The update to historical-message-10 is lost. Only its new stamp and
+        // a disjoint authoritative tail (980..999) reach the client.
+        act(() => latestEventSource().dispatchNamedEvent("lagged", "1"));
+        await dispatchStateEvent(latestEventSource(), makeStateResponse({
+          revision: 3,
+          serverInstanceId: "test-instance",
+          sessions: [{ ...summary, sessionMutationStamp: 9, bodySeqEpoch: "test-instance", bodySeq: 9 }],
+          projects: [], orchestrators: [], workspaces: [],
+        }));
+        await waitFor(() => expect(fetchTail).toHaveBeenCalledTimes(2));
+        await act(async () => {
+          recoveryTail.resolve(tailResponse(3, 9));
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        // Detached history retains master policy: a disjoint tail read does
+        // not repair, certify or replace the selected historical bodies.
+        const repaired = getSessionRecordSnapshotForTesting(initial.id)!;
+        expect(repaired.messageStartIndex).toBe(0);
+        expect(repaired.hasNewerHistory).toBe(true);
+        expect(repaired.messages).toBe(residentBeforeLoss.messages);
+        expect(repaired.messages).toEqual(historicalMessages.slice(0, SESSION_HISTORY_PAGE_MESSAGE_COUNT));
+        expect(repaired.bodySeq).toBeUndefined();
+        expect(fetchHistory).toHaveBeenCalledTimes(3);
+        expect(stack).not.toHaveClass("is-tail-following");
+        expect(stack.scrollTop).toBe(topBeforeLoss);
+        expect(stack).not.toHaveTextContent("Recent body 980");
+        expect(stack).toHaveTextContent("Resident body before lost update");
+        expect(stack).not.toHaveTextContent("Resident body after lost update");
+        expect(repaired.messages.find(message => message.id === "historical-message-10"))
+          .toEqual(historicalMessages[10]);
       } finally {
         context.cleanup();
         restoreGeometry();

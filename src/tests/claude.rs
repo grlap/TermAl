@@ -25,6 +25,246 @@
 
 use super::*;
 
+#[test]
+fn unchanged_claude_completion_after_recorder_boundary_preserves_message_ids() {
+    for boundary in ["thinking", "diff", "subagent"] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Claude);
+        let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+        let mut turn = ClaudeTurnState::default();
+        record_claude_assistant_text_delta(&mut turn, &mut recorder, "First reply").unwrap();
+        match boundary {
+            "thinking" => recorder
+                .push_thinking("Reasoning", vec!["A thought".to_owned()])
+                .unwrap(),
+            "diff" => recorder
+                .push_diff("example.rs", "Edit", "-old\n+new", ChangeType::Edit)
+                .unwrap(),
+            "subagent" => recorder
+                .push_subagent_result("Worker", "Done", None, None)
+                .unwrap(),
+            _ => unreachable!(),
+        }
+        let before = state
+            .full_snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .unwrap()
+            .messages;
+        assert_eq!(before.len(), 2);
+        for _ in 0..2 {
+            record_claude_completed_assistant_text(&mut turn, &mut recorder, "First reply")
+                .unwrap();
+            let after = state
+                .full_snapshot()
+                .sessions
+                .into_iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .messages;
+            assert_eq!(
+                serde_json::to_value(&after).unwrap(),
+                serde_json::to_value(&before).unwrap(),
+                "unchanged completion after {boundary} must preserve transcript ids and count"
+            );
+        }
+    }
+}
+
+#[test]
+fn unchanged_claude_completion_preserves_a_reopened_split_stream() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn = ClaudeTurnState::default();
+    record_claude_assistant_text_delta(&mut turn, &mut recorder, "First reply").unwrap();
+    recorder
+        .push_thinking("Reasoning", vec!["A thought".to_owned()])
+        .unwrap();
+    record_claude_assistant_text_delta(&mut turn, &mut recorder, " suffix").unwrap();
+    let before = state
+        .full_snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .messages;
+    assert_eq!(before.len(), 3);
+    record_claude_completed_assistant_text(&mut turn, &mut recorder, "First reply suffix").unwrap();
+    let after = state
+        .full_snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .messages;
+    assert_eq!(
+        serde_json::to_value(after).unwrap(),
+        serde_json::to_value(before).unwrap(),
+        "unchanged body must not replace a later split bubble with the full text"
+    );
+}
+
+#[test]
+fn appended_claude_completion_preserves_prior_and_split_bubbles() {
+    for boundary in ["thinking", "diff", "subagent"] {
+        for split in [false, true] {
+            let state = test_app_state();
+            let session_id = test_session_id(&state, Agent::Claude);
+            let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+            let mut turn = ClaudeTurnState::default();
+            record_claude_assistant_text_delta(&mut turn, &mut recorder, "First reply").unwrap();
+            match boundary {
+                "thinking" => recorder
+                    .push_thinking("Reasoning", vec!["A thought".to_owned()])
+                    .unwrap(),
+                "diff" => recorder
+                    .push_diff("example.rs", "Edit", "-old\n+new", ChangeType::Edit)
+                    .unwrap(),
+                "subagent" => recorder
+                    .push_subagent_result("Worker", "Done", None, None)
+                    .unwrap(),
+                _ => unreachable!(),
+            }
+            if split {
+                record_claude_assistant_text_delta(&mut turn, &mut recorder, " suffix").unwrap();
+            }
+            let before = state
+                .full_snapshot()
+                .sessions
+                .into_iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .messages;
+            let completed = if split {
+                "First reply suffix final"
+            } else {
+                "First reply final"
+            };
+            record_claude_completed_assistant_text(&mut turn, &mut recorder, completed).unwrap();
+            let after = state
+                .full_snapshot()
+                .sessions
+                .into_iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .messages;
+            assert_eq!(after.len(), 3);
+            assert_eq!(
+                serde_json::to_value(&after[..2]).unwrap(),
+                serde_json::to_value(&before[..2]).unwrap()
+            );
+            match &after[2] {
+                Message::Text { id, text, .. } => {
+                    assert_eq!(id, "message-3");
+                    assert_eq!(
+                        text,
+                        if split { " suffix final" } else { " final" },
+                        "repair after {boundary} must retain this bubble's canonical segment"
+                    );
+                }
+                _ => panic!("expected suffix text bubble"),
+            }
+        }
+    }
+}
+
+#[test]
+fn repair_republish_rejection_is_a_complete_state_noop() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    recorder.text_delta("Resident body").unwrap();
+    let before = serde_json::to_value(state.full_snapshot()).unwrap();
+    let before_stamp = state.inner.lock().unwrap().last_mutation_stamp;
+    recorder
+        .republish_streaming_text("Different canonical body")
+        .unwrap();
+    assert_eq!(serde_json::to_value(state.full_snapshot()).unwrap(), before);
+    assert_eq!(
+        state.inner.lock().unwrap().last_mutation_stamp,
+        before_stamp
+    );
+}
+
+#[test]
+fn repair_republish_stale_message_ids_are_a_complete_state_noop() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    recorder
+        .push_thinking("Reasoning", vec!["A thought".to_owned()])
+        .unwrap();
+    for stale_id in ["missing-message", "message-1"] {
+        recorder.recorder_state.streaming_text_message_id = Some(stale_id.to_owned());
+        let before = serde_json::to_value(state.full_snapshot()).unwrap();
+        let before_stamp = state.inner.lock().unwrap().last_mutation_stamp;
+        recorder.republish_streaming_text("Canonical body").unwrap();
+        assert_eq!(serde_json::to_value(state.full_snapshot()).unwrap(), before);
+        assert_eq!(
+            state.inner.lock().unwrap().last_mutation_stamp,
+            before_stamp
+        );
+    }
+}
+
+#[test]
+fn completed_claude_text_republishes_the_full_streamed_body() {
+    for streamed in ["Hello", "Hello there.", "Draft"] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Claude);
+        let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+        let mut turn = ClaudeTurnState::default();
+        let mut external_session_id = None;
+        handle_claude_event(
+            &json!({"type":"stream_event", "event": {
+            "type":"content_block_delta", "delta":{"text":streamed}}}),
+            &mut external_session_id,
+            &mut turn,
+            &mut recorder,
+        )
+        .unwrap();
+        let mut events = state.subscribe_delta_events();
+        handle_claude_event(
+            &json!({"type":"assistant", "message":{"content":[
+            {"type":"text", "text":"Hello there."}]}}),
+            &mut external_session_id,
+            &mut turn,
+            &mut recorder,
+        )
+        .unwrap();
+        let mut replacement = None;
+        while let Ok(payload) = events.try_recv() {
+            if let DeltaEvent::TextReplace {
+                text, message_id, ..
+            } = serde_json::from_str::<DeltaEvent>(&payload).unwrap()
+            {
+                replacement = Some((message_id, text));
+            }
+        }
+        assert_eq!(
+            replacement,
+            Some((
+                state.last_message_id(&session_id).unwrap().unwrap(),
+                "Hello there.".to_owned()
+            )),
+            "completion must repair a client that missed a delta"
+        );
+        assert_eq!(
+            state
+                .full_snapshot()
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .messages
+                .len(),
+            1
+        );
+    }
+}
+
 fn claude_permission_request(tool_name: &str, tool_input: Value) -> Value {
     json!({
         "type": "control_request",

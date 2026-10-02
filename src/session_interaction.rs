@@ -252,6 +252,7 @@ fn set_approval_decision_on_record(
             ..
         } if id == message_id => {
             *current = decision;
+            record.mark_body_changed(message_id);
             Ok(message_index)
         }
         _ => Err(anyhow!("approval message `{message_id}` not found")),
@@ -280,6 +281,7 @@ fn set_user_input_request_state_on_record(
         } if id == message_id => {
             *current_state = state;
             *current_answers = submitted_answers;
+            record.mark_body_changed(message_id);
             Ok(message_index)
         }
         _ => Err(anyhow!("user input request `{message_id}` not found")),
@@ -311,6 +313,7 @@ fn set_mcp_elicitation_request_state_on_record(
             *current_state = state;
             *current_action = submitted_action;
             *current_content = submitted_content;
+            record.mark_body_changed(message_id);
             Ok(message_index)
         }
         _ => Err(anyhow!("MCP elicitation request `{message_id}` not found")),
@@ -339,6 +342,7 @@ fn set_codex_app_request_state_on_record(
         } if id == message_id => {
             *current_state = state;
             *current_result = submitted_result;
+            record.mark_body_changed(message_id);
             Ok(message_index)
         }
         _ => Err(anyhow!("Codex app request `{message_id}` not found")),

@@ -33,7 +33,10 @@ struct PersistedState {
     engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_work_source_roots: Vec<EngramWorkSourceRoot>,
-    #[serde(default, skip_serializing_if = "engram_source_root_generation_is_unset")]
+    #[serde(
+        default,
+        skip_serializing_if = "engram_source_root_generation_is_unset"
+    )]
     engram_source_root_generation: u64,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pending_coordination_scope_deletions: BTreeSet<String>,
@@ -563,6 +566,7 @@ impl PersistedSessionRecord {
             hidden: false,
             // Freshly loaded records start unstamped; nothing has changed
             // since the on-disk snapshot so nothing needs to be persisted.
+            body_sequence: SessionBodySequence::default(),
             mutation_stamp: 0,
             prompt_history_mutation_stamp: 0,
             session,

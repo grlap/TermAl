@@ -237,6 +237,8 @@ mod visible_session_hydration_error_tests {
             .expect("local session should be created")
             .session_id;
         let remote_session = StateSessionSummary {
+            body_seq: None,
+            body_seq_epoch: None,
             id: "remote-session-1".to_owned(),
             name: "Remote Proxy".to_owned(),
             emoji: Agent::Codex.avatar().to_owned(),
@@ -649,7 +651,7 @@ impl AppState {
         sha256_hex(&serialized)
     }
 
-    fn wire_session_from_record(record: &SessionRecord) -> Session {
+    fn wire_session_from_record(local_instance_id: &str, record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
         // The record owns remote-proxy identity; the wire field is a derived
         // UI/API projection and embedded session snapshots are not authoritative.
@@ -674,6 +676,8 @@ impl AppState {
         session.prompt_history_redacted = false;
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
+        session.body_seq = record.wire_body_seq();
+        session.body_seq_epoch = record.wire_body_seq_epoch(local_instance_id);
         session.session_mutation_stamp = Some(record.mutation_stamp);
         session.engram_boot_recovery_pending = record.engram_boot_recovery_pending;
         if session.status != SessionStatus::Active {
@@ -692,6 +696,7 @@ impl AppState {
     }
 
     fn wire_session_tail_from_record(
+        local_instance_id: &str,
         record: &SessionRecord,
         message_limit: usize,
         messages_loaded: bool,
@@ -700,7 +705,7 @@ impl AppState {
         // interaction state, including queued prompt bodies. Start from the
         // complete projection so new targeted fields cannot be silently lost,
         // then bound only the transcript payload.
-        let mut session = Self::wire_session_from_record(record);
+        let mut session = Self::wire_session_from_record(local_instance_id, record);
         let source_messages = &record.session.messages;
         let start_index = Self::session_tail_start_index(record, message_limit);
         debug_assert!(
@@ -712,9 +717,12 @@ impl AppState {
         session
     }
 
-    fn wire_session_summary_from_record(record: &SessionRecord) -> StateSessionSummary {
+    fn wire_session_summary_from_record(
+        local_instance_id: &str,
+        record: &SessionRecord,
+    ) -> StateSessionSummary {
         let session = &record.session;
-        let summary = StateSessionSummary {
+        let mut summary = StateSessionSummary {
             id: session.id.clone(),
             name: session.name.clone(),
             emoji: session.emoji.clone(),
@@ -772,19 +780,35 @@ impl AppState {
             } else {
                 session.queue_projection_hash.clone()
             },
+            body_seq_epoch: if record.is_local_session() {
+                Some(local_instance_id.to_owned())
+            } else {
+                record.session.body_seq_epoch.clone()
+            },
+            body_seq: if record.is_local_session() {
+                record.wire_body_seq()
+            } else {
+                record.session.body_seq
+            },
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),
         };
-        Self::debug_assert_session_summary_matches_full_projection(record, &summary);
+        normalize_body_sequence_pair(&mut summary.body_seq, &mut summary.body_seq_epoch);
+        Self::debug_assert_session_summary_matches_full_projection(
+            local_instance_id,
+            record,
+            &summary,
+        );
         summary
     }
 
     #[cfg(debug_assertions)]
     fn debug_assert_session_summary_matches_full_projection(
+        local_instance_id: &str,
         record: &SessionRecord,
         summary: &StateSessionSummary,
     ) {
-        let full = Self::wire_session_from_record(record);
+        let full = Self::wire_session_from_record(local_instance_id, record);
         debug_assert_eq!(summary.id, full.id);
         debug_assert_eq!(summary.name, full.name);
         debug_assert_eq!(summary.emoji, full.emoji);
@@ -844,6 +868,7 @@ impl AppState {
 
     #[cfg(not(debug_assertions))]
     fn debug_assert_session_summary_matches_full_projection(
+        _local_instance_id: &str,
         _record: &SessionRecord,
         _summary: &StateSessionSummary,
     ) {
@@ -969,7 +994,12 @@ impl AppState {
         let messages_loaded = record.session.messages_loaded && tail_start_index == 0;
         Ok(SessionResponse {
             revision: inner.revision,
-            session: Self::wire_session_tail_from_record(record, message_limit, messages_loaded),
+            session: Self::wire_session_tail_from_record(
+                &self.server_instance_id,
+                record,
+                message_limit,
+                messages_loaded,
+            ),
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -1122,6 +1152,7 @@ impl AppState {
         before: Option<&str>,
         after: Option<&str>,
         around: Option<usize>,
+        start: Option<usize>,
         from_start: bool,
         message_limit: usize,
     ) -> Result<SessionHistoryResponse, ApiError> {
@@ -1132,177 +1163,23 @@ impl AppState {
                 before,
                 after,
                 around,
+                start,
                 from_start,
                 message_limit,
                 REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
             );
         }
 
-        let (
-            local_messages,
-            local_start_index,
-            local_cursor_position,
-            message_count,
-            revision,
-            session_mutation_stamp,
-        ) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner
-                .find_visible_session_index(session_id)
-                .ok_or_else(ApiError::local_session_missing)?;
-            let record = &inner.sessions[index];
-            (
-                record.session.messages.clone(),
-                record.message_start_index,
-                before.or(after).and_then(|cursor_id| {
-                    record
-                        .message_positions
-                        .get(cursor_id)
-                        .copied()
-                        .map(|local_index| global_message_index(record, local_index))
-                }),
-                usize::try_from(session_message_count(record)).unwrap_or(usize::MAX),
-                inner.revision,
-                record.mutation_stamp,
-            )
+        let selector = SessionHistorySelector {
+            before,
+            after,
+            around,
+            start,
+            from_start,
+            limit: message_limit,
         };
-        let cursor = before.or(after);
-        // A local history request uses at most one read connection. Cursor
-        // resolution and page loading must observe the same SQLite snapshot,
-        // and opening the database twice adds avoidable filesystem/pragma work
-        // to the scroll path.
-        let mut persistence_connection = None;
-        let cursor_position = match (cursor, local_cursor_position) {
-            (_, Some(position)) => Some(position),
-            (Some(cursor_id), None) => {
-                let connection = open_sqlite_history_snapshot(self.persistence_path.as_ref())
-                    .map_err(|err| {
-                        ApiError::internal(format!(
-                            "failed to open session history snapshot: {err:#}"
-                        ))
-                    })?;
-                let position = persisted_message_position_with_connection(
-                    &connection,
-                    session_id,
-                    cursor_id,
-                )
-                .map_err(|err| {
-                    ApiError::internal(format!("failed to resolve session history cursor: {err:#}"))
-                })?
-                .ok_or_else(|| {
-                    ApiError::conflict(
-                        "session history cursor is no longer available; refresh the session tail",
-                    )
-                })?;
-                persistence_connection = Some(connection);
-                Some(position)
-            }
-            (None, None) => None,
-        };
-        let (start_index, end_index) = if let Some(around) = around {
-            if around >= message_count && message_count > 0 {
-                return Err(ApiError::conflict(
-                    "session history position is beyond the current transcript; refresh the session overview",
-                ));
-            }
-            let half_page = message_limit / 2;
-            let mut start_index = around.saturating_sub(half_page);
-            let end_index = start_index.saturating_add(message_limit).min(message_count);
-            start_index = end_index.saturating_sub(message_limit);
-            (start_index, end_index)
-        } else if from_start {
-            (0, message_limit.min(message_count))
-        } else if after.is_some() {
-            let start_index = cursor_position
-                .unwrap_or(message_count)
-                .saturating_add(1)
-                .min(message_count);
-            (
-                start_index,
-                start_index.saturating_add(message_limit).min(message_count),
-            )
-        } else {
-            let end_index = cursor_position.unwrap_or(message_count);
-            (end_index.saturating_sub(message_limit), end_index)
-        };
-        if end_index > message_count {
-            return Err(ApiError::conflict(
-                "session history cursor is beyond the current transcript; refresh the session tail",
-            ));
-        }
-        let mut page = vec![None; end_index.saturating_sub(start_index)];
-        for (local_index, message) in local_messages.into_iter().enumerate() {
-            let global_index = local_start_index.saturating_add(local_index);
-            if global_index < start_index || global_index >= end_index {
-                continue;
-            }
-            page[global_index - start_index] = Some(message);
-        }
-        if page.iter().any(Option::is_none) {
-            if persistence_connection.is_none() {
-                persistence_connection = Some(
-                    open_sqlite_history_snapshot(self.persistence_path.as_ref()).map_err(
-                        |err| {
-                            ApiError::internal(format!(
-                                "failed to open session history snapshot: {err:#}"
-                            ))
-                        },
-                    )?,
-                );
-            }
-            let persisted_messages = load_persisted_message_range_with_connection(
-                persistence_connection
-                    .as_ref()
-                    .expect("history snapshot should be open"),
-                session_id,
-                start_index,
-                end_index,
-            )
-            .map_err(|err| {
-                ApiError::internal(format!("failed to load session history page: {err:#}"))
-            })?;
-            for (position, message) in persisted_messages {
-                if position >= start_index && position < end_index {
-                    let slot = &mut page[position - start_index];
-                    if slot.is_none() {
-                        *slot = Some(message);
-                    }
-                }
-            }
-        }
-        let page = page
-            .into_iter()
-            .enumerate()
-            .map(|(offset, message)| {
-                message.ok_or_else(|| {
-                    ApiError::conflict(format!(
-                        "session history is missing persisted position {}; refresh the session tail",
-                        start_index + offset
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let has_more = start_index > 0 && !page.is_empty();
-        let next_before = has_more
-            .then(|| page.first().map(|message| message.id().to_owned()))
-            .flatten();
-        let has_newer = end_index < message_count && !page.is_empty();
-        let next_after = has_newer
-            .then(|| page.last().map(|message| message.id().to_owned()))
-            .flatten();
-
-        Ok(SessionHistoryResponse {
-            messages: page,
-            next_before,
-            has_more,
-            next_after,
-            has_newer,
-            message_start_index: start_index,
-            message_count: u32::try_from(message_count).unwrap_or(u32::MAX),
-            revision,
-            session_mutation_stamp,
-            server_instance_id: self.server_instance_id.clone(),
-        })
+        self.capture_local_session_history(session_id, selector)?
+            .page(session_id, selector, self.server_instance_id.clone())
     }
 
     fn invalidate_agent_readiness_cache(&self) {
@@ -1497,7 +1374,9 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter(|record| !record.hidden)
-                .map(Self::wire_session_summary_from_record)
+                .map(|record| {
+                    Self::wire_session_summary_from_record(&self.server_instance_id, record)
+                })
                 .collect(),
             delegations: inner
                 .delegations
@@ -1536,7 +1415,7 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter(|record| !record.hidden)
-                .map(Self::wire_session_from_record)
+                .map(|record| Self::wire_session_from_record(&self.server_instance_id, record))
                 .collect(),
             delegations: inner
                 .delegations

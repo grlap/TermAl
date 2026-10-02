@@ -14,6 +14,7 @@ import type {
   SessionFlagMap,
 } from "./app-utils";
 import type { WorkspaceState } from "./workspace-types";
+import type { SessionReadRef, TranscriptRepairAuthority } from "./transcript-repair-authority";
 import type {
   AgentReadiness,
   AgentType,
@@ -64,7 +65,7 @@ export type ActionStateClassifierContext = {
     revision: number | null;
     serverInstanceId: string | null;
     projects: Project[];
-    sessions: Session[];
+    sessions: readonly Session[];
   };
 };
 
@@ -72,7 +73,7 @@ export type UseAppSessionActionsRefs = {
   isMountedRef: MutableRefObject<boolean>;
   latestStateRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
-  sessionsRef: MutableRefObject<Session[]>;
+  sessionsRef: SessionReadRef;
   actionStateClassifierContextRef: MutableRefObject<ActionStateClassifierContext>;
   draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
   draftAttachmentsBySessionIdRef: MutableRefObject<
@@ -87,7 +88,6 @@ export type UseAppSessionActionsRefs = {
 };
 
 export type UseAppSessionActionsSetters = {
-  setSessions: Dispatch<SetStateAction<Session[]>>;
   setWorkspace: Dispatch<SetStateAction<WorkspaceState>>;
   setRequestError: Dispatch<SetStateAction<string | null>>;
   setIsCreating: Dispatch<SetStateAction<boolean>>;
@@ -112,6 +112,7 @@ export type UseAppSessionActionsSetters = {
 };
 
 export type UseAppSessionActionsParams = {
+  sessionAuthority: TranscriptRepairAuthority;
   lookups: UseAppSessionActionsLookups;
   newProjectRootPath: string;
   newProjectRemoteId: string;

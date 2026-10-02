@@ -1,4 +1,4 @@
-// Owns: small pure helpers/constants for live-state session hydration.
+// Owns: small helpers/constants and release of the existing hydration flight.
 // Does not own: hydration fetch effects, adoption side effects, or retry timers.
 // Split from: ui/src/app-live-state.ts.
 
@@ -9,8 +9,26 @@ import type {
 export type SessionHydrationOptions = {
   allowDivergentTextRepairAfterNewerRevision?: boolean;
   forceTailRepair?: boolean;
+  ownerTailRead?: boolean;
   queueAfterCurrent?: boolean;
 };
+
+// Shared by the hook and its deterministic delivery model. No second flight
+// registry or proof token is introduced; every terminal path frees this slot.
+export function releaseSessionHydrationFlight(active: Set<string>, sessionId: string) {
+  active.delete(sessionId);
+}
+
+// The task-end request decision is shared with the delivery model. Keep demand
+// lazy so blocked requests do not evaluate it, just as in the hook's guard.
+export function shouldRequestSessionTailRead(options: {
+  mounted: boolean;
+  inFlight: boolean;
+  retryPending: boolean;
+  needsTailRead: () => boolean;
+}): boolean {
+  return options.mounted && !options.inFlight && !options.retryPending && options.needsTailRead();
+}
 
 export function resolveAdoptStateSessionOptions(
   options: AdoptStateOptions | undefined,
@@ -28,7 +46,8 @@ export function resolveAdoptStateSessionOptions(
     // visible-session hydration effect so /api/sessions/{id} repaints
     // the active pane instead of leaving stale streaming content
     // visible until the user hard-refreshes.
-    forceMessagesUnloaded: serverInstanceChanged,
+    forceMessagesUnloaded:
+      serverInstanceChanged || options?.forceMessagesUnloaded === true,
     // Delegated child sessions are durable for result inspection, but restored
     // workspace layouts should not reopen historical reviewer panes after a
     // browser or backend restart. They remain openable explicitly from the

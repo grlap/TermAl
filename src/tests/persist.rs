@@ -4148,7 +4148,7 @@ fn local_history_cursor_and_page_share_the_persisted_read_path() {
     // 66..129 in-memory suffix, forcing the request through the shared SQLite
     // snapshot for both cursor resolution and page loading.
     let page = state
-        .get_session_history(&session_id, Some("message-065"), None, None, false, 64)
+        .get_session_history(&session_id, Some("message-065"), None, None, None, false, 64)
         .expect("combined persisted cursor/page read should succeed");
     assert_eq!(page.messages.len(), 64);
     assert_eq!(page.messages.first().map(Message::id), Some("message-001"));

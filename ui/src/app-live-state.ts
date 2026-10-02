@@ -59,10 +59,6 @@ import {
   type MutableRefObject,
 } from "react";
 import {
-  syncComposerSessionsStoreIncremental,
-  upsertSessionStoreSession,
-} from "./session-store";
-import {
   noteSessionTailAdopted,
 } from "./session-hydration-performance";
 import {
@@ -70,6 +66,8 @@ import {
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
 import { ApiRequestError } from "./api-request";
+import { repairSessionTailFromHistoryPage } from "./session-history";
+import { decideHttpSessionAdoption, applyHttpSessionEffects } from "./transcript-http-adoption";
 import {
   fetchSessionHistory,
   fetchSessionTail,
@@ -103,19 +101,14 @@ import {
 } from "./app-live-state-model-confirmations";
 import {
   advancePartialTailAppendProof,
-  classifyFetchedSessionAdoption,
   getHydrationMessageCount,
   getHydrationMutationStamp,
-  mergeAppendOnlyPartialTailCoverage,
   samePartialTailProjection,
   type AdoptFetchedSessionOutcome,
   type HydrationDeltaObservation,
   type PartialTailAppendProof,
   type SessionHydrationRequestContext,
 } from "./session-hydration-adoption";
-import {
-  repairSessionTailFromHistoryPage,
-} from "./session-history";
 import {
   loadBoundedSessionHistoryWindow,
   loadOlderHistoryPageOnce,
@@ -124,9 +117,7 @@ import {
 } from "./session-history-loading";
 import {
   applyDelegationParentIdsFromSummaries,
-  reconcileSessions,
   reconcileSingleSession,
-  reconcileStateSessionSummaries,
 } from "./session-reconcile";
 import {
   openSessionInWorkspaceState,
@@ -172,6 +163,8 @@ import type {
 } from "./app-live-state-types";
 import {
   resolveAdoptStateSessionOptions,
+  shouldRequestSessionTailRead,
+  releaseSessionHydrationFlight,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
   SESSION_HYDRATION_RETRY_DELAYS_MS,
   type SessionHydrationOptions,
@@ -236,7 +229,6 @@ export function useAppLiveState(
     activePromptPollSessionIdRef,
   } = adoptionRefs;
   const {
-    setSessions,
     setWorkspace,
     setCodexState,
     setAgentReadiness,
@@ -312,6 +304,12 @@ export function useAppLiveState(
   // `messagesLoaded: false` indefinitely without triggering another automatic
   // page; explicit history demand still loads one older page at a time.
   const tailLoadedSessionIdsRef = useRef<Set<string>>(new Set());
+  // SSE handlers live across renders; recovery must use current pane demand.
+  const visibleHydrationSessionIdsRef = useRef<Set<string>>(new Set());
+  visibleHydrationSessionIdsRef.current = new Set(
+    visibleSessionHydrationTargets.map(target => target.id),
+  );
+  if (activeSession) visibleHydrationSessionIdsRef.current.add(activeSession.id);
   const hydrationMismatchSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedHydrationSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTailRepairSessionIdsRef = useRef<Set<string>>(new Set());
@@ -385,7 +383,7 @@ export function useAppLiveState(
   // sync (defined inside the transport useEffect). Assigned on
   // mount, reset to a no-op on cleanup.
   const syncAdoptedLiveSessionResumeWatchdogBaselinesRef = useRef<
-    (sessions: Session[], now?: number) => void
+    (sessions: readonly Session[], now?: number) => void
   >(() => {});
   const {
     cancelPendingCodexStateRender,
@@ -401,16 +399,11 @@ export function useAppLiveState(
     isMountedRef,
     sessionsRef,
     setCodexState,
-    setSessions,
+    sessionAuthority: params.sessionAuthority,
   });
 
   function upsertSessionSlice(session: Session) {
-    upsertSessionStoreSession({
-      session,
-      committedDraft: draftsBySessionIdRef.current[session.id] ?? "",
-      draftAttachments:
-        draftAttachmentsBySessionIdRef.current[session.id] ?? [],
-    });
+    params.sessionAuthority.syncSlices([session.id]);
   }
 
   function clearHydrationRetry(sessionId: string) {
@@ -477,9 +470,8 @@ export function useAppLiveState(
   }
 
   function sessionStillNeedsHydration(sessionId: string) {
-    return sessionsRef.current.some(
-      (session) => session.id === sessionId && session.messagesLoaded === false,
-    );
+    return sessionsRef.current.some(session =>
+      session.id === sessionId && session.messagesLoaded === false);
   }
 
   function shouldStartTailLoad(
@@ -506,12 +498,14 @@ export function useAppLiveState(
 
   function scheduleHydrationRetry(
     sessionId: string,
-    options: { capAttempts?: boolean } = {},
+    options: { capAttempts?: boolean; ownerTailRead?: boolean } = {},
   ) {
     if (
       !isMountedRef.current ||
       hydrationRetryTimersRef.current.has(sessionId) ||
-      !sessionStillNeedsHydration(sessionId)
+      !(options.ownerTailRead === true
+        ? params.sessionAuthority.needsTailRead(sessionId, visibleHydrationSessionIdsRef.current.has(sessionId))
+        : sessionStillNeedsHydration(sessionId))
     ) {
       return;
     }
@@ -532,10 +526,13 @@ export function useAppLiveState(
     hydrationRetryAttemptsRef.current.set(sessionId, attempt + 1);
     const timerId = window.setTimeout(() => {
       hydrationRetryTimersRef.current.delete(sessionId);
-      if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
+      if (!isMountedRef.current) {
         return;
       }
-      startSessionHydration(sessionId);
+      if (options.ownerTailRead !== true && sessionStillNeedsHydration(sessionId)) {
+        startSessionHydration(sessionId);
+      }
+      requestSessionTailRead(sessionId);
     }, delayMs);
     hydrationRetryTimersRef.current.set(sessionId, timerId);
   }
@@ -613,14 +610,14 @@ export function useAppLiveState(
     options?: AdoptSessionsOptions,
   ) {
     const previousSessions = sessionsRef.current;
-    const mergedSessions = reconcileStateSessionSummaries(
-      previousSessions,
+    const mergedSessions = params.sessionAuthority.adoptSummaries(
       nextSessions,
       {
         disableMutationStampFastPath: options?.disableMutationStampFastPath,
         forceMessagesUnloaded: options?.forceMessagesUnloaded,
       },
     );
+    queueMicrotask(startVisibleTranscriptRepairs);
     // Summary metadata cannot prove what happened to transcript content.
     // Only observed reducer applications may advance an append proof.
     for (const [sessionId, proof] of partialTailAppendProofsRef.current) {
@@ -637,6 +634,14 @@ export function useAppLiveState(
         : (pendingRecoveryPaneIdRef.current ?? null);
     const shouldPruneDelegatedChildWorkspaceTabs =
       options?.pruneDelegatedChildWorkspaceTabs === true;
+
+    // Transport loss invalidates the hydrated-tail proof even when summary
+    // reconciliation keeps the same already-partial session object.
+    if (options?.forceMessagesUnloaded === true) {
+      for (const session of mergedSessions) {
+        tailLoadedSessionIdsRef.current.delete(session.id);
+      }
+    }
 
     if (
       mergedSessions === previousSessions &&
@@ -706,21 +711,12 @@ export function useAppLiveState(
       canOpenPendingSession ||
       shouldPruneDelegatedChildWorkspaceTabs;
 
-    sessionsRef.current = mergedSessions;
-    if (changedSessions.length > 0 || hasRemovedSessions) {
-      syncComposerSessionsStoreIncremental({
-        changedSessions,
-        draftsBySessionId: draftsBySessionIdRef.current,
-        draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
-        removedSessionIds: [...removedSessionIds],
-      });
-    }
     if (mergedSessions !== previousSessions) {
       flushAndCancelPendingSessionRender(mergedSessions);
     }
     startTransition(() => {
       if (mergedSessions !== previousSessions) {
-        setSessions(mergedSessions);
+        params.sessionAuthority.publish();
       }
       if (shouldReconcileWorkspace) {
         setWorkspace((current) => {
@@ -833,6 +829,7 @@ export function useAppLiveState(
       );
       for (const sessionId of hydrationRetryTimersRef.current.keys()) {
         if (!availableSessionIds.has(sessionId)) {
+          // Removed sessions have no demand to wake when their retry clears.
           clearHydrationRetry(sessionId);
         }
       }
@@ -846,6 +843,7 @@ export function useAppLiveState(
         ),
       );
     }
+    queueMicrotask(() => { for (const session of mergedSessions) requestSessionTailRead(session.id); });
     for (const session of mergedSessions) {
       const previousSession = previousSessionsById.get(session.id);
       const previousMessageCount =
@@ -862,7 +860,8 @@ export function useAppLiveState(
             previousMutationStamp !== nextMutationStamp));
       if (
         session.messagesLoaded === false &&
-        (previousSession?.messagesLoaded === true ||
+        (options?.forceMessagesUnloaded === true ||
+          previousSession?.messagesLoaded === true ||
           transcriptAuthorityChanged)
       ) {
         // A bounded tail is only authoritative for the summary metadata that
@@ -955,20 +954,9 @@ export function useAppLiveState(
       return "stale";
     }
 
-    const previousSessions = sessionsRef.current;
-    const existingIndex = previousSessions.findIndex(
-      (session) => session.id === created.sessionId,
-    );
-    const nextSessionCandidates =
-      existingIndex === -1
-        ? [...previousSessions, created.session]
-        : previousSessions.map((session, index) =>
-            index === existingIndex ? created.session : session,
-          );
-    const nextSessions = reconcileSessions(
-      previousSessions,
-      nextSessionCandidates,
-    );
+    params.sessionAuthority.setServerInstance(created.serverInstanceId);
+    const nextSessions = params.sessionAuthority.adoptCreatedSession(created.session);
+    if (!nextSessions) return "stale";
     const adoptedSession =
       nextSessions.find((session) => session.id === created.sessionId) ??
       created.session;
@@ -980,10 +968,9 @@ export function useAppLiveState(
       );
       lastSeenServerInstanceIdRef.current = created.serverInstanceId;
     }
-    sessionsRef.current = nextSessions;
     upsertSessionSlice(adoptedSession);
     flushAndCancelPendingSessionRender(nextSessions);
-    setSessions(nextSessions);
+    params.sessionAuthority.publish();
     setWorkspace((current) =>
       applyControlPanelLayout(
         openSessionInWorkspaceState(
@@ -1022,141 +1009,61 @@ export function useAppLiveState(
   // bounded session response ahead of the current summary must first force
   // `/api/state` so the global revision/session metadata catches up.
   function adoptFetchedSession(
-    session: Session,
-    revision: number,
-    serverInstanceId: string,
+    session: Session, revision: number, serverInstanceId: string,
     requestContext: SessionHydrationRequestContext,
   ): AdoptFetchedSessionOutcome {
-    const previousRevision = latestStateRevisionRef.current;
+    const authority = params.sessionAuthority;
     const latestSessions = sessionsRef.current;
-    const latestExistingIndex = latestSessions.findIndex(
-      (entry) => entry.id === session.id,
-    );
-    const latestCurrentSession =
-      latestExistingIndex === -1 ? null : latestSessions[latestExistingIndex];
-    const adoptOutcome = classifyFetchedSessionAdoption({
-      responseSession: session,
-      responseRevision: revision,
-      responseServerInstanceId: serverInstanceId,
-      requestContext,
-      currentSession: latestCurrentSession,
-      currentRevision: previousRevision,
+    const current = latestSessions.find(entry => entry.id === session.id) ?? null;
+    const pairedLocalTail = authority.isEligibleLocalRead(session, serverInstanceId) &&
+      current?.hasNewerHistory !== true;
+    const decision = decideHttpSessionAdoption({
+      responseSession: session, responseRevision: revision, responseServerInstanceId: serverInstanceId,
+      requestContext, currentSession: current, currentRevision: latestStateRevisionRef.current,
       currentServerInstanceId: lastSeenServerInstanceIdRef.current,
-      seenServerInstanceIds: seenServerInstanceIdsRef.current,
+      seenServerInstanceIds: seenServerInstanceIdsRef.current, pairedLocalTail,
     });
-    if (
-      (adoptOutcome !== "adopted" && adoptOutcome !== "partial" &&
-        adoptOutcome !== "partialCoverage") ||
-      latestExistingIndex === -1
-    ) {
-      return adoptOutcome;
-    }
-    const currentSession = latestSessions[latestExistingIndex];
-
-    const preserveHistoricalWindow =
-      currentSession.hasNewerHistory === true &&
-      currentSession.messages.length > 0;
-    const incomingMessagesById = preserveHistoricalWindow
-      ? new Map(session.messages.map((message) => [message.id, message]))
-      : null;
-    const hydratedSession = {
-      ...session,
-      // Hydration repairs content; it is not an explicit navigation request.
-      // A late tail response must not evict a historical window opened before
-      // or during the request. Repair shared message ids and session metadata,
-      // but leave window replacement to the history-demand navigation path.
-      messages: incomingMessagesById
-        ? currentSession.messages.map(
-            (message) => incomingMessagesById.get(message.id) ?? message,
-          )
-        : session.messages,
-      messagesLoaded: !preserveHistoricalWindow && adoptOutcome === "adopted",
-      messageStartIndex: preserveHistoricalWindow
-        ? currentSession.messageStartIndex
-        : session.messageStartIndex,
-      hasOlderHistory: preserveHistoricalWindow
-        ? currentSession.hasOlderHistory
-        : adoptOutcome === "partial",
-      hasNewerHistory: preserveHistoricalWindow,
-    };
-    const coverageSession = adoptOutcome === "partialCoverage"
-      ? mergeAppendOnlyPartialTailCoverage(session, currentSession, requestContext)
-      : null;
-    if (adoptOutcome === "partialCoverage" && !coverageSession) return "stale";
-    const reconciledHydratedSession = coverageSession ?? reconcileSingleSession(
-      currentSession,
-      hydratedSession,
-      {
-        adoptPartialMessages:
-          preserveHistoricalWindow || adoptOutcome === "partial",
-        disableMutationStampFastPath: true,
-      },
-    );
-    const nextSessions = latestSessions.map((entry, index) =>
-      index === latestExistingIndex ? reconciledHydratedSession : entry,
-    );
-    if (previousRevision === null || revision > previousRevision) {
-      // A fresh server instance starts a new revision counter, so adopting its
-      // targeted hydration response may legitimately step this ref backward.
-      // Cross-instance ordering is handled by the server-instance gate above.
-      latestStateRevisionRef.current = revision;
-    }
-    if (serverInstanceId) {
-      rememberServerInstanceId(seenServerInstanceIdsRef, serverInstanceId);
-      lastSeenServerInstanceIdRef.current = serverInstanceId;
-    }
-    sessionsRef.current = nextSessions;
-    if (activeTranscriptSessionIdRef.current === session.id) {
-      // Attach an explicit adoption generation to the exact session object that
-      // enters the record store. The transcript commit consumes that token;
-      // message sampling cannot collide and an async request cannot use a stale
-      // active-session value captured by an earlier React render.
-      noteSessionTailAdopted(reconciledHydratedSession);
-    }
-    upsertSessionSlice(reconciledHydratedSession);
-    flushAndCancelPendingSessionRender(nextSessions);
-    // The active pane already receives this exact record synchronously through
-    // session-store. Keep the 2k+ session parent-list reconciliation off the
-    // urgent transcript commit so hydration cannot sit behind a broad App
-    // render; SessionPaneView deliberately defers scroll effects until this
-    // transition catches up.
-    startTransition(() => setSessions(nextSessions));
+    if (decision.admission === "none") return decision.outcome;
+    const next = authority.adoptTail(session, {
+      outcome: decision.outcome as "adopted" | "partial" | "partialCoverage", requestContext,
+    });
+    if (!next) return "stale";
+    applyHttpSessionEffects(decision, { latestRevision: latestStateRevisionRef,
+      instance: lastSeenServerInstanceIdRef, seenInstances: seenServerInstanceIdsRef });
+    const adopted = next.find(entry => entry.id === session.id)!;
+    if (activeTranscriptSessionIdRef.current === session.id) noteSessionTailAdopted(adopted);
+    upsertSessionSlice(adopted);
+    flushAndCancelPendingSessionRender(next);
+    startTransition(() => authority.publish());
     hydrationMismatchSessionIdsRef.current.delete(session.id);
-    return adoptOutcome;
+    return decision.outcome;
   }
 
   function publishHistorySession(session: Session) {
     invalidatePartialTailProof(session.id);
-    const latestSessions = sessionsRef.current;
-    const sessionIndex = latestSessions.findIndex(
-      (entry) => entry.id === session.id,
-    );
-    if (sessionIndex === -1) {
-      return false;
-    }
-    const nextSessions = latestSessions.map((entry, index) =>
-      index === sessionIndex ? session : entry,
-    );
-    sessionsRef.current = nextSessions;
-    upsertSessionSlice(session);
-    flushAndCancelPendingSessionRender(nextSessions);
-    startTransition(() => setSessions(nextSessions));
+    const latest = sessionsRef.current;
+    if (!latest.some(entry => entry.id === session.id)) return false;
+    const next = params.sessionAuthority.commit(latest.map(entry =>
+      entry.id === session.id ? session : entry), "history");
+    const adopted = next.find(entry => entry.id === session.id)!;
+    if (adopted.hasNewerHistory === true) tailLoadedSessionIdsRef.current.delete(session.id);
+    upsertSessionSlice(adopted);
+    flushAndCancelPendingSessionRender(next);
+    startTransition(() => params.sessionAuthority.publish());
     hydrationMismatchSessionIdsRef.current.delete(session.id);
+    queueMicrotask(startVisibleTranscriptRepairs);
     return true;
   }
 
   function createSessionHistoryLoadingContext(): SessionHistoryLoadingContext {
     return {
-      getLastSeenServerInstanceId: () =>
-        lastSeenServerInstanceIdRef.current,
-      getSession: (sessionId) =>
-        sessionsRef.current.find((entry) => entry.id === sessionId),
+      getLastSeenServerInstanceId: () => lastSeenServerInstanceIdRef.current,
+      getSession: id => sessionsRef.current.find(session => session.id === id),
       inFlightOlderLoads: olderHistoryLoadsRef.current,
       isMounted: () => isMountedRef.current,
       publishSession: publishHistorySession,
       reportRequestError,
-      requestActionRecoveryResync: (options) =>
-        requestActionRecoveryResyncRef.current(options),
+      requestActionRecoveryResync: options => requestActionRecoveryResyncRef.current(options),
     };
   }
 
@@ -1194,12 +1101,17 @@ export function useAppLiveState(
     hydratingSessionIdsRef.current.add(sessionId);
     const requestContext = captureHydrationRequestContext(sessionId, options);
     if (!requestContext) {
-      hydratingSessionIdsRef.current.delete(sessionId);
+      releaseSessionHydrationFlight(hydratingSessionIdsRef.current, sessionId);
       return;
     }
     void (async () => {
       let shouldRetryHydration = false;
-      let retryHydrationWithCap = false;
+      let retryHydrationWithCap = options?.ownerTailRead === true;
+      let requestedRecovery = false;
+      const requestRecovery = (recoveryOptions?: Parameters<typeof requestActionRecoveryResyncRef.current>[0]) => {
+        requestedRecovery = true;
+        requestActionRecoveryResyncRef.current(recoveryOptions);
+      };
       try {
         let attemptedTailHydration = false;
         if (shouldStartTailLoad(sessionId, options)) {
@@ -1218,9 +1130,10 @@ export function useAppLiveState(
             return;
           }
           if (tailResponse.session.id !== sessionId) {
+            requestedRecovery = true;
             if (!hydrationMismatchSessionIdsRef.current.has(sessionId)) {
               hydrationMismatchSessionIdsRef.current.add(sessionId);
-              requestActionRecoveryResyncRef.current();
+              requestRecovery();
             }
             return;
           }
@@ -1268,10 +1181,10 @@ export function useAppLiveState(
             case "restartResync":
               hydrationAfterStateResyncSessionIdsRef.current.add(sessionId);
               hydrationRestartResyncPendingRef.current = true;
-              requestActionRecoveryResyncRef.current();
+              requestRecovery();
               return;
             case "stateResync":
-              requestActionRecoveryResyncRef.current();
+              requestRecovery();
               shouldRetryHydration = true;
               return;
             case "stale":
@@ -1310,7 +1223,8 @@ export function useAppLiveState(
           }
           if (!isTextRepair) {
             const result = await loadOlderHistoryPageOnce({
-              context: createSessionHistoryLoadingContext(),
+              context: { ...createSessionHistoryLoadingContext(),
+                requestActionRecoveryResync: requestRecovery },
               requestedBefore: requestedBefore!,
               sessionId,
             });
@@ -1340,7 +1254,7 @@ export function useAppLiveState(
               historyPage.serverInstanceId,
             )
           ) {
-            requestActionRecoveryResyncRef.current({
+            requestRecovery({
               allowUnknownServerInstance: true,
             });
             return;
@@ -1369,7 +1283,7 @@ export function useAppLiveState(
               return;
             case "cursorChanged":
             case "metadataChanged":
-              requestActionRecoveryResyncRef.current();
+              requestRecovery();
               return;
             case "protocolError":
               throw new Error(mergeOutcome.message);
@@ -1384,7 +1298,7 @@ export function useAppLiveState(
         // Every transcript load is either the recent tail or one bounded
         // history page. Reaching this point means local metadata no longer
         // describes either state; repair from the authoritative summary.
-        requestActionRecoveryResyncRef.current();
+        requestRecovery();
         return;
       } catch (error) {
         if (!isMountedRef.current) {
@@ -1402,7 +1316,7 @@ export function useAppLiveState(
           error instanceof ApiRequestError &&
           (error.status === 404 || error.status === 409)
         ) {
-          requestActionRecoveryResyncRef.current();
+          requestRecovery();
           return;
         }
         reportRequestError(error);
@@ -1412,7 +1326,7 @@ export function useAppLiveState(
         if (partialTailAppendProofsRef.current.get(sessionId) === requestContext.partialTailAppendProof) {
           partialTailAppendProofsRef.current.delete(sessionId);
         }
-        hydratingSessionIdsRef.current.delete(sessionId);
+        releaseSessionHydrationFlight(hydratingSessionIdsRef.current, sessionId);
         if (
           queuedTextRepairHydrationSessionIdsRef.current.delete(sessionId) &&
           isMountedRef.current
@@ -1420,9 +1334,7 @@ export function useAppLiveState(
           startSessionHydration(sessionId, {
             allowDivergentTextRepairAfterNewerRevision: true,
           });
-          return;
-        }
-        if (
+        } else if (
           queuedTailRepairSessionIdsRef.current.delete(sessionId) &&
           isMountedRef.current
         ) {
@@ -1430,22 +1342,32 @@ export function useAppLiveState(
             forceTailRepair: true,
             queueAfterCurrent: true,
           });
-          return;
-        }
-        if (
+        } else if (
           queuedHydrationSessionIdsRef.current.delete(sessionId) &&
           isMountedRef.current
         ) {
           startSessionHydration(sessionId, { queueAfterCurrent: true });
-          return;
-        }
-        if (shouldRetryHydration) {
+        } else if (shouldRetryHydration) {
           scheduleHydrationRetry(sessionId, {
             capAttempts: retryHydrationWithCap,
+            ownerTailRead: options?.ownerTailRead === true,
           });
         }
+        // Slot release can reopen the gate even without another stream event.
+        // Retry/recovery endings are served by their timer or summary instead.
+        if (!shouldRetryHydration && !requestedRecovery) requestSessionTailRead(sessionId);
       }
     })();
+  }
+
+  function requestSessionTailRead(sessionId: string) {
+    if (!shouldRequestSessionTailRead({
+      mounted: isMountedRef.current,
+      inFlight: hydratingSessionIdsRef.current.has(sessionId),
+      retryPending: hydrationRetryTimersRef.current.has(sessionId),
+      needsTailRead: () => params.sessionAuthority.needsTailRead(sessionId, visibleHydrationSessionIdsRef.current.has(sessionId)),
+    })) return;
+    startSessionHydration(sessionId, { forceTailRepair: true, ownerTailRead: true });
   }
 
   useEffect(() => {
@@ -1456,6 +1378,7 @@ export function useAppLiveState(
     for (const target of visibleSessionHydrationTargets) {
       hydrationTargetIds.add(target.id);
     }
+    queueMicrotask(startVisibleTranscriptRepairs);
 
     const sessionIdsToHydrate = [...hydrationTargetIds].filter((sessionId) => {
       const session = sessionsRef.current.find(
@@ -1516,6 +1439,22 @@ export function useAppLiveState(
     setEngramHostSettings(preferences.engram);
   }
 
+  function startVisibleTranscriptRepairs() {
+    if (!isMountedRef.current) return;
+    for (const id of visibleHydrationSessionIdsRef.current) requestSessionTailRead(id);
+  }
+
+  function markTranscriptsDirty() {
+    params.sessionAuthority.declareLoss("lagged");
+    invalidatePartialTailProof();
+    queueMicrotask(startVisibleTranscriptRepairs);
+  }
+
+  function repairTranscriptsAfterTransportLoss() {
+    invalidatePartialTailProof();
+    queueMicrotask(startVisibleTranscriptRepairs);
+  }
+
   function adoptState(nextState: StateResponse, options?: AdoptStateOptions) {
     if (!isMountedRef.current) {
       return false;
@@ -1524,6 +1463,7 @@ export function useAppLiveState(
     const fullStateServerInstanceChanged =
       !!nextState.serverInstanceId &&
       nextState.serverInstanceId !== lastFullStateServerInstanceIdRef.current;
+    const hadFullStateServerInstance = lastFullStateServerInstanceIdRef.current !== null;
     const allowUnknownServerInstance =
       options?.allowUnknownServerInstance === true;
     const allowServerInstanceChange =
@@ -1548,6 +1488,7 @@ export function useAppLiveState(
       return false;
     }
 
+    params.sessionAuthority.setServerInstance(nextState.serverInstanceId);
     latestStateRevisionRef.current = nextState.revision;
     if (fullStateServerInstanceChanged) {
       // Keep a failure this server sent before its snapshot was adopted; drop
@@ -1586,6 +1527,7 @@ export function useAppLiveState(
 
     if (fullStateServerInstanceChanged) {
       // Retry deadlines belong to the old authority, not restart recovery.
+      if (hadFullStateServerInstance) params.sessionAuthority.declareLoss("serverInstanceChanged");
       cancelHydrationRetries();
       invalidatePartialTailProof();
       partialTailAppendProofsRef.current.clear();
@@ -1699,6 +1641,12 @@ export function useAppLiveState(
       ),
       resolveAdoptStateSessionOptions(options, fullStateServerInstanceChanged),
     );
+    if (options?.forceMessagesUnloaded === true) {
+      // A same-metadata recovery may preserve session identity, so no React
+      // effect runs. Repair visible transcripts explicitly, without fetching
+      // every inactive session affected by the global transport loss.
+      startVisibleTranscriptRepairs();
+    }
     // Local state adoptions can resume or create active sessions before any SSE arrives.
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
       sessionsRef.current,
@@ -1744,6 +1692,9 @@ export function useAppLiveState(
   }
 
   useAppLiveStateTransport({
+    sessionAuthority: params.sessionAuthority,
+    requestSessionTailRead,
+    visibleHydrationSessionIdsRef,
     applyTestRunDeltaLocally: delta => {
       if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
         setTestRuns(current => applyTestRunDelta(current, delta));
@@ -1789,6 +1740,8 @@ export function useAppLiveState(
     pendingStateResyncOptionsRef,
     publishQueuedSessionSlices,
     queueSessionSliceForRender,
+    markTranscriptsDirty,
+    repairTranscriptsAfterTransportLoss,
     requestActionRecoveryResyncRef,
     requestBackendReconnectRef,
     resetWorkspaceFilesChangedEventGate,

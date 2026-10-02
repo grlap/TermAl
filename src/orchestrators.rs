@@ -953,7 +953,8 @@ impl AppState {
         revision: u64,
         orchestrators: Vec<OrchestratorInstance>,
     ) {
-        let sessions = referenced_sessions_for_orchestrators(inner, &orchestrators);
+        let sessions =
+            referenced_sessions_for_orchestrators(&self.server_instance_id, inner, &orchestrators);
         self.publish_delta_locked(
             &inner,
             DeltaEvent::OrchestratorsUpdated {

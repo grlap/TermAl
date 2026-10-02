@@ -960,6 +960,12 @@ fn rollback_engram_mcp_rotation_notices_locked(
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
+        for message in &record.session.messages[*previous_len..] {
+            record
+                .body_sequence
+                .unrepresented_messages
+                .remove(message.id());
+        }
         record.session.messages.truncate(*previous_len);
         record.message_positions = build_message_positions(&record.session.messages);
         sync_retained_transcript_metadata(record);
@@ -3954,8 +3960,9 @@ impl AppState {
             .find_session_index(&record.session.id)
             .and_then(|index| inner.sessions.get(index))
             .expect("just-created session must be present in the index");
-        let session = AppState::wire_session_from_record(created_record);
-        let delta_session = AppState::wire_session_summary_from_record(created_record);
+        let session = AppState::wire_session_from_record(&self.server_instance_id, created_record);
+        let delta_session =
+            AppState::wire_session_summary_from_record(&self.server_instance_id, created_record);
         self.publish_delta_locked(
             &inner,
             DeltaEvent::SessionCreated {

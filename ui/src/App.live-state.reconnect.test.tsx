@@ -34,6 +34,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
+import { getSessionRecordSnapshotForTesting } from "./session-store";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
 import { ThemedCombobox } from "./preferences/themed-combobox";
@@ -1122,6 +1123,9 @@ describe("App live state — reconnect", () => {
 
       await settleAsyncUi();
       expect(stateRequestCount).toBe(2);
+      expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
+        status: "idle", preview: "Recovered after queued reconnect fallback.",
+      });
       expect(
         screen.getAllByText("Recovered after queued reconnect fallback."),
       ).toHaveLength(1);

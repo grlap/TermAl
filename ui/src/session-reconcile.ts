@@ -93,8 +93,8 @@ export function applyDelegationParentIdsFromSummaries<
 }
 
 export function reconcileSessions(
-  previous: Session[],
-  next: Session[],
+  previous: readonly Session[],
+  next: readonly Session[],
   options?: ReconcileSessionsOptions,
 ) {
   let previousById: Map<string, Session> | null = null;
@@ -126,14 +126,14 @@ export function reconcileSessions(
     return mergedSession;
   });
 
-  return changed ? merged : previous;
+  return changed ? merged : previous as Session[];
 }
 
 /** Reconciles canonical transcript-free wire summaries into the local
  * transcript-bearing session store. Omitted private fields are retained only
  * from local state; new sessions start explicitly unhydrated. */
 export function reconcileStateSessionSummaries(
-  previous: Session[],
+  previous: readonly Session[],
   next: StateSessionSummary[],
   options?: ReconcileSessionsOptions,
 ): Session[] {
@@ -166,7 +166,7 @@ export function reconcileStateSessionSummaries(
     return mergedSession;
   });
 
-  return changed ? merged : previous;
+  return changed ? merged : previous as Session[];
 }
 
 function materializeNewStateSessionSummary(

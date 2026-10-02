@@ -843,6 +843,8 @@ include!("workspace_queries.rs");
 include!("session_identity.rs");
 include!("session_sync.rs");
 include!("state_accessors.rs");
+include!("session_history.rs");
+include!("session_body_sequence.rs");
 include!("state_boot.rs");
 include!("state_inner.rs");
 include!("delegations.rs");

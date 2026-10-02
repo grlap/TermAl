@@ -167,9 +167,12 @@ impl StateInner {
             // immediately inserts this record and then the caller routes
             // subsequent edits through `session_mut*`, which bumps the
             // stamp as soon as a mutation happens.
+            body_sequence: SessionBodySequence::default(),
             mutation_stamp: 0,
             prompt_history_mutation_stamp: 0,
             session: Session {
+                body_seq: None,
+                body_seq_epoch: None,
                 id: session_id,
                 name: session_name,
                 emoji: agent.avatar().to_owned(),

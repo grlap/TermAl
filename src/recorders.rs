@@ -83,6 +83,11 @@ trait TurnRecorder {
     /// the agent emits a "completed assistant message" that diverges from what
     /// was streamed so far (see Claude's append-vs-replace reconciliation).
     fn replace_streaming_text(&mut self, text: &str) -> Result<()>;
+    /// Republishes an already-identical open stream without creating a message
+    /// or rewriting a different stream. Non-session recorders need no repair.
+    fn republish_streaming_text(&mut self, _text: &str) -> Result<()> {
+        Ok(())
+    }
     /// Closes the currently open streaming-text message. Called before any
     /// non-text event so new events appear after the finalized text block.
     fn finish_streaming_text(&mut self) -> Result<()>;
@@ -697,6 +702,29 @@ fn recorder_replace_streaming_text<R: SessionRecorderAccess>(
     state.replace_text_message(&session_id, &message_id, trimmed)
 }
 
+// Unchanged completions can arrive after a recorder boundary or item switch.
+// Unlike replacement, repair publication must never allocate a new message or
+// overwrite a later split bubble whose resident body is not this completion.
+fn recorder_republish_streaming_text<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    text: &str,
+) -> Result<()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let Some(message_id) = recorder
+        .recorder_state_mut()
+        .streaming_text_message_id
+        .clone()
+    else {
+        return Ok(());
+    };
+    recorder
+        .state()
+        .republish_unchanged_text_message(recorder.session_id(), &message_id, trimmed)
+}
+
 // Appends a `Thinking` reasoning block with a title + bullet lines.
 // Empty-lines input is a no-op. Closes any open streaming text first.
 fn recorder_push_thinking<R: SessionRecorderAccess>(
@@ -1102,6 +1130,10 @@ impl TurnRecorder for SessionRecorder {
         recorder_replace_streaming_text(self, text)
     }
 
+    fn republish_streaming_text(&mut self, text: &str) -> Result<()> {
+        recorder_republish_streaming_text(self, text)
+    }
+
     /// Pushes thinking.
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
         recorder_push_thinking(self, title, lines)
@@ -1231,6 +1263,10 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     /// Replaces streaming text.
     fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
         recorder_replace_streaming_text(self, text)
+    }
+
+    fn republish_streaming_text(&mut self, text: &str) -> Result<()> {
+        recorder_republish_streaming_text(self, text)
     }
 
     /// Pushes thinking.

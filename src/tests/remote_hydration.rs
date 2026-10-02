@@ -1019,6 +1019,22 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
 
 #[test]
 fn bounded_history_hydrates_unloaded_remote_proxy_before_slicing() {
+    assert_bounded_history_proxy_sequence(None, None);
+}
+
+#[test]
+fn body_sequence_remote_history_preserves_its_own_snapshot_sequence() {
+    assert_bounded_history_proxy_sequence(Some(88), Some("upstream-instance"));
+}
+
+#[test]
+fn body_sequence_remote_history_treats_incomplete_pairs_as_legacy() {
+    assert_bounded_history_proxy_sequence(Some(88), None);
+    assert_bounded_history_proxy_sequence(None, Some("unpaired"));
+}
+
+fn assert_bounded_history_proxy_sequence(body_seq: Option<u64>, epoch: Option<&str>) {
+    let certified_sequence = body_seq.filter(|_| epoch.is_some());
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -1056,6 +1072,12 @@ fn bounded_history_hydrates_unloaded_remote_proxy_before_slicing() {
     full_remote_session.message_count = 3;
     let mut summary_session = full_remote_session.clone();
     make_remote_session_summary_only(&mut summary_session, 3);
+    summary_session.body_seq = certified_sequence.map(|seq| seq + 1);
+    summary_session.body_seq_epoch = certified_sequence.and(epoch).map(str::to_owned);
+    if certified_sequence.is_some() {
+        // Matching mirror metadata is required even when the page has proof.
+        summary_session.session_mutation_stamp = Some(7);
+    }
     state
         .apply_remote_delta_event(
             &remote.id,
@@ -1081,6 +1103,8 @@ fn bounded_history_hydrates_unloaded_remote_proxy_before_slicing() {
 
     let (port, requests, server) =
         spawn_remote_session_history_response_server(SessionHistoryResponse {
+            body_seq,
+            body_seq_epoch: epoch.map(str::to_owned),
             messages: full_remote_session.messages[1..].to_vec(),
             next_before: Some("remote-message-2".to_owned()),
             has_more: true,
@@ -1100,8 +1124,13 @@ fn bounded_history_hydrates_unloaded_remote_proxy_before_slicing() {
     );
 
     let history = state
-        .get_session_history(&local_session_id, None, None, None, false, 2)
+        .get_session_history(&local_session_id, None, None, None, None, false, 2)
         .expect("remote proxy history should page directly from its owner");
+    assert_eq!(history.body_seq, certified_sequence);
+    assert_eq!(
+        history.body_seq_epoch.as_deref(),
+        certified_sequence.and(epoch)
+    );
     assert_eq!(history.message_count, 3);
     assert_eq!(history.messages.len(), 2);
     assert!(history.has_more);
@@ -1333,6 +1362,15 @@ fn stale_remote_tail_response_cannot_overwrite_newer_synchronized_metadata() {
 
 #[test]
 fn stale_remote_history_page_is_not_relabelled_with_current_proxy_metadata() {
+    assert_stale_remote_history_page_rejected(None, None);
+}
+
+#[test]
+fn stale_paired_remote_history_page_is_not_relabelled_with_current_proxy_metadata() {
+    assert_stale_remote_history_page_rejected(Some(88), Some("upstream-instance"));
+}
+
+fn assert_stale_remote_history_page_rejected(body_seq: Option<u64>, body_seq_epoch: Option<&str>) {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -1382,16 +1420,19 @@ fn stale_remote_history_page_is_not_relabelled_with_current_proxy_metadata() {
 
     let (port, _requests, server) =
         spawn_remote_session_history_response_server(SessionHistoryResponse {
-            messages: vec![remote_text_message(
-                "remote-message-1",
-                "Stale remote history.",
-            )],
+            body_seq,
+            body_seq_epoch: body_seq_epoch.map(str::to_owned),
+            messages: vec![
+                remote_text_message("remote-message-1", "Stale remote history."),
+                remote_text_message("remote-message-2", "Stale final streaming body."),
+            ],
             next_before: None,
             has_more: false,
             next_after: None,
             has_newer: false,
             message_start_index: 0,
-            message_count: 1,
+            // Equal counts cannot establish freshness for in-place streaming.
+            message_count: 2,
             revision: 3,
             session_mutation_stamp: 30,
             server_instance_id: "remote-instance".to_owned(),
@@ -1403,7 +1444,8 @@ fn stale_remote_history_page_is_not_relabelled_with_current_proxy_metadata() {
         TestRemoteBridgeOwnership::RequestOnly,
     );
 
-    let error = match state.get_session_history(&local_session_id, None, None, None, false, 2) {
+    let error = match state.get_session_history(&local_session_id, None, None, None, None, false, 2)
+    {
         Ok(_) => panic!("stale remote history must be rejected"),
         Err(error) => error,
     };
@@ -1739,6 +1781,8 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -1760,6 +1804,8 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-2".to_owned(),
                 message_id: "remote-message-2".to_owned(),
@@ -2213,6 +2259,8 @@ fn remote_message_delta_hydrates_unloaded_proxy_before_gap_check() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-2".to_owned(),
@@ -2344,6 +2392,8 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
 
     let mut delta_receiver = state.subscribe_delta_events();
     let replayed_delta = || DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 3,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -2375,6 +2425,8 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -2428,6 +2480,8 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 4,
                 session_id: "remote-session-2".to_owned(),
                 message_id: "remote-message-2".to_owned(),
@@ -2477,6 +2531,8 @@ fn remote_session_create_forwards_configured_default_model() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
     let port = listener.local_addr().expect("listener addr").port();
     let remote_session = Session {
+        body_seq: None,
+        body_seq_epoch: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -2777,8 +2833,8 @@ fn inbound_remote_session_remote_id_is_replaced_by_connection_metadata() {
             "embedded session state must not retain untrusted inbound remote_id"
         );
 
-        let summary = AppState::wire_session_summary_from_record(record);
-        let full = AppState::wire_session_from_record(record);
+        let summary = AppState::wire_session_summary_from_record(&state.server_instance_id, record);
+        let full = AppState::wire_session_from_record(&state.server_instance_id, record);
         assert_eq!(summary.remote_id.as_deref(), Some(remote.id.as_str()));
         assert_eq!(full.remote_id.as_deref(), Some(remote.id.as_str()));
         assert_ne!(summary.remote_id.as_deref(), Some("attacker-remote"));
@@ -2860,6 +2916,8 @@ fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -2970,6 +3028,8 @@ fn targeted_remote_hydration_rejects_message_count_length_mismatch() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -3067,6 +3127,8 @@ fn remote_delta_falls_through_when_targeted_hydration_returns_summary() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -3175,6 +3237,8 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-2".to_owned(),
@@ -3265,6 +3329,8 @@ fn stale_remote_delta_skips_before_targeted_hydration_fetch() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 4,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-2".to_owned(),
@@ -3309,6 +3375,8 @@ fn apply_remote_created_text_message_at(
         .apply_remote_delta_event(
             remote_id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision,
                 session_id: "remote-session-1".to_owned(),
                 message_id: message_id.to_owned(),
@@ -3351,6 +3419,8 @@ fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -3417,6 +3487,8 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 4,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-2".to_owned(),
@@ -3483,6 +3555,8 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
     .expect("message create delta should decode");
     match delta {
         DeltaEvent::MessageCreated {
+            session_seq: _,
+            body_seq_epoch: _,
             revision,
             session_id,
             message_id,
@@ -3551,6 +3625,8 @@ fn remote_message_created_delta_rejects_gap_without_advancing_revision() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -3609,6 +3685,8 @@ fn remote_message_created_delta_rejects_payload_id_mismatch_without_advancing_re
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -3678,6 +3756,8 @@ fn remote_message_created_delta_rejects_existing_message_out_of_bounds_without_a
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 4,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-2".to_owned(),
@@ -3746,6 +3826,8 @@ fn remote_command_update_missing_target_rejects_gap_without_advancing_revision()
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::CommandUpdate {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "command-1".to_owned(),
@@ -3808,6 +3890,8 @@ fn remote_parallel_agents_update_missing_target_rejects_gap_without_advancing_re
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::ParallelAgentsUpdate {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "parallel-1".to_owned(),
@@ -3877,6 +3961,8 @@ fn remote_message_updated_delta_replaces_existing_message_and_publishes_local_de
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -3911,6 +3997,8 @@ fn remote_message_updated_delta_replaces_existing_message_and_publishes_local_de
     .expect("message update delta should decode");
     match delta {
         DeltaEvent::MessageUpdated {
+            session_seq: _,
+            body_seq_epoch: _,
             revision,
             session_id,
             message_id,
@@ -3967,6 +4055,8 @@ fn remote_message_updated_delta_uses_message_id_when_remote_index_is_stale() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-2".to_owned(),
@@ -3986,6 +4076,8 @@ fn remote_message_updated_delta_uses_message_id_when_remote_index_is_stale() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 4,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-2".to_owned(),
@@ -4028,6 +4120,8 @@ fn remote_message_updated_delta_uses_message_id_when_remote_index_is_stale() {
     .expect("message update delta should decode");
     match delta {
         DeltaEvent::MessageUpdated {
+            session_seq: _,
+            body_seq_epoch: _,
             revision,
             session_id,
             message_id,
@@ -4090,6 +4184,8 @@ fn remote_message_updated_delta_missing_target_errors_without_creating_or_advanc
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 5,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "missing-message".to_owned(),
@@ -4153,6 +4249,8 @@ fn stale_remote_message_updated_delta_is_ignored() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -4211,6 +4309,8 @@ fn stale_remote_message_updated_delta_with_mismatched_payload_id_is_ignored() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -4272,6 +4372,8 @@ fn remote_message_updated_delta_rejects_payload_id_mismatch() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageUpdated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -4368,6 +4470,8 @@ fn remote_same_revision_deltas_apply_in_sequence() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
@@ -4393,6 +4497,8 @@ fn remote_same_revision_deltas_apply_in_sequence() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::CommandUpdate {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "command-1".to_owned(),

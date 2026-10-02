@@ -163,8 +163,9 @@ impl AppState {
         expected_remote: Option<&RemoteConfig>,
         expected_connection: Option<&RemoteConnection>,
         expected_state_continuity_generation: Option<u64>,
-        event: DeltaEvent,
+        mut event: DeltaEvent,
     ) -> Result<(), anyhow::Error> {
+        event.normalize_body_sequence_pair();
         let ensure_expected_route = |inner: &StateInner| -> Result<(), anyhow::Error> {
             if let Some(expected_remote) = expected_remote {
                 self.ensure_remote_apply_authority_locked(
@@ -265,8 +266,10 @@ impl AppState {
                         let local_record = inner.sessions.get(local_index).ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
-                        let delta_session =
-                            AppState::wire_session_summary_from_record(local_record);
+                        let delta_session = AppState::wire_session_summary_from_record(
+                            &self.server_instance_id,
+                            local_record,
+                        );
                         let published_session_id = delta_session.id.clone();
                         inner.note_remote_applied_revision(remote_id, remote_revision);
                         Some((published_session_id, delta_session, revision))
@@ -296,6 +299,8 @@ impl AppState {
                 session_id,
                 session_queue,
                 session_mutation_stamp: remote_session_mutation_stamp,
+                session_seq: remote_session_seq,
+                body_seq_epoch: remote_sequence_epoch,
                 status,
                 ..
             } => {
@@ -356,6 +361,10 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
+                        record.ensure_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.as_deref(),
+                        )?;
                         let applied_message_index = if let Some(existing_index) =
                             message_index_on_record(record, &message_id)
                         {
@@ -410,6 +419,10 @@ impl AppState {
                                     queue.queue_projection_hash.clone();
                             }
                         }
+                        record.apply_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.clone(),
+                        );
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
@@ -443,6 +456,8 @@ impl AppState {
                         status,
                         session_queue,
                         session_mutation_stamp: Some(session_mutation_stamp),
+                        session_seq: remote_session_seq,
+                        body_seq_epoch: remote_sequence_epoch,
                     },
                 );
                 drop(inner);
@@ -456,6 +471,8 @@ impl AppState {
                 preview,
                 session_id,
                 session_mutation_stamp: remote_session_mutation_stamp,
+                session_seq: remote_session_seq,
+                body_seq_epoch: remote_sequence_epoch,
                 status,
                 ..
             } => {
@@ -522,6 +539,10 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
+                        record.ensure_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.as_deref(),
+                        )?;
                         let Some(local_message_index) =
                             message_index_on_record(record, &message_id)
                         else {
@@ -537,6 +558,10 @@ impl AppState {
                         *existing_message = message.clone();
                         record.session.preview = preview.clone();
                         record.session.status = status;
+                        record.apply_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.clone(),
+                        );
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
@@ -569,6 +594,8 @@ impl AppState {
                         preview,
                         status,
                         session_mutation_stamp: Some(session_mutation_stamp),
+                        session_seq: remote_session_seq,
+                        body_seq_epoch: remote_sequence_epoch,
                     },
                 );
                 drop(inner);
@@ -581,6 +608,8 @@ impl AppState {
                 preview,
                 session_id,
                 session_mutation_stamp: remote_session_mutation_stamp,
+                session_seq: remote_session_seq,
+                body_seq_epoch: remote_sequence_epoch,
                 text_start_byte: remote_text_start_byte,
                 ..
             } => {
@@ -654,6 +683,10 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
+                        record.ensure_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.as_deref(),
+                        )?;
                         let local_message_index = message_index_on_record(record, &message_id)
                             .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
                         let Some(message) = record.session.messages.get_mut(local_message_index)
@@ -677,6 +710,10 @@ impl AppState {
                         if let Some(next_preview) = preview.as_ref() {
                             record.session.preview = next_preview.clone();
                         }
+                        record.apply_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.clone(),
+                        );
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
@@ -716,6 +753,8 @@ impl AppState {
                         delta,
                         preview,
                         session_mutation_stamp: Some(session_mutation_stamp),
+                        session_seq: remote_session_seq,
+                        body_seq_epoch: remote_sequence_epoch,
                     },
                 );
                 drop(inner);
@@ -727,6 +766,8 @@ impl AppState {
                 preview,
                 session_id,
                 session_mutation_stamp: remote_session_mutation_stamp,
+                session_seq: remote_session_seq,
+                body_seq_epoch: remote_sequence_epoch,
                 text,
                 ..
             } => {
@@ -771,6 +812,10 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
+                        record.ensure_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.as_deref(),
+                        )?;
                         let local_message_index = message_index_on_record(record, &message_id)
                             .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
                         let Some(message) = record.session.messages.get_mut(local_message_index)
@@ -795,6 +840,10 @@ impl AppState {
                         if let Some(next_preview) = preview.as_ref() {
                             record.session.preview = next_preview.clone();
                         }
+                        record.apply_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.clone(),
+                        );
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
@@ -831,6 +880,8 @@ impl AppState {
                         text,
                         preview,
                         session_mutation_stamp: Some(session_mutation_stamp),
+                        session_seq: remote_session_seq,
+                        body_seq_epoch: remote_sequence_epoch,
                     },
                 );
                 drop(inner);
@@ -847,6 +898,8 @@ impl AppState {
                 preview,
                 session_id,
                 session_mutation_stamp: remote_session_mutation_stamp,
+                session_seq: remote_session_seq,
+                body_seq_epoch: remote_sequence_epoch,
                 status,
                 ..
             } => {
@@ -905,6 +958,10 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
+                        record.ensure_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.as_deref(),
+                        )?;
                         let (created_message, applied_message_index) = if let Some(existing_index) =
                             message_index_on_record(record, &message_id)
                         {
@@ -966,6 +1023,10 @@ impl AppState {
                             (Some(message), message_index)
                         };
                         record.session.preview = preview.clone();
+                        record.apply_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.clone(),
+                        );
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
@@ -1013,6 +1074,8 @@ impl AppState {
                             status: session_status,
                             session_queue: None,
                             session_mutation_stamp: Some(session_mutation_stamp),
+                            session_seq: remote_session_seq,
+                            body_seq_epoch: remote_sequence_epoch,
                         },
                     );
                 } else {
@@ -1031,6 +1094,8 @@ impl AppState {
                             status,
                             preview,
                             session_mutation_stamp: Some(session_mutation_stamp),
+                            session_seq: remote_session_seq,
+                            body_seq_epoch: remote_sequence_epoch,
                         },
                     );
                 }
@@ -1045,6 +1110,8 @@ impl AppState {
                 preview,
                 session_id,
                 session_mutation_stamp: remote_session_mutation_stamp,
+                session_seq: remote_session_seq,
+                body_seq_epoch: remote_sequence_epoch,
                 ..
             } => {
                 if message_index >= usize::try_from(remote_message_count).unwrap_or(usize::MAX) {
@@ -1102,6 +1169,10 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
+                        record.ensure_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.as_deref(),
+                        )?;
                         let (created_message, applied_message_index) = if let Some(existing_index) =
                             message_index_on_record(record, &message_id)
                         {
@@ -1151,6 +1222,10 @@ impl AppState {
                             (Some(message), message_index)
                         };
                         record.session.preview = preview.clone();
+                        record.apply_remote_body_sequence(
+                            remote_session_seq,
+                            remote_sequence_epoch.clone(),
+                        );
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
@@ -1198,6 +1273,8 @@ impl AppState {
                             status: session_status,
                             session_queue: None,
                             session_mutation_stamp: Some(session_mutation_stamp),
+                            session_seq: remote_session_seq,
+                            body_seq_epoch: remote_sequence_epoch,
                         },
                     );
                 } else {
@@ -1212,9 +1289,100 @@ impl AppState {
                             agents,
                             preview,
                             session_mutation_stamp: Some(session_mutation_stamp),
+                            session_seq: remote_session_seq,
+                            body_seq_epoch: remote_sequence_epoch,
                         },
                     );
                 }
+                drop(inner);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+            }
+            DeltaEvent::TestRunCardUpdated {
+                session_id,
+                message_id,
+                message_count: remote_message_count,
+                run,
+                preview,
+                session_seq,
+                body_seq_epoch,
+                session_mutation_stamp: remote_stamp,
+                ..
+            } => {
+                let hydration = self.hydrate_unloaded_remote_session_for_delta(
+                    remote_id,
+                    &session_id,
+                    authority_generation,
+                    remote_revision,
+                    remote_message_count,
+                    remote_stamp,
+                    expected_remote,
+                    expected_connection,
+                    expected_state_continuity_generation,
+                )?;
+                if self
+                    .should_skip_delta_after_remote_hydration(hydration, &remote_delta_replay_key)
+                {
+                    return Ok(());
+                }
+                // Enqueued under the lock that committed it, as every delta is.
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let (local_session_id, message_index, message_count, stamp, revision) = {
+                    ensure_expected_route(&inner)?;
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
+                        return Ok(());
+                    }
+                    self.retry_remote_delta_persist_if_dirty_locked(&mut inner)?;
+                    let index = inner
+                        .find_remote_session_index(remote_id, &session_id)
+                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("valid session index");
+                    record.ensure_remote_body_sequence(session_seq, body_seq_epoch.as_deref())?;
+                    let local_index = message_index_on_record(record, &message_id)
+                        .ok_or_else(|| anyhow!("remote test-run card `{message_id}` not found"))?;
+                    match &mut record.session.messages[local_index] {
+                        Message::TestRun { run: current, .. } => *current = run.clone(),
+                        _ => {
+                            return Err(anyhow!(
+                                "remote message `{message_id}` is not a test-run card"
+                            ));
+                        }
+                    }
+                    record.session.preview = preview.clone();
+                    record.apply_remote_body_sequence(session_seq, body_seq_epoch.clone());
+                    if remote_stamp.is_some() {
+                        record.session.session_mutation_stamp = remote_stamp;
+                    }
+                    let parts = (
+                        record.session.id.clone(),
+                        global_message_index(record, local_index),
+                        session_message_count(record),
+                        record.mutation_stamp,
+                    );
+                    let revision = self.commit_remote_delta_persisted_locked(&mut inner)?;
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
+                    (parts.0, parts.1, parts.2, parts.3, revision)
+                };
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::TestRunCardUpdated {
+                        revision,
+                        session_id: local_session_id,
+                        message_id,
+                        message_index,
+                        message_count,
+                        preview,
+                        session_seq,
+                        body_seq_epoch,
+                        session_mutation_stamp: Some(stamp),
+                        run,
+                    },
+                );
                 drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
@@ -1498,7 +1666,6 @@ impl AppState {
             | DeltaEvent::DelegationCanceled { .. }
             | DeltaEvent::TestRunChanged { .. }
             | DeltaEvent::TestRunRemoved { .. }
-            | DeltaEvent::TestRunCardUpdated { .. }
             | DeltaEvent::TestRunWaitCreated { .. }
             | DeltaEvent::TestRunWaitConsumed { .. }
             | DeltaEvent::TestRunWaitResumeDispatchFailed { .. } => {

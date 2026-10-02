@@ -126,6 +126,7 @@ enum ParentDelegationCardDelta {
         preview: String,
         status: SessionStatus,
         session_mutation_stamp: u64,
+        session_seq: u64,
     },
     Updated {
         session_id: String,
@@ -135,6 +136,7 @@ enum ParentDelegationCardDelta {
         agents: Vec<ParallelAgentProgress>,
         preview: String,
         session_mutation_stamp: u64,
+        session_seq: u64,
     },
 }
 
@@ -149,6 +151,7 @@ enum DelegationChildTranscriptDelta {
         preview: String,
         status: SessionStatus,
         session_mutation_stamp: u64,
+        session_seq: u64,
     },
     MessageUpdated {
         session_id: String,
@@ -159,6 +162,7 @@ enum DelegationChildTranscriptDelta {
         preview: String,
         status: SessionStatus,
         session_mutation_stamp: u64,
+        session_seq: u64,
     },
 }
 
@@ -668,9 +672,12 @@ impl AppState {
             configure_delegation_child_prompt_settings(child_record, mode, &write_policy);
             child_record.session.parent_delegation_id = Some(delegation_id.clone());
         }
-        let child_session = Self::wire_session_from_record(&inner.sessions[child_index]);
-        let child_delta_session =
-            Self::wire_session_summary_from_record(&inner.sessions[child_index]);
+        let child_session =
+            Self::wire_session_from_record(&self.server_instance_id, &inner.sessions[child_index]);
+        let child_delta_session = Self::wire_session_summary_from_record(
+            &self.server_instance_id,
+            &inner.sessions[child_index],
+        );
         let record = DelegationRecord {
             id: delegation_id.clone(),
             parent_session_id,
@@ -805,7 +812,7 @@ impl AppState {
         let child_session = inner
             .find_session_index(&delegation.child_session_id)
             .and_then(|index| inner.sessions.get(index))
-            .map(Self::wire_session_from_record)
+            .map(|record| Self::wire_session_from_record(&self.server_instance_id, record))
             .ok_or_else(|| ApiError::not_found("delegation child session not found"))?;
         Ok(DelegationResponse {
             revision: inner.revision,
@@ -2150,6 +2157,7 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
+                session_seq,
             } => self.publish_delta_locked(
                 &inner,
                 DeltaEvent::MessageCreated {
@@ -2163,6 +2171,8 @@ impl AppState {
                     status,
                     session_queue: None,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             ),
             ParentDelegationCardDelta::Updated {
@@ -2173,6 +2183,7 @@ impl AppState {
                 agents,
                 preview,
                 session_mutation_stamp,
+                session_seq,
             } => self.publish_delta_locked(
                 &inner,
                 DeltaEvent::ParallelAgentsUpdate {
@@ -2184,6 +2195,8 @@ impl AppState {
                     agents,
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             ),
         }
@@ -2205,6 +2218,7 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
+                session_seq,
             } => self.publish_delta_locked(
                 &inner,
                 DeltaEvent::MessageCreated {
@@ -2218,6 +2232,8 @@ impl AppState {
                     status,
                     session_queue: None,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             ),
             DelegationChildTranscriptDelta::MessageUpdated {
@@ -2229,6 +2245,7 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
+                session_seq,
             } => self.publish_delta_locked(
                 &inner,
                 DeltaEvent::MessageUpdated {
@@ -2241,6 +2258,8 @@ impl AppState {
                     preview,
                     status,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             ),
         }
@@ -2444,7 +2463,8 @@ Final answer requirements:\n\
 /// TermAl result tools.
 const KIMI_READ_ONLY_CHILD_INSTRUCTIONS: &str = "\n\nTermAl read-only gate for Kimi (TermAl answers your permission requests itself):\n- Read, Grep and Glob work as usual.\n- Bash runs only simple read-only commands (for example `git status`, `git diff`, `git log`, `ls`, `sed -n`), in the working directory, in the foreground. Do not pass `cwd`, `run_in_background` or `disable_timeout`; no redirection, `;`, backticks or `$(`.\n- Do not use Agent or AgentSwarm: a subagent's requests are always refused.\n- A refused tool is not a failure of your task; continue with what is allowed.";
 const KIMI_READ_ONLY_REVIEWER_REFUSALS: &str = "\n- Write, Edit, CronCreate and every other tool that asks permission are refused, except the TermAl result tools named above.";
-const KIMI_READ_ONLY_EXPLORER_REFUSALS: &str = "\n- Write, Edit, CronCreate and every other tool that asks permission are refused.";
+const KIMI_READ_ONLY_EXPLORER_REFUSALS: &str =
+    "\n- Write, Edit, CronCreate and every other tool that asks permission are refused.";
 
 impl AppState {
     fn delegation_control_plane_capability_allowed(
@@ -3099,6 +3119,7 @@ fn add_parent_delegation_card_locked(
         record.session.preview = preview;
     }
     let message_index = push_message_on_record(record, message.clone());
+    let session_seq = record.next_body_delta_seq(&message_id);
     Some(ParentDelegationCardDelta::Created {
         session_id: record.session.id.clone(),
         message_id,
@@ -3108,6 +3129,7 @@ fn add_parent_delegation_card_locked(
         preview: record.session.preview.clone(),
         status: record.session.status,
         session_mutation_stamp: record.mutation_stamp,
+        session_seq,
     })
 }
 
@@ -3153,14 +3175,17 @@ fn update_parent_delegation_card_locked(
         let agents = agents.clone();
         let preview = parallel_agents_preview_text(&agents);
         record.session.preview = preview.clone();
+        let message_id = id.clone();
+        let session_seq = record.next_body_delta_seq(&message_id);
         return Some(ParentDelegationCardDelta::Updated {
             session_id: record.session.id.clone(),
-            message_id: id.clone(),
+            message_id,
             message_index: global_message_index(record, message_index),
             message_count: session_message_count(record),
             agents,
             preview,
             session_mutation_stamp: record.mutation_stamp,
+            session_seq,
         });
     }
     None
@@ -3941,6 +3966,7 @@ fn detach_delegation_child_runtime_locked(
         .into_iter()
         .filter_map(|message_index| {
             let message = child.session.messages.get(message_index)?.clone();
+            let session_seq = child.next_body_delta_seq(message.id());
             Some(DelegationChildTranscriptDelta::MessageUpdated {
                 session_id: session_id.clone(),
                 message_id: message.id().to_owned(),
@@ -3950,10 +3976,12 @@ fn detach_delegation_child_runtime_locked(
                 preview: preview.clone(),
                 status,
                 session_mutation_stamp,
+                session_seq,
             })
         })
         .collect::<Vec<_>>();
     if let Some((message_index, message)) = created_marker {
+        let session_seq = child.next_body_delta_seq(message.id());
         transcript_deltas.push(DelegationChildTranscriptDelta::MessageCreated {
             session_id,
             message_id: message.id().to_owned(),
@@ -3963,6 +3991,7 @@ fn detach_delegation_child_runtime_locked(
             preview,
             status,
             session_mutation_stamp,
+            session_seq,
         });
     }
     DetachedDelegationChildRuntime {

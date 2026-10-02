@@ -1795,6 +1795,8 @@ fn ephemeral_remote_delta_retries_dirty_persistence_before_mutation() {
         .apply_remote_delta_event(
             &remote.id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 5,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),

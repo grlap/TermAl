@@ -33,6 +33,258 @@
 use super::shared_codex_thread_setup::test_pending_codex_thread_setup;
 use super::*;
 
+#[test]
+fn unchanged_codex_completion_after_item_switch_preserves_message_ids() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn = CodexTurnState::default();
+    for (item_id, text) in [("item-a", "First reply"), ("item-b", "Second reply")] {
+        record_codex_agent_message_delta(
+            &mut turn,
+            &mut recorder,
+            &state,
+            &session_id,
+            item_id,
+            text,
+        )
+        .unwrap();
+    }
+    let before = state
+        .full_snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .messages;
+    assert_eq!(before.len(), 2);
+    for _ in 0..2 {
+        record_completed_codex_agent_message(
+            &mut turn,
+            &mut recorder,
+            &state,
+            &session_id,
+            "item-a",
+            "First reply",
+        )
+        .unwrap();
+        let after = state
+            .full_snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .unwrap()
+            .messages;
+        assert_eq!(
+            serde_json::to_value(&after).unwrap(),
+            serde_json::to_value(&before).unwrap(),
+            "late unchanged completion must neither duplicate A nor overwrite B"
+        );
+    }
+}
+
+#[test]
+fn unchanged_codex_completion_preserves_a_reopened_split_stream() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn = CodexTurnState::default();
+    record_codex_agent_message_delta(
+        &mut turn,
+        &mut recorder,
+        &state,
+        &session_id,
+        "item-a",
+        "First reply",
+    )
+    .unwrap();
+    recorder
+        .push_thinking("Reasoning", vec!["A thought".to_owned()])
+        .unwrap();
+    record_codex_agent_message_delta(
+        &mut turn,
+        &mut recorder,
+        &state,
+        &session_id,
+        "item-a",
+        " suffix",
+    )
+    .unwrap();
+    let before = state
+        .full_snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .messages;
+    assert_eq!(before.len(), 3);
+    record_completed_codex_agent_message(
+        &mut turn,
+        &mut recorder,
+        &state,
+        &session_id,
+        "item-a",
+        "First reply suffix",
+    )
+    .unwrap();
+    let after = state
+        .full_snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .messages;
+    assert_eq!(
+        serde_json::to_value(after).unwrap(),
+        serde_json::to_value(before).unwrap(),
+        "unchanged item body must not replace its later split bubble with the full text"
+    );
+}
+
+#[test]
+fn appended_codex_completion_preserves_prior_and_split_bubbles() {
+    for split in [false, true] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+        let mut turn = CodexTurnState::default();
+        record_codex_agent_message_delta(
+            &mut turn,
+            &mut recorder,
+            &state,
+            &session_id,
+            "item-a",
+            "First reply",
+        )
+        .unwrap();
+        if split {
+            recorder
+                .push_thinking("Reasoning", vec!["A thought".to_owned()])
+                .unwrap();
+            record_codex_agent_message_delta(
+                &mut turn,
+                &mut recorder,
+                &state,
+                &session_id,
+                "item-a",
+                " suffix",
+            )
+            .unwrap();
+        } else {
+            record_codex_agent_message_delta(
+                &mut turn,
+                &mut recorder,
+                &state,
+                &session_id,
+                "item-b",
+                "Second reply",
+            )
+            .unwrap();
+        }
+        let before = state
+            .full_snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .unwrap()
+            .messages;
+        let completed = if split {
+            "First reply suffix final"
+        } else {
+            "First reply final"
+        };
+        record_completed_codex_agent_message(
+            &mut turn,
+            &mut recorder,
+            &state,
+            &session_id,
+            "item-a",
+            completed,
+        )
+        .unwrap();
+        let after = state
+            .full_snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .unwrap()
+            .messages;
+        assert_eq!(after.len(), 3);
+        assert_eq!(
+            serde_json::to_value(&after[..2]).unwrap(),
+            serde_json::to_value(&before[..2]).unwrap()
+        );
+        match &after[2] {
+            Message::Text { id, text, .. } => {
+                assert_eq!(id, "message-3");
+                assert_eq!(
+                    text,
+                    if split { " suffix final" } else { " final" },
+                    "repair must retain only the canonical segment for this bubble"
+                );
+            }
+            _ => panic!("expected suffix text bubble"),
+        }
+    }
+}
+
+#[test]
+fn completed_codex_text_republishes_the_full_streamed_body() {
+    for streamed in ["Hello", "Hello there.", "Draft"] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+        let mut turn = CodexTurnState::default();
+        record_codex_agent_message_delta(
+            &mut turn,
+            &mut recorder,
+            &state,
+            &session_id,
+            "item-1",
+            streamed,
+        )
+        .unwrap();
+        let mut events = state.subscribe_delta_events();
+        record_completed_codex_agent_message(
+            &mut turn,
+            &mut recorder,
+            &state,
+            &session_id,
+            "item-1",
+            "Hello there.",
+        )
+        .unwrap();
+        let mut replacement = None;
+        while let Ok(payload) = events.try_recv() {
+            if let DeltaEvent::TextReplace {
+                text, message_id, ..
+            } = serde_json::from_str::<DeltaEvent>(&payload).unwrap()
+            {
+                replacement = Some((message_id, text));
+            }
+        }
+        assert_eq!(
+            replacement,
+            Some((
+                state.last_message_id(&session_id).unwrap().unwrap(),
+                "Hello there.".to_owned()
+            )),
+            "completion must repair a client that missed a delta"
+        );
+        assert_eq!(
+            state
+                .full_snapshot()
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .messages
+                .len(),
+            1
+        );
+    }
+}
+
 // A late thread-level notification must not disarm the turn-level watchdog.
 // The turn/start response and thread/started notification are independent, and
 // only the matching turn/started event proves that the accepted turn began.

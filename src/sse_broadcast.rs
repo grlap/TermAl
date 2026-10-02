@@ -55,6 +55,11 @@
 // worker serializes both kinds after releasing the mailbox mutex and holds no
 // StateInner guard. The bounded queue retains the base eviction policy: drop
 // the oldest pending work rather than block a producer under the state mutex.
+// An overflow also sets a lagged flag kept outside the bounded queue, which the
+// worker takes before the next retained item and forwards as a lagged marker:
+// SSE consumers then resync summaries and hydrate transcripts, since revision
+// gaps alone cannot prove a metadata-first transcript is complete. The marker
+// has no revision or body sequence and is not part of the commit order.
 // This keeps the state mutex off the slow-serialization critical path for
 // commit-heavy routes like `put_workspace_layout`. When there is no broadcaster
 // mailbox (notably: test builds that construct `AppState` without spawning the
@@ -167,6 +172,7 @@ impl AppState {
         // and resync via `/api/state`), and keeping the ordering
         // symmetric with the sibling means the two paths share one
         // durability posture.
+        inner.finish_body_sequence_commits();
         inner.revision += 1;
         if self.persist_tx.send(PersistRequest::Delta).is_err() {
             persist_created_session(&self.persistence_path, inner, record)?;
@@ -315,6 +321,7 @@ impl AppState {
     /// the per-session mutation helpers in `session_messages.rs` and
     /// `turn_lifecycle.rs` where full snapshots would be overkill.
     fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
+        inner.finish_body_sequence_commits();
         inner.revision += 1;
         // Post-shutdown durability: this commit shape doesn't send its own
         // `PersistRequest::Delta`. Normally the next persist-triggering
@@ -371,6 +378,7 @@ impl AppState {
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
+        inner.finish_body_sequence_commits();
         inner.revision += 1;
         let dispatch = self.persist_internal_locked_with_dispatch(inner)?;
         Ok((inner.revision, dispatch))
@@ -438,14 +446,17 @@ impl AppState {
 
     /// Enqueues the owned delta after its commit, before releasing the same
     /// state lock. The broadcaster serializes it off-lock in commit order.
-    /// The synchronous fallback exists for test states without a worker.
-    fn publish_delta_locked(&self, inner: &StateInner, event: DeltaEvent) {
+    /// An incomplete body-sequence pair is normalized first, so the mailbox
+    /// and the synchronous fallback carry the same event. The synchronous
+    /// fallback exists for test states without a worker.
+    fn publish_delta_locked(&self, inner: &StateInner, mut event: DeltaEvent) {
         debug_assert_eq!(inner.revision, event.revision());
         #[cfg(test)]
         assert!(
             !self.inner.is_not_held_by_current_thread_for_test(),
             "delta enqueue requires the commit lock"
         );
+        event.normalize_body_sequence_pair();
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             mailbox.publish_delta(event);
             return;
@@ -616,8 +627,7 @@ impl AppState {
                     engram_path_within(&engram_path_key(FsPath::new(path)), root)
                 });
                 if !in_root {
-                    if change.session_id.is_none() && session_scoped_change_paths.contains(path)
-                    {
+                    if change.session_id.is_none() && session_scoped_change_paths.contains(path) {
                         continue;
                     }
                     if change
@@ -632,8 +642,7 @@ impl AppState {
                     let path_check_elapsed = path_check_started.elapsed();
                     diagnostic.path_checks += 1;
                     diagnostic.path_checks_subset += path_check_elapsed;
-                    diagnostic.path_check_max =
-                        diagnostic.path_check_max.max(path_check_elapsed);
+                    diagnostic.path_check_max = diagnostic.path_check_max.max(path_check_elapsed);
                     if !matches {
                         continue;
                     }

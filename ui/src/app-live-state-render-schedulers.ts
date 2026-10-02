@@ -16,10 +16,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
-import {
-  removeSessionFromStore,
-  syncComposerSessionsStoreIncremental,
-} from "./session-store";
+import type { SessionReadRef, TranscriptRepairAuthority } from "./transcript-repair-authority";
 import type { DraftImageAttachment } from "./app-utils";
 import type { CodexState, Session } from "./types";
 
@@ -30,9 +27,9 @@ type UseAppLiveStateRenderSchedulersParams = {
   >;
   draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
   isMountedRef: MutableRefObject<boolean>;
-  sessionsRef: MutableRefObject<Session[]>;
+  sessionsRef: SessionReadRef;
   setCodexState: Dispatch<SetStateAction<CodexState>>;
-  setSessions: Dispatch<SetStateAction<Session[]>>;
+  sessionAuthority: TranscriptRepairAuthority;
 };
 
 export function useAppLiveStateRenderSchedulers(
@@ -45,7 +42,7 @@ export function useAppLiveStateRenderSchedulers(
     isMountedRef,
     sessionsRef,
     setCodexState,
-    setSessions,
+    sessionAuthority,
   } = params;
   const pendingSessionRenderFrameRef = useRef<number | null>(null);
   const hasPendingSessionRenderRef = useRef(false);
@@ -83,12 +80,7 @@ export function useAppLiveStateRenderSchedulers(
       eagerlyPublishedSessionStoreIdsRef.current.add(session.id);
     });
 
-    syncComposerSessionsStoreIncremental({
-      changedSessions,
-      draftsBySessionId: draftsBySessionIdRef.current,
-      draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
-      removedSessionIds: [],
-    });
+    sessionAuthority.syncSlices(changedSessions.map(session => session.id));
   }
 
   function flushPendingSessionStoreSync(sessionSnapshot = sessionsRef.current) {
@@ -116,19 +108,7 @@ export function useAppLiveStateRenderSchedulers(
     if (changedSessions.length === 0 && removedSessionIds.length === 0) {
       return;
     }
-    if (changedSessions.length === 0) {
-      removedSessionIds.forEach((sessionId) => {
-        removeSessionFromStore({ sessionId });
-      });
-      return;
-    }
-
-    syncComposerSessionsStoreIncremental({
-      changedSessions,
-      draftsBySessionId: draftsBySessionIdRef.current,
-      draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
-      removedSessionIds,
-    });
+    sessionAuthority.syncSlices(changedSessions.map(session => session.id), removedSessionIds);
   }
 
   function cancelPendingSessionRender() {
@@ -201,7 +181,7 @@ export function useAppLiveStateRenderSchedulers(
     const nextSessions = sessionsRef.current;
     flushPendingSessionStoreSync(nextSessions);
     startTransition(() => {
-      setSessions(nextSessions);
+      sessionAuthority.publish();
     });
   }
 

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import { useAppSessionActions } from "./app-session-actions";
+import { withActionSessionAuthority, type TestSessionActionsParams } from "./session-publication-test-fixtures";
 import { reconcileStateSessionSummaries } from "./session-reconcile";
 import type { StateResponse } from "./api";
 import type { AgentType, ConversationMarker, Project, Session } from "./types";
@@ -105,12 +106,12 @@ function makeWorkspace(): WorkspaceState {
 }
 
 function makeSessionActionsParams(
-  overrides: Partial<Parameters<typeof useAppSessionActions>[0]> = {},
-): Parameters<typeof useAppSessionActions>[0] {
+  overrides: Partial<TestSessionActionsParams> = {},
+): TestSessionActionsParams {
   const session = makeSession("session-1");
   const noopSetter = vi.fn();
   const classifierProjectsRef = { current: [] as Project[] };
-  let refs: Parameters<typeof useAppSessionActions>[0]["refs"];
+  let refs: TestSessionActionsParams["refs"];
   refs = {
     isMountedRef: { current: true },
     latestStateRevisionRef: { current: 5 },
@@ -136,7 +137,7 @@ function makeSessionActionsParams(
     refreshingAgentCommandSessionIdsRef: { current: {} },
   };
 
-  return {
+  return withActionSessionAuthority({
     lookups: {
       sessionLookup: new Map([[session.id, session]]),
       projectLookup: new Map(),
@@ -192,7 +193,7 @@ function makeSessionActionsParams(
     requestSessionBottomFollow: vi.fn(),
     forceSseReconnect: vi.fn(() => 42),
     ...overrides,
-  };
+  });
 }
 
 function expectRequestErrorDeferredUpdatesOnly(

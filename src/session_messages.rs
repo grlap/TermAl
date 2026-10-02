@@ -62,11 +62,19 @@ impl AppState {
             preview,
             status,
             session_mutation_stamp,
+            session_seq,
         ) = {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, message_count, preview, status, session_mutation_stamp) = {
+            let (
+                message_index,
+                message_count,
+                preview,
+                status,
+                session_mutation_stamp,
+                session_seq,
+            ) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -86,6 +94,7 @@ impl AppState {
                     record.session.preview.clone(),
                     record.session.status,
                     record.mutation_stamp,
+                    record.next_body_delta_seq(message.id()),
                 )
             };
             let revision = self.commit_persisted_delta_locked(&mut inner)?;
@@ -97,6 +106,7 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
+                session_seq,
             )
         };
 
@@ -113,6 +123,8 @@ impl AppState {
                 status,
                 session_queue: None,
                 session_mutation_stamp: Some(session_mutation_stamp),
+                session_seq: Some(session_seq),
+                body_seq_epoch: Some(self.server_instance_id.clone()),
             },
         );
         drop(inner);
@@ -159,11 +171,19 @@ impl AppState {
             preview,
             status,
             session_mutation_stamp,
+            session_seq,
         ) = {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, message_count, preview, status, session_mutation_stamp) = {
+            let (
+                message_index,
+                message_count,
+                preview,
+                status,
+                session_mutation_stamp,
+                session_seq,
+            ) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -183,6 +203,7 @@ impl AppState {
                     record.session.preview.clone(),
                     record.session.status,
                     record.mutation_stamp,
+                    record.next_body_delta_seq(message.id()),
                 )
             };
             let revision = self.commit_persisted_delta_locked(&mut inner)?;
@@ -194,6 +215,7 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
+                session_seq,
             )
         };
 
@@ -210,6 +232,8 @@ impl AppState {
                 status,
                 session_queue: None,
                 session_mutation_stamp: Some(session_mutation_stamp),
+                session_seq: Some(session_seq),
+                body_seq_epoch: Some(self.server_instance_id.clone()),
             },
         );
         drop(inner);
@@ -239,12 +263,19 @@ impl AppState {
             message_count,
             text_start_byte,
             session_mutation_stamp,
+            session_seq,
         ) = {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let mut preview = None;
-            let (message_index, message_count, text_start_byte, session_mutation_stamp) = {
+            let (
+                message_index,
+                message_count,
+                text_start_byte,
+                session_mutation_stamp,
+                session_seq,
+            ) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -284,6 +315,7 @@ impl AppState {
                     session_message_count(record),
                     text_start_byte,
                     record.mutation_stamp,
+                    record.next_body_delta_seq(message_id),
                 )
             };
             let revision = self.commit_delta_locked(&mut inner)?;
@@ -294,6 +326,7 @@ impl AppState {
                 message_count,
                 text_start_byte,
                 session_mutation_stamp,
+                session_seq,
             )
         };
 
@@ -309,6 +342,8 @@ impl AppState {
                 delta: delta.to_owned(),
                 preview,
                 session_mutation_stamp: Some(session_mutation_stamp),
+                session_seq: Some(session_seq),
+                body_seq_epoch: Some(self.server_instance_id.clone()),
             },
         );
 
@@ -336,6 +371,30 @@ impl AppState {
     /// `append_text_delta` when their message-stop handler detects a
     /// mismatch.
     fn replace_text_message(&self, session_id: &str, message_id: &str, text: &str) -> Result<()> {
+        self.replace_text_message_inner(session_id, message_id, text, false)
+    }
+
+    /// Publishes repair text only if the target still holds that exact body.
+    /// The check and publication revision allocation share the state lock.
+    fn republish_unchanged_text_message(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Result<()> {
+        self.replace_text_message_inner(session_id, message_id, text, true)
+    }
+
+    fn replace_text_message_inner(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        text: &str,
+        only_if_unchanged: bool,
+    ) -> Result<()> {
+        // One guard for the whole call, taken first. Under it, in order: the
+        // unchanged check, the mutation, the body sequence, the commit and
+        // the enqueue. A failed check returns before any of the others.
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             preview,
@@ -344,12 +403,38 @@ impl AppState {
             message_count,
             replacement_text,
             session_mutation_stamp,
+            session_seq,
         ) = {
-            let index = inner
-                .find_session_index(session_id)
-                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let Some(index) = inner.find_session_index(session_id) else {
+                return if only_if_unchanged {
+                    Ok(())
+                } else {
+                    Err(anyhow!("session `{session_id}` not found"))
+                };
+            };
+            if only_if_unchanged {
+                // A repair-only rejection must not stamp the record as dirty.
+                // This immutable check stays under the same lock as publication.
+                let record = inner
+                    .session_by_index(index)
+                    .expect("session index should be valid");
+                let message = cached_message_index_on_record(record, message_id)
+                    .or_else(|| {
+                        record
+                            .session
+                            .messages
+                            .iter()
+                            .position(|message| message.id() == message_id)
+                    })
+                    .and_then(|message_index| record.session.messages.get(message_index));
+                if !matches!(message, Some(Message::Text { id, text: current_text, .. })
+                    if id == message_id && current_text == text)
+                {
+                    return Ok(());
+                }
+            }
             let mut preview = None;
-            let (message_index, message_count, session_mutation_stamp) = {
+            let (message_index, message_count, session_mutation_stamp, session_seq) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -391,6 +476,7 @@ impl AppState {
                     global_message_index(record, message_index),
                     session_message_count(record),
                     record.mutation_stamp,
+                    record.next_body_delta_seq(message_id),
                 )
             };
             let revision = self.commit_delta_locked(&mut inner)?;
@@ -401,6 +487,7 @@ impl AppState {
                 message_count,
                 text.to_owned(),
                 session_mutation_stamp,
+                session_seq,
             )
         };
 
@@ -415,6 +502,8 @@ impl AppState {
                 text: replacement_text,
                 preview,
                 session_mutation_stamp: Some(session_mutation_stamp),
+                session_seq: Some(session_seq),
+                body_seq_epoch: Some(self.server_instance_id.clone()),
             },
         );
 
@@ -452,6 +541,7 @@ impl AppState {
             created_message,
             session_status,
             session_mutation_stamp,
+            session_seq,
         ) = {
             let index = inner
                 .find_session_index(session_id)
@@ -463,6 +553,7 @@ impl AppState {
                 preview,
                 session_status,
                 session_mutation_stamp,
+                session_seq,
             ) = {
                 let record = inner
                     .session_mut_by_index(index)
@@ -551,6 +642,7 @@ impl AppState {
                     preview,
                     record.session.status,
                     record.mutation_stamp,
+                    record.next_body_delta_seq(message_id),
                 )
             };
             let revision = if created_message.is_some() {
@@ -566,6 +658,7 @@ impl AppState {
                 created_message,
                 session_status,
                 session_mutation_stamp,
+                session_seq,
             )
         };
 
@@ -583,6 +676,8 @@ impl AppState {
                     status: session_status,
                     session_queue: None,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             );
         } else {
@@ -601,6 +696,8 @@ impl AppState {
                     status,
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             );
         }
@@ -635,6 +732,7 @@ impl AppState {
             created_message,
             session_status,
             session_mutation_stamp,
+            session_seq,
         ) = {
             let index = inner
                 .find_session_index(session_id)
@@ -646,6 +744,7 @@ impl AppState {
                 preview,
                 session_status,
                 session_mutation_stamp,
+                session_seq,
             ) = {
                 let record = inner
                     .session_mut_by_index(index)
@@ -694,6 +793,7 @@ impl AppState {
                     preview,
                     record.session.status,
                     record.mutation_stamp,
+                    record.next_body_delta_seq(message_id),
                 )
             };
             let revision = if created_message.is_some() {
@@ -709,6 +809,7 @@ impl AppState {
                 created_message,
                 session_status,
                 session_mutation_stamp,
+                session_seq,
             )
         };
 
@@ -726,6 +827,8 @@ impl AppState {
                     status: session_status,
                     session_queue: None,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             );
         } else {
@@ -740,6 +843,8 @@ impl AppState {
                     agents,
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
                 },
             );
         }

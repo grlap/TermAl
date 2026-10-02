@@ -11,6 +11,7 @@ import {
   resolveAdoptStateSessionOptions,
 } from "./app-live-state-hydration";
 import { useAppLiveState } from "./app-live-state";
+import { withLiveSessionAuthority, type TestLiveStateParams } from "./session-publication-test-fixtures";
 import {
   type SessionHydrationTarget,
   type UseAppLiveStateParams,
@@ -304,9 +305,9 @@ function makeCountingActionRecoveryRef(invocations: () => void) {
 function makeLiveStateParams(
   session: Session,
   actionRecoveryInvocations = vi.fn(),
-): UseAppLiveStateParams {
+): TestLiveStateParams {
   const noopSetter = vi.fn();
-  return {
+  return withLiveSessionAuthority({
     adoptionRefs: {
       isMountedRef: { current: true },
       latestStateRevisionRef: { current: 1 },
@@ -384,11 +385,11 @@ function makeLiveStateParams(
     activeSession: session,
     activeTranscriptSessionId: session.id,
     visibleSessionHydrationTargets: [{ id: session.id, messagesLoaded: false }],
-  } as UseAppLiveStateParams;
+  });
 }
 
 function renderLiveStateHarness(
-  params: UseAppLiveStateParams,
+  params: TestLiveStateParams,
   capture: (hook: UseAppLiveStateReturn) => void,
   getVisibleSessionHydrationTargets: () => readonly SessionHydrationTarget[] = () => [
     {
@@ -400,9 +401,10 @@ function renderLiveStateHarness(
 ) {
   function Harness() {
     const [, setSessions] = useState(params.adoptionRefs.sessionsRef.current);
+    if (reactiveSessions) params.stateSetters.setSessions = setSessions;
     const hook = useAppLiveState({
       ...params,
-      stateSetters: reactiveSessions ? { ...params.stateSetters, setSessions } : params.stateSetters,
+      stateSetters: params.stateSetters,
       visibleSessionHydrationTargets: getVisibleSessionHydrationTargets(),
     });
     capture(hook);
@@ -1826,6 +1828,20 @@ describe("deferred session-store sync", () => {
 });
 
 describe("delegation delta repair", () => {
+  it.each([0, 1])("does not certify an existing loaded session without an observed pair (%s bodies)", async count => {
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    const session = makeSession({ messagesLoaded: true, messageCount: count,
+      messages: count === 0 ? [] : [{ id: "existing-message", type: "text", author: "assistant", timestamp: "10:00", text: "Existing body" }],
+      sessionMutationStamp: 2 });
+    const fetchTail = vi.spyOn(api, "fetchSessionTail").mockReturnValue(new Promise(() => {}));
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    renderLiveStateHarness(params, () => {});
+    await act(async () => { await Promise.resolve(); });
+    expect(fetchTail).not.toHaveBeenCalled();
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(session.messages);
+  });
+
   it.each(makeDelegationDeltaCases(2))(
     "repairs equal-revision %s without session-delta hydration",
     async (_, makeDelta) => {

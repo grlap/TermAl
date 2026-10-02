@@ -160,6 +160,8 @@ fn remote_text_delta_gap_triggers_bounded_authoritative_tail_repair() {
     );
 
     let discontinuous_delta = DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 3,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -311,6 +313,8 @@ fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
     );
 
     let discontinuous_delta = DeltaEvent::TextDelta {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 3,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),
@@ -1646,6 +1650,8 @@ fn remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress() 
     .expect("lagged marker should arm recovery");
 
     let newer_delta = DeltaEvent::MessageUpdated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 3,
         session_id: "remote-session-1".to_owned(),
         message_id: "message-1".to_owned(),
@@ -1949,6 +1955,8 @@ fn remote_delta_hydration_in_flight_skips_narrow_unloaded_delta_apply() {
 
     let mut delta_rx = state.subscribe_delta_events();
     let event = DeltaEvent::MessageCreated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 3,
         session_id: remote_session.id.clone(),
         message_id: "remote-message-1".to_owned(),
@@ -2103,6 +2111,8 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
         first_state.apply_remote_delta_event(
             &first_remote_id,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 3,
                 session_id: first_session_id,
                 message_id: "remote-message-1".to_owned(),
@@ -2130,6 +2140,8 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
         second_state.apply_remote_delta_event(
             &second_remote_id,
             DeltaEvent::TextDelta {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 4,
                 session_id: second_session_id,
                 message_id: "remote-message-1".to_owned(),

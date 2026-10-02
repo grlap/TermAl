@@ -960,6 +960,8 @@ fn the_card_and_its_update_have_the_contract_wire_shape() {
 
     let Message::TestRun { run, .. } = message else { unreachable!() };
     let update = serde_json::to_value(DeltaEvent::TestRunCardUpdated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 9,
         session_id: "session-1".to_owned(),
         message_id: "message-1".to_owned(),

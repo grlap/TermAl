@@ -219,6 +219,8 @@ fn assert_hydration_rejects_authority_change_before_target(restore_original: boo
             &original,
             &original_connection,
             DeltaEvent::MessageCreated {
+                session_seq: None,
+                body_seq_epoch: None,
                 revision: 2,
                 session_id: "remote-session-1".to_owned(),
                 message_id: "remote-message-1".to_owned(),
@@ -286,6 +288,8 @@ fn remote_delta_repair_rejects_post_decode_a_to_b_to_a_before_apply() {
         .expect("original connection should exist");
     install_post_decode_a_to_b_to_a_cycle(&state, &original);
     let event = DeltaEvent::MessageCreated {
+        session_seq: None,
+        body_seq_epoch: None,
         revision: 2,
         session_id: "remote-session-1".to_owned(),
         message_id: "remote-message-1".to_owned(),

@@ -115,9 +115,190 @@ fn concurrent_text_publication(before_fix: bool) -> (u64, Vec<Value>) {
             SseStreamEvent::State(body) | SseStreamEvent::Delta(body) => {
                 serde_json::from_str(&body).unwrap()
             }
+            SseStreamEvent::Lagged => panic!("no work was dropped"),
         })
         .collect();
     (initial_revision, received)
+}
+
+fn body_sequence_of(state: &AppState, session: &str) -> u64 {
+    state
+        .get_session_tail(session, 20)
+        .unwrap()
+        .session
+        .body_seq
+        .unwrap()
+}
+
+#[test]
+fn ordered_publication_interleaved_commits_keep_revision_and_body_sequence_order() {
+    let (mut state, session) = ordered_publication_state();
+    let mailbox = Arc::new(StateBroadcastMailbox::default());
+    state.state_broadcast_mailbox = Some(mailbox.clone());
+    let first_sequence = body_sequence_of(&state, &session) + 1;
+    // Two producers commit body changes to the one local session, one delta
+    // per commit, while a third makes metadata-only commits between them.
+    let start = Arc::new(std::sync::Barrier::new(3));
+    let text_producer = {
+        let (state, session, start) = (state.clone(), session.clone(), start.clone());
+        std::thread::spawn(move || {
+            start.wait();
+            for _ in 0..30 {
+                state
+                    .append_text_delta(&session, "streamed-body", "x")
+                    .unwrap();
+            }
+        })
+    };
+    let message_producer = {
+        let (state, session, start) = (state.clone(), session.clone(), start.clone());
+        std::thread::spawn(move || {
+            start.wait();
+            for index in 0..30 {
+                state
+                    .push_message(
+                        &session,
+                        Message::Text {
+                            id: format!("created-{index}"),
+                            author: Author::Assistant,
+                            text: format!("created {index}"),
+                            timestamp: stamp_now(),
+                            attachments: Vec::new(),
+                            expanded_text: None,
+                            source: None,
+                        },
+                    )
+                    .unwrap();
+            }
+        })
+    };
+    let metadata_producer = {
+        let (state, session, start) = (state.clone(), session.clone(), start.clone());
+        std::thread::spawn(move || {
+            start.wait();
+            for index in 0..30 {
+                let mut inner = state.inner.lock().unwrap();
+                let at = inner.find_session_index(&session).unwrap();
+                inner.session_mut_by_index(at).unwrap().session.name = format!("renamed {index}");
+                state.commit_locked(&mut inner).unwrap();
+            }
+        })
+    };
+    for producer in [text_producer, message_producer, metadata_producer] {
+        producer.join().unwrap();
+    }
+
+    let pending = mailbox.take_pending_for_test();
+    assert!(
+        !pending
+            .iter()
+            .any(|work| matches!(work, StateBroadcastWork::Lagged)),
+        "the fixture stays within the mailbox capacity"
+    );
+    let revisions = pending
+        .iter()
+        .map(|work| work.revision().unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        revisions.windows(2).all(|pair| pair[0] < pair[1]),
+        "one delta per commit: mailbox order is strict revision order: {revisions:?}"
+    );
+    let sequences = pending
+        .iter()
+        .filter_map(|work| match work {
+            StateBroadcastWork::Delta(event) => Some(
+                serde_json::to_value(event).unwrap()["sessionSeq"]
+                    .as_u64()
+                    .expect("every body delta carries its sequence"),
+            ),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sequences,
+        (first_sequence..first_sequence + 60).collect::<Vec<_>>(),
+        "body sequences increase by one in mailbox order; metadata commits take none"
+    );
+    assert!(
+        pending
+            .iter()
+            .any(|work| matches!(work, StateBroadcastWork::Snapshot(_))),
+        "the metadata commits were published"
+    );
+
+    // A body change committed without a delta makes the next sequence skip one.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let at = inner.find_session_index(&session).unwrap();
+        inner
+            .session_mut_by_index(at)
+            .unwrap()
+            .mark_body_changed("streamed-body");
+        state.commit_locked(&mut inner).unwrap();
+    }
+    mailbox.take_pending_for_test();
+    state
+        .append_text_delta(&session, "streamed-body", "y")
+        .unwrap();
+    let next = mailbox
+        .take_pending_for_test()
+        .into_iter()
+        .find_map(|work| match work {
+            StateBroadcastWork::Delta(event) => {
+                serde_json::to_value(&event).unwrap()["sessionSeq"].as_u64()
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(next, first_sequence + 61);
+}
+
+#[test]
+fn ordered_publication_overflow_under_the_lock_never_blocks_and_signals_loss_first() {
+    let (mut state, session) = ordered_publication_state();
+    let mailbox = Arc::new(StateBroadcastMailbox::default());
+    state.state_broadcast_mailbox = Some(mailbox.clone());
+    let mut stream = state.subscribe_stream_events();
+    let total = STATE_BROADCAST_MAILBOX_CAPACITY + 40;
+    // Every enqueue happens under the state lock that committed it; with no
+    // worker draining, the queue overflows while producers hold that lock.
+    let (done, finished) = mpsc::channel();
+    let producer = {
+        let (state, session) = (state.clone(), session.clone());
+        std::thread::spawn(move || {
+            for _ in 0..total {
+                state
+                    .append_text_delta(&session, "streamed-body", "x")
+                    .unwrap();
+            }
+            done.send(()).unwrap();
+        })
+    };
+    finished
+        .recv_timeout(Duration::from_secs(30))
+        .expect("no producer waits for queue capacity");
+    producer.join().unwrap();
+    let last_revision = state.inner.lock().unwrap().revision;
+
+    let pending = mailbox.take_pending_for_test();
+    assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY + 1);
+    assert!(
+        matches!(pending.first(), Some(StateBroadcastWork::Lagged)),
+        "the loss signal comes before the retained work"
+    );
+    let retained = pending[1..]
+        .iter()
+        .map(|work| work.revision().unwrap())
+        .collect::<Vec<_>>();
+    let oldest_retained = last_revision + 1 - STATE_BROADCAST_MAILBOX_CAPACITY as u64;
+    assert_eq!(
+        retained,
+        (oldest_retained..=last_revision).collect::<Vec<_>>(),
+        "the oldest work was dropped and the retained work keeps commit order"
+    );
+
+    forward_state_broadcast_work(StateBroadcastWork::Lagged, &state.state_broadcast_senders);
+    assert!(matches!(stream.try_recv(), Ok(SseStreamEvent::Lagged)));
 }
 
 #[test]
@@ -293,6 +474,8 @@ impl AppState {
             delta: delta.to_owned(),
             preview,
             session_mutation_stamp: Some(session_mutation_stamp),
+            session_seq: None,
+            body_seq_epoch: None,
         };
         if let Some(mailbox) = self.state_broadcast_mailbox.as_ref() {
             mailbox.publish_delta(event);

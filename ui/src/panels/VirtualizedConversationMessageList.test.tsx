@@ -235,10 +235,12 @@ function renderVirtualizedHarness({
   let isActive = true;
   let estimatedLayout = buildEstimatedLayout(currentMessages);
   const nativeClamps: { before: number; after: number; height: number; keys: string[] }[] = [];
+  let geometryObserver: MutationObserver | null = null;
+  let geometryCache: ReturnType<typeof calculateCommittedGeometry> | null = null;
   // Read the committed spacer styles and mounted cards, not the virtualizer's
   // estimates. A real browser clamps scrollTop when this extent contracts,
   // even if application code never writes an upward position.
-  const committedGeometry = () => {
+  const calculateCommittedGeometry = () => {
     const list = scrollNode.querySelector<HTMLElement>(".virtualized-message-list");
     const slots = new Map<HTMLElement, { top: number; height: number }>();
     const bands = new Map<HTMLElement, { top: number; height: number }>();
@@ -272,6 +274,17 @@ function renderVirtualizedHarness({
       height = Number.parseFloat(list.style.height) || 0;
     }
     return { height: Math.max(clientHeight, height), slots, bands, keys, spacers };
+  };
+  const committedGeometry = () => {
+    // The fixture models browser layout, which is reused until DOM geometry
+    // changes. Re-scanning every slot for each rect/scroll read makes a single
+    // scroll perform thousands of identical jsdom selector walks. takeRecords
+    // observes mutations synchronously, including changes within layout effects.
+    // Custom geometry callbacks may depend on external state, so never cache
+    // them; the DOM-backed case depends only on nodes/attributes and viewport.
+    if (!geometryObserver) return calculateCommittedGeometry();
+    if (geometryObserver.takeRecords().length > 0) geometryCache = null;
+    return geometryCache ??= calculateCommittedGeometry();
   };
   const readCommittedGeometry = () => {
     const geometry = committedGeometry();
@@ -330,6 +343,10 @@ function renderVirtualizedHarness({
   }
 
   const scrollNode = document.createElement("div");
+  if (committedDomGeometry && !committedSlotHeight) {
+    geometryObserver = new MutationObserver(() => { geometryCache = null; });
+    geometryObserver.observe(scrollNode, { childList: true, subtree: true, attributes: true });
+  }
   Object.defineProperty(scrollNode, "clientHeight", {
     configurable: true,
     get: () => clientHeight,
@@ -487,6 +504,7 @@ function renderVirtualizedHarness({
     // Effects must release their frames/observers while the owning harness is
     // still installed. Restoring jsdom globals first breaks manual-frame cleanup.
     result.unmount();
+    geometryObserver?.disconnect();
     window.ResizeObserver = OriginalResizeObserver;
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -574,6 +592,7 @@ function renderVirtualizedHarness({
     },
     setClientHeight(nextValue: number) {
       clientHeight = nextValue;
+      geometryCache = null;
     },
     setScrollTop(nextValue: number) {
       scrollTop = nextValue;
@@ -1935,9 +1954,31 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("invalidates fixture geometry on synchronous DOM changes and viewport changes", () => {
+    const harness = renderVirtualizedHarness({
+      messages: makeTextMessages(8), committedDomGeometry: true,
+      manualAnimationFrames: true, clientHeight: 100,
+    });
+    try {
+      const before = harness.capturePaint();
+      expect(harness.capturePaint().height).toBe(before.height);
+      const card = harness.container.querySelector<HTMLElement>("[data-fixture-height]")!;
+      card.dataset.fixtureHeight = "180";
+      // No MutationObserver microtask has run: takeRecords must invalidate
+      // before the very next rect/scroll read, just like browser layout.
+      expect(harness.capturePaint().height).toBe(before.height + 100);
+      card.dataset.fixtureHeight = "80";
+      expect(harness.capturePaint().height).toBe(before.height);
+      harness.rerenderWithMessages([]);
+      expect(harness.capturePaint().height).toBe(100);
+      harness.setClientHeight(200);
+      expect(harness.capturePaint().height).toBe(200);
+    } finally { harness.restore(); }
+  });
+
   it.each(["detached", "bottom"] as const)(
     "keeps a measured tall offscreen page when unchanged messages are rehydrated (%s)",
-    async (position) => {
+    (position) => {
       vi.useFakeTimers();
       const messages = makeTextMessages(240);
       const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
@@ -1966,7 +2007,10 @@ describe("VirtualizedConversationMessageList foundation", () => {
           harness.setScrollTop(16_000);
           fireEvent.scroll(harness.scrollNode);
         });
-        await advanceIdleMountedRangeCompaction();
+        // These timer callbacks and the controlled frames are synchronous.
+        // Do not leave an async act continuation alive if the runner times out:
+        // it can otherwise mutate globals belonging to the following fixture.
+        act(() => { vi.advanceTimersByTime(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS + 1); });
         harness.advanceAnimationFrame();
         expect(harness.container.querySelector(
           '.virtualized-message-slot[data-message-id="message-1"]',

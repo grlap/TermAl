@@ -885,6 +885,45 @@ async fn get_session_history_route_centers_an_around_position() {
 }
 
 #[tokio::test]
+async fn get_session_history_route_reads_exact_start_ranges() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let ids = seed_loaded_history_messages(&state, &session_id, 100);
+    let app = app_router(state);
+    for (start, limit, end) in [(0, 20, 20), (47, 20, 67), (95, 20, 100), (0, 64, 64)] {
+        let (status, page): (StatusCode, SessionHistoryResponse) = request_json(
+            &app,
+            Request::builder().method("GET")
+                .uri(format!("/api/sessions/{session_id}/history?start={start}&limit={limit}"))
+                .body(Body::empty()).unwrap(),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(page.message_start_index, start);
+        assert_eq!(page.messages.len(), end - start);
+        assert_eq!(page.messages.first().map(Message::id), Some(ids[start].as_str()));
+        assert_eq!(page.messages.last().map(Message::id), Some(ids[end - 1].as_str()));
+        assert_eq!(page.has_more, start > 0);
+        assert_eq!(page.has_newer, end < 100);
+    }
+    for (query, expected) in [
+        ("start=100&limit=20", StatusCode::CONFLICT),
+        ("start=101&limit=20", StatusCode::CONFLICT),
+        ("start=0&limit=65", StatusCode::BAD_REQUEST),
+        ("start=0&limit=0", StatusCode::BAD_REQUEST),
+        ("start=0&around=10", StatusCode::BAD_REQUEST),
+        ("start=0&from=start", StatusCode::BAD_REQUEST),
+        ("start=0&before=a", StatusCode::BAD_REQUEST),
+        ("start=0&after=a", StatusCode::BAD_REQUEST),
+    ] {
+        let response = app.clone().oneshot(Request::builder().method("GET")
+            .uri(format!("/api/sessions/{session_id}/history?{query}"))
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), expected, "{query}");
+    }
+}
+
+#[tokio::test]
 async fn get_session_overview_meets_large_transcript_latency_and_network_budgets() {
     let state = test_app_state();
     let _files = HttpRouteTestFiles::capture(&state);
@@ -2451,6 +2490,49 @@ async fn state_events_route_streams_parallel_agents_update_sources() {
     assert_eq!(delta["agents"][1]["source"], "delegation");
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn state_events_route_repairs_producer_mailbox_overflow_before_channel_lag() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    assert_eq!(parse_sse_event(&next_sse_event(&mut body).await).0, "state");
+
+    // Loss occurs before the broadcast channel. Multiple queue capacities
+    // cannot evict the pending control, and one forwarded control alone must
+    // repair the wire stream without relying on receiver-channel overflow.
+    let mailbox = StateBroadcastMailbox::default();
+    for index in 0..STATE_BROADCAST_MAILBOX_CAPACITY * 3 {
+        mailbox.publish_delta(DeltaEvent::TestRunRemoved {
+            revision: index as u64,
+            run_id: format!("lost-or-retained-{index}"),
+        });
+    }
+    let mut pending = mailbox.take_pending_for_test().into_iter();
+    let control = pending
+        .next()
+        .expect("loss control should precede retained work");
+    assert!(matches!(control, StateBroadcastWork::Lagged));
+    forward_state_broadcast_work(control, &state.state_broadcast_senders);
+
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!((name.as_str(), data.as_str()), ("lagged", "1"));
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(name, "state");
+    let recovered: StateResponse = serde_json::from_str(&data).unwrap();
+    assert_eq!(recovered.revision, state.summary_snapshot().revision);
 }
 
 // Pins `GET /api/events` lagged recovery wire format. Browsers can skip

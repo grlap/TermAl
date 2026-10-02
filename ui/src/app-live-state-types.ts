@@ -39,6 +39,7 @@ import type {
 } from "./app-shell-internals";
 import type { WorkspaceState } from "./workspace-types";
 import type { ControlPanelSide } from "./workspace-storage";
+import type { SessionReadRef, TranscriptRepairAuthority } from "./transcript-repair-authority";
 
 // Outcome of `adoptCreatedSessionResponse`:
 //   - "adopted":    session inserted into `sessionsRef` and the
@@ -71,6 +72,8 @@ export type AdoptStateOptions = {
   allowRevisionDowngrade?: boolean;
   allowUnknownServerInstance?: boolean;
   disableMutationStampFastPath?: boolean;
+  /** Rehydrate transcript content after transport loss even if metadata matches. */
+  forceMessagesUnloaded?: boolean;
   sseReconnectRequestId?: number | null;
   openSessionId?: string;
   paneId?: string | null;
@@ -94,7 +97,7 @@ export type UseAppLiveStateAdoptionRefs = {
   latestStateRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>;
-  sessionsRef: MutableRefObject<Session[]>;
+  sessionsRef: SessionReadRef;
   draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
   draftAttachmentsBySessionIdRef: MutableRefObject<
     Record<string, DraftImageAttachment[]>
@@ -112,7 +115,6 @@ export type UseAppLiveStateAdoptionRefs = {
 };
 
 export type UseAppLiveStateStateSetters = {
-  setSessions: Dispatch<SetStateAction<Session[]>>;
   setWorkspace: Dispatch<SetStateAction<WorkspaceState>>;
   setCodexState: Dispatch<SetStateAction<CodexState>>;
   setAgentReadiness: Dispatch<SetStateAction<AgentReadiness[]>>;
@@ -171,6 +173,7 @@ export type UseAppLiveStatePreferenceSetters = {
 };
 
 export type UseAppLiveStateParams = {
+  sessionAuthority: TranscriptRepairAuthority;
   adoptionRefs: UseAppLiveStateAdoptionRefs;
   stateSetters: UseAppLiveStateStateSetters;
   preferenceSetters: UseAppLiveStatePreferenceSetters;

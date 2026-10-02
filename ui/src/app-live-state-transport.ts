@@ -74,8 +74,12 @@ import { ReconnectStateMachine } from "./app-live-state-reconnect-state";
 import { createWaitSnapshotRepairRetry } from "./app-live-state-wait-repair";
 import type { SessionHydrationOptions } from "./app-live-state-hydration";
 import type { HydrationDeltaObservation } from "./session-hydration-adoption";
+import type { SessionReadRef, TranscriptRepairAuthority } from "./transcript-repair-authority";
 
 type UseAppLiveStateTransportParams = {
+  sessionAuthority: TranscriptRepairAuthority;
+  requestSessionTailRead: (sessionId: string) => void;
+  visibleHydrationSessionIdsRef: MutableRefObject<Set<string>>;
   observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
   hasPartialTailAppendProof?: (sessionId?: string) => boolean;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
@@ -99,8 +103,10 @@ type UseAppLiveStateTransportParams = {
   pendingRecoveryOpenSessionIdRef: MutableRefObject<string | undefined>;
   pendingRecoveryPaneIdRef: MutableRefObject<string | null | undefined>;
   pendingStateResyncOptionsRef: MutableRefObject<PendingStateResyncOptions | null>;
-  publishQueuedSessionSlices: (sessionSnapshot?: Session[]) => void;
+  publishQueuedSessionSlices: (sessionSnapshot?: readonly Session[]) => void;
   queueSessionSliceForRender: (sessionId: string) => void;
+  markTranscriptsDirty: () => void;
+  repairTranscriptsAfterTransportLoss: () => void;
   requestActionRecoveryResyncRef: MutableRefObject<
     (options?: {
       openSessionId?: string;
@@ -113,7 +119,7 @@ type UseAppLiveStateTransportParams = {
   resetWorkspaceFilesChangedEventGate: () => void;
   scheduleCodexStateRender: () => void;
   scheduleSessionRender: () => void;
-  sessionsRef: MutableRefObject<Session[]>;
+  sessionsRef: SessionReadRef;
   setBackendConnectionIssueDetail: Dispatch<SetStateAction<string | null>>;
   setBackendConnectionState: (next: BackendConnectionState) => void;
   setIsLoading: Dispatch<SetStateAction<boolean>>;
@@ -131,7 +137,7 @@ type UseAppLiveStateTransportParams = {
   stateResyncInFlightRef: MutableRefObject<boolean>;
   stateResyncPendingRef: MutableRefObject<boolean>;
   syncAdoptedLiveSessionResumeWatchdogBaselinesRef: MutableRefObject<
-    (sessions: Session[], now?: number) => void
+    (sessions: readonly Session[], now?: number) => void
   >;
   workspaceFilesChangedEventGateRefs: WorkspaceFilesChangedEventGateRefs;
 };
@@ -174,6 +180,8 @@ export function useAppLiveStateTransport(
     pendingStateResyncOptionsRef,
     publishQueuedSessionSlices,
     queueSessionSliceForRender,
+    markTranscriptsDirty,
+    repairTranscriptsAfterTransportLoss,
     requestActionRecoveryResyncRef,
     requestBackendReconnectRef,
     resetWorkspaceFilesChangedEventGate,
@@ -209,6 +217,7 @@ export function useAppLiveStateTransport(
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
     > | null = null;
+    let tailReadBackstopFirings = 0;
     let shouldResyncOnResume = false;
     // These refs are component-scoped, so Strict Mode and SSE-epoch effect
     // remounts must reset stale in-flight resync bookkeeping from the previous
@@ -501,7 +510,7 @@ export function useAppLiveStateTransport(
     }
 
     function syncLiveTransportActivityFromState(
-      sessions: Session[],
+      sessions: readonly Session[],
       now = Date.now(),
       {
         clearWatchdogCooldown = true,
@@ -529,7 +538,7 @@ export function useAppLiveStateTransport(
     }
 
     function syncLiveSessionResumeWatchdogBaselines(
-      sessions: Session[],
+      sessions: readonly Session[],
       now = Date.now(),
     ) {
       syncLiveSessionResumeWatchdogBaselineActivity(
@@ -1167,9 +1176,16 @@ export function useAppLiveStateTransport(
       );
     }
 
-    function clearForceAdoptNextStateEvent() {
+    function clearForceAdoptNextStateEvent(transcriptsRepaired = false) {
+      const transcriptRepairPending = laggedRecoveryBaselineRevisionRef.current !== null;
       forceAdoptNextStateEventRef.current = false;
       laggedRecoveryBaselineRevisionRef.current = null;
+      // Rollback permission is one-shot; transcript loss is not stream proof.
+      // A rejected, fallback or malformed snapshot (or reconnect) must still
+      // transfer that loss into local invalidation and visible-tail demand.
+      if (transcriptRepairPending && !transcriptsRepaired && !cancelled) {
+        repairTranscriptsAfterTransportLoss();
+      }
     }
 
     const {
@@ -1178,6 +1194,8 @@ export function useAppLiveStateTransport(
       handleWorkspaceFilesChangedEvent,
       handleLaggedEvent,
     } = createAppLiveStateTransportEventHandlers({
+      sessionAuthority: params.sessionAuthority,
+      requestSessionTailRead: params.requestSessionTailRead,
       observeHydrationDelta,
       hasPartialTailAppendProof,
       adoptState,
@@ -1186,6 +1204,7 @@ export function useAppLiveStateTransport(
       beginBadLiveEventRecovery,
       cancelStaleSendResponseRecoveryPollForSessions,
       clearForceAdoptNextStateEvent,
+      markTranscriptsDirty,
       clearRecoveredBackendRequestError,
       clearReconnectStateResyncTimeoutAfterConfirmedReopen,
       codexStateRef,
@@ -1319,7 +1338,19 @@ export function useAppLiveStateTransport(
     };
     scheduleInitialStateFallbackResync();
     liveSessionResumeWatchdogIntervalId = window.setInterval(
-      handleLiveSessionResumeWatchdogTick,
+      () => {
+        if (cancelled) return;
+        // A missed edge notification must not strand standing body demand.
+        // This sibling runs before the watchdog's independent policy guards;
+        // browser throttling controls when actual interval firings occur.
+        tailReadBackstopFirings++;
+        if (tailReadBackstopFirings % 3 === 0) {
+          for (const id of params.visibleHydrationSessionIdsRef.current) {
+            params.requestSessionTailRead(id);
+          }
+        }
+        handleLiveSessionResumeWatchdogTick();
+      },
       LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
     );
 

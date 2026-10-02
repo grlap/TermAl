@@ -3548,6 +3548,9 @@ fn shared_codex_stale_thread_setup_timeout_ignores_newer_same_runtime_request() 
 #[test]
 fn shared_codex_runtime_exit_clears_shared_slot_before_queued_dispatch_attempt() {
     let state = test_app_state();
+    // A cleared slot must attempt a fresh spawn, which this test state refuses.
+    // Keeping the dying slot would reuse its scripted runtime instead.
+    assert!(!state.agent_runtime_spawning_enabled);
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) =
         test_shared_codex_runtime("shared-codex-runtime-exit-clear-before-dispatch");
@@ -3579,8 +3582,7 @@ fn shared_codex_runtime_exit_clears_shared_slot_before_queued_dispatch_attempt()
         });
         record.session.status = SessionStatus::Active;
         record.session.preview = "Waiting for Codex".to_owned();
-        record.remote_id = Some("remote-proxy-to-block-dispatch-spawn".to_owned());
-        record.remote_session_id = Some("remote-session".to_owned());
+        assert!(record.is_local_session());
         record.queued_prompts.push_back(QueuedPromptRecord {
             engram_waiting: false,
             promoted_message_index: None,
@@ -3609,9 +3611,9 @@ fn shared_codex_runtime_exit_clears_shared_slot_before_queued_dispatch_attempt()
             &runtime_token,
             Some("shared app-server exited"),
         )
-        .expect_err("remote proxy queued dispatch should fail after slot clear");
+        .expect_err("fresh local runtime spawn should fail after slot clear");
     assert!(
-        format!("{error:#}").contains("remote proxy sessions must dispatch"),
+        format!("{error:#}").contains("agent runtime spawning is disabled for this AppState"),
         "unexpected runtime-exit error: {error:#}"
     );
     assert!(
