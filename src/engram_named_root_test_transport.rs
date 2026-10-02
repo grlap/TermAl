@@ -117,7 +117,8 @@ impl TestEngramNamedRoots {
             return Some(Ok(
                 json!({"project_id":self.project_id.as_deref().unwrap_or("github.com/example/source-root"), "work_id":binding.work_id,
                     "root_execution_id":binding.root_execution_id,"run_id":binding.run_id,"claim_id":binding.claim_id,
-                    "run":{"state":"open", "generation":self.run_generations[&binding.run_id]},
+                    "run":{"state":if self.released.contains_key(claim) { "open" } else { "claimed" },
+                        "generation":self.run_generations[&binding.run_id]},
                     "named_root":root, "latest_event":latest.map(|event| json!({"event":event["event"],
                         "position":event["position"],"kind":event["kind"],"generation":event["generation"],
                         "workspace_id":event["workspace_id"],"named_at":event["named_at"]})),

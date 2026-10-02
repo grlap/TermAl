@@ -1279,6 +1279,106 @@ fn source_root_authority_review_first_contact_none_recovers_remote_ended_history
     }
 }
 
+#[test]
+fn source_root_canonical_live_run_states_establish_first_contact_absence() {
+    // Engram's run lifecycle is distinct from the work item's open lifecycle.
+    // A current claim is claimed before admission and active after begin.
+    for case in ["claimed-no-event", "active-no-event"] {
+        authority_review_first_contact(case);
+    }
+}
+
+#[test]
+fn source_root_canonical_run_state_and_history_contract() {
+    let claimed = ClaimedRoot::new("canonical-state-contract", Vec::new());
+    prepare_claimed_root_naming(&claimed, "canonical-state-contract");
+    let store = claimed_root_store(&claimed);
+    let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
+    let base = json!({
+        "project_id":store.project_id,"work_id":binding.work_id,
+        "root_execution_id":binding.root_execution_id,"run_id":binding.run_id,
+        "claim_id":binding.claim_id,"run":{"state":"claimed","generation":1},
+        "named_root":{"state":"none"},"latest_event":null,
+        "read_cut":{"feed":{"kind":"run_execution","id":binding.run_id},"position":4}
+    });
+    let valid = |value: Value| {
+        serde_json::from_value::<EngramNamedRootReadResponse>(value)
+            .unwrap()
+            .validate_authority(&store, &binding)
+            .is_ok()
+    };
+    let event = json!({"event":"canonical-bound-event",
+        "position":{"feed":{"kind":"run_execution","id":binding.run_id},"position":2},
+        "kind":"bound","generation":1,"workspace_id":"canonical-workspace",
+        "named_at":"2026-10-01T00:00:00Z"});
+    // Producer WorkRunState, not the work item's open lifecycle. A live run
+    // may prove absence, but cannot hide a still-Bound event as terminal.
+    for state in ["open", "claimed", "active", "completed", "cancelled"] {
+        let mut proof = base.clone();
+        proof["run"]["state"] = json!(state);
+        assert!(valid(proof.clone()), "{state}: no-event absence");
+        proof["latest_event"] = event.clone();
+        assert_eq!(
+            valid(proof.clone()),
+            matches!(state, "completed" | "cancelled"),
+            "{state}: absent projection with latest Bound"
+        );
+        proof["latest_event"]["kind"] = json!("ended");
+        assert!(valid(proof.clone()), "{state}: explicit Ended absence");
+        proof["latest_event"] = event.clone();
+        proof["named_root"] = json!({"state":"bound","workspace_id":"canonical-workspace",
+            "generation":1,"named_at":"2026-10-01T00:00:00Z"});
+        assert!(valid(proof.clone()), "{state}: matching Bound");
+        proof["named_root"] = json!({"state":"unbound_by_release",
+            "last_generation":1,"released_at_position":3});
+        assert!(valid(proof.clone()), "{state}: matching release");
+        proof["named_root"]["last_generation"] = json!(2);
+        assert!(!valid(proof), "{state}: contradictory release");
+    }
+    for state in ["", "ready", "future_run_state", "Claimed"] {
+        let mut proof = base.clone();
+        proof["run"]["state"] = json!(state);
+        assert!(!valid(proof), "unknown run state {state:?}");
+    }
+    for (path, replacement) in [
+        (vec!["project_id"], json!("other-project")),
+        (vec!["work_id"], json!("other-work")),
+        (vec!["run_id"], json!("other-run")),
+        (vec!["claim_id"], json!("other-claim")),
+        (vec!["root_execution_id"], json!("other-execution")),
+        (vec!["run", "generation"], json!(0)),
+        (vec!["read_cut", "feed", "id"], json!("other-run")),
+        (vec!["read_cut", "feed", "kind"], json!("other-feed")),
+        (vec!["read_cut", "position"], json!(-1)),
+    ] {
+        let mut proof = base.clone();
+        let mut target = &mut proof;
+        for field in &path {
+            target = &mut target[*field];
+        }
+        *target = replacement;
+        assert!(!valid(proof), "contradictory association {path:?}");
+    }
+    for (path, replacement) in [
+        (vec!["position", "position"], json!(5)),
+        (vec!["position", "feed", "id"], json!("other-run")),
+        (vec!["generation"], json!(0)),
+        (vec!["event"], json!("")),
+        (vec!["workspace_id"], json!("")),
+        (vec!["named_at"], json!("invalid")),
+    ] {
+        let mut proof = base.clone();
+        proof["latest_event"] = event.clone();
+        proof["latest_event"]["kind"] = json!("ended");
+        let mut target = &mut proof["latest_event"];
+        for field in &path {
+            target = &mut target[*field];
+        }
+        *target = replacement;
+        assert!(!valid(proof), "malformed event {path:?}");
+    }
+}
+
 fn authority_review_first_contact(case: &str) {
     let label = "authority-first-contact";
     let claimed = ClaimedRoot::new(label, Vec::new());
@@ -1310,7 +1410,12 @@ fn authority_review_first_contact(case: &str) {
     if case == "completed" {
         proof["run"]["state"] = json!("completed");
         proof["latest_event"]["kind"] = json!("bound");
-    } else if case == "no-event" {
+    } else if case.ends_with("no-event") {
+        proof["run"]["state"] = json!(match case {
+            "claimed-no-event" => "claimed",
+            "active-no-event" => "active",
+            _ => "open",
+        });
         proof["latest_event"] = Value::Null;
         proof["read_cut"]["position"] = json!(0);
     }
@@ -1348,7 +1453,7 @@ fn authority_review_first_contact(case: &str) {
     assert_eq!(inner.engram_work_naming_history[0].proofs[0].read, decoded);
     assert_eq!(
         inner.engram_work_naming_history[0].frontier.is_none(),
-        case == "no-event"
+        case.ends_with("no-event")
     );
     drop(inner);
     let restored = load_state(claimed.state.persistence_path.as_path())
