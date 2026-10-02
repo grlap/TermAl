@@ -320,7 +320,10 @@ export function useAppLiveState(
   );
   const hydrationRestartResyncPendingRef = useRef(false);
   const hydrationAfterStateResyncSessionIdsRef = useRef(new Set<string>());
-  const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
+  const hydrationRetryTimersRef = useRef<Map<string, {
+    timerId: number;
+    masterRetryOwed: boolean;
+  }>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const hydrationCappedRetryAttemptsRef = useRef<Map<string, number>>(
     new Map(),
@@ -407,9 +410,9 @@ export function useAppLiveState(
   }
 
   function clearHydrationRetry(sessionId: string) {
-    const timerId = hydrationRetryTimersRef.current.get(sessionId);
-    if (timerId !== undefined) {
-      window.clearTimeout(timerId);
+    const retry = hydrationRetryTimersRef.current.get(sessionId);
+    if (retry !== undefined) {
+      window.clearTimeout(retry.timerId);
       hydrationRetryTimersRef.current.delete(sessionId);
     }
     hydrationRetryAttemptsRef.current.delete(sessionId);
@@ -422,8 +425,8 @@ export function useAppLiveState(
   }
 
   function cancelHydrationRetries() {
-    for (const timerId of hydrationRetryTimersRef.current.values()) {
-      window.clearTimeout(timerId);
+    for (const retry of hydrationRetryTimersRef.current.values()) {
+      window.clearTimeout(retry.timerId);
     }
     hydrationRetryTimersRef.current.clear();
     hydrationRetryAttemptsRef.current.clear();
@@ -500,13 +503,18 @@ export function useAppLiveState(
     sessionId: string,
     options: { capAttempts?: boolean; ownerTailRead?: boolean } = {},
   ) {
-    if (
-      !isMountedRef.current ||
-      hydrationRetryTimersRef.current.has(sessionId) ||
-      !(options.ownerTailRead === true
-        ? params.sessionAuthority.needsTailRead(sessionId, visibleHydrationSessionIdsRef.current.has(sessionId))
-        : sessionStillNeedsHydration(sessionId))
-    ) {
+    if (!isMountedRef.current) return;
+    const masterRetryOwed = options.ownerTailRead !== true && sessionStillNeedsHydration(sessionId);
+    const pending = hydrationRetryTimersRef.current.get(sessionId);
+    if (pending) {
+      // Coalesce the request without losing master's distinct restart action
+      // or charging an attempt for a second request absorbed by this timer.
+      if (masterRetryOwed) pending.masterRetryOwed = true;
+      return;
+    }
+    if (!(options.ownerTailRead === true
+      ? params.sessionAuthority.needsTailRead(sessionId, visibleHydrationSessionIdsRef.current.has(sessionId))
+      : masterRetryOwed)) {
       return;
     }
 
@@ -524,17 +532,18 @@ export function useAppLiveState(
         Math.min(attempt, SESSION_HYDRATION_MAX_RETRY_ATTEMPTS - 1)
       ];
     hydrationRetryAttemptsRef.current.set(sessionId, attempt + 1);
-    const timerId = window.setTimeout(() => {
+    const retry = { timerId: 0, masterRetryOwed };
+    retry.timerId = window.setTimeout(() => {
       hydrationRetryTimersRef.current.delete(sessionId);
       if (!isMountedRef.current) {
         return;
       }
-      if (options.ownerTailRead !== true && sessionStillNeedsHydration(sessionId)) {
+      if (retry.masterRetryOwed && sessionStillNeedsHydration(sessionId)) {
         startSessionHydration(sessionId);
       }
       requestSessionTailRead(sessionId);
     }, delayMs);
-    hydrationRetryTimersRef.current.set(sessionId, timerId);
+    hydrationRetryTimersRef.current.set(sessionId, retry);
   }
 
   useEffect(() => {

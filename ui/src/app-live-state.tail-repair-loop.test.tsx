@@ -12,6 +12,7 @@ import { ApiRequestError } from "./api-request";
 import { useAppLiveState } from "./app-live-state";
 import { withLiveSessionAuthority, type TestLiveStateParams } from "./session-publication-test-fixtures";
 import { SESSION_HYDRATION_RETRY_DELAYS_MS } from "./app-live-state-hydration";
+import * as hydration from "./app-live-state-hydration";
 import { requestSessionHistoryPage, requestSessionHistoryOlderPage, requestSessionHistoryStartPage } from "./session-history-demand";
 import * as transport from "./app-live-state-transport";
 import type { UseAppLiveStateParams } from "./app-live-state-types";
@@ -320,6 +321,72 @@ async function startRejectedOwnerRead(h: Awaited<ReturnType<typeof pairedRetryFi
 }
 
 describe("owner retry initiation witnesses", () => {
+  it.each(["standing", "closed", "loaded"] as const)(
+    "shared retry slot keeps the master action when owner demand becomes %s", async (demand) => {
+      const h = await pairedRetryFixture(false);
+      // An earlier action's metadata already carries the upcoming summary's
+      // stamp, but is not a body certificate. This keeps the separate master
+      // unseen-stamp partial hydration from taking the owner's first flight.
+      act(() => h.params.sessionAuthority.commit([{ ...h.current(),
+        sessionMutationStamp: 102 }], "metadata"));
+      await startRejectedOwnerRead(h);
+      expect(h.current().messagesLoaded).toBe(false);
+
+      // Older-prefetch is a real master origin. The owner repair cleared the
+      // tail-loaded flag, so this prefetch first needs the missing tail.
+      act(() => requestSessionHistoryPage(SESSION_ID));
+      await flush();
+      h.expectTailCount(3);
+      expect(h.tailRequests[2].stack).not.toContain("requestSessionTailRead");
+      expect(h.historyRequests).toHaveLength(0);
+      await act(async () => h.tailRequests[2].reject(new Error("Master prefetch unavailable")));
+      expect(h.params.reportRequestError).toHaveBeenCalledTimes(2);
+
+      if (demand !== "standing") {
+        h.emit("delta", { ...textDelta(102, 1), sessionSeq: 1, bodySeqEpoch: INSTANCE });
+        expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+      }
+      if (demand === "loaded") {
+        // A complete ordinary history extension can finish loading without
+        // clearing the pending hook timer or changing the retained tail.
+        const resident = h.current();
+        const prefix = Array.from({ length: TOTAL - resident.messages.length }, (_, index) =>
+          message(`Loaded ${index}`, `loaded-${index}`));
+        act(() => h.params.sessionAuthority.commit([{ ...resident,
+          messages: [...prefix, ...resident.messages], messagesLoaded: true,
+          messageStartIndex: 0, hasOlderHistory: false }], "history"));
+        expect(h.current().messagesLoaded).toBe(true);
+        expect(h.params.sessionAuthority.needsTailRead(SESSION_ID, true)).toBe(false);
+      }
+      await flush(SESSION_HYDRATION_RETRY_DELAYS_MS[0] - 1);
+      h.expectTailCount(3);
+      const gate = vi.spyOn(hydration, "shouldRequestSessionTailRead");
+      await flush(1);
+      expect(gate).toHaveBeenCalledTimes(1);
+      h.expectTailCount(demand === "loaded" ? 3 : 4);
+      if (demand !== "loaded") {
+        // The first timer action must be master/optionless, not an owner read.
+        expect(h.tailRequests[3].stack).not.toContain("requestSessionTailRead");
+        expect(gate.mock.calls[0][0].inFlight).toBe(true);
+      } else {
+        expect(gate.mock.calls[0][0].inFlight).toBe(false);
+      }
+      expect(gate.mock.results[0].value).toBe(false);
+      expect(h.historyRequests).toHaveLength(0);
+      if (demand === "standing") {
+        // The absorbed master retry did not charge a second attempt: after
+        // this real restart fails, the next delay is still attempt two.
+        await act(async () => h.tailRequests[3].reject(new Error("Master restart unavailable")));
+        expect(h.params.reportRequestError).toHaveBeenCalledTimes(3);
+        await flush(SESSION_HYDRATION_RETRY_DELAYS_MS[1] - 1);
+        h.expectTailCount(4);
+        await flush(1);
+        h.expectTailCount(5);
+        expect(h.tailRequests[4].stack).not.toContain("requestSessionTailRead");
+      }
+    },
+  );
+
   it("W5c: keeps base retry after five stale excluded forced repairs", async () => {
     const h = setup();
     await h.visible(true);
