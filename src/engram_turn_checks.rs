@@ -165,6 +165,11 @@ struct EngramCapture<T> {
     /// The captured value once the capture finished; unset while it runs.
     result: Mutex<Option<T>>,
     ready: std::sync::Condvar,
+    /// When it finished, on the interference clock
+    /// (`engram_claude_interference.rs`), set under `result`'s lock with the
+    /// value, so whoever sees the value sees the instant too. It is taken
+    /// from the clock alone, never under the state lock.
+    ready_tick: std::sync::atomic::AtomicU64,
 }
 
 /// A content-revision source basis, or `None` when it could not be taken.
@@ -251,6 +256,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
         let pending = Arc::new(Self {
             result: Mutex::new(None),
             ready: std::sync::Condvar::new(),
+            ready_tick: std::sync::atomic::AtomicU64::new(0),
         });
         let filling = pending.clone();
         let worker = EngramCaptureWorker::start(workers);
@@ -267,14 +273,30 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
         let settled = Arc::new(Self {
             result: Mutex::new(None),
             ready: std::sync::Condvar::new(),
+            ready_tick: std::sync::atomic::AtomicU64::new(0),
         });
         settled.finish(value);
         settled
     }
 
     fn finish(&self, value: T) {
-        *self.result.lock().expect("Engram capture mutex poisoned") = Some(value);
+        let mut result = self.result.lock().expect("Engram capture mutex poisoned");
+        self.ready_tick.store(
+            engram_interference_tick(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        *result = Some(value);
+        drop(result);
         self.ready.notify_all();
+    }
+
+    /// When the capture finished, on the interference clock; `None` while it
+    /// runs.
+    fn ready_tick(&self) -> Option<u64> {
+        let result = self.result.lock().expect("Engram capture mutex poisoned");
+        result
+            .is_some()
+            .then(|| self.ready_tick.load(std::sync::atomic::Ordering::SeqCst))
     }
 
     /// Whether the capture has finished, with or without a value.
@@ -343,9 +365,9 @@ struct EngramTurnCheck {
     /// have tested that change.
     watcher_fence: Option<String>,
     end: Option<EngramTurnCheckEnd>,
-    /// When its end was recorded on the interference clock
-    /// (`engram_claude_interference.rs`): work registered later cannot have
-    /// written under it once it is closed to writes.
+    /// When its command's end was recorded on the interference clock
+    /// (`engram_claude_interference.rs`). Its evidence interval closes only
+    /// once its snapshots are taken as well (`interference_end`).
     ended_at: Option<u64>,
 }
 
@@ -905,6 +927,23 @@ fn engram_mark_open_checks_in_worktrees(
 }
 
 impl EngramTurnCheck {
+    /// When the check's evidence interval closed, on the interference clock:
+    /// the latest of its command's end and the completion of its start and
+    /// end snapshots, since a write before any of them may be in what it
+    /// recorded. `None` while it is open to writes or any of those instants is
+    /// unknown, which counts as still open.
+    fn interference_end(&self) -> Option<u64> {
+        if self.open_to_writes() {
+            return None;
+        }
+        let end = self.end.as_ref()?;
+        Some(
+            self.ended_at?
+                .max(self.start_basis.ready_tick()?)
+                .max(end.end_basis.ready_tick()?),
+        )
+    }
+
     /// Whether a write now could still reach what the check's snapshots see:
     /// the check is running, or one of its snapshots is still being taken.
     fn open_to_writes(&self) -> bool {

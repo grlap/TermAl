@@ -108,9 +108,35 @@ struct EngramCarriedCheck {
     /// such a check is refused and its holder told.
     fence: Option<String>,
     /// When the host first read its run as terminal, on the interference
-    /// clock (`engram_claude_interference.rs`): Claude work registered later
-    /// cannot have written under the run.
+    /// clock (`engram_claude_interference.rs`).
     terminal_at: Option<u64>,
+    /// The end snapshot its latest settlement took, shared by every copy of
+    /// this record (`engram_settle_carried_check` fills it off the lock), so
+    /// the interference rule sees when that snapshot closed. A retried
+    /// settlement replaces it and so extends the interval.
+    settlement_end: Arc<Mutex<Option<Arc<EngramBasisCapture>>>>,
+}
+
+impl EngramCarriedCheck {
+    /// When the run's evidence interval closed, on the interference clock:
+    /// the latest of its terminal read, the completion of its launch
+    /// snapshot and the completion of its latest settlement snapshot. `None`
+    /// until all three are known, which counts as still open. Under the
+    /// state lock, this takes the slot's lock and then the capture's, and
+    /// neither of those is held while taking the state lock.
+    fn interference_end(&self) -> Option<u64> {
+        self.terminal_digest.as_ref()?;
+        let settlement = self
+            .settlement_end
+            .lock()
+            .expect("carried settlement mutex poisoned")
+            .clone()?;
+        Some(
+            self.terminal_at?
+                .max(self.check.start_basis.ready_tick()?)
+                .max(settlement.ready_tick()?),
+        )
+    }
 }
 
 /// What survives a host restart of a carried check: enough to tell its
@@ -965,6 +991,12 @@ fn engram_settle_carried_check(
         _ => EngramRootCapture::Unconfirmed,
     };
     let end_basis = engram_spawn_basis_capture(carried.check.target.basis_place(), workers, provenance);
+    // The interference rule closes the run's interval only once this
+    // snapshot is taken too (`EngramCarriedCheck::interference_end`).
+    *carried
+        .settlement_end
+        .lock()
+        .expect("carried settlement mutex poisoned") = Some(end_basis.clone());
     let finish = match end_basis.wait_until(deadline) {
         Some(Some(finish)) => finish,
         Some(None) => {
@@ -1134,6 +1166,7 @@ fn engram_carry_check(record: &mut SessionRecord, launched: EngramTurnCheck) -> 
         ruled_out_runs: std::collections::BTreeSet::new(),
         fence,
         terminal_at: None,
+        settlement_end: Arc::new(Mutex::new(None)),
     };
     let mut told = None;
     if engram.carried_checks.len() >= ENGRAM_CARRIED_CHECK_LIMIT {

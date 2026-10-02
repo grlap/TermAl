@@ -72,7 +72,10 @@ struct EngramInterferenceSubject<'a> {
     key: &'a str,
     /// The path key of the worktree it tested.
     root: String,
-    /// When it closed to writes; `None` while it may still be reached.
+    /// When its evidence interval closed: after its command or run ended and
+    /// every snapshot it records was taken (`EngramTurnCheck::interference_end`,
+    /// `EngramCarriedCheck::interference_end`); `None` while it may still be
+    /// reached.
     ended_at: Option<u64>,
     /// Its command is a recognised simple full gate.
     simple_full_gate: bool,
@@ -236,11 +239,7 @@ fn engram_apply_claude_hazards(
                 session: index,
                 key: &check.key,
                 root: engram_path_key(&check.target.root),
-                ended_at: if check.open_to_writes() {
-                    None
-                } else {
-                    check.ended_at
-                },
+                ended_at: check.interference_end(),
                 simple_full_gate: engram_is_simple_full_launcher(&check.command),
             };
             if let Some(cause) = engram_claude_interference_cause(hazards, &subject) {
@@ -256,10 +255,7 @@ fn engram_apply_claude_hazards(
                 session: index,
                 key: &carried.check.key,
                 root: engram_path_key(&carried.check.target.root),
-                ended_at: carried
-                    .terminal_digest
-                    .as_ref()
-                    .and(carried.terminal_at),
+                ended_at: carried.interference_end(),
                 simple_full_gate: engram_is_simple_full_launcher(&carried.check.command),
             };
             if let Some(cause) = engram_claude_interference_cause(hazards, &subject) {

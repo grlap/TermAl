@@ -632,6 +632,30 @@ The ownership rules come from live stream-json captures (Claude Code
   outstanding: only evidence is withheld. A host restart forgets this
   process-local record; that is a limitation, not a reset. Recovering from
   orphaned work is separate work.
+- **One interference rule.** Whether outstanding work fences a record or
+  mixes a grant is decided in one place (`src/engram_claude_interference.rs`),
+  from the same retained facts, under the state lock. Work interferes with a
+  check or a carried run when it was registered no later than the record's
+  evidence interval closed, and, for another session's or a deleted
+  session's work, may write where the record ran. The session's own
+  restricting work counts in any workspace. A check's interval closes only
+  after its command ended and both its snapshots were taken. A carried run's
+  interval closes only after its terminal read, its launch snapshot and the
+  end snapshot of the settlement that credits it; a retried settlement
+  extends it. So a place found later for work registered earlier reaches a
+  record it may have overlapped, while work that started only after every
+  snapshot closed leaves it eligible. The only exception is the exact call
+  of a recognised simple full gate, which does not fence the record of the
+  run it launched itself and fences everything else. The rule runs both
+  ways: work registered, moved to the background, placed further or orphaned
+  is applied to every unpublished record and to the session's live grant. A
+  check that starts, ends or is carried, and a checkpoint's publication, are
+  reconciled with every retained hazard. That last step also catches work
+  that became a hazard with no event of its own, such as a command whose turn
+  or runtime is gone. Outstanding work a replaced runtime left that overlaps
+  the session's live grant marks that grant mixed. A late duplicate of work
+  already proven complete does not. Fences stay; the restriction an agent is
+  told lifts when the work ends.
 - **Saying why.** When a restriction takes effect, the session gets a
   transcript notice, and the agent the same line before its next prompt. The
   notice says what is outstanding, and that some of it may belong to a

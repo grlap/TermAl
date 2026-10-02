@@ -3521,42 +3521,162 @@ fn a_newly_found_place_of_outstanding_work_reaches_a_finished_check_only_from_it
 }
 
 #[test]
-fn a_newly_found_place_reaches_a_carried_run_read_as_terminal_only_from_its_registration() {
-    for (label, registered_first) in [
+fn a_newly_found_place_reaches_a_carried_run_until_its_settlement_snapshot_closes() {
+    // A carried run's evidence ends only once its settlement snapshot is
+    // taken: work registered before the terminal read, or after it but before
+    // settlement, may have written into what the settlement records.
+    for (label, registered_before_terminal) in [
         ("carried-late-place-before-end", true),
-        ("carried-late-place-after-end", false),
+        ("carried-late-place-before-settlement", false),
     ] {
         let (turn, worktree) = named_turn(label);
         launch_gate(&turn, &worktree, false);
         let (other, stopped) = other_claude_session_elsewhere(&turn, label);
-        if registered_first {
+        if registered_before_terminal {
             admit_background_call(&turn, &other, &stopped, "writer", "Bash");
         }
         let start_basis =
             turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
         start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
-        let run = finish_run(&worktree, "passed", &"f".repeat(64));
+        finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
         assert!(
             turn.record(|record| record.engram.carried_checks[0].terminal_digest.is_some()),
             "{label}: read as terminal"
         );
-        if !registered_first {
+        if !registered_before_terminal {
             admit_background_call(&turn, &other, &stopped, "writer", "Bash");
         }
         assert_eq!(carried_fence(&turn), None, "{label}: elsewhere");
         place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
-        assert_eq!(
+        assert!(
             carried_fence(&turn).is_some(),
-            registered_first,
-            "{label}: only work that may have run with the run reaches it"
+            "{label}: work that may have run before the settlement snapshot reaches it"
         );
         let checkpoint = turn.finish();
-        if registered_first {
-            assert_refused(&turn, &checkpoint, &other);
+        assert_refused(&turn, &checkpoint, &other);
+    }
+}
+
+#[test]
+fn work_registered_after_every_settlement_capture_closed_leaves_the_carried_run_credited() {
+    // The settlement snapshot is taken and closed off the lock; work that
+    // starts only after it, while the checkpoint is between its settlement and
+    // its publication, cannot be in what the run recorded.
+    let label = "carried-after-settlement";
+    let (turn, worktree) = named_turn(label);
+    launch_gate(&turn, &worktree, false);
+    let (other, stopped) = other_claude_session_elsewhere(&turn, label);
+    let start_basis =
+        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let runtime_token = turn.record(|record| {
+        record
+            .runtime
+            .runtime_token()
+            .expect("the begun turn should own the runtime")
+    });
+    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+    let finishing = {
+        let state = turn.state.clone();
+        let session_id = turn.session_id.clone();
+        std::thread::spawn(move || {
+            state
+                .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
+                .expect("the turn should complete");
+        })
+    };
+    gate.wait_until_claimed();
+    let settlement = turn.record(|record| {
+        record.engram.carried_checks[0]
+            .settlement_end
+            .lock()
+            .expect("carried settlement mutex poisoned")
+            .clone()
+    });
+    assert!(
+        settlement.is_some_and(|capture| capture.is_ready()),
+        "the checkpoint settled the run before its publication"
+    );
+    admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+    place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
+    assert_eq!(
+        carried_fence(&turn),
+        None,
+        "it started after every capture closed"
+    );
+    gate.release();
+    finishing.join().expect("the checkpoint should not panic");
+    let checkpoint = turn
+        .transport
+        .requests()
+        .into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the turn is checkpointed")
+        .request;
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+}
+
+/// A finished check of `turn` in its worktree whose command ended now, with
+/// the given snapshots.
+fn check_with_captures(
+    turn: &CheckedTurn,
+    start_basis: Arc<EngramBasisCapture>,
+    end_basis: Arc<EngramBasisCapture>,
+) -> EngramTurnCheck {
+    EngramTurnCheck {
+        start_basis,
+        ended_at: Some(EngramHost::interference_tick()),
+        ..turn.finished_check(0, end_basis)
+    }
+}
+
+/// A snapshot already taken, with no basis.
+fn closed_capture() -> Arc<EngramBasisCapture> {
+    let capture = Arc::new(EngramBasisCapture::default());
+    capture.finish(None);
+    capture
+}
+
+#[test]
+fn work_registered_while_a_checks_snapshot_is_taken_reaches_it_when_found_there_later() {
+    // The end snapshot is still being taken, then the start snapshot finishes
+    // last: in both, the check's evidence interval runs until its last
+    // snapshot is taken, so work registered meanwhile, elsewhere, and found
+    // in the check's worktree only after that, is placed under it.
+    for (label, start_last) in [
+        ("end-snapshot-pending", false),
+        ("start-snapshot-last", true),
+    ] {
+        let (turn, _worktree) = named_turn(label);
+        let (other, stopped) = other_claude_session_elsewhere(&turn, label);
+        let pending = Arc::new(EngramBasisCapture::default());
+        let check = if start_last {
+            check_with_captures(&turn, pending.clone(), closed_capture())
         } else {
-            assert_credited(&turn, &checkpoint, &run, "succeeded");
-        }
+            check_with_captures(&turn, closed_capture(), pending.clone())
+        };
+        turn.record_mut(|record| record.engram.active_turn_checks = vec![check]);
+        admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+        pending.finish(None);
+        turn.record(|record| {
+            let check = &record.engram.active_turn_checks[0];
+            assert!(!check.open_to_writes(), "{label}: closed now");
+            assert_eq!(check.fenced_by_outstanding, None, "{label}: elsewhere");
+        });
+        place_other_work_in(&turn, &other, &stopped, "writer", &turn.root);
+        turn.record(|record| {
+            assert_eq!(
+                record.engram.active_turn_checks[0].fenced_by_outstanding,
+                Some(ClaudeHazardCause::OtherSession {
+                    session_id: other.clone(),
+                    name: "Test".to_owned(),
+                }),
+                "{label}"
+            );
+        });
     }
 }
 
