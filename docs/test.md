@@ -438,9 +438,15 @@ projects, which run in this order, one file at a time:
   `cpu-heavy` for measured duration, `wall-clock` for real-time waits);
 - `app`: a file that renders the whole App (explicit list).
 
-Every project still runs in jsdom, and each has its own `sequence.groupOrder`,
-starting at 1. Vitest 4 runs a one-worker, isolated project with groupOrder 0
-after every ordered group, so 0 would put it last.
+The `unit` project runs in a node environment, with no DOM. A unit file whose
+run reaches a DOM global node lacks, such as `document` or `window`, itself or
+through a module it imports, fails and belongs in the list of files that need
+the DOM. Two cases are not caught that way. Browser storage is one, because
+`ui/src/test-setup.ts` supplies in-memory `localStorage` and `sessionStorage`
+in every project. Code behind a `typeof window` or similar check is the other,
+because it takes its non-DOM branch. The other three projects run in jsdom. Each project has its own `sequence.groupOrder`, starting at 1.
+Vitest 4 runs a one-worker, isolated project with groupOrder 0 after every
+ordered group, so 0 would put it last.
 
 The guard `ui/src/test-categories.test.ts` checks the placement rules:
 
@@ -458,17 +464,22 @@ It also fails when any of these hold:
   own matcher;
 - a selection pattern is a glob other than the one component glob;
 - the group order is wrong;
+- a project's environment is not node for `unit` and jsdom for the others, by
+  the manifest, by a source check of `ui/vite.config.ts`, and by the guard's
+  own run, which is in `unit` and asserts that `document` and `window` are
+  undefined;
 - a unit file's own text contains one of these patterns: an import
   `from "@testing-library/…"`, `renderHook`, `render(`, `screen.`,
-  `document.`, `window.`, `localStorage` or `sessionStorage`.
+  `document.`, `window.`, `localStorage`, `sessionStorage`, or a
+  `@vitest-environment` comment, which would give that one file jsdom inside
+  the `unit` project.
 
 That last check is a static backstop with stated limits. It reads only the
 test file's own text, not the modules the test imports, and only those
-patterns. A unit file that reaches the DOM through a module it exercises, or
-through another DOM global, passes it. Every project still runs in jsdom, so a
-normal run would not catch such a file either. Only running the unit list in a
-node environment catches it, which is what moving the unit project to node, a
-later change, does.
+patterns. A unit file that reaches a DOM global through a module it exercises
+passes it; the `unit` project's node environment catches such a file instead,
+by failing its run, with the two exceptions above (browser storage and code
+behind a typeof check).
 
 ## Known Coverage Gaps
 

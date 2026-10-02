@@ -155,12 +155,15 @@ describe("UI test categories", () => {
     ).toEqual([]);
   });
 
-  // A static backstop for the unit contract: a unit file needs no DOM. While
-  // every project still runs in jsdom, which would hide a misplaced file, it
-  // rejects the listed patterns in each unit file's own text. It does not
-  // read the modules a test imports, so a file that reaches the DOM through
-  // one passes here; only running the unit list in a node environment, the
-  // later move of that project, catches it.
+  // A static backstop for the unit contract: a unit file needs no DOM. It
+  // rejects the listed patterns in each unit file's own text, which names the
+  // cause before the file's own run does, and a per-file environment comment,
+  // which would give that one file jsdom inside the unit project. It does not
+  // read the modules a test imports. For those, the unit project's node
+  // environment fails a file whose run reaches a DOM global node lacks, such
+  // as document or window. Neither check catches browser storage reached
+  // through an import, since test-setup supplies in-memory storage in every
+  // project, nor code behind a typeof check that takes its non-DOM branch.
   it("keeps every unit file free of Testing Library, rendering and the DOM globals", () => {
     const needsTheDom: Record<string, RegExp> = {
       "a Testing Library import": /from\s+["']@testing-library\//u,
@@ -170,6 +173,7 @@ describe("UI test categories", () => {
       "document.": /\bdocument\./u,
       "window.": /\bwindow\./u,
       "browser storage": /\b(?:localStorage|sessionStorage)\b/u,
+      "a per-file environment comment": /@vitest-environment\b/u,
     };
     // This guard is a unit file too. It reads files only through node:fs, but
     // its own patterns spell the words they look for, so it is not scanned.
@@ -210,6 +214,21 @@ describe("UI test categories", () => {
       expect(new Set(tags).size, file).toBe(tags.length);
       expect(reason.trim(), file).not.toBe("");
     }
+  });
+
+  // The unit project has no DOM, so a unit file whose run reaches a DOM
+  // global node lacks, even through a module it imports, fails. Every other
+  // project keeps jsdom.
+  it("runs the unit project in node and every other project in jsdom", () => {
+    expect(
+      Object.fromEntries(CATEGORY_PROJECTS.map(({ name, environment }) => [name, environment])),
+    ).toEqual({ unit: "node", component: "jsdom", heavy: "jsdom", app: "jsdom" });
+    expect(source("vite.config.ts")).toMatch(/environment,/u);
+    // This guard is itself a unit file, so its own run shows the environment
+    // Vitest applied after merging the root and project configs, which the
+    // source check above cannot.
+    expect(typeof document).toBe("undefined");
+    expect(typeof window).toBe("undefined");
   });
 
   it("runs unit, component, heavy and app in that order, each in its own group", () => {

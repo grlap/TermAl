@@ -4,20 +4,20 @@ guard (src/test-categories.test.ts) both read.
 
 Owns: which category each UI test file belongs to, the resource tags of the
 heavy files, and the four Vitest projects built from them (unit, component,
-heavy, app, run in that order, one file at a time).
+heavy, app, run in that order, one file at a time), with the test
+environment of each: node for unit, jsdom for the others.
   - app: renders the whole App (explicit list).
   - heavy: a component file with a test at or above 2 s in measured runs,
     with real-time sensitivity, or that exercises the virtualizer and
     measurement lifecycle (explicit list, with tags).
-  - unit: a *.test.ts file that needs no DOM (explicit list).
+  - unit: a *.test.ts file that needs no DOM (explicit list), run without one.
   - component: every other *.test.tsx, plus the *.test.ts files listed as
     needing the DOM.
 Every *.test.ts is in exactly one of the unit, DOM and app lists, so a new one
 is placed on purpose; the guard fails until it is.
 Does not own: selecting a category for a review round or a gate (the
-launcher does not do that yet; it is a later change there, not here), the
-per-test duration report (scripts/test-durations.mjs), or the test
-environment, which is still jsdom for every project.
+launcher does not do that yet; it is a later change there, not here), or the
+per-test duration report (scripts/test-durations.mjs).
 New file; the two projects it replaces were inline in vite.config.ts.
 */
 
@@ -107,13 +107,13 @@ export const HEAVY_TEST_FILES: readonly HeavyTestFile[] = [
   },
 ];
 
-// Files that need no DOM. Every project still runs in jsdom, so a normal run
-// cannot catch a misplaced file. The guard's static check reads only each
-// test file's own text: it rejects a unit file that imports Testing Library,
-// renders, or uses the DOM globals itself, but not one that reaches the DOM
-// through a module it imports. Only running the list in a node environment
-// catches that, which is what moving this project to node, a later change,
-// does; a file that fails there moves to the list below.
+// Files that need no DOM. The unit project runs them in a node environment,
+// so a file whose run reaches a DOM global node lacks, such as document or
+// window, itself or through a module it imports, fails; such a file belongs
+// in the list below. Browser storage is not caught that way, since
+// test-setup supplies in-memory storage in every project, and neither is code
+// behind a typeof check. The guard's static check is a quicker backstop that
+// reads only each test file's own text for its listed patterns.
 export const UNIT_TEST_FILES: readonly string[] = [
   "src/SessionPaneView.active-tab.test.ts",
   "src/SessionPaneView.content-transition.test.ts",
@@ -268,20 +268,29 @@ export type CategoryProject = {
   // isolation into a group of its own that runs after every ordered group,
   // so a 0 here would run that project last.
   readonly groupOrder: number;
+  // node has no DOM, which is the unit contract; jsdom supplies one.
+  readonly environment: "node" | "jsdom";
 };
 
 const heavyFiles = HEAVY_TEST_FILES.map(({ file }) => file);
 
 export const CATEGORY_PROJECTS: readonly CategoryProject[] = [
-  { name: "unit", include: UNIT_TEST_FILES, exclude: [], groupOrder: 1 },
+  {
+    name: "unit",
+    include: UNIT_TEST_FILES,
+    exclude: [],
+    groupOrder: 1,
+    environment: "node",
+  },
   {
     name: "component",
     include: [COMPONENT_TSX_GLOB, ...DOM_TS_TEST_FILES],
     exclude: [...APP_TEST_FILES, ...heavyFiles],
     groupOrder: 2,
+    environment: "jsdom",
   },
-  { name: "heavy", include: heavyFiles, exclude: [], groupOrder: 3 },
-  { name: "app", include: APP_TEST_FILES, exclude: [], groupOrder: 4 },
+  { name: "heavy", include: heavyFiles, exclude: [], groupOrder: 3, environment: "jsdom" },
+  { name: "app", include: APP_TEST_FILES, exclude: [], groupOrder: 4, environment: "jsdom" },
 ];
 
 function matchesSelection(pattern: string, file: string): boolean {

@@ -128,19 +128,21 @@ export default defineConfig({
     setupFiles: "./src/test-setup.ts",
     testTimeout: 10_000,
     // Four projects from ui/test-categories.ts: unit, component, heavy and
-    // app, every one on jsdom. One worker keeps the stage to one file at a
+    // app. Each sets its own environment: unit runs in node, with no DOM,
+    // and the others in jsdom. One worker keeps the stage to one file at a
     // time; each project's own groupOrder sets the order between them. The
     // heavy and app files either render the full App or exercise the
     // scheduler-sensitive SessionPaneView and virtualizer lifecycle, so they
     // must not share the runner with other files: oversubscribing the
     // lifecycle under test, or abandoning an open `act()` scope, would make
     // them fail for reasons that are not theirs.
-    projects: CATEGORY_PROJECTS.map(({ name, include, exclude, groupOrder }) => ({
+    projects: CATEGORY_PROJECTS.map(({ name, include, exclude, groupOrder, environment }) => ({
       extends: true,
       test: {
         name,
         include: [...include],
         exclude: [...configDefaults.exclude, ...exclude],
+        environment,
         maxWorkers: 1,
         sequence: {
           groupOrder,
