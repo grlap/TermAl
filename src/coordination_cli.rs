@@ -629,7 +629,36 @@ fn validate_coordination_cli_output(
             {
                 return Err(unusable("`mailboxId` is missing".to_owned()));
             }
-            serde_json::from_value::<MailboxReadResponse>(output.clone())
+            // The bridge omits the body of the reader's own sends and marks
+            // them `bodyOmitted: true`, as the MCP read tool does. Such a
+            // message is checked against the wire type with a stand-in body,
+            // so every other field is still required; the stand-in never
+            // reaches the printed output.
+            let mut checked = output.clone();
+            if let Some(messages) = checked.get_mut("messages").and_then(Value::as_array_mut) {
+                for (index, message) in messages.iter_mut().enumerate() {
+                    let Some(object) = message.as_object_mut() else {
+                        continue;
+                    };
+                    match object.remove("bodyOmitted") {
+                        None => {}
+                        Some(Value::Bool(true)) => {
+                            if object.contains_key("body") {
+                                return Err(unusable(format!(
+                                    "messages[{index}] has a body but says bodyOmitted"
+                                )));
+                            }
+                            object.insert("body".to_owned(), Value::String(String::new()));
+                        }
+                        Some(_) => {
+                            return Err(unusable(format!(
+                                "messages[{index}].bodyOmitted is not true"
+                            )));
+                        }
+                    }
+                }
+            }
+            serde_json::from_value::<MailboxReadResponse>(checked)
                 .map(|_| ())
                 .map_err(|err| unusable(format!("mailbox read: {err}")))
         }
@@ -805,6 +834,12 @@ fn coordination_cli_field(value: &Value, key: &str) -> String {
 /// Block rendering of a message body: line structure is kept, every other
 /// control character becomes U+FFFD.
 fn coordination_cli_body(message: &Value) -> String {
+    if message.get("bodyOmitted") == Some(&Value::Bool(true)) {
+        return format!(
+            "(body omitted: your own message; read it with `termal mailbox read-message --message-id {}`)",
+            coordination_cli_field(message, "id")
+        );
+    }
     match message.get("body") {
         Some(Value::String(text)) => sanitize_coordination_cli_text(text, true),
         _ => "-".to_owned(),

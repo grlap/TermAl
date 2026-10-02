@@ -1344,6 +1344,124 @@ fn coordination_cli_rejects_malformed_successful_responses() {
     }
 }
 
+fn mailbox_page_message(sequence: u64, sender: &str, sender_name: &str) -> Value {
+    json!({
+        "id": format!("mailbox-message-{sequence}"),
+        "mailboxId": "mailbox-1",
+        "sequence": sequence,
+        "senderSessionId": sender,
+        "senderName": sender_name,
+        "targetSessionId": if sender == "session-root" { "session-peer" } else { "session-root" },
+        "targetName": "Termal::Peer",
+        "createdAt": "2026-09-03T00:00:00Z",
+        "class": "routine",
+        "body": format!("body of #{sequence}"),
+        "notificationState": "deliveredToIdleSession"
+    })
+}
+
+// The bridge omits the body of the reader's own sends (`bodyOmitted: true`),
+// as the MCP read tool does. A page holding one used to be rejected with
+// "missing field body", so the CLI could not read or acknowledge past its
+// own reply.
+#[test]
+fn mailbox_read_cli_accepts_a_page_holding_the_readers_own_send() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(2, |request| {
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/api/state") => (200, root_inventory_state()),
+            ("POST", "/api/sessions/session-root/mailboxes/mailbox-1/read") => (
+                200,
+                json!({ "afterSequence": 7, "processedThrough": 7, "receipt": "page-token",
+                    "messages": [
+                        mailbox_page_message(8, "session-peer", "Termal::Codex"),
+                        mailbox_page_message(9, "session-root", "Termal::Fable"),
+                    ] }),
+            ),
+            _ => (
+                404,
+                json!({ "error": format!("unexpected {} {}", request.method, request.path) }),
+            ),
+        }
+    });
+    let command = CoordinationCliCommand::MailboxRead {
+        as_session: "session-root".to_owned(),
+        mailbox_id: "mailbox-1".to_owned(),
+        after_sequence: None,
+        limit: None,
+    };
+    let read = execute_coordination_cli(&command, &base_url).expect("the read itself succeeds");
+    server.join().expect("test server should join");
+    // The CLI validates every output before writing it, as `run` does.
+    validate_coordination_cli_output(&command, &read)
+        .expect("a page holding the reader's own send must be usable");
+
+    // --json prints exactly this value.
+    assert_eq!(read["messages"][0]["body"], "body of #8");
+    assert!(read["messages"][0].get("bodyOmitted").is_none());
+    assert!(read["messages"][1].get("body").is_none());
+    assert_eq!(read["messages"][1]["bodyOmitted"], true);
+    assert_eq!(read["receipt"], "page-token");
+
+    let mut rendered = Vec::new();
+    render_coordination_cli_output(&command, &read, &mut rendered).unwrap();
+    let rendered = String::from_utf8(rendered).unwrap();
+    assert!(rendered.contains("body of #8"), "{rendered}");
+    assert!(
+        rendered.contains("body omitted: your own message")
+            && rendered.contains("termal mailbox read-message --message-id mailbox-message-9"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn mailbox_read_cli_still_rejects_a_contradictory_body_omission() {
+    let command = CoordinationCliCommand::MailboxRead {
+        as_session: "session-root".to_owned(),
+        mailbox_id: "mailbox-1".to_owned(),
+        after_sequence: None,
+        limit: None,
+    };
+    let page = |message: Value| {
+        json!({ "mailboxId": "mailbox-1", "afterSequence": 7, "processedThrough": 7,
+            "messages": [message] })
+    };
+
+    let mut both = mailbox_page_message(9, "session-root", "Termal::Fable");
+    both["bodyOmitted"] = json!(true);
+    let error = validate_coordination_cli_output(&command, &page(both))
+        .expect_err("a message cannot carry a body and also say it is omitted");
+    assert!(error.to_string().contains("unusable response"), "{error}");
+    assert!(error.to_string().contains("messages[0]"), "{error}");
+
+    for not_true in [json!(false), json!("true"), json!(1), Value::Null] {
+        let mut message = mailbox_page_message(9, "session-root", "Termal::Fable");
+        message.as_object_mut().unwrap().remove("body");
+        message["bodyOmitted"] = not_true.clone();
+        let error = validate_coordination_cli_output(&command, &page(message))
+            .expect_err("bodyOmitted must be exactly true");
+        assert!(
+            error.to_string().contains("bodyOmitted"),
+            "{not_true}: {error}"
+        );
+    }
+
+    // An omitted body still leaves every other field checked by the wire type.
+    let mut missing_sequence = mailbox_page_message(9, "session-root", "Termal::Fable");
+    missing_sequence.as_object_mut().unwrap().remove("body");
+    missing_sequence.as_object_mut().unwrap().remove("sequence");
+    missing_sequence["bodyOmitted"] = json!(true);
+    let error = validate_coordination_cli_output(&command, &page(missing_sequence))
+        .expect_err("an omitted body does not excuse a missing sequence");
+    assert!(error.to_string().contains("sequence"), "{error}");
+
+    // A message with no body and no omission marker is still unusable.
+    let mut bodiless = mailbox_page_message(8, "session-peer", "Termal::Codex");
+    bodiless.as_object_mut().unwrap().remove("body");
+    let error = validate_coordination_cli_output(&command, &page(bodiless))
+        .expect_err("a body is required unless it is marked omitted");
+    assert!(error.to_string().contains("body"), "{error}");
+}
+
 #[test]
 fn coordination_cli_sanitizes_backend_diagnostics_but_keeps_usage_text() {
     let hostile = anyhow!("server said \u{1b}]0;pwned\u{7} and \u{9b}31m\nsecond line");

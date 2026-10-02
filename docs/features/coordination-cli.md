@@ -103,7 +103,10 @@ admits; other values are usage errors.
   rejection, read from the current cursor and process the earlier page first.
 - `mailbox read` defaults to the durable cursor; explicit `--after` reads
   strictly after that sequence. It returns at most `--limit` (default 50,
-  server-bounded), oldest first, including own sends. Save `receipt`;
+  server-bounded), oldest first, including own sends. An own send keeps its
+  header and id but carries `bodyOmitted: true` instead of `body`, as the MCP
+  read tool returns it; the text form says the body is omitted and names
+  `mailbox read-message --message-id <id>`. Save `receipt`;
   `hasMore` and `nextAfterSequence` describe pagination. Empty pages have
   no receipt. Reading records issuance but does not acknowledge. The bridge
   inserts `issueReceipt: true`; UI HTTP reads omit it and only preview.
