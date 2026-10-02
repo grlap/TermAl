@@ -975,6 +975,9 @@ fn engram_settle_carried_check(
     // (`install_test_engram_settlement_hold`).
     #[cfg(test)]
     let hold = test_engram_take_settlement_hold(&carried.check.target.root);
+    // Tells the test this settlement returned, whichever way it does.
+    #[cfg(test)]
+    let _settling = hold.as_ref().map(TestEngramSettlementHold::settling);
     #[cfg(test)]
     let deadline = match &hold {
         Some(hold) if hold.deadline_now => std::time::Instant::now(),
@@ -1002,10 +1005,13 @@ fn engram_settle_carried_check(
     let end_basis = match hold {
         Some(hold) => {
             let place = carried.check.target.basis_place();
-            EngramCapture::spawn(workers, move || {
+            let shared = hold.shared.clone();
+            let capture = EngramCapture::spawn(workers, move || {
                 hold.wait_released();
                 provenance.stamp(engram_place_source_basis(&place))
-            })
+            });
+            TestEngramSettlementHold::record_capture(&shared, &capture);
+            capture
         }
         None => engram_spawn_basis_capture(carried.check.target.basis_place(), workers, provenance),
     };
@@ -1053,20 +1059,72 @@ fn engram_settle_carried_check(
 /// present instant, so a held snapshot misses the deadline deterministically.
 #[cfg(test)]
 struct TestEngramSettlementHold {
+    /// Tells this hold from every other, including one for the same root.
+    id: u64,
     root: PathBuf,
     deadline_now: bool,
-    taken: Arc<(Mutex<bool>, std::sync::Condvar)>,
-    released: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    shared: TestEngramSettlementHoldShared,
+}
+
+/// What a hold's settlement and its test share.
+#[cfg(test)]
+#[derive(Default)]
+struct TestEngramSettlementHoldState {
+    /// A settlement took the hold.
+    taken: bool,
+    /// The test let the held snapshot be taken.
+    released: bool,
+    /// The settlement that took the hold returned.
+    settled: bool,
+    /// The end snapshot the settlement started, held until the release; its
+    /// worker's last effect is publishing it.
+    capture: Option<Arc<EngramBasisCapture>>,
+}
+
+#[cfg(test)]
+type TestEngramSettlementHoldShared = Arc<(Mutex<TestEngramSettlementHoldState>, std::sync::Condvar)>;
+
+/// Locks a hold's shared state, also after a panic poisoned it, so cleanup
+/// on unwind never panics again.
+#[cfg(test)]
+fn test_engram_settlement_hold_state(
+    shared: &TestEngramSettlementHoldShared,
+) -> std::sync::MutexGuard<'_, TestEngramSettlementHoldState> {
+    shared.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Marks a hold's settlement returned when dropped.
+#[cfg(test)]
+struct TestEngramSettlementSettling(TestEngramSettlementHoldShared);
+
+#[cfg(test)]
+impl Drop for TestEngramSettlementSettling {
+    fn drop(&mut self) {
+        test_engram_settlement_hold_state(&self.0).settled = true;
+        self.0.1.notify_all();
+    }
 }
 
 #[cfg(test)]
 impl TestEngramSettlementHold {
+    fn settling(&self) -> TestEngramSettlementSettling {
+        TestEngramSettlementSettling(self.shared.clone())
+    }
+
     fn wait_released(&self) {
-        let (lock, changed) = &*self.released;
-        let mut released = lock.lock().expect("test settlement hold poisoned");
-        while !*released {
-            released = changed.wait(released).expect("test settlement hold poisoned");
+        let mut state = test_engram_settlement_hold_state(&self.shared);
+        while !state.released {
+            state = self
+                .shared
+                .1
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
+    }
+
+    fn record_capture(shared: &TestEngramSettlementHoldShared, capture: &Arc<EngramBasisCapture>) {
+        test_engram_settlement_hold_state(shared).capture = Some(capture.clone());
+        shared.1.notify_all();
     }
 }
 
@@ -1076,35 +1134,100 @@ impl TestEngramSettlementHold {
 static TEST_ENGRAM_SETTLEMENT_HOLDS: std::sync::LazyLock<Mutex<Vec<TestEngramSettlementHold>>> =
     std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
 
-/// The test's handle on one installed hold.
+#[cfg(test)]
+static TEST_ENGRAM_SETTLEMENT_HOLD_IDS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// The test's handle on one installed hold. Dropped, also on unwind, it
+/// removes its hold if no settlement took it; otherwise it releases the held
+/// snapshot and waits, bounded, for the settlement and its snapshot to
+/// finish, so neither outlives the test's fixture unnoticed.
 #[cfg(test)]
 struct TestEngramSettlementControl {
-    taken: Arc<(Mutex<bool>, std::sync::Condvar)>,
-    released: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    id: u64,
+    shared: TestEngramSettlementHoldShared,
 }
 
 #[cfg(test)]
 impl TestEngramSettlementControl {
     /// Waits until a settlement took this hold, panicking past `deadline`.
     fn wait_taken(&self, deadline: std::time::Instant) {
-        let (lock, changed) = &*self.taken;
-        let mut taken = lock.lock().expect("test settlement hold poisoned");
-        while !*taken {
+        let mut state = test_engram_settlement_hold_state(&self.shared);
+        while !state.taken {
             let remaining = deadline
                 .checked_duration_since(std::time::Instant::now())
                 .expect("no settlement took the hold in time");
-            taken = changed
-                .wait_timeout(taken, remaining)
-                .expect("test settlement hold poisoned")
+            state = self
+                .shared
+                .1
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .0;
         }
     }
 
+    /// Whether a settlement took this hold.
+    fn was_taken(&self) -> bool {
+        test_engram_settlement_hold_state(&self.shared).taken
+    }
+
     /// Lets the held snapshot be taken.
     fn release(&self) {
-        let (lock, changed) = &*self.released;
-        *lock.lock().expect("test settlement hold poisoned") = true;
-        changed.notify_all();
+        test_engram_settlement_hold_state(&self.shared).released = true;
+        self.shared.1.notify_all();
+    }
+
+    /// Whether, by `deadline`, the settlement that took this hold returned
+    /// and the end snapshot it started was published: the last effect of its
+    /// worker. The snapshot finishes only after `release`.
+    fn completed_by(&self, deadline: std::time::Instant) -> bool {
+        let mut state = test_engram_settlement_hold_state(&self.shared);
+        while !state.settled {
+            let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
+                return false;
+            };
+            state = self
+                .shared
+                .1
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        let capture = state.capture.clone();
+        drop(state);
+        capture.is_none_or(|capture| capture.wait_until(deadline).is_some())
+    }
+
+    /// As `completed_by`, panicking when the settlement did not complete.
+    fn wait_completed(&self, deadline: std::time::Instant) {
+        assert!(
+            self.completed_by(deadline),
+            "the held settlement and its end snapshot did not finish in time"
+        );
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestEngramSettlementControl {
+    fn drop(&mut self) {
+        let untaken = {
+            let mut holds = TEST_ENGRAM_SETTLEMENT_HOLDS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            holds
+                .iter()
+                .position(|hold| hold.id == self.id)
+                .map(|position| holds.remove(position))
+                .is_some()
+        };
+        if untaken {
+            return;
+        }
+        self.release();
+        // A bound is only a diagnostic here: it never shows the worker ended.
+        if !self.completed_by(std::time::Instant::now() + TEST_PHASE_DEADLOCK_GUARD) {
+            eprintln!("a held carried settlement had not finished when its test let go of it");
+        }
     }
 }
 
@@ -1114,31 +1237,32 @@ fn install_test_engram_settlement_hold(
     root: &FsPath,
     deadline_now: bool,
 ) -> TestEngramSettlementControl {
-    let taken = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-    let released = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let id = TEST_ENGRAM_SETTLEMENT_HOLD_IDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let shared = TestEngramSettlementHoldShared::default();
     TEST_ENGRAM_SETTLEMENT_HOLDS
         .lock()
         .expect("test settlement holds poisoned")
         .push(TestEngramSettlementHold {
+            id,
             root: root.to_path_buf(),
             deadline_now,
-            taken: taken.clone(),
-            released: released.clone(),
+            shared: shared.clone(),
         });
-    TestEngramSettlementControl { taken, released }
+    TestEngramSettlementControl { id, shared }
 }
 
 /// The first hold installed for the worktree `root`, marked taken.
 #[cfg(test)]
 fn test_engram_take_settlement_hold(root: &FsPath) -> Option<TestEngramSettlementHold> {
-    let mut holds = TEST_ENGRAM_SETTLEMENT_HOLDS
-        .lock()
-        .expect("test settlement holds poisoned");
-    let position = holds.iter().position(|hold| hold.root == root)?;
-    let hold = holds.remove(position);
-    let (lock, changed) = &*hold.taken;
-    *lock.lock().expect("test settlement hold poisoned") = true;
-    changed.notify_all();
+    let hold = {
+        let mut holds = TEST_ENGRAM_SETTLEMENT_HOLDS
+            .lock()
+            .expect("test settlement holds poisoned");
+        let position = holds.iter().position(|hold| hold.root == root)?;
+        holds.remove(position)
+    };
+    test_engram_settlement_hold_state(&hold.shared).taken = true;
+    hold.shared.1.notify_all();
     Some(hold)
 }
 

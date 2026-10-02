@@ -3927,48 +3927,99 @@ fn carried_root(turn: &CheckedTurn) -> PathBuf {
     turn.record(|record| record.engram.carried_checks[0].check.target.root.clone())
 }
 
+/// When other work is found in the worktree and ends, against the late end
+/// snapshot of a settlement that missed its deadline.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LateWork {
+    /// After that snapshot and the rest of its settlement finished.
+    AfterTheLateSnapshot,
+    /// While that snapshot is still held.
+    BeforeTheLateSnapshot,
+    /// None is: the retry is credited.
+    None,
+}
+
+/// The other session's outstanding call `writer` is found running in
+/// `worktree`, then reports its end.
+fn other_work_found_and_ended(
+    turn: &CheckedTurn,
+    other: &str,
+    stopped: &ClaudeObservationProvenance,
+    worktree: &FsPath,
+) {
+    admit_background_call(turn, other, stopped, "writer", "Bash");
+    place_other_work_in(turn, other, stopped, "writer", worktree);
+    let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+    let other_index = inner.find_session_index(other).expect("other session");
+    inner.sessions[other_index].claude_outstanding = ClaudeOutstandingWork::default();
+}
+
 #[test]
 fn a_settlement_that_misses_its_deadline_grants_nothing_late_and_its_retry_sees_ended_work() {
-    // Candidate A's settlement snapshot is held past the checkpoint's
-    // deadline: the run stays carried. Work then registers in the worktree
-    // and ends, and A's abandoned snapshot completes late: that earns
-    // nothing. The retry B takes a new snapshot after the ended work and is
-    // refused for it.
-    let label = "carried-timeout-late";
-    let (turn, worktree) = three_turns_with_a_terminal_carried_run(label);
-    let (other, stopped) = other_claude_session_elsewhere(&turn, label);
-    let hold = install_test_engram_settlement_hold(&carried_root(&turn), true);
-    let second = finish_next_turn(&turn);
-    hold.wait_taken(std::time::Instant::now() + DEADLOCK_GUARD);
-    assert!(second.get("verification_evidence").is_none(), "{second:#}");
-    assert_eq!(
-        turn.record(|record| record.engram.carried_checks.len()),
-        1,
-        "kept"
-    );
-
-    admit_background_call(&turn, &other, &stopped, "writer", "Bash");
-    place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
-    {
-        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
-        let other_index = inner.find_session_index(&other).expect("other session");
-        // The work reports its end.
-        inner.sessions[other_index].claude_outstanding = ClaudeOutstandingWork::default();
-    }
-    // A's snapshot completes now, after its checkpoint gave up on it.
-    hold.release();
-    turn.state.poll_engram_carried_runs();
-    turn.record(|record| {
-        assert_eq!(
-            record.engram.carried_checks.len(),
-            1,
-            "a late snapshot settles nothing"
+    // Candidate A's settlement snapshot is held past its checkpoint's
+    // deadline: the run stays carried and A's checkpoint credits nothing. A's
+    // snapshot is then let finish, and A's settlement with it; that earns
+    // nothing late. Work found in the worktree that ended, after A finished
+    // or while A was still held, reaches the retry B, whose own snapshot is
+    // taken after it: B is refused. With no such work B is credited.
+    for late_work in [
+        LateWork::AfterTheLateSnapshot,
+        LateWork::BeforeTheLateSnapshot,
+        LateWork::None,
+    ] {
+        let label = format!("carried-timeout-{late_work:?}").to_lowercase();
+        let (turn, worktree) = three_turns_with_a_terminal_carried_run(&label);
+        let (other, stopped) = other_claude_session_elsewhere(&turn, &label);
+        let run = turn
+            .record(|record| record.engram.carried_checks[0].run_directory.clone())
+            .expect("the run was found");
+        let guard = || std::time::Instant::now() + DEADLOCK_GUARD;
+        let late = install_test_engram_settlement_hold(&carried_root(&turn), true);
+        let second = finish_next_turn(&turn);
+        late.wait_taken(guard());
+        assert!(
+            second.get("verification_evidence").is_none(),
+            "{label}: {second:#}"
         );
-        assert!(record.engram.carried_checks[0].potential.is_some(), "kept");
-    });
+        assert_eq!(
+            turn.record(|record| record.engram.carried_checks.len()),
+            1,
+            "{label}: kept"
+        );
+        if late_work == LateWork::BeforeTheLateSnapshot {
+            other_work_found_and_ended(&turn, &other, &stopped, &worktree);
+        }
+        // A's snapshot finishes now, after its checkpoint gave up on it, and
+        // with it everything of A's settlement.
+        late.release();
+        late.wait_completed(guard());
+        turn.state.poll_engram_carried_runs();
+        let checkpoints = checkpoint_requests(&turn);
+        assert_eq!(checkpoints.len(), 2, "{label}: nothing more reached Engram");
+        assert!(
+            checkpoints
+                .iter()
+                .all(|checkpoint| checkpoint.get("verification_evidence").is_none()),
+            "{label}: {checkpoints:#?}"
+        );
+        assert_eq!(
+            turn.record(|record| record.engram.carried_checks.len()),
+            1,
+            "{label}: a late snapshot settles nothing"
+        );
+        if late_work == LateWork::AfterTheLateSnapshot {
+            other_work_found_and_ended(&turn, &other, &stopped, &worktree);
+        }
 
-    let third = finish_next_turn(&turn);
-    assert_refused(&turn, &third, &other);
+        let third = finish_next_turn(&turn);
+        assert_eq!(third["grant_id"], "turn-check-grant-third", "{label}");
+        match late_work {
+            LateWork::None => assert_credited(&turn, &third, &run, "succeeded"),
+            LateWork::AfterTheLateSnapshot | LateWork::BeforeTheLateSnapshot => {
+                assert_refused(&turn, &third, &other);
+            }
+        }
+    }
 }
 
 #[test]
@@ -4100,20 +4151,31 @@ fn concurrent_closers_consume_once_and_the_winner_is_judged_by_its_own_snapshot(
             .expect("the winner's thread")
             .join()
             .expect("the winning closer should not panic");
+        let checkpoints = checkpoint_requests(&turn);
+        let report = cached_report(&turn);
+        assert_eq!(checkpoints.len(), 1, "{label}: {checkpoints:#?}");
+        assert_eq!(
+            checkpoints[0],
+            expected_checkpoint_request(&turn, &checkpoints[0], &report),
+            "{label}: the winner's complete request"
+        );
         loser_gate.release();
         closers[loser_index]
             .take()
             .expect("the other closer's thread")
             .join()
             .expect("the other closer should not panic");
+        assert_eq!(
+            checkpoint_requests(&turn),
+            checkpoints,
+            "{label}: the other closer sends nothing"
+        );
+        assert_eq!(
+            serde_json::to_value(cached_report(&turn)).expect("the report serializes"),
+            serde_json::to_value(&report).expect("the report serializes"),
+            "{label}: and changes nothing"
+        );
 
-        let checkpoints: Vec<Value> = turn
-            .transport
-            .requests()
-            .into_iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint")
-            .map(|request| request.request)
-            .collect();
         let verified: Vec<&Value> = checkpoints
             .iter()
             .filter(|checkpoint| checkpoint.get("verification_evidence").is_some())
@@ -4196,41 +4258,609 @@ fn a_session_removed_while_its_checkpoint_settles_is_consumed_once_by_its_teardo
     assert!(inner.find_session_index(&turn.session_id).is_none());
 }
 
+/// The turn's checkpoint requests that reached Engram, in order.
+fn checkpoint_requests(turn: &CheckedTurn) -> Vec<Value> {
+    turn.transport
+        .requests()
+        .into_iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint")
+        .map(|request| request.request)
+        .collect()
+}
+
+/// The report cached for the turn's grant.
+fn cached_report(turn: &CheckedTurn) -> EngramTurnReport {
+    turn.record(|record| {
+        let (grant_id, report) = record
+            .engram
+            .active_turn_report
+            .clone()
+            .expect("the grant's report is cached");
+        assert_eq!(grant_id, CHECK_GRANT);
+        report
+    })
+}
+
+/// The complete request that checkpoints the turn's grant with `report`,
+/// waiting for the next prompt, routed as `sent` was.
+fn expected_checkpoint_request(
+    turn: &CheckedTurn,
+    sent: &Value,
+    report: &EngramTurnReport,
+) -> Value {
+    let next_intent = EngramNextIntent::Wait;
+    serde_json::to_value(EngramControlRequest::TurnCheckpoint {
+        routing_token: sent["routing_token"]
+            .as_str()
+            .expect("the request is routed")
+            .to_owned(),
+        grant_id: CHECK_GRANT.to_owned(),
+        next_intent,
+        report: report.clone(),
+        idempotency_key: engram_checkpoint_idempotency_key(
+            format!(
+                "termal-checkpoint:{}:{}:{}",
+                turn.session_id,
+                CHECK_GRANT,
+                next_intent.as_idempotency_component()
+            ),
+            report,
+        ),
+    })
+    .expect("the request serializes")
+}
+
+/// Engram's reply to a checkpoint, lost on the way.
+fn lost_checkpoint_reply() -> ScriptedEngramControlResponse {
+    ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport(
+        "scripted lost checkpoint reply",
+    )))
+}
+
+type HeldCheckpointShared = Arc<(Mutex<HeldCheckpointState>, std::sync::Condvar)>;
+
+/// What a held checkpoint's transport and its test share.
+#[derive(Default)]
+struct HeldCheckpointState {
+    /// The grant's checkpoint requests, as they arrived.
+    sent: Vec<Value>,
+    released: bool,
+    /// What happened to the grant's checkpoint requests, in order.
+    order: Vec<&'static str>,
+}
+
+/// Locks a held checkpoint's shared state, also after a panic poisoned it.
+fn held_checkpoint_state(
+    shared: &HeldCheckpointShared,
+) -> std::sync::MutexGuard<'_, HeldCheckpointState> {
+    shared
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Holds the first checkpoint request of the turn's grant in flight, off the
+/// state lock, until the test lets it through, and keeps every checkpoint
+/// request of that grant as it arrived. Every other request goes straight on.
+struct HeldCheckpointTransport {
+    control: Arc<ScriptedEngramControlTransport>,
+    session_id: String,
+    shared: HeldCheckpointShared,
+}
+
+impl EngramControlTransport for HeldCheckpointTransport {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: std::time::Duration,
+    ) -> std::result::Result<Value, EngramTransportError> {
+        let of_grant = connection.session_id == self.session_id
+            && matches!(
+                request,
+                EngramControlRequest::TurnCheckpoint { grant_id, .. } if grant_id == CHECK_GRANT
+            );
+        if !of_grant {
+            return self.control.request(connection, request, timeout);
+        }
+        let first = {
+            let mut state = held_checkpoint_state(&self.shared);
+            state
+                .sent
+                .push(serde_json::to_value(request).expect("the request serializes"));
+            let first = state.sent.len() == 1;
+            state.order.push(if first {
+                "first requested"
+            } else {
+                "later requested"
+            });
+            first
+        };
+        self.shared.1.notify_all();
+        if first {
+            let deadline = std::time::Instant::now() + DEADLOCK_GUARD;
+            let mut state = held_checkpoint_state(&self.shared);
+            while !state.released {
+                let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now())
+                else {
+                    state.order.push("first never released");
+                    return Err(EngramTransportError::transport(
+                        "the held checkpoint was never released",
+                    ));
+                };
+                state = self
+                    .shared
+                    .1
+                    .wait_timeout(state, remaining)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .0;
+            }
+        }
+        let reply = self.control.request(connection, request, timeout);
+        held_checkpoint_state(&self.shared).order.push(if first {
+            "first answered"
+        } else {
+            "later answered"
+        });
+        reply
+    }
+
+    fn shutdown_session(&self, session_id: &str) {
+        self.control.shutdown_session(session_id);
+    }
+
+    fn read_work_binding(
+        &self,
+        connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
+        timeout: std::time::Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.control
+            .read_work_binding(connection, preference, timeout)
+    }
+
+    fn read_work_binding_for_boot(
+        &self,
+        connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
+        timeout: std::time::Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.control
+            .read_work_binding_for_boot(connection, preference, timeout)
+    }
+
+    fn read_held_claims(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: std::time::Duration,
+    ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        self.control.read_held_claims(connection, timeout)
+    }
+}
+
+/// The test's handle on a held checkpoint. Dropped, also on unwind, it lets
+/// the held request through.
+struct HeldCheckpoint(HeldCheckpointShared);
+
+impl HeldCheckpoint {
+    fn install(turn: &CheckedTurn) -> Self {
+        let shared = HeldCheckpointShared::default();
+        install_control_only_transport(
+            &turn.state,
+            Arc::new(HeldCheckpointTransport {
+                control: turn.transport.clone(),
+                session_id: turn.session_id.clone(),
+                shared: shared.clone(),
+            }),
+        );
+        Self(shared)
+    }
+
+    /// Waits until the grant's first checkpoint request is held.
+    fn wait_held(&self) {
+        let deadline = std::time::Instant::now() + DEADLOCK_GUARD;
+        let mut state = held_checkpoint_state(&self.0);
+        while state.sent.is_empty() {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("no checkpoint request was held in time");
+            state = self
+                .0
+                .1
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+    }
+
+    fn release(&self) {
+        held_checkpoint_state(&self.0).released = true;
+        self.0.1.notify_all();
+    }
+
+    fn sent(&self) -> Vec<Value> {
+        held_checkpoint_state(&self.0).sent.clone()
+    }
+
+    fn order(&self) -> Vec<&'static str> {
+        held_checkpoint_state(&self.0).order.clone()
+    }
+}
+
+impl Drop for HeldCheckpoint {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// Closers of the turn's grant on their own threads, as the runtime's
+/// turn-completed callbacks run. Dropped, also on unwind, it waits for those
+/// still running; declared before the holds and gates that stop them, it is
+/// dropped after they let go. Its bound only turns a hang into a diagnostic.
+#[derive(Default)]
+struct Closers(Vec<Option<(std::thread::JoinHandle<()>, std::sync::mpsc::Receiver<()>)>>);
+
+impl Closers {
+    fn spawn(&mut self, turn: &CheckedTurn) -> usize {
+        let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+        let state = turn.state.clone();
+        let session_id = turn.session_id.clone();
+        // Dropped as the thread ends, however it ends.
+        let (ended_tx, ended_rx) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let _ended = ended_tx;
+            let _ = state.finish_turn_ok_if_runtime_matches(&session_id, &runtime_token);
+        });
+        self.0.push(Some((handle, ended_rx)));
+        self.0.len() - 1
+    }
+
+    fn join(&mut self, closer: usize) {
+        let (handle, _) = self.0[closer].take().expect("the closer runs");
+        handle.join().expect("the closer should not panic");
+    }
+}
+
+impl Drop for Closers {
+    fn drop(&mut self) {
+        let deadline = std::time::Instant::now() + DEADLOCK_GUARD;
+        for (handle, ended) in self.0.iter_mut().filter_map(Option::take) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match ended.recv_timeout(remaining) {
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    eprintln!("a closer was still running when its test let go of it");
+                }
+                _ => {
+                    let _ = handle.join();
+                }
+            }
+        }
+    }
+}
+
+/// Runs a closer of the turn's grant to its end on this thread.
+fn run_closer(turn: &CheckedTurn) {
+    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+    let _ = turn
+        .state
+        .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token);
+}
+
 #[test]
-fn an_explicit_refusal_of_the_report_that_consumed_a_carried_run_does_not_bring_it_back() {
-    // The run is consumed into the cached report at the publication cut.
-    // Engram refuses that report explicitly: the cached report falls back,
-    // dropping the gate's verification, and the consumed run stays consumed.
-    // That is distinct from replaying the cached report verbatim after a
-    // transport failure.
-    let label = "carried-refused-report";
+fn a_closer_that_reaches_its_claim_while_the_winners_checkpoint_is_in_flight_is_skipped() {
+    // Both closers of the grant plan a fresh report and take their own
+    // settlement snapshots. The loser stops after its snapshot, before its
+    // claim. The winner claims, consumes the run into its report, and its
+    // checkpoint request is held in flight with the claim still its own. The
+    // loser then reaches its claim and is refused there: it sends nothing,
+    // consumes nothing, and the winner's report stands.
+    let label = "carried-claim-loser";
     let (turn, worktree) = named_turn(label);
+    let mut closers = Closers::default();
     launch_gate(&turn, &worktree, false);
-    let start_basis =
-        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
-    assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
-    turn.state
-        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("refused"));
+    let root = carried_root(&turn);
+    let held = HeldCheckpoint::install(&turn);
+    let guard = || std::time::Instant::now() + DEADLOCK_GUARD;
+    let holds = [
+        install_test_engram_settlement_hold(&root, false),
+        install_test_engram_settlement_hold(&root, false),
+    ];
+    // Each closer finds no claim at its first look and takes its own hold.
+    let winner = closers.spawn(&turn);
+    holds[0].wait_taken(guard());
+    let loser = closers.spawn(&turn);
+    holds[1].wait_taken(guard());
+    // The loser's snapshot completes; it stops before its claim.
+    let loser_gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+    holds[1].release();
+    loser_gate.wait_until_claimed();
+    // The winner's snapshot completes; it claims, publishes, and is held in
+    // flight.
+    holds[0].release();
+    held.wait_held();
+    let report = cached_report(&turn);
+    let sent = held.sent();
+    assert_eq!(sent.len(), 1, "{sent:#?}");
+    assert_eq!(
+        sent[0],
+        expected_checkpoint_request(&turn, &sent[0], &report),
+        "the winner's complete request"
+    );
+    assert_credited(&turn, &sent[0], &run, "succeeded");
+    // The loser reaches its claim while the winner holds it.
+    loser_gate.release();
+    closers.join(loser);
+    turn.record(|record| {
+        assert!(
+            record.engram.checkpoint_in_progress,
+            "the winner's claim was in flight when the loser reached its own"
+        );
+        assert_eq!(
+            record.engram.active_grant_id.as_deref(),
+            Some(CHECK_GRANT),
+            "the grant was still open"
+        );
+        assert!(
+            record.engram.carried_checks.is_empty(),
+            "the run was consumed once"
+        );
+    });
+    assert_eq!(held.sent(), sent, "the loser sent nothing");
+    assert_eq!(
+        serde_json::to_value(cached_report(&turn)).expect("the report serializes"),
+        serde_json::to_value(&report).expect("the report serializes"),
+        "the winner's report stands"
+    );
+    held.release();
+    closers.join(winner);
+    assert_eq!(held.order(), ["first requested", "first answered"]);
+    assert_eq!(
+        checkpoint_requests(&turn),
+        sent,
+        "one checkpoint closed the grant"
+    );
+    turn.record(|record| {
+        assert!(!record.engram.checkpoint_in_progress);
+        assert_eq!(record.engram.active_grant_id, None);
+    });
+}
+
+#[test]
+fn a_closer_that_claims_after_the_winners_reply_was_lost_replays_the_winners_report() {
+    // Both closers plan a fresh report and take their own settlement
+    // snapshots; the loser stops before its claim. The winner claims,
+    // consumes the run into its report, and its reply is lost: the claim
+    // ends, the grant stays open with that report cached. Other work found in
+    // the worktree afterwards cannot change it. The loser then claims, finds
+    // the cached report, discards its own snapshot's candidate, and sends the
+    // winner's request verbatim.
+    let label = "carried-cached-loser";
+    let turn = CheckedTurn::start_with_opening(
+        label,
+        true,
+        None,
+        vec![lost_checkpoint_reply(), checkpoint_reply(CHECK_GRANT)],
+        1,
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
+    let mut closers = Closers::default();
+    launch_gate(&turn, &worktree, false);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let (other, stopped) = other_claude_session_elsewhere(&turn, label);
+    let root = carried_root(&turn);
+    let guard = || std::time::Instant::now() + DEADLOCK_GUARD;
+    let holds = [
+        install_test_engram_settlement_hold(&root, false),
+        install_test_engram_settlement_hold(&root, false),
+    ];
+    let winner = closers.spawn(&turn);
+    holds[0].wait_taken(guard());
+    let loser = closers.spawn(&turn);
+    holds[1].wait_taken(guard());
+    let loser_gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+    holds[1].release();
+    loser_gate.wait_until_claimed();
+    holds[0].release();
+    closers.join(winner);
+    let first = checkpoint_requests(&turn);
+    assert_eq!(first.len(), 1, "{first:#?}");
+    assert_credited(&turn, &first[0], &run, "succeeded");
+    let report = cached_report(&turn);
+    assert_eq!(
+        first[0],
+        expected_checkpoint_request(&turn, &first[0], &report),
+        "the winner's complete request"
+    );
+    turn.record(|record| {
+        assert!(
+            !record.engram.checkpoint_in_progress,
+            "the winner's claim ended with its lost reply"
+        );
+        assert_eq!(
+            record.engram.active_grant_id.as_deref(),
+            Some(CHECK_GRANT),
+            "the grant stays open"
+        );
+    });
+    // Later, other work is found in the worktree: the frozen report stands.
+    admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+    place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
+    loser_gate.release();
+    closers.join(loser);
+    let checkpoints = checkpoint_requests(&turn);
+    assert_eq!(checkpoints.len(), 2, "{checkpoints:#?}");
+    assert_eq!(
+        checkpoints[1], checkpoints[0],
+        "the loser replays the winner's request verbatim"
+    );
     turn.record(|record| {
         assert!(
             record.engram.carried_checks.is_empty(),
-            "the run is not brought back"
+            "the run was consumed once"
         );
-        let cached = record
-            .engram
-            .active_turn_report
-            .as_ref()
-            .map(|(_, report)| report.verification_evidence.len())
-            .unwrap_or_default();
         assert_eq!(
-            cached, 0,
-            "the fallback carries no verification of the gate"
+            record.engram.active_grant_id, None,
+            "the replay closed the grant"
         );
+    });
+}
+
+#[test]
+fn a_new_closer_after_a_lost_reply_replays_the_cached_report_and_settles_nothing() {
+    // The first closer's settlement snapshot misses its deadline, so the run
+    // stays carried and its report goes without it; that report's reply is
+    // lost. A closer that starts afterwards finds the cached report at its
+    // first look: it takes no settlement snapshot of the run still carried,
+    // and sends the first request verbatim.
+    let label = "carried-cached-new-closer";
+    let turn = CheckedTurn::start_with_opening(
+        label,
+        true,
+        None,
+        vec![lost_checkpoint_reply(), checkpoint_reply(CHECK_GRANT)],
+        1,
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
+    launch_gate(&turn, &worktree, false);
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let root = carried_root(&turn);
+    let guard = || std::time::Instant::now() + DEADLOCK_GUARD;
+    let missed = install_test_engram_settlement_hold(&root, true);
+    run_closer(&turn);
+    missed.wait_taken(guard());
+    missed.release();
+    missed.wait_completed(guard());
+    let first = checkpoint_requests(&turn);
+    assert_eq!(first.len(), 1, "{first:#?}");
+    assert!(
+        first[0].get("verification_evidence").is_none(),
+        "{:#}",
+        first[0]
+    );
+    let report = cached_report(&turn);
+    assert_eq!(
+        first[0],
+        expected_checkpoint_request(&turn, &first[0], &report),
+        "the first complete request"
+    );
+    turn.record(|record| {
+        assert!(!record.engram.checkpoint_in_progress);
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(CHECK_GRANT));
+        assert_eq!(
+            record.engram.carried_checks.len(),
+            1,
+            "the run stays carried"
+        );
+    });
+    // A new closer of the grant.
+    let untouched = install_test_engram_settlement_hold(&root, true);
+    run_closer(&turn);
+    assert!(
+        !untouched.was_taken(),
+        "the new closer took no settlement snapshot"
+    );
+    let checkpoints = checkpoint_requests(&turn);
+    assert_eq!(checkpoints.len(), 2, "{checkpoints:#?}");
+    assert_eq!(
+        checkpoints[1], checkpoints[0],
+        "the new closer sends the first request verbatim"
+    );
+    turn.record(|record| {
+        assert_eq!(record.engram.active_grant_id, None);
+        assert_eq!(
+            record.engram.carried_checks.len(),
+            1,
+            "the run is still carried, for a later grant"
+        );
+    });
+}
+
+#[test]
+fn an_explicit_refusal_of_the_report_that_consumed_a_carried_run_sends_its_fallback_next() {
+    // The run is consumed into the report at the publication cut, and Engram
+    // refuses that checkpoint explicitly. The grant's cached report becomes
+    // the report's fallback, which carries no verification of the gate, and
+    // the grant's next closer sends exactly that. The consumed run stays
+    // consumed. That differs from a lost reply, whose report is replayed.
+    let label = "carried-refused-report";
+    let turn = CheckedTurn::start_with_opening(
+        label,
+        true,
+        None,
+        vec![
+            checkpoint_refusal_reply("checkpoint_report_refused"),
+            checkpoint_reply(CHECK_GRANT),
+        ],
+        1,
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
+    let mut closers = Closers::default();
+    launch_gate(&turn, &worktree, false);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let root = carried_root(&turn);
+    let held = HeldCheckpoint::install(&turn);
+    let first_closer = closers.spawn(&turn);
+    held.wait_held();
+    // In flight: the report and its fallback, as built.
+    let report = cached_report(&turn);
+    let fallback = turn.record(|record| {
+        let (grant_id, fallback) = record
+            .engram
+            .active_turn_report_fallback
+            .clone()
+            .expect("a report with a check has a fallback");
+        assert_eq!(grant_id, CHECK_GRANT);
+        fallback
+    });
+    held.release();
+    closers.join(first_closer);
+    let first = held.sent();
+    assert_eq!(first.len(), 1, "{first:#?}");
+    assert_eq!(
+        first[0],
+        expected_checkpoint_request(&turn, &first[0], &report),
+        "the refused complete request"
+    );
+    assert_credited(&turn, &first[0], &run, "succeeded");
+    assert_eq!(held.order(), ["first requested", "first answered"]);
+    // Refused: the cached report is now the fallback, the grant stays open.
+    assert_eq!(
+        serde_json::to_value(cached_report(&turn)).expect("the report serializes"),
+        serde_json::to_value(&fallback).expect("the report serializes")
+    );
+    turn.record(|record| {
+        assert!(!record.engram.checkpoint_in_progress);
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(CHECK_GRANT));
+        assert!(record.engram.carried_checks.is_empty(), "not brought back");
+    });
+    // The grant's next closer.
+    let untouched = install_test_engram_settlement_hold(&root, true);
+    run_closer(&turn);
+    assert!(!untouched.was_taken(), "it took no settlement snapshot");
+    let sent = held.sent();
+    assert_eq!(sent.len(), 2, "{sent:#?}");
+    assert_eq!(
+        sent[1],
+        expected_checkpoint_request(&turn, &sent[1], &fallback),
+        "the fallback's complete request"
+    );
+    assert!(
+        sent[1].get("verification_evidence").is_none(),
+        "{:#}",
+        sent[1]
+    );
+    assert_eq!(checkpoint_requests(&turn), sent);
+    turn.record(|record| {
+        assert_eq!(record.engram.active_grant_id, None);
+        assert!(record.engram.carried_checks.is_empty(), "not brought back");
     });
 }
 
