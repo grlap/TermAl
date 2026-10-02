@@ -551,6 +551,51 @@ fn acceptance_evaluator_brief_numbers_criteria_lists_locators_and_names_the_tool
     assert!(!prompt.contains("older entries not shown"));
     assert!(prompt.contains("The workspace at /work/repo is read-only."));
     assert!(prompt.contains("Submit once with termal_submit_acceptance_evaluation."));
+    // A Claude evaluator's brief states the command form TermAl's read-only
+    // Claude gate allows, so an evaluator checking a freeze fingerprint does
+    // not reach for a refused shape first.
+    let claude = build_acceptance_evaluator_brief_for_agent(
+        &task,
+        "/work/repo",
+        Agent::Claude,
+        64 * 1024,
+    )
+    .unwrap()
+    .prompt;
+    for form in [
+        "TermAl's read-only gate",
+        "Run each command in the\nworkspace as it is",
+        "one command per call",
+        "`&&` or `|`",
+        "`git diff --cached --stat`",
+        "`git diff HEAD -- . | sha256sum`",
+        "`;` and line breaks",
+        "redirection other than `2>/dev/null`",
+        "`git -C`",
+        "`--git-dir`",
+        "`--work-tree`",
+        "a `cd` elsewhere",
+        "the PowerShell tool",
+        "its refusal names the rule",
+    ] {
+        assert!(claude.contains(form), "{form}: {claude}");
+    }
+    // The paragraph sits with the workspace rule, before the Rules list.
+    let workspace = claude.find("is read-only. Inspect").expect("workspace rule");
+    let gate = claude.find("TermAl's read-only gate").expect("command form");
+    let rules = claude.find("\nRules:\n").expect("rules");
+    assert!(workspace < gate && gate < rules, "{claude}");
+    // A Codex evaluator runs in its own sandbox, through PowerShell on
+    // Windows, where neither the Claude gate's rules nor the Bash fingerprint
+    // example hold: its brief, like the agent-neutral one, carries none of it.
+    let codex =
+        build_acceptance_evaluator_brief_for_agent(&task, "/work/repo", Agent::Codex, 64 * 1024)
+            .unwrap()
+            .prompt;
+    assert_eq!(codex, prompt);
+    for claude_only in ["read-only gate", "PowerShell", "sha256sum", "Bash tool"] {
+        assert!(!codex.contains(claude_only), "{claude_only}: {codex}");
+    }
     // Indented continuation lines survive the source-level line joins.
     assert!(
         prompt.contains("insufficient-evidence\n  or needs-human.\n"),

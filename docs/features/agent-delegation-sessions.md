@@ -566,6 +566,20 @@ instruction discovery, but receive a process-only permission overlay: explicit
 TermAl's host classifier. Tool discovery (`ToolSearch`) is permitted; executing
 a discovered tool is checked separately, including the authenticated review
 submission exception. Unknown tools and nested agent tools are denied.
+A denial names the rule the request broke and the form that is allowed, so
+the child can adapt in one step: for Bash, which of `;` or a line break,
+redirection, substitution, a background `&`, a `cd` away from the workspace,
+git's `-C`, `--git-dir`, `--work-tree` or `-c`, or a command outside the
+read-only list applied, followed by the allowed form (one read-only command
+per call in the workspace, or several joined with `&&` or `|`); the PowerShell
+tool, file edits, the tracker and other tools each get a rule of their own.
+The denial says "delegation", not "reviewer", because acceptance evaluators
+share the gate. It only explains a decision; the explanation
+(`src/claude_read_only_refusal.rs`) never decides one, and it names the rule
+in the checker's own order, including the line-wide `cd` guard on a line that
+runs git. A Claude acceptance evaluator's brief states the same command form;
+a Codex evaluator's brief does not, since it runs in its own read-only
+sandbox (through Windows PowerShell on Windows) where these rules do not apply.
 Hooks are disabled in these children because they can run shell commands or
 answer permission requests before the host; ordinary sessions retain their hooks.
 No user or repository settings file is rewritten. This is a CLI permission

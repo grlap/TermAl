@@ -1411,9 +1411,63 @@ fn acceptance_same_session_cut_notice_with_detail(
 /// the outcome; every such cut is said in the brief and returned for the
 /// requester. It never drops or cuts a criterion, and refuses only when the
 /// criteria do not fit with no context left to give up.
+///
+/// This agent-neutral brief carries no command-form paragraph; the request
+/// path builds its brief for the chosen evaluator agent with
+/// [`build_acceptance_evaluator_brief_for_agent`], so only tests call this.
+#[cfg(test)]
 fn build_acceptance_evaluator_brief(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
+    max_bytes: usize,
+) -> std::result::Result<AcceptanceEvaluatorBrief, ApiError> {
+    build_acceptance_evaluator_brief_with_command_form(task, cwd, "", max_bytes)
+}
+
+/// The brief for an evaluator of `agent`: the same brief, with the paragraph
+/// on how to run commands that this agent's read-only runtime needs.
+fn build_acceptance_evaluator_brief_for_agent(
+    task: &AcceptanceEvaluationTask,
+    cwd: &str,
+    agent: Agent,
+    max_bytes: usize,
+) -> std::result::Result<AcceptanceEvaluatorBrief, ApiError> {
+    build_acceptance_evaluator_brief_with_command_form(
+        task,
+        cwd,
+        acceptance_evaluator_command_form(agent),
+        max_bytes,
+    )
+}
+
+/// How a read-only evaluator of `agent` runs commands, for its brief, or empty
+/// when its runtime needs no such paragraph.
+///
+/// Only a Claude evaluator gets one: its commands pass TermAl's read-only
+/// Claude gate (`claude_bash_command_is_read_only`), which refuses shapes an
+/// evaluator would otherwise reach for first. A Codex evaluator runs in its
+/// own read-only sandbox, on Windows through Windows PowerShell, where neither
+/// these rules nor the Bash fingerprint example hold, so it gets none.
+fn acceptance_evaluator_command_form(agent: Agent) -> &'static str {
+    match agent {
+        Agent::Claude => {
+            "Your commands pass TermAl's read-only gate. Run each command in the\n\
+workspace as it is: one command per call through the Bash tool, or\n\
+read-only commands joined with `&&` or `|`, for example\n\
+`git diff --cached --stat` or `git diff HEAD -- . | sha256sum`. The gate\n\
+refuses `;` and line breaks, redirection other than `2>/dev/null`,\n\
+`git -C`, `--git-dir`, `--work-tree` and `-c`, a `cd` elsewhere before git,\n\
+and the PowerShell tool; its refusal names the rule. Read file content with\n\
+the Read, Grep and Glob tools.\n"
+        }
+        _ => "",
+    }
+}
+
+fn build_acceptance_evaluator_brief_with_command_form(
+    task: &AcceptanceEvaluationTask,
+    cwd: &str,
+    command_form: &str,
     max_bytes: usize,
 ) -> std::result::Result<AcceptanceEvaluatorBrief, ApiError> {
     // Context shrinks before anything is said about the criteria, and the
@@ -1435,6 +1489,7 @@ fn build_acceptance_evaluator_brief(
         let brief = render_acceptance_evaluator_brief_with_details(
             task,
             cwd,
+            command_form,
             listed,
             0,
             MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
@@ -1456,6 +1511,7 @@ fn build_acceptance_evaluator_brief(
         let brief = render_acceptance_evaluator_brief_with_index_detail(
             task,
             cwd,
+            command_form,
             listed,
             0,
             MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
@@ -1476,6 +1532,7 @@ fn build_acceptance_evaluator_brief(
             render_acceptance_evaluator_brief_with_index_detail(
                 task,
                 cwd,
+                command_form,
                 shown,
                 clipped,
                 outcome_bytes,
@@ -1521,6 +1578,7 @@ fn render_acceptance_evaluator_brief(
     render_acceptance_evaluator_brief_with_details(
         task,
         cwd,
+        "",
         shown,
         clipped,
         outcome_bytes,
@@ -1536,6 +1594,7 @@ fn render_acceptance_evaluator_brief(
 fn render_acceptance_evaluator_brief_with_details(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
+    command_form: &str,
     shown: usize,
     clipped: usize,
     outcome_bytes: usize,
@@ -1545,6 +1604,7 @@ fn render_acceptance_evaluator_brief_with_details(
     render_acceptance_evaluator_brief_with_index_detail(
         task,
         cwd,
+        command_form,
         shown,
         clipped,
         outcome_bytes,
@@ -1554,9 +1614,13 @@ fn render_acceptance_evaluator_brief_with_details(
     )
 }
 
+/// `command_form` is the paragraph on how to run commands that the
+/// evaluator's own runtime needs (see [`acceptance_evaluator_command_form`]),
+/// or empty when there is none.
 fn render_acceptance_evaluator_brief_with_index_detail(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
+    command_form: &str,
     shown: usize,
     clipped: usize,
     outcome_bytes: usize,
@@ -1631,6 +1695,7 @@ Evidence recorded on the task — cite by locator:\n\
 \n\
 The workspace at {cwd} is read-only. Inspect files, history and diffs as\n\
 needed; do not edit, build or run project scripts.\n\
+{command_form}\
 \n\
 Rules:\n\
 - Give each criterion exactly one verdict: pass, fail, insufficient-evidence\n  \

@@ -93,6 +93,7 @@ mod persist_fence;
 mod project_creation_races;
 mod project_digest;
 mod projects;
+mod read_only_refusal_rules;
 mod remote;
 mod remote_authority_races;
 mod remote_delta_replay;

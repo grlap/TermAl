@@ -514,14 +514,14 @@ fn read_only_claude_permission_decision(
         };
     }
 
+    let message = if tracker_word.is_some() && tracker_reads {
+        CLAUDE_READ_ONLY_TRACKER_DENIAL.to_owned()
+    } else {
+        read_only_claude_denial(&request, cwd, tracker_word.is_some())
+    };
     ClaudePermissionDecision::Deny {
         request_id: request.request_id,
-        message: if tracker_word.is_some() && tracker_reads {
-            CLAUDE_READ_ONLY_TRACKER_DENIAL.to_owned()
-        } else {
-            "TermAl denied this tool request because this Claude reviewer delegation is read-only."
-                .to_owned()
-        },
+        message,
     }
 }
 
@@ -989,31 +989,35 @@ fn claude_bash_command_has_background_separator(command: &str) -> bool {
     false
 }
 
+/// Pure readers: they consume stdin/files and write only to stdout. The hashers
+/// are here so reviewers can fingerprint a diff (`git diff … | sha256sum`) to prove
+/// content identity — a common, entirely read-only review technique.
+const CLAUDE_READ_ONLY_BASH_COMMANDS: &[&str] = &[
+    "cat",
+    "cksum",
+    "echo",
+    "grep",
+    "head",
+    "ls",
+    "md5sum",
+    "nl",
+    "pwd",
+    "sha1sum",
+    "sha256sum",
+    "sha512sum",
+    "tail",
+    "wc",
+];
+
+/// Commands allowed only with the arguments their own checks below accept.
+const CLAUDE_OPTION_CHECKED_BASH_COMMANDS: &[&str] = &["date", "rg", "find", "sed", "git"];
+
 fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
     let Some(command) = tokens.first().copied() else {
         return false;
     };
 
-    // Pure readers: they consume stdin/files and write only to stdout. The hashers
-    // are here so reviewers can fingerprint a diff (`git diff … | sha256sum`) to prove
-    // content identity — a common, entirely read-only review technique.
-    let read_only_commands = [
-        "cat",
-        "cksum",
-        "echo",
-        "grep",
-        "head",
-        "ls",
-        "md5sum",
-        "nl",
-        "pwd",
-        "sha1sum",
-        "sha256sum",
-        "sha512sum",
-        "tail",
-        "wc",
-    ];
-    if read_only_commands.contains(&command) {
+    if CLAUDE_READ_ONLY_BASH_COMMANDS.contains(&command) {
         return true;
     }
 

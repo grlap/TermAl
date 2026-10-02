@@ -206,7 +206,9 @@ fn claude_read_only_child_may_make_the_tracker_reads_that_record_nothing() {
         // the host gave no tracker server.
         let refused = tracker_decision(&tool, input.clone(), false).unwrap_err();
         assert!(
-            refused.contains("this Claude reviewer delegation is read-only"),
+            refused.contains("this Claude delegation is read-only")
+                && refused.contains("has no tracker access")
+                && !refused.contains("reviewer"),
             "{tool} {input}: {refused}"
         );
     }
@@ -254,7 +256,8 @@ fn claude_read_only_child_is_refused_every_tracker_call_that_writes() {
         if word.is_empty() {
             // `mcp__engram__` names no tool of the tracker's server.
             assert!(
-                message.contains("reviewer delegation is read-only"),
+                message.contains("this Claude delegation is read-only")
+                    && message.contains("is not one of the tools"),
                 "{message}"
             );
             continue;

@@ -861,6 +861,7 @@ include!("kimi_approvals.rs");
 include!("turns.rs");
 include!("recorders.rs");
 include!("claude.rs");
+include!("claude_read_only_refusal.rs");
 include!("repl_codex.rs");
 include!("api.rs");
 include!("api_git.rs");

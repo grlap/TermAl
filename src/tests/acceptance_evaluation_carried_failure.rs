@@ -352,6 +352,7 @@ fn the_carried_section_falls_to_minimal_before_any_evidence_is_clipped() {
     let compact = render_acceptance_evaluator_brief_with_details(
         &task,
         "/repo",
+        "",
         task.evidence.len(),
         0,
         MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,

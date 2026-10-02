@@ -651,6 +651,7 @@ fn criterion_evidence_final_body_plan_recomputes_clips_and_omissions() {
     let floor = render_acceptance_evaluator_brief_with_index_detail(
         &task,
         ".",
+        "",
         2,
         0,
         MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
@@ -1485,6 +1486,7 @@ fn criterion_evidence_request_preserves_criteria_and_truthful_cuts_when_details_
     let floor = render_acceptance_evaluator_brief_with_details(
         &task,
         ".",
+        "",
         0,
         0,
         0,

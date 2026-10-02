@@ -1087,11 +1087,13 @@ impl AppState {
                         .flatten()
                         .map(|model| model.trim().to_owned())
                 });
-                let AcceptanceEvaluatorBrief { prompt, cuts } = build_acceptance_evaluator_brief(
-                    &task,
-                    &evaluator_dir,
-                    MAX_ACCEPTANCE_BRIEF_BYTES,
-                )?;
+                let AcceptanceEvaluatorBrief { prompt, cuts } =
+                    build_acceptance_evaluator_brief_for_agent(
+                        &task,
+                        &evaluator_dir,
+                        agent,
+                        MAX_ACCEPTANCE_BRIEF_BYTES,
+                    )?;
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
                 let unmeasured = unmeasured(&source_fingerprint);
                 let delegation = self.create_delegation_with_evaluation_target(
