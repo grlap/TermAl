@@ -1483,6 +1483,9 @@ struct StateInner {
     /// statements so removed rows do not linger after the move to
     /// delta persistence.
     removed_session_ids: Vec<String>,
+    /// Process-local: outstanding Claude work removed sessions left, kept so
+    /// its interference outlives their records (`claude_outstanding_work.rs`).
+    claude_orphaned_work: Vec<ClaudeOrphanedWork>,
 }
 
 impl StateInner {
@@ -1534,6 +1537,7 @@ impl StateInner {
             workspace_layouts: BTreeMap::new(),
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),
+            claude_orphaned_work: Vec::new(),
         }
     }
 
@@ -1705,6 +1709,26 @@ struct SessionRecord {
     active_turn_start_message_count: Option<usize>,
     active_turn_file_changes: BTreeMap<String, WorkspaceFileChangeKind>,
     active_turn_file_change_grace_deadline: Option<std::time::Instant>,
+    /// Process-local: a Claude segment no prompt owns is open
+    /// (`claude_runtime_turns.rs`). While it is, nothing the recorder sees is
+    /// reported to Engram. It closes with its segment's result or runtime.
+    unmediated_claude_turn: Option<UnmediatedClaudeTurn>,
+    /// Process-local: the turn generation the host adopted for a turn Claude
+    /// Code started by itself. That generation was granted nothing, so no
+    /// terminal path of it reports execution on a grant
+    /// (`EngramCheckpointPurpose::TurnTerminal`). The one authoritative record
+    /// of that fact: no result, Stop, runtime exit or deferred callback
+    /// clears it, and it goes inert when a successor generation begins.
+    adopted_claude_turn_generation: Option<u64>,
+    /// Process-local: the Claude work that may still run and write without
+    /// a later frame saying so (`claude_outstanding_work.rs`): subagent tool
+    /// calls and background launches, by the runtime and turn that started
+    /// them. While any of it is foreign to the session's grant, that grant is
+    /// mixed and its checks are fenced.
+    claude_outstanding: ClaudeOutstandingWork,
+    /// Process-local: what the recorder saw in turns no prompt owned, kept as
+    /// unassigned and never credited, bounded and newest last.
+    unassigned_claude_observations: VecDeque<UnassignedClaudeObservation>,
     agent_commands: Vec<AgentCommand>,
     codex_approval_policy: CodexApprovalPolicy,
     codex_reasoning_effort: CodexReasoningEffort,
@@ -1833,6 +1857,8 @@ impl SessionRecord {
     fn clear_runtime(&mut self) {
         self.runtime = SessionRuntime::None;
         self.engram_mcp_installed = None;
+        // A runtime-started turn ends with its runtime.
+        self.unmediated_claude_turn = None;
     }
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {

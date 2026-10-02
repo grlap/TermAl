@@ -603,6 +603,10 @@ fn push_remote_proxy_session_record(
         active_turn_start_message_count: None,
         active_turn_file_changes: BTreeMap::new(),
         active_turn_file_change_grace_deadline: None,
+        unmediated_claude_turn: None,
+        adopted_claude_turn_generation: None,
+        claude_outstanding: ClaudeOutstandingWork::default(),
+        unassigned_claude_observations: VecDeque::new(),
         agent_commands: Vec::new(),
         codex_approval_policy: session
             .approval_policy

@@ -263,6 +263,35 @@ impl SessionRecorder {
         )
     }
 
+    /// Runs `write`, a Claude subagent's presentation write (a card, a diff,
+    /// an error line), without closing the root turn's open streaming-text
+    /// message, whether `write` succeeds or fails. The root turn's later
+    /// deltas and its completed text keep updating that same message, which
+    /// the root parser's own text reconciliation still describes, even
+    /// though `write` appended entries after it. Only the streaming message's
+    /// identity is kept; everything `write` records stays recorded once.
+    fn keeping_streaming_text<T>(
+        &mut self,
+        write: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let open = self.recorder_state.streaming_text_message_id.clone();
+        let written = write(self);
+        self.recorder_state.streaming_text_message_id = open;
+        written
+    }
+
+    /// Sets who produced what this recorder observes from now on: the
+    /// Claude frame it is about to apply (`claude_outstanding_work.rs`).
+    fn set_observation_provenance(&mut self, provenance: EngramObservationProvenance) {
+        self.recorder_state.observation_provenance = provenance;
+    }
+
+    /// Keeps, across turn resets, the messages of the commands `keys` names
+    /// (a Claude subagent's tool calls still pending), and of no others.
+    fn keep_command_messages<'a>(&mut self, keys: impl IntoIterator<Item = &'a String>) {
+        self.recorder_state.kept_command_keys = keys.into_iter().cloned().collect();
+    }
+
     /// Records an AskUserQuestion that TermAl resolved on Claude's behalf
     /// because the session runs unattended: a resolved (`Declined`,
     /// non-declinable) card carrying the parsed questions, with no pending
@@ -360,6 +389,16 @@ trait SessionRecorderAccess {
     /// Returns a mutable reference to the per-turn recorder state
     /// (streaming id, command upsert map, parallel-agents upsert map).
     fn recorder_state_mut(&mut self) -> &mut SessionRecorderState;
+
+    /// Reports an observation to the Engram sink, with the provenance the
+    /// recorder holds for the frame it is applying.
+    fn observe(&mut self, observation: EngramRecorderObservation<'_>) {
+        let provenance = self.recorder_state_mut().observation_provenance.clone();
+        let session_id = self.session_id().to_owned();
+        self.state()
+            .engram_host()
+            .observe(&session_id, &provenance, observation);
+    }
 }
 
 // Wires `SessionRecorder` (owned `AppState` + owned state) into the generic
@@ -755,9 +794,7 @@ fn recorder_push_diff<R: SessionRecorderAccess>(
             change_type,
         },
     )?;
-    state
-        .engram_host()
-        .observe(&session_id, EngramRecorderObservation::WorkspaceEdit);
+    recorder.observe(EngramRecorderObservation::WorkspaceEdit);
     Ok(())
 }
 
@@ -807,10 +844,7 @@ fn recorder_command_started<R: SessionRecorderAccess>(
         "",
         CommandStatus::Running,
     )?;
-    state.engram_host().observe(
-        &session_id,
-        EngramRecorderObservation::CommandStarted { key, ran, cwd },
-    );
+    recorder.observe(EngramRecorderObservation::CommandStarted { key, ran, cwd });
     Ok(())
 }
 
@@ -839,15 +873,12 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     state.upsert_command_message(&session_id, &message_id, command, output, status)?;
     // A completion that still reports the command running is not its end.
     if status != CommandStatus::Running {
-        state.engram_host().observe(
-            &session_id,
-            EngramRecorderObservation::CommandFinished {
-                key,
-                command,
-                output,
-                exit,
-            },
-        );
+        recorder.observe(EngramRecorderObservation::CommandFinished {
+            key,
+            command,
+            output,
+            exit,
+        });
     }
     Ok(())
 }
@@ -1143,11 +1174,7 @@ impl TurnRecorder for SessionRecorder {
     }
 
     fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
-        let session_id = self.session_id().to_owned();
-        self.state().engram_host().observe(
-            &session_id,
-            EngramRecorderObservation::CommandDescribed { key, ran, cwd },
-        );
+        self.observe(EngramRecorderObservation::CommandDescribed { key, ran, cwd });
         Ok(())
     }
 
@@ -1173,11 +1200,7 @@ impl TurnRecorder for SessionRecorder {
     }
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
-        let session_id = self.session_id().to_owned();
-        self.state().engram_host().observe(
-            &session_id,
-            EngramRecorderObservation::CommandAbandoned { key },
-        );
+        self.observe(EngramRecorderObservation::CommandAbandoned { key });
         Ok(())
     }
 
@@ -1274,11 +1297,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     }
 
     fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
-        let session_id = self.session_id().to_owned();
-        self.state().engram_host().observe(
-            &session_id,
-            EngramRecorderObservation::CommandDescribed { key, ran, cwd },
-        );
+        self.observe(EngramRecorderObservation::CommandDescribed { key, ran, cwd });
         Ok(())
     }
 
@@ -1304,11 +1323,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     }
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
-        let session_id = self.session_id().to_owned();
-        self.state().engram_host().observe(
-            &session_id,
-            EngramRecorderObservation::CommandAbandoned { key },
-        );
+        self.observe(EngramRecorderObservation::CommandAbandoned { key });
         Ok(())
     }
 

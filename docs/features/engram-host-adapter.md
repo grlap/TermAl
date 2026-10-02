@@ -468,6 +468,335 @@ compensating checkpoint of a superseded begin and the project-reset exit
 checkpoint close grants whose turn this process never saw end and report no
 observation.
 
+### Continuity between turns
+
+A turn's own `source_changed` compares its measured begin with its close and
+nothing else: a change made between two mediated turns belongs to neither,
+so the next turn's begin is never replaced by the previous turn's close
+(`engram_turn_continuity.rs`). Such changes include another session's
+writes, a turn Claude Code started by itself, and the naming turn's edits.
+The host keeps that change apart instead:
+
+- **The anchor.** When Engram acknowledges a checkpoint, the record keeps
+  where that turn's closing observation left the workspace, with the work,
+  run and claim it reported to. Only an acknowledged checkpoint moves it, so
+  a retry never advances it twice. A report without a closing basis clears it
+  rather than leaving an older one standing.
+- **The comparison.** When the next turn's begin basis is taken, it is
+  compared with the anchor, and the result is kept for that grant:
+  - unchanged;
+  - drifted, with the previous grant, both revisions and their times, and
+    the cause recorded as unknown;
+  - not compared, with the reason: no previous checkpoint, another work, run
+    or claim, another workspace (a root named or cleared between), or a
+    begin that could not be measured. A reason never reads as "unchanged".
+- **Surfacing.** A drift is logged as a host diagnostic. A turn that then
+  edits nothing still reports `source_changed=false` for itself, and the
+  drift stays recorded beside that report.
+- **Not yet reported to Engram.** Reporting the drift to the store waits on
+  the producer representation agreed with Engram.
+
+### Turns Claude Code starts by itself
+
+Claude Code can start a turn TermAl never prompted, for example when a
+background Bash task finishes and its notice wakes the agent. Such a turn
+had no grant before its effects, and Engram's contract forbids authorizing
+it afterwards, so TermAl makes no turn evaluation or begin for it. Instead
+the host attributes it truthfully (`claude_turn_ownership.rs`,
+`claude_frame_router.rs`, `claude_frame_application.rs`,
+`claude_runtime_turns.rs`).
+
+The ownership rules come from live stream-json captures (Claude Code
+2.1.285):
+- **Identity first.** The writer reserves each attempt's owner (its turn
+  generation, replay generation, attempt and exact content) before writing
+  it, and writes the attempt with a top-level `uuid` of its own: the replay
+  generation for a prompt's first attempt, a fresh uuid for each automatic
+  retry. A retry's reservation replaces the one still waiting for that
+  prompt. An attempt that has ended is retired: a late frame naming only
+  retired attempts (a duplicate `result`, a late `started` or output) moves
+  no turn and reaches no parser.
+- **Lifecycle runtimes.** A runtime that advertises `msg_lifecycle_v1` in
+  `init` (or sends a lifecycle frame) answers with `command_lifecycle`
+  frames naming the uuid (`queued`, `started`, `completed`). The prompt's
+  `result` names it in `user_message_uuid` / `user_message_uuids`.
+  - `started` opens that prompt's turn. It can arrive before `init`, and a
+    later `init`, a status or compaction frame does not reset it.
+  - Native slash commands are covered the same way. `/context`, `/cost` and
+    a resumed `/compact` are answered with no echo, but with their uuid.
+  - `queued` proves only receipt, and `completed` after the result moves
+    nothing.
+  - Frames without a uuid belong to the open turn. On such a runtime an echo
+    owns nothing.
+- **Settling.** A result settles a prompt only when its identities name that
+  prompt alone.
+  - Missing identities on a lifecycle runtime leave the turn unresolved, and
+    so do unknown or contradictory ones. A singular identity missing from
+    the plural list does too, as do identities naming two prompts, or a
+    second `started` inside a prompt's turn.
+  - An unresolved turn's result finalizes nothing and says so in the
+    transcript.
+  - A result that names no uuid of TermAl's never consumes a waiting prompt.
+  - An unresolved turn keeps the attempts that took part in it: the prompt
+    whose turn it was, and any waiting prompt whose `started` arrived inside
+    it, which then waits no longer. Its result retires them all, as a
+    settled attempt is retired, so their late frames move nothing. That is
+    routing only: no participant is settled, checkpointed or credited by it.
+    A prompt the result merely names, without having started, keeps waiting.
+  - Frames nothing can be tied to (an unknown, plural or malformed identity,
+    with no turn open) open an unresolved prefix with no owner and no
+    participant. A waiting prompt's own `started`, or a result naming that
+    prompt alone, takes the prefix up, as a turn no prompt owned would be
+    taken up. What ran before stays unassigned, the prompt's grant is marked
+    mixed, the replay barrier stays, the prompt is never retried, and its own
+    result settles it. Inside an unresolved turn that a prompt or an
+    unowned turn took part in, nothing is taken up.
+- **Taken up mid-turn.** A turn the runtime starts by itself (after a
+  background-task notice) names no uuid of TermAl's. A prompt written while
+  it runs can be taken up inside it: its `started` arrives mid-turn and the
+  turn's result names it.
+  - That result settles the prompt.
+  - The prompt's grant is marked as having mixed attribution, and what the
+    recorder saw in that turn stays unassigned.
+  - Inside a turn the host adopted, such a `started` leaves the turn
+    unresolved instead.
+- **Runtimes without the capability.** These keep the echo rules:
+  - A turn whose first top-level `user` frame is the exact echo of one
+    waiting prompt, before any assistant output, is that prompt's.
+  - An echo matching two waiting prompts, or output with no echo while a
+    prompt waits, is unassigned. An echo-less native command on such a
+    runtime is therefore unassigned, and its session stays busy, with the
+    notice, until it is stopped.
+- **Subagent frames.** Frames that carry a `parent_tool_use_id` neither open
+  nor end a turn, and they never touch the root turn's parser state: its
+  pending tools, text stream, approvals, permission state, retry count or
+  terminal owner. A subagent's tool calls and their results are parsed in a
+  state of their own, so the commands it runs are recorded and observed. Its
+  text and thinking are not rendered (its outcome reaches the transcript
+  through its tool's result), and its `result` and lifecycle frames are not
+  parsed at all. A subagent's frames bar the root attempt from replay.
+  A subagent's work is credited to no grant, not even its own prompt
+  attempt's: its commands and edits stay visible and still fence, but what it
+  records is kept as unassigned, and the live grant is excluded from it. A
+  command started under one prompt and ending under the next is never moved
+  to the next prompt's grant, and its late result still updates its own card:
+  a subagent's pending tool calls outlive the root turn's reset.
+  The cards, diffs and error lines a subagent records never close the root
+  turn's open text message either. When root text streams while a background
+  subagent works, its later deltas and its completed text keep updating that
+  one message, even though the subagent's entries were appended after it.
+  The root message's text is reconciled once and never duplicated. A real
+  root boundary (root tool use, thinking, a new turn) still closes it.
+- **Who produced an observation.** Every Claude frame, root or subagent,
+  carries its runtime and the turn the router found for it to the Engram
+  sink (`src/claude_outstanding_work.rs`); a subagent's frame names no turn.
+  The router's verdict is only a candidate. Each handler decides under the
+  state lock, in the section that applies the observation, whether the
+  session's grant may take it: only top-level work of the session's current
+  runtime and current turn's prompt attempt is credited. Another turn's or a
+  subagent's work on the same runtime is kept as unassigned, and the live
+  grant is excluded from it: marked mixed, so its own source report is
+  withheld as uncertain, and its open checks fenced. A replaced runtime's work
+  is kept nowhere on the session and never credited. It excludes the live
+  grant only when it shows new activity (a command starting); a buffered
+  result or edit report does not show that the work ran during the live
+  grant. A frame that proves such activity excludes the live grant when it is
+  admitted, before its handler runs, so no report installed afterwards is
+  clean of it.
+- **Work that outlives its frame.** Every shell command, every background
+  launch and a subagent's own subagent launch are kept as outstanding, by
+  runtime and turn, with every worktree each may write in: the session's
+  workdir worktree and the grant's named root when it was registered, and
+  every place its command was later placed. Those places only grow until the
+  work ends. Each entry retires only on a correlated end from the session's
+  current runtime: a foreground tool result, or a terminal task notification
+  naming a background call. A call Claude Code reports as moved to the
+  background (its result carries a background task id) stays until that
+  notification. Nothing else releases it: not a Stop, a runtime replacement or
+  exit (a command's processes may outlive its runtime), a replaced runtime's
+  late frame, a parent task's end (its subagent's commands end with their own
+  results), an abandoned call, or the session's deletion. On deletion, its
+  work moves to the host, where it keeps fencing the worktrees it may write
+  in. Work past the per-session bound is kept as unknown, with where it may
+  write.
+  While background, subagent or orphaned work is outstanding, the session is
+  restricted:
+  - its overlapping grants are mixed, the grant that launched the work
+    included, and a grant that begins meanwhile begins mixed, in the section
+    that begins it, with no later frame needed;
+  - its checks start fenced, in whatever workspace they run;
+  - another session's check in a worktree that work may write in is fenced
+    too, whatever the owning session's status.
+  A top-level foreground command of the current turn is that turn's own, and
+  a clean test of it keeps its credit. Prompts still run while work is
+  outstanding: only evidence is withheld. A host restart forgets this
+  process-local record; that is a limitation, not a reset. Recovering from
+  orphaned work is separate work.
+- **Saying why.** When a restriction takes effect, the session gets a
+  transcript notice, and the agent the same line before its next prompt. The
+  notice says what is outstanding, and that some of it may belong to a
+  stopped or replaced runtime. It says that the session's tests, in any
+  workspace, may pass without earning verification credit, and that an
+  acceptance result needing that credit cannot pass on those runs, while
+  other sessions are refused only in the workspaces the work may write in.
+  It also says that a Stop, a runtime replacement, a deletion or a fresh
+  session in the same workspace does not end it, and that TermAl has no
+  reset for it. When no such work is left, a second notice says the
+  restriction lifted. Each notice is given once and stays in the transcript.
+  A refused check keeps the cause it was fenced for (this session's own
+  work, another session's, or a deleted session's), and a successful test
+  withheld for it names that cause, without the advice to run it again. An
+  acceptance evaluation requested while the requester, or the workspace it is
+  measured in, is restricted tells the requester why; the evaluator's brief
+  never carries the requester's state.
+- **Runtime-started.** A turn that shows assistant output first, with no
+  identity, is runtime-started when no prompt waits or a notice arrived
+  since the last result.
+
+What the host does with a runtime-started turn:
+- **Adoption.** On an idle session (or one idle after an error) the turn is
+  adopted: Active under a new turn generation, so prompts sent meanwhile
+  queue behind it. A System notice in the transcript says at once that
+  TermAl did not mediate it and that its edits and tests are neither
+  reported nor credited. On a session busy with another turn, the turn is
+  marked but not adopted, and the notice says it is not part of that turn.
+  An unassigned turn is never adopted. Its notice says TermAl could not tie
+  it to the waiting prompt, and that the session should be stopped if it
+  stays busy.
+- **No attribution, full fencing.** While it is open, nothing the recorder
+  sees is attributed to a grant: no check starts and no credit is given. It
+  is kept on the session as unassigned observations instead (bounded,
+  newest last, each naming the notice that announced its turn). Where its
+  commands run and what they may write still fences carried gates and marks
+  open checks, of its own session and of others, as any command does. An
+  adopted turn's start makes the same overlap marks a dispatched turn's
+  start makes.
+- **Beside an open grant.** A turn that runs beside the session's own turn
+  overlaps that grant's measurement interval, between its begin basis and
+  its close. Nothing proves where the unowned turn ended and the grant's own
+  turn began: the runtime may start the waiting prompt before the host
+  processes the unowned result. So the grant's measured begin, and the
+  watcher's hints, stay as they are, and the grant is marked as having
+  mixed attribution. Its report then emits no change observation measured
+  from the begin basis, and withholds its own source observation unless a
+  reported check gives it a base of its own. It reports neither a clean
+  no-change turn nor the whole difference as the grant's. Each check keeps
+  its own proof. The overlap is kept as unassigned.
+- **No checkpoint.** An adopted turn was granted nothing, and its
+  generation keeps that provenance in one process-local value until a
+  successor generation begins. Its open segment may close earlier. Every
+  checkpoint names its purpose, and the one common gate reads it:
+  - TurnTerminal: completion, error, failure, runtime exit, user Stop and the
+    atomic failure, with or without the runtime token. It never reports the
+    adopted turn as a grant's execution, so a grant left open on the session
+    stays open. This holds through a deferred completion replayed after a
+    stop, a failed Stop and a runtime exit.
+  - Teardown: session deletion and revocation teardown. It resolves under
+    the lock: TurnTerminal when the current turn owns the grant, Settlement
+    when the current turn was granted nothing.
+  - Settlement: closes the leftover grant without reporting any turn's
+    execution. A report an earlier attempt for that same grant already built
+    is preserved and repeated verbatim. Without one, the settlement carries no
+    observation. Project reset and restart recovery settle on their own
+    paths, as before.
+  - The plan and the claim resolve the purpose alike. A context that changes
+    between them closes nothing.
+- **Results.** A `result` finalizes only the turn its frames opened: a
+  dispatched prompt's turn by that prompt's generation, an adopted turn by
+  its own. A result of an unadopted or unassigned turn ends only that
+  segment. A result with no turn open finalizes nothing; when a prompt still
+  waits, the transcript says so. Either way, nothing else is finished,
+  errored, checkpointed or queue-drained, so an idle session never turns to
+  Error from it, and a waiting prompt stays visibly unresolved. On a runtime
+  without lifecycle identities, an unadopted turn that ends while a prompt
+  waits gets the same Stop guidance, since nothing will settle that prompt.
+  One case does end: an interval the host adopted for a turn Claude Code
+  started by itself. Its result may name identities TermAl cannot resolve,
+  or the turn may have become unresolved part-way. It still ends when all of
+  these hold:
+  - the result is top-level and not a late duplicate;
+  - the interval kept its adopted generation;
+  - no prompt's attempt was part of it and none waits;
+  - the session still runs that runtime and that adopted generation.
+  The interval then ends through the guarded terminal paths. Its own error
+  stays an error. No prompt is settled and no grant is checkpointed or
+  credited, and the transcript says so. This ends the observed interval; it
+  never gives the unknown identities to a prompt of TermAl's. Prompts queued
+  behind the turn then run.
+- **One decision per frame, one application.** The stdout reader parses a
+  line and calls one function, `apply_claude_frame`
+  (`claude_frame_application.rs`), which the tests call as well. It asks the
+  frame router (`claude_frame_router.rs`) once for the frame's plan, then
+  applies it in a fixed order. The plan names:
+  - the frame's scope (the runtime's own, the top-level conversation, or a
+    subagent's) and the turn and attempt it belongs to;
+  - whether the root parser opens for a new host attempt, is fed, or is left
+    alone;
+  - whether the replay prompt is kept, barred from replay, or released;
+  - whether a transient error is retried;
+  - which turn a top-level `result` ended, resolved once before any reset;
+  - for a control frame, its origin.
+  Only stopping the process after a control-protocol failure stays in the
+  reader, on the application's explicit outcome. The writer's per-command
+  checks live in one function the tests call too.
+- **Control requests.** The control transport is the runtime's, but each
+  request has an origin:
+  - Root: the turn open now, or a turn no prompt owns that the request opens.
+    A request outside every turn opens such a segment, which never shows
+    that a waiting prompt owns the work.
+  - Nested: a subagent, named by its tool use.
+  - Unresolved: a malformed parent, or a request that names only ended
+    attempts.
+
+  How each is handled:
+  - A root or nested request is answered or queued through the ordinary
+    approval flow, under the same policy, using its own origin's parser
+    state. A subagent's request never touches the root turn's approvals,
+    unattended-question count, permission state or text stream, and its card
+    leaves the root turn's open text message open.
+  - An unresolved request is refused, never dropped and never answered with
+    root authority.
+  - Each request's origin is kept for its runtime. A cancellation clears
+    only a request that its runtime sent and that it may name: a subagent
+    cancels only its own, and a root cancellation may name any request by id.
+- **Replay state.** The replay prompt is kept until its attempt's result
+  ends the prompt's turn for good.
+  - Bookkeeping neither releases it nor bars it: lifecycle frames, `init`,
+    request admission, telemetry, and the exact echo of a waiting prompt. An
+    echo that matches no waiting prompt is not bookkeeping. Background-task
+    frames (task notices, task status) count as bookkeeping only between
+    turns. Inside an open attempt they bar it, as before: a task notice can
+    carry context into the running prompt, and nothing yet proves that
+    replaying the prompt after one is safe.
+  - Tool, control and unknown frames bar the open attempt for good.
+  - Such a frame arriving outside every turn while a written prompt waits (a
+    prompt hook, or a cancellation) bars that prompt's next attempt too.
+  - Nothing inside a turn no prompt owns acts on a waiting prompt's replay
+    state.
+- **Retries.** Only the exact resolved host attempt is retried: a result
+  that names the attempt alone, even with no `started` before it, with no
+  barrier since it began and its prompt still held. Every frame that opens a
+  prompt's attempt (its `started`, turn output or echo naming it, a control
+  request naming it, or its result) first prepares the root parser for that
+  attempt: bound to it and reset once, keeping a barrier inherited from
+  between turns. The frame's own barrier comes after the reset, so a control
+  request that opens the attempt bars it from replay before the request is
+  answered or queued, and a later `started` resets nothing. Without that
+  preparation, only an attempt its result alone opened counts as having done
+  nothing before it; an attempt the turn record already held open is never
+  retried. The same single preparation point serves a turn Claude Code
+  started (a clean parser, no attempt bound, its own provenance kept and the
+  waiting prompt's barrier left alone), while a waiting prompt taken up
+  inside a turn no prompt owned keeps what ran before, unreset. A turn taken up
+  mid-turn, an unresolved one or a runtime-started one is never retried. The
+  retry is written under a fresh uuid, only while it is still the retry
+  pending: the same prompt still held, its turn generation still the
+  session's live turn, and the same runtime. A new prompt, a stop, a new
+  turn or a new runtime drops it.
+
+Recording such a turn in the store, as detected and unmediated, waits on
+Engram's producer contract for observed turns.
+
 ### Content revision
 
 Every source basis TermAl reports, at a turn's begin and close, at each
@@ -806,8 +1135,9 @@ happens elsewhere. The agent therefore names the item's worktree once with
   refuse its submission, and the tracker's own freshness check is what
   stands. A
   change made between two mediated turns (the naming turn's edits, a
-  runtime-started turn) is not reported by either; option A', a separate
-  Engram record, is planned for it. The main checkout of a
+  runtime-started turn) is not reported by either. The host keeps it as
+  continuity drift (Continuity between turns, above); reporting it to
+  Engram waits on the producer representation agreed with Engram. The main checkout of a
   `--separate-git-dir` repository cannot be named, since its `.git` file
   names no linked worktree; a linked worktree of it can.
 

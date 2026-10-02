@@ -1373,6 +1373,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
         claimed.record(|record| record.engram.pending_source_root_line = None);
         claimed.state.note_engram_command_started(
             &claimed.session_id,
+            &EngramObservationProvenance::Ambient,
             "test",
             Some("cargo test"),
             Some(second.to_str().expect("UTF-8 fixture path")),
@@ -1527,6 +1528,7 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
     };
     claimed.state.note_engram_command_started(
         &claimed.session_id,
+        &EngramObservationProvenance::Ambient,
         "focused-test",
         Some("cargo test"),
         Some(second.to_str().expect("UTF-8 fixture path")),
@@ -1538,6 +1540,7 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
     );
     claimed.state.note_engram_command_finished(
         &claimed.session_id,
+        &EngramObservationProvenance::Ambient,
         "focused-test",
         "cargo test",
         "test result: ok. 1 passed",

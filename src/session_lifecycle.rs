@@ -180,6 +180,7 @@ impl AppState {
         for terminating_session_id in &engram_session_ids_to_terminate {
             self.checkpoint_engram_turn_off_lock(
                 terminating_session_id,
+                EngramCheckpointPurpose::Teardown,
                 None,
                 None,
                 EngramNextIntent::Exit,
@@ -1035,6 +1036,7 @@ impl AppState {
         }
         let checkpoint_failure = match self.checkpoint_engram_turn_off_lock(
             session_id,
+            EngramCheckpointPurpose::TurnTerminal,
             None,
             None,
             EngramNextIntent::Wait,

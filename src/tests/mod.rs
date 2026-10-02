@@ -24,7 +24,9 @@ mod agent_commands;
 mod agent_readiness;
 mod bounded_read_process;
 mod claude;
+mod claude_frame_router;
 mod claude_permission_boundary;
+mod claude_turn_ownership;
 mod cli;
 mod codex_bin;
 mod codex_delegation_release;
@@ -547,6 +549,7 @@ fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
         command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
         parallel_agents_messages: HashMap::from([("parallel-1".to_owned(), "Working".to_owned())]),
         streaming_text_message_id: Some("message-1".to_owned()),
+        ..SessionRecorderState::default()
     };
 
     clear_shared_codex_turn_recorder_state(&mut recorder_state);
@@ -586,6 +589,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
                 "Working".to_owned(),
             )]),
             streaming_text_message_id: Some("message-1".to_owned()),
+            ..SessionRecorderState::default()
         },
         thread_id: Some("thread-1".to_owned()),
         turn_id: Some("turn-1".to_owned()),

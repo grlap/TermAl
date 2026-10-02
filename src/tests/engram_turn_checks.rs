@@ -482,6 +482,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         sandbox: None,
         start_basis: engram_ready_basis_capture(),
         overlapped: false,
+        fenced_by_outstanding: None,
         watcher_fence: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -1332,6 +1333,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         sandbox: None,
         start_basis: settled(),
         overlapped: false,
+        fenced_by_outstanding: None,
         watcher_fence: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -1347,7 +1349,8 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
             check("settled", settled()),
         ];
     });
-    turn.state.note_engram_workspace_edit(&turn.session_id);
+    turn.state
+        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
     let overlapped = turn.record(|record| {
         record
             .engram
@@ -1385,6 +1388,7 @@ pub(super) fn finished_check(
         sandbox: None,
         start_basis: engram_ready_basis_capture(),
         overlapped: false,
+        fenced_by_outstanding: None,
         watcher_fence: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -2855,7 +2859,8 @@ fn an_acp_check_a_later_start_invalidates_stays_withheld_until_its_call_ends() {
         [("corrected".to_owned(), false)]
     );
     // An edit while the test runs makes it unknown.
-    turn.state.note_engram_workspace_edit(&turn.session_id);
+    turn.state
+        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
     // A correction to another place in the worktree drops the check, and
     // later starts of the same call start none.
     for moved in [
@@ -4036,6 +4041,16 @@ mod lost_shell_overlap;
 // module.
 #[path = "engram_carried_checks.rs"]
 mod carried_checks;
+
+// Turns Claude Code starts by itself: ownership, results and what reaches a
+// grant, likewise a child module.
+#[path = "engram_claude_runtime_turns.rs"]
+mod claude_runtime_turns;
+
+// An adopted runtime-started turn's provenance through every lifecycle path
+// that ends it, likewise a child module.
+#[path = "engram_claude_adopted_terminalization.rs"]
+mod claude_adopted_terminalization;
 
 // Which launcher stages are test stages, likewise a child module.
 #[path = "engram_launcher_stages.rs"]

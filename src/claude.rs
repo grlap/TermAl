@@ -1604,6 +1604,25 @@ fn clear_claude_turn_state(state: &mut ClaudeTurnState) {
     state.saw_text_delta = false;
 }
 
+/// At most this many subagent tool calls are kept pending across root turn
+/// resets; past that, their correlation is dropped (their late results then
+/// update no card). What may still run is held apart from the parser, by the
+/// session (`claude_outstanding_work.rs`), and is not released by this.
+const CLAUDE_SUBAGENT_PENDING_TOOL_LIMIT: usize = 256;
+
+/// Clears the subagents' turn-local parser state when the root turn resets,
+/// but keeps their pending tool calls: a background subagent's call may end
+/// after the root turn that launched it, and its result must still find the
+/// call it answers.
+fn clear_claude_subagent_turn_state(state: &mut ClaudeTurnState) {
+    let mut pending = std::mem::take(&mut state.pending_tools);
+    clear_claude_turn_state(state);
+    if pending.len() > CLAUDE_SUBAGENT_PENDING_TOOL_LIMIT {
+        pending.clear();
+    }
+    state.pending_tools = pending;
+}
+
 /// Resets Claude turn-local parser and recorder state.
 fn reset_claude_turn_state<R: TurnRecorder + ?Sized>(
     state: &mut ClaudeTurnState,
@@ -2117,8 +2136,18 @@ fn handle_claude_bash_result(
         CommandStatus::Success
     };
     let command = tool_use.command.as_deref().unwrap_or("Bash");
-    let exit =
-        EngramHost::claude_command_exit(is_error, interrupted, tool_use.run_in_background, detail);
+    // A command Claude Code moved to the background (a timeout, the user, a
+    // turn abort) runs on: its result marks the move, not its end.
+    let moved_to_background = tool_use_result
+        .and_then(|value| value.get("backgroundTaskId"))
+        .and_then(Value::as_str)
+        .is_some_and(|task| !task.is_empty());
+    let exit = EngramHost::claude_command_exit(
+        is_error,
+        interrupted,
+        tool_use.run_in_background || moved_to_background,
+        detail,
+    );
     recorder.command_completed_with_exit(tool_use_id, command, output.trim_end(), status, exit)
 }
 

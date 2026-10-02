@@ -1049,6 +1049,15 @@ fn engram_carry_refusal(record: &SessionRecord, launched: &EngramTurnCheck) -> O
              earn no credit: it ran outside the named source root this turn is measured in."
         ));
     }
+    // Claude work with no verified completion restricted it: told as that
+    // cause, with no relaunch advice, since a relaunch cannot end that work.
+    if let Some(cause) = &launched.fenced_by_outstanding {
+        return Some(format!(
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a background full gate (check {fingerprint}) will \
+             earn no credit: {}. It can earn credit only once Claude reports that work ended.",
+            cause.describe()
+        ));
+    }
     if launched.overlapped {
         return Some(format!(
             "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a background full gate (check {fingerprint}) will \
@@ -1212,6 +1221,73 @@ fn engram_fence_carried_checks_in(
             && engram_worktrees_may_hold(worktrees, &engram_path_key(&carried.check.target.root))
         {
             carried.fence = Some(cause.to_owned());
+        }
+    }
+}
+
+/// Whether `command` is a recognised, simple full-gate launch of the
+/// launcher (`node scripts/test-launcher.mjs full …`, one call, nothing
+/// joined to it): the only launch whose own outstanding Claude work does not
+/// fence the check and the carried run it starts (`claude_outstanding_work.rs`).
+fn engram_is_simple_full_launcher(command: &EngramCheckCommand) -> bool {
+    command.simple
+        && engram_launcher_words(command)
+            .is_some_and(|words| words.get(2).map(String::as_str) == Some("full"))
+}
+
+/// Applies outstanding Claude work of the session at `owner` (its call
+/// `key`, which may write in `locations`) to the checks already running
+/// there: every other session's open turn check, and every unsettled
+/// carried check of any session, whose worktree `locations` may hold, is
+/// fenced, with the cause stored. The owner's own open turn checks are fenced
+/// by the exclusion of its grant. When the call is a recognised simple full
+/// gate (`self_gate`), the carried run it launched itself is not fenced by
+/// it. Under the state lock, in the section that registers, promotes or
+/// places the work; a fence stays when the work later ends.
+fn engram_fence_checks_for_claude_work(
+    inner: &mut StateInner,
+    owner: usize,
+    key: &str,
+    locations: &[Option<String>],
+    self_gate: bool,
+) {
+    if !engram_session_may_write(inner, owner) {
+        return;
+    }
+    let other_cause = ClaudeHazardCause::OtherSession {
+        session_id: inner.sessions[owner].session.id.clone(),
+        name: inner.sessions[owner].session.name.clone(),
+    };
+    for (index, record) in inner.sessions.iter_mut().enumerate() {
+        let cause = if index == owner {
+            ClaudeHazardCause::OwnSession
+        } else {
+            other_cause.clone()
+        };
+        if index != owner {
+            for check in &mut record.engram.active_turn_checks {
+                if check.open_to_writes()
+                    && engram_worktrees_may_hold(locations, &engram_path_key(&check.target.root))
+                {
+                    check.overlapped = true;
+                    check.fenced_by_outstanding.get_or_insert(cause.clone());
+                }
+            }
+        }
+        for carried in &mut record.engram.carried_checks {
+            if index == owner && self_gate && carried.check.key == key {
+                continue;
+            }
+            if carried.fence.is_none()
+                && carried.terminal_digest.is_none()
+                && engram_worktrees_may_hold(locations, &engram_path_key(&carried.check.target.root))
+            {
+                carried.fence = Some(cause.describe());
+                carried
+                    .check
+                    .fenced_by_outstanding
+                    .get_or_insert(cause.clone());
+            }
         }
     }
 }

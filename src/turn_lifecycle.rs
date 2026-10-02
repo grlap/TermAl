@@ -860,6 +860,7 @@ impl AppState {
     ) -> Result<bool> {
         self.checkpoint_engram_turn_off_lock(
             session_id,
+            EngramCheckpointPurpose::TurnTerminal,
             Some(token),
             expected_active_turn_generation,
             EngramNextIntent::Wait,
@@ -1306,6 +1307,7 @@ impl AppState {
                 // runtime or a rejected delivery leaves the ending unknown.
                 self.checkpoint_engram_turn_off_lock(
                     session_id,
+                    EngramCheckpointPurpose::TurnTerminal,
                     checkpoint_token,
                     None,
                     EngramNextIntent::Wait,
@@ -1654,6 +1656,29 @@ impl AppState {
         token: &RuntimeToken,
         detail: &str,
     ) -> Result<bool> {
+        self.note_turn_retry_guarded(session_id, token, None, detail)
+    }
+
+    /// `note_turn_retry_if_runtime_matches`, only while the session's turn is
+    /// still the one dispatched under `active_turn_generation`: a delayed
+    /// retry of a stopped turn notes nothing on the turn after it.
+    fn note_turn_retry_if_runtime_and_generation_match(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        detail: &str,
+    ) -> Result<bool> {
+        self.note_turn_retry_guarded(session_id, token, Some(active_turn_generation), detail)
+    }
+
+    fn note_turn_retry_guarded(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        expected_active_turn_generation: Option<u64>,
+        detail: &str,
+    ) -> Result<bool> {
         let cleaned = detail.trim();
         if cleaned.is_empty() {
             return Ok(false);
@@ -1666,16 +1691,7 @@ impl AppState {
 
         let duplicate_last_message = {
             let record = &inner.sessions[index];
-            if !record.runtime.matches_runtime_token(token) {
-                return Ok(false);
-            }
-            if record.runtime_stop_in_progress {
-                return Ok(false);
-            }
-            if !matches!(
-                record.session.status,
-                SessionStatus::Active | SessionStatus::Approval
-            ) {
+            if !turn_retry_allowed_on_record(record, token, expected_active_turn_generation) {
                 return Ok(false);
             }
 
@@ -1713,6 +1729,10 @@ impl AppState {
 
     /// Returns whether a delayed retry still belongs to the current live
     /// runtime and the turn has not entered its stop window.
+    // Production Claude retries are also held to their turn generation
+    // (`turn_retry_allowed_if_runtime_and_generation_match`); this token-only
+    // form remains for tests.
+    #[cfg(test)]
     fn turn_retry_allowed_if_runtime_matches(
         &self,
         session_id: &str,
@@ -1722,13 +1742,25 @@ impl AppState {
         inner
             .find_session_index(session_id)
             .and_then(|index| inner.sessions.get(index))
+            .is_some_and(|record| turn_retry_allowed_on_record(record, token, None))
+    }
+
+    /// `turn_retry_allowed_if_runtime_matches`, only while the session's turn
+    /// is still the one dispatched under `active_turn_generation`: a stop
+    /// followed at once by a new prompt leaves the session Active, but under
+    /// another generation.
+    fn turn_retry_allowed_if_runtime_and_generation_match(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+    ) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .and_then(|index| inner.sessions.get(index))
             .is_some_and(|record| {
-                record.runtime.matches_runtime_token(token)
-                    && !record.runtime_stop_in_progress
-                    && matches!(
-                        record.session.status,
-                        SessionStatus::Active | SessionStatus::Approval
-                    )
+                turn_retry_allowed_on_record(record, token, Some(active_turn_generation))
             })
     }
 
@@ -1737,6 +1769,9 @@ impl AppState {
     /// buffers a `DeferredStopCallback::TurnError` for replay. Unlike
     /// `fail_turn_if_runtime_matches`, this keeps the turn in a retryable
     /// state — the user can submit again without starting over.
+    // Production Claude results finalize by turn generation
+    // (`claude_runtime_turns.rs`); this token-only form remains for tests.
+    #[cfg(test)]
     fn mark_turn_error_if_runtime_matches(
         &self,
         session_id: &str,
@@ -1770,6 +1805,7 @@ impl AppState {
     ) -> Result<()> {
         self.checkpoint_engram_turn_off_lock(
             session_id,
+            EngramCheckpointPurpose::TurnTerminal,
             Some(token),
             expected_active_turn_generation,
             EngramNextIntent::Wait,
@@ -2079,6 +2115,7 @@ impl AppState {
             // leaves its outcome unknown.
             self.checkpoint_engram_turn_off_lock(
                 session_id,
+                EngramCheckpointPurpose::TurnTerminal,
                 Some(token),
                 expected_active_turn_generation,
                 EngramNextIntent::Wait,
@@ -2500,4 +2537,22 @@ impl AppState {
         drop(inner);
         Ok(())
     }
+}
+
+/// Whether a retry may still act on `record`'s turn: the runtime `token`
+/// names is the session's, no stop is under way, the turn is live, and, when
+/// `expected_active_turn_generation` is given, it is still that turn.
+fn turn_retry_allowed_on_record(
+    record: &SessionRecord,
+    token: &RuntimeToken,
+    expected_active_turn_generation: Option<u64>,
+) -> bool {
+    record.runtime.matches_runtime_token(token)
+        && !record.runtime_stop_in_progress
+        && matches!(
+            record.session.status,
+            SessionStatus::Active | SessionStatus::Approval
+        )
+        && expected_active_turn_generation
+            .is_none_or(|generation| record.active_turn_generation == generation)
 }

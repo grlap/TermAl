@@ -65,16 +65,29 @@ pub(crate) enum EngramRecorderObservation<'a> {
 }
 
 impl EngramHost<'_> {
-    /// Reports what a recorder saw in `session_id`.
-    pub(crate) fn observe(&self, session_id: &str, observation: EngramRecorderObservation<'_>) {
+    /// Reports what a recorder saw in `session_id`, produced as `provenance`
+    /// says. Every handler reaches the observation, because where a command
+    /// runs and what it may write fences carried gates and other sessions'
+    /// checks whoever ran it. Whether the session's grant may take it is
+    /// decided inside each handler, under the state lock in the section that
+    /// applies it (`claude_observation_disposition`): work of another turn,
+    /// of a turn no prompt owns or of a replaced runtime is attributed to no
+    /// grant, and the live grant is excluded from it
+    /// (`claude_outstanding_work.rs`).
+    pub(crate) fn observe(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        observation: EngramRecorderObservation<'_>,
+    ) {
         match observation {
             EngramRecorderObservation::CommandStarted { key, ran, cwd } => {
                 self.state
-                    .note_engram_command_started(session_id, key, ran, cwd);
+                    .note_engram_command_started(session_id, provenance, key, ran, cwd);
             }
             EngramRecorderObservation::CommandDescribed { key, ran, cwd } => {
                 self.state
-                    .note_engram_command_described(session_id, key, ran, cwd);
+                    .note_engram_command_described(session_id, provenance, key, ran, cwd);
             }
             EngramRecorderObservation::CommandFinished {
                 key,
@@ -82,14 +95,17 @@ impl EngramHost<'_> {
                 output,
                 exit,
             } => {
-                self.state
-                    .note_engram_command_finished(session_id, key, command, output, exit);
+                self.state.note_engram_command_finished(
+                    session_id, provenance, key, command, output, exit,
+                );
             }
             EngramRecorderObservation::CommandAbandoned { key } => {
-                self.state.note_engram_command_abandoned(session_id, key);
+                self.state
+                    .note_engram_command_abandoned(session_id, provenance, key);
             }
             EngramRecorderObservation::WorkspaceEdit => {
-                self.state.note_engram_workspace_edit(session_id);
+                self.state
+                    .note_engram_workspace_edit(session_id, provenance);
             }
         }
     }
@@ -110,6 +126,60 @@ impl EngramHost<'_> {
     /// lock, by the dispatch that holds it.
     pub(crate) fn turn_started(inner: &mut StateInner, index: usize) {
         engram_note_turn_started(inner, index);
+    }
+
+    /// A turn of the session at `index` began beside the turn it is already
+    /// running (a Claude turn no prompt owns): it may now write under a check
+    /// another session of its worktree has open, while the commands of the
+    /// session's own turn go on. Called under the state lock.
+    pub(crate) fn turn_running_beside(inner: &mut StateInner, index: usize) {
+        engram_mark_checks_overlapped_by(inner, index, EngramWriterAct::Presence);
+    }
+
+    /// Where the session in `record` may write now: its workdir's worktree,
+    /// as last resolved (`None` when never resolved, so any), and its grant's
+    /// named source root while one is held. For outstanding Claude work
+    /// registered now (`claude_outstanding_work.rs`).
+    pub(crate) fn session_write_locations(record: &SessionRecord) -> Vec<Option<String>> {
+        let mut locations = vec![engram_session_worktree(record)];
+        if let Some(root) = engram_turn_named_root_key(record) {
+            let root = Some(root);
+            if !locations.contains(&root) {
+                locations.push(root);
+            }
+        }
+        locations
+    }
+
+    /// Whether `worktrees` may hold the worktree with key `root`: one of them
+    /// is it, or one is a worktree TermAl could not name.
+    pub(crate) fn worktrees_may_hold(worktrees: &[Option<String>], root: &str) -> bool {
+        engram_worktrees_may_hold(worktrees, root)
+    }
+
+    /// Applies outstanding Claude work of the session at `owner` to the
+    /// checks and carried runs already running where it may write
+    /// (`engram_fence_checks_for_claude_work`). Called under the state lock.
+    pub(crate) fn fence_checks_for_claude_work(
+        inner: &mut StateInner,
+        owner: usize,
+        key: &str,
+        locations: &[Option<String>],
+        self_gate: bool,
+    ) {
+        engram_fence_checks_for_claude_work(inner, owner, key, locations, self_gate);
+    }
+
+    /// Whether the command line `line` is a recognised, simple full-gate
+    /// launch (`engram_is_simple_full_launcher`).
+    pub(crate) fn is_simple_full_launcher_line(line: &str) -> bool {
+        engram_check_command(line).is_some_and(|command| engram_is_simple_full_launcher(&command))
+    }
+
+    /// Whether the session at `index` may write: a read-only delegation child
+    /// cannot. Called under the state lock.
+    pub(crate) fn session_may_write(inner: &StateInner, index: usize) -> bool {
+        engram_session_may_write(inner, index)
     }
 
     /// The watcher saw `changes` in a workspace. Its one caller, the watcher

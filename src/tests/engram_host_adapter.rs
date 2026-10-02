@@ -5693,6 +5693,7 @@ fn engram_mcp_grant_clear_waits_for_a_lifecycle_checkpoint_before_teardown() {
     let checkpoint_thread = std::thread::spawn(move || {
         checkpoint_state.checkpoint_engram_turn_off_lock(
             &checkpoint_session_id,
+            EngramCheckpointPurpose::TurnTerminal,
             None,
             None,
             EngramNextIntent::Wait,
@@ -5768,6 +5769,7 @@ fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
     let checkpoint_thread = std::thread::spawn(move || {
         checkpoint_state.checkpoint_engram_turn_off_lock(
             &checkpoint_session_id,
+            EngramCheckpointPurpose::TurnTerminal,
             None,
             None,
             EngramNextIntent::Wait,
@@ -5810,6 +5812,7 @@ fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
     }
     state.checkpoint_engram_turn_off_lock(
         &child_session_id,
+        EngramCheckpointPurpose::TurnTerminal,
         None,
         None,
         EngramNextIntent::Wait,

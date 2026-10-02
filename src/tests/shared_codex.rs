@@ -60,6 +60,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
                     )]),
                     parallel_agents_messages: HashMap::new(),
                     streaming_text_message_id: Some("stale-stream".to_owned()),
+                    ..SessionRecorderState::default()
                 },
                 thread_id: Some("conversation-123".to_owned()),
                 turn_id: Some("turn-old".to_owned()),

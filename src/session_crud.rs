@@ -1556,6 +1556,7 @@ impl AppState {
             if project_reset_owner_generation.is_none() {
                 self.checkpoint_engram_turn_off_lock(
                     &session_id,
+                    EngramCheckpointPurpose::Teardown,
                     None,
                     None,
                     EngramNextIntent::Exit,

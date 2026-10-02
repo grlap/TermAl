@@ -1793,6 +1793,7 @@ fn delayed_claude_retry_is_dropped_during_stop_and_after_runtime_replacement() {
         attachments: Vec::new(),
         replay_generation: "retry-generation-stop".to_owned(),
         text: "retry me".to_owned(),
+        turn_generation: 1,
     })));
 
     {
@@ -1803,15 +1804,30 @@ fn delayed_claude_retry_is_dropped_during_stop_and_after_runtime_replacement() {
         inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
         inner.sessions[index].runtime_stop_in_progress = true;
+        inner.sessions[index].active_turn_generation = 1;
     }
+    // Each retry is still the one pending: only the stop, the replaced
+    // runtime or the idle session refuses it.
+    let pending = |replay_generation: &str| {
+        let ticket = ClaudeRetryTicket {
+            replay_generation: replay_generation.to_owned(),
+            turn_generation: 1,
+            attempt: 1,
+        };
+        let ownership = new_claude_turn_ownership();
+        lock_claude_turn_ownership(&ownership).schedule_retry(ticket.clone());
+        (ownership, ticket)
+    };
 
+    let (ownership, ticket) = pending("retry-generation-stop");
     assert!(!dispatch_claude_retry_if_current(
         &state,
         &session_id,
         &stale_runtime_token,
         &retry_tx,
         &replay_prompt,
-        "retry-generation-stop",
+        &ownership,
+        &ticket,
         "Retrying Claude automatically.",
     ));
     assert!(matches!(
@@ -1837,15 +1853,18 @@ fn delayed_claude_retry_is_dropped_during_stop_and_after_runtime_replacement() {
         attachments: Vec::new(),
         replay_generation: "retry-generation-replaced".to_owned(),
         text: "stale retry".to_owned(),
+        turn_generation: 1,
     });
 
+    let (ownership, ticket) = pending("retry-generation-replaced");
     assert!(!dispatch_claude_retry_if_current(
         &state,
         &session_id,
         &stale_runtime_token,
         &retry_tx,
         &replay_prompt,
-        "retry-generation-replaced",
+        &ownership,
+        &ticket,
         "Retrying Claude automatically.",
     ));
     assert!(matches!(
@@ -1868,14 +1887,17 @@ fn delayed_claude_retry_is_dropped_during_stop_and_after_runtime_replacement() {
         attachments: Vec::new(),
         replay_generation: "retry-generation-idle".to_owned(),
         text: "do not resurrect this turn".to_owned(),
+        turn_generation: 1,
     });
+    let (ownership, ticket) = pending("retry-generation-idle");
     assert!(!dispatch_claude_retry_if_current(
         &state,
         &session_id,
         &replacement_runtime_token,
         &retry_tx,
         &replay_prompt,
-        "retry-generation-idle",
+        &ownership,
+        &ticket,
         "This message must not be recorded.",
     ));
     {
@@ -1890,6 +1912,110 @@ fn delayed_claude_retry_is_dropped_during_stop_and_after_runtime_replacement() {
         );
     }
     assert_eq!(claude_replay_generation(&replay_prompt), None);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delayed_claude_retry_is_sent_only_while_it_is_the_pending_attempt_of_the_live_turn() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _runtime_input_rx) = test_claude_runtime_handle("claude-delayed-retry-attempt");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 4;
+    }
+    let prompt = ClaudePromptCommand {
+        attachments: Vec::new(),
+        replay_generation: "retry-attempt".to_owned(),
+        text: "retry me".to_owned(),
+        turn_generation: 4,
+    };
+    let replay_prompt = Arc::new(Mutex::new(Some(prompt.clone())));
+    let ownership = new_claude_turn_ownership();
+    let ticket = ClaudeRetryTicket {
+        replay_generation: "retry-attempt".to_owned(),
+        turn_generation: 4,
+        attempt: 1,
+    };
+    let (retry_tx, retry_rx) = mpsc::channel();
+    let dispatch = |ticket: &ClaudeRetryTicket| {
+        dispatch_claude_retry_if_current(
+            &state,
+            &session_id,
+            &runtime_token,
+            &retry_tx,
+            &replay_prompt,
+            &ownership,
+            ticket,
+            "Retrying Claude automatically.",
+        )
+    };
+
+    // The pending attempt of the live turn is sent.
+    lock_claude_turn_ownership(&ownership).schedule_retry(ticket.clone());
+    assert!(dispatch(&ticket));
+    match retry_rx.try_recv() {
+        Ok(ClaudeRuntimeCommand::RetryLastPrompt { ticket: sent, .. }) => assert_eq!(sent, ticket),
+        _ => panic!("the retry should be queued for the writer"),
+    }
+
+    // A newer retry of the same prompt is pending: the older one is refused
+    // and leaves the prompt for it.
+    let newer = ClaudeRetryTicket {
+        attempt: 2,
+        ..ticket.clone()
+    };
+    lock_claude_turn_ownership(&ownership).schedule_retry(newer.clone());
+    assert!(!dispatch(&ticket));
+    assert_eq!(
+        claude_replay_generation(&replay_prompt).as_deref(),
+        Some("retry-attempt")
+    );
+
+    // A new prompt written meanwhile is a new attempt: the retry is refused,
+    // and the new prompt's replay state is untouched.
+    write_claude_runtime_command(
+        &mut Vec::new(),
+        &replay_prompt,
+        &ownership,
+        ClaudeRuntimeCommand::Prompt(ClaudePromptCommand {
+            replay_generation: "next-prompt".to_owned(),
+            ..prompt.clone()
+        }),
+    )
+    .expect("the next prompt should be written");
+    assert!(!dispatch(&newer));
+    assert_eq!(
+        claude_replay_generation(&replay_prompt).as_deref(),
+        Some("next-prompt")
+    );
+
+    // A stop followed at once by a new turn leaves the session Active under
+    // another generation: the stopped turn's retry is refused.
+    *replay_prompt
+        .lock()
+        .expect("Claude replay prompt mutex poisoned") = Some(prompt.clone());
+    lock_claude_turn_ownership(&ownership).schedule_retry(ticket.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].active_turn_generation = 5;
+    }
+    assert!(!dispatch(&ticket));
+    assert_eq!(claude_replay_generation(&replay_prompt), None);
+    assert!(matches!(
+        retry_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
