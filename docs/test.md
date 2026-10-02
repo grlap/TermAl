@@ -424,6 +424,52 @@ Keep integration tests focused. The main `App.test.tsx` harness is valuable but
 expensive; prefer extracting pure helpers or testing a panel directly when that
 captures the bug.
 
+### UI test categories
+
+`ui/test-categories.ts` places every UI test file in exactly one of four Vitest
+projects, which run in this order, one file at a time:
+
+- `unit`: a `*.test.ts` file that needs no DOM (explicit list);
+- `component`: every other `*.test.tsx`, plus the `*.test.ts` files listed as
+  needing the DOM;
+- `heavy`: a component file with a test at or above 2 s in measured runs, with
+  real-time sensitivity, or that exercises the virtualizer and measurement
+  lifecycle (explicit list, each with a reason and its resource tags:
+  `cpu-heavy` for measured duration, `wall-clock` for real-time waits);
+- `app`: a file that renders the whole App (explicit list).
+
+Every project still runs in jsdom, and each has its own `sequence.groupOrder`,
+starting at 1. Vitest 4 runs a one-worker, isolated project with groupOrder 0
+after every ordered group, so 0 would put it last.
+
+The guard `ui/src/test-categories.test.ts` checks the placement rules:
+
+- A new `*.test.ts` must be added to the unit list, to the list of files that
+  need the DOM, or to `app`.
+- A file that renders the App must be in `app`, and every `app` file must
+  render it. A file renders the App when it imports the App module, calls a
+  harness export that renders it (`renderApp`, `renderAppWithProjectAndSession`
+  or `withFallbackStateHarness`), or imports a local module that does. This is
+  a text match followed one module level deep, not an import graph.
+
+It also fails when any of these hold:
+
+- a test file under `ui/` falls into no project or into two, by the manifest's
+  own matcher;
+- a selection pattern is a glob other than the one component glob;
+- the group order is wrong;
+- a unit file's own text contains one of these patterns: an import
+  `from "@testing-library/…"`, `renderHook`, `render(`, `screen.`,
+  `document.`, `window.`, `localStorage` or `sessionStorage`.
+
+That last check is a static backstop with stated limits. It reads only the
+test file's own text, not the modules the test imports, and only those
+patterns. A unit file that reaches the DOM through a module it exercises, or
+through another DOM global, passes it. Every project still runs in jsdom, so a
+normal run would not catch such a file either. Only running the unit list in a
+node environment catches it, which is what moving the unit project to node, a
+later change, does.
+
 ## Known Coverage Gaps
 
 The active follow-up list lives in Beads. Use `bd ready` for currently

@@ -3,16 +3,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { configDefaults } from "vitest/config";
 import { assertVitestResourceBudget } from "../scripts/vitest-resource-preflight.mjs";
-
-const SERIALIZED_REACT_TESTS = [
-  "src/App.*.test.tsx",
-  "src/backend-connection.test.tsx",
-  "src/panels/AgentSessionPanel.virtualization*.test.tsx",
-  "src/SessionPaneView.delegation-composer.test.tsx",
-  "src/SessionPaneView.retry-display.test.tsx",
-  "src/SessionPaneView.scroll-idle-measurement.test.tsx",
-  "src/SessionPaneView.scroll-native-authority.test.tsx",
-];
+import { CATEGORY_PROJECTS } from "./test-categories";
 
 function monacoEsmCssStub() {
   return {
@@ -136,37 +127,26 @@ export default defineConfig({
     maxWorkers: 1,
     setupFiles: "./src/test-setup.ts",
     testTimeout: 10_000,
-    projects: [
-      {
-        extends: true,
-        test: {
-          name: "default",
-          exclude: [
-            ...configDefaults.exclude,
-            ...SERIALIZED_REACT_TESTS,
-          ],
-          sequence: {
-            groupOrder: 0,
-          },
+    // Four projects from ui/test-categories.ts: unit, component, heavy and
+    // app, every one on jsdom. One worker keeps the stage to one file at a
+    // time; each project's own groupOrder sets the order between them. The
+    // heavy and app files either render the full App or exercise the
+    // scheduler-sensitive SessionPaneView and virtualizer lifecycle, so they
+    // must not share the runner with other files: oversubscribing the
+    // lifecycle under test, or abandoning an open `act()` scope, would make
+    // them fail for reasons that are not theirs.
+    projects: CATEGORY_PROJECTS.map(({ name, include, exclude, groupOrder }) => ({
+      extends: true,
+      test: {
+        name,
+        include: [...include],
+        exclude: [...configDefaults.exclude, ...exclude],
+        maxWorkers: 1,
+        sequence: {
+          groupOrder,
         },
       },
-      {
-        extends: true,
-        test: {
-          name: "serialized-react",
-          include: SERIALIZED_REACT_TESTS,
-          // These files either render the full App or exercise the same
-          // scheduler-sensitive SessionPaneView/virtualizer lifecycle. Run
-          // this behavior-based set one file at a time so the runner does not
-          // oversubscribe the lifecycle it is measuring or abandon an open
-          // `act()` scope.
-          maxWorkers: 1,
-          sequence: {
-            groupOrder: 1,
-          },
-        },
-      },
-    ],
+    })),
   },
   server: {
     host: "127.0.0.1",
