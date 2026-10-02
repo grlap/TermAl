@@ -639,12 +639,18 @@ The ownership rules come from live stream-json captures (Claude Code
   evidence interval closed, and, for another session's or a deleted
   session's work, may write where the record ran. The session's own
   restricting work counts in any workspace. A check's interval closes only
-  after its command ended and both its snapshots were taken. A carried run's
-  interval closes only after its terminal read, its launch snapshot and the
-  end snapshot of the settlement that credits it; a retried settlement
-  extends it. So a place found later for work registered earlier reaches a
-  record it may have overlapped, while work that started only after every
-  snapshot closed leaves it eligible. The only exception is the exact call
+  after its command ended and both its snapshots were taken. A carried run
+  stays open until it is consumed or refused, since any later settlement may
+  record what work wrote: work registered before its run was read as
+  terminal fences it outright, and work registered after that is kept on the
+  run, even after the work ends, as potential interference. Each settlement
+  candidate closes at the latest of the terminal read, the launch snapshot
+  and its own settlement snapshot, and is judged against that kept evidence
+  when it is consumed: work registered no later than its closure refuses it,
+  and work that started only after it does not, though a later retry with a
+  new snapshot is refused by it. So a place found later for work registered
+  earlier reaches a record it may have overlapped, while work that started
+  only after every snapshot closed leaves it eligible. The only exception is the exact call
   of a recognised simple full gate, which does not fence the record of the
   run it launched itself and fences everything else. The rule runs both
   ways: work registered, moved to the background, placed further or orphaned

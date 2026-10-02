@@ -3549,10 +3549,27 @@ fn a_newly_found_place_reaches_a_carried_run_until_its_settlement_snapshot_close
         }
         assert_eq!(carried_fence(&turn), None, "{label}: elsewhere");
         place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
-        assert!(
-            carried_fence(&turn).is_some(),
-            "{label}: work that may have run before the settlement snapshot reaches it"
-        );
+        let (fence, potential) = turn.record(|record| {
+            let carried = &record.engram.carried_checks[0];
+            (carried.fence.clone(), carried.potential.clone())
+        });
+        if registered_before_terminal {
+            // It precedes every settlement candidate's closure: fenced now.
+            assert!(fence.is_some(), "{label}");
+        } else {
+            // It may or may not precede a candidate: kept, judged at
+            // consumption.
+            assert_eq!(fence, None, "{label}");
+            assert!(
+                potential.as_ref().is_some_and(|(_, cause)| *cause
+                    == ClaudeHazardCause::OtherSession {
+                        session_id: other.clone(),
+                        name: "Test".to_owned(),
+                    }),
+                "{label}: {potential:?}"
+            );
+        }
+        // The settlement snapshot is taken after it: the run is refused.
         let checkpoint = turn.finish();
         assert_refused(&turn, &checkpoint, &other);
     }
@@ -3589,24 +3606,15 @@ fn work_registered_after_every_settlement_capture_closed_leaves_the_carried_run_
         })
     };
     gate.wait_until_claimed();
-    let settlement = turn.record(|record| {
-        record.engram.carried_checks[0]
-            .settlement_end
-            .lock()
-            .expect("carried settlement mutex poisoned")
-            .clone()
-    });
-    assert!(
-        settlement.is_some_and(|capture| capture.is_ready()),
-        "the checkpoint settled the run before its publication"
-    );
     admit_background_call(&turn, &other, &stopped, "writer", "Bash");
     place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
-    assert_eq!(
-        carried_fence(&turn),
-        None,
-        "it started after every capture closed"
-    );
+    // Kept for any later settlement, but this candidate's snapshots all
+    // closed before it.
+    turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
+        assert_eq!(carried.fence, None);
+        assert!(carried.potential.is_some(), "the run keeps it");
+    });
     gate.release();
     finishing.join().expect("the checkpoint should not panic");
     let checkpoint = turn
@@ -3677,6 +3685,192 @@ fn work_registered_while_a_checks_snapshot_is_taken_reaches_it_when_found_there_
                 "{label}"
             );
         });
+    }
+}
+
+#[test]
+fn retained_interference_refuses_a_retry_after_its_first_candidate_is_discarded() {
+    // Candidate A's snapshots close; other work registers in the worktree and
+    // ends; A is discarded at the publication cut (its root turned
+    // unconfirmed); the retry B takes a new snapshot. The ended work is still
+    // judged against B, whose snapshot came after it, and B is refused.
+    const SECOND: &str = "turn-check-grant-second";
+    const THIRD: &str = "turn-check-grant-third";
+    let label = "carried-discard-retry";
+    let turn = CheckedTurn::start_with_opening(
+        label,
+        true,
+        None,
+        vec![
+            checkpoint_reply(CHECK_GRANT),
+            grant_reply(SECOND),
+            begin_reply(SECOND),
+            checkpoint_reply(SECOND),
+            grant_reply(THIRD),
+            begin_reply(THIRD),
+            checkpoint_reply(THIRD),
+        ],
+        3,
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
+    launch_gate(&turn, &worktree, false);
+    turn.finish();
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let (other, stopped) = other_claude_session_elsewhere(&turn, label);
+
+    // Second turn: A settles; at the gate, the work registers and ends, and
+    // A is discarded.
+    dispatch_next_turn(&turn);
+    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+    let finishing = {
+        let state = turn.state.clone();
+        let session_id = turn.session_id.clone();
+        let token = runtime_token.clone();
+        std::thread::spawn(move || {
+            let _ = state.finish_turn_ok_if_runtime_matches(&session_id, &token);
+        })
+    };
+    gate.wait_until_claimed();
+    admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+    place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let other_index = inner.find_session_index(&other).expect("other session");
+        // The work reports its end: nothing of it is outstanding any more.
+        inner.sessions[other_index].claude_outstanding = ClaudeOutstandingWork::default();
+        let index = inner
+            .find_session_index(&turn.session_id)
+            .expect("the root");
+        // The root turns unconfirmed: A is discarded, the run kept.
+        inner.sessions[index].engram.active_turn_naming_identity = None;
+    }
+    gate.release();
+    finishing.join().expect("the checkpoint should not panic");
+    turn.record(|record| {
+        assert_eq!(record.engram.carried_checks.len(), 1, "A was not consumed");
+        assert!(record.engram.carried_checks[0].potential.is_some(), "kept");
+    });
+    assert!(
+        turn.transport
+            .requests()
+            .into_iter()
+            .filter(|request| request.request["operation"] == "turn_checkpoint")
+            .all(|request| request.request.get("verification_evidence").is_none()),
+        "A earned nothing"
+    );
+
+    // Third turn: B takes a new snapshot after the ended work, and is refused.
+    dispatch_next_turn(&turn);
+    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token)
+        .expect("the third turn should complete");
+    let last = turn
+        .transport
+        .requests()
+        .into_iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint")
+        .last()
+        .expect("the third turn is checkpointed")
+        .request;
+    assert_eq!(last["grant_id"], THIRD, "{last:#}");
+    assert_refused(&turn, &last, &other);
+}
+
+/// Dispatches and delivers the next prompt of `turn`'s session.
+fn dispatch_next_turn(turn: &CheckedTurn) {
+    let dispatch = match turn
+        .state
+        .dispatch_turn(
+            &turn.session_id,
+            SendMessageRequest {
+                text: "Carry on.".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .expect("the next turn should reach admission")
+    {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("an idle root should dispatch"),
+    };
+    deliver_turn_dispatch(&turn.state, dispatch).expect("the next turn should be delivered");
+}
+
+#[test]
+fn each_settlement_candidate_is_judged_by_its_own_closure() {
+    // Two candidates of one carried run, whose snapshots close on either side
+    // of retained interference: the one that closed first is credited, the
+    // one that closed after it is refused, in whichever order they finished.
+    let label = "carried-candidate-closure";
+    let (turn, worktree) = named_turn(label);
+    launch_gate(&turn, &worktree, false);
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let start_basis =
+        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    let early = Arc::new(EngramBasisCapture::default());
+    let late = Arc::new(EngramBasisCapture::default());
+    early.finish(None);
+    let between = EngramHost::interference_tick();
+    late.finish(None);
+    let candidate = |carried: &EngramCarriedCheck, end_basis: Arc<EngramBasisCapture>| {
+        let end = EngramTurnCheckEnd {
+            completed_at: carried.check.started_at.clone(),
+            exit: EngramCommandExit::Code(0),
+            result_lines: Vec::new(),
+            showed_passing_tests: true,
+            end_basis,
+        };
+        EngramResolvedCheck {
+            check: carried.check.clone(),
+            end,
+            outcome: EngramExecutionOutcome::Succeeded,
+            basis: EngramExecutionSourceBasis {
+                workspace_id: "w".to_owned(),
+                source_revision: "r".to_owned(),
+                source_root_generation: None,
+                source_root_state: None,
+            },
+            toolchain: None,
+            ran_successfully: true,
+        }
+    };
+    for (end_basis, credited) in [(late.clone(), false), (early.clone(), true)] {
+        let mut record = turn.record(|record| record.clone());
+        let carried = record.engram.carried_checks[0].clone();
+        record.engram.carried_checks[0].potential = Some((
+            between,
+            ClaudeHazardCause::DeletedSession {
+                session_id: "gone".to_owned(),
+            },
+        ));
+        let settled = vec![(
+            carried.check.grant_id.clone(),
+            carried.check.sequence,
+            Ok(Some(candidate(&carried, end_basis))),
+        )];
+        let (taken, lines) = engram_take_settled_carried_checks(
+            &mut record,
+            settled,
+            &[Some(carried.root_generation)],
+            chrono::Utc::now(),
+        );
+        assert_eq!(taken.len(), usize::from(credited), "{lines:?}");
+        assert_eq!(
+            lines
+                .iter()
+                .any(|line| line.contains("a deleted session (gone)")),
+            !credited,
+            "{lines:?}"
+        );
     }
 }
 

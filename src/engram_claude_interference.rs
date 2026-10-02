@@ -26,7 +26,10 @@
 // entry points.
 
 /// Orders hazard registrations against the ends of the records they may
-/// overlap. Process-wide and monotone; read and advanced under the state lock.
+/// overlap. Process-wide and monotone (one SeqCst counter). It is advanced
+/// under the state lock for registrations and off it when a capture
+/// completes, where the tick is stored under the capture's own lock with its
+/// result.
 static ENGRAM_INTERFERENCE_CLOCK: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
@@ -251,16 +254,44 @@ fn engram_apply_claude_hazards(
             if carried.fence.is_some() {
                 continue;
             }
+            // A carried run stays open until it is consumed or refused: any
+            // later settlement may record what the work wrote. Work
+            // registered before its run was read as terminal precedes every
+            // candidate's closure, so it fences it outright. Work registered
+            // after that is kept as potential interference, which each
+            // candidate is judged against by its own closure at consumption
+            // (`engram_take_settled_carried_checks`).
             let subject = EngramInterferenceSubject {
                 session: index,
                 key: &carried.check.key,
                 root: engram_path_key(&carried.check.target.root),
-                ended_at: carried.interference_end(),
+                ended_at: None,
                 simple_full_gate: engram_is_simple_full_launcher(&carried.check.command),
             };
-            if let Some(cause) = engram_claude_interference_cause(hazards, &subject) {
-                carried.fence = Some(cause.describe());
-                carried.check.fenced_by_outstanding.get_or_insert(cause);
+            let terminal_at = carried
+                .terminal_digest
+                .as_ref()
+                .and(carried.terminal_at);
+            for hazard in hazards {
+                let Some(cause) = engram_claude_interference(hazard, &subject) else {
+                    continue;
+                };
+                match terminal_at {
+                    Some(terminal_at) if hazard.registered_at > terminal_at => {
+                        if carried
+                            .potential
+                            .as_ref()
+                            .is_none_or(|(earliest, _)| hazard.registered_at < *earliest)
+                        {
+                            carried.potential = Some((hazard.registered_at, cause));
+                        }
+                    }
+                    _ => {
+                        carried.fence = Some(cause.describe());
+                        carried.check.fenced_by_outstanding.get_or_insert(cause);
+                        break;
+                    }
+                }
             }
         }
         let mixes_grant = hazards.iter().any(|hazard| {

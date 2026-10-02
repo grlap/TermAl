@@ -650,16 +650,28 @@ fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command
         assert_eq!(record.session.status, SessionStatus::Active);
         assert_eq!(record.active_turn_generation, generation);
     });
-    // A command it starts now is new activity: the live grant is excluded,
-    // and nothing else of the successor's turn changes.
+    // A command it starts now is new activity: it reaches what the grant
+    // has open now. A check still taking its end snapshot is fenced by it,
+    // with the session's own unresolved work as the cause, and nothing else
+    // of the successor's turn changes.
+    let pending = Arc::new(EngramBasisCapture::default());
+    turn.record_mut(|record| {
+        record.engram.active_turn_checks = vec![turn.finished_check(0, pending.clone())];
+    });
     reader.feed(root_bash("old-new-command", SIZE_TEST, false));
+    pending.finish(None);
     turn.wait_for_snapshots();
     turn.record(|record| {
         assert_eq!(
             record.engram.active_turn_mixed_attribution.as_deref(),
             Some(CHECK_GRANT)
         );
-        assert!(record.engram.active_turn_checks.is_empty());
+        assert_eq!(record.engram.active_turn_checks.len(), 1);
+        assert_eq!(
+            record.engram.active_turn_checks[0].fenced_by_outstanding,
+            Some(ClaudeHazardCause::OwnSession),
+            "the new command reaches the open check"
+        );
         assert_eq!(record.session.status, SessionStatus::Active);
         assert_eq!(record.active_turn_generation, generation);
         assert_eq!(record.unmediated_claude_turn, None);
