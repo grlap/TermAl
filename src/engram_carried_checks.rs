@@ -971,6 +971,15 @@ fn engram_settle_carried_check(
         return Err("its run was not found".to_owned());
     };
     let verdict = engram_read_carried_run(directory, digest).map_err(str::to_owned)?;
+    // A test may hold this settlement's snapshot and decide its deadline
+    // (`install_test_engram_settlement_hold`).
+    #[cfg(test)]
+    let hold = test_engram_take_settlement_hold(&carried.check.target.root);
+    #[cfg(test)]
+    let deadline = match &hold {
+        Some(hold) if hold.deadline_now => std::time::Instant::now(),
+        _ => deadline,
+    };
     // A snapshot that finished without a basis failed, and never will give
     // one; only one not ready in time is tried again at the next checkpoint.
     let start = match carried.check.start_basis.wait_until(deadline) {
@@ -989,6 +998,18 @@ fn engram_settle_carried_check(
         (None, None) => EngramRootCapture::Unnamed,
         _ => EngramRootCapture::Unconfirmed,
     };
+    #[cfg(test)]
+    let end_basis = match hold {
+        Some(hold) => {
+            let place = carried.check.target.basis_place();
+            EngramCapture::spawn(workers, move || {
+                hold.wait_released();
+                provenance.stamp(engram_place_source_basis(&place))
+            })
+        }
+        None => engram_spawn_basis_capture(carried.check.target.basis_place(), workers, provenance),
+    };
+    #[cfg(not(test))]
     let end_basis = engram_spawn_basis_capture(carried.check.target.basis_place(), workers, provenance);
     let finish = match end_basis.wait_until(deadline) {
         Some(Some(finish)) => finish,
@@ -1024,6 +1045,101 @@ fn engram_settle_carried_check(
         basis,
         ran_successfully: verdict.passed,
     }))
+}
+
+/// A test's hold on the next settlement of the carried run in one worktree:
+/// its end snapshot is taken only once the test releases it, and with
+/// `deadline_now` the settlement waits for its snapshots no longer than the
+/// present instant, so a held snapshot misses the deadline deterministically.
+#[cfg(test)]
+struct TestEngramSettlementHold {
+    root: PathBuf,
+    deadline_now: bool,
+    taken: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    released: Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+
+#[cfg(test)]
+impl TestEngramSettlementHold {
+    fn wait_released(&self) {
+        let (lock, changed) = &*self.released;
+        let mut released = lock.lock().expect("test settlement hold poisoned");
+        while !*released {
+            released = changed.wait(released).expect("test settlement hold poisoned");
+        }
+    }
+}
+
+/// The holds tests have installed, taken in order by the settlements of the
+/// carried runs in their worktrees.
+#[cfg(test)]
+static TEST_ENGRAM_SETTLEMENT_HOLDS: std::sync::LazyLock<Mutex<Vec<TestEngramSettlementHold>>> =
+    std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// The test's handle on one installed hold.
+#[cfg(test)]
+struct TestEngramSettlementControl {
+    taken: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    released: Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+
+#[cfg(test)]
+impl TestEngramSettlementControl {
+    /// Waits until a settlement took this hold, panicking past `deadline`.
+    fn wait_taken(&self, deadline: std::time::Instant) {
+        let (lock, changed) = &*self.taken;
+        let mut taken = lock.lock().expect("test settlement hold poisoned");
+        while !*taken {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("no settlement took the hold in time");
+            taken = changed
+                .wait_timeout(taken, remaining)
+                .expect("test settlement hold poisoned")
+                .0;
+        }
+    }
+
+    /// Lets the held snapshot be taken.
+    fn release(&self) {
+        let (lock, changed) = &*self.released;
+        *lock.lock().expect("test settlement hold poisoned") = true;
+        changed.notify_all();
+    }
+}
+
+/// Holds the next settlement of the carried run in the worktree `root`.
+#[cfg(test)]
+fn install_test_engram_settlement_hold(
+    root: &FsPath,
+    deadline_now: bool,
+) -> TestEngramSettlementControl {
+    let taken = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let released = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    TEST_ENGRAM_SETTLEMENT_HOLDS
+        .lock()
+        .expect("test settlement holds poisoned")
+        .push(TestEngramSettlementHold {
+            root: root.to_path_buf(),
+            deadline_now,
+            taken: taken.clone(),
+            released: released.clone(),
+        });
+    TestEngramSettlementControl { taken, released }
+}
+
+/// The first hold installed for the worktree `root`, marked taken.
+#[cfg(test)]
+fn test_engram_take_settlement_hold(root: &FsPath) -> Option<TestEngramSettlementHold> {
+    let mut holds = TEST_ENGRAM_SETTLEMENT_HOLDS
+        .lock()
+        .expect("test settlement holds poisoned");
+    let position = holds.iter().position(|hold| hold.root == root)?;
+    let hold = holds.remove(position);
+    let (lock, changed) = &*hold.taken;
+    *lock.lock().expect("test settlement hold poisoned") = true;
+    changed.notify_all();
+    Some(hold)
 }
 
 /// A carried check's outcome at a checkpoint, by the grant and sequence that

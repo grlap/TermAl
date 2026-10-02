@@ -3874,6 +3874,366 @@ fn each_settlement_candidate_is_judged_by_its_own_closure() {
     }
 }
 
+/// A turn of three grants, with the gate launched in its first and its run
+/// ended and read as terminal, for settlements in the later two.
+fn three_turns_with_a_terminal_carried_run(label: &str) -> (CheckedTurn, PathBuf) {
+    const SECOND: &str = "turn-check-grant-second";
+    const THIRD: &str = "turn-check-grant-third";
+    let turn = CheckedTurn::start_with_opening(
+        label,
+        true,
+        None,
+        vec![
+            checkpoint_reply(CHECK_GRANT),
+            grant_reply(SECOND),
+            begin_reply(SECOND),
+            checkpoint_reply(SECOND),
+            grant_reply(THIRD),
+            begin_reply(THIRD),
+            checkpoint_reply(THIRD),
+        ],
+        3,
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
+    launch_gate(&turn, &worktree, false);
+    turn.finish();
+    let start_basis =
+        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    (turn, worktree)
+}
+
+/// Runs the next turn of `turn` to its end and returns its checkpoint.
+fn finish_next_turn(turn: &CheckedTurn) -> Value {
+    dispatch_next_turn(turn);
+    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token)
+        .expect("the turn should complete");
+    turn.transport
+        .requests()
+        .into_iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint")
+        .last()
+        .expect("the turn is checkpointed")
+        .request
+}
+
+/// The worktree root the carried run of `turn` was launched in.
+fn carried_root(turn: &CheckedTurn) -> PathBuf {
+    turn.record(|record| record.engram.carried_checks[0].check.target.root.clone())
+}
+
+#[test]
+fn a_settlement_that_misses_its_deadline_grants_nothing_late_and_its_retry_sees_ended_work() {
+    // Candidate A's settlement snapshot is held past the checkpoint's
+    // deadline: the run stays carried. Work then registers in the worktree
+    // and ends, and A's abandoned snapshot completes late: that earns
+    // nothing. The retry B takes a new snapshot after the ended work and is
+    // refused for it.
+    let label = "carried-timeout-late";
+    let (turn, worktree) = three_turns_with_a_terminal_carried_run(label);
+    let (other, stopped) = other_claude_session_elsewhere(&turn, label);
+    let hold = install_test_engram_settlement_hold(&carried_root(&turn), true);
+    let second = finish_next_turn(&turn);
+    hold.wait_taken(std::time::Instant::now() + DEADLOCK_GUARD);
+    assert!(second.get("verification_evidence").is_none(), "{second:#}");
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks.len()),
+        1,
+        "kept"
+    );
+
+    admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+    place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let other_index = inner.find_session_index(&other).expect("other session");
+        // The work reports its end.
+        inner.sessions[other_index].claude_outstanding = ClaudeOutstandingWork::default();
+    }
+    // A's snapshot completes now, after its checkpoint gave up on it.
+    hold.release();
+    turn.state.poll_engram_carried_runs();
+    turn.record(|record| {
+        assert_eq!(
+            record.engram.carried_checks.len(),
+            1,
+            "a late snapshot settles nothing"
+        );
+        assert!(record.engram.carried_checks[0].potential.is_some(), "kept");
+    });
+
+    let third = finish_next_turn(&turn);
+    assert_refused(&turn, &third, &other);
+}
+
+#[test]
+fn a_carried_run_whose_launch_snapshot_is_pending_stays_carried_and_settles_once_it_is_taken() {
+    // The launch snapshot is still being taken when a checkpoint would settle
+    // the run: it stays carried and earns nothing. Once taken, a later
+    // checkpoint settles it.
+    let label = "carried-launch-pending";
+    let (turn, worktree) = three_turns_with_a_terminal_carried_run(label);
+    let taken = turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    let basis = taken
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken");
+    let pending = Arc::new(EngramBasisCapture::default());
+    turn.record_mut(|record| {
+        record.engram.carried_checks[0].check.start_basis = pending.clone();
+    });
+    let hold = install_test_engram_settlement_hold(&carried_root(&turn), true);
+    let second = finish_next_turn(&turn);
+    hold.wait_taken(std::time::Instant::now() + DEADLOCK_GUARD);
+    hold.release();
+    assert!(second.get("verification_evidence").is_none(), "{second:#}");
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks.len()),
+        1,
+        "monitored"
+    );
+
+    pending.finish(basis);
+    let run = review_runs(&worktree)
+        .read_dir()
+        .expect("the run directory lists")
+        .next()
+        .expect("one run")
+        .expect("the run entry")
+        .path();
+    let third = finish_next_turn(&turn);
+    assert_credited(&turn, &third, &run, "succeeded");
+}
+
+/// Which of two concurrent closers' settlement snapshots completes first,
+/// and which of them publishes first.
+#[derive(Clone, Copy, Debug)]
+enum Closer {
+    First,
+    Second,
+}
+
+#[test]
+fn concurrent_closers_consume_once_and_the_winner_is_judged_by_its_own_snapshot() {
+    // Two closers of one grant settle the same carried run off the lock.
+    // Their snapshots complete on either side of other work registering in
+    // the worktree. Whichever publishes first consumes the run, judged by its
+    // own snapshot. The other publishes nothing new and cannot change it.
+    for (capture_first, winner) in [
+        (Closer::First, Closer::First),
+        (Closer::First, Closer::Second),
+        (Closer::Second, Closer::First),
+        (Closer::Second, Closer::Second),
+    ] {
+        let label = format!("carried-closers-{capture_first:?}-{winner:?}").to_lowercase();
+        let turn = CheckedTurn::start_with_opening(
+            &label,
+            true,
+            None,
+            vec![checkpoint_reply(CHECK_GRANT), checkpoint_reply(CHECK_GRANT)],
+            1,
+            true,
+        );
+        let worktree = turn.root.join(".worktrees").join("wt");
+        launch_gate(&turn, &worktree, false);
+        let start_basis =
+            turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+        start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+        let run = finish_run(&worktree, "passed", &"f".repeat(64));
+        turn.state.poll_engram_carried_runs();
+        let (other, stopped) = other_claude_session_elsewhere(&turn, &label);
+        let root = carried_root(&turn);
+        let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+        let closer = || {
+            let state = turn.state.clone();
+            let session_id = turn.session_id.clone();
+            let token = runtime_token.clone();
+            std::thread::spawn(move || {
+                let _ = state.finish_turn_ok_if_runtime_matches(&session_id, &token);
+            })
+        };
+        let guard = || std::time::Instant::now() + DEADLOCK_GUARD;
+        let holds = [
+            install_test_engram_settlement_hold(&root, false),
+            install_test_engram_settlement_hold(&root, false),
+        ];
+        // Each closer takes its own hold, in order.
+        let first_closer = closer();
+        holds[0].wait_taken(guard());
+        let second_closer = closer();
+        holds[1].wait_taken(guard());
+        let (early, late) = match capture_first {
+            Closer::First => (0, 1),
+            Closer::Second => (1, 0),
+        };
+        // The early snapshot completes; its closer stops at the first gate.
+        let early_gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+        holds[early].release();
+        early_gate.wait_until_claimed();
+        // Other work registers in the worktree between the two snapshots.
+        admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+        place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
+        // The late snapshot completes; its closer stops at the second gate.
+        let late_gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+        holds[late].release();
+        late_gate.wait_until_claimed();
+        // The winner publishes first, then the other.
+        let winner_is_early = matches!(
+            (capture_first, winner),
+            (Closer::First, Closer::First) | (Closer::Second, Closer::Second)
+        );
+        // The closer holding hold 0 is the first closer.
+        let mut closers = [Some(first_closer), Some(second_closer)];
+        let (winner_index, loser_index, winner_gate, loser_gate) = if winner_is_early {
+            (early, late, early_gate, late_gate)
+        } else {
+            (late, early, late_gate, early_gate)
+        };
+        // The winner publishes and finishes first; only then does the other.
+        winner_gate.release();
+        closers[winner_index]
+            .take()
+            .expect("the winner's thread")
+            .join()
+            .expect("the winning closer should not panic");
+        loser_gate.release();
+        closers[loser_index]
+            .take()
+            .expect("the other closer's thread")
+            .join()
+            .expect("the other closer should not panic");
+
+        let checkpoints: Vec<Value> = turn
+            .transport
+            .requests()
+            .into_iter()
+            .filter(|request| request.request["operation"] == "turn_checkpoint")
+            .map(|request| request.request)
+            .collect();
+        let verified: Vec<&Value> = checkpoints
+            .iter()
+            .filter(|checkpoint| checkpoint.get("verification_evidence").is_some())
+            .collect();
+        assert!(
+            turn.record(|record| record.engram.carried_checks.is_empty()),
+            "{label}: consumed once"
+        );
+        if winner_is_early {
+            // Its snapshot closed before the work: credited, whatever the
+            // other closer's later snapshot.
+            assert_eq!(verified.len(), 1, "{label}: {checkpoints:#?}");
+            assert_credited(&turn, verified[0], &run, "succeeded");
+        } else {
+            // Its snapshot closed after the work: refused, whatever the
+            // other closer's earlier snapshot.
+            assert!(verified.is_empty(), "{label}: {checkpoints:#?}");
+            let line = turn
+                .record(|record| record.engram.pending_source_root_line.clone())
+                .expect("the holder is told");
+            assert!(line.contains(&other), "{label}: {line}");
+        }
+    }
+}
+
+#[test]
+fn a_session_removed_while_its_checkpoint_settles_is_consumed_once_by_its_teardown() {
+    // The checkpoint settles the carried run off the lock; the session is
+    // deleted before it publishes. Deletion closes the grant with its own
+    // teardown checkpoint, an ordinary consumer: it settles and consumes the
+    // run once. The attempt that was paused finds no session and publishes
+    // nothing, and no surviving attempt brings the record back.
+    let label = "carried-removed-mid-settlement";
+    let (turn, worktree) = named_turn(label);
+    launch_gate(&turn, &worktree, false);
+    let start_basis =
+        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+    let finishing = {
+        let state = turn.state.clone();
+        let session_id = turn.session_id.clone();
+        std::thread::spawn(move || {
+            let _ = state.finish_turn_ok_if_runtime_matches(&session_id, &runtime_token);
+        })
+    };
+    gate.wait_until_claimed();
+    turn.state
+        .kill_session(&turn.session_id)
+        .expect("the session should be deleted");
+    gate.release();
+    finishing.join().expect("the checkpoint should not panic");
+    let checkpoints: Vec<Value> = turn
+        .transport
+        .requests()
+        .into_iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint")
+        .map(|request| request.request)
+        .collect();
+    assert_eq!(
+        checkpoints.len(),
+        1,
+        "one checkpoint closes the grant: {checkpoints:#?}"
+    );
+    assert_eq!(
+        checkpoints[0]["next_intent"], "exit",
+        "the deletion's teardown"
+    );
+    assert_eq!(
+        checkpoints[0]["verification_evidence"]
+            .as_array()
+            .map_or(0, Vec::len),
+        1,
+        "the run is consumed once"
+    );
+    let inner = turn.state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.find_session_index(&turn.session_id).is_none());
+}
+
+#[test]
+fn an_explicit_refusal_of_the_report_that_consumed_a_carried_run_does_not_bring_it_back() {
+    // The run is consumed into the cached report at the publication cut.
+    // Engram refuses that report explicitly: the cached report falls back,
+    // dropping the gate's verification, and the consumed run stays consumed.
+    // That is distinct from replaying the cached report verbatim after a
+    // transport failure.
+    let label = "carried-refused-report";
+    let (turn, worktree) = named_turn(label);
+    launch_gate(&turn, &worktree, false);
+    let start_basis =
+        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let checkpoint = turn.finish();
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+    turn.state
+        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("refused"));
+    turn.record(|record| {
+        assert!(
+            record.engram.carried_checks.is_empty(),
+            "the run is not brought back"
+        );
+        let cached = record
+            .engram
+            .active_turn_report
+            .as_ref()
+            .map(|(_, report)| report.verification_evidence.len())
+            .unwrap_or_default();
+        assert_eq!(
+            cached, 0,
+            "the fallback carries no verification of the gate"
+        );
+    });
+}
+
 #[test]
 fn retained_work_no_transition_applied_reaches_a_report_at_its_publication_cut() {
     // Work that may have written in the worktree since before the check

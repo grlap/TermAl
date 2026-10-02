@@ -11,8 +11,13 @@
 // the reconciliation in both directions under the caller's state lock: a
 // hazard registered, promoted, placed further or orphaned against every
 // unpublished check, carried run and live grant; and a check started, carried
-// or published, or a grant begun, against every retained hazard. A fence is
-// sticky: a later end of the work, or a narrower view of it, never lifts it.
+// or published, or a grant begun, against every retained hazard. A carried
+// run is split at its first terminal read: work registered before it fences
+// the run outright, and work registered after it is kept on the run as
+// potential interference, which each settlement candidate is judged against
+// by its own closure when it is consumed (`engram_carried_checks.rs`). A fence
+// and kept potential are sticky: a later end of the work, or a narrower view
+// of it, never lifts them.
 // The current restriction an agent is told is projected from the same facts
 // and differs from the fences once the work ends.
 //
@@ -75,10 +80,12 @@ struct EngramInterferenceSubject<'a> {
     key: &'a str,
     /// The path key of the worktree it tested.
     root: String,
-    /// When its evidence interval closed: after its command or run ended and
-    /// every snapshot it records was taken (`EngramTurnCheck::interference_end`,
-    /// `EngramCarriedCheck::interference_end`); `None` while it may still be
-    /// reached.
+    /// When its evidence interval closed: for a turn check, after its command
+    /// ended and both its snapshots were taken (`EngramTurnCheck::interference_end`);
+    /// `None` while it may still be reached. A carried run is always open here,
+    /// since any later settlement may record what work wrote; each of its
+    /// candidates is judged by its own closure when it is consumed
+    /// (`engram_carried_candidate_closure`).
     ended_at: Option<u64>,
     /// Its command is a recognised simple full gate.
     simple_full_gate: bool,
@@ -220,9 +227,12 @@ fn engram_claude_interference_cause(
 }
 
 /// Applies `hazards` to the unpublished records and the live grant of the
-/// session at `consumer`, or of every session: each open or closed turn check
-/// and each carried run they may overlap is fenced with the first cause, and
-/// the grant is mixed by the session's own restricting work, whatever gate it
+/// session at `consumer`, or of every session. Each open or closed turn check
+/// they may overlap is fenced with the first cause. Each carried run is fenced
+/// outright by work registered no later than its first terminal read, and
+/// keeps the earliest later registration, with its cause, as potential
+/// interference for its candidates to be judged against at consumption. The
+/// grant is mixed by the session's own restricting work, whatever gate it
 /// launched. A record already fenced keeps its first cause. Under the state
 /// lock, in the section of the transition.
 fn engram_apply_claude_hazards(
