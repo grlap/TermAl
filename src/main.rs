@@ -747,6 +747,7 @@ include!("test_temp_paths.rs");
 #[cfg(test)]
 include!("test_temp_root.rs");
 include!("state.rs");
+include!("engram_budget.rs");
 include!("engram_host_adapter.rs");
 include!("engram_turn_observations.rs");
 include!("engram_evaluation_refusal.rs");

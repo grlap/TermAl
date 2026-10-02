@@ -1449,6 +1449,11 @@ struct StateInner {
     /// clone this handle while holding `inner`, but must release the state
     /// mutex before invoking any control operation.
     engram_host_adapter: Arc<EngramHostAdapter>,
+    /// One clock domain for control/authority budgets; runtime-only and shared
+    /// with targets and recovery workers. Fixtures opt in before operations.
+    engram_budget_clock: EngramBudgetClock,
+    #[cfg(test)]
+    test_engram_authority_ack_boundary: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     /// Ordering fixtures use scheduling headroom without changing budget tests
     /// in other states or the production dispatch deadline.
     #[cfg(test)]
@@ -1611,6 +1616,9 @@ impl StateInner {
         Self {
             codex: CodexState::default(),
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
+            engram_budget_clock: EngramBudgetClock::default(),
+            #[cfg(test)]
+            test_engram_authority_ack_boundary: None,
             #[cfg(test)]
             test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),

@@ -191,6 +191,9 @@ impl PersistedState {
         let mut inner = StateInner {
             codex: self.codex,
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
+            engram_budget_clock: EngramBudgetClock::default(),
+            #[cfg(test)]
+            test_engram_authority_ack_boundary: None,
             #[cfg(test)]
             test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),

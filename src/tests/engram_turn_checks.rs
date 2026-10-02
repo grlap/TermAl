@@ -855,6 +855,7 @@ impl CheckedTurn {
         use_toolchain_label(Some(FIXTURE_TOOLCHAIN));
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime(&format!("engram-turn-check-{label}"));
+        state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
         let root = state
             .test_temp_root
             .as_ref()
