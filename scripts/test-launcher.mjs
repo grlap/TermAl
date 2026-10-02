@@ -26,6 +26,13 @@ import {
   isolatedGitEnvironment,
 } from "./review-freeze-fingerprint.mjs";
 import { processMayBeAlive } from "./test-temp-root.mjs";
+import {
+  durationReportKinds,
+  durationReportPlan,
+  durationSummaryLines,
+  nodeDurationReporterFile,
+  readDurationReport,
+} from "./test-durations.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
@@ -33,12 +40,15 @@ const diagnosticLimit = 2400;
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 export const helperTestFiles = Object.freeze([
   "scripts/review-freeze-fingerprint.test.mjs",
+  "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
   "scripts/test-temp-root.test.mjs",
   "scripts/vitest-resource-preflight.test.mjs",
 ]);
 const helperSupportFiles = Object.freeze([
+  nodeDurationReporterFile,
   "scripts/review-freeze-fingerprint.mjs",
+  "scripts/test-durations.mjs",
   "scripts/test-launcher.mjs",
   "scripts/test-temp-root.mjs",
   "scripts/vitest-resource-preflight.mjs",
@@ -102,13 +112,20 @@ export function requiredStages(platform = process.platform, env = process.env) {
       name: "fingerprint-tests",
       command: process.execPath,
       args: ["--test", ...helperTestFiles],
+      durationReport: "node-test-events",
     },
-    { name: "rust-tests", command: rustCommand, args: rustArgs },
+    {
+      name: "rust-tests",
+      command: rustCommand,
+      args: rustArgs,
+      durationReport: "unavailable",
+    },
     {
       name: "vitest",
       command: process.execPath,
       args: ["node_modules/vitest/vitest.mjs", "run"],
       cwd: "ui",
+      durationReport: "vitest-json",
     },
   ];
 }
@@ -418,7 +435,8 @@ function validateInitialRequest(runDir, request, env) {
     if (!stage || typeof stage !== "object" ||
         !/^[a-zA-Z0-9_-]+$/u.test(stage.name) || names.has(stage.name) ||
         typeof stage.command !== "string" || !Array.isArray(stage.args) ||
-        !stage.args.every((arg) => typeof arg === "string")) {
+        !stage.args.every((arg) => typeof arg === "string") ||
+        (stage.durationReport !== undefined && !durationReportKinds.includes(stage.durationReport))) {
       throw new Error("worker request contains an invalid stage");
     }
     names.add(stage.name);
@@ -603,15 +621,19 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
     for (let index = 0; index < request.stages.length; index += 1) {
       const stage = request.stages[index];
       const entry = result.stages[index];
+      // The duration report only adds a machine-readable artifact beside the
+      // stage's own output; it never decides the stage's state.
+      const report = durationReportPlan(stage, runDir);
+      const args = report ? [...report.prefix, ...stage.args, ...report.suffix] : stage.args;
       Object.assign(entry, {
         state: "running",
         started: new Date().toISOString(),
-        command: [stage.command, ...stage.args],
+        command: [stage.command, ...args],
         cwd: stage.cwd,
         log: join(runDir, `${stage.name}.log`),
       });
       save(resultPath, result);
-      const outcome = await runCommand(stage.command, stage.args, {
+      const outcome = await runCommand(stage.command, args, {
         cwd: stage.cwd,
         env: childEnv,
         log: entry.log,
@@ -620,6 +642,7 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
         ended: new Date().toISOString(),
         state: outcome.code === 0 && !outcome.error ? "passed" : "failed",
       });
+      if (report) entry.durations = readDurationReport(report, stage.cwd);
       entry.diagnostics = await diagnostics(entry.log, entry.state === "failed");
       save(resultPath, result);
       if (entry.state === "failed") break;
@@ -689,6 +712,7 @@ export async function summarize(runDir) {
     }
     if (stage.diagnostics?.truncated) lines.push("[diagnostics truncated; full output in log]");
   }
+  lines.push(...durationSummaryLines(result.stages));
   if (result.limitations) lines.push(result.limitations);
   return `${lines.join("\n")}\n`;
 }

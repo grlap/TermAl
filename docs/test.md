@@ -219,13 +219,53 @@ Paths are normalized lexically, not canonicalized through filesystem aliases;
 product and run directory components must not be symlinks or junctions.
 
 The review-integrity helper tests run on Linux, macOS, and Windows in CI: the
-same four maintained suites as the full gate's `fingerprint-tests` stage
+same five maintained suites as the full gate's `fingerprint-tests` stage
 (`helperTestFiles` in `scripts/test-launcher.mjs`), which a launcher test keeps
 in step with the workflow. The
 Vitest resource preflight itself uses three fixed CPU samples and the median,
 so one scheduler spike does not reject a gate while sustained starvation still
 fails before frontend tests start. Windows reports process CPU availability
 without presenting its unsupported load-average value as real system load.
+
+### Per-test durations
+
+The full gate names every test that took 2 seconds or longer, so slow tests
+are found and repaired instead of failing under load. The 2 s figure is a
+repair-report budget. It never decides whether a stage passed, and no timeout
+is raised to meet it. Two stages write a machine-readable duration artifact
+into the run directory beside their human log:
+
+- `vitest` adds Vitest's JSON reporter beside its default one and writes
+  `vitest-durations.json`;
+- `fingerprint-tests` keeps Node's `spec` output in its log and adds
+  `scripts/node-test-duration-reporter.mjs`, which writes the runner's test
+  events to `fingerprint-tests-durations.jsonl`.
+
+After each of those stages, `results.json` records a `durations` report:
+
+- how many tests were measured, and how many had no duration;
+- the tests at or above the budget, with file, full name and state (failed
+  and timed out are kept distinct from passed);
+- the files whose test time reached 10 seconds.
+
+Both lists keep at most 200 entries each, the slowest first, with exact totals
+beside them. Names and paths are kept to one line of at most 300 characters,
+so `results.json` stays within the size the host reads. The artifact keeps
+every test.
+
+The durations are the runners' own figures, and the summary says so. A
+test's time includes its own per-test hooks (`beforeEach` and `afterEach`),
+but not import or environment time. A file's time is the runner's file figure
+and is never divided among tests: for Vitest, it runs from its first test's
+start to its last test's end, with the hooks between them included. A skipped
+or todo test is not counted. The summary lists at most ten such tests and five
+such files per stage, each artifact path on its own line, and the artifact
+holds the rest.
+
+`rust-tests` reports its per-test durations as unavailable, because stable
+libtest prints none; only the stage time is recorded. A missing or malformed
+artifact is reported as `missing` or `unreadable`, never as a pass or a
+failure. The report logic is in `scripts/test-durations.mjs`.
 
 ### Credit for a background or detached gate
 

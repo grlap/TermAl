@@ -134,6 +134,13 @@ test("required stages preserve the TermAl five-gate order and direct JavaScript 
       : /^sh scripts\/test-rust\.sh$/u);
     assert.deepEqual(stages[4].args, ["node_modules/vitest/vitest.mjs", "run"]);
     assert.equal(stages[4].cwd, "ui");
+    assert.deepEqual(stages.map(({ durationReport }) => durationReport), [
+      undefined,
+      undefined,
+      "node-test-events",
+      "unavailable",
+      "vitest-json",
+    ]);
     assert.match([liveStage(platform, { ...process.env, ProgramFiles: "C:\\Program Files" }).command,
       ...liveStage(platform, { ...process.env, ProgramFiles: "C:\\Program Files" }).args].join(" "),
     /test-rust\.sh.*root_recovery_live.*--ignored.*--test-threads=1/u);
@@ -143,7 +150,9 @@ test("required stages preserve the TermAl five-gate order and direct JavaScript 
 test("full plan prerequisites cover every maintained helper and direct UI entrypoint", () => {
   const files = new Set(requiredFiles(projectRoot));
   for (const path of [...helperTestFiles,
+    "scripts/node-test-duration-reporter.mjs",
     "scripts/review-freeze-fingerprint.mjs",
+    "scripts/test-durations.mjs",
     "scripts/test-launcher.mjs",
     "scripts/test-temp-root.mjs",
     "scripts/vitest-resource-preflight.mjs",
@@ -155,6 +164,90 @@ test("full plan prerequisites cover every maintained helper and direct UI entryp
       assert(files.has(join(projectRoot, stage.cwd, stage.args[0])));
     }
   }
+});
+
+test("a stage's duration report is recorded beside its log and summarized without deciding its state", async (t) => {
+  await repository(t, async (root, env) => {
+    writeFileSync(join(root, "fixture.test.mjs"), [
+      "import test from 'node:test';",
+      "test('fast fixture', () => {});",
+      "test('failing fixture', () => { throw new Error('expected failure'); });",
+      "",
+    ].join("\n"));
+    execFileSync("git", ["add", "fixture.test.mjs"], { cwd: root, env });
+    // The stage's runner must not inherit this runner's child-protocol marker,
+    // or it streams events to a parent that is not listening.
+    const { NODE_TEST_CONTEXT: _parentRunner, ...runEnv } = fixtureEnv;
+    const runDir = await createRun({
+      root,
+      stages: [{
+        name: "helpers",
+        command: process.execPath,
+        args: ["--test", "fixture.test.mjs"],
+        durationReport: "node-test-events",
+      }],
+    }, runEnv);
+    const result = await executeRun(runDir, runEnv);
+    const [entry] = result.stages;
+    assert.equal(entry.state, "failed", "the failing fixture still fails the stage");
+    assert.ok(entry.command.includes("--test-reporter=spec"));
+    assert.ok(entry.command.includes(`--test-reporter-destination=${join(runDir, "helpers-durations.jsonl")}`));
+    assert.match(readFileSync(logPath(runDir, entry), "utf8"), /✖ failing fixture/u);
+    assert.equal(entry.durations.status, "measured");
+    assert.equal(entry.durations.tests, 2);
+    assert.equal(entry.durations.budgetMs, 2000);
+    assert.deepEqual(json(join(runDir, "results.json")).stages[0].durations, entry.durations);
+    const summary = await summarize(runDir);
+    assert.match(summary, /^helpers: failed exit=1/mu);
+    assert.match(summary, /^durations: a test's time is its runner's figure, which includes its own per-test hooks/mu);
+    assert.match(summary, /^helpers: \d+ of 2 tests >= 2000 ms/mu);
+  });
+});
+
+test("a passing stage stays passed whatever its duration artifact holds", async (t) => {
+  await repository(t, async (root, env) => {
+    // A stage script that receives the report arguments and writes whatever
+    // the case asks into the artifact path it is given, then exits 0.
+    writeFileSync(join(root, "stage.mjs"), [
+      "import { writeFileSync } from 'node:fs';",
+      "const target = process.argv.find((arg) => arg.startsWith('--outputFile.json='));",
+      "if (process.env.STAGE_ARTIFACT && target) {",
+      "  writeFileSync(target.slice('--outputFile.json='.length), process.env.STAGE_ARTIFACT);",
+      "}",
+      "",
+    ].join("\n"));
+    execFileSync("git", ["add", "stage.mjs"], { cwd: root, env });
+    for (const [label, artifact, status] of [
+      ["no artifact", "", "missing"],
+      ["malformed artifact", "{not json", "unreadable"],
+      ["wrong shape", JSON.stringify({ results: [] }), "unreadable"],
+    ]) {
+      const runEnv = { ...fixtureEnv, STAGE_ARTIFACT: artifact };
+      const runDir = await createRun({
+        root,
+        stages: [{ name: "ui", command: process.execPath, args: ["stage.mjs"], durationReport: "vitest-json" }],
+      }, runEnv);
+      const result = await executeRun(runDir, runEnv);
+      assert.equal(result.state, "passed", label);
+      assert.equal(result.exitCode, 0, label);
+      assert.equal(result.stages[0].state, "passed", label);
+      assert.equal(result.stages[0].durations.status, status, label);
+      assert.match(await summarize(runDir), /^PASS /u, label);
+    }
+  });
+});
+
+test("a request naming an unknown duration report kind is rejected before any stage runs", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [{ ...stage("guess", "process.exit(0)"), durationReport: "guess" }],
+    }, fixtureEnv);
+    const result = await executeRun(runDir, fixtureEnv);
+    assert.equal(result.state, "failed");
+    assert.match(result.error, /invalid stage/u);
+    assert.deepEqual(result.stages.map(({ state }) => state), ["unrun"]);
+  });
 });
 
 test("configured shell preflight executes a portable command instead of requesting --version", async (t) => {
@@ -1037,7 +1130,7 @@ test("helper scripts run when started through a linked directory", async (t) => 
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const real = join(base, "real");
   mkdirSync(join(real, "scripts"), { recursive: true });
-  for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs"]) {
+  for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs"]) {
     copyFileSync(join(projectRoot, "scripts", name), join(real, "scripts", name));
   }
   const linked = join(base, "linked");
@@ -1070,7 +1163,7 @@ test("a foreground run prints its run receipt before any stage completes", async
     // from inside the fixture.
     const scripts = join(root, "scripts");
     mkdirSync(scripts);
-    for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs"]) {
+    for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs"]) {
       copyFileSync(join(projectRoot, "scripts", name), join(scripts, name));
     }
     const gate = mkdtempSync(join(testTempDirectory(), "launcher-receipt-"));

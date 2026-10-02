@@ -391,17 +391,26 @@ fn native_windows_launch_supervises_real_focused_launcher_and_recovers_run() {
         String::from_utf8_lossy(&clone.stderr)
     );
     std::fs::create_dir_all(repository.join("scripts")).unwrap();
-    for filename in [
-        "test-launcher.mjs",
-        "review-freeze-fingerprint.mjs",
-        "test-temp-root.mjs",
-    ] {
-        std::fs::copy(
-            root().join("scripts").join(filename),
-            repository.join("scripts").join(filename),
-        )
-        .unwrap();
+    // Copy the launcher's whole module set, not a hand-kept list: a module the
+    // launcher imports but the fixture lacks fails before the RUN receipt.
+    let mut copied = Vec::new();
+    for entry in std::fs::read_dir(root().join("scripts")).unwrap() {
+        let entry = entry.unwrap();
+        let filename = entry.file_name().to_string_lossy().into_owned();
+        if entry.file_type().unwrap().is_file()
+            && filename.ends_with(".mjs")
+            && !filename.ends_with(".test.mjs")
+        {
+            std::fs::copy(entry.path(), repository.join("scripts").join(&filename)).unwrap();
+            copied.push(filename);
+        }
     }
+    assert!(
+        copied
+            .iter()
+            .any(|filename| filename == "test-launcher.mjs"),
+        "the launcher module set was copied: {copied:?}"
+    );
     let mut spec = LaunchSpec::new("node.exe");
     spec.args(["scripts/test-launcher.mjs", "focused", "--", "node.exe"])
         .arg(fixture())
