@@ -3,7 +3,7 @@
 // wall-clock timing, so the outcome cannot depend on machine load.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -128,6 +128,41 @@ test("Node runner events give nested test names and per-file time, and suites ar
     ["suite > inner", "passed", false, "helper.test.mjs"],
   ]);
   assert.deepEqual(report.slowFiles, [{ file: "helper.test.mjs", durationMs: 12_400 }]);
+});
+
+test("a run reached through a directory link names files relative to it, as runners name them resolved", (t) => {
+  // macOS's temporary directories are under /var, a link to /private/var: a
+  // runner started there names its files under the resolved path.
+  const directory = scratch(t);
+  const real = join(directory, "real");
+  const link = join(directory, "link");
+  mkdirSync(real);
+  symlinkSync(real, link, "junction");
+  const resolved = realpathSync.native(real);
+  const nodeArtifact = join(real, "helpers-durations.jsonl");
+  writeFileSync(nodeArtifact, [
+    JSON.stringify({ type: "test:start", file: join(resolved, "linked.test.mjs"), name: "linked", nesting: 0 }),
+    JSON.stringify({
+      type: "test:pass", file: join(resolved, "linked.test.mjs"), name: "linked", nesting: 0,
+      kind: "test", durationMs: 2500, skipped: false, todo: false, timedOut: false,
+    }),
+    "",
+  ].join("\n"));
+  const node = readDurationReport({ kind: "node-test-events", artifact: nodeArtifact }, link);
+  assert.deepEqual(node.overBudget.map(({ file }) => file), ["linked.test.mjs"]);
+
+  const vitestArtifact = join(real, "vitest-durations.json");
+  writeFileSync(vitestArtifact, JSON.stringify({
+    testResults: [{
+      name: join(resolved, "src", "Linked.test.tsx"),
+      startTime: 0,
+      endTime: 11_000,
+      assertionResults: [{ fullName: "linked", status: "passed", duration: 2500, failureMessages: [] }],
+    }],
+  }));
+  const vitest = readDurationReport({ kind: "vitest-json", artifact: vitestArtifact }, link);
+  assert.deepEqual(vitest.overBudget.map(({ file }) => file), ["src/Linked.test.tsx"]);
+  assert.deepEqual(vitest.slowFiles, [{ file: "src/Linked.test.tsx", durationMs: 11_000 }]);
 });
 
 test("the recorded lists are bounded for the host's results cap while totals stay exact", (t) => {
