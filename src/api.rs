@@ -420,6 +420,7 @@ fn handoff_prepared_turn_dispatch(
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(&session_id);
     let mut opening_diagnostic_delivery = None;
+    let mut authority_recovery_delivery = None;
     let guarded =
         engram_generation.is_some() || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
     if guarded {
@@ -452,6 +453,9 @@ fn handoff_prepared_turn_dispatch(
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
         }
         if engram_generation.is_some() {
+            refresh_engram_authority_recovery_notice_locked(&mut inner, index);
+            let record = &mut inner.sessions[index];
+            authority_recovery_delivery = record.engram.authority_recovery_notice.clone();
             opening_diagnostic_delivery =
                 refresh_engram_source_root_prompt_locked(record, &mut dispatch);
         }
@@ -516,6 +520,17 @@ fn handoff_prepared_turn_dispatch(
     if let Some(delivered) = &opening_diagnostic_delivery {
         let index = index.expect("opening diagnostic handoff owns session");
         acknowledge_engram_opening_diagnostic_locked(&mut inner.sessions[index], delivered);
+    }
+    if let Some(delivered) = &authority_recovery_delivery {
+        let index = index.expect("recovery notice handoff owns session");
+        if inner.sessions[index]
+            .engram
+            .authority_recovery_notice
+            .as_ref()
+            == Some(delivered)
+        {
+            inner.sessions[index].engram.authority_recovery_notice = None;
+        }
     }
     if engram_generation.is_some() {
         let index = index.expect("guarded handoff owns session");

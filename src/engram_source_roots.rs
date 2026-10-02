@@ -149,7 +149,7 @@ impl EngramOpeningRootReason {
                 "the canonical authority read failed. Recover the original run association and refresh its authority before a later turn"
             }
             Self::CanonicalHistory => {
-                "the canonical naming history could not be established. Recover the original run association; unexplained legacy history requires an authorized repair"
+                "the canonical naming history could not be established. Recover the original run association, or name a validated worktree prospectively for a later turn; unexplained historical associations still require authorized repair"
             }
             Self::Publication => {
                 "the authority publication was not acknowledged. Refresh the original run's authority before a later turn"
@@ -177,6 +177,37 @@ struct EngramOpeningDiagnostic {
 
 struct EngramOpeningPrompt {
     base: String,
+}
+
+/// Current recovery status, separate from historical naming/check messages.
+/// Runtime-only and scoped to the canonical store/work whose publication
+/// issued it. Reissuing equal prose creates a distinct delivery instance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramAuthorityRecoveryNotice {
+    id: String,
+    store: EngramAuthorityStoreKey,
+    work_id: String,
+    line: String,
+}
+
+fn refresh_engram_authority_recovery_notice_locked(inner: &mut StateInner, index: usize) {
+    let Some(notice) = inner.sessions[index]
+        .engram
+        .authority_recovery_notice
+        .as_ref()
+    else {
+        return;
+    };
+    let same_work = inner.sessions[index]
+        .engram
+        .active_turn_naming_identity
+        .as_ref()
+        .is_some_and(|(store, work)| store == &notice.store && work == &notice.work_id);
+    // This is presentation only: never clear the opening capture, diagnostic,
+    // pending intent or recovery guard to make a warning disappear.
+    if !same_work || !engram_authority_work_unresolved(inner, &notice.store, &notice.work_id) {
+        inner.sessions[index].engram.authority_recovery_notice = None;
+    }
 }
 
 /// Admission can discover uncertainty after the prompt was built. Compose
@@ -217,7 +248,8 @@ fn refresh_engram_source_root_prompt_locked(
             ..
         } => (&mut command.prompt, opening_prompt),
     };
-    if diagnostic.is_none() && slot.is_none() {
+    let recovery = record.engram.authority_recovery_notice.as_ref();
+    if diagnostic.is_none() && recovery.is_none() && slot.is_none() {
         return None;
     }
     // Restore only our own composed slot, never search user text for a notice.
@@ -226,10 +258,18 @@ fn refresh_engram_source_root_prompt_locked(
             base: prompt.clone(),
         })
         .base;
-    *prompt = diagnostic.as_ref().map_or_else(
-        || base.clone(),
-        |notice| format!("{}\n\n{base}", notice.reason.notice()),
-    );
+    let mut lines = Vec::new();
+    if let Some(notice) = &diagnostic {
+        lines.push(notice.reason.notice());
+    }
+    if let Some(notice) = recovery {
+        lines.push(notice.line.clone());
+    }
+    *prompt = if lines.is_empty() {
+        base.clone()
+    } else {
+        format!("{}\n\n{base}", lines.join("\n"))
+    };
     diagnostic
 }
 
@@ -345,6 +385,7 @@ impl EngramSessionState {
         self.pending_source_root_line = None;
         self.source_root_line_delivery = None;
         self.opening_diagnostic = None;
+        self.authority_recovery_notice = None;
     }
 }
 

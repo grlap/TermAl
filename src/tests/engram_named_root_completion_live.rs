@@ -3,6 +3,9 @@
 //! Uses the production host transport and a pinned Engram disposable store.
 use super::*;
 
+#[path = "engram_legacy_root_recovery_live.rs"]
+mod legacy_recovery;
+
 struct CompletionFixture {
     live: LiveRootFixture,
     root: PathBuf,

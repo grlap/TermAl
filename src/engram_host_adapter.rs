@@ -2384,6 +2384,8 @@ struct EngramSessionState {
     source_root_line_delivery: Option<(String, u64)>,
     /// Runtime-only presentation owned by the captured opening, not the next prompt.
     opening_diagnostic: Option<EngramOpeningDiagnostic>,
+    /// Current canonical recovery status, projected again at provider handoff.
+    authority_recovery_notice: Option<EngramAuthorityRecoveryNotice>,
     /// What the first closing checkpoint of the named grant reported for its
     /// turn, reused verbatim by every retry of that checkpoint so the
     /// idempotency key repeats: the turn's observations and the evidence of
@@ -2503,6 +2505,7 @@ impl Default for EngramSessionState {
             pending_source_root_line: None,
             source_root_line_delivery: None,
             opening_diagnostic: None,
+            authority_recovery_notice: None,
             active_turn_report: None,
             active_turn_report_fallback: None,
             active_turn_grant_mutates: None,

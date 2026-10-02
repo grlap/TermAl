@@ -801,8 +801,23 @@ happens elsewhere. The agent therefore names the item's worktree once with
   A failed read or uncertain acknowledgement keeps authority withheld.
   A restored epoch-zero naming history without a canonical explanation also
   withholds evidence while allowing a valid admitted turn to continue. It
-  requires recovery of the original association or an authorized historical
-  repair; ordinary fresh naming is not proof of that history.
+  does not prove the old name from a no-event read. To resume prospectively,
+  the current holder can run `termal_name_source_root` with its `work`
+  reference and `path` set to a validated same-repository worktree (including
+  the same path it named before the upgrade). This creates a new monotonic
+  generation and canonical bound event, subject to the existing exact claim,
+  run, store, immutable-intent and persistence-acknowledgement checks. A
+  conflicting pending intent must first be settled by retrying its original
+  request; naming never clears it or invents a historical receipt. This
+  action confirms only the new generation. Recovering an unexplained old
+  association itself still requires its original history or authorized repair.
+  The naming turn stays unconfirmed; start a fresh later turn before running
+  a check or requesting acceptance on the new root.
+  Recovery-status notices are scoped to their canonical store and work, and
+  rechecked at the owner-checked provider handoff. Resolved authority no
+  longer delivers a queued warning that recovery is still incomplete. This
+  does not remove the original opening's unconfirmed diagnostic or historical
+  messages explaining why an earlier check received no credit.
   Recovery uses the current canonical cut; it does not reconstruct the
   opening of a replayed begin receipt, which carries no feed cut. That original
   turn remains without credited source provenance. A later fresh begin can
