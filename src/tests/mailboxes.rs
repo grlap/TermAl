@@ -3477,16 +3477,15 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
 
 #[tokio::test]
 async fn mailbox_http_send_surfaces_writer_admission_exhaustion_as_retryable_503() {
-    let (base_state, sender_id, target_id) = mailbox_test_state();
-    let coordination_path =
-        resolve_coordination_persistence_path(base_state.persistence_path.as_ref());
-    let state = AppState {
-        mailbox_store: Arc::new(
-            MailboxStore::open_with_write_admission_timeout(&coordination_path, Duration::ZERO)
-                .expect("zero-deadline mailbox store should open"),
-        ),
-        ..base_state
-    };
+    let (mut state, sender_id, target_id) = mailbox_test_state();
+    let coordination_path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
+    // Replacing the field drops the fixture's own store now. Struct update
+    // syntax would keep it, and its open database, alive past the state that
+    // owns the guarded root.
+    state.mailbox_store = Arc::new(
+        MailboxStore::open_with_write_admission_timeout(&coordination_path, Duration::ZERO)
+            .expect("zero-deadline mailbox store should open"),
+    );
     let writer_lock = sqlite_state_write_lock(&coordination_path);
     let (locked_tx, locked_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();

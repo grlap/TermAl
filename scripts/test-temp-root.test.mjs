@@ -181,23 +181,82 @@ test("linked persistent compile cache is rejected before a child starts", async 
   assert.deepEqual(readdirSync(outside), []);
 });
 
-test("green cleanup reports residual names while their evidence still exists", async (t) => {
+test("a leftover in the run root fails a green run and keeps the root for inspection", async (t) => {
   const userTemp = sandbox(t);
-  let reported = false;
+  const messages = [];
   const result = await runInTestTemp(process.execPath, ["-e", `
     const fs = require('node:fs');
     const path = require('node:path');
     fs.writeFileSync(path.join(process.env.TEMP, 'leftover.sqlite'), 'evidence');
-  `], { userTemp, report: (message) => {
-    if (message.startsWith("Test temp cleanup:")) {
-      assert.match(message, /leftover\.sqlite/);
-      const root = join(userTemp, "termal", "tests");
-      assert(existsSync(join(root, readdirSync(root)[0], "leftover.sqlite")));
-      reported = true;
-    }
-  } });
-  assert.equal(result.exitCode, 0);
-  assert(reported);
+  `], { userTemp, report: (message) => messages.push(message) });
+  assert.equal(result.exitCode, 1);
+  assert.equal(existsSync(join(result.runRoot, "leftover.sqlite")), true);
+  const cleanup = messages.find((message) => message.startsWith("Test temp cleanup:"));
+  assert.match(cleanup ?? "", /1 remaining entries/);
+  assert.match(cleanup ?? "", /leftover\.sqlite/);
+  assert(
+    messages.some((message) => message.includes("left entries in its run root") && message.includes(result.runRoot)),
+    messages.join("\n"),
+  );
+});
+
+test("the leftover report names the test that created each leftover root", async (t) => {
+  const userTemp = sandbox(t);
+  const messages = [];
+  const result = await runInTestTemp(process.execPath, ["-e", `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    fs.mkdirSync(path.join(process.env.TEMP, 'termal-test-state-1'));
+    fs.writeFileSync(path.join(process.env.TEMP, 'termal-test-state-1.owner'), 'tests::persist::keeps_a_root');
+  `], { userTemp, report: (message) => messages.push(message) });
+  assert.equal(result.exitCode, 1);
+  assert(
+    messages.some((message) => message === "Test temp leftover termal-test-state-1 was created by tests::persist::keeps_a_root"),
+    messages.join("\n"),
+  );
+});
+
+// The owner report reads at most 512 bytes of a plain file and prints one
+// line: whole characters only, with no control or bidirectional characters.
+async function leftoverOwners(t, source) {
+  const messages = [];
+  const result = await runInTestTemp(process.execPath, ["-e", `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const temp = process.env.TEMP;
+    ${source}
+  `], { userTemp: sandbox(t), report: (message) => messages.push(message) });
+  assert.equal(result.exitCode, 1);
+  return messages.filter((message) => message.startsWith("Test temp leftover "));
+}
+
+test("an oversized owner marker is cut at its byte bound on a whole character", async (t) => {
+  // 1000 three-byte characters: 512 bytes hold 170 of them and part of one.
+  const owners = await leftoverOwners(t, `
+    fs.writeFileSync(path.join(temp, 'big.owner'), '\\u20ac'.repeat(1000));
+  `);
+  assert.deepEqual(owners, [`Test temp leftover big was created by ${"\u20ac".repeat(170)}`]);
+});
+
+test("owner markers that are not plain files are named, never followed", async (t) => {
+  const owners = await leftoverOwners(t, `
+    fs.mkdirSync(path.join(temp, 'folder.owner'));
+    const outside = path.join(temp, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'secret'), 'tests::outside');
+    fs.symlinkSync(outside, path.join(temp, 'linked.owner'), process.platform === 'win32' ? 'junction' : 'dir');
+  `);
+  assert.deepEqual(owners.sort(), [
+    "Test temp leftover folder was created by (owner marker is not a plain file)",
+    "Test temp leftover linked was created by (owner marker is not a plain file)",
+  ]);
+});
+
+test("owner report lines carry no control, line-separator or bidirectional characters", async (t) => {
+  const owners = await leftoverOwners(t, `
+    fs.writeFileSync(path.join(temp, 'name\\u202eeman.owner'), 'tests::\\u009b31mred\\u2028line\\u2066x');
+  `);
+  assert.deepEqual(owners, ["Test temp leftover name eman was created by tests:: 31mred line x"]);
 });
 
 test("green children receive one contained root which is removed after exit", async (t) => {
@@ -210,7 +269,9 @@ test("green children receive one contained root which is removed after exit", as
     assert.equal(process.env.TMP, process.env.TMPDIR);
     assert.equal(process.env.TEMP, process.env.TERMAL_TEST_RUN_ROOT);
     assert.equal(path.dirname(process.env.TEMP), path.join(process.env.TERMAL_TEST_USER_TEMP, 'termal', 'tests'));
-    fs.mkdirSync(path.join(process.env.TEMP, 'termal-test-state-child'));
+    const fixture = path.join(process.env.TEMP, 'termal-test-state-child');
+    fs.mkdirSync(fixture);
+    fs.rmSync(fixture, { recursive: true });
   `);
   assert.equal(result.exitCode, 0);
   assert.equal(result.beforeCount, 0);
@@ -320,7 +381,7 @@ test("manual user-temp aliases stay lexical while parent traversal is rejected",
   }
 });
 
-test("failed green cleanup reports exact survivors and OS error without retry", async (t) => {
+test("a failed removal of a clean green run reports the OS error without retry", async (t) => {
   const userTemp = sandbox(t);
   const originalRemove = fs.rmSync;
   let removals = 0;
@@ -330,18 +391,17 @@ test("failed green cleanup reports exact survivors and OS error without retry", 
   });
   syncBuiltinESMExports();
   try {
-    await assert.rejects(child(userTemp, `
-      require('node:fs').writeFileSync(require('node:path').join(process.env.TEMP, 'held.sqlite'), 'evidence');
-    `), (error) => {
+    // The child leaves nothing behind, so the wrapper removes the run root,
+    // and that one removal fails.
+    await assert.rejects(child(userTemp, ""), (error) => {
       assert.match(error.message, /EBUSY/);
       assert.match(error.message, /-16/);
-      assert.match(error.message, /held\.sqlite/);
       assert(error.message.includes(userTemp));
       return true;
     });
     assert.equal(removals, 1);
     const [run] = readdirSync(join(userTemp, "termal", "tests"));
-    assert(existsSync(join(userTemp, "termal", "tests", run, "held.sqlite")));
+    assert(existsSync(join(userTemp, "termal", "tests", run)));
   } finally {
     mock.mock.restore();
     fs.rmSync = originalRemove;

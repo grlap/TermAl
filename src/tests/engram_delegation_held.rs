@@ -721,6 +721,9 @@ fn a_hold_and_its_wait_survive_a_restart_and_wake_once() {
     assert_eq!(reloaded.held_since, hold.held_since);
     assert_eq!(reloaded.prompt_id, hold.prompt_id);
     assert_eq!(wait_notifications(&again, &parent, &wait_id).len(), 1);
+    // Join the third boot's persist worker, which keeps the database open,
+    // before the guarded root is removed.
+    again.shutdown_persist_blocking();
 }
 
 /// Criterion 4: a hold that cannot be resumed safely (an interrupted

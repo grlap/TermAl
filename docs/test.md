@@ -206,8 +206,12 @@ The wrapper requires Node.js (the version in `.nvmrc`) on `PATH`, including
 redirects `TMP`/`TEMP`/`TMPDIR` into the product's `termal/tests/run-*` folder,
 reports newly escaped artifacts, and removes successful runs without retries.
 A failed run is retained for diagnosis; removal failures name the path, OS error
-and surviving entries. Stale marked runs are swept only after the recorded
-processes have exited and the age threshold has passed.
+and surviving entries. A green run whose run root still holds entries fails too,
+and its root is retained: every test must remove what it created. A root made by
+`TestTempRoot::create` has a sibling `<root>.owner` file naming the test that
+created it, so the report names the test behind each such leftover; other
+leftovers are reported by name only. Stale marked runs are swept only after the
+recorded processes have exited and the age threshold has passed.
 
 Direct `cargo test` and `cargo check` do not require Node. Direct tests use the
 Rust product-temp helper where adopted, but bypass the wrapper's environment

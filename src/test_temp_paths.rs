@@ -188,21 +188,48 @@ fn sweep_unmarked_test_fixtures(
 /// assertion unwind report the cleanup failure without causing a double panic.
 #[track_caller]
 fn remove_test_directory(path: impl AsRef<FsPath>) {
-    let path = path.as_ref();
-    if let Err(error) = fs::remove_dir_all(path) {
-        if error.kind() == io::ErrorKind::NotFound {
-            return;
-        }
-        let detail = format!(
-            "test directory not removed: {} ({error}; kind={:?}; os={:?})",
+    report_test_directory_failures(test_directory_removal_failure(path.as_ref()).into_iter());
+}
+
+/// One cleanup attempt for each directory. Every directory is attempted even
+/// after an earlier one failed; all failures are then reported together, as
+/// `remove_test_directory` reports one.
+#[track_caller]
+fn remove_test_directories<P: AsRef<FsPath>>(paths: impl IntoIterator<Item = P>) {
+    let failures = paths
+        .into_iter()
+        .filter_map(|path| test_directory_removal_failure(path.as_ref()))
+        .collect::<Vec<_>>();
+    report_test_directory_failures(failures.into_iter());
+}
+
+/// The path and original OS error of a failed removal; an absent directory
+/// counts as removed.
+fn test_directory_removal_failure(path: &FsPath) -> Option<String> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => None,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => Some(format!(
+            "{} ({error}; kind={:?}; os={:?})",
             path.display(),
             error.kind(),
             error.raw_os_error()
-        );
-        if std::thread::panicking() {
-            eprintln!("{detail}");
-        } else {
-            panic!("{detail}");
-        }
+        )),
+    }
+}
+
+#[track_caller]
+fn report_test_directory_failures(mut failures: impl Iterator<Item = String>) {
+    let Some(first) = failures.next() else {
+        return;
+    };
+    let detail = failures.fold(
+        format!("test directory not removed: {first}"),
+        |detail, failure| format!("{detail}; {failure}"),
+    );
+    if std::thread::panicking() {
+        eprintln!("{detail}");
+    } else {
+        panic!("{detail}");
     }
 }

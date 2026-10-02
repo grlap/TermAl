@@ -209,7 +209,7 @@ async fn response_board_snapshots_durable_messages_and_survives_source_pruning()
         state.orchestrator_templates_path.as_ref().clone(),
     )
     .expect("state should restart from the same database");
-    let restarted_app = app_router(restarted);
+    let restarted_app = app_router(restarted.clone());
     let (list_status, board): (StatusCode, Value) = request_json(
         &restarted_app,
         Request::builder()
@@ -250,6 +250,9 @@ async fn response_board_snapshots_durable_messages_and_survives_source_pruning()
     )
     .await;
     assert_eq!(empty_board["cards"].as_array().map(Vec::len), Some(0));
+    // The restarted state runs a live persist worker that keeps the database
+    // open; join it before the original state's guarded root is removed.
+    restarted.shutdown_persist_blocking();
 }
 
 #[tokio::test]

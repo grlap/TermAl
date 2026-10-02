@@ -666,13 +666,9 @@ fn a_mode_violation_is_cancelled_even_when_persisting_the_display_fails() {
     set_kimi_mode_gate_armed(&kimi.runtime_state, true);
     // Every commit from here fails: the persist worker is gone and the
     // persistence path is a directory.
-    let failing_path = test_temp_dir().join(format!(
-        "termal-kimi-mode-persist-failure-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&failing_path).expect("a directory at the persistence path");
+    let failing_path = TestTempRoot::create("termal-kimi-mode-persist-failure");
     kimi.state.shutdown_persist_blocking();
-    kimi.state.persistence_path = Arc::new(failing_path.clone());
+    kimi.state.persistence_path = Arc::new(failing_path.to_path_buf());
 
     let _ = handle_acp_message(
         &update(json!({ "sessionUpdate": "current_mode_update", "currentModeId": "yolo" })),
@@ -688,7 +684,6 @@ fn a_mode_violation_is_cancelled_even_when_persisting_the_display_fails() {
     );
 
     assert!(kimi.cancelled(), "the prompt is cancelled whatever persistence does");
-    let _ = fs::remove_dir_all(&failing_path);
 }
 
 #[test]

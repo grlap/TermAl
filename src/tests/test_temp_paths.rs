@@ -244,6 +244,105 @@ fn checked_directory_cleanup_does_not_double_panic_during_assertion_unwind() {
 }
 
 #[test]
+fn checked_cleanup_of_several_directories_attempts_each_and_reports_every_failure() {
+    let sandbox = TestTempRoot::create("termal-checked-removals");
+    let first = sandbox.path().join("first-not-directory");
+    let removable = sandbox.path().join("removable");
+    let last = sandbox.path().join("last-not-directory");
+    fs::write(&first, b"evidence").unwrap();
+    fs::create_dir(&removable).unwrap();
+    fs::write(removable.join("content"), b"fixture").unwrap();
+    fs::write(&last, b"evidence").unwrap();
+    let failure = std::panic::catch_unwind(|| {
+        remove_test_directories([&first, &removable, &last]);
+    })
+    .unwrap_err();
+    let message = failure.downcast_ref::<String>().unwrap();
+    assert!(message.contains(&first.display().to_string()), "{message}");
+    assert!(message.contains(&last.display().to_string()), "{message}");
+    assert!(
+        !removable.exists(),
+        "a failure must not skip the later directories"
+    );
+    assert!(first.exists() && last.exists());
+}
+
+#[test]
+fn checked_cleanup_of_several_directories_keeps_the_original_assertion_on_unwind() {
+    struct Cleanup(Vec<PathBuf>);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            remove_test_directories(&self.0);
+        }
+    }
+    let sandbox = TestTempRoot::create("termal-checked-removals-unwind");
+    let failing = sandbox.path().join("not-directory");
+    let removable = sandbox.path().join("removable");
+    fs::write(&failing, b"evidence").unwrap();
+    fs::create_dir(&removable).unwrap();
+    let failure = std::panic::catch_unwind(|| {
+        let _cleanup = Cleanup(vec![failing.clone(), removable.clone()]);
+        panic!("original assertion");
+    })
+    .unwrap_err();
+    assert_eq!(failure.downcast_ref::<&str>(), Some(&"original assertion"));
+    assert!(!removable.exists());
+}
+
+#[test]
+fn a_created_root_names_its_test_beside_it_until_the_root_is_removed() {
+    let root = TestTempRoot::create("termal-owner-marker");
+    let path = root.path().to_owned();
+    let marker = TestTempRoot::owner_marker(&path);
+    assert_eq!(
+        marker.parent(),
+        path.parent(),
+        "the marker sits beside the root"
+    );
+    assert_eq!(
+        fs::read_to_string(&marker).unwrap(),
+        std::thread::current().name().unwrap()
+    );
+    assert!(
+        fs::read_dir(&path).unwrap().next().is_none(),
+        "the root's own contents stay the fixture's"
+    );
+    drop(root);
+    assert!(!path.exists());
+    assert!(!marker.exists());
+}
+
+#[test]
+fn an_owned_root_writes_no_owner_marker() {
+    let parent = TestTempRoot::create("termal-owned-root");
+    let path = parent.path().join("owned");
+    fs::create_dir(&path).unwrap();
+    let root = TestTempRoot::own(path.clone());
+    assert!(!TestTempRoot::owner_marker(&path).exists());
+    drop(root);
+    assert!(!path.exists());
+}
+
+#[test]
+fn a_root_that_cannot_be_removed_keeps_the_marker_naming_its_test() {
+    let root = TestTempRoot::create("termal-owner-retained");
+    let path = root.path().to_owned();
+    let marker = TestTempRoot::owner_marker(&path);
+    // A regular file in the root's place makes the directory removal fail.
+    fs::remove_dir(&path).unwrap();
+    fs::write(&path, b"in the root's place").unwrap();
+    let cleaned = root.observe_cleanup();
+    drop(root);
+    assert!(phase_sync::receive(&cleaned, "failed owner root cleanup").is_err());
+    assert_eq!(
+        fs::read_to_string(&marker).unwrap(),
+        std::thread::current().name().unwrap()
+    );
+    fs::remove_file(&path).unwrap();
+    fs::remove_file(&marker).unwrap();
+}
+
+#[test]
 fn direct_cargo_paths_stay_under_the_product_directory() {
     let user_temp = std::env::current_dir().unwrap().join("synthetic-user-temp");
     assert_eq!(

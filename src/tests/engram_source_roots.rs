@@ -7,14 +7,14 @@
 use super::*;
 
 /// Removes the directories it owns when dropped, on success and on an
-/// assertion's unwind alike.
+/// assertion's unwind alike; a failed removal is reported, never swallowed,
+/// and does not stop the removal of the others. Newest first, so a worktree
+/// goes before the repository that holds it.
 struct RemoveDirsOnDrop(Vec<PathBuf>);
 
 impl Drop for RemoveDirsOnDrop {
     fn drop(&mut self) {
-        for dir in self.0.iter().rev() {
-            let _ = fs::remove_dir_all(dir);
-        }
+        remove_test_directories(self.0.iter().rev());
     }
 }
 

@@ -5,19 +5,60 @@
 // outside the product directory or retry failed removals. Shared by the Rust
 // launcher and Node fixture tests.
 import {
-  lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync,
-  realpathSync, rmSync, writeFileSync,
+  closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync,
+  readdirSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 const markerName = ".termal-test-run";
+// A Rust fixture root `<name>` names its creating test in `<name>.owner`
+// (src/test_temp_root.rs).
+const ownerSuffix = ".owner";
+const maxOwnerBytes = 512;
 const productName = "termal";
 const ownedOutsidePrefixes = ["termal-"];
 const staleAgeMs = 48 * 60 * 60 * 1000;
 const maxSweepRemovals = 64;
+
+// Characters that could reshape a report line: C0 and C1 controls, DEL, and
+// the line, paragraph and bidirectional formatting characters.
+const unsafeReportCharacters = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]+/gu;
+
+function reportText(text) {
+  return text.replace(unsafeReportCharacters, " ").trim();
+}
+
+// The creating test named in an owner marker, on one line. Only a plain file
+// is read, never through a link, and at most maxOwnerBytes of it, cut on a
+// whole character. A marker that cannot be read is named, never fatal.
+function readOwner(path) {
+  let descriptor;
+  try {
+    const entry = lstatSync(path);
+    if (entry.isSymbolicLink() || !entry.isFile()) return "(owner marker is not a plain file)";
+    // No-follow and non-blocking where the platform has them, so a link or a
+    // FIFO swapped in after the lstat is neither followed nor waited on.
+    descriptor = openSync(
+      path,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
+    if (!fstatSync(descriptor).isFile()) return "(owner marker is not a plain file)";
+    const buffer = Buffer.alloc(maxOwnerBytes);
+    const length = readSync(descriptor, buffer, 0, maxOwnerBytes, 0);
+    // The decoder holds back a character cut by the bound instead of
+    // replacing it.
+    const text = new StringDecoder("utf8").write(buffer.subarray(0, length));
+    return reportText(text) || "(empty owner marker)";
+  } catch (error) {
+    return `(owner marker unreadable: ${error.code ?? error.message})`;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
 
 function directoryWithoutLinks(path) {
   try {
@@ -228,10 +269,21 @@ export async function runInTestTemp(command, args, {
     directoryWithoutLinks(runRoot);
     const residual = readdirSync(runRoot).filter((name) => name !== markerName);
     report(`Test temp cleanup: ${residual.length} remaining entries in ${runRoot}: ${residual.map((name) => JSON.stringify(name)).join(", ") || "(empty)"}`);
-    try {
-      rmSync(runRoot, { recursive: true, maxRetries: 0 });
-    } catch (error) {
-      throw removalFailure("Failed to remove green test run", runRoot, error);
+    if (residual.length > 0) {
+      // Every fixture must remove what it creates. A green run that leaves
+      // entries fails, and its root is kept so the leftovers can be traced:
+      // a Rust fixture root names its creating test in a sibling .owner file.
+      for (const name of residual.filter((entry) => entry.endsWith(ownerSuffix))) {
+        report(`Test temp leftover ${reportText(name.slice(0, -ownerSuffix.length))} was created by ${readOwner(join(runRoot, name))}`);
+      }
+      report(`A green test run left entries in its run root; retained ${runRoot} for inspection`);
+      exitCode = 1;
+    } else {
+      try {
+        rmSync(runRoot, { recursive: true, maxRetries: 0 });
+      } catch (error) {
+        throw removalFailure("Failed to remove green test run", runRoot, error);
+      }
     }
   } else {
     report(`Retained failed test run: ${runRoot}`);

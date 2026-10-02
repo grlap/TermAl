@@ -593,10 +593,9 @@ fn a_detail_only_change_of_a_failed_run_is_recorded_without_a_card_update() {
 fn a_run_whose_delta_was_not_committed_gets_no_card() {
     let mut fixture = CardFixture::new("unpublished");
     let persistence_path = fixture.state.persistence_path.clone();
-    let failing = test_temp_dir().join(format!("termal-cards-persist-failure-{}", Uuid::new_v4()));
-    fs::create_dir_all(&failing).unwrap();
+    let failing = TestTempRoot::create("termal-cards-persist-failure");
     fixture.state.shutdown_persist_blocking();
-    fixture.state.persistence_path = Arc::new(failing.clone());
+    fixture.state.persistence_path = Arc::new(failing.to_path_buf());
     fixture.write("test-unsent", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
     fixture.refresh(&[7]);
     assert!(fixture.cards().is_empty(), "cards follow published summaries only");
@@ -604,7 +603,6 @@ fn a_run_whose_delta_was_not_committed_gets_no_card() {
     fixture.state.persistence_path = persistence_path;
     fixture.refresh(&[7]);
     assert_eq!(fixture.cards().len(), 1);
-    let _ = fs::remove_dir_all(&failing);
 }
 
 #[test]

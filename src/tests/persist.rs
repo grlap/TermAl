@@ -53,23 +53,17 @@ fn tests_must_join_persist_worker_instead_of_disconnecting_its_sender() {
     assert_source_tree_has_no_orphan_worker_pattern(&tests_root, &forbidden);
 }
 
-struct PersistTestRoot(PathBuf);
+// A guarded root under the product test directory: removal failures are
+// reported and the leftover is traced to its test, never swallowed.
+struct PersistTestRoot(TestTempRoot);
 
 impl PersistTestRoot {
     fn new(label: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("termal-persist-{label}-{}", Uuid::new_v4()));
-        fs::create_dir_all(&path).expect("persist test root should exist");
-        Self(path)
+        Self(TestTempRoot::create(&format!("termal-persist-{label}")))
     }
 
     fn path(&self) -> &FsPath {
-        &self.0
-    }
-}
-
-impl Drop for PersistTestRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        self.0.path()
     }
 }
 
@@ -775,9 +769,7 @@ fn project_deletion_does_not_cleanup_board_before_a_queued_persist_is_durable() 
 #[cfg(windows)]
 #[test]
 fn persisted_state_normalizes_legacy_local_verbatim_paths() {
-    let project_root =
-        std::env::temp_dir().join(format!("termal-legacy-verbatim-path-{}", Uuid::new_v4()));
-    fs::create_dir_all(&project_root).expect("project root should exist");
+    let project_root = TestTempRoot::create("termal-legacy-verbatim-path");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
@@ -798,8 +790,6 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
     let loaded = state_inner_from_persisted_value(encoded).expect("persisted state should load");
     assert_eq!(loaded.projects[0].root_path, normalized_root);
     assert_eq!(loaded.sessions[0].session.workdir, normalized_root);
-
-    let _ = fs::remove_dir_all(project_root);
 }
 
 // A retired field in stored metadata is inert: loading keeps current layout
@@ -908,9 +898,7 @@ async fn sqlite_stored_workspace_theme_id_is_ignored_on_load_and_dropped_on_save
 #[cfg(windows)]
 #[test]
 fn persisted_state_normalizes_legacy_workspace_layout_paths() {
-    let project_root =
-        std::env::temp_dir().join(format!("termal-layout-verbatim-path-{}", Uuid::new_v4()));
-    fs::create_dir_all(&project_root).expect("project root should exist");
+    let project_root = TestTempRoot::create("termal-layout-verbatim-path");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
@@ -1034,8 +1022,6 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
             .and_then(Value::as_str),
         Some(normalized_file.as_str())
     );
-
-    let _ = fs::remove_dir_all(project_root);
 }
 
 #[cfg(windows)]
@@ -1044,19 +1030,12 @@ fn app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs() {
     let _env_lock = TEST_HOME_ENV_MUTEX
         .lock()
         .expect("test home env mutex poisoned");
-    let project_root =
-        std::env::temp_dir().join(format!("termal-bootstrap-verbatim-{}", Uuid::new_v4()));
-    fs::create_dir_all(&project_root).expect("project root should exist");
+    let project_root = TestTempRoot::create("termal-bootstrap-verbatim");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
     let verbatim_root = format!(r"\\?\{normalized_root}");
-    let state_root = std::env::temp_dir().join(format!(
-        "termal-bootstrap-verbatim-state-{}",
-        Uuid::new_v4()
-    ));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-bootstrap-verbatim-state");
     let _home = ScopedEnvVar::set_home_dir(&state_root);
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
@@ -1083,8 +1062,6 @@ fn app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs() {
     }
     drop(inner);
     state.shutdown_persist_blocking();
-
-    let _ = fs::remove_dir_all(project_root);
 }
 
 #[cfg(windows)]
@@ -1124,11 +1101,7 @@ fn assert_windows_state_redirection_rejected(error: anyhow::Error) {
 #[cfg(windows)]
 #[test]
 fn windows_sqlite_state_redirection_rejects_main_database_link() {
-    let state_root = std::env::temp_dir().join(format!(
-        "termal-windows-main-redirection-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-windows-main-redirection");
     let db = state_root.join("termal.sqlite");
     let main_target = state_root.join("main-target.sqlite");
 
@@ -1138,18 +1111,12 @@ fn windows_sqlite_state_redirection_rejects_main_database_link() {
             .expect_err("main sqlite symlink should be rejected");
         assert_windows_state_redirection_rejected(main_error);
     }
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[cfg(windows)]
 #[test]
 fn windows_sqlite_state_redirection_rejects_sidecar_link_independently() {
-    let state_root = std::env::temp_dir().join(format!(
-        "termal-windows-sidecar-redirection-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-windows-sidecar-redirection");
     let db = state_root.join("termal.sqlite");
     let wal_target = state_root.join("wal-target");
 
@@ -1160,16 +1127,12 @@ fn windows_sqlite_state_redirection_rejects_sidecar_link_independently() {
             .expect_err("sqlite sidecar symlink should be rejected");
         assert_windows_state_redirection_rejected(wal_error);
     }
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[cfg(windows)]
 #[test]
 fn windows_sqlite_state_redirection_rejects_termal_directory_reparse_point_independently() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-windows-dir-redirection-{}", Uuid::new_v4()));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-windows-dir-redirection");
     let redirected_target = state_root.join("redirected-termal-target");
     let termal_dir = state_root.join(".termal");
 
@@ -1180,25 +1143,22 @@ fn windows_sqlite_state_redirection_rejects_termal_directory_reparse_point_indep
                 .expect_err(".termal directory reparse point should be rejected");
         assert_windows_state_redirection_rejected(directory_error);
     }
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 // Tests that persisted state preserves significant local path spaces.
 #[cfg(not(windows))]
 #[test]
 fn persisted_state_preserves_significant_local_path_spaces() {
-    let project_root =
-        std::env::temp_dir().join(format!("termal-significant-path-space-{} ", Uuid::new_v4()));
+    // The trailing space is the point of this root, so it is named here and
+    // only its removal is guarded; a simple prefix cannot carry the space.
+    let project_root = TestTempRoot::own(
+        test_temp_dir().join(format!("termal-significant-path-space-{} ", Uuid::new_v4())),
+    );
     fs::create_dir_all(&project_root).expect("project root should exist");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let state_root = std::env::temp_dir().join(format!(
-        "termal-significant-path-space-state-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-significant-path-space-state");
     let path = state_root.join("termal.sqlite");
 
     assert!(normalized_root.ends_with(' '));
@@ -1219,10 +1179,6 @@ fn persisted_state_preserves_significant_local_path_spaces() {
         .expect("persisted state should exist");
     assert_eq!(loaded.projects[0].root_path, normalized_root);
     assert_eq!(loaded.sessions[0].session.workdir, normalized_root);
-
-    let _ = fs::remove_file(path);
-    let _ = fs::remove_dir_all(state_root);
-    let _ = fs::remove_dir_all(project_root);
 }
 
 // Pins that stripping the top-level `projects` field causes
@@ -2379,8 +2335,6 @@ fn shutdown_persist_blocking_persists_delta_committed_while_joining_worker() {
         "shutdown's final synchronized persist must include delta-only mutations that land while \
          the worker is joining",
     );
-
-    let _ = fs::remove_file(&*persistence_path);
 }
 
 #[tokio::test]
@@ -2553,14 +2507,8 @@ fn commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist() {
     // signal, but post-shutdown there is no worker. Without this
     // synchronous fallback, those final mutations are kept only in
     // memory and lost when the process exits.
-    let unique_suffix = Uuid::new_v4();
-    let project_root =
-        std::env::temp_dir().join(format!("termal-post-shutdown-commit-root-{unique_suffix}"));
-    fs::create_dir_all(&project_root).expect("project root should exist");
-    let state_root =
-        std::env::temp_dir().join(format!("termal-post-shutdown-commit-state-{unique_suffix}"));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let project_root = TestTempRoot::create("termal-post-shutdown-commit-root");
+    let state_root = TestTempRoot::create("termal-post-shutdown-commit-state");
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
@@ -2640,9 +2588,6 @@ fn commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist() {
          synchronous fallback path; otherwise the bug ledger entry \"Persist shutdown drain \
          can run before background mutation sources are quiesced\" remains open",
     );
-
-    let _ = fs::remove_dir_all(&state_root);
-    let _ = fs::remove_dir_all(&project_root);
 }
 
 #[test]
@@ -2661,14 +2606,8 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
     // and the fake-loop integration test could pass even if the real worker
     // failed to write the final delta or a restarted `AppState` silently
     // dropped the last record.
-    let unique_suffix = Uuid::new_v4();
-    let project_root =
-        std::env::temp_dir().join(format!("termal-graceful-shutdown-root-{unique_suffix}"));
-    fs::create_dir_all(&project_root).expect("project root should exist");
-    let state_root =
-        std::env::temp_dir().join(format!("termal-graceful-shutdown-state-{unique_suffix}"));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let project_root = TestTempRoot::create("termal-graceful-shutdown-root");
+    let state_root = TestTempRoot::create("termal-graceful-shutdown-state");
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
@@ -2725,11 +2664,6 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
     );
     drop(reloaded_inner);
     restarted.shutdown_persist_blocking();
-
-    // Best-effort cleanup; tests that fail mid-flight intentionally leave
-    // the temp files in place for postmortem inspection.
-    let _ = fs::remove_dir_all(&state_root);
-    let _ = fs::remove_dir_all(&project_root);
 }
 
 #[test]
@@ -2867,10 +2801,7 @@ fn make_persist_test_delegation(
 
 #[test]
 fn sqlite_persist_connection_cache_reuses_matching_connection_until_invalidated() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-sqlite-cache-reuse-{}", Uuid::new_v4()));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-cache-reuse");
     let path = state_root.join("termal.sqlite");
     let mut cache = SqlitePersistConnectionCache::new();
 
@@ -2911,8 +2842,6 @@ fn sqlite_persist_connection_cache_reuses_matching_connection_until_invalidated(
             "unexpected cache invalidation error: {error}"
         );
     }
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[test]
@@ -2988,9 +2917,7 @@ fn coordination_bootstrap_hands_its_connection_to_the_mailbox_store() {
 
 #[test]
 fn sqlite_delta_upserts_only_changed_session_rows_and_removes_hidden_or_deleted_rows() {
-    let state_root = std::env::temp_dir().join(format!("termal-sqlite-delta-{}", Uuid::new_v4()));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-delta");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
     let changed_id = inner
@@ -3091,8 +3018,6 @@ fn sqlite_delta_upserts_only_changed_session_rows_and_removes_hidden_or_deleted_
     assert!(loaded.find_session_index(&unchanged_id).is_some());
     assert!(loaded.find_session_index(&hidden_id).is_none());
     assert!(loaded.find_session_index(&deleted_id).is_none());
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[test]
@@ -3214,10 +3139,7 @@ fn invalid_in_memory_remote_identity_isolated_from_full_and_delta_persistence() 
 
 #[test]
 fn sqlite_delta_upserts_changed_delegation_rows_and_removes_deleted_rows() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-sqlite-delegation-delta-{}", Uuid::new_v4()));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-delegation-delta");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
     let parent_id = inner
@@ -3302,16 +3224,11 @@ fn sqlite_delta_upserts_changed_delegation_rows_and_removes_deleted_rows() {
         "unchanged delegation row should not be rewritten by a targeted delta"
     );
     assert!(sqlite_row_json(&path, "delegations", deleted_id).is_none());
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[test]
 fn sqlite_delta_metadata_only_update_does_not_rewrite_session_rows() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-sqlite-metadata-only-{}", Uuid::new_v4()));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-metadata-only");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
     let session_id = inner
@@ -3355,15 +3272,11 @@ fn sqlite_delta_metadata_only_update_does_not_rewrite_session_rows() {
             .any(|value| value["id"] == Value::String(project.id.clone())),
         "metadata row should contain the newly-created project"
     );
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[test]
 fn sqlite_startup_loads_sessions_and_delegations_from_split_tables() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-sqlite-split-load-{}", Uuid::new_v4()));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-split-load");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
     let parent_id = inner
@@ -3430,15 +3343,11 @@ fn sqlite_startup_loads_sessions_and_delegations_from_split_tables() {
         loaded_delegation.result.is_none(),
         "state-only loading must not invent a reviewer result before mailbox recovery"
     );
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[test]
 fn sqlite_startup_retains_only_the_latest_page_and_reads_older_history_by_index() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-sqlite-bounded-history-{}", Uuid::new_v4()));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-bounded-history");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
     let session_id = inner
@@ -3514,8 +3423,6 @@ fn sqlite_startup_retains_only_the_latest_page_and_reads_older_history_by_index(
         older_page.last().map(|(_, message)| message.id()),
         Some("message-065")
     );
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[test]
@@ -4160,9 +4067,7 @@ fn local_history_cursor_and_page_share_the_persisted_read_path() {
 
 #[test]
 fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metadata() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-sqlite-malformed-{}", Uuid::new_v4()));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-malformed");
     let session_row_path = state_root.join("session-row.sqlite");
     let delegation_row_path = state_root.join("delegation-row.sqlite");
     let metadata_path = state_root.join("metadata.sqlite");
@@ -4298,8 +4203,6 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
         rendered.contains("Move or delete `termal.sqlite`"),
         "{rendered}"
     );
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 // Regression guard: `commit_session_created_locked` must route
@@ -4432,12 +4335,8 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
         record_id.starts_with("session-"),
         "record id should follow `session-<n>` shape, got: {record_id}"
     );
-
-    // Defensive cleanup for the per-test SQLite directory and sidecars.
-    drop(connection);
-    if let Some(state_root) = persistence_path.parent() {
-        let _ = fs::remove_dir_all(state_root);
-    }
+    // The state's guarded root removes the SQLite directory and sidecars
+    // after `connection`, declared later, has closed them.
 }
 
 /// Regression: a session whose metadata knows a remote transcript length but
@@ -4452,9 +4351,7 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
 /// refuse to boot. Absent local rows are a hydration state, not corruption.
 #[test]
 fn sqlite_startup_tolerates_remote_metadata_message_count_without_local_rows() {
-    let state_root =
-        std::env::temp_dir().join(format!("termal-sqlite-proxy-boot-{}", Uuid::new_v4()));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-proxy-boot");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
     let session_id = inner
@@ -4505,8 +4402,6 @@ fn sqlite_startup_tolerates_remote_metadata_message_count_without_local_rows() {
         loaded_record.session.messages.is_empty(),
         "no local rows exist, so no messages should be materialized"
     );
-
-    let _ = fs::remove_dir_all(state_root);
 }
 
 /// Regression: a persisted remote proxy can own a bounded, nonzero transcript
@@ -4603,11 +4498,7 @@ fn sqlite_startup_tolerates_bounded_remote_proxy_suffix_without_overview() {
 /// presented as a healthy in-memory session.
 #[test]
 fn sqlite_startup_skips_invalid_session_rows_and_loads_valid_sessions() {
-    let state_root = std::env::temp_dir().join(format!(
-        "termal-sqlite-session-isolation-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&state_root).expect("state root should exist");
+    let state_root = TestTempRoot::create("termal-sqlite-session-isolation");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
     let valid_session_id = inner
@@ -4822,6 +4713,4 @@ fn sqlite_startup_skips_invalid_session_rows_and_loads_valid_sessions() {
             "quarantined session `{invalid_session_id}` must stay on disk"
         );
     }
-
-    let _ = fs::remove_dir_all(state_root);
 }

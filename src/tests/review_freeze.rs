@@ -87,7 +87,7 @@ async fn review_freeze_http_observes_failure_and_rejects_concurrent_attempt_chan
 
     for exit in [7, 0] {
         let expected = expected.clone();
-        let root = root.clone();
+        let root = root.to_path_buf();
         let runner = Arc::new(move |command: &mut Command| {
             assert_eq!(
                 command.get_program(),
@@ -852,8 +852,7 @@ fn review_freeze_git_failures_retain_operation_timing_budget_and_cause() {
 
 #[test]
 fn review_freeze_matches_independent_nonempty_engram_golden() {
-    let root = test_temp_dir().join(format!("review-golden-{}", Uuid::new_v4()));
-    fs::create_dir_all(&root).unwrap();
+    let root = TestTempRoot::create("review-golden");
     run_git_test_command(&root, &["init", "--object-format=sha1"]);
     run_git_test_command(&root, &["config", "core.autocrlf", "false"]);
     fs::write(root.join("tracked.txt"), b"base\n").unwrap();
@@ -911,9 +910,9 @@ fn review_freeze_matches_independent_nonempty_engram_golden() {
     }
 }
 
-fn fixture() -> (PathBuf, ReviewFreezeRequest) {
-    let root = test_temp_dir().join(format!("review-freeze-{}", Uuid::new_v4()));
-    fs::create_dir_all(&root).unwrap();
+/// A frozen repository in a root that is removed when the returned guard drops.
+fn fixture() -> (TestTempRoot, ReviewFreezeRequest) {
+    let root = TestTempRoot::create("review-freeze");
     init_git_document_test_repo(&root);
     fs::write(root.join("tracked.txt"), b"base\n").unwrap();
     run_git_test_command(&root, &["add", "tracked.txt"]);
@@ -995,20 +994,22 @@ fn review_freeze_rejects_manifest_and_parent_literal_mismatch() {
 
 /// Removes the directories it owns when dropped, on success and on an
 /// assertion's unwind alike, so a direct `cargo test` leaves nothing behind.
+/// A removal that fails is reported, never ignored, and does not stop the
+/// removal of the others.
 struct RemoveDirsOnDrop(Vec<PathBuf>);
 
 impl Drop for RemoveDirsOnDrop {
     fn drop(&mut self) {
-        for dir in &self.0 {
-            let _ = fs::remove_dir_all(dir);
-        }
+        remove_test_directories(&self.0);
     }
 }
 
 #[test]
 fn review_freeze_accepts_a_manifest_in_the_linked_worktrees_own_git_dir_only() {
+    // The main repository's guard is declared first, so it drops last: the
+    // linked worktrees below go before the repository that records them.
     let (main_root, _) = fixture();
-    let mut cleanup = RemoveDirsOnDrop(vec![main_root.clone()]);
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let mut add_worktree = |label: &str| {
         let path = test_temp_dir().join(format!("review-freeze-{label}-{}", Uuid::new_v4()));
         cleanup.0.push(path.clone());
@@ -1145,8 +1146,7 @@ fn review_freeze_observer_requires_exact_successful_stdout_and_keeps_stderr_sepa
 
 #[test]
 fn review_freeze_unborn_and_path_rejection_are_explicit() {
-    let root = test_temp_dir().join(format!("review-freeze-unborn-{}", Uuid::new_v4()));
-    fs::create_dir_all(&root).unwrap();
+    let root = TestTempRoot::create("review-freeze-unborn");
     init_git_document_test_repo(&root);
     let git = ReviewFreezeGit::new(&root).unwrap();
     // Independent golden: BE uint64 framing of schema=1, head=UNBORN,

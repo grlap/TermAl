@@ -5,9 +5,28 @@
 // New module; consolidates the private temp-root guards previously scattered
 // across state, mailbox, board-route, and agent-command tests.
 
+/// Suffix of the sibling file that names the test which created a root.
+const TEST_TEMP_ROOT_OWNER_SUFFIX: &str = ".owner";
+
 struct TestTempRoot {
     path: PathBuf,
     cleanup_observers: Mutex<Vec<mpsc::Sender<std::result::Result<(), String>>>>,
+}
+
+// A fixture can hand out the guard itself where a path is expected, so the
+// directory lives exactly as long as the value the test holds.
+impl std::ops::Deref for TestTempRoot {
+    type Target = FsPath;
+
+    fn deref(&self) -> &FsPath {
+        &self.path
+    }
+}
+
+impl AsRef<FsPath> for TestTempRoot {
+    fn as_ref(&self) -> &FsPath {
+        &self.path
+    }
 }
 
 impl TestTempRoot {
@@ -21,7 +40,27 @@ impl TestTempRoot {
         );
         let path = test_temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("test temp root should be created");
-        Self::own(path)
+        // The guard exists before the marker is written, so a failed write
+        // still removes the root.
+        let root = Self::own(path);
+        // Name the creating test in a sibling file, never inside the root,
+        // whose contents fixtures own. A root that outlives its test can then
+        // be traced to it from the wrapper's leftover report.
+        fs::write(
+            Self::owner_marker(&root.path),
+            std::thread::current()
+                .name()
+                .unwrap_or("unnamed test thread"),
+        )
+        .expect("test temp root owner marker should be written");
+        root
+    }
+
+    /// The sibling file naming the test that created `root`.
+    fn owner_marker(root: &FsPath) -> PathBuf {
+        let mut name = root.as_os_str().to_owned();
+        name.push(TEST_TEMP_ROOT_OWNER_SUFFIX);
+        PathBuf::from(name)
     }
 
     fn own(path: PathBuf) -> Self {
@@ -61,6 +100,20 @@ impl Drop for TestTempRoot {
                 error.raw_os_error()
             )),
         };
+        // The owner marker goes only with its root: a root that could not be
+        // removed keeps the marker that names its test.
+        if outcome.is_ok() {
+            match fs::remove_file(Self::owner_marker(&self.path)) {
+                Ok(()) => (),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+                Err(error) => eprintln!(
+                    "test temp root owner marker not removed: {} ({error}; kind={:?}; os={:?})",
+                    Self::owner_marker(&self.path).display(),
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+            }
+        }
         if let Err(detail) = &outcome {
             eprintln!("{detail}");
         }

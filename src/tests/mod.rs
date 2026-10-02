@@ -2893,7 +2893,7 @@ fn normalize_user_facing_path_rewrites_macos_private_firmlinks() {
 #[tokio::test]
 async fn read_directory_accepts_project_id_without_session() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-fs-read-{}", Uuid::new_v4()));
+    let root = TestTempRoot::create("termal-project-fs-read");
     let src_dir = root.join("src");
     let file_path = src_dir.join("main.rs");
 
@@ -2930,8 +2930,6 @@ async fn read_directory_accepts_project_id_without_session() {
     );
     assert_eq!(response.entries.len(), 1);
     assert_eq!(response.entries[0].name, "src");
-
-    fs::remove_dir_all(root).unwrap();
 }
 
 // Tests that API router sets local CORS headers.
@@ -2999,8 +2997,7 @@ async fn health_route_reports_current_server_instance() {
 #[tokio::test]
 async fn read_and_write_file_accept_project_id_without_session() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-project-file-read-write-{}", Uuid::new_v4()));
+    let root = TestTempRoot::create("termal-project-file-read-write");
     let existing_file = root.join("src").join("main.rs");
     let new_file = root.join("generated").join("output.rs");
 
@@ -3069,16 +3066,13 @@ async fn read_and_write_file_accept_project_id_without_session() {
         write_response.content_hash.as_deref(),
         Some(file_content_hash(write_response.content.as_bytes()).as_str())
     );
-
-    fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
 async fn write_file_rejects_missing_path_traversal_outside_project() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-project-file-traversal-{}", Uuid::new_v4()));
-    let outside_root = std::env::temp_dir().join(format!(
+    let root = TestTempRoot::create("termal-project-file-traversal");
+    let outside_root = test_temp_dir().join(format!(
         "termal-project-file-traversal-outside-{}",
         Uuid::new_v4()
     ));
@@ -3129,7 +3123,6 @@ async fn write_file_rejects_missing_path_traversal_outside_project() {
             || error.message.contains("must stay inside project")
     );
     assert!(!outside_file.exists());
-    fs::remove_dir_all(root).unwrap();
     if outside_root.exists() {
         fs::remove_dir_all(outside_root).unwrap();
     }
@@ -3139,8 +3132,7 @@ async fn write_file_rejects_missing_path_traversal_outside_project() {
 #[tokio::test]
 async fn write_file_rejects_stale_base_hash() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-project-file-stale-base-{}", Uuid::new_v4()));
+    let root = TestTempRoot::create("termal-project-file-stale-base");
     let existing_file = root.join("src").join("main.rs");
 
     fs::create_dir_all(existing_file.parent().unwrap()).unwrap();
@@ -3216,15 +3208,13 @@ async fn write_file_rejects_stale_base_hash() {
         fs::read_to_string(&existing_file).unwrap(),
         "fn main() { println!(\"user\"); }\n"
     );
-
-    fs::remove_dir_all(root).unwrap();
 }
 
 // Tests that read file returns not found for missing project file.
 #[tokio::test]
 async fn read_file_returns_not_found_for_missing_project_file() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-file-missing-{}", Uuid::new_v4()));
+    let root = TestTempRoot::create("termal-project-file-missing");
     let missing_file = root.join("missing.rs");
 
     fs::create_dir_all(&root).unwrap();
@@ -3253,18 +3243,13 @@ async fn read_file_returns_not_found_for_missing_project_file() {
 
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert!(error.message.contains("file not found"));
-
-    fs::remove_dir_all(root).unwrap();
 }
 
 // Tests that read directory returns not found for missing project path.
 #[tokio::test]
 async fn read_directory_returns_not_found_for_missing_project_path() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
-        "termal-project-directory-missing-{}",
-        Uuid::new_v4()
-    ));
+    let root = TestTempRoot::create("termal-project-directory-missing");
     let missing_dir = root.join("missing");
 
     fs::create_dir_all(&root).unwrap();
@@ -3293,16 +3278,13 @@ async fn read_directory_returns_not_found_for_missing_project_path() {
 
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert!(error.message.contains("path not found"));
-
-    fs::remove_dir_all(root).unwrap();
 }
 
 // Tests that read file rejects content over size limit.
 #[tokio::test]
 async fn read_file_rejects_content_over_size_limit() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-project-file-read-limit-{}", Uuid::new_v4()));
+    let root = TestTempRoot::create("termal-project-file-read-limit");
     let oversized_file = root.join("big.txt");
 
     fs::create_dir_all(&root).unwrap();
@@ -3332,18 +3314,13 @@ async fn read_file_rejects_content_over_size_limit() {
 
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("read limit"));
-
-    fs::remove_dir_all(root).unwrap();
 }
 
 // Tests that write file rejects content over size limit.
 #[tokio::test]
 async fn write_file_rejects_content_over_size_limit() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
-        "termal-project-file-write-limit-{}",
-        Uuid::new_v4()
-    ));
+    let root = TestTempRoot::create("termal-project-file-write-limit");
     let output_file = root.join("generated").join("output.rs");
     let oversized_content = "b".repeat(MAX_FILE_CONTENT_BYTES + 1);
 
@@ -3377,6 +3354,4 @@ async fn write_file_rejects_content_over_size_limit() {
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("write limit"));
     assert!(!output_file.exists());
-
-    fs::remove_dir_all(root).unwrap();
 }

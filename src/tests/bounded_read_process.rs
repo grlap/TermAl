@@ -199,7 +199,9 @@ fn assert_windows_fixture_descendant_exited(marker: &FsPath) {
 #[cfg(windows)]
 #[test]
 fn bounded_read_windows_job_reclaims_descendant_pipes_after_launcher_exit() {
-    let marker = test_temp_dir().join(format!("bounded-ready-{}.txt", Uuid::new_v4()));
+    // The descendant writes its marker inside a guarded root, removed with it.
+    let root = TestTempRoot::create("bounded-ready");
+    let marker = root.join("ready.txt");
     let output = run_bounded_read_process(
         &mut windows_bounded_fixture(&marker, false),
         std::time::Instant::now() + Duration::from_secs(20),
@@ -216,7 +218,9 @@ fn bounded_read_windows_job_reclaims_descendant_pipes_after_launcher_exit() {
 #[cfg(windows)]
 #[test]
 fn bounded_read_windows_deadline_terminates_launcher_and_ready_descendant() {
-    let marker = test_temp_dir().join(format!("bounded-deadline-{}.txt", Uuid::new_v4()));
+    // The descendant writes its marker inside a guarded root, removed with it.
+    let root = TestTempRoot::create("bounded-deadline");
+    let marker = root.join("ready.txt");
     let error = run_bounded_read_process(
         &mut windows_bounded_fixture(&marker, true),
         std::time::Instant::now() + Duration::from_secs(15),
