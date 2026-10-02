@@ -419,6 +419,7 @@ fn handoff_prepared_turn_dispatch(
 
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(&session_id);
+    let mut opening_diagnostic_delivery = None;
     let guarded =
         engram_generation.is_some() || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
     if guarded {
@@ -449,6 +450,10 @@ fn handoff_prepared_turn_dispatch(
         }
         if record.session.status != SessionStatus::Active {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        }
+        if engram_generation.is_some() {
+            opening_diagnostic_delivery =
+                refresh_engram_source_root_prompt_locked(record, &mut dispatch);
         }
     }
 
@@ -507,6 +512,10 @@ fn handoff_prepared_turn_dispatch(
         } else {
             Ok(HandoffPreparedTurnDispatchOutcome::Superseded)
         };
+    }
+    if let Some(delivered) = &opening_diagnostic_delivery {
+        let index = index.expect("opening diagnostic handoff owns session");
+        acknowledge_engram_opening_diagnostic_locked(&mut inner.sessions[index], delivered);
     }
     if engram_generation.is_some() {
         let index = index.expect("guarded handoff owns session");
@@ -1401,7 +1410,10 @@ async fn followup_delegation(
         state.followup_delegation(&parent_session_id, &delegation_id, request.message)
     })
     .await?;
-    Ok((delegation_status_turn_response_status(&response), Json(response)))
+    Ok((
+        delegation_status_turn_response_status(&response),
+        Json(response),
+    ))
 }
 
 /// 200 for a follow-up or resume whose turn was started; 202 when its turn is
@@ -1426,7 +1438,10 @@ async fn resume_delegation(
     let response =
         run_blocking_api(move || state.resume_delegation(&parent_session_id, &delegation_id))
             .await?;
-    Ok((delegation_status_turn_response_status(&response), Json(response)))
+    Ok((
+        delegation_status_turn_response_status(&response),
+        Json(response),
+    ))
 }
 
 /// Schedules a parent resume after one or more delegations become terminal.

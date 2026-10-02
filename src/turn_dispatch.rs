@@ -456,6 +456,8 @@ impl AppState {
             .collect::<Vec<_>>();
         record.active_turn_generation = record.active_turn_generation.wrapping_add(1).max(1);
         let active_turn_generation = record.active_turn_generation;
+        // A successor never inherits the previous opening's presentation.
+        record.engram.opening_diagnostic = None;
         record.active_turn_start_message_count = Some(record.session.messages.len());
         let expanded_prompt = expanded_prompt
             .as_deref()
@@ -590,6 +592,7 @@ impl AppState {
 
                 TurnDispatch::PersistentClaude {
                     active_turn_generation,
+                    opening_prompt: None,
                     command: ClaudePromptCommand {
                         attachments: attachments.clone(),
                         replay_generation: Uuid::new_v4().to_string(),
@@ -659,6 +662,7 @@ impl AppState {
 
                 TurnDispatch::PersistentCodex {
                     active_turn_generation,
+                    opening_prompt: None,
                     service_tier: codex_fast_service_tier_value(
                         &record.session.model,
                         &record.session.model_options,
@@ -756,6 +760,7 @@ impl AppState {
 
                 TurnDispatch::PersistentAcp {
                     active_turn_generation,
+                    opening_prompt: None,
                     command: AcpPromptCommand {
                         cwd: record.session.workdir.clone(),
                         cursor_mode: record.session.cursor_mode,

@@ -1582,6 +1582,9 @@ struct DelegationAcceptanceEvaluation {
     /// by then. Absent with a root, or with no binding at the request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_claim: Option<AcceptanceEvaluationSourceClaim>,
+    /// Immutable request fence, independent of current selection and receipts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    naming_history: Option<EngramWorkNamingToken>,
     #[serde(
         default,
         skip_serializing_if = "AcceptanceEvaluationSubmission::is_none"
@@ -1720,6 +1723,8 @@ struct PersistedDelegationAcceptanceEvaluation {
     #[serde(default)]
     source_claim: Option<AcceptanceEvaluationSourceClaim>,
     #[serde(default)]
+    naming_history: Option<EngramWorkNamingToken>,
+    #[serde(default)]
     submission: AcceptanceEvaluationSubmission,
     #[serde(default)]
     outcome: Option<PersistedRawAcceptanceEvaluationOutcome>,
@@ -1756,6 +1761,7 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             source_fingerprint: persisted.source_fingerprint,
             source_root: persisted.source_root,
             source_claim: persisted.source_claim,
+            naming_history: persisted.naming_history,
             submission,
         }
     }

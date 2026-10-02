@@ -46,17 +46,14 @@ struct EngramWorkSourceRoot {
     generation: u64,
 }
 
-/// How long naming a source root may take in all, on the server: the held
-/// reads, the full list's reclaim and the captures share it, and what has not
-/// started when it runs out is skipped, conservatively. The MCP bridge waits
-/// this long on top of its normal request timeout, so a name is never kept
-/// after the tool call reported a failure. It holds the two captures a rename
-/// takes (the old root's seal, then the new root's measure), each of one full
-/// freeze budget, and the commit's reserve. The held reads and the path's
-/// validation come out of it too, so time they take shortens the second
-/// capture, which then reports the new root unmeasured, conservatively.
+/// Two source captures, one shared control allowance and a commit reserve.
+/// Validation also consumes this wall-clock budget. A runtime may cut the
+/// caller's wait sooner; the next identical call reveals a retained result
+/// or settles the durable pending intent.
 const ENGRAM_SOURCE_ROOT_NAMING_BUDGET: Duration = Duration::from_secs(
-    2 * REVIEW_FREEZE_TIMEOUT.as_secs() + ENGRAM_SOURCE_ROOT_COMMIT_RESERVE.as_secs(),
+    2 * REVIEW_FREEZE_TIMEOUT.as_secs()
+        + ENGRAM_SOURCE_ROOT_COMMIT_RESERVE.as_secs()
+        + ENGRAM_MAX_CALL_TIMEOUT_MS / 1_000,
 );
 
 /// The part of the naming budget the captures leave for the commit under the
@@ -67,8 +64,33 @@ const ENGRAM_SOURCE_ROOT_COMMIT_RESERVE: Duration = Duration::from_secs(2);
 /// How long one capture of a naming call may take, with `left` of its budget
 /// remaining: the freeze budget, stopping `ENGRAM_SOURCE_ROOT_COMMIT_RESERVE`
 /// short of the end.
-fn engram_source_root_capture_budget(left: Duration) -> Duration {
-    REVIEW_FREEZE_TIMEOUT.min(left.saturating_sub(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE))
+fn engram_source_root_capture_budget(left: Duration, control_left: Duration) -> Duration {
+    REVIEW_FREEZE_TIMEOUT.min(left.saturating_sub(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE + control_left))
+}
+
+/// Charge only time spent in control I/O, so filesystem captures between
+/// status and bind cannot refresh or exhaust the shared dispatch allowance.
+fn engram_source_root_control_within<T>(
+    remaining: &mut Duration,
+    wall_left: Duration,
+    call: impl FnOnce(Duration) -> Result<T, ApiError>,
+) -> Result<T, ApiError> {
+    let budget = (*remaining).min(wall_left);
+    if budget.is_zero() {
+        return Err(ApiError::bad_gateway(
+            "named-root control budget exhausted; retry the same request to settle any pending intent",
+        ));
+    }
+    let started = std::time::Instant::now();
+    let result = call(budget);
+    let elapsed = started.elapsed();
+    *remaining = remaining.saturating_sub(elapsed);
+    if elapsed >= budget {
+        return Err(ApiError::bad_gateway(
+            "named-root control reply arrived after its budget; retry the same request to settle any pending intent",
+        ));
+    }
+    result
 }
 
 #[cfg(test)]
@@ -84,6 +106,149 @@ thread_local! {
 /// next prompt; older ones give way.
 const ENGRAM_SOURCE_ROOT_PENDING_LINES: usize = 4;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngramOpeningRootReason {
+    UnverifiedStore,
+    MissingProjection,
+    UnknownProjection,
+    OwnerChanged,
+    CanonicalRead,
+    CanonicalHistory,
+    Publication,
+    PendingAuthority,
+}
+
+impl EngramOpeningRootReason {
+    fn from_uncertainty(reason: &EngramRootEvidenceUncertainty) -> Self {
+        match reason {
+            EngramRootEvidenceUncertainty::UnverifiedStore => Self::UnverifiedStore,
+            EngramRootEvidenceUncertainty::UnknownProjection => Self::UnknownProjection,
+            EngramRootEvidenceUncertainty::OwnerChanged => Self::OwnerChanged,
+            EngramRootEvidenceUncertainty::CanonicalRead(_) => Self::CanonicalRead,
+            EngramRootEvidenceUncertainty::CanonicalHistory(_) => Self::CanonicalHistory,
+            EngramRootEvidenceUncertainty::Publication(_) => Self::Publication,
+        }
+    }
+
+    fn notice(self) -> String {
+        let cause = match self {
+            Self::UnverifiedStore => {
+                "its Engram store identity is missing. Verify and save the project settings before a later turn"
+            }
+            Self::MissingProjection => {
+                "its begin receipt lacks opening provenance. A fresh later turn can use the recovered authority"
+            }
+            Self::UnknownProjection => {
+                "Engram reported unknown opening authority. Refresh the original run's authority before a later turn"
+            }
+            Self::OwnerChanged => {
+                "its authority owner changed during recovery. Refresh the original run's authority before a later turn"
+            }
+            Self::CanonicalRead => {
+                "the canonical authority read failed. Recover the original run association and refresh its authority before a later turn"
+            }
+            Self::CanonicalHistory => {
+                "the canonical naming history could not be established. Recover the original run association; unexplained legacy history requires an authorized repair"
+            }
+            Self::Publication => {
+                "the authority publication was not acknowledged. Refresh the original run's authority before a later turn"
+            }
+            Self::PendingAuthority => {
+                "its authority transition remains unresolved. Retry the original naming request or refresh its authority before a later turn"
+            }
+        };
+        format!(
+            "[TermAl] This turn's source-root binding is unconfirmed because {cause}. Source, test and evaluation evidence are withheld for this turn."
+        )
+    }
+}
+
+/// Presentation derived from one immutable opening, never authority or a
+/// next-prompt notice. Equal prose under a successor is a different instance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramOpeningDiagnostic {
+    id: String,
+    turn_generation: u64,
+    grant_id: String,
+    reason: EngramOpeningRootReason,
+    delivered: bool,
+}
+
+struct EngramOpeningPrompt {
+    base: String,
+}
+
+/// Admission can discover uncertainty after the prompt was built. Compose
+/// its current opening at the owner-checked handoff; ordinary naming lines
+/// retain their next-prompt ordering and acknowledgement.
+fn refresh_engram_source_root_prompt_locked(
+    record: &mut SessionRecord,
+    dispatch: &mut TurnDispatch,
+) -> Option<EngramOpeningDiagnostic> {
+    let generation = dispatch.active_turn_generation();
+    if record.active_turn_generation != generation {
+        return None;
+    }
+    let diagnostic = record
+        .engram
+        .opening_diagnostic
+        .as_ref()
+        .filter(|notice| {
+            !notice.delivered
+                && notice.turn_generation == generation
+                && record.engram.active_grant_id.as_deref() == Some(notice.grant_id.as_str())
+        })
+        .cloned();
+    let (prompt, slot) = match dispatch {
+        TurnDispatch::PersistentClaude {
+            command,
+            opening_prompt,
+            ..
+        } => (&mut command.text, opening_prompt),
+        TurnDispatch::PersistentCodex {
+            command,
+            opening_prompt,
+            ..
+        } => (&mut command.prompt, opening_prompt),
+        TurnDispatch::PersistentAcp {
+            command,
+            opening_prompt,
+            ..
+        } => (&mut command.prompt, opening_prompt),
+    };
+    if diagnostic.is_none() && slot.is_none() {
+        return None;
+    }
+    // Restore only our own composed slot, never search user text for a notice.
+    let base = &slot
+        .get_or_insert_with(|| EngramOpeningPrompt {
+            base: prompt.clone(),
+        })
+        .base;
+    *prompt = diagnostic.as_ref().map_or_else(
+        || base.clone(),
+        |notice| format!("{}\n\n{base}", notice.reason.notice()),
+    );
+    diagnostic
+}
+
+fn acknowledge_engram_opening_diagnostic_locked(
+    record: &mut SessionRecord,
+    delivered: &EngramOpeningDiagnostic,
+) {
+    if record.active_turn_generation == delivered.turn_generation
+        && record.engram.active_grant_id.as_deref() == Some(delivered.grant_id.as_str())
+        && record.engram.opening_diagnostic.as_ref() == Some(delivered)
+    {
+        record
+            .engram
+            .opening_diagnostic
+            .as_mut()
+            .expect("matching opening diagnostic")
+            .delivered = true;
+    }
+}
+
 /// How every host line about a recognised test that got no check begins
 /// (`engram_source_root_withheld_line`, `engram_source_root_unconfirmed_line`):
 /// a new one replaces an earlier one still pending
@@ -91,6 +256,25 @@ const ENGRAM_SOURCE_ROOT_PENDING_LINES: usize = 4;
 const ENGRAM_UNCREDITED_TEST_LINE_PREFIX: &str = "[TermAl] A recognised test";
 
 impl EngramSessionState {
+    fn set_opening_diagnostic(
+        &mut self,
+        turn_generation: u64,
+        grant_id: &str,
+        reason: EngramOpeningRootReason,
+    ) {
+        if self.opening_diagnostic.as_ref().is_none_or(|notice| {
+            notice.turn_generation != turn_generation || notice.grant_id != grant_id
+        }) {
+            self.opening_diagnostic = Some(EngramOpeningDiagnostic {
+                id: Uuid::new_v4().to_string(),
+                turn_generation,
+                grant_id: grant_id.to_owned(),
+                reason,
+                delivered: false,
+            });
+        }
+    }
+
     /// Adds a host line for the agent's next prompt about where its turns on
     /// claimed work are measured. Lines not yet delivered are kept, so a
     /// later one (a withheld test) does not hide an earlier one (a bind); a
@@ -159,12 +343,9 @@ impl EngramSessionState {
     fn drop_pending_source_root_lines(&mut self) {
         self.pending_source_root_line = None;
         self.source_root_line_delivery = None;
+        self.opening_diagnostic = None;
     }
 }
-
-/// At most this many held-claims reads of other sessions run at once when a
-/// full list is reclaimed.
-const ENGRAM_SOURCE_ROOT_RECLAIM_READERS: usize = 8;
 
 /// Where a source basis is taken: the session's workdir, as before phase 2,
 /// or a work's named root, on exactly that path.
@@ -266,6 +447,10 @@ impl AcceptanceEvaluationSourceRoot {
 struct AcceptanceEvaluationSourceClaim {
     work_id: String,
     claim_id: String,
+    /// Host bookkeeping: detect a later name for a different current run,
+    /// including when that name is cleared before admission or submission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    named_generation_at_request: Option<u64>,
 }
 
 /// Whether the root the evaluation `target` was requested on is no longer
@@ -280,8 +465,38 @@ fn acceptance_evaluation_root_changed_locked(
     let Some(store) = &target.store else {
         return false;
     };
+    if target
+        .naming_history
+        .as_ref()
+        .is_none_or(|token| !engram_work_naming_is_current(inner, store, token))
+    {
+        return true;
+    }
+    let claim_id = target
+        .source_root
+        .as_ref()
+        .map(|root| root.claim_id.as_str())
+        .or_else(|| {
+            target
+                .source_claim
+                .as_ref()
+                .map(|claim| claim.claim_id.as_str())
+        });
+    if claim_id.is_some_and(|claim| {
+        engram_root_journal(&inner.engram_named_root_journal, store, claim).is_some_and(|journal| {
+            journal.requires_reconciliation()
+                || journal.retirement == Some(EngramRootRetirement::Displaced)
+        })
+    }) {
+        return true;
+    }
     match (&target.source_root, &target.source_claim) {
         (Some(source_root), _) => !source_root.still_named(&inner.engram_work_source_roots, store),
+        (None, Some(claim))
+            if acceptance_evaluation_other_claim_named_since(inner, store, claim) =>
+        {
+            true
+        }
         (None, Some(claim)) => acceptance_evaluation_claim_named_since(
             &inner.engram_work_source_roots,
             store,
@@ -290,6 +505,36 @@ fn acceptance_evaluation_root_changed_locked(
         ),
         (None, None) => false,
     }
+}
+
+/// A fresh name for the work under another current claim invalidates a
+/// previously seeded workdir evaluation. Retired historical claims cannot
+/// become the new target merely because their selection has disappeared.
+fn acceptance_evaluation_other_claim_named_since(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    claim: &AcceptanceEvaluationSourceClaim,
+) -> bool {
+    let after = claim.named_generation_at_request.unwrap_or(0);
+    let replaced = |root: &EngramWorkSourceRoot| {
+        &root.store == store
+            && root.work_id == claim.work_id
+            && root.claim_id != claim.claim_id
+            && root.generation > after
+    };
+    inner.engram_work_source_roots.iter().any(&replaced)
+        || inner.engram_named_root_journal.iter().any(|journal| {
+            &journal.store == store
+                && (journal
+                    .pending
+                    .as_ref()
+                    .is_some_and(|event| replaced(&event.root))
+                    || !journal.obsolete
+                        && journal
+                            .confirmed
+                            .as_ref()
+                            .is_some_and(|(event, _)| replaced(&event.root)))
+        })
 }
 
 /// Whether a root is now named for `claim`, the claim an evaluation with no
@@ -346,7 +591,9 @@ fn engram_evaluation_source_root(
     let claim = claim?;
     engram_work_source_root_for_claim(entries, store, &claim.work_id, &claim.claim_id)
         .filter(|entry| {
-            work_id.map_or(entry.short_ref == work_ref, |work_id| entry.work_id == work_id)
+            work_id.map_or(entry.short_ref == work_ref, |work_id| {
+                entry.work_id == work_id
+            })
         })
         .map(AcceptanceEvaluationSourceRoot::from_entry)
 }
@@ -705,7 +952,8 @@ fn engram_source_root_registered(root: &FsPath, common: &FsPath) -> bool {
         return false;
     };
     let under_worktrees = own.parent().is_some_and(|parent| {
-        parent.file_name().is_some_and(|name| name == "worktrees") && parent.parent() == Some(common)
+        parent.file_name().is_some_and(|name| name == "worktrees")
+            && parent.parent() == Some(common)
     });
     if !under_worktrees {
         return false;
@@ -854,7 +1102,10 @@ fn validate_engram_source_root(
     // `C:wt` on Windows: relative to that drive's current folder, which is
     // the process's and not the session's, so it is not joined to the workdir.
     if !requested.has_root()
-        && matches!(requested.components().next(), Some(std::path::Component::Prefix(_)))
+        && matches!(
+            requested.components().next(),
+            Some(std::path::Component::Prefix(_))
+        )
     {
         return Err(format!(
             "`{path}` is relative to a drive's current folder; name the worktree by its full \
@@ -869,8 +1120,9 @@ fn validate_engram_source_root(
     if engram_network_path(&requested.to_string_lossy()) {
         return Err(network());
     }
-    let project = fs::canonicalize(project_root)
-        .map_err(|error| format!("the project folder {project_root} cannot be resolved: {error}"))?;
+    let project = fs::canonicalize(project_root).map_err(|error| {
+        format!("the project folder {project_root} cannot be resolved: {error}")
+    })?;
     let outside = |root: &FsPath| {
         format!(
             "`{}` lies outside the project folder {}: the acceptance evaluator runs in the \
@@ -895,14 +1147,13 @@ fn validate_engram_source_root(
     if engram_network_path(&root.to_string_lossy()) {
         return Err(network());
     }
-    let common = engram_source_root_common_dir(&root)
-        .ok_or_else(|| {
-            format!(
-                "`{path}` has no Git directory TermAl can read as a worktree's: its `.git` must \
+    let common = engram_source_root_common_dir(&root).ok_or_else(|| {
+        format!(
+            "`{path}` has no Git directory TermAl can read as a worktree's: its `.git` must \
                  be a directory, or a linked worktree's file (the main checkout of a \
                  `--separate-git-dir` repository cannot be named; name a linked worktree of it)"
-            )
-        })?;
+        )
+    })?;
     let session_common = test_runs_git_common_dir(&engram_worktree_root_path(FsPath::new(workdir)))
         .and_then(|common| fs::canonicalize(common).ok())
         .ok_or_else(|| "this session's workdir is not in a Git repository".to_owned())?;
@@ -920,7 +1171,10 @@ fn validate_engram_source_root(
     if !root.starts_with(&project) {
         return Err(outside(&root));
     }
-    Ok((root.to_string_lossy().into_owned(), engram_exact_path_key(&common)))
+    Ok((
+        root.to_string_lossy().into_owned(),
+        engram_exact_path_key(&common),
+    ))
 }
 
 /// Why a path was not accepted as a source root.
@@ -1066,10 +1320,12 @@ fn engram_set_work_source_root(
                     .join(", ");
                 return Err(format!(
                     "TermAl keeps at most {ENGRAM_WORK_SOURCE_ROOT_LIMIT} named source roots and \
-                     evicts none. An entry ends when a session holding its work's claim clears \
-                     it, when the session that named it is removed, or, once its claim has ended, \
-                     at that session's next naming call; entries of released claims of every \
-                     live session were already ended before this refusal. An entry in a store \
+                     evicts none. To free a slot, have a session holding the entry's work claim \
+                     explicitly clear that name, or remove the session that named it. A fresh \
+                     authoritative read of that claim can also end an obsolete entry. Moving \
+                     a session to another claim does not reclaim its old entries: TermAl cannot \
+                     query the lifecycle of an arbitrary old claim; its reclamation state is \
+                     unknown, never silently ended. An entry in a store \
                      its session's project no longer uses, or of a project with Engram turned \
                      off, cannot be read or cleared and stays until the session that named it \
                      is removed. Entries: {held}"
@@ -1080,37 +1336,6 @@ fn engram_set_work_source_root(
         (None, None) => {}
     }
     Ok(())
-}
-
-/// Ends the entries session `session_id` named in `store` whose claim a
-/// complete held-claims read of that session no longer lists. A read that
-/// left claims out (`omitted`) ends nothing: an unlisted claim may be among
-/// them; nor does one with a row that names no claim (an Engram build that
-/// lists no claim ids), since any entry's claim may be that row's. Only
-/// entries in `known`, the list as it was before the read began, can end:
-/// one named after the read began has a claim the read may not list yet.
-/// Returns whether anything ended.
-fn engram_end_released_work_source_roots(
-    entries: &mut Vec<EngramWorkSourceRoot>,
-    known: &[EngramWorkSourceRoot],
-    session_id: &str,
-    store: &EngramAuthorityStoreKey,
-    held: &EngramHeldClaims,
-) -> bool {
-    if held.omitted > 0 || held.items.iter().any(|claim| claim.claim_id.is_empty()) {
-        return false;
-    }
-    let before = entries.len();
-    entries.retain(|entry| {
-        entry.named_by_session != session_id
-            || &entry.store != store
-            || !known.contains(entry)
-            || held
-                .items
-                .iter()
-                .any(|claim| claim.claim_id == entry.claim_id)
-    });
-    entries.len() != before
 }
 
 /// Ends the entries whose naming session no longer exists, so no entry is
@@ -1198,82 +1423,6 @@ async fn name_engram_source_root(
 }
 
 impl AppState {
-    /// One held-claims read under the own connection of every session other
-    /// than `caller` that named an entry and still exists, with the store
-    /// its project is bound to: what a full list needs to end the entries of
-    /// claims that have ended. Sessions without an Engram target, and reads
-    /// that fail, are left out, so they end nothing. Off the lock; at most one
-    /// read per naming session, and only when the list is full. The reads run
-    /// side by side (`ENGRAM_SOURCE_ROOT_RECLAIM_READERS`), each bounded by
-    /// what is left before `deadline`; one not started by then is skipped and
-    /// ends nothing. Each is a one-shot `engram work core held` process under
-    /// that session's own identity, not a request on its control transport,
-    /// so it does not touch the session's binding; a session in a turn is
-    /// read as it stands. The MCP bridge waits for all of it:
-    /// `tool_name_source_root` allows `ENGRAM_SOURCE_ROOT_NAMING_BUDGET` on top
-    /// of its normal request timeout.
-    fn engram_source_root_held_reads_of_other_sessions(
-        &self,
-        caller: &str,
-        deadline: std::time::Instant,
-    ) -> Vec<(String, EngramAuthorityStoreKey, EngramHeldClaims)> {
-        let targets = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let mut sessions = inner
-                .engram_work_source_roots
-                .iter()
-                .map(|entry| entry.named_by_session.clone())
-                .filter(|named_by| named_by != caller)
-                .collect::<Vec<_>>();
-            sessions.sort();
-            sessions.dedup();
-            sessions
-                .into_iter()
-                .filter(|named_by| inner.find_session_index(named_by).is_some())
-                .filter_map(|named_by| {
-                    // A project with Engram control off is not read: its
-                    // entries stay, as the full-list refusal says.
-                    let target =
-                        Self::engram_binding_target_for_session_shape_locked(&inner, &named_by, true)
-                            .ok()
-                            .flatten()?;
-                    let store = target.settings.authority_store_key.clone()?;
-                    Some((named_by, store, target))
-                })
-                .collect::<Vec<_>>()
-        };
-        let readers = targets.len().min(ENGRAM_SOURCE_ROOT_RECLAIM_READERS);
-        let queue = Mutex::new(targets.into_iter());
-        let reads = Mutex::new(Vec::new());
-        std::thread::scope(|scope| {
-            for _ in 0..readers {
-                scope.spawn(|| {
-                    loop {
-                        let Some((named_by, store, target)) =
-                            queue.lock().expect("source root reclaim queue poisoned").next()
-                        else {
-                            break;
-                        };
-                        let left = deadline.saturating_duration_since(std::time::Instant::now());
-                        if left.is_zero() {
-                            continue;
-                        }
-                        if let Ok(held) = target.adapter.read_held_claims(
-                            &target.connection,
-                            ENGRAM_WORK_BINDING_COMMAND_TIMEOUT.min(left),
-                        ) {
-                            reads
-                                .lock()
-                                .expect("source root reclaim reads poisoned")
-                                .push((named_by, store, held));
-                        }
-                    }
-                });
-            }
-        });
-        reads.into_inner().expect("source root reclaim reads poisoned")
-    }
-
     /// Takes the lines the prompt of turn `active_turn_generation` carried
     /// out of the pending source-root lines once the runtime accepted it; a
     /// line set since that prompt was built, even one it carried, stays for
@@ -1323,6 +1472,7 @@ impl AppState {
         // Everything below shares one budget, within the bridge's wait.
         let deadline = std::time::Instant::now() + ENGRAM_SOURCE_ROOT_NAMING_BUDGET;
         let left = || deadline.saturating_duration_since(std::time::Instant::now());
+        let mut control_left = Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS);
         let work = request.work.trim().to_owned();
         if work.is_empty() || work.len() > 256 {
             return Err(ApiError::bad_request(
@@ -1331,7 +1481,11 @@ impl AppState {
         }
         // Only an omitted `path` clears: a blank one is refused, not read as a
         // clear.
-        let path = match request.path.as_ref().map(|path| path.as_deref().map(str::trim)) {
+        let path = match request
+            .path
+            .as_ref()
+            .map(|path| path.as_deref().map(str::trim))
+        {
             None => None,
             Some(None) => {
                 return Err(ApiError::bad_request(
@@ -1350,8 +1504,12 @@ impl AppState {
             }
             Some(Some(path)) => Some(path.to_owned()),
         };
-        // `known` is the list before any held-claims read begins: a read ends
-        // only entries that existed when it began.
+        engram_source_root_control_within(&mut control_left, left(), |budget| {
+            self.resolve_removed_engram_roots(session_id, None, budget);
+            Ok(())
+        })?;
+        // `known` fences concurrent selections while the held-claims and
+        // lifecycle reads run off the lock.
         let (target, workdir, project_id, project_root, known, validations_live, sealable) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1364,21 +1522,23 @@ impl AppState {
                     "only a root session holding the work's claim names its source root",
                 ));
             }
-            let project = engram_project_for_session_locked(&inner, session_id).ok_or_else(|| {
-                ApiError::conflict(
-                    "this session has no project; Engram is configured per project",
-                )
-            })?;
+            let project =
+                engram_project_for_session_locked(&inner, session_id).ok_or_else(|| {
+                    ApiError::conflict(
+                        "this session has no project; Engram is configured per project",
+                    )
+                })?;
             let project_root = project.root_path.clone();
             // A name counts only for turns Engram mediates, so a project or
             // session with Engram control off names nothing.
-            let target = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
-                .map_err(ApiError::conflict)?
-                .ok_or_else(|| {
-                    ApiError::conflict(
-                        "Engram control is not enabled for this session or its project",
-                    )
-                })?;
+            let target =
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    .map_err(ApiError::conflict)?
+                    .ok_or_else(|| {
+                        ApiError::conflict(
+                            "Engram control is not enabled for this session or its project",
+                        )
+                    })?;
             // The caller's turn a rename or a clear may seal: one admitted,
             // with its root kept, before this call read anything. A turn
             // admitted later measures what it finds; a finished one keeps its
@@ -1407,15 +1567,19 @@ impl AppState {
                  the session has bound",
             )
         })?;
-        let held = target
-            .adapter
-            .read_held_claims(
-                &target.connection,
-                ENGRAM_WORK_BINDING_COMMAND_TIMEOUT.min(left()),
-            )
-            .map_err(|error| ApiError::bad_gateway(format!("engram work core held: {error}")))?;
+        let held = engram_source_root_control_within(&mut control_left, left(), |budget| {
+            target
+                .adapter
+                .read_held_claims(
+                    &target.connection,
+                    ENGRAM_WORK_BINDING_COMMAND_TIMEOUT.min(budget),
+                )
+                .map_err(|error| ApiError::bad_gateway(format!("engram work core held: {error}")))
+        })?;
         #[cfg(test)]
-        if let Some(meanwhile) = TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| hook.borrow_mut().take()) {
+        if let Some(meanwhile) =
+            TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| hook.borrow_mut().take())
+        {
             meanwhile();
         }
         let claim = held
@@ -1452,6 +1616,139 @@ impl AppState {
                  which TermAl matches evaluations by; install a newer Engram",
             ));
         }
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let current =
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    .ok()
+                    .flatten();
+            if current.as_ref().is_none_or(|current| {
+                current.connection != target.connection
+                    || !current.settings.same_admission_settings(&target.settings)
+            }) {
+                return Err(ApiError::conflict(
+                    "Engram project or store changed while the root was being named",
+                ));
+            }
+        }
+        let association = EngramRootIntentAssociation::validate(
+            &store,
+            &claim.work_id,
+            &claim.claim_id,
+            Some(claim.claim_fence),
+            claim.control_binding.as_ref(),
+        )?;
+        // The current claim's lifecycle is read explicitly. A held-claims
+        // row, including its fence, cannot distinguish recovery from release.
+        // For a different held claim there is no status projection on this
+        // connection; a completed explicit name therefore mints a new event.
+        let root_read_fence =
+            EngramRootReadFence::capture(&self.inner.lock().expect("state mutex poisoned"));
+        let remote_root = if target
+            .work_binding
+            .as_ref()
+            .is_some_and(|binding| binding.claim_id == claim.claim_id)
+        {
+            let token = target.routing_token.as_ref().ok_or_else(|| {
+                ApiError::conflict("Engram session must be bound before naming a root")
+            })?;
+            engram_source_root_control_within(&mut control_left, left(), |budget| {
+                let phase_deadline = (std::time::Instant::now() + budget).min(deadline);
+                self.guard_engram_root_read_until(
+                    &target,
+                    target.work_binding.as_ref(),
+                    phase_deadline,
+                )
+                .map_err(|error| ApiError::bad_gateway(error.to_string()))?;
+                target
+                    .adapter
+                    .request(
+                        &target.connection,
+                        &EngramControlRequest::SessionStatus {
+                            routing_token: token.clone(),
+                        },
+                        target
+                            .rpc_timeout_until(phase_deadline)
+                            .map_err(|error| ApiError::bad_gateway(error.to_string()))?,
+                    )
+                    .and_then(parse_engram_result::<EngramSessionStatusResponse>)
+                    .map_err(|error| ApiError::bad_gateway(format!("reading named_root: {error}")))
+            })?
+            .named_root
+        } else {
+            None
+        };
+        if self.engram_orphaned_root_pending(&store, &claim.claim_id) {
+            let token = target.routing_token.as_deref().ok_or_else(|| {
+                ApiError::conflict(
+                    "focus this claim and start a turn to recover its orphaned source-root intent",
+                )
+            })?;
+            if !target
+                .work_binding
+                .as_ref()
+                .is_some_and(|binding| binding.claim_id == claim.claim_id)
+            {
+                return Err(ApiError::conflict(
+                    "focus this claim and start a turn before recovering its orphaned source-root intent",
+                ));
+            }
+            // A read never acknowledges a possibly executable transport send.
+            // Only a covering canonical lifecycle proof settles its exact intent.
+            self.reconcile_engram_named_root_with_fence_until(
+                session_id,
+                token,
+                target.work_binding.as_ref(),
+                remote_root.clone(),
+                &root_read_fence,
+                Some(&target.connection),
+                deadline,
+            )
+            .map_err(|error| {
+                ApiError::bad_gateway(format!("recovering orphaned root intent: {error}"))
+            })?;
+            return Err(ApiError::conflict(
+                "the original reporter is unavailable; authoritative recovery was attempted. Retry naming a valid worktree for a fresh generation; evidence stays withheld until it succeeds",
+            ));
+        }
+        // A lost binding reply must remain settleable even if its worktree
+        // was removed before retry. The stored absolute path is sufficient
+        // to replay the immutable intent; it is never published as a root.
+        let missing_pending = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            engram_root_journal(&inner.engram_named_root_journal, &store, &claim.claim_id)
+                .and_then(|journal| journal.pending.clone())
+        }
+        .filter(|event| {
+            event.kind == EngramNamedRootKind::Bound
+                && path.as_ref().is_some_and(|path| {
+                    let path = engram_msys_drive_path(path);
+                    let path = FsPath::new(path.as_ref());
+                    let absolute = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        FsPath::new(&workdir).join(path)
+                    };
+                    // Settlement replays the stored identity; this comparison
+                    // grants no source credit and never changes the intent.
+                    engram_canonical_path_key(&absolute)
+                        == engram_canonical_path_key(FsPath::new(&event.root.root))
+                })
+                && engram_named_root_absent(&event.root.root)
+        });
+        if let Some(event) = missing_pending {
+            let receipt = engram_source_root_control_within(&mut control_left, left(), |budget| {
+                self.send_engram_root_event(&target, &event, budget)
+            })?;
+            self.retire_engram_root_replay(
+                &event,
+                &receipt.receipt,
+                Some(EngramNamedRootEndReason::RootInvalid),
+            )?;
+            return Err(ApiError::conflict(
+                "the pending binding was settled, but its worktree is gone; its root_invalid end is queued for the next turn",
+            ));
+        }
         let validated = match path {
             None => None,
             Some(path) => Some(
@@ -1464,10 +1761,9 @@ impl AppState {
                 )
                 .map_err(|refusal| match refusal {
                     EngramSourceRootValidation::Refused(message) => ApiError::bad_request(message),
-                    EngramSourceRootValidation::OutOfTime(message) => ApiError::from_status(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        message,
-                    ),
+                    EngramSourceRootValidation::OutOfTime(message) => {
+                        ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE, message)
+                    }
                 })?,
             ),
         };
@@ -1475,25 +1771,16 @@ impl AppState {
         // the work since (a newer claim's holder, say) makes the name below
         // a conflict rather than be overwritten by what this call read.
         let old = engram_work_source_root_for_work(&known, &store, &claim.work_id).cloned();
-        // Full once the caller's own entries of ended claims are gone, as
-        // they are at the commit below: only a list still full then needs
-        // the reads of other sessions.
-        let list_full = {
-            let mut after_own = known.clone();
-            engram_end_released_work_source_roots(&mut after_own, &known, session_id, &store, &held);
-            after_own.len() >= ENGRAM_WORK_SOURCE_ROOT_LIMIT
-        };
-        // A new name on a full list first ends the entries of released
-        // claims of every other naming session that still exists, one
-        // held-claims read under each one's own connection, so an entry of an
-        // ended claim cannot hold a place nobody may clear. A read that
-        // fails, runs out of the budget, or leaves claims out, ends nothing
-        // for that session.
-        let reclaimed = if list_full && old.is_none() && validated.is_some() {
-            self.engram_source_root_held_reads_of_other_sessions(session_id, deadline)
-        } else {
-            Vec::new()
-        };
+        if validated.is_none()
+            && matches!(remote_root, Some(EngramNamedRootState::Bound { .. }))
+            && old
+                .as_ref()
+                .is_none_or(|old| old.claim_id != claim.claim_id)
+        {
+            return Err(ApiError::conflict(
+                "Engram has a named root whose original local selection is unavailable; restore or explicitly name this claim's worktree before clearing it",
+            ));
+        }
         // A rename or a clear seals the old root for the caller's turn running
         // in it on that claim since before this call began (`sealable`;
         // sealed below, under the lock, if that turn still runs); with no
@@ -1516,7 +1803,7 @@ impl AppState {
                             root: old.root.clone(),
                             common_dir_key: old.common_dir_key.clone(),
                         },
-                        engram_source_root_capture_budget(left()),
+                        engram_source_root_capture_budget(left(), control_left),
                     )
                     .map(|basis| basis.source_revision),
             });
@@ -1526,15 +1813,15 @@ impl AppState {
                     root: root.clone(),
                     common_dir_key: common_dir_key.clone(),
                 },
-                engram_source_root_capture_budget(left()),
+                engram_source_root_capture_budget(left(), control_left),
             )
         });
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        // Nothing is kept past the budget, so the bridge, which waits that
-        // long and more, never reports a failure for a name the server kept.
+        // No event has been sent yet. A timeout here names nothing; after
+        // transport begins, the durable intent carries an unknown outcome.
         if left().is_zero() {
             return Err(ApiError::from_status(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -1555,7 +1842,11 @@ impl AppState {
             && Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
                 .ok()
                 .flatten()
-                .is_some_and(|current| current.settings.authority_store_key.as_ref() == Some(&store));
+                .is_some_and(|current| {
+                    current.settings.authority_store_key.as_ref() == Some(&association.store)
+                        && current.connection == target.connection
+                        && current.routing_token == target.routing_token
+                });
         if !still_there {
             return Err(ApiError::conflict(
                 "this session's project, folder or Engram store changed while the root was being \
@@ -1569,48 +1860,70 @@ impl AppState {
                 "the work's source root changed while it was being named; name it again",
             ));
         }
-        let previous = inner.engram_work_source_roots.clone();
-        let previous_generation = inner.engram_source_root_generation;
-        let previous_record = {
-            let engram = &inner.sessions[index].engram;
-            (
-                engram.pending_source_root_line.clone(),
-                engram.source_root_line_delivery.clone(),
-                engram.active_turn_source_root.clone(),
-            )
-        };
-        engram_end_released_work_source_roots(
-            &mut inner.engram_work_source_roots,
-            &known,
-            session_id,
-            &store,
-            &held,
-        );
-        for (named_by, named_store, named_held) in &reclaimed {
-            engram_end_released_work_source_roots(
-                &mut inner.engram_work_source_roots,
-                &known,
-                named_by,
-                named_store,
-                named_held,
-            );
-        }
+        // Absence from a holder's read may mean handoff. Only Engram's
+        // authoritative lifecycle response removes a binding.
         // The same root named again under the same claim is the same name;
         // anything else is a new one, numbered above every name given before.
         let kept = old.as_ref().filter(|old| {
             old.claim_id == claim.claim_id
                 && validated.as_ref().is_some_and(|(root, _)| *root == old.root)
+                && matches!(&remote_root, Some(EngramNamedRootState::Bound {
+                    workspace_id, generation, named_at
+                }) if *workspace_id == old.root && u64::try_from(*generation).ok() == Some(old.generation)
+                    && engram_named_at_matches(named_at, &old.named_at))
         });
+        let pending =
+            engram_root_journal(&inner.engram_named_root_journal, &store, &claim.claim_id)
+                .and_then(|journal| journal.pending.clone());
+        let retrying = pending.is_some();
+        if let Some(pending) = &pending {
+            if pending.kind == EngramNamedRootKind::Bound
+                && !target
+                    .work_binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.claim_id == claim.claim_id)
+            {
+                return Err(ApiError::conflict(
+                    "focus this claim and start a new turn before retrying its uncertain root binding; its authoritative named_root state must be readable",
+                ));
+            }
+            let same = match (&validated, pending.kind) {
+                (Some((root, _)), EngramNamedRootKind::Bound) => *root == pending.root.root,
+                (None, EngramNamedRootKind::Ended) => {
+                    pending.end_reason == Some(EngramNamedRootEndReason::ExplicitClear)
+                }
+                _ => false,
+            };
+            if !same {
+                return Err(ApiError::conflict(
+                    "an earlier named-root transition remains pending; retry that exact naming request first",
+                ));
+            }
+        }
+        let remote_generation = match &remote_root {
+            Some(EngramNamedRootState::Bound { generation, .. }) => *generation,
+            Some(EngramNamedRootState::UnboundByRelease {
+                last_generation, ..
+            }) => *last_generation,
+            _ => 0,
+        };
+        inner.engram_source_root_generation = inner
+            .engram_source_root_generation
+            .max(u64::try_from(remote_generation).unwrap_or(0));
         let generation = match (&validated, kept) {
             (None, _) => 0,
+            (Some(_), _) if pending.is_some() => pending.as_ref().unwrap().root.generation,
             (Some(_), Some(kept)) => kept.generation,
             (Some(_), None) => {
-                inner.engram_source_root_generation =
-                    inner.engram_source_root_generation.saturating_add(1);
+                inner.engram_source_root_generation = inner
+                    .engram_source_root_generation
+                    .checked_add(1)
+                    .filter(|generation| *generation <= i64::MAX as u64)
+                    .ok_or_else(|| ApiError::conflict("named-root generation exhausted"))?;
                 inner.engram_source_root_generation
             }
         };
-        let entry = validated
+        let mut entry = validated
             .as_ref()
             .map(|(root, common_dir_key)| EngramWorkSourceRoot {
                 store: store.clone(),
@@ -1627,6 +1940,127 @@ impl AppState {
                 ),
                 generation,
             });
+        if let Some(kept) = kept {
+            entry = Some(kept.clone());
+        }
+        if let Some(pending) = &pending {
+            if pending.kind == EngramNamedRootKind::Bound {
+                entry = Some(pending.root.clone());
+            }
+        }
+        let event = pending.or_else(|| match (&entry, &old) {
+            (Some(entry), _) if kept.is_none() => Some(EngramNamedRootEvent {
+                root: entry.clone(), reporter: session_id.to_owned(),
+                kind: EngramNamedRootKind::Bound, end_reason: None,
+            }),
+            (None, Some(old)) if old.claim_id == claim.claim_id && (
+                engram_root_journal(&inner.engram_named_root_journal, &store, &claim.claim_id)
+                    .is_some_and(|journal| journal.confirmed.is_some())
+                || matches!(&remote_root, Some(EngramNamedRootState::Bound { workspace_id, generation, named_at })
+                    if *workspace_id == old.root && u64::try_from(*generation).ok() == Some(old.generation) && engram_named_at_matches(named_at, &old.named_at))
+            ) => Some(EngramNamedRootEvent {
+                root: old.clone(), reporter: old.named_by_session.clone(),
+                kind: EngramNamedRootKind::Ended,
+                end_reason: Some(EngramNamedRootEndReason::ExplicitClear),
+            }),
+            _ => None,
+        });
+        let transition = if let Some(event) = event {
+            let mut trial = inner.engram_work_source_roots.clone();
+            engram_set_work_source_root(&mut trial, &store, &claim.work_id, entry.clone())
+                .map_err(ApiError::conflict)?;
+            // Reserve the immutable intent before releasing the lock. No
+            // filesystem capture or control transport runs under this lock.
+            self.stage_engram_root_event_locked(&mut inner, &event, Some(&association.binding))?;
+            drop(inner);
+            let receipt = engram_source_root_control_within(&mut control_left, left(), |budget| {
+                self.send_engram_root_event(&target, &event, budget)
+            })?;
+            if retrying
+                && event.kind == EngramNamedRootKind::Bound
+                && !engram_root_event_matches_state(&event, remote_root.as_ref())
+            {
+                let token = target.routing_token.as_ref().ok_or_else(|| {
+                    ApiError::conflict("the naming connection is no longer bound")
+                })?;
+                let replay_fence =
+                    EngramRootReadFence::capture(&self.inner.lock().expect("state mutex poisoned"));
+                let status = engram_source_root_control_within(
+                    &mut control_left,
+                    left(),
+                    |budget| {
+                        target.adapter.request(&target.connection,
+                    &EngramControlRequest::SessionStatus { routing_token: token.clone() },
+                    target.settings.call_timeout().min(budget))
+                    .and_then(parse_engram_result::<EngramSessionStatusResponse>)
+                    .map_err(|error| ApiError::bad_gateway(format!("binding receipt replayed, but named_root readback is unknown; retry: {error}")))
+                    },
+                )?;
+                if !engram_root_event_matches_state(&event, status.named_root.as_ref()) {
+                    if matches!(
+                        status.named_root,
+                        None | Some(EngramNamedRootState::Unknown)
+                    ) {
+                        return Err(ApiError::bad_gateway(
+                            "binding receipt replayed, but this Engram response cannot confirm its lifecycle; pending intent retained",
+                        ));
+                    }
+                    self.retire_engram_root_replay_checked(
+                        &event,
+                        &receipt.receipt,
+                        None,
+                        engram_root_retirement_for_state(status.named_root.as_ref().unwrap()),
+                        Some((&target, &replay_fence, status.named_root.as_ref().unwrap())),
+                    )?;
+                    return Err(ApiError::conflict(
+                        "the replayed event is no longer an active named root; name the worktree again to create a fresh generation",
+                    ));
+                }
+            }
+            inner = self.inner.lock().expect("state mutex poisoned");
+            if engram_work_source_root_for_work(
+                &inner.engram_work_source_roots,
+                &store,
+                &claim.work_id,
+            ) != old.as_ref()
+                || engram_root_journal(&inner.engram_named_root_journal, &store, &claim.claim_id)
+                    .and_then(|journal| journal.pending.as_ref())
+                    != Some(&event)
+            {
+                return Err(ApiError::conflict(
+                    "named-root selection changed while its event was in flight; reconcile before retrying",
+                ));
+            }
+            Some((event, receipt))
+        } else {
+            None
+        };
+        let index = inner.find_session_index(session_id).ok_or_else(|| {
+            ApiError::conflict("naming session disappeared; transition remains pending")
+        })?;
+        if inner.sessions[index].session.workdir != workdir
+            || inner.sessions[index].session.project_id != project_id
+            || !Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                .ok()
+                .flatten()
+                .is_some_and(|current| {
+                    current.settings.authority_store_key.as_ref() == Some(&store)
+                        && current.connection == target.connection
+                })
+        {
+            return Err(ApiError::conflict(
+                "the naming session's authority changed; the transition remains pending",
+            ));
+        }
+        let previous = inner.engram_work_source_roots.clone();
+        let previous_record = {
+            let engram = &inner.sessions[index].engram;
+            (
+                engram.pending_source_root_line.clone(),
+                engram.source_root_line_delivery.clone(),
+                engram.active_turn_source_root.clone(),
+            )
+        };
         let line = engram_source_root_line(
             entry.as_ref(),
             &claim.short_ref,
@@ -1639,22 +2073,41 @@ impl AppState {
             &claim.work_id,
             entry,
         ) {
-            // Only the new name is refused: the entries of ended claims the
-            // reclaim ended stay ended, as the refusal says, and are kept.
-            inner.engram_source_root_generation = previous_generation;
+            // Capacity was checked before transport; a concurrent change
+            // can still require a later retry of the retained intent.
+            // Never lower the shared allocation watermark after off-lock
+            // work: another work may already have allocated above it.
             if inner.engram_work_source_roots != previous
-                && self.commit_locked(&mut inner).is_err()
+                && self.commit_engram_root_locked(&mut inner).is_err()
             {
                 inner.engram_work_source_roots = previous;
             }
             return Err(ApiError::conflict(error));
         }
-        // The agent's next turn is told where it is measured from then on.
-        inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid")
-            .engram
-            .set_pending_source_root_line(line);
+        let previous_journal = inner.engram_named_root_journal.clone();
+        for journal in &mut inner.engram_named_root_journal {
+            if journal.store == store
+                && journal.claim_id != claim.claim_id
+                && journal.confirmed.as_ref().is_some_and(|(event, _)| {
+                    event.root.work_id == claim.work_id && event.kind == EngramNamedRootKind::Bound
+                })
+            {
+                journal.retire(EngramRootRetirement::Displaced);
+            }
+        }
+        if let Some((event, reply)) = &transition {
+            let journal = inner
+                .engram_named_root_journal
+                .iter_mut()
+                .find(|journal| journal.store == store && journal.claim_id == claim.claim_id)
+                .expect("staged journal");
+            journal.confirmed = Some((event.clone(), reply.receipt.clone()));
+            journal.reconciliation = None;
+            journal.obsolete = false;
+            journal.retirement = None;
+            journal.pending = None;
+            Self::learn_engram_authority_locked(&mut inner, &store, &reply.owner, &reply.proof)?;
+        }
         // The seal is for the caller's turn measured in the old root under
         // the old entry's claim, and is reported only when that turn took it.
         // A turn of another claim in the same tree (two works may name one
@@ -1684,11 +2137,11 @@ impl AppState {
             }
             _ => None,
         };
-        if let Err(error) = self.commit_locked(&mut inner) {
+        if let Err(error) = self.commit_engram_root_locked(&mut inner) {
             // Nothing was kept, so the agent is told of nothing and the
             // running turn keeps its root unsealed.
             inner.engram_work_source_roots = previous;
-            inner.engram_source_root_generation = previous_generation;
+            inner.engram_named_root_journal = previous_journal;
             let engram = &mut inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid")
@@ -1702,14 +2155,62 @@ impl AppState {
                 "failed to persist the source root: {error:#}"
             )));
         }
+        if let Some((_, reply)) = &transition {
+            drop(inner);
+            self.publish_engram_authority_until(&store, &reply.owner, deadline)?;
+            inner = self.inner.lock().expect("state mutex poisoned");
+        } else if let Some(owner) = inner
+            .engram_work_naming_history
+            .iter()
+            .find(|history| history.store == store && history.work_id == claim.work_id)
+            .and_then(|history| history.transition.clone())
+            .filter(|owner| owner.phase == EngramAuthorityPhase::Prepared)
+        {
+            drop(inner);
+            let proof = self.read_engram_authority_fact_until(&target, &owner.binding, deadline)?;
+            inner = self.inner.lock().expect("state mutex poisoned");
+            Self::learn_engram_authority_locked(&mut inner, &store, &owner, &proof)?;
+            drop(inner);
+            self.publish_engram_authority_until(&store, &owner, deadline)?;
+            inner = self.inner.lock().expect("state mutex poisoned");
+        }
+        let index = inner.find_session_index(session_id).ok_or_else(|| {
+            ApiError::conflict("naming session disappeared after persistence acknowledgement")
+        })?;
+        // Announce success only after the selection and receipt are durable.
+        inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .engram
+            .set_pending_source_root_line(line);
+        // The root image was acknowledged above. Notice delivery is optional
+        // metadata and must not resurrect a synchronous authority write here.
+        let _ = self.persist_tx.send(PersistRequest::Delta);
+        if inner.sessions[index]
+            .engram
+            .work_binding
+            .as_ref()
+            .is_some_and(|binding| binding.claim_id == claim.claim_id)
+        {
+            if let Some((event, _)) = &transition {
+                inner.sessions[index].engram.named_root = Some(match event.kind {
+                    EngramNamedRootKind::Bound => EngramNamedRootState::Bound {
+                        workspace_id: event.root.root.clone(),
+                        generation: event.root.generation as i64,
+                        named_at: event.root.named_at.clone(),
+                    },
+                    EngramNamedRootKind::Ended => EngramNamedRootState::None,
+                });
+            }
+        }
         let (root, source_revision, unmeasured) = match (&validated, basis) {
-            (Some((root, _)), Some(basis)) => (Some(root.clone()), Some(basis.source_revision), None),
+            (Some((root, _)), Some(basis)) => {
+                (Some(root.clone()), Some(basis.source_revision), None)
+            }
             (Some((root, _)), None) => (
                 Some(root.clone()),
                 None,
-                Some(
-                    "TermAl cannot take its content revision now; see the host log".to_owned(),
-                ),
+                Some("TermAl cannot take its content revision now; see the host log".to_owned()),
             ),
             (None, _) => (None, None, None),
         };

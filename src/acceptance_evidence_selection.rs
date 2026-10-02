@@ -80,8 +80,13 @@ fn acceptance_core_identity(value: &Value) -> Result<Option<AcceptanceEvidenceId
             .transpose()?;
         (root, generation)
     } else {
-        if value.get("run").is_some_and(|run| !run.is_null()) {
-            return Err(invalid());
+        // Core can include its latest historical run when none is active.
+        // Validate that association without adopting it as current authority.
+        if let Some(run) = value.get("run").filter(|run| !run.is_null()) {
+            if id(&run["work_id"])? != work_id {
+                return Err(invalid());
+            }
+            id(&run["run_id"])?;
         }
         (None, None)
     };
@@ -108,15 +113,15 @@ fn validate_acceptance_projection_identity(
         || work
             .get("work_id")
             .is_some_and(|value| value.as_str() != Some(&identity.work_id))
-        || work
-            .get("active_run_id")
-            .is_some_and(|value| match value {
-                Value::Null => identity.active_run_id.is_some(),
-                Value::String(run) => identity.active_run_id.as_ref() != Some(run),
-                _ => true,
-            })
+        || work.get("active_run_id").is_some_and(|value| match value {
+            Value::Null => identity.active_run_id.is_some(),
+            Value::String(run) => identity.active_run_id.as_ref() != Some(run),
+            _ => true,
+        })
     {
-        return Err(ApiError::conflict("the task's canonical work/run identity changed while evidence was read; request a new evaluation"));
+        return Err(ApiError::conflict(
+            "the task's canonical work/run identity changed while evidence was read; request a new evaluation",
+        ));
     }
     Ok(())
 }
@@ -140,9 +145,13 @@ fn acceptance_full_contract_identity(
     identity: &AcceptanceEvidenceIdentity,
 ) -> Result<(), ApiError> {
     let contract: AcceptanceContractIdentity = serde_json::from_value(full["work"].clone())
-        .map_err(|_| ApiError::bad_gateway("engram work show --full: malformed contract identity"))?;
+        .map_err(|_| {
+            ApiError::bad_gateway("engram work show --full: malformed contract identity")
+        })?;
     if contract.short_ref != identity.work_ref || contract.revision != identity.revision {
-        return Err(ApiError::conflict("engram work show --full: contract identity changed during discovery"));
+        return Err(ApiError::conflict(
+            "engram work show --full: contract identity changed during discovery",
+        ));
     }
     validate_acceptance_projection_identity(&full["work"], identity)
 }
@@ -173,21 +182,24 @@ fn acceptance_initial_evidence_basis(
 ) -> Result<AcceptanceAgentEvidenceBasis, ApiError> {
     let work = &show["status"]["work"];
     if work["short_ref"].as_str() != Some(identity.work_ref.as_str()) {
-        return Err(ApiError::conflict("engram work show: initial carrier has a missing or inconsistent work reference"));
+        return Err(ApiError::conflict(
+            "engram work show: initial carrier has a missing or inconsistent work reference",
+        ));
     }
     validate_acceptance_projection_identity(work, identity)?;
     let basis: AcceptanceAgentEvidenceBasis = serde_json::from_value(show.clone())
         .map_err(|_| ApiError::bad_gateway("engram work show: malformed initial evidence basis"))?;
     if basis.acceptance_basis != identity.revision || basis.evidence_basis < 0 {
-        return Err(ApiError::conflict("the task revision changed after the opening core identity; request a new evaluation"));
+        return Err(ApiError::conflict(
+            "the task revision changed after the opening core identity; request a new evaluation",
+        ));
     }
     Ok(basis)
 }
 
 fn acceptance_notes_window(page: &Value) -> Result<AcceptanceNotesWindow, ApiError> {
-    let invalid = || {
-        ApiError::bad_gateway("engram work show notes continuation: malformed catalog window")
-    };
+    let invalid =
+        || ApiError::bad_gateway("engram work show notes continuation: malformed catalog window");
     let window: AcceptanceNotesWindow =
         serde_json::from_value(page["notes_window"].clone()).map_err(|_| invalid())?;
     let notes = page["notes"].as_array().ok_or_else(invalid)?;
@@ -202,7 +214,10 @@ fn acceptance_notes_window(page: &Value) -> Result<AcceptanceNotesWindow, ApiErr
             != Some(window.total)
         || window.read_cut.project_position < 0
         || window.read_cut.observed_at.is_empty()
-        || window.read_cut.valid_until_ms.is_some_and(|until| until <= 0)
+        || window
+            .read_cut
+            .valid_until_ms
+            .is_some_and(|until| until <= 0)
         || !page["notes_window"]
             .as_object()
             .is_some_and(|object| object.contains_key("after"))
@@ -224,9 +239,8 @@ fn acceptance_compact_notes_carrier(
     previous: &AcceptanceNotesWindow,
     seen: &BTreeSet<String>,
 ) -> Result<AcceptanceNotesWindow, ApiError> {
-    let malformed = || {
-        ApiError::bad_gateway("engram work show notes continuation: malformed compact header")
-    };
+    let malformed =
+        || ApiError::bad_gateway("engram work show notes continuation: malformed compact header");
     let work = page
         .get("work")
         .filter(|work| work.is_object())
@@ -246,14 +260,19 @@ fn acceptance_compact_notes_carrier(
             .filter(|work| work.is_object())
             .ok_or_else(malformed)?;
         validate_acceptance_projection_identity(duplicate, identity).map_err(|_| {
-            ApiError::conflict("engram work show notes continuation: contradictory duplicate identity")
+            ApiError::conflict(
+                "engram work show notes continuation: contradictory duplicate identity",
+            )
         })?;
     }
     for (field, expected) in [
         ("acceptance_basis", basis.acceptance_basis),
         ("evidence_basis", basis.evidence_basis),
     ] {
-        if page.get(field).is_some_and(|value| value.as_i64() != Some(expected)) {
+        if page
+            .get(field)
+            .is_some_and(|value| value.as_i64() != Some(expected))
+        {
             return Err(ApiError::conflict(
                 "engram work show notes continuation: task or evidence basis changed",
             ));
@@ -838,7 +857,9 @@ impl AppState {
                     || current.circuit_open
                     || current.rebind_required
             }) {
-                return Err(ApiError::conflict("canonical criterion evidence authority changed during discovery; request a new evaluation"));
+                return Err(ApiError::conflict(
+                    "canonical criterion evidence authority changed during discovery; request a new evaluation",
+                ));
             }
         }
         Ok(())

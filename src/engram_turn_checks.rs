@@ -189,8 +189,9 @@ const ENGRAM_CAPTURE_WORKER_LIMIT: usize = 2 * ENGRAM_TURN_CHECK_LIMIT;
 fn engram_spawn_basis_capture(
     place: EngramBasisPlace,
     workers: &Arc<std::sync::atomic::AtomicUsize>,
+    provenance: EngramRootCapture,
 ) -> Arc<EngramBasisCapture> {
-    EngramCapture::spawn(workers, move || engram_place_source_basis(&place))
+    EngramCapture::spawn(workers, move || provenance.stamp(engram_place_source_basis(&place)))
 }
 
 #[cfg(test)]
@@ -1150,6 +1151,7 @@ impl AppState {
         let other_writer = target.as_ref().is_some_and(|(_, _, target)| {
             engram_other_writer_in(&inner, index, &engram_path_key(&target.root))
         });
+        let provenance = engram_turn_root_capture_locked(&inner, session_id);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -1233,7 +1235,8 @@ impl AppState {
             };
             record.engram.active_turn_checks.remove(oldest);
         }
-        let start_basis = engram_spawn_basis_capture(target.basis_place(), &workers);
+        let start_basis =
+            engram_spawn_basis_capture(target.basis_place(), &workers, provenance);
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
         let toolchain = if engram_cargo_toolchain_selector(&command).is_some() {
@@ -1518,6 +1521,7 @@ impl AppState {
                 && check.end.is_none()
                 && grant_id.as_deref() == Some(check.grant_id.as_str())
         };
+        let provenance = engram_turn_root_capture_locked(&inner, session_id);
         // A session in a turn now was in one while the check ran. Its turn
         // start or its own reports marked the check already; this catches a
         // turn that began where no mark was made.
@@ -1604,7 +1608,7 @@ impl AppState {
             EngramBasisCapture::settled(None)
         } else {
             // The worktree the check ran in, as its opening snapshot was.
-            engram_spawn_basis_capture(check.target.basis_place(), &workers)
+            engram_spawn_basis_capture(check.target.basis_place(), &workers, provenance)
         };
         check.end = Some(EngramTurnCheckEnd {
             completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),

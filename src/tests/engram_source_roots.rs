@@ -50,7 +50,10 @@ fn project(cleanup: &mut RemoveDirsOnDrop) -> Project {
 }
 
 fn root_key(path: &FsPath) -> String {
-    fs::canonicalize(path).unwrap().to_string_lossy().into_owned()
+    fs::canonicalize(path)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn validate(path: &FsPath, project: &Project) -> std::result::Result<(String, String), String> {
@@ -80,19 +83,6 @@ fn entry(work: &str, claim: &str, session: &str, generation: u64) -> EngramWorkS
         named_by_session: session.to_owned(),
         named_at: "2026-09-27T00:00:00.000Z".to_owned(),
         generation,
-    }
-}
-
-fn held(claims: &[&str], omitted: u64) -> EngramHeldClaims {
-    EngramHeldClaims {
-        items: claims
-            .iter()
-            .map(|claim| EngramHeldClaim {
-                claim_id: (*claim).to_owned(),
-                ..Default::default()
-            })
-            .collect(),
-        omitted,
     }
 }
 
@@ -150,7 +140,8 @@ fn a_copied_git_file_is_not_a_registered_worktree() {
     fs::write(copy.join("tracked.txt"), "base\n").unwrap();
     let error = validate(&copy, &project).expect_err("a copied .git file is refused");
     assert!(
-        error.contains("not a worktree registered") || error.contains("is not the root of a worktree"),
+        error.contains("not a worktree registered")
+            || error.contains("is not the root of a worktree"),
         "{error}"
     );
 }
@@ -181,13 +172,20 @@ fn a_named_root_is_measured_on_exactly_its_own_path() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let project = project(&mut cleanup);
     let (root, common_dir_key) = validate(&project.worktree, &project).unwrap();
-    let basis = engram_named_root_source_basis(&root, &common_dir_key)
-        .expect("a present root has a basis");
+    let basis =
+        engram_named_root_source_basis(&root, &common_dir_key).expect("a present root has a basis");
     assert_eq!(basis.workspace_id, root);
     let (_, main_revision) = content_revision(&project.root).unwrap();
-    fs::write(project.worktree.join("tracked.txt"), "changed in the worktree\n").unwrap();
+    fs::write(
+        project.worktree.join("tracked.txt"),
+        "changed in the worktree\n",
+    )
+    .unwrap();
     let moved = engram_named_root_source_basis(&root, &common_dir_key).unwrap();
-    assert_ne!(moved.source_revision, basis.source_revision, "an edit there moves it");
+    assert_ne!(
+        moved.source_revision, basis.source_revision,
+        "an edit there moves it"
+    );
     assert_ne!(moved.source_revision, main_revision);
     assert!(
         engram_named_root_source_basis(&root, "c:/another/repository/.git").is_none(),
@@ -275,15 +273,27 @@ fn a_naming_capture_leaves_the_commit_its_reserve() {
     // A capture stops short of the budget's end, so a slow tree reports the
     // root unmeasured instead of spending the budget and refusing the name.
     assert_eq!(
-        engram_source_root_capture_budget(ENGRAM_SOURCE_ROOT_NAMING_BUDGET),
-        REVIEW_FREEZE_TIMEOUT.min(ENGRAM_SOURCE_ROOT_NAMING_BUDGET - ENGRAM_SOURCE_ROOT_COMMIT_RESERVE)
+        engram_source_root_capture_budget(
+            ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+            Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS)
+        ),
+        REVIEW_FREEZE_TIMEOUT.min(
+            ENGRAM_SOURCE_ROOT_NAMING_BUDGET
+                - ENGRAM_SOURCE_ROOT_COMMIT_RESERVE
+                - Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS)
+        )
     );
     assert_eq!(
-        engram_source_root_capture_budget(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE + Duration::from_secs(3)),
+        engram_source_root_capture_budget(
+            ENGRAM_SOURCE_ROOT_COMMIT_RESERVE
+                + Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS)
+                + Duration::from_secs(3),
+            Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS),
+        ),
         Duration::from_secs(3).min(REVIEW_FREEZE_TIMEOUT)
     );
     assert_eq!(
-        engram_source_root_capture_budget(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE),
+        engram_source_root_capture_budget(ENGRAM_SOURCE_ROOT_COMMIT_RESERVE, Duration::ZERO),
         Duration::ZERO,
         "nothing is left to capture in once only the reserve remains"
     );
@@ -302,14 +312,24 @@ fn a_full_list_refuses_a_new_name_and_evicts_nothing() {
     )
     .expect_err("a new name on a full list is refused");
     assert!(error.contains("evicts none"), "{error}");
-    assert!(error.contains("w-0 (named by session-1"), "the refusal names the entries: {error}");
+    assert!(
+        error.contains("w-0 (named by session-1"),
+        "the refusal names the entries: {error}"
+    );
     assert!(
         error.contains(&format!("in store {})", store().project_id)),
         "and each entry's store, since an entry of a store no longer used cannot be cleared: \
          {error}"
     );
-    assert!(error.contains("stays until the session that named it"), "{error}");
-    assert_eq!(entries.len(), ENGRAM_WORK_SOURCE_ROOT_LIMIT, "nothing was evicted");
+    assert!(
+        error.contains("stays until the session that named it"),
+        "{error}"
+    );
+    assert_eq!(
+        entries.len(),
+        ENGRAM_WORK_SOURCE_ROOT_LIMIT,
+        "nothing was evicted"
+    );
     // Renaming a work already on the list replaces it in place.
     engram_set_work_source_root(
         &mut entries,
@@ -319,7 +339,8 @@ fn a_full_list_refuses_a_new_name_and_evicts_nothing() {
     )
     .expect("a rename is not a new entry");
     assert_eq!(
-        engram_work_source_root_for_work(&entries, &store(), "work-3").map(|entry| entry.generation),
+        engram_work_source_root_for_work(&entries, &store(), "work-3")
+            .map(|entry| entry.generation),
         Some(2)
     );
     // A clear removes it.
@@ -339,43 +360,37 @@ fn an_entry_applies_only_to_the_claim_it_was_named_for() {
         project_id: "github.com/example/other".to_owned(),
         ..store()
     };
-    assert!(engram_work_source_root_for_claim(&entries, &other_store, "work-a", "claim-1").is_none());
+    assert!(
+        engram_work_source_root_for_claim(&entries, &other_store, "work-a", "claim-1").is_none()
+    );
 }
 
 #[test]
-fn only_a_complete_held_list_ends_the_entries_of_released_claims() {
-    let mut entries = vec![
-        entry("kept", "claim-kept", "session-1", 1),
-        entry("released", "claim-released", "session-1", 1),
-        entry("other", "claim-other", "session-2", 1),
-    ];
-    let known = entries.clone();
-    assert!(
-        !engram_end_released_work_source_roots(
-            &mut entries,
-            &known,
-            "session-1",
-            &store(),
-            &held(&["claim-kept"], 1)
-        ),
-        "a list that left claims out ends nothing"
-    );
-    assert_eq!(entries.len(), 3);
-    // Named after the read began: its claim may not be on the list yet.
-    entries.push(entry("late", "claim-late", "session-1", 2));
-    assert!(engram_end_released_work_source_roots(
-        &mut entries,
-        &known,
-        "session-1",
-        &store(),
-        &held(&["claim-kept"], 0)
+fn only_authoritative_lifecycle_reads_end_a_known_generation() {
+    let root = entry("kept", "claim-kept", "session-1", 4);
+    assert!(!engram_named_root_read_obsoletes(&root, None, 4));
+    assert!(!engram_named_root_read_obsoletes(
+        &root,
+        Some(&EngramNamedRootState::Unknown),
+        4
     ));
-    let names = entries.iter().map(|entry| entry.short_ref.as_str()).collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        ["w-kept", "w-other", "w-late"],
-        "another session's entry is not ended by this session's read, nor one named after it"
+    assert!(
+        !engram_named_root_read_obsoletes(&root, Some(&EngramNamedRootState::None), 3),
+        "a name issued during a read cannot be removed by that read"
     );
+    assert!(engram_named_root_read_obsoletes(
+        &root,
+        Some(&EngramNamedRootState::None),
+        4
+    ));
+    assert!(engram_named_root_read_obsoletes(
+        &root,
+        Some(&EngramNamedRootState::UnboundByRelease {
+            last_generation: 4,
+            released_at_position: 9,
+        }),
+        4
+    ));
 }
 
 #[test]
@@ -384,9 +399,10 @@ fn an_entry_ends_with_the_session_that_named_it() {
         entry("a", "claim-a", "session-gone", 1),
         entry("b", "claim-b", "session-live", 1),
     ];
-    assert!(engram_end_orphaned_work_source_roots(&mut entries, |session| {
-        session == "session-live"
-    }));
+    assert!(engram_end_orphaned_work_source_roots(
+        &mut entries,
+        |session| { session == "session-live" }
+    ));
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].named_by_session, "session-live");
 }
@@ -402,6 +418,8 @@ fn a_sealed_revision_stands_in_only_when_the_root_is_gone() {
     };
     let sealed = (root.clone(), "content-v1:sealed".to_owned());
     let captured = EngramExecutionSourceBasis {
+        source_root_generation: None,
+        source_root_state: None,
         workspace_id: root.clone(),
         source_revision: "content-v1:captured".to_owned(),
     };
@@ -419,6 +437,8 @@ fn a_sealed_revision_stands_in_only_when_the_root_is_gone() {
     assert_eq!(
         engram_turn_end_basis(&place, Some(&sealed), None),
         Some(EngramExecutionSourceBasis {
+            source_root_generation: None,
+            source_root_state: None,
             workspace_id: root,
             source_revision: "content-v1:sealed".to_owned(),
         }),
@@ -441,6 +461,7 @@ fn an_evaluation_uses_the_root_of_its_requested_claim() {
     let claim = AcceptanceEvaluationSourceClaim {
         work_id: "work-a".to_owned(),
         claim_id: "claim-1".to_owned(),
+        named_generation_at_request: None,
     };
     let root = engram_evaluation_source_root(&entries, &store(), Some(&claim), "w-a", None)
         .expect("matched on the short ref when the receipt has no work id");
@@ -478,8 +499,14 @@ fn the_display_path_drops_the_verbatim_prefix() {
         engram_source_root_display(r"\\?\C:\github\Personal\Engram"),
         r"C:\github\Personal\Engram"
     );
-    assert_eq!(engram_source_root_display(r"\\?\UNC\server\share\x"), r"\\server\share\x");
-    assert_eq!(engram_source_root_display("/home/me/project"), "/home/me/project");
+    assert_eq!(
+        engram_source_root_display(r"\\?\UNC\server\share\x"),
+        r"\\server\share\x"
+    );
+    assert_eq!(
+        engram_source_root_display("/home/me/project"),
+        "/home/me/project"
+    );
 }
 
 #[test]
@@ -491,10 +518,14 @@ fn a_test_is_credited_to_a_named_root_only_when_it_ran_there() {
     let (root, common_dir_key) = validate(&project.worktree, &project).unwrap();
     let check = engram_check_command("cargo test").expect("a recognised test");
     let credit_root = Some((FsPath::new(&root), common_dir_key.as_str()));
-    let target = engram_check_worktree_in(&check, &project.root, Some(".worktrees/wt"), credit_root)
-        .expect("a test run in the named root is credited to it");
+    let target =
+        engram_check_worktree_in(&check, &project.root, Some(".worktrees/wt"), credit_root)
+            .expect("a test run in the named root is credited to it");
     assert_eq!(target.root, PathBuf::from(&root));
-    assert_eq!(target.common_dir_key.as_deref(), Some(common_dir_key.as_str()));
+    assert_eq!(
+        target.common_dir_key.as_deref(),
+        Some(common_dir_key.as_str())
+    );
     assert!(
         matches!(target.basis_place(), EngramBasisPlace::Named { .. }),
         "its snapshots are taken on exactly the named path"
@@ -511,7 +542,8 @@ fn a_test_is_credited_to_a_named_root_only_when_it_ran_there() {
 #[test]
 fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
     let state = test_app_state();
-    let source_root = AcceptanceEvaluationSourceRoot::from_entry(&entry("a", "claim-1", "session-1", 1));
+    let source_root =
+        AcceptanceEvaluationSourceRoot::from_entry(&entry("a", "claim-1", "session-1", 1));
     // Whether or not a revision was taken at the request: a capture that
     // failed there leaves no fingerprint, and the root check still holds.
     for source_fingerprint in [Some("content-v1:requested".to_owned()), None] {
@@ -533,14 +565,27 @@ fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
                 store: Some(store()),
                 source_fingerprint: source_fingerprint.clone(),
                 source_root: Some(source_root.clone()),
+                naming_history: Some(EngramWorkNamingToken {
+                    epoch: ENGRAM_NAMING_HISTORY_EPOCH,
+                    work_id: "work-task".to_owned(),
+                    revision: 0,
+                }),
                 source_claim: None,
                 submission: AcceptanceEvaluationSubmission::None,
             };
             let error = state
                 .acceptance_evaluation_declared_target("session-evaluator", &target)
                 .expect_err("a renamed or cleared root refuses the submission");
-            assert_eq!(error.status, StatusCode::CONFLICT, "{source_fingerprint:?} {current:?}");
-            assert!(error.message.contains("source root changed"), "{}", error.message);
+            assert_eq!(
+                error.status,
+                StatusCode::CONFLICT,
+                "{source_fingerprint:?} {current:?}"
+            );
+            assert!(
+                error.message.contains("source root changed"),
+                "{}",
+                error.message
+            );
         }
     }
 }
@@ -604,16 +649,16 @@ fn a_root_on_a_network_share_is_refused() {
 }
 
 #[test]
-fn a_held_list_with_a_row_that_names_no_claim_ends_nothing() {
-    let mut entries = vec![entry("live", "claim-live", "session-1", 1)];
-    let known = entries.clone();
-    let mut no_ids = held(&["claim-other"], 0);
-    no_ids.items.push(EngramHeldClaim::default());
-    assert!(
-        !engram_end_released_work_source_roots(&mut entries, &known, "session-1", &store(), &no_ids),
-        "the unnamed row may be the live claim"
-    );
-    assert_eq!(entries.len(), 1);
+fn an_older_release_does_not_end_a_newly_named_generation() {
+    let root = entry("new", "claim", "session", 5);
+    assert!(!engram_named_root_read_obsoletes(
+        &root,
+        Some(&EngramNamedRootState::UnboundByRelease {
+            last_generation: 4,
+            released_at_position: 9,
+        }),
+        5
+    ));
 }
 
 #[test]
@@ -657,7 +702,10 @@ fn a_validation_that_outlasts_its_budget_names_nothing_and_keeps_its_place() {
     // Its place is given back as its thread ends.
     let deadline = std::time::Instant::now() + Duration::from_secs(60);
     while live.load(std::sync::atomic::Ordering::SeqCst) != 0 {
-        assert!(std::time::Instant::now() < deadline, "the place is given back");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the place is given back"
+        );
         std::thread::yield_now();
     }
     assert_eq!(
@@ -668,7 +716,9 @@ fn a_validation_that_outlasts_its_budget_names_nothing_and_keeps_its_place() {
             "bad".to_owned(),
             || Err("not a worktree".to_owned()),
         ),
-        Err(EngramSourceRootValidation::Refused("not a worktree".to_owned()))
+        Err(EngramSourceRootValidation::Refused(
+            "not a worktree".to_owned()
+        ))
     );
 }
 
@@ -678,7 +728,10 @@ fn a_drive_relative_path_is_refused_before_it_is_joined() {
     let project = project(&mut cleanup);
     if cfg!(windows) {
         let error = validate(FsPath::new("C:wt"), &project).expect_err("drive-relative");
-        assert!(error.contains("relative to a drive's current folder"), "{error}");
+        assert!(
+            error.contains("relative to a drive's current folder"),
+            "{error}"
+        );
     } else {
         // No drive prefixes: such a name is an ordinary relative path.
         let error = validate(FsPath::new("C:wt"), &project).expect_err("not a worktree");
@@ -691,7 +744,11 @@ fn only_a_lookup_that_says_missing_makes_a_root_absent() {
     use std::io::ErrorKind;
     assert!(engram_lookup_says_missing(ErrorKind::NotFound));
     assert!(engram_lookup_says_missing(ErrorKind::NotADirectory));
-    for kind in [ErrorKind::PermissionDenied, ErrorKind::Other, ErrorKind::TimedOut] {
+    for kind in [
+        ErrorKind::PermissionDenied,
+        ErrorKind::Other,
+        ErrorKind::TimedOut,
+    ] {
         assert!(
             !engram_lookup_says_missing(kind),
             "{kind:?} leaves a root that may still exist unmeasured"
@@ -713,12 +770,17 @@ fn a_bounded_closing_capture_measures_a_gone_root_by_its_seal() {
     let live = state
         .engram_turn_end_basis_within(&place, Some(&sealed), Duration::from_secs(60))
         .expect("a live root is captured");
-    assert_ne!(live.source_revision, "content-v1:sealed", "a live capture wins");
+    assert_ne!(
+        live.source_revision, "content-v1:sealed",
+        "a live capture wins"
+    );
 
     fs::remove_dir_all(&project.worktree).unwrap();
     assert_eq!(
         state.engram_turn_end_basis_within(&place, Some(&sealed), Duration::from_secs(60)),
         Some(EngramExecutionSourceBasis {
+            source_root_generation: None,
+            source_root_state: None,
             workspace_id: root,
             source_revision: "content-v1:sealed".to_owned(),
         }),

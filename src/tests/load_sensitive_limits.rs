@@ -16,7 +16,7 @@ fn load_sensitive_limits_are_doubled_and_keep_their_relations() {
         Duration::from_secs(20)
     );
     assert_eq!(ENGRAM_CONTROL_SETTLE_TIMEOUT, Duration::from_secs(21));
-    assert_eq!(ENGRAM_SOURCE_ROOT_NAMING_BUDGET, Duration::from_secs(82));
+    assert_eq!(ENGRAM_SOURCE_ROOT_NAMING_BUDGET, Duration::from_secs(102));
     // Lifecycle arbitration outlasts the longest call and a whole admission.
     assert!(ENGRAM_CONTROL_SETTLE_TIMEOUT > Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS));
     assert!(ENGRAM_CONTROL_SETTLE_TIMEOUT > Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS));
@@ -24,7 +24,9 @@ fn load_sensitive_limits_are_doubled_and_keep_their_relations() {
     // its reads take comes out of the second capture.
     assert!(
         ENGRAM_SOURCE_ROOT_NAMING_BUDGET
-            >= REVIEW_FREEZE_TIMEOUT * 2 + ENGRAM_SOURCE_ROOT_COMMIT_RESERVE
+            >= REVIEW_FREEZE_TIMEOUT * 2
+                + ENGRAM_SOURCE_ROOT_COMMIT_RESERVE
+                + Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS)
     );
 }
 
@@ -99,7 +101,9 @@ fn the_docs_state_the_derived_limits() {
         "the naming budget"
     );
     assert!(
-        doc("docs/architecture.md").contains(&format!("naming outlasted its {naming} s budget")),
+        doc("docs/architecture.md").contains(&format!(
+            "naming took longer than its {naming} s budget, so nothing was named; name it again"
+        )),
         "the naming refusal"
     );
     let bridge = TermalDelegationMcpBridge::new(

@@ -418,10 +418,10 @@ close, and a difference is a source change. When both exist, the turn's
 file-change tracking is not consulted: the watcher credits the turn with any
 write under the session's workdir, by any writer and inside a nested
 worktree too, so it reported changes the content never showed (tm-97wp).
-The tracking, a debounced hint, decides alone only when the closing basis is
-missing; a turn whose begin-time basis is missing but whose closing basis
-exists cannot be cleared by the comparison and is reported as a change under
-a grant that mediates local mutation, the conservative answer. Each capture
+The tracking, a debounced hint, decides alone when a comparison basis is
+missing. A missing opening basis withholds the comparison and its closing
+source sighting; inability to read the source is not itself evidence of a
+change. Each capture
 runs under the reviewer's shared forty-second freeze budget, because a turn
 closes at the host's busiest moment and a tighter bound would drop the basis
 when Git is merely slow; at the close the capture is taken before the
@@ -675,46 +675,189 @@ happens elsewhere. The agent therefore names the item's worktree once with
   write admitted there was for the root as it was then named. The request
   itself looks the root up again under the lock that creates the evaluator,
   after its own capture, and is refused when a rename, a clear or a first
-  name landed in between.
-- **When an entry ends.** On a clear by a session holding the work's claim;
-  when the session that named it no longer exists (at its removal and at
-  restore); and, once its claim has ended, at that session's next naming
-  call, when a complete held-claims read of it no longer lists the claim.
-  The admission refresh reads only the selected binding, so it ends none:
-  until one of these happens an entry of an ended claim stays, though it no
-  longer applies. A new name on a list that is still full once the caller's
-  own such entries are gone first ends such entries for every other naming
-  session that still exists, one held-claims read under each
-  one's connection (up to eight at once), and only then refuses; a refusal
-  keeps what the reclaim ended. A read that left claims out, listed a claim
-  without its id, failed, or did not start within the naming budget ends
-  nothing, and a read ends only entries that existed before it began, never
-  one named meanwhile. Likewise a name is compared with the work's entry as
-  it stood before the call's first read: a name that landed since, for a
-  newer claim say, makes the call a conflict rather than be overwritten.
-  An entry named in a store its session's project no longer uses, or of a
-  project with Engram turned off, can be neither read nor cleared, so it
-  stays until that session is removed; the full-list refusal names each
-  entry's store.
-- **How long naming takes.** One budget of 82 seconds on the server covers
-  the held-claims reads, the path's validation (on its own thread), the
-  reclaim and the captures (each capture counted with the turns' capture
-  threads); what has not started when it runs out is skipped
-  conservatively: no reclaim, no sealed revision, the new root reported
-  unmeasured. The captures stop two seconds short of its end, leaving that
-  for the commit, so a slow tree leaves the new root unmeasured rather than
-  costing the name. A validation that outlasts it, or a name that would be kept
-  after it, is refused with 503 and nothing is named. At most four path
-  checks run at once on the host, an abandoned one keeping its place until
-  its thread ends, so a stalled volume cannot pile up threads; a call past
-  that gets 503 too. The MCP bridge waits
-  that budget on top of its normal request timeout, so a tool call that
-  reports a failure never leaves a name the server kept. The budget starts
-  when the handler runs: the time the request waits for a blocking worker,
-  and the final write of the state, fall within that normal timeout. A Codex
-  caller waits longer still: TermAl gives Codex the delegation server's
-  `tool_timeout_sec`, covering the longest bridge allowance
-  ([Agent delegation sessions](./agent-delegation-sessions.md#completed-codex-child-thread-lifecycle)).
+  name landed in between. Workdir targets keep the host's naming high-water
+  mark at the request: a later name on the work under another current claim
+  refuses the old target, even after that new name is cleared. The new claim
+  is never substituted into a previously seeded evaluation.
+- **Host binding and lifecycle.** Naming records Engram's private
+  `named_root_bind` event before reporting success. `bound` carries the exact
+  canonical workspace identity (including a Windows verbatim prefix), positive
+  generation, claim id and fence, and naming time. The retry key is derived
+  from claim id, generation and event kind. A rename sends a newer `bound`;
+  it does not invent an end reason. A clear sends `ended`, repeating the bound
+  workspace and naming time, through the original naming session's connection.
+  Cleanup uses `session_gone_at_restore` only when restore finds the naming
+  session absent, or `root_invalid` for a root proved invalid. Removing a
+  session while the host runs revokes local selection; it does not manufacture
+  a restore event or a remote lifecycle end. Claim completion
+  and release are Engram lifecycle events and need no synthetic host end.
+- **Authoritative readback.** Session bind, session status and turn begin carry
+  `named_root`: `none`, `bound` (workspace, generation, naming time), or
+  `unbound_by_release` (last generation and release position). Release followed
+  by re-claim cannot revive an old name; a new explicit name uses a fresh
+  generation. Recovery and handoff preserve a bound root. Neither a changed
+  fence nor absence from one holder's list proves release. Missing fields and
+  unknown future states decode without failing the response; an unknown state
+  cannot authorize evidence. A conflicting read invalidates the local selection
+  and leaves a host line directing the agent to name the worktree again.
+  Naming times compare as parsed instants, so `.000Z` and `Z` do not end a
+  valid binding; durable retry requests retain their original bytes. After a
+  successful turn begin, an unavailable auxiliary status read (including no
+  remaining budget) retains the admitted grant with an Unknown binding and an
+  agent notice. That turn keeps source, check and evaluation evidence withheld
+  even if a later read succeeds; its ordinary closing checkpoint still runs.
+  The next turn refreshes authority and captures its own provenance. Ownership
+  and routing-credential failures remain admission errors.
+  After a definitive bind or begin, source-only canonical reader, history or
+  candidate-publication failures also retain the admission with evidence
+  withheld. The host distinguishes those outcomes from invalid runtime, claim,
+  store, connection, routing credential or queued-turn ownership. It does not
+  decide from an HTTP status, error message or elapsed deadline. Unsupported
+  source readers and malformed source replies cannot authorize evidence;
+  a structured routing refusal still blocks delivery.
+  The acknowledged Prepared guard follows the control request into readback.
+  Before withholding, the host checks its current exact work/owner association
+  and admission identity. If a successor published that owner, the old proof
+  is unusable and a fresh acknowledged guard is required. Missing preparation
+  durability and failed admission persistence block provider handoff. A source
+  diagnostic belongs to the captured opening's turn generation and grant, with
+  a typed cause distinct from wire-field presence. It is composed at the final
+  owner-checked prompt handoff, including missing opening provenance or store
+  identity, and acknowledged only for that exact instance after the provider
+  runtime channel accepts the prompt. A failed send does not deliver it or
+  replay the user's command. A confirmed successor drops stale opening text;
+  ordinary name, clear and test-credit notices keep their next-prompt ordering.
+  Recovery later in a turn cannot upgrade its uncertain opening.
+  A temporary UserStop borrow retains identity only when the existing stop
+  owner, runtime token and stop generation match. The existing handoff barrier
+  still waits for Stop to settle: rollback can restore the same runtime,
+  while a committed Stop or replacement cannot inherit delivery permission.
+  Evaluator defaults are separate from admission settings; store, connection
+  and claim identity are still checked independently.
+  A read begun before a newer local transition cannot alter its selection,
+  pending journal or runtime authority, including when that read is unknown.
+  The fence compares exact claim transitions and store/connection identity,
+  not just a generation: a clear can end the generation a delayed read saw.
+  When an immutable pending intent's original reporter is gone or unbound,
+  the current holder can settle the retry obligation only with a definitive
+  read of that claim. TermAl records the unchanged intent, state read, reading
+  session and host receipt timestamp separately from event receipts. Missing
+  or unknown lifecycle information keeps the retry pending. Readback creates
+  no event receipt or evidence; the holder must name a valid worktree at a
+  fresh generation before evidence can resume. Persistence uncertainty keeps
+  the work's recovery guard and immutable retry intent; it never restores a
+  usable old authority image.
+- **Durability and refusal.** An immutable pending event is persisted before
+  transport. Only a matching receipt and the local selection's persistence
+  publish success. The receipt's `position` is a feed-position object: its
+  feed kind must be `run_execution`, its run id must match the known claim
+  binding, and its nested position must be positive. A transport or persistence failure leaves an unknown
+  outcome, with the same intent available after restart. The host waits for a
+  content-specific SQLite acknowledgment before sending the event and before reporting the
+  confirmed selection as successful; queuing a write is insufficient. The
+  same boundary governs lifecycle reads, replay retirement, orphan recovery
+  and cleanup. A per-work owner persists a preparation guard before I/O, then
+  fences a complete candidate: naming history, canonical frontier, selected
+  root or its absence, all affected journals and required allocation state.
+  Only an acknowledgement of that content under the same owner/version can
+  publish authority. Unrelated work does not prevent a scoped acknowledgement,
+  and a late acknowledgement cannot release a successor's guard. A candidate
+  restored after commit but before acknowledgement remains withheld until
+  that exact image is acknowledged again. Recovery obligations for other
+  canonical runs survive a claim handoff. Retry
+  the same naming request; a conflicting request is refused. Pending events withhold source
+  bases and check credit and prevent an acceptance request. A definitive
+  `named_root_binding_refused` is surfaced and retires the refused intent;
+  a repair may then name again. Cleanup events remain queued until a live
+  connection to their store can send them. Reporter assignment is durable
+  before transport and rolls back on persistence failure. An assigned attempt
+  keeps its original reporter; transferring it to another session requires a
+  separately persisted successor attempt, which is not implemented here.
+  The journal is bounded and refuses new entries rather than evicting a
+  pending transition or unresolved reconciliation guard.
+  Before allocating a generation or staging a fresh intent, naming validates
+  the held claim's exact work, run, claim, fence and root-execution association.
+  Missing or mismatched associations refuse without creating a pending event;
+  they never borrow the currently focused claim's binding. Shared staging and
+  cleanup enforce the same association boundary. A retry keeps the original
+  association and immutable bytes even when its outcome is uncertain. Legacy
+  cleanup without that association retains an unconfirmed recovery obligation
+  instead of fabricating an unsendable ended event. Allocated generations are
+  never rolled back after an off-lock operation.
+  Retirement makes a confirmed bound generation ineligible for new captures;
+  it is not an Engram ended receipt. Stale replay retirement and a successful
+  current-claim replacement mark the old authorization obsolete. Settled
+  unused history may compact after definitive unbinding or displacement.
+  Another active root for the same claim, an orphan reconciliation, and legacy
+  retirement without a known reason retain their refusal through focus changes
+  and restore; a fresh confirmed name clears the reconciliation guard.
+  Active snapshots, checks, cached checkpoint retries and evaluation/submission
+  references protect their history. A retired receipt never supplies named
+  provenance when a later response omits the named-root projection.
+  An omitted projection is a supported legacy receipt shape, not proof that
+  no root was named. With an exact claimed binding, validated store and
+  authorized reader, the host can recover through the same durable guard,
+  canonical read and acknowledged candidate used for explicit projections.
+  A failed read or uncertain acknowledgement keeps authority withheld.
+  A restored epoch-zero naming history without a canonical explanation also
+  withholds evidence while allowing a valid admitted turn to continue. It
+  requires recovery of the original association or an authorized historical
+  repair; ordinary fresh naming is not proof of that history.
+  Recovery uses the current canonical cut; it does not reconstruct the
+  opening of a replayed begin receipt, which carries no feed cut. That original
+  turn remains without credited source provenance. A later fresh begin can
+  capture its own confirmed basis. A claim without validated store identity
+  is unconfirmed from opening and receives an actionable settings notice;
+  discovering its store later cannot upgrade that turn. Unbound sessions
+  remain valid without claimed source provenance.
+- **Freeing a local slot.** TermAl retains at most 64 named source-root
+  selections. A holder can explicitly clear its claim's name; removing the
+  session that named an entry also removes that local selection while retaining
+  unresolved remote history. Fresh authoritative readback of the same claim removes an obsolete
+  selection. Changing focus does not reclaim an active selection; the bounded
+  reader handles retained claims whose naming session was removed. A full list names
+  the retained entries and these supported actions; it never infers release
+  from the absence of a holder. Removing a local selection does not itself
+  confirm a pending binding or cleanup event. When no supported read can
+  establish an old claim's lifecycle, its state remains unknown for reclamation;
+  the host refuses a new allocation before sending any binding event. The
+  host consumes `named_root_read` for known retired claim/run identities within
+  a bounded maintenance or admission budget. A same-store live connection can
+  resolve a removed naming session without focusing its historical claim.
+  A covering, consistent completed/ended or released response removes the
+  local-removal guard; a still-bound root, unsupported reader, failed or stale
+  read, and uncertain persistence retain it. Exact local state and connection
+  are revalidated after transport. Each store's sweep resumes after the last
+  claim actually attempted, even if that read consumes the deadline; a
+  requested-claim read does not change the sweep cursor. Pending attempts and orphan reconciliation
+  remain protected independently. The reader does not fabricate an end or a
+  receipt, and does not infer release from a missing held-claims row. Broader
+  reclamation of the 64-selection list remains a separate integration.
+- **Sighting provenance.** Source bases carry `source_root_generation` and
+  `source_root_state` together (`named` or `ended`), including sightings in the
+  ordinary workdir after an end. A capture retains its workspace identity;
+  generation changes cannot relabel an earlier check as a check of the new
+  root. Known rename, end or retirement preserves an already admitted confirmed
+  snapshot; pending or unknown authority still withholds evidence. A check whose opening and closing bases differ, including provenance,
+  receives no credit. Engram independently requires the verification and its
+  producer to match the active root's workspace and generation.
+- **How long naming takes.** One budget of 102 seconds on the server covers
+  two source captures, the commit reserve, and one shared 20-second control
+  allowance across held-claim read, retired-claim maintenance, initial status, binding event and any
+  replay readback. Each control phase consumes the allowance left by the
+  previous phase; filesystem capture time does not refresh or consume that
+  allowance. Path validation consumes the overall budget. Captures leave the
+  remaining control allowance and commit reserve available. The MCP bridge
+  waits for the naming budget plus its normal request allowance; Codex's tool
+  timeout is longer still. A pre-transport timeout names nothing. After
+  transport starts, a failure can leave an unknown outcome and retains the
+  exact durable intent for retry. A runtime that ends the caller's wait earlier
+  can report failure while the server still finishes: retry the identical
+  request to reveal the retained confirmed name or settle the pending intent.
+  A different request is refused until the pending transition is settled.
+  Filesystem probes and Engram calls run off the state lock. See
+  [architecture route](../architecture.md) and
+  [delegation lifecycle](./agent-delegation-sessions.md#completed-codex-child-thread-lifecycle).
 - **What the agent and the operator see.**
   - *The checkpoint card* of a bound turn names where it was measured: the
     root and the item, or "session workdir (no worktree named)". The card
@@ -1792,7 +1935,30 @@ own identity, independently of its turn's bound item. A held requested
 item without a named root uses the workdir and receives an explicit notice;
 an omitted requested claim or a malformed held receipt refuses the request.
 The evaluator reads the live tree and keeps the requested claim and root
-name generation for admission and submission checks. The value
+name generation for admission and submission checks. The source-root owner
+also persists one monotone naming-history revision per canonical work and
+authority store, separate from disposable claim receipts. Confirmed naming
+publication or a fresh read establishing later naming advances it; exact
+replays do not. Learning a previously unknown bound receipt during stale
+replay retirement, or a released generation during readback, also advances
+the history before pending uncertainty is cleared. The frontier orders
+canonical runs by the work run's ordinal, and events within one run by their
+feed position and event identity. Root generations order only a claim's
+bindings; a successor claim may use a lower root generation. Equal ordinals
+with different run ids, or equal positions with different events, withhold
+authority. A known binding's Ended cleanup changes lifecycle proof without
+inventing another naming; an unknown Ended event teaches its naming history.
+Persistence failure keeps the candidate and recovery guard unconfirmed.
+Legacy numeric history and evaluator tokens require canonical recovery and
+cannot be silently promoted into the new history epoch. Clear, release,
+removal and compaction never reset history. A
+request freezes this revision before off-lock preparation and revalidates its
+task metadata after resolving the claim. The original token survives evaluator
+persistence and is compared at spawn and first submission, so later naming
+still invalidates an old workdir request after its receipt has compacted.
+Unconfirmed publication and legacy targets without a trusted token refuse a
+fresh admission; another work's naming does not invalidate this one. Unknown
+submission outcomes still retry their immutable saved arguments. The value
 comes from the same function as every basis the turns report. The capture
 runs on its own thread and is abandoned at the freeze budget, so a slow file
 read cannot hold the request past the allowance the bridge gives it; an
@@ -1825,6 +1991,18 @@ agent passes. Under the policy `require_source_freshness`, Engram's
 `done` must also present the evaluated fingerprint; TermAl does not supply
 it at completion yet.
 
+Canonical work identity for the naming fence comes from an independent,
+read-only `work core inspect` on the validated host read target. This read does
+not enable, bind or focus control authority. Missing optional closure-index
+capability still permits evaluation; missing canonical work identity does not
+permit a source-authority token. Sparse show/full receipts need no invented
+identity fields. The pre-read naming snapshot includes whether its shared owner
+was unresolved, so later settlement cannot refresh that request's authority.
+The request reads opening core identity, notes windows, requester-held claims,
+one full contract, selected bodies and optional closure rows, then closing
+show basis and core identity. Exposed legacy identity assertions remain checked
+against the canonical identity, including active-run movement.
+
 **Read budget.** Every tracker call runs through the one-retry lock policy, so
 it can cost two command timeouts plus the retry delay. One function computes
 the worst case of a request (the two task reads, up to seven continuation
@@ -1832,7 +2010,8 @@ pages, the policy read, a shared 60-second criterion-evidence discovery budget,
 and the source capture, bounded by the freeze budget)
 and both sides use it: the MCP bridge adds it to its HTTP allowance, and the
 request path takes it as its own deadline. Core identity reads add no allowance:
-when canonical discovery is eligible, its one absolute 60-second budget starts
+canonical identity is mandatory even when optional closure discovery is unavailable;
+its one absolute 60-second budget starts
 before the opening inspect and covers the intervening task reads, selected
 records, closure pages and final validation. Twenty seconds of that same budget
 is reserved for the closing notes/core bracket; each call funds any lock retry
@@ -2430,3 +2609,12 @@ session_bind(turn_gated) -> turn_evaluate(grant) -> turn_begin(begin) \
 A fixture-only test, direct SQLite inspection, or control card without runtime
 delivery is not an end-to-end proof. Installing a new Engram build or switching
 the live host remains an explicit operator action outside settings validation.
+
+Named-root settlement during turn admission shares the original admission
+absolute deadline across Prepared persistence, canonical reads, recovery and
+Candidate publication. Each RPC recalculates its cap from the lesser of the
+configured call timeout and the remaining total; local writer waits use the
+remaining total. An expired admission cannot acquire a new standalone allowance.
+Standalone naming and cleanup retain their existing entry budgets and carry one
+absolute deadline through their phases. A stopped production writer withholds
+authority without entering synchronous SQLite under the state lock.

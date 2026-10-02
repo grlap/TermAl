@@ -2111,6 +2111,8 @@ fn checkpoint_observations_are_serialized_and_participate_in_idempotency() {
         outcome: EngramExecutionOutcome::Succeeded,
         source_changed: true,
         source_basis: Some(EngramExecutionSourceBasis {
+            source_root_generation: None,
+            source_root_state: None,
             workspace_id: "workspace".to_owned(),
             source_revision: "source-revision".to_owned(),
         }),
@@ -6568,7 +6570,11 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
         record.queued_prompts.front().map(|queued| queued.source),
         Some(QueuedPromptSource::User)
     );
-    let waits: Vec<&str> = inner.test_run_waits.iter().map(|wait| wait.id.as_str()).collect();
+    let waits: Vec<&str> = inner
+        .test_run_waits
+        .iter()
+        .map(|wait| wait.id.as_str())
+        .collect();
     assert_eq!(waits, vec!["test-run-wait-other-session"]);
 }
 

@@ -572,7 +572,7 @@ fn a_run_that_ends_while_its_launcher_is_checked_is_read_as_ended() {
 /// The claimed turn's named source root registered as the host records a
 /// name, under a store the turn's project uses, so a carried check's
 /// settlement can find its generation.
-fn register_named_root(turn: &CheckedTurn, worktree: &FsPath, generation: u64) {
+pub(super) fn register_named_root(turn: &CheckedTurn, worktree: &FsPath, generation: u64) {
     let (root, common_dir_key) = turn.record(|record| {
         let root = record
             .engram
@@ -588,10 +588,6 @@ fn register_named_root(turn: &CheckedTurn, worktree: &FsPath, generation: u64) {
             .clone()
             .expect("the turn is bound")
     });
-    let store = EngramAuthorityStoreKey {
-        database_path: turn.root.join("engram.db"),
-        project_id: "github.com/example/carried".to_owned(),
-    };
     let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
     let project_id = {
         let index = inner
@@ -608,31 +604,92 @@ fn register_named_root(turn: &CheckedTurn, worktree: &FsPath, generation: u64) {
         .iter_mut()
         .find(|project| project.id == project_id)
         .expect("the project exists");
-    project
+    let store = project
         .engram
-        .as_mut()
-        .expect("the project uses Engram")
-        .authority_store_key = Some(store.clone());
-    inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
-        store,
-        work_id: binding.work_id,
+        .as_ref()
+        .unwrap()
+        .authority_store_key
+        .clone()
+        .expect("validated store is installed before opening");
+    let entry = EngramWorkSourceRoot {
+        store: store.clone(),
+        work_id: binding.work_id.clone(),
         short_ref: "w-carried".to_owned(),
-        claim_id: binding.claim_id,
+        claim_id: binding.claim_id.clone(),
         claim_fence: binding.claim_fence,
         root,
         common_dir_key,
         named_by_session: turn.session_id.clone(),
         named_at: "2026-09-29T00:00:00.000Z".to_owned(),
-        generation,
+        generation: generation.max(1),
+    };
+    let target =
+        AppState::engram_binding_target_for_session_shape_locked(&inner, &turn.session_id, true)
+            .unwrap()
+            .unwrap();
+    let event = EngramNamedRootEvent {
+        root: entry.clone(),
+        reporter: turn.session_id.clone(),
+        kind: EngramNamedRootKind::Bound,
+        end_reason: None,
+    };
+    turn.state
+        .stage_engram_root_event_locked(&mut inner, &event, Some(&binding))
+        .unwrap();
+    drop(inner);
+    turn.transport
+        .enable_named_roots(&turn.session_id, &binding);
+    turn.transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .project_id = Some(store.project_id.clone());
+    // The opt-in wire model independently issues the binding receipt and
+    // answers later status/begin reads. A local entry alone is unconfirmed.
+    let receipt = turn
+        .state
+        .send_engram_root_event(&target, &event, DEADLOCK_GUARD)
+        .unwrap();
+    let mut inner = turn.state.inner.lock().unwrap();
+    inner.engram_source_root_generation = inner.engram_source_root_generation.max(entry.generation);
+    inner.engram_work_source_roots = vec![entry.clone()];
+    inner.engram_named_root_journal = vec![EngramNamedRootJournal {
+        store: store.clone(),
+        claim_id: entry.claim_id.clone(),
+        read_binding: Some(binding.clone()),
+        confirmed: Some((event, receipt.receipt)),
+        pending: None,
+        obsolete: false,
+        retirement: None,
+        reconciliation: None,
     }];
+    let index = inner.find_session_index(&turn.session_id).unwrap();
+    let runtime = &mut inner.sessions[index].engram;
+    runtime.named_root = Some(EngramNamedRootState::Bound {
+        workspace_id: entry.root.clone(),
+        generation: entry.generation as i64,
+        named_at: entry.named_at.clone(),
+    });
     let _ = worktree;
+    drop(inner);
+    turn.state
+        .publish_engram_authority(&store, &receipt.owner, DEADLOCK_GUARD)
+        .unwrap();
 }
 
 /// A claimed turn measured in a named linked worktree, registered as named.
 fn named_turn(label: &str) -> (CheckedTurn, PathBuf) {
-    let turn = CheckedTurn::start(label, true);
-    let worktree = name_turn_source_root(&turn);
-    register_named_root(&turn, &worktree, 0);
+    let turn = CheckedTurn::start_with_opening(
+        label,
+        true,
+        None,
+        vec![checkpoint_reply(CHECK_GRANT)],
+        1,
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
     (turn, worktree)
 }
 
@@ -1741,7 +1798,7 @@ fn a_carried_gate_whose_claim_changed_is_refused() {
 #[test]
 fn a_gate_launched_in_one_turn_is_credited_at_the_next_turns_checkpoint() {
     const NEXT_GRANT: &str = "turn-check-grant-next";
-    let turn = CheckedTurn::start_with_turns(
+    let turn = CheckedTurn::start_with_opening(
         "carried-next-turn",
         true,
         None,
@@ -1752,9 +1809,9 @@ fn a_gate_launched_in_one_turn_is_credited_at_the_next_turns_checkpoint() {
             checkpoint_reply(NEXT_GRANT),
         ],
         2,
+        true,
     );
-    let worktree = name_turn_source_root(&turn);
-    register_named_root(&turn, &worktree, 0);
+    let worktree = turn.root.join(".worktrees").join("wt");
     launch_gate(&turn, &worktree, false);
     let first = turn.finish();
     assert!(first.get("verification_evidence").is_none(), "{first:#}");
@@ -1979,7 +2036,7 @@ fn a_carried_gate_is_kept_until_it_can_be_settled_and_told_when_it_never_was() {
     launch_gate(&turn, &worktree, false);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let generation = Some(0);
+    let generation = Some(1);
     turn.record_mut(|record| {
         let (grant, sequence) = {
             let carried = &record.engram.carried_checks[0];
@@ -2133,7 +2190,7 @@ fn a_conflict_found_after_the_settlement_copy_still_refuses_the_gate() {
         let (credited, lines) = engram_take_settled_carried_checks(
             record,
             vec![(copy.check.grant_id.clone(), copy.check.sequence, settled)],
-            &[Some(0)],
+            &[Some(1)],
             chrono::Utc::now(),
         );
         assert!(credited.is_empty());
@@ -2423,7 +2480,7 @@ fn a_run_a_dropped_gate_used_is_never_taken_by_a_later_launch() {
         let (_, lines) = engram_take_settled_carried_checks(
             record,
             vec![(grant, sequence, Err("dropped for the test".to_owned()))],
-            &[Some(0)],
+            &[Some(1)],
             chrono::Utc::now(),
         );
         assert_eq!(lines.len(), 1);
@@ -2743,7 +2800,7 @@ fn a_gate_settled_after_six_hours_is_refused_whatever_its_run_says() {
         let (credited, lines) = engram_take_settled_carried_checks(
             record,
             vec![(copy.check.grant_id.clone(), copy.check.sequence, settled)],
-            &[Some(0)],
+            &[Some(1)],
             chrono::Utc::now() + chrono::Duration::hours(7),
         );
         assert!(credited.is_empty(), "a late settlement is not credited");

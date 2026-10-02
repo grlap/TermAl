@@ -161,6 +161,7 @@ struct AcceptanceEvaluationTargetSeed {
     /// The work's id when the tracker's receipt carried it, with which the
     /// root is looked up again as the evaluator is created.
     work_id: Option<String>,
+    naming_history: Option<EngramWorkNamingToken>,
 }
 
 impl AcceptanceEvaluationTargetSeed {
@@ -178,6 +179,7 @@ impl AcceptanceEvaluationTargetSeed {
             source_fingerprint: self.source_fingerprint,
             source_root: self.source_root,
             source_claim: self.source_claim,
+            naming_history: self.naming_history,
             submission: AcceptanceEvaluationSubmission::None,
         }
     }
@@ -779,6 +781,7 @@ impl AcceptanceEvaluationTask {
             source_root,
             source_claim,
             work_id: self.canonical_work_id().map(str::to_owned),
+            naming_history: None,
         }
     }
 }

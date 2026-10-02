@@ -558,6 +558,7 @@ struct MailboxNotificationDelivery {
 enum TurnDispatch {
     PersistentClaude {
         active_turn_generation: u64,
+        opening_prompt: Option<EngramOpeningPrompt>,
         command: ClaudePromptCommand,
         engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
@@ -567,6 +568,7 @@ enum TurnDispatch {
     },
     PersistentCodex {
         active_turn_generation: u64,
+        opening_prompt: Option<EngramOpeningPrompt>,
         command: CodexPromptCommand,
         service_tier: Result<Option<String>>,
         engram_dispatch_generation: Option<u64>,
@@ -577,6 +579,7 @@ enum TurnDispatch {
     },
     PersistentAcp {
         active_turn_generation: u64,
+        opening_prompt: Option<EngramOpeningPrompt>,
         command: AcpPromptCommand,
         engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,

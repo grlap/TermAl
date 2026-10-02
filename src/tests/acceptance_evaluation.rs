@@ -3,7 +3,7 @@
 // injected runner) and the parent-side request through an injected reader.
 // No test here spawns an Engram process; every store below is a fixture. The
 // `evaluate` receipt and refusal shapes are copied from runs of the real CLI.
-use super::work_visualizer::{fixture, install_store};
+use super::work_visualizer::fixture;
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
@@ -24,6 +24,50 @@ mod evidence_selection;
 
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
+/// These request/submission fixtures begin after a canonical no-event read
+/// has settled. Enabling a store alone no longer establishes naming absence.
+fn install_store(state: &AppState, project: &str, root: &FsPath) {
+    super::work_visualizer::install_store(state, project, root);
+    let store = established_store(state, project).expect("fixture store");
+    acknowledge_fixture_work(state, &store, &evidence_selection::canonical_core_receipt());
+}
+
+fn acknowledge_fixture_work(state: &AppState, store: &EngramAuthorityStoreKey, core: &Value) {
+    let binding = EngramControlWorkBinding {
+        work_id: core["status"]["work"]["work_id"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+        run_id: core["run"]["run_id"].as_str().unwrap().to_owned(),
+        root_execution_id: core["run"]["root_execution_id"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+        claim_id: "fixture-claim".to_owned(),
+        work_revision: 7,
+        claim_fence: 1,
+    };
+    let owner = state
+        .prepare_engram_authority(store, &binding, Duration::from_secs(2))
+        .unwrap();
+    let proof: EngramNamedRootReadResponse = serde_json::from_value(json!({
+        "project_id":store.project_id, "work_id":binding.work_id,
+        "run_id":binding.run_id, "claim_id":binding.claim_id, "root_execution_id":binding.root_execution_id,
+        "run":{"state":"open","generation":1}, "named_root":{"state":"none"}, "latest_event":null,
+        "read_cut":{"feed":{"kind":"run_execution","id":binding.run_id},"position":0}
+    })).unwrap();
+    AppState::learn_engram_authority_locked(
+        &mut state.inner.lock().unwrap(),
+        store,
+        &owner,
+        &proof,
+    )
+    .unwrap();
+    state
+        .publish_engram_authority(store, &owner, Duration::from_secs(2))
+        .unwrap();
+}
+
 fn modes(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_owned()).collect()
 }
@@ -41,6 +85,11 @@ fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAc
         store: None,
         source_fingerprint: None,
         source_root: None,
+        naming_history: Some(EngramWorkNamingToken {
+            epoch: ENGRAM_NAMING_HISTORY_EPOCH,
+            work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
+            revision: 1,
+        }),
         source_claim: None,
         submission: AcceptanceEvaluationSubmission::None,
     }
@@ -291,7 +340,7 @@ fn evaluate_receipt(replayed: bool) -> String {
         "obligations": {"omitted": 0, "open": 0},
         "operation": "evaluate",
         "reminders": ["held by peer-119f70de38059dde74d9fd98"],
-        "work": {"lifecycle": "open", "revision": 1, "short_ref": "w-task", "title": "Ship the route"}
+        "work": {"lifecycle": "open", "revision": 1, "short_ref": "w-task", "work_id": "01a0b6c5-4b4f-7b41-9e32-edc597077acf", "title": "Ship the route"}
     })
     .to_string()
 }
@@ -404,7 +453,9 @@ fn fixture_reader(
             .lock()
             .unwrap()
             .push((connection.clone(), args.to_vec()));
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             policy.clone()
         } else if args.iter().any(|arg| arg == "held") {
             Ok(json!({"items": [], "omitted": 0}))
@@ -2035,8 +2086,11 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
         .unwrap();
 
     let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 4);
-    for (connection, _) in calls.iter().filter(|(_, args)| !args.iter().any(|arg| arg == "held")) {
+    assert_eq!(calls.len(), 7);
+    for (connection, _) in calls
+        .iter()
+        .filter(|(_, args)| !args.iter().any(|arg| arg == "held"))
+    {
         // Reads run as the host reader and never register the requester.
         assert_eq!(connection.session_id, WORK_HOST_READER_SESSION_ID);
         assert!(
@@ -2047,11 +2101,11 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
         assert_eq!(connection.actor_context, None);
         assert_eq!(connection.project_root, project_root(&state, &project));
     }
-    let show_args = calls[0].1.iter().map(String::as_str).collect::<Vec<_>>();
+    let show_args = calls[1].1.iter().map(String::as_str).collect::<Vec<_>>();
     let expected_show_args: Vec<&str> = vec![
         "work",
         "--actor-id",
-        &calls[0].0.actor_id,
+        &calls[1].0.actor_id,
         "--session-id",
         WORK_HOST_READER_SESSION_ID,
         "show",
@@ -2062,13 +2116,16 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
     ];
     assert_eq!(show_args, expected_show_args);
     // The CLI refuses --full together with the evidence windows: a second read.
-    let full_args = calls[1].1.iter().map(String::as_str).collect::<Vec<_>>();
+    let full_args = calls[3].1.iter().map(String::as_str).collect::<Vec<_>>();
     assert_eq!(full_args[..5], expected_show_args[..5]);
     assert_eq!(full_args[5..], ["show", "w-task", "--full", "--json"]);
     // The policy head, never the whole-store `doctor` audit.
     assert!(calls[2].1.iter().any(|arg| arg == "held"));
     assert_eq!(calls[2].0.session_id, parent);
-    assert_eq!(calls[3].1, ["control-policy", "show"]);
+    assert_eq!(calls[6].1, ["control-policy", "show"]);
+    assert!(calls[0].1.iter().any(|arg| arg == "inspect"));
+    assert!(calls[4].1.iter().any(|arg| arg == "--notes"));
+    assert!(calls[5].1.iter().any(|arg| arg == "inspect"));
 
     let wire = serde_json::to_value(&response).unwrap();
     assert_eq!(wire["mode"], "independent_session");
@@ -2491,8 +2548,13 @@ fn acceptance_request_model_requires_explicit_agent_before_any_tracker_read() {
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("requires an explicit agent"));
     assert!(state.inner.lock().unwrap().delegations.is_empty());
-    assert!(acceptance_evaluation_request_tool_definition()["inputSchema"]["properties"]["model"]["description"]
-        .as_str().unwrap().contains("Requires an explicit agent"));
+    assert!(
+        acceptance_evaluation_request_tool_definition()["inputSchema"]["properties"]["model"]
+            ["description"]
+            .as_str()
+            .unwrap()
+            .contains("Requires an explicit agent")
+    );
 }
 
 #[test]
@@ -2508,7 +2570,9 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
         seen.lock()
             .unwrap()
             .push((connection.clone(), args.to_vec()));
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
         } else if args.iter().any(|arg| arg == "held") {
             Ok(json!({"items": [], "omitted": 0}))
@@ -2537,17 +2601,17 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
         .iter()
         .map(|(_, args)| args.iter().skip(5).map(String::as_str).collect::<Vec<_>>())
         .collect::<Vec<_>>();
-    assert_eq!(tails[0], ["show", "w-task", "--notes", "--gates", "--json"]);
+    assert_eq!(tails[1], ["show", "w-task", "--notes", "--gates", "--json"]);
     assert_eq!(
-        tails[1],
+        tails[2],
         [
             "show", "w-task", "--notes", "--gates", "--after", "s1-token", "--json"
         ]
     );
-    assert_eq!(tails[2], ["show", "w-task", "--full", "--json"]);
     assert!(calls[3].1.iter().any(|arg| arg == "held"));
-    assert_eq!(calls[4].1, ["control-policy", "show"]);
-    assert_eq!(calls.len(), 5);
+    assert_eq!(tails[4], ["show", "w-task", "--full", "--json"]);
+    assert_eq!(calls[7].1, ["control-policy", "show"]);
+    assert_eq!(calls.len(), 8);
 
     let wire = serde_json::to_value(&response).unwrap();
     let prompt = wire["delegation"]["prompt"]
@@ -2578,7 +2642,9 @@ fn acceptance_request_reports_the_evidence_behind_a_refused_continuation() {
         seen.lock()
             .unwrap()
             .push((connection.clone(), args.to_vec()));
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
         } else if args.iter().any(|arg| arg == "held") {
             Ok(json!({"items": [], "omitted": 0}))
@@ -2598,42 +2664,20 @@ fn acceptance_request_reports_the_evidence_behind_a_refused_continuation() {
             evaluation_request(Some(Agent::Codex)),
             reader,
         )
-        .unwrap();
-
-    // One continuation was tried and refused; it is not tried again.
-    let continuations = calls
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(_, args)| args.iter().any(|arg| arg == "--after"))
-        .count();
-    assert_eq!(continuations, 1);
-
-    let wire = serde_json::to_value(&response).unwrap();
-    // The bases are the first read's, and so is the evidence.
+        .err()
+        .expect("an issued canonical page refusal cannot admit an evaluator");
+    assert_eq!(response.status, StatusCode::BAD_GATEWAY);
+    assert!(response.message.contains("canonical discovery page"));
     assert_eq!(
-        wire["delegation"]["acceptanceEvaluation"]["evidenceBasis"],
-        42
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, args)| args.iter().any(|arg| arg == "--after"))
+            .count(),
+        1
     );
-    let prompt = wire["delegation"]["prompt"]
-        .as_str()
-        .expect("the evaluator's brief");
-    assert!(
-        prompt.contains("aaaaaaaa1111") && prompt.contains("bbbbbbbb2222"),
-        "{prompt}"
-    );
-    assert!(
-        prompt.contains("  (3 older entries not shown)\n"),
-        "{prompt}"
-    );
-    let notice = wire["notice"].as_str().expect("the omission is reported");
-    assert!(
-        notice.contains(
-            "The evaluator's brief for `w-task` does not carry all of its evidence whole: 3 \
-             entries older than the host's reads were not read."
-        ),
-        "{notice}"
-    );
+    assert!(state.inner.lock().unwrap().delegations.is_empty());
 }
 
 #[test]
@@ -2788,7 +2832,9 @@ fn acceptance_request_refuses_to_spawn_when_the_store_changed_during_the_reads()
     );
     let (rotating, rotated_project, rotated_root) = (state.clone(), project.clone(), root.clone());
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             // The last off-lock read: the operator re-points the project now.
             rotate_store(&rotating, &rotated_project, &rotated_root);
             Ok(policy_receipt(Some(&["independent_session"])))
@@ -4724,7 +4770,9 @@ fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_ref
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["same_session"])))
         } else if args.iter().any(|arg| arg == "held") {
             Ok(json!({"items": [], "omitted": 0}))
@@ -4937,7 +4985,8 @@ fn acceptance_request_refuses_a_tracker_ref_that_is_not_a_safe_argument() {
         )
         .err()
         .expect("a flag-shaped ref is refused");
-    assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("inconsistent work reference"));
     assert!(state.inner.lock().unwrap().delegations.is_empty());
 }
 
@@ -5081,7 +5130,9 @@ fn endless_evidence_reader(
 ) -> std::result::Result<Value, EngramTransportError> {
     move |_, args, _| {
         let call = calls.fetch_add(1, Ordering::SeqCst);
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             // Nothing is spawned, so the test stays process-free.
             Ok(policy_receipt(Some(&["same_session"])))
         } else if args.iter().any(|arg| arg == "held") {
@@ -5134,7 +5185,7 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
             endless_evidence_reader(calls.clone()),
         )
         .unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 2 + 7 + 1 + 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2 + 7 + 1 + 1 + 3);
 }
 
 #[test]
@@ -5142,16 +5193,18 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     let calls = Arc::new(AtomicUsize::new(0));
-    // A clock that advances one step per reading, against a deadline that
-    // funds the reserve and two and a half steps: two pages, never a third.
+    // The clock advances after two issued pages, leaving the mandatory
+    // full/held and closing bracket funded by the same original allowance.
     let start = std::time::Instant::now();
-    let step = Duration::from_secs(20);
-    let ticks = std::cell::Cell::new(0u32);
     let now = || {
-        ticks.set(ticks.get() + 1);
-        start + step * ticks.get()
+        start
+            + if calls.load(Ordering::SeqCst) >= 4 {
+                Duration::from_secs(30)
+            } else {
+                Duration::ZERO
+            }
     };
-    let deadline = start + acceptance_evaluation_paging_reserve() + step * 2 + step / 2;
+    let deadline = start + acceptance_evaluation_paging_reserve() + Duration::from_secs(25);
     let response = state
         .request_acceptance_evaluation_until(
             &parent,
@@ -5162,13 +5215,13 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
         )
         .unwrap();
     // The windowed read, two pages, then the reads that decide the request.
-    assert_eq!(calls.load(Ordering::SeqCst), 1 + 2 + 1 + 1 + 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1 + 2 + 1 + 1 + 1 + 3);
     assert_eq!(
         serde_json::to_value(&response).unwrap()["mode"],
         "same_session"
     );
 
-    // A deadline already spent reads no page at all and still answers.
+    // A spent mandatory identity budget refuses before any tracker read.
     let calls = Arc::new(AtomicUsize::new(0));
     state
         .request_acceptance_evaluation_until(
@@ -5178,8 +5231,9 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
             start,
             std::time::Instant::now,
         )
-        .unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 4);
+        .err()
+        .expect("expired mandatory identity cannot mint a token");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 // ---- one active evaluation per task --------------------------------------
@@ -5262,19 +5316,36 @@ fn acceptance_request_refuses_a_second_active_evaluator_and_names_the_first() {
     );
     assert_eq!(state.inner.lock().unwrap().delegations.len(), 2);
 
-    // Another task is not a duplicate.
+    // Another canonical work has its own acknowledged history and evaluator.
+    let mut other_core = evidence_selection::canonical_core_receipt();
+    other_core["status"]["work"]["short_ref"] = json!("w-other");
+    other_core["status"]["work"]["work_id"] = json!("01a0b6c5-4b4f-7b41-9e32-edc597077ad0");
+    other_core["run"]["work_id"] = other_core["status"]["work"]["work_id"].clone();
+    acknowledge_fixture_work(
+        &state,
+        &established_store(&state, &project).unwrap(),
+        &other_core,
+    );
     let mut other_task = show_receipt(None);
     other_task["status"]["work"]["short_ref"] = json!("w-other");
+    let mut other_full = full_receipt();
+    other_full["work"]["short_ref"] = json!("w-other");
+    let mut request = evaluation_request(Some(Agent::Codex));
+    request.work_ref = "w-other".to_owned();
     state
-        .request_acceptance_evaluation_with_runner(
-            &parent,
-            evaluation_request(Some(Agent::Codex)),
-            fixture_reader(
-                Arc::default(),
-                other_task,
-                Ok(policy_receipt(Some(&["independent_session"]))),
-            ),
-        )
+        .request_acceptance_evaluation_with_runner(&parent, request, |_, args, _| {
+            if args.iter().any(|arg| arg == "inspect") {
+                Ok(other_core.clone())
+            } else if args.iter().any(|arg| arg == "held") {
+                Ok(json!({"items":[],"omitted":0}))
+            } else if args.iter().any(|arg| arg == "--full") {
+                Ok(other_full.clone())
+            } else if args.first().map(String::as_str) == Some("control-policy") {
+                Ok(policy_receipt(Some(&["independent_session"])))
+            } else {
+                Ok(other_task.clone())
+            }
+        })
         .expect("another task has its own evaluator");
     assert_eq!(state.inner.lock().unwrap().delegations.len(), 3);
 }
@@ -5292,12 +5363,14 @@ fn acceptance_requests_racing_for_one_task_spawn_exactly_one_evaluator() {
             let (state, barrier) = (state.clone(), barrier.clone());
             scope.spawn(move || {
                 let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-                    if args.first().map(String::as_str) == Some("control-policy") {
+                    if args.iter().any(|arg| arg == "inspect") {
+                        Ok(evidence_selection::canonical_core_receipt())
+                    } else if args.first().map(String::as_str) == Some("control-policy") {
                         barrier.wait();
                         Ok(policy_receipt(Some(&["independent_session"])))
                     } else if args.iter().any(|arg| arg == "held") {
-            Ok(json!({"items": [], "omitted": 0}))
-        } else if args.iter().any(|arg| arg == "--full") {
+                        Ok(json!({"items": [], "omitted": 0}))
+                    } else if args.iter().any(|arg| arg == "--full") {
                         Ok(full_receipt())
                     } else {
                         Ok(show_receipt(None))
@@ -5481,12 +5554,14 @@ fn acceptance_creation_racing_a_followup_leaves_exactly_one_active_evaluator() {
             let (state, parent, barrier) = (state.clone(), parent.clone(), barrier.clone());
             scope.spawn(move || {
                 let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-                    if args.first().map(String::as_str) == Some("control-policy") {
+                    if args.iter().any(|arg| arg == "inspect") {
+                        Ok(evidence_selection::canonical_core_receipt())
+                    } else if args.first().map(String::as_str) == Some("control-policy") {
                         barrier.wait();
                         Ok(policy_receipt(Some(&["independent_session"])))
                     } else if args.iter().any(|arg| arg == "held") {
-            Ok(json!({"items": [], "omitted": 0}))
-        } else if args.iter().any(|arg| arg == "--full") {
+                        Ok(json!({"items": [], "omitted": 0}))
+                    } else if args.iter().any(|arg| arg == "--full") {
                         Ok(full_receipt())
                     } else {
                         Ok(show_receipt(None))

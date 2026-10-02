@@ -33,6 +33,10 @@ struct PersistedState {
     engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_work_source_roots: Vec<EngramWorkSourceRoot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_named_root_journal: Vec<EngramNamedRootJournal>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_work_naming_history: Vec<EngramWorkNamingHistory>,
     #[serde(
         default,
         skip_serializing_if = "engram_source_root_generation_is_unset"
@@ -93,6 +97,8 @@ impl PersistedState {
                 .engram_retired_work_authority_grants
                 .clone(),
             engram_work_source_roots: inner.engram_work_source_roots.clone(),
+            engram_named_root_journal: inner.engram_named_root_journal.clone(),
+            engram_work_naming_history: inner.engram_work_naming_history.clone(),
             engram_source_root_generation: inner.engram_source_root_generation,
             pending_coordination_scope_deletions: inner
                 .pending_coordination_scope_deletions
@@ -144,6 +150,8 @@ impl PersistedState {
             projects: self.projects.clone(),
             engram_retired_work_authority_grants: self.engram_retired_work_authority_grants.clone(),
             engram_work_source_roots: self.engram_work_source_roots.clone(),
+            engram_named_root_journal: self.engram_named_root_journal.clone(),
+            engram_work_naming_history: self.engram_work_naming_history.clone(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.clone(),
             pending_response_board_project_detachments: self
@@ -195,6 +203,10 @@ impl PersistedState {
             projects: self.projects,
             engram_retired_work_authority_grants: self.engram_retired_work_authority_grants,
             engram_work_source_roots: self.engram_work_source_roots,
+            engram_named_root_journal: self.engram_named_root_journal,
+            engram_work_naming_history: self.engram_work_naming_history,
+            engram_root_read_cursor: BTreeMap::new(),
+            engram_authority_read_cursor: BTreeMap::new(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions,
             pending_response_board_project_detachments: self
@@ -283,7 +295,35 @@ impl PersistedState {
             .engram_work_source_roots
             .iter()
             .map(|entry| entry.generation)
+            .chain(inner.engram_named_root_journal.iter().flat_map(|journal| {
+                journal
+                    .confirmed
+                    .iter()
+                    .map(|(event, _)| event.root.generation)
+                    .chain(journal.pending.iter().map(|event| event.root.generation))
+            }))
             .fold(inner.engram_source_root_generation, u64::max);
+        // Migrate retained confirmed history without giving legacy evaluator
+        // seeds a new token. Their absent request fence remains unavailable.
+        let history_roots = inner
+            .engram_work_source_roots
+            .iter()
+            .cloned()
+            .chain(
+                inner
+                    .engram_named_root_journal
+                    .iter()
+                    .filter_map(|journal| {
+                        journal
+                            .confirmed
+                            .as_ref()
+                            .map(|(event, _)| event.root.clone())
+                    }),
+            )
+            .collect::<Vec<_>>();
+        for root in history_roots {
+            engram_record_naming_history(&mut inner, &root.store, &root.work_id, root.generation);
+        }
         // A work's source root whose naming session did not survive has
         // nobody left who named it (`engram_source_roots.rs`). A session
         // whose row was quarantined still exists: its row is kept, and it may
@@ -294,6 +334,20 @@ impl PersistedState {
             .map(|record| record.session.id.clone())
             .chain(inner.quarantined_persisted_session_ids.iter().cloned())
             .collect::<HashSet<_>>();
+        for root in &inner.engram_work_source_roots {
+            if !session_ids.contains(&root.named_by_session) {
+                engram_queue_root_cleanup(
+                    &mut inner.engram_named_root_journal,
+                    root,
+                    EngramNamedRootEndReason::SessionGoneAtRestore,
+                );
+                if let Some(binding) = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
+                    .and_then(|journal| journal.read_binding.clone())
+                    && let Some(history) = inner.engram_work_naming_history.iter_mut()
+                        .find(|history| history.store == root.store && history.work_id == root.work_id)
+                {engram_retain_recovery_run(&mut history.unresolved_runs, &binding);}
+            }
+        }
         engram_end_orphaned_work_source_roots(&mut inner.engram_work_source_roots, |named_by| {
             session_ids.contains(named_by)
         });

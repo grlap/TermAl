@@ -403,6 +403,57 @@ impl Drop for AcceptanceEvaluationSubmissionInFlight {
     }
 }
 
+/// The requested claim governs evaluator authority independently of the
+/// parent's control binding. Another claim's uncertainty cannot redirect it.
+fn acceptance_evaluation_claim_unconfirmed_locked(
+    inner: &StateInner,
+    parent_session_id: &str,
+    store: &EngramAuthorityStoreKey,
+    claim: Option<&AcceptanceEvaluationSourceClaim>,
+) -> bool {
+    let Some(claim) = claim else {
+        return false;
+    };
+    if engram_authority_work_unresolved(inner, store, &claim.work_id) {
+        return true;
+    }
+    let journal = engram_root_journal(&inner.engram_named_root_journal, store, &claim.claim_id);
+    if journal.is_some_and(|journal| {
+        journal.requires_reconciliation()
+            || journal.retirement == Some(EngramRootRetirement::Displaced)
+    }) {
+        return true;
+    }
+    let bound_requested_claim = inner
+        .find_session_index(parent_session_id)
+        .and_then(|index| inner.sessions[index].engram.work_binding.as_ref())
+        .is_some_and(|binding| {
+            binding.work_id == claim.work_id && binding.claim_id == claim.claim_id
+        });
+    if bound_requested_claim {
+        return engram_root_capture_locked(inner, parent_session_id)
+            == EngramRootCapture::Unconfirmed;
+    }
+    let confirmed = journal
+        .filter(|journal| !journal.obsolete)
+        .and_then(|journal| journal.confirmed.as_ref());
+    match engram_work_source_root_for_claim(
+        &inner.engram_work_source_roots,
+        store,
+        &claim.work_id,
+        &claim.claim_id,
+    ) {
+        Some(selected) => !confirmed.is_some_and(|(event, receipt)| {
+            event.kind == EngramNamedRootKind::Bound
+                && event.root == *selected
+                && event.matches_receipt(receipt)
+        }),
+        // An acknowledged bound root without its local selection cannot
+        // silently become a workdir evaluation for another held claim.
+        None => confirmed.is_some_and(|(event, _)| event.kind == EngramNamedRootKind::Bound),
+    }
+}
+
 /// Runs under the lock that creates the evaluator delegation, so neither a
 /// settings change during the off-lock reads nor a second concurrent request
 /// can slip between this check and the spawn.
@@ -417,6 +468,15 @@ fn acceptance_evaluation_spawn_admission_locked(
             ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
         ));
     }
+    if seed
+        .naming_history
+        .as_ref()
+        .is_none_or(|token| !engram_work_naming_is_current(inner, &seed.store, token))
+    {
+        return Err(ApiError::conflict(
+            "the work's naming history changed or is unavailable; request a fresh acceptance evaluation",
+        ));
+    }
     // The root was looked up before the fingerprint was taken off the lock;
     // a rename, a clear or a first name since then would leave the evaluator
     // judging a tree the work is no longer (or not yet) measured in.
@@ -426,6 +486,7 @@ fn acceptance_evaluation_spawn_admission_locked(
         .map(|root| AcceptanceEvaluationSourceClaim {
             work_id: root.work_id.clone(),
             claim_id: root.claim_id.clone(),
+            named_generation_at_request: None,
         });
     let root_now = engram_evaluation_source_root(
         &inner.engram_work_source_roots,
@@ -446,11 +507,24 @@ fn acceptance_evaluation_spawn_admission_locked(
                 &seed.work_ref,
             )
         });
-    if root_now != seed.source_root || named_since {
+    let displaced = seed.source_claim.as_ref().is_some_and(|claim| {
+        acceptance_evaluation_other_claim_named_since(inner, &seed.store, claim)
+    });
+    if root_now != seed.source_root || named_since || displaced {
         return Err(ApiError::conflict(
             "the work's source root changed while this evaluation was being requested, so its \
              fingerprint may not describe the tree the work is measured in; request the \
              evaluation again",
+        ));
+    }
+    if acceptance_evaluation_claim_unconfirmed_locked(
+        inner,
+        parent_session_id,
+        &seed.store,
+        claim.as_ref().or(seed.source_claim.as_ref()),
+    ) {
+        return Err(ApiError::conflict(
+            "the requested claim's named-root binding became unconfirmed while the evaluator was being requested",
         ));
     }
     refuse_second_active_acceptance_evaluator_locked(inner, &seed.store, &seed.work_ref, None)
@@ -677,7 +751,7 @@ impl AppState {
                 "An evaluator model override requires an explicit agent (Claude or Codex)",
             ));
         }
-        let (target, parent_workdir, parent_agent, defaults, held_connection) = {
+        let (target, parent_workdir, parent_agent, defaults, held_connection, naming_snapshot) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(parent_session_id)
@@ -699,6 +773,20 @@ impl AppState {
                     .and_then(|settings| settings.acceptance_evaluation.clone())
                     .unwrap_or_default(),
                 held_connection,
+                inner
+                    .engram_work_naming_history
+                    .iter()
+                    .map(|history| {
+                        (
+                            history.clone(),
+                            engram_authority_work_unresolved(
+                                &inner,
+                                &history.store,
+                                &history.work_id,
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
             )
         };
         // The ref is caller text: never hand it to a shell shim or to a store
@@ -723,29 +811,31 @@ impl AppState {
             self.acceptance_evidence_discovery_target(parent_session_id, &target.store)?;
         // Start the canonical bracket before the anonymous agent window. One
         // absolute allowance covers both core reads and all intervening reads.
-        let canonical_deadline = discovery
-            .target
-            .as_ref()
-            .map(|_| (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
+        let canonical_deadline =
+            Some((now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
         let discovery_deadline =
             canonical_deadline.map(|limit| limit - ACCEPTANCE_EVIDENCE_CLOSING_RESERVE);
-        if let Some(limit) = discovery_deadline {
-            match read(
-                connection,
-                &core_args,
-                acceptance_criterion_evidence_read_timeout(limit, &now)?,
-            ) {
-                Ok(opening) => discovery.identity = acceptance_core_identity(&opening)?,
-                Err(error) if acceptance_core_inspect_unsupported(&error) => {
-                    discovery.unavailable = "Engram does not support canonical core identity reads";
-                }
-                Err(error) => {
-                    return Err(acceptance_evaluation_transport_error(
-                        "engram work core inspect",
-                        error,
-                    ))
-                }
+        let opening = read(
+            connection,
+            &core_args,
+            acceptance_criterion_evidence_read_timeout(discovery_deadline.expect("identity budget"), &now)?,
+        ).map_err(|error| {
+            if acceptance_core_inspect_unsupported(&error) {
+                ApiError::conflict("canonical work identity and source authority are unavailable: Engram does not support core inspect")
+            } else {
+                acceptance_evaluation_transport_error("engram work core inspect", error)
             }
+        })?;
+        discovery.identity = Some(acceptance_core_identity(&opening)?.ok_or_else(||
+            ApiError::conflict("canonical work identity and source authority are unavailable: core inspect supplied no canonical identity"))?);
+        if discovery
+            .identity
+            .as_ref()
+            .is_some_and(|identity| identity.work_ref != work_ref)
+        {
+            return Err(ApiError::conflict(
+                "core inspect resolved another work; request a fresh acceptance evaluation",
+            ));
         }
         let mut full_args = show_args.clone();
         show_args
@@ -758,12 +848,20 @@ impl AppState {
         };
         let mut show = read(connection, &show_args, task_timeout()?)
             .map_err(|e| acceptance_evaluation_transport_error("engram work show", e))?;
+        if show.get("acceptance_basis").is_none() || show.get("evidence_basis").is_none() {
+            return Err(ApiError::conflict(format!(
+                "`{work_ref}` reports no acceptance and evidence basis: the task has no active evaluated run or applicable acceptance contract"
+            )));
+        }
         let initial_basis = discovery
             .identity
             .as_ref()
             .map(|identity| acceptance_initial_evidence_basis(&show, identity))
             .transpose()?;
-        let mut canonical_window = if initial_basis.is_some() && show.get("notes_window").is_some() {
+        let mut canonical_window = if discovery.target.is_some()
+            && initial_basis.is_some()
+            && show.get("notes_window").is_some()
+        {
             let window = acceptance_notes_window(&show)?;
             if window.newer != 0 {
                 return Err(ApiError::bad_gateway(
@@ -777,6 +875,7 @@ impl AppState {
         let mut notes_cursors = BTreeSet::new();
         // Ordinary legacy paging can shorten the brief. Once canonical
         // identity is acquired, contradictory carriers and page failures abort.
+
         let mut older_pages = Vec::new();
         let mut collected = acceptance_evidence_page_len(&show);
         let mut after = acceptance_evidence_continuation(&show);
@@ -817,7 +916,8 @@ impl AppState {
             page_args.extend(json_flag);
             match read(connection, &page_args, page_timeout) {
                 Ok(page) => {
-                    if let Some(identity) = &discovery.identity {
+                    if canonical_window.is_some() {
+                        let identity = discovery.identity.as_ref().expect("captured core identity");
                         canonical_window = Some(acceptance_compact_notes_carrier(
                             &page,
                             identity,
@@ -861,17 +961,97 @@ impl AppState {
         } else {
             None
         });
+        // The request names its work independently of the control turn's
+        // binding. Read live claims under the requester's own identity;
+        // host-reader identity would list the host reader's claims instead.
+        let mut held_args = vec![
+            "work".to_owned(),
+            "--actor-id".to_owned(),
+            held_connection.actor_id.clone(),
+            "--session-id".to_owned(),
+            held_connection.session_id.clone(),
+        ];
+        if let Some(context) = held_connection.actor_context.as_ref() {
+            held_args.extend(["--actor-context".to_owned(), context.clone()]);
+        }
+        held_args.extend(["core".to_owned(), "held".to_owned(), "--json".to_owned()]);
+        let held: EngramHeldClaims = serde_json::from_value(
+            read(&held_connection, &held_args, task_timeout()?)
+                .map_err(|e| acceptance_evaluation_transport_error("engram work core held", e))?,
+        )
+        .map_err(|e| {
+            ApiError::bad_gateway(format!("engram work core held: invalid receipt: {e}"))
+        })?;
+        // Validate the rows before deciding that the requested work is
+        // unheld. A missing canonical id must not hide a matching short ref
+        // and silently choose the requester's workdir.
+        let mut requested_claim = None;
+        for claim in &held.items {
+            if claim.work_id.trim().is_empty() || claim.claim_id.trim().is_empty() {
+                return Err(ApiError::bad_gateway(
+                    "engram work core held: a claim has no work or claim id",
+                ));
+            }
+            let matches_ref = claim.short_ref == work_ref;
+            let matches_id = discovery
+                .identity
+                .as_ref()
+                .map(|identity| identity.work_id.as_str())
+                .is_some_and(|id| claim.work_id == id);
+            if !matches_ref && !matches_id {
+                continue;
+            }
+            if !matches_ref || !matches_id {
+                return Err(ApiError::bad_gateway(
+                    "engram work core held: requested claim has inconsistent work identity",
+                ));
+            }
+            if requested_claim.is_some() {
+                return Err(ApiError::bad_gateway(
+                    "engram work core held: requested work has more than one claim row",
+                ));
+            }
+            requested_claim = Some(AcceptanceEvaluationSourceClaim {
+                work_id: claim.work_id.clone(),
+                claim_id: claim.claim_id.clone(),
+                named_generation_at_request: None,
+            });
+        }
+        if requested_claim.is_none() && held.omitted > 0 {
+            return Err(ApiError::conflict(
+                "engram work core held omitted claims and did not list the requested work; its source claim cannot be resolved",
+            ));
+        }
+        // The sole authored contract read follows requester claim resolution.
         let full = read(connection, &full_args, task_timeout()?)
             .map_err(|e| acceptance_evaluation_transport_error("engram work show --full", e))?;
         if let Some(identity) = &discovery.identity {
             validate_acceptance_projection_identity(&show["status"]["work"], identity)?;
             acceptance_full_contract_identity(&full, identity)?;
             if show["acceptance_basis"].as_i64() != Some(identity.revision) {
-                return Err(ApiError::conflict("the task revision changed after the opening core identity; request a new evaluation"));
+                return Err(ApiError::conflict(
+                    "the task revision changed after the opening core identity; request a new evaluation",
+                ));
             }
         }
         let mut task = parse_acceptance_evaluation_task(show, full)?;
         task.canonical_identity = discovery.identity.clone();
+        // Preserve the acknowledged naming version captured before any tracker
+        // reads. Canonical identity can come from core inspect on sparse show
+        // receipts; agent-facing projections alone do not establish it.
+        let canonical_work = task.canonical_work_id().ok_or_else(||
+            ApiError::conflict("the requested work's canonical identity is unavailable; request a fresh acceptance evaluation"))?;
+        let captured_history = naming_snapshot.iter().find(|(history, _)| {
+            history.store == target.store && history.work_id == canonical_work
+        });
+        let captured_history = captured_history.filter(|(history, unresolved)| !unresolved && history.epoch == ENGRAM_NAMING_HISTORY_EPOCH).map(|(history, _)| history).ok_or_else(||
+            ApiError::conflict("the requested work has no acknowledged canonical naming history; request a fresh acceptance evaluation"))?;
+        let naming_history = EngramWorkNamingToken {
+            epoch: captured_history.epoch,
+            work_id: canonical_work.to_owned(),
+            revision: captured_history.revision,
+        };
+
         let evidence_deadline = canonical_deadline
             .unwrap_or_else(|| (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
         let body_deadline = discovery_deadline.unwrap_or(evidence_deadline);
@@ -918,7 +1098,9 @@ impl AppState {
                 )
             })?;
             if acceptance_core_identity(&closing)?.as_ref() != Some(identity) {
-                return Err(ApiError::conflict("the task's canonical work/run identity changed during discovery; request a new evaluation"));
+                return Err(ApiError::conflict(
+                    "the task's canonical work/run identity changed during discovery; request a new evaluation",
+                ));
             }
         }
         if canonical_deadline.is_some() || !request.criterion_evidence.is_empty() {
@@ -931,67 +1113,12 @@ impl AppState {
             connection,
         )?;
 
-        // The request names its work independently of the control turn's
-        // binding. Read live claims under the requester's own identity;
-        // host-reader identity would list the host reader's claims instead.
-        let mut held_args = vec![
-            "work".to_owned(),
-            "--actor-id".to_owned(),
-            held_connection.actor_id.clone(),
-            "--session-id".to_owned(),
-            held_connection.session_id.clone(),
-        ];
-        if let Some(context) = held_connection.actor_context.as_ref() {
-            held_args.extend(["--actor-context".to_owned(), context.clone()]);
-        }
-        held_args.extend(["core".to_owned(), "held".to_owned(), "--json".to_owned()]);
-        let held: EngramHeldClaims = serde_json::from_value(
-            read(
-                &held_connection,
-                &held_args,
-                ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
-            )
-            .map_err(|e| acceptance_evaluation_transport_error("engram work core held", e))?,
-        )
-        .map_err(|e| {
-            ApiError::bad_gateway(format!("engram work core held: invalid receipt: {e}"))
-        })?;
-        // Validate the rows before deciding that the requested work is
-        // unheld. A missing canonical id must not hide a matching short ref
-        // and silently choose the requester's workdir.
-        let mut requested_claim = None;
-        for claim in &held.items {
-            if claim.work_id.trim().is_empty() || claim.claim_id.trim().is_empty() {
-                return Err(ApiError::bad_gateway(
-                    "engram work core held: a claim has no work or claim id",
-                ));
-            }
-            let matches_ref = claim.short_ref == task.work_ref;
-            let matches_id = task
-                .canonical_work_id()
-                .is_some_and(|id| claim.work_id == id);
-            if !matches_ref && !matches_id {
-                continue;
-            }
-            if !matches_ref || task.canonical_work_id().is_some() && !matches_id {
-                return Err(ApiError::bad_gateway(
-                    "engram work core held: requested claim has inconsistent work identity",
-                ));
-            }
-            if requested_claim.is_some() {
-                return Err(ApiError::bad_gateway(
-                    "engram work core held: requested work has more than one claim row",
-                ));
-            }
-            requested_claim = Some(AcceptanceEvaluationSourceClaim {
-                work_id: claim.work_id.clone(),
-                claim_id: claim.claim_id.clone(),
-            });
-        }
-        if requested_claim.is_none() && held.omitted > 0 {
-            return Err(ApiError::conflict(
-                "engram work core held omitted claims and did not list the requested work; its source claim cannot be resolved",
-            ));
+        if let Some(claim) = &requested_claim {
+            self.resolve_removed_engram_roots(
+                parent_session_id,
+                Some(&claim.claim_id),
+                deadline.saturating_duration_since(now()),
+            );
         }
 
         let admitted = match read_acceptance_control_policy(connection, &read) {
@@ -1037,6 +1164,21 @@ impl AppState {
         // session is bound to by then.
         let (source_root, source_claim) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
+            if !engram_work_naming_is_current(&inner, &target.store, &naming_history) {
+                return Err(ApiError::conflict(
+                    "the work's naming history changed or is unconfirmed; request a fresh acceptance evaluation",
+                ));
+            }
+            if acceptance_evaluation_claim_unconfirmed_locked(
+                &inner,
+                parent_session_id,
+                &target.store,
+                requested_claim.as_ref(),
+            ) {
+                return Err(ApiError::conflict(
+                    "the requested claim's named-root binding is unconfirmed; settle its transition before requesting acceptance evaluation",
+                ));
+            }
             let source_root = engram_evaluation_source_root(
                 &inner.engram_work_source_roots,
                 &target.store,
@@ -1048,6 +1190,10 @@ impl AppState {
                 .is_none()
                 .then(|| requested_claim.clone())
                 .flatten();
+            let source_claim = source_claim.map(|mut claim| {
+                claim.named_generation_at_request = Some(inner.engram_source_root_generation);
+                claim
+            });
             (source_root, source_claim)
         };
         let place = source_root.as_ref().map_or_else(
@@ -1109,13 +1255,16 @@ impl AppState {
                     },
                     // Creation re-resolves the store and refuses a second
                     // active evaluator of this task, under its own lock.
-                    Some(task.target_seed(
-                        mode,
-                        target.store.clone(),
-                        source_fingerprint,
-                        source_root.clone(),
-                        source_claim,
-                    )),
+                    Some(AcceptanceEvaluationTargetSeed {
+                        naming_history: Some(naming_history.clone()),
+                        ..task.target_seed(
+                            mode,
+                            target.store.clone(),
+                            source_fingerprint,
+                            source_root.clone(),
+                            source_claim,
+                        )
+                    }),
                 )?;
                 let notice = acceptance_evaluation_notices([
                     self.acceptance_evaluation_open_write_notice(
@@ -1154,6 +1303,26 @@ impl AppState {
                     )));
                 }
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
+                {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    if !engram_work_naming_is_current(&inner, &target.store, &naming_history) {
+                        return Err(ApiError::conflict(
+                            "the work's naming history changed or is unconfirmed; request a fresh acceptance evaluation",
+                        ));
+                    }
+                    if source_root.as_ref().is_some_and(|root| {
+                        !root.still_named(&inner.engram_work_source_roots, &target.store)
+                    }) || acceptance_evaluation_claim_unconfirmed_locked(
+                        &inner,
+                        parent_session_id,
+                        &target.store,
+                        requested_claim.as_ref(),
+                    ) {
+                        return Err(ApiError::conflict(
+                            "the requested claim's source root changed during capture; request a fresh acceptance evaluation",
+                        ));
+                    }
+                }
                 let unmeasured = unmeasured(&source_fingerprint);
                 let (brief, cuts) = build_same_session_acceptance_brief_and_cuts(
                     &task,
@@ -1982,12 +2151,12 @@ async fn run_acceptance_evaluation_submit_request(
     request: Result<Json<SubmitAcceptanceEvaluationRequest>, JsonRejection>,
     permits: Arc<tokio::sync::Semaphore>,
     submit: impl FnOnce(
-            AppState,
-            &str,
-            SubmitAcceptanceEvaluationRequest,
-        ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError>
-        + Send
-        + 'static,
+        AppState,
+        &str,
+        SubmitAcceptanceEvaluationRequest,
+    ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError>
+    + Send
+    + 'static,
 ) -> Result<Json<AcceptanceEvaluationSubmitResponse>, ApiError> {
     let Json(request) =
         request.map_err(|e| api_json_rejection("acceptance evaluation submission", e))?;

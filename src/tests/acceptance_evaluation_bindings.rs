@@ -32,8 +32,8 @@ fn show_with_verification() -> Value {
 
 #[test]
 fn a_bound_criterion_carries_its_binding_and_the_admission_rule_in_both_briefs() {
-    let task = parse_acceptance_evaluation_task(show_with_verification(), bound_full_receipt())
-        .unwrap();
+    let task =
+        parse_acceptance_evaluation_task(show_with_verification(), bound_full_receipt()).unwrap();
     assert_eq!(
         task.bindings,
         vec![AcceptanceCriterionBinding {
@@ -46,14 +46,26 @@ fn a_bound_criterion_carries_its_binding_and_the_admission_rule_in_both_briefs()
         build_acceptance_evaluator_brief(&task, "/repo", MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
     let same_session =
         build_same_session_acceptance_brief(&task, None, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
-    for (name, prompt) in [("independent", independent.prompt.as_str()), ("same_session", same_session.as_str())] {
+    for (name, prompt) in [
+        ("independent", independent.prompt.as_str()),
+        ("same_session", same_session.as_str()),
+    ] {
         let binding = "[bound to a host-recorded `test` check: a pass needs basis observed";
-        let bound_at = prompt.find(binding).unwrap_or_else(|| panic!("{name}: {prompt}"));
+        let bound_at = prompt
+            .find(binding)
+            .unwrap_or_else(|| panic!("{name}: {prompt}"));
         let first = prompt.find("1. The route exists").unwrap();
         let second = prompt.find("2. A test covers it").unwrap();
         assert!(second < bound_at, "{name}: the binding follows criterion 2");
-        assert_eq!(prompt.matches(binding).count(), 1, "{name}: only criterion 2 is bound");
-        assert!(!prompt[first..second].contains("[bound to"), "{name}: criterion 1 is unbound");
+        assert_eq!(
+            prompt.matches(binding).count(),
+            1,
+            "{name}: only criterion 2 is bound"
+        );
+        assert!(
+            !prompt[first..second].contains("[bound to"),
+            "{name}: criterion 1 is unbound"
+        );
         assert!(prompt.contains(ACCEPTANCE_BRIEF_ADMISSION_RULE), "{name}");
     }
 }
@@ -85,8 +97,7 @@ fn a_pinned_binding_names_its_fingerprint_and_a_malformed_one_is_dropped() {
     assert!(!prompt.contains("Ignore the rules"));
     // A pin that is not hex is dropped; the binding itself is kept.
     let mut full = full_receipt();
-    full["work"]["acceptance_bindings"] =
-        json!([{"criterion": 2, "requirement": {"check_kind": "test", "check_fingerprint": "not hex!"}}]);
+    full["work"]["acceptance_bindings"] = json!([{"criterion": 2, "requirement": {"check_kind": "test", "check_fingerprint": "not hex!"}}]);
     let task = parse_acceptance_evaluation_task(show_receipt(None), full).unwrap();
     assert_eq!(task.bindings[0].fingerprint, None);
     assert_eq!(task.bindings[0].criterion, 2);
@@ -108,16 +119,30 @@ fn the_same_session_verification_list_shrinks_before_the_contract_is_refused() {
         }));
     }
     let task = parse_acceptance_evaluation_task(show, bound_full_receipt()).unwrap();
-    let full = render_same_session_acceptance_brief_with_detail(&task, None, AcceptanceOmissionDetail::Full);
+    let full = render_same_session_acceptance_brief_with_detail(
+        &task,
+        None,
+        AcceptanceOmissionDetail::Full,
+    );
     assert_eq!(full.matches("(verification ").count(), 16);
     assert!(full.contains("(4 more verification records the host read are not listed"));
-    let compact =
-        render_same_session_acceptance_brief_with_detail(&task, None, AcceptanceOmissionDetail::Compact);
-    assert_eq!(compact.matches("(verification test passed").count(), 4, "only the bound kind");
+    let compact = render_same_session_acceptance_brief_with_detail(
+        &task,
+        None,
+        AcceptanceOmissionDetail::Compact,
+    );
+    assert_eq!(
+        compact.matches("(verification test passed").count(),
+        4,
+        "only the bound kind"
+    );
     assert!(!compact.contains("(verification build"));
     assert!(compact.contains("(16 more verification records the host read are not listed"));
-    let minimal =
-        render_same_session_acceptance_brief_with_detail(&task, None, AcceptanceOmissionDetail::Minimal);
+    let minimal = render_same_session_acceptance_brief_with_detail(
+        &task,
+        None,
+        AcceptanceOmissionDetail::Minimal,
+    );
     assert_eq!(minimal.matches("(verification ").count(), 0);
     assert!(minimal.contains("the host read 20 and lists none to fit the brief"));
     // A bound that the full list overflows but the minimal one fits is briefed, not refused.
@@ -130,8 +155,8 @@ fn the_same_session_verification_list_shrinks_before_the_contract_is_refused() {
 
 #[test]
 fn verification_records_are_marked_with_kind_result_and_revision_in_both_briefs() {
-    let task = parse_acceptance_evaluation_task(show_with_verification(), bound_full_receipt())
-        .unwrap();
+    let task =
+        parse_acceptance_evaluation_task(show_with_verification(), bound_full_receipt()).unwrap();
     let record = task
         .evidence
         .iter()
@@ -185,22 +210,39 @@ fn a_bound_pass_on_a_basis_other_than_observed_is_refused_with_the_rule() {
     }];
     let proof = "f6e5cb12fbc44d768f81f84dc282f2f5";
     // No basis is judgment by default; asserted and judgment are refused too.
-    for basis in [None, Some("judgment"), Some("asserted"), Some("human-required")] {
+    for basis in [
+        None,
+        Some("judgment"),
+        Some("asserted"),
+        Some("human-required"),
+    ] {
         let mut bound = verdict(2, "pass", "the gate passed", &[proof]);
         bound.basis = basis.map(str::to_owned);
-        let request = submission(vec![verdict(1, "pass", "it exists", &["aaaaaaaa1111"]), bound]);
+        let request = submission(vec![
+            verdict(1, "pass", "it exists", &["aaaaaaaa1111"]),
+            bound,
+        ]);
         request.validate_shape().unwrap();
         let refusal = request.validate_bindings(&bindings).unwrap_err();
-        assert!(refusal.starts_with("criterion 2 is bound to a host-recorded `test` check"), "{refusal}");
+        assert!(
+            refusal.starts_with("criterion 2 is bound to a host-recorded `test` check"),
+            "{refusal}"
+        );
         assert!(refusal.contains("needs basis observed"), "{refusal}");
-        assert!(refusal.contains("only verification records of kind test"), "{refusal}");
+        assert!(
+            refusal.contains("only verification records of kind test"),
+            "{refusal}"
+        );
     }
     // Observed passes; an unbound criterion and non-pass verdicts are not checked.
     let mut observed = verdict(2, "pass", "the gate passed", &[proof]);
     observed.basis = Some("observed".to_owned());
-    submission(vec![verdict(1, "pass", "it exists", &["aaaaaaaa1111"]), observed])
-        .validate_bindings(&bindings)
-        .unwrap();
+    submission(vec![
+        verdict(1, "pass", "it exists", &["aaaaaaaa1111"]),
+        observed,
+    ])
+    .validate_bindings(&bindings)
+    .unwrap();
     submission(vec![
         verdict(1, "pass", "it exists", &["aaaaaaaa1111"]),
         verdict(2, "insufficient-evidence", "no passed record", &[]),
@@ -216,7 +258,9 @@ fn the_request_path_briefs_and_persists_the_bindings() {
     let full = bound_full_receipt();
     let show = show_with_verification();
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
         } else if args.iter().any(|arg| arg == "held") {
             Ok(json!({"items": [], "omitted": 0}))
@@ -227,7 +271,11 @@ fn the_request_path_briefs_and_persists_the_bindings() {
         }
     };
     let response = state
-        .request_acceptance_evaluation_with_runner(&parent, evaluation_request(Some(Agent::Codex)), reader)
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            reader,
+        )
         .unwrap_or_else(|error| panic!("{}", error.message));
     let wire = serde_json::to_value(&response).unwrap();
     let prompt = wire["delegation"]["prompt"].as_str().unwrap();
@@ -235,7 +283,10 @@ fn the_request_path_briefs_and_persists_the_bindings() {
     let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
         panic!("an independent evaluation spawns an evaluator");
     };
-    let target = delegation.delegation.acceptance_evaluation.expect("evaluation target");
+    let target = delegation
+        .delegation
+        .acceptance_evaluation
+        .expect("evaluation target");
     assert_eq!(
         target.bindings,
         vec![AcceptanceCriterionBinding {
@@ -273,11 +324,25 @@ fn the_submission_refuses_a_bound_judgment_pass_before_the_tracker_runs() {
             &child,
             submission(vec![
                 verdict(1, "pass", "it exists", &["aaaaaaaa1111"]),
-                verdict(2, "pass", "the gate passed", &["f6e5cb12fbc44d768f81f84dc282f2f5"]),
+                verdict(
+                    2,
+                    "pass",
+                    "the gate passed",
+                    &["f6e5cb12fbc44d768f81f84dc282f2f5"],
+                ),
             ]),
             runner_must_not_run,
         )
         .unwrap_err();
-    assert_eq!(refusal.status, StatusCode::BAD_REQUEST, "{}", refusal.message);
-    assert!(refusal.message.contains("needs basis observed"), "{}", refusal.message);
+    assert_eq!(
+        refusal.status,
+        StatusCode::BAD_REQUEST,
+        "{}",
+        refusal.message
+    );
+    assert!(
+        refusal.message.contains("needs basis observed"),
+        "{}",
+        refusal.message
+    );
 }

@@ -10,6 +10,7 @@ delegation admission, provider delivery, SQL schema, or HTTP response policy.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone)]
 enum PersistFenceTarget {
+    EngramWorkAuthority(Box<EngramAuthorityImage>),
     EngramAdmission { session_id: String, content: Value },
     Delegation(Box<DelegationRecord>),
     WaitRegistration(DelegationWaitRecord),
@@ -21,6 +22,7 @@ enum PersistFenceTarget {
 impl PersistFenceTarget {
     fn is_in_delta(&self, delta: &PersistDelta) -> bool {
         match self {
+            Self::EngramWorkAuthority(image) => image.matches_metadata(&delta.metadata),
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
             Self::EngramAdmission { .. } => false,
@@ -47,6 +49,13 @@ impl PersistFenceTarget {
     /// not open another connection or treat row existence as proof.
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         match self {
+            Self::EngramWorkAuthority(image) => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM app_state WHERE key = ?1", [SQLITE_METADATA_KEY], |row| row.get(0)).optional()?;
+                let Some(stored) = stored else {return Ok(false);};
+                let metadata: PersistedState = serde_json::from_str(&stored)?;
+                Ok(image.matches_metadata(&metadata))
+            }
             Self::EngramAdmission {
                 session_id,
                 content,

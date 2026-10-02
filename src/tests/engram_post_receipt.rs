@@ -437,7 +437,10 @@ fn initial_child_post_begin_persistence_unknown_reports_a_held_delegation_and_se
         // The created delegation is durable: its held first turn is reported
         // with it, never as an error that would invite a duplicate spawn.
         let response = result.expect("a held first turn still returns the delegation");
-        let first_turn = response.first_turn.as_ref().expect("the first turn is reported");
+        let first_turn = response
+            .first_turn
+            .as_ref()
+            .expect("the first turn is reported");
         assert_eq!(first_turn.state, DelegationTurnDeliveryState::Held);
         assert!(
             first_turn
@@ -833,6 +836,7 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
             handoff_prepared_turn_dispatch(
                 &state,
                 TurnDispatch::PersistentAcp {
+                    opening_prompt: None,
                     active_turn_generation,
                     engram_dispatch_generation: generation,
                     runtime_token: token.clone(),
@@ -1143,6 +1147,7 @@ async fn assert_public_failed_stop_restores_admitted_handoff(
     handoff_prepared_turn_dispatch(
         &state,
         TurnDispatch::PersistentAcp {
+            opening_prompt: None,
             active_turn_generation,
             engram_dispatch_generation: generation,
             runtime_token: token.clone(),

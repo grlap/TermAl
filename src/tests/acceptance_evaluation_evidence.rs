@@ -64,7 +64,11 @@ fn assert_nullable_catalog_expiry(single_page: bool, initial_null: bool, page_nu
             }
         },
     );
-    assert!(result.is_ok(), "nullable catalog expiry: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "nullable catalog expiry: {:?}",
+        result.err()
+    );
     assert_eq!(
         pages.load(std::sync::atomic::Ordering::SeqCst),
         usize::from(!single_page)
@@ -467,8 +471,9 @@ fn criterion_evidence_request_refuses_crossed_core_brackets() {
                 Ok(json!({"work_ref":"w-task", "note":{"locator":"cccccccccccccccccccccccccccccccc",
                     "family":"notes", "summary":"Captured proof before replacement"}}))
             } else if args.iter().any(|arg| arg == "--full") { Ok(full.clone()) }
+            else if args.iter().any(|arg| arg == "held") { Ok(json!({"items":[], "omitted":0})) }
             else {
-                assert!(!args.iter().any(|arg| arg == "held"), "{change}: no admission after a crossed bracket");
+                assert!(!args.iter().any(|arg| arg == "control-policy"), "{change}: no evaluator admission after a crossed bracket");
                 let mut receipt = show.clone();
                 if change == "cut" && exact.load(std::sync::atomic::Ordering::SeqCst) != 0 {
                     receipt["evidence_basis"] = json!(43);
@@ -527,8 +532,10 @@ fn criterion_evidence_request_closing_core_spends_the_original_deadline() {
                     Ok(canonical_core_receipt())
                 } else if args.iter().any(|arg| arg == "--full") {
                     Ok(full.clone())
+                } else if args.iter().any(|arg| arg == "held") {
+                    Ok(json!({"items":[], "omitted":0}))
                 } else {
-                    assert!(!args.iter().any(|arg| arg == "held"));
+                    assert!(!args.iter().any(|arg| arg == "control-policy"));
                     Ok(show.clone())
                 }
             },
@@ -685,7 +692,10 @@ fn criterion_evidence_request_legacy_and_absent_identity_are_explicitly_unavaila
     for absence in ["legacy", "no_active_run", "unsupported", "malformed"] {
         let (state, project, parent, root) = fixture();
         install_store(&state, &project, &root);
-        let (show, full, _) = canonical_binding_receipts();
+        let (mut show, full, _) = canonical_binding_receipts();
+        if absence == "no_active_run" {
+            show.as_object_mut().unwrap().remove("evidence_basis");
+        }
         let transport = install_binding_evidence_transport(&state, &parent, vec![]);
         let response = state.request_acceptance_evaluation_with_runner(
             &parent,
@@ -704,7 +714,8 @@ fn criterion_evidence_request_legacy_and_absent_identity_are_explicitly_unavaila
                     }
                     if absence == "no_active_run" {
                         core["status"]["work"]["active_run_id"] = Value::Null;
-                        core["run"] = Value::Null;
+                        // Faithful core keeps the latest same-work historical run.
+                        // It must never be adopted as the active run.
                     } else if absence == "malformed" {
                         return Ok(json!({}));
                     }
@@ -725,18 +736,17 @@ fn criterion_evidence_request_legacy_and_absent_identity_are_explicitly_unavaila
             assert_eq!(error.status, StatusCode::BAD_GATEWAY);
             assert!(error.message.contains("malformed work/run identity"));
         } else {
-            let wire = serde_json::to_value(response.unwrap()).unwrap();
+            let error = response
+                .err()
+                .expect("missing source identity or active evaluation run cannot mint a token");
+            assert_eq!(error.status, StatusCode::CONFLICT, "{absence}: {error:?}");
             assert!(
-                wire["criterionEvidence"][0]["association"]
-                    .as_str()
-                    .unwrap()
-                    .contains("unavailable")
-            );
-            assert!(
-                wire["criterionEvidence"][0]["locators"]
-                    .as_array()
-                    .unwrap()
-                    .is_empty()
+                error.message.contains(if absence == "no_active_run" {
+                    "no acceptance and evidence basis"
+                } else {
+                    "canonical work identity and source authority are unavailable"
+                }),
+                "{absence}: {error:?}"
             );
         }
         assert!(transport.requests.lock().unwrap().is_empty());
@@ -934,8 +944,9 @@ fn criterion_evidence_request_refuses_wrong_or_partial_records_and_changed_basis
                 }
                 Ok(receipt)
             } else if args.iter().any(|arg| arg == "inspect") { Ok(canonical_core_receipt()) } else if args.iter().any(|arg| arg == "--full") { Ok(full_receipt()) }
+            else if args.iter().any(|arg| arg == "held") { Ok(json!({"items":[], "omitted":0})) }
             else {
-                assert!(!args.iter().any(|arg| arg == "held"), "no admission reads after invalid proof");
+                assert!(!args.iter().any(|arg| arg == "control-policy"), "no evaluator admission reads after invalid proof");
                 let mut show = show_receipt(Some("same_session"));
                 if exact_read.load(std::sync::atomic::Ordering::SeqCst) != 0 {
                     match failure {
@@ -952,8 +963,10 @@ fn criterion_evidence_request_refuses_wrong_or_partial_records_and_changed_basis
         }).err().unwrap();
         let (status, reason) = match failure {
             "wrong_work" => (StatusCode::BAD_GATEWAY, "belongs to another task"),
-            "changed_cut" | "changed_revision" | "changed_ref" | "changed_run"
-            | "changed_work_id" => (
+            "changed_ref" | "changed_run" | "changed_work_id" => {
+                (StatusCode::CONFLICT, "canonical work/run identity changed")
+            }
+            "changed_cut" | "changed_revision" => (
                 StatusCode::CONFLICT,
                 "changed while criterion evidence was read",
             ),
@@ -1041,7 +1054,7 @@ fn install_binding_evidence_transport(
 
 // Faithful host-core shape at the pinned producer: identities are on core
 // inspect, never injected into the safe agent show projections.
-fn canonical_core_receipt() -> Value {
+pub(super) fn canonical_core_receipt() -> Value {
     json!({"status":{"work":{"short_ref":"w-task", "revision":7,
         "work_id":"01a0b6c5-4b4f-7b41-9e32-edc597077acf",
         "active_run_id":"01a0b6c5-4b4f-7b41-9e32-edd7dea8b369"}},
@@ -1222,8 +1235,10 @@ fn criterion_evidence_request_refuses_changed_canonical_basis_and_malformed_clos
                         Ok(canonical_core_receipt())
                     } else if args.iter().any(|arg| arg == "--full") {
                         Ok(full.clone())
+                    } else if args.iter().any(|arg| arg == "held") {
+                        Ok(json!({"items":[], "omitted":0}))
                     } else {
-                        assert!(!args.iter().any(|arg| arg == "held"));
+                        assert!(!args.iter().any(|arg| arg == "control-policy"));
                         Ok(show.clone())
                     }
                 },
@@ -1283,12 +1298,12 @@ fn criterion_evidence_request_pins_all_closure_pages_before_admission() {
                 } else if args.iter().any(|arg| arg == "--full") {
                     Ok(full.clone())
                 } else if args.iter().any(|arg| arg == "held") {
-                    assert!(
-                        !changed_cut,
-                        "a partial/moving index must not reach admission"
-                    );
                     Ok(json!({"items": [], "omitted": 0}))
                 } else if args.first().map(String::as_str) == Some("control-policy") {
+                    assert!(
+                        !changed_cut,
+                        "a moving index cannot reach evaluator admission"
+                    );
                     Ok(policy_receipt(Some(&["same_session"])))
                 } else {
                     Ok(show.clone())
@@ -1794,11 +1809,13 @@ fn criterion_evidence_page_limits_refuse_before_admission() {
                 evaluation_request(None),
                 |_, args, _| {
                     assert!(
-                        !args.iter().any(|arg| arg == "held"),
-                        "no admission after an invalid index"
+                        !args.iter().any(|arg| arg == "control-policy"),
+                        "no evaluator admission after an invalid index"
                     );
                     if args.iter().any(|arg| arg == "inspect") {
                         Ok(canonical_core_receipt())
+                    } else if args.iter().any(|arg| arg == "held") {
+                        Ok(json!({"items":[],"omitted":0}))
                     } else if args.iter().any(|arg| arg == "--full") {
                         Ok(full.clone())
                     } else {

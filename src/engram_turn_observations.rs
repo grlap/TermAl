@@ -92,6 +92,8 @@ fn engram_turn_end_basis(
     };
     let (sealed_root, revision) = sealed.filter(|(sealed_root, _)| sealed_root == root)?;
     engram_named_root_absent(root).then(|| EngramExecutionSourceBasis {
+        source_root_generation: None,
+        source_root_state: None,
         workspace_id: sealed_root.clone(),
         source_revision: revision.clone(),
     })
@@ -146,10 +148,7 @@ fn engram_prepared_evaluate_requests_mutation(
 
 /// Whether `request`, an evaluate issued for `intent`, requested
 /// `mutate_local`; `None` for any other request, or one for another intent.
-fn engram_evaluate_requests_mutation(
-    request: &EngramControlRequest,
-    intent: &str,
-) -> Option<bool> {
+fn engram_evaluate_requests_mutation(request: &EngramControlRequest, intent: &str) -> Option<bool> {
     engram_evaluate_requested_effects(request, intent).map(|requested_effects| {
         requested_effects
             .iter()
@@ -182,9 +181,8 @@ fn engram_evaluate_requested_effects<'a>(
 /// tracking is not consulted, because the watcher credits the turn with any
 /// write under the session's workdir, by any writer and in a nested worktree
 /// too (tm-97wp). The tracking, a debounced hint, decides alone only when the
-/// closing basis is missing. A turn whose begin-time basis is missing but
-/// whose closing basis exists cannot be cleared by the comparison and counts
-/// as changed under a mutation grant. A changed source is
+/// either comparison basis is missing. A missing opening basis withholds
+/// comparison evidence; it does not itself establish a mutation. A changed source is
 /// reported with the `mutate_local` effect Engram requires for it, which
 /// must be one of the grant's requested effects; a turn that changed source
 /// under a grant that mediates no local mutation is withheld rather than
@@ -207,6 +205,12 @@ fn engram_turn_execution_observation(
     end_basis: Option<EngramExecutionSourceBasis>,
     reported_revision: Option<String>,
 ) -> Option<EngramExecutionObservationInput> {
+    let end_basis =
+        if reported_revision.is_none() && record.engram.active_turn_start_basis.is_none() {
+            None
+        } else {
+            end_basis
+        };
     // A turn measured in its claim's named source root counts only the
     // watcher's changes inside that root: the watcher attributes every write
     // under the session's workdir, whoever made it and wherever it landed.
@@ -238,12 +242,7 @@ fn engram_turn_execution_observation(
         (Some(_), None) => tracked_change,
         (None, Some(end)) => match &record.engram.active_turn_start_basis {
             Some(start) => start.source_revision != end.source_revision,
-            // Without a begin-time basis the comparison cannot clear the
-            // turn. Under a grant that mediates local mutation the
-            // conservative answer is a change, which opens an obligation a
-            // later check can satisfy; under an observe-only grant a change
-            // could only withhold the report, so the tracking decides.
-            None => mutation_granted || tracked_change,
+            None => tracked_change,
         },
         (None, None) => tracked_change,
     };
@@ -331,6 +330,8 @@ fn engram_bounded_source_basis(
         return None;
     }
     Some(EngramExecutionSourceBasis {
+        source_root_generation: None,
+        source_root_state: None,
         workspace_id,
         source_revision,
     })
@@ -390,7 +391,9 @@ impl AppState {
             &live,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
             budget,
-            move || engram_turn_end_basis(&place, sealed.as_ref(), engram_place_source_basis(&place)),
+            move || {
+                engram_turn_end_basis(&place, sealed.as_ref(), engram_place_source_basis(&place))
+            },
         )
     }
 
@@ -405,8 +408,56 @@ impl AppState {
     /// the next one. The root is kept on the record before the capture
     /// starts, so a rename or a clear during the capture seals it
     /// (`name_engram_source_root`); the capture then sets only the basis.
+    #[cfg(test)]
     fn record_engram_turn_start_basis_off_lock(&self, session_id: &str, grant_id: &str) {
-        let (place, other_roots_read) = {
+        self.record_engram_turn_start_basis_with_projection_off_lock(
+            session_id, grant_id, true, None,
+        );
+    }
+
+    fn record_engram_turn_start_basis_with_projection_off_lock(
+        &self,
+        session_id: &str,
+        grant_id: &str,
+        begin_projection_present: bool,
+        opening_uncertainty: Option<EngramOpeningRootReason>,
+    ) {
+        let capture_deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
+        // An absent registered tree is a lifecycle end, not permission to
+        // measure an ancestor. This filesystem probe stays off the lock.
+        let candidate = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).and_then(|index| {
+                let binding = inner.sessions[index].engram.work_binding.as_ref()?;
+                let store = engram_project_for_session_locked(&inner, session_id)?
+                    .engram
+                    .as_ref()?
+                    .authority_store_key
+                    .as_ref()?;
+                engram_work_source_root_for_claim(
+                    &inner.engram_work_source_roots,
+                    store,
+                    &binding.work_id,
+                    &binding.claim_id,
+                )
+                .cloned()
+            })
+        };
+        let invalid_root = candidate.filter(|root| engram_named_root_absent(&root.root));
+        if let Some(root) = &invalid_root {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            engram_queue_root_cleanup(
+                &mut inner.engram_named_root_journal,
+                root,
+                EngramNamedRootEndReason::RootInvalid,
+            );
+            // The flush persists the complete intent before any transport.
+        }
+        self.flush_engram_root_cleanup(
+            session_id,
+            capture_deadline.saturating_duration_since(std::time::Instant::now()),
+        );
+        let (place, provenance, other_roots_read, turn_generation, runtime_token, claim_identity) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -420,18 +471,27 @@ impl AppState {
             else {
                 return;
             };
-            let turn_root = engram_project_for_session_locked(&inner, session_id)
-                .and_then(|project| project.engram.as_ref())
-                .and_then(|settings| settings.authority_store_key.as_ref())
-                .and_then(|store| {
-                    engram_work_source_root_for_claim(
-                        &inner.engram_work_source_roots,
-                        store,
-                        &binding.work_id,
-                        &binding.claim_id,
-                    )
-                })
-                .map(EngramTurnSourceRoot::from_entry);
+            let turn_root = if record.engram.active_turn_root_capture.is_some() {
+                // Re-entering capture is still the same opening. A recovered
+                // current selection must not replace its admitted workspace.
+                record.engram.active_turn_source_root.clone()
+            } else {
+                engram_project_for_session_locked(&inner, session_id)
+                    .and_then(|project| project.engram.as_ref())
+                    .and_then(|settings| settings.authority_store_key.as_ref())
+                    .and_then(|store| {
+                        engram_work_source_root_for_claim(
+                            &inner.engram_work_source_roots,
+                            store,
+                            &binding.work_id,
+                            &binding.claim_id,
+                        )
+                    })
+                    // A cleanup during admission does not silently move this
+                    // turn to the workdir. Its absent root yields no basis.
+                    .or(invalid_root.as_ref())
+                    .map(EngramTurnSourceRoot::from_entry)
+            };
             // One grant reports to one binding. Other held roots explain a
             // refused or shared-root test, without widening that grant.
             let other_roots_read =
@@ -462,6 +522,15 @@ impl AppState {
                 EngramTurnSourceRoot::place,
             );
             let named = turn_root.is_some();
+            let naming_identity = if record.engram.active_turn_root_capture.is_some() {
+                record.engram.active_turn_naming_identity.clone()
+            } else {
+                engram_project_for_session_locked(&inner, session_id)
+                    .and_then(|project| project.engram.as_ref())
+                    .and_then(|settings| settings.authority_store_key.clone())
+                    .map(|store| (store, binding.work_id.clone()))
+            };
+            inner.sessions[index].engram.active_turn_naming_identity = naming_identity;
             inner.sessions[index].engram.active_turn_source_root = turn_root;
             // The turn-start sweep (`engram_note_turn_started`) ran before the
             // root was known: an open check in it is marked now, as one in
@@ -469,7 +538,55 @@ impl AppState {
             if named {
                 engram_mark_checks_overlapped_by(&mut inner, index, EngramWriterAct::Presence);
             }
-            (place, other_roots_read)
+            // A current canonical read can recover the owner for a later turn,
+            // but cannot reconstruct the opening of an immutable legacy begin
+            // receipt. Nor may a repeated capture upgrade existing uncertainty.
+            let provenance = if opening_uncertainty.is_some()
+                || !begin_projection_present
+                || inner.sessions[index].engram.active_turn_root_capture
+                    == Some(EngramRootCapture::Unconfirmed)
+            {
+                EngramRootCapture::Unconfirmed
+            } else {
+                engram_root_capture_locked(&inner, session_id)
+            };
+            inner.sessions[index].engram.active_turn_root_capture = Some(provenance.clone());
+            let record = &mut inner.sessions[index];
+            if provenance == EngramRootCapture::Unconfirmed {
+                let reason = if record.engram.active_turn_naming_identity.is_none() {
+                    EngramOpeningRootReason::UnverifiedStore
+                } else if let Some(reason) = opening_uncertainty {
+                    reason
+                } else if !begin_projection_present {
+                    EngramOpeningRootReason::MissingProjection
+                } else if record.engram.named_root == Some(EngramNamedRootState::Unknown) {
+                    EngramOpeningRootReason::UnknownProjection
+                } else {
+                    EngramOpeningRootReason::PendingAuthority
+                };
+                // Repeated capture retains the original diagnostic instance
+                // and reason, just as it retains the immutable opening.
+                record.engram.set_opening_diagnostic(
+                    record.active_turn_generation,
+                    grant_id,
+                    reason,
+                );
+            } else {
+                record.engram.opening_diagnostic = None;
+            }
+            let record = &inner.sessions[index];
+            (
+                place,
+                provenance,
+                other_roots_read,
+                record.active_turn_generation,
+                record.runtime.runtime_token(),
+                record
+                    .engram
+                    .work_binding
+                    .as_ref()
+                    .map(|binding| (binding.run_id.clone(), binding.claim_id.clone())),
+            )
         };
         let other_roots = other_roots_read
             .and_then(|(target, roots)| {
@@ -507,12 +624,51 @@ impl AppState {
         {
             during();
         }
-        let basis = self.engram_source_basis_within(&place, REVIEW_FREEZE_TIMEOUT);
+        let basis = self.engram_source_basis_within(
+            &place,
+            capture_deadline.saturating_duration_since(std::time::Instant::now()),
+        );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id)
             && inner.sessions[index].engram.active_grant_id.as_deref() == Some(grant_id)
+            && inner.sessions[index].active_turn_generation == turn_generation
+            && inner.sessions[index].runtime.runtime_token() == runtime_token
+            && inner.sessions[index]
+                .engram
+                .work_binding
+                .as_ref()
+                .map(|binding| (binding.run_id.clone(), binding.claim_id.clone()))
+                == claim_identity
         {
-            inner.sessions[index].engram.active_turn_start_basis = basis;
+            // A confirmed transition changes future admission, while this
+            // exact grant keeps the workspace and provenance it began with.
+            // Validate and install under one lock so a later grant or unknown
+            // authority cannot inherit this off-lock capture.
+            let effective_capture = engram_turn_root_capture_locked(&inner, session_id);
+            let basis = if effective_capture == provenance {
+                provenance.stamp(basis)
+            } else {
+                None
+            };
+            let record = &mut inner.sessions[index];
+            record.engram.active_turn_start_basis = basis;
+            // The canonical transition may have become unresolved during
+            // the off-lock capture. Its withheld opening needs a diagnostic
+            // before handoff too, without changing the admitted identity.
+            if effective_capture == EngramRootCapture::Unconfirmed {
+                // Settle opening eligibility with its basis and diagnostic.
+                // Current authority may recover, but this grant's opening
+                // remains uncertain; its admitted workspace stays separate.
+                record.engram.active_turn_root_capture = Some(EngramRootCapture::Unconfirmed);
+                let reason = if record.engram.named_root == Some(EngramNamedRootState::Unknown) {
+                    EngramOpeningRootReason::UnknownProjection
+                } else {
+                    EngramOpeningRootReason::PendingAuthority
+                };
+                record
+                    .engram
+                    .set_opening_diagnostic(turn_generation, grant_id, reason);
+            }
         }
     }
 
@@ -678,7 +834,10 @@ impl Drop for TestEngramTurnReportGateControl {
 }
 
 #[cfg(test)]
-fn test_engram_turn_report_gate_key(state: &AppState, session_id: &str) -> TestEngramTurnReportGateKey {
+fn test_engram_turn_report_gate_key(
+    state: &AppState,
+    session_id: &str,
+) -> TestEngramTurnReportGateKey {
     (Arc::as_ptr(&state.inner) as usize, session_id.to_owned())
 }
 

@@ -23,18 +23,24 @@ fn acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused() 
             }
             let token = format!("captured-cursor:{}", "x".repeat(8_000));
             let mut show = show_receipt(None);
-            show["notes"] = json!((0..110).map(|index| {
-                let mut note = evidence_note(index, "older proof");
-                note["locator"] = json!(format!("{index:064x}"));
-                note
-            }).collect::<Vec<_>>());
+            show["notes"] = json!(
+                (0..110)
+                    .map(|index| {
+                        let mut note = evidence_note(index, "older proof");
+                        note["locator"] = json!(format!("{index:064x}"));
+                        note
+                    })
+                    .collect::<Vec<_>>()
+            );
             if with_continuation {
                 show["notes_omitted"] = json!(7);
                 show["notes_window"] = json!({"older": 7, "after": token,
                     "read_cut": {"project_position": 42}});
             }
             let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-                if args.first().map(String::as_str) == Some("control-policy") {
+                if args.iter().any(|arg| arg == "inspect") {
+                    Ok(evidence_selection::canonical_core_receipt())
+                } else if args.first().map(String::as_str) == Some("control-policy") {
                     Ok(policy_receipt(Some(&[mode])))
                 } else if args.iter().any(|arg| arg == "held") {
                     Ok(json!({"items": [], "omitted": 0}))
@@ -44,11 +50,21 @@ fn acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused() 
                     Ok(show.clone())
                 }
             };
-            let wire = serde_json::to_value(state
-                .request_acceptance_evaluation_with_runner(
-                    &parent, evaluation_request(Some(Agent::Codex)), reader)
-                .unwrap_or_else(|error| panic!("{mode}, continuation={with_continuation}: {}", error.message)))
-                .unwrap();
+            let wire = serde_json::to_value(
+                state
+                    .request_acceptance_evaluation_with_runner(
+                        &parent,
+                        evaluation_request(Some(Agent::Codex)),
+                        reader,
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "{mode}, continuation={with_continuation}: {}",
+                            error.message
+                        )
+                    }),
+            )
+            .unwrap();
             let prompt = if mode == "same_session" {
                 wire["brief"].as_str().unwrap()
             } else {
@@ -58,19 +74,28 @@ fn acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused() 
             assert!(prompt.contains(&criterion));
             assert!(prompt.contains("second criterion stays whole"));
             assert!(prompt.contains("not shown to fit the brief"));
-            assert!(!prompt.contains(&"x".repeat(100)), "no partial continuation is usable");
+            assert!(
+                !prompt.contains(&"x".repeat(100)),
+                "no partial continuation is usable"
+            );
             let omitted = &wire["evidenceOmissions"];
             let left_out = &omitted["leftOut"];
             assert!(left_out["count"].as_u64().unwrap() >= 70);
             assert_eq!(left_out["locators"].as_array().unwrap().len(), 64);
-            assert_eq!(left_out["locators"][63], format!("{:064x}", left_out["count"].as_u64().unwrap() - 1));
+            assert_eq!(
+                left_out["locators"][63],
+                format!("{:064x}", left_out["count"].as_u64().unwrap() - 1)
+            );
             if with_continuation {
                 assert_eq!(omitted["unread"]["continuation"], token);
                 assert_eq!(omitted["unread"]["continuationOmitted"], false);
                 assert_eq!(omitted["unread"]["readCut"]["project_position"], 42);
                 assert_eq!(omitted["unread"]["reason"], "entry_limit");
             }
-            assert_eq!(compact_acceptance_evaluation_request_result(&wire)["evidenceOmissions"], *omitted);
+            assert_eq!(
+                compact_acceptance_evaluation_request_result(&wire)["evidenceOmissions"],
+                *omitted
+            );
         }
     }
 }
@@ -82,16 +107,18 @@ fn acceptance_omissions_entry_limit_exposes_older_only_proof_to_the_requester() 
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     let mut show = show_receipt(None);
-    show["notes"] = json!((0..110)
-        .map(|index| evidence_note(
-            index,
-            if index == 0 {
-                "ONLY PROOF of criterion 1"
-            } else {
-                "unrelated newer note"
-            }
-        ))
-        .collect::<Vec<_>>());
+    show["notes"] = json!(
+        (0..110)
+            .map(|index| evidence_note(
+                index,
+                if index == 0 {
+                    "ONLY PROOF of criterion 1"
+                } else {
+                    "unrelated newer note"
+                }
+            ))
+            .collect::<Vec<_>>()
+    );
     show["notes_omitted"] = json!(7);
     show["notes_window"] = json!({"after": "older-cut-token", "older": 7,
         "read_cut": {"project_position": 42, "observed_at": "2026-09-30T22:00:00Z"}});
@@ -132,12 +159,14 @@ fn acceptance_omissions_byte_limit_reports_known_locators_without_changing_verdi
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     let mut show = show_receipt(None);
-    show["notes"] = json!((0..3)
-        .map(|index| evidence_note(
-            index,
-            &format!("{} criterion {} only proof", "x".repeat(40_000), index + 1)
-        ))
-        .collect::<Vec<_>>());
+    show["notes"] = json!(
+        (0..3)
+            .map(|index| evidence_note(
+                index,
+                &format!("{} criterion {} only proof", "x".repeat(40_000), index + 1)
+            ))
+            .collect::<Vec<_>>()
+    );
     let response = state
         .request_acceptance_evaluation_with_runner(
             &parent,
@@ -168,16 +197,15 @@ fn acceptance_omissions_page_limit_and_time_budget_keep_the_last_read_cut() {
         install_store(&state, &project, &root);
         let calls = Arc::new(AtomicUsize::new(0));
         let start = std::time::Instant::now();
-        let ticks = std::cell::Cell::new(0u32);
         let now = || {
-            ticks.set(ticks.get() + 1);
-            start + Duration::from_secs(20) * ticks.get()
+            start
+                + if timed && calls.load(Ordering::SeqCst) >= 4 {
+                    Duration::from_secs(30)
+                } else {
+                    Duration::ZERO
+                }
         };
-        let deadline = if timed {
-            start + acceptance_evaluation_paging_reserve() + Duration::from_secs(50)
-        } else {
-            start + Duration::from_secs(10_000)
-        };
+        let deadline = start + acceptance_evaluation_paging_reserve() + Duration::from_secs(25);
         let response = state
             .request_acceptance_evaluation_until(
                 &parent,
@@ -197,9 +225,9 @@ fn acceptance_omissions_page_limit_and_time_budget_keep_the_last_read_cut() {
         );
         assert_eq!(
             unread["continuation"],
-            if timed { "token-2" } else { "token-7" }
+            if timed { "token-3" } else { "token-8" }
         );
-        assert_eq!(calls.load(Ordering::SeqCst), if timed { 6 } else { 11 });
+        assert_eq!(calls.load(Ordering::SeqCst), if timed { 9 } else { 14 });
     }
 }
 
@@ -214,7 +242,9 @@ fn acceptance_omissions_failed_second_page_preserves_the_unread_locator_boundary
     let pages = Arc::new(AtomicUsize::new(0));
     let reads = pages.clone();
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-        if args.first().map(String::as_str) == Some("control-policy") {
+        if args.iter().any(|arg| arg == "inspect") {
+            Ok(evidence_selection::canonical_core_receipt())
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
         } else if args.iter().any(|arg| arg == "held") {
             Ok(json!({"items": [], "omitted": 0}))
@@ -238,20 +268,12 @@ fn acceptance_omissions_failed_second_page_preserves_the_unread_locator_boundary
             evaluation_request(Some(Agent::Codex)),
             reader,
         )
-        .unwrap();
-    let wire = serde_json::to_value(response).unwrap();
-    let unread = &wire["evidenceOmissions"]["unread"];
-    assert_eq!(unread["count"], 4);
-    assert_eq!(unread["continuation"], "second-token");
-    assert_eq!(unread["readCut"]["project_position"], 42);
-    assert_eq!(unread["reason"], "transport_failure");
-    assert_eq!(unread["locatorsKnown"], false);
+        .err()
+        .expect("an issued page failure refuses the canonical source capture");
+    assert_eq!(response.status, StatusCode::BAD_GATEWAY);
+    assert!(response.message.contains("cut expired"));
     assert_eq!(pages.load(Ordering::SeqCst), 2);
-    let prompt = wire["delegation"]["prompt"].as_str().unwrap();
-    assert!(prompt.contains("second-token") && prompt.contains("transport_failure"));
-    assert!(prompt.contains("individual unread locators are unknown"));
-    assert!(prompt.contains("scattered older proof"));
-    assert!(wire["notice"].as_str().unwrap().contains("second-token"));
+    assert!(state.inner.lock().unwrap().delegations.is_empty());
 }
 
 #[test]
@@ -260,9 +282,11 @@ fn acceptance_omissions_missing_or_oversized_continuation_is_explicit() {
         let (state, project, parent, root) = fixture();
         install_store(&state, &project, &root);
         let mut show = show_receipt(None);
-        show["notes"] = json!((0..40)
-            .map(|i| evidence_note(i, "newer context"))
-            .collect::<Vec<_>>());
+        show["notes"] = json!(
+            (0..40)
+                .map(|i| evidence_note(i, "newer context"))
+                .collect::<Vec<_>>()
+        );
         show["notes_omitted"] = json!(1);
         show["notes_window"] = json!({"older": 1, "after": if oversized {
             Some("x".repeat(MAX_ACCEPTANCE_CONTINUATION_BYTES + 1)) } else { None }});
@@ -316,7 +340,9 @@ fn acceptance_omissions_final_page_without_window_drops_the_consumed_boundary() 
             "read_cut": {"project_position": 42}});
         first["notes_omitted"] = json!(5);
         let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-            if args.first().map(String::as_str) == Some("control-policy") {
+            if args.iter().any(|arg| arg == "inspect") {
+                Ok(evidence_selection::canonical_core_receipt())
+            } else if args.first().map(String::as_str) == Some("control-policy") {
                 Ok(policy_receipt(Some(&["independent_session"])))
             } else if args.iter().any(|arg| arg == "held") {
                 Ok(json!({"items": [], "omitted": 0}))

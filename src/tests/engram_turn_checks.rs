@@ -515,6 +515,8 @@ fn only_a_success_the_host_cannot_judge_is_withheld() {
             basis: EngramExecutionSourceBasis {
                 workspace_id: "C:/w".to_owned(),
                 source_revision: "revision".to_owned(),
+                source_root_generation: None,
+                source_root_state: None,
             },
             toolchain: None,
             ran_successfully,
@@ -603,6 +605,8 @@ fn a_check_is_labelled_with_the_toolchain_it_captured_as_it_started() {
 fn engram_ready_basis_capture() -> Arc<EngramBasisCapture> {
     let capture = Arc::new(EngramBasisCapture::default());
     capture.finish(Some(EngramExecutionSourceBasis {
+        source_root_generation: None,
+        source_root_state: None,
         workspace_id: "C:/w".to_owned(),
         source_revision: "revision".to_owned(),
     }));
@@ -837,6 +841,17 @@ impl CheckedTurn {
         checkpoints: Vec<ScriptedEngramControlResponse>,
         turns: usize,
     ) -> Self {
+        Self::start_with_opening(label, claimed, subdirectory, checkpoints, turns, false)
+    }
+
+    fn start_with_opening(
+        label: &str,
+        claimed: bool,
+        subdirectory: Option<&str>,
+        checkpoints: Vec<ScriptedEngramControlResponse>,
+        turns: usize,
+        named: bool,
+    ) -> Self {
         use_toolchain_label(Some(FIXTURE_TOOLCHAIN));
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime(&format!("engram-turn-check-{label}"));
@@ -880,9 +895,56 @@ impl CheckedTurn {
             ]
             .into_iter()
             .chain(checkpoints),
-            (0..turns).map(|_| Ok(binding.clone())).collect::<Vec<_>>(),
+            (0..turns + usize::from(named))
+                .map(|_| Ok(binding.clone()))
+                .collect::<Vec<_>>(),
         );
+        if let Some(binding) = &binding {
+            let mut inner = state.inner.lock().unwrap();
+            inner
+                .projects
+                .iter_mut()
+                .find(|p| p.id == project_id)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .authority_store_key = Some(EngramAuthorityStoreKey {
+                database_path: root.join("engram.db"),
+                project_id: "github.com/example/source-root".to_owned(),
+            });
+            drop(inner);
+            transport.enable_named_roots(&session_id, binding);
+        }
         install_control_only_transport(&state, transport.clone());
+        let turn = Self {
+            state,
+            session_id,
+            root,
+            transport,
+            _runtime_rx: runtime_rx,
+        };
+        let state = &turn.state;
+        let session_id = &turn.session_id;
+        if named {
+            let target = AppState::engram_binding_target_for_session_shape_locked(
+                &state.inner.lock().unwrap(),
+                session_id,
+                true,
+            )
+            .unwrap()
+            .unwrap();
+            // Establish naming before opening through the real bind/read/ACK
+            // path. Fixture setup has one total; control RPC caps are unchanged.
+            state
+                .bind_engram_fixture_setup_off_lock(
+                    target,
+                    std::time::Instant::now() + DEADLOCK_GUARD,
+                )
+                .unwrap();
+            let worktree = name_turn_source_root(&turn);
+            carried_checks::register_named_root(&turn, &worktree, 1);
+        }
         let dispatch = match state
             .dispatch_turn(
                 &session_id,
@@ -902,16 +964,10 @@ impl CheckedTurn {
         };
         deliver_turn_dispatch(&state, dispatch).expect("the begun turn should be delivered");
         assert!(matches!(
-            receive(&runtime_rx, "runtime should receive the prompt"),
+            receive(&turn._runtime_rx, "runtime should receive the prompt"),
             CodexRuntimeCommand::Prompt { .. }
         ));
-        Self {
-            state,
-            session_id,
-            root,
-            transport,
-            _runtime_rx: runtime_rx,
-        }
+        turn
     }
 
     fn recorder(&self) -> SessionRecorder {
@@ -1771,6 +1827,8 @@ fn an_overlap_marked_while_the_checkpoint_waited_is_carried_into_the_report() {
             .expect("a finished check"),
         outcome: EngramExecutionOutcome::Succeeded,
         basis: EngramExecutionSourceBasis {
+            source_root_generation: None,
+            source_root_state: None,
             workspace_id: "C:/w".to_owned(),
             source_revision: "revision".to_owned(),
         },
@@ -2093,6 +2151,8 @@ fn resolved_check(sequence: usize, revision: &str, toolchain: &str) -> EngramRes
         check,
         outcome: EngramExecutionOutcome::Succeeded,
         basis: EngramExecutionSourceBasis {
+            source_root_generation: None,
+            source_root_state: None,
             workspace_id: "C:/w".to_owned(),
             source_revision: revision.to_owned(),
         },
@@ -3323,6 +3383,8 @@ fn checks_under_an_observe_only_grant_do_not_hide_a_change() {
     // its begin-time basis and withheld when the source changed.
     let turn = CheckedTurn::start("observe-only", true);
     let moved = EngramExecutionSourceBasis {
+        source_root_generation: None,
+        source_root_state: None,
         workspace_id: "C:/w".to_owned(),
         source_revision: "moved".to_owned(),
     };
@@ -3885,7 +3947,9 @@ fn name_other_session_source_root(turn: &CheckedTurn, session: &str, root: &FsPa
     )
     .expect("the worktree can be named");
     let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
-    let index = inner.find_session_index(session).expect("the other session");
+    let index = inner
+        .find_session_index(session)
+        .expect("the other session");
     let engram = &mut inner.sessions[index].engram;
     engram.active_grant_id = Some("other-session-grant".to_owned());
     engram.active_turn_source_root = Some(EngramTurnSourceRoot {

@@ -480,8 +480,31 @@ impl StateInner {
     /// SQLite after the move to delta persistence.
     fn record_removed_session(&mut self, session_id: String) {
         if !session_id.is_empty() {
-            // A work's source root this session named has nobody left who
-            // named it; it ends with the session (`engram_source_roots.rs`).
+            let retired_bindings = self.engram_work_source_roots.iter()
+                .filter(|root| root.named_by_session == session_id)
+                .filter_map(|root| engram_root_journal(&self.engram_named_root_journal, &root.store, &root.claim_id)
+                    .and_then(|journal| journal.read_binding.clone()).map(|binding| (root.store.clone(), binding)))
+                .collect::<Vec<_>>();
+            for (store, binding) in retired_bindings {
+                if let Some(history) = self.engram_work_naming_history.iter_mut()
+                    .find(|history| history.store == store && history.work_id == binding.work_id)
+                {
+                    engram_retain_recovery_run(&mut history.unresolved_runs, &binding);
+                }
+            }
+            for root in &self.engram_work_source_roots {
+                if root.named_by_session == session_id {
+                    if let Some(journal) =
+                        self.engram_named_root_journal.iter_mut().find(|journal| {
+                            journal.store == root.store && journal.claim_id == root.claim_id
+                        })
+                    {
+                        journal.retire(EngramRootRetirement::NamingSessionRemoved);
+                    }
+                }
+            }
+            // Live removal revokes local selection only. It is not a restore
+            // observation and supplies no remote Ended event.
             engram_end_orphaned_work_source_roots(&mut self.engram_work_source_roots, |named_by| {
                 named_by != session_id
             });

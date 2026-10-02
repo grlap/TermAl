@@ -951,7 +951,16 @@ fn engram_settle_carried_check(
         }
         None => return Ok(None),
     };
-    let end_basis = engram_spawn_basis_capture(carried.check.target.basis_place(), workers);
+    // Settlement keeps the launch's root identity. The caller separately
+    // rejects a carried check if the live claim no longer names this generation.
+    let provenance = match (start.source_root_generation, start.source_root_state) {
+        (Some(generation), Some(state)) => EngramRootCapture::Recorded {
+            generation, state, workspace_id: start.workspace_id.clone(),
+        },
+        (None, None) => EngramRootCapture::Unnamed,
+        _ => EngramRootCapture::Unconfirmed,
+    };
+    let end_basis = engram_spawn_basis_capture(carried.check.target.basis_place(), workers, provenance);
     let finish = match end_basis.wait_until(deadline) {
         Some(Some(finish)) => finish,
         Some(None) => {

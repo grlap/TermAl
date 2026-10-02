@@ -771,6 +771,10 @@ include!("delegation_mcp_review_freeze.rs");
 include!("review_freeze.rs");
 include!("content_revision.rs");
 include!("engram_source_roots.rs");
+include!("engram_named_root_binding.rs");
+include!("engram_root_authority.rs");
+#[cfg(test)]
+include!("engram_named_root_test_transport.rs");
 include!("bounded_read_process.rs");
 include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");

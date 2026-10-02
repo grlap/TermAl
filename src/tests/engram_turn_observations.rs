@@ -28,6 +28,8 @@ fn a_worktree_root_over_engrams_basis_bound_leaves_the_report_without_a_basis() 
     assert_eq!(
         engram_bounded_source_basis(workdir, FsPath::new(&at_bound), "revision".to_owned()),
         Some(EngramExecutionSourceBasis {
+            source_root_generation: None,
+            source_root_state: None,
             workspace_id: at_bound.clone(),
             source_revision: "revision".to_owned(),
         })
@@ -251,6 +253,32 @@ fn start_mediated_turn_with_script(
         }
         ControlBinding::Unbound => ScriptedEngramControlTransport::new(responses),
     };
+    if matches!(binding, ControlBinding::Claimed) {
+        let work_binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
+        let mut inner = state.inner.lock().unwrap();
+        inner
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project_id)
+            .unwrap()
+            .engram
+            .as_mut()
+            .unwrap()
+            .authority_store_key = Some(EngramAuthorityStoreKey {
+            database_path: root.join("engram.db"),
+            project_id: "github.com/example/source-root".to_owned(),
+        });
+        drop(inner);
+        transport.register_named_root_run(&work_binding);
+        // Lost-checkpoint tests own their status replies, including open grants.
+        transport
+            .named_roots
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .scripted_status = true;
+    }
     install_control_only_transport(&state, transport.clone());
     let created = state
         .create_read_only_delegation(
@@ -589,6 +617,7 @@ fn a_root_session_on_claimed_work_reports_the_source_change_its_turn_made() {
             checkpoint_reply(grant_id),
         ],
     );
+    prepare_confirmed_claimed_opening(&claimed, "root");
     let (state, session_id, root, transport) = (
         &claimed.state,
         &claimed.session_id,
@@ -803,10 +832,8 @@ fn a_turn_without_a_closing_basis_is_judged_by_its_watcher_event() {
 }
 
 #[test]
-fn a_turn_without_a_begin_basis_under_a_mutation_grant_reports_a_change() {
-    // The comparison cannot clear a turn whose begin-time capture failed.
-    // Under a grant that mediates local mutation the conservative answer is
-    // a change, with the closing basis a later check can match.
+fn a_turn_without_a_begin_basis_withholds_comparison_without_inventing_a_change() {
+    // Missing comparison evidence is not evidence of a source mutation.
     let turn = start_mediated_turn(
         "no-begin-basis",
         ChildWorkspace::IsolatedWorktree,
@@ -822,17 +849,11 @@ fn a_turn_without_a_begin_basis_under_a_mutation_grant_reports_a_change() {
     let (_, observation) = turn.observation();
     assert_eq!(observation["outcome"], "succeeded");
     assert_eq!(
-        observation["source_changed"], true,
-        "an unclearable turn counts as changed under a mutation grant"
+        observation["source_changed"], false,
+        "an unavailable opening basis does not invent a source change"
     );
-    assert_eq!(observation["effect"], "mutate_local");
-    assert_eq!(
-        observation["source_basis"]["source_revision"]
-            .as_str()
-            .expect("source revision"),
-        content_revision_of(&turn.child_workdir),
-        "the closing basis is still reported for a later check to match"
-    );
+    assert_eq!(observation["effect"], "observe");
+    assert!(observation.get("source_basis").is_none());
 }
 
 #[test]
@@ -1110,6 +1131,7 @@ fn a_turn_is_judged_by_the_effects_its_own_grant_requested() {
             checkpoint_reply(grant_id),
         ],
     );
+    prepare_confirmed_claimed_opening(&claimed, "replayed-evaluate");
     deliver_turn_dispatch(&claimed.state, claimed.dispatch())
         .expect("an unknown admission retains the prompt");
     assert!(claimed.runtime_rx.try_recv().is_err());
@@ -1540,6 +1562,7 @@ fn name_claimed_root_source_root(
     worktree: &FsPath,
 ) -> EngramSourceRootResponse {
     let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
+    prepare_claimed_root_naming(claimed, label);
     {
         let mut inner = claimed.state.inner.lock().expect("state mutex poisoned");
         for project in &mut inner.projects {
@@ -1574,9 +1597,60 @@ fn name_claimed_root_source_root(
         .expect("the claim's holder names a registered worktree of its repository")
 }
 
+fn prepare_claimed_root_naming(claimed: &ClaimedRoot, label: &str) {
+    let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
+    claimed
+        .transport
+        .enable_named_roots(&claimed.session_id, &binding);
+    claimed.record(|record| {
+        if record.engram.routing_token.is_none() {
+            record.engram.rebind_required = true;
+        }
+        record
+            .engram
+            .routing_token
+            .get_or_insert_with(|| "fixture-root-token".to_owned());
+        record.engram.work_binding.get_or_insert(binding);
+    });
+}
+
+/// Positive observation fixtures model verified settings before admission;
+/// the actual bind/read/ACK and begin path still establishes the opening.
+fn prepare_confirmed_claimed_opening(claimed: &ClaimedRoot, label: &str) {
+    let store = EngramAuthorityStoreKey {
+        database_path: claimed.root.join("engram.db"),
+        project_id: "github.com/example/source-root".to_owned(),
+    };
+    let mut inner = claimed.state.inner.lock().unwrap();
+    let project_id = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == claimed.session_id)
+        .unwrap()
+        .session
+        .project_id
+        .clone()
+        .unwrap();
+    inner
+        .projects
+        .iter_mut()
+        .find(|p| p.id == project_id)
+        .unwrap()
+        .engram
+        .as_mut()
+        .unwrap()
+        .authority_store_key = Some(store);
+    drop(inner);
+    let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
+    claimed.transport.register_named_root_run(&binding);
+}
+
 /// The prompt text the root's runtime received.
 fn received_prompt(claimed: &ClaimedRoot) -> String {
-    match receive(&claimed.runtime_rx, "runtime should receive the root prompt") {
+    match receive(
+        &claimed.runtime_rx,
+        "runtime should receive the root prompt",
+    ) {
         CodexRuntimeCommand::Prompt { command, .. } => command.prompt,
         _ => panic!("expected the root's runtime to receive a prompt"),
     }
@@ -1600,7 +1674,10 @@ fn a_turn_on_a_claim_with_a_named_source_root_is_measured_in_that_worktree() {
     let worktree = add_claimed_root_worktree(&claimed.root);
     let named = name_claimed_root_source_root(&claimed, label, &worktree);
     let canonical = fs::canonicalize(&worktree).expect("the worktree should canonicalize");
-    assert_eq!(named.root.as_deref().map(PathBuf::from), Some(canonical.clone()));
+    assert_eq!(
+        named.root.as_deref().map(PathBuf::from),
+        Some(canonical.clone())
+    );
     assert_eq!(named.generation, 1);
     assert_eq!(named.source_revision, Some(content_revision_of(&worktree)));
 
@@ -1608,12 +1685,17 @@ fn a_turn_on_a_claim_with_a_named_source_root_is_measured_in_that_worktree() {
         .expect("the begun root turn should reach the runtime");
     let prompt = received_prompt(&claimed);
     assert!(
-        prompt.contains(&format!("Engram source basis for w-{label}: its named source root")),
+        prompt.contains(&format!(
+            "Engram source basis for w-{label}: its named source root"
+        )),
         "the agent is told where its turns are measured: {prompt}"
     );
     let runtime_token = claimed.runtime_token();
-    fs::write(worktree.join("README.md"), "changed in the named worktree\n")
-        .expect("worktree edit should write");
+    fs::write(
+        worktree.join("README.md"),
+        "changed in the named worktree\n",
+    )
+    .expect("worktree edit should write");
 
     claimed
         .state
@@ -1657,6 +1739,7 @@ fn named_root_turn(label: &str, name_first: bool) -> (ClaimedRoot, PathBuf, Runt
             checkpoint_reply(&grant_id),
         ],
     );
+    prepare_confirmed_claimed_opening(&claimed, label);
     let worktree = add_claimed_root_worktree(&claimed.root);
     if name_first {
         name_claimed_root_source_root(&claimed, label, &worktree);
@@ -1718,7 +1801,11 @@ fn a_root_named_during_a_turn_takes_effect_at_the_next_one() {
     let observation = finish_claimed_turn(&claimed, &runtime_token);
 
     assert_eq!(
-        PathBuf::from(observation["source_basis"]["workspace_id"].as_str().expect("workspace id")),
+        PathBuf::from(
+            observation["source_basis"]["workspace_id"]
+                .as_str()
+                .expect("workspace id")
+        ),
         fs::canonicalize(&claimed.root).expect("the root should canonicalize"),
         "this turn is still measured in the workdir it began with"
     );
@@ -1738,7 +1825,11 @@ fn without_a_closing_basis_a_watcher_event_outside_the_named_root_is_no_change()
     // The watcher saw only a write in the main checkout.
     claimed.record(|record| {
         record.active_turn_file_changes.insert(
-            claimed.root.join("README.md").to_string_lossy().into_owned(),
+            claimed
+                .root
+                .join("README.md")
+                .to_string_lossy()
+                .into_owned(),
             WorkspaceFileChangeKind::Modified,
         );
     });
@@ -1798,7 +1889,11 @@ fn an_edit_in_the_main_checkout_is_no_change_of_a_turn_measured_in_a_named_root(
     fs::write(claimed.root.join("README.md"), "changed in main\n").expect("main edit");
     claimed.record(|record| {
         record.active_turn_file_changes.insert(
-            claimed.root.join("README.md").to_string_lossy().into_owned(),
+            claimed
+                .root
+                .join("README.md")
+                .to_string_lossy()
+                .into_owned(),
             WorkspaceFileChangeKind::Modified,
         );
     });
