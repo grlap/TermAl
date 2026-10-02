@@ -343,6 +343,10 @@ struct EngramTurnCheck {
     /// have tested that change.
     watcher_fence: Option<String>,
     end: Option<EngramTurnCheckEnd>,
+    /// When its end was recorded on the interference clock
+    /// (`engram_claude_interference.rs`): work registered later cannot have
+    /// written under it once it is closed to writes.
+    ended_at: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -1168,13 +1172,12 @@ impl AppState {
             },
         );
         // Outstanding Claude work keeps every place its command was placed,
-        // and what already runs there is fenced (`claude_outstanding_work.rs`).
-        let placed_hazard = if reads_only {
-            None
-        } else {
+        // and what it may have written under there since it was registered is
+        // reconciled with it (`engram_claude_interference.rs`).
+        let placed = !reads_only && record.claude_outstanding.holds(key);
+        if placed {
             record.claude_outstanding.place(key, &worktrees);
-            claude_hazard_scope(record, key)
-        };
+        }
         // A replaced runtime's shell is not the session's: its `cd` moves
         // nothing the session's commands start from.
         if disposition != ClaudeObservationDisposition::Replaced {
@@ -1192,10 +1195,10 @@ impl AppState {
         {
             record.engram.set_pending_source_root_line(line);
         }
-        // Outstanding Claude work whose scope grew fences what already runs
-        // there first, so the checks it reaches keep its cause.
-        if let Some((locations, self_gate)) = placed_hazard {
-            engram_fence_checks_for_claude_work(&mut inner, index, key, &locations, self_gate);
+        // Outstanding Claude work whose scope grew fences what it may overlap
+        // first, so the checks it reaches keep its cause.
+        if placed {
+            engram_reconcile_claude_work(&mut inner, index, &[key.to_owned()]);
         }
         // A carried check of another session is fenced for this command
         // where it may write, unless it only reads.
@@ -1237,11 +1240,13 @@ impl AppState {
             engram_other_writer_in(&inner, index, &engram_path_key(&target.root))
         });
         let provenance = engram_turn_root_capture_locked(&inner, session_id);
-        // Claude work of any other session, live or removed, that may write
-        // in the check's worktree with no verified completion, whatever that
-        // session's status (`claude_outstanding_work.rs`).
-        let other_outstanding = target.as_ref().and_then(|(_, _, target)| {
-            inner.claude_work_restricting_worktree(Some(index), &engram_path_key(&target.root))
+        // Retained Claude work that may overlap the check from its start: the
+        // session's own restricting work, or another or a deleted session's
+        // that may write in its worktree, except the exact call of a
+        // recognised simple full gate for the check it starts
+        // (`engram_claude_interference.rs`).
+        let restricted_by = target.as_ref().and_then(|(_, command, target)| {
+            engram_claude_start_cause(&inner, index, key, command, &engram_path_key(&target.root))
         });
         let record = inner
             .session_mut_by_index(index)
@@ -1338,19 +1343,6 @@ impl AppState {
         let sandbox = record
             .active_codex_sandbox_mode
             .map(|mode| mode.as_cli_value().to_owned());
-        // Claude work that restricts this session (background, subagent or
-        // orphaned work with no verified completion), or another session's
-        // that may write in its worktree, may write under the check
-        // (`claude_outstanding_work.rs`).
-        // A recognised simple full gate's own call is not a writer to the
-        // check it starts (`claude_outstanding_work.rs`).
-        let self_gate = recognised
-            .as_ref()
-            .filter(|command| engram_is_simple_full_launcher(command))
-            .map(|_| key);
-        let restricted_by = claude_session_work_restricts_except(record, self_gate)
-            .then_some(ClaudeHazardCause::OwnSession)
-            .or(other_outstanding);
         let foreign_work = restricted_by.is_some();
         let sequence = record.engram.next_turn_check_sequence;
         record.engram.next_turn_check_sequence += 1;
@@ -1368,6 +1360,7 @@ impl AppState {
             fenced_by_outstanding: restricted_by,
             watcher_fence: None,
             end: None,
+            ended_at: None,
         });
     }
 
@@ -1539,14 +1532,10 @@ impl AppState {
                     worktrees.clone()
                 },
             );
-            let placed_hazard = if reads_only {
-                None
-            } else {
+            let placed = !reads_only && record.claude_outstanding.holds(key);
+            if placed {
                 record.claude_outstanding.place(key, &worktrees);
-                claude_hazard_scope(record, key)
-            };
-            if let Some((locations, self_gate)) = placed_hazard {
-                engram_fence_checks_for_claude_work(&mut inner, index, key, &locations, self_gate);
+                engram_reconcile_claude_work(&mut inner, index, &[key.to_owned()]);
             }
             engram_mark_checks_overlapped_by(
                 &mut inner,
@@ -1666,6 +1655,10 @@ impl AppState {
             .is_some_and(|check| {
                 engram_other_writer_in(&inner, index, &engram_path_key(&check.target.root))
             });
+        // The check ends here and a background gate's is carried or refused
+        // by what fenced it: reconciled first with every retained hazard
+        // (`engram_claude_interference.rs`).
+        engram_reconcile_claude_consumer(&mut inner, index);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -1764,6 +1757,7 @@ impl AppState {
             // The worktree the check ran in, as its opening snapshot was.
             engram_spawn_basis_capture(check.target.basis_place(), &workers, provenance)
         };
+        check.ended_at = Some(engram_interference_tick());
         check.end = Some(EngramTurnCheckEnd {
             completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             exit: exit.unwrap_or(EngramCommandExit::Unknown),

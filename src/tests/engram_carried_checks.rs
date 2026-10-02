@@ -3218,19 +3218,14 @@ fn a_claude_background_gate_carries_and_is_credited_beside_its_own_outstanding_l
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
     start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
-    // Once carried, the gate's own call still does not fence its run, while
-    // the same hazard of any other call would.
-    let root_key = engram_worktree_root(&worktree);
+    // Once carried, the gate's own call still does not fence its run when
+    // it is reconciled again.
     {
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(&turn.session_id).expect("the root");
-        EngramHost::fence_checks_for_claude_work(
-            &mut inner,
-            index,
-            "gate",
-            &[Some(root_key.clone())],
-            true,
-        );
+        let index = inner
+            .find_session_index(&turn.session_id)
+            .expect("the root");
+        EngramHost::reconcile_claude_work(&mut inner, index, &["gate".to_owned()]);
         assert_eq!(inner.sessions[index].engram.carried_checks[0].fence, None);
     }
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
@@ -3405,5 +3400,208 @@ fn another_sessions_background_work_fences_a_carried_gate_already_running_where_
             name: "Test".to_owned(),
         }),
         "the extended hazard stores its own cause"
+    );
+}
+
+/// Runs an ordinary passing test in `worktree` to its end, with both its
+/// snapshots taken.
+fn run_check_in(turn: &CheckedTurn, worktree: &FsPath, key: &str) {
+    let cwd = fs::canonicalize(worktree)
+        .expect("the worktree canonicalizes")
+        .to_string_lossy()
+        .into_owned();
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started_in(key, SIZE_TEST, Some(SIZE_TEST), Some(&cwd))
+        .expect("the start should record");
+    turn.wait_for_snapshots();
+    recorder
+        .command_completed_with_exit(
+            key,
+            SIZE_TEST,
+            "running 3 tests\ntest result: ok. 3 passed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .expect("the end should record");
+    turn.wait_for_snapshots();
+}
+
+/// A Claude session working in a sibling of `worktree`, and a runtime of it
+/// that was stopped: work it registers is another session's, outstanding.
+fn other_claude_session_elsewhere(
+    turn: &CheckedTurn,
+    label: &str,
+) -> (String, ClaudeObservationProvenance) {
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let elsewhere = sibling_worktree(turn, &format!("{label}-sibling"));
+    let other = create_test_project_session(&turn.state, Agent::Claude, &project_id, &elsewhere);
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&other).expect("other session");
+        let workdir = inner.sessions[index].session.workdir.clone();
+        inner.sessions[index].engram.workdir_worktree =
+            Some((workdir, engram_worktree_root(&elsewhere)));
+    }
+    let stopped = ClaudeObservationProvenance {
+        token: RuntimeToken::Claude(format!("{label}-runtime")),
+        origin: ClaudeWorkOrigin::Unattributed,
+    };
+    (other, stopped)
+}
+
+/// The other session's outstanding call `key` is found running in
+/// `worktree`: its place grows by that worktree.
+fn place_other_work_in(
+    turn: &CheckedTurn,
+    other: &str,
+    stopped: &ClaudeObservationProvenance,
+    key: &str,
+    worktree: &FsPath,
+) {
+    let cwd = fs::canonicalize(worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    turn.state.engram_host().observe(
+        other,
+        &EngramObservationProvenance::Claude(stopped.clone()),
+        EngramRecorderObservation::CommandStarted {
+            key,
+            ran: Some("touch notes.txt"),
+            cwd: Some(&cwd),
+        },
+    );
+}
+
+#[test]
+fn a_newly_found_place_of_outstanding_work_reaches_a_finished_check_only_from_its_registration() {
+    for (label, registered_first) in [
+        ("late-place-before-check-end", true),
+        ("late-place-after-check-end", false),
+    ] {
+        let (turn, worktree) = named_turn(label);
+        let (other, stopped) = other_claude_session_elsewhere(&turn, label);
+        if registered_first {
+            admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+        }
+        run_check_in(&turn, &worktree, "check");
+        if !registered_first {
+            admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+        }
+        turn.record(|record| {
+            let check = &record.engram.active_turn_checks[0];
+            assert!(check.end.is_some() && !check.open_to_writes(), "{label}");
+            assert_eq!(check.fenced_by_outstanding, None, "{label}: elsewhere");
+        });
+        // Found writing in the check's worktree after the check closed: what
+        // ran since its registration may have written under the check.
+        place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
+        turn.record(|record| {
+            let check = &record.engram.active_turn_checks[0];
+            assert_eq!(
+                check.fenced_by_outstanding,
+                registered_first.then(|| ClaudeHazardCause::OtherSession {
+                    session_id: other.clone(),
+                    name: "Test".to_owned(),
+                }),
+                "{label}"
+            );
+            assert_eq!(check.overlapped, registered_first, "{label}");
+        });
+        let checkpoint = turn.finish();
+        assert_eq!(
+            checkpoint["verification_evidence"]
+                .as_array()
+                .map_or(0, Vec::len),
+            usize::from(!registered_first),
+            "{label}: {checkpoint:#}"
+        );
+    }
+}
+
+#[test]
+fn a_newly_found_place_reaches_a_carried_run_read_as_terminal_only_from_its_registration() {
+    for (label, registered_first) in [
+        ("carried-late-place-before-end", true),
+        ("carried-late-place-after-end", false),
+    ] {
+        let (turn, worktree) = named_turn(label);
+        launch_gate(&turn, &worktree, false);
+        let (other, stopped) = other_claude_session_elsewhere(&turn, label);
+        if registered_first {
+            admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+        }
+        let start_basis =
+            turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+        start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+        let run = finish_run(&worktree, "passed", &"f".repeat(64));
+        turn.state.poll_engram_carried_runs();
+        assert!(
+            turn.record(|record| record.engram.carried_checks[0].terminal_digest.is_some()),
+            "{label}: read as terminal"
+        );
+        if !registered_first {
+            admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+        }
+        assert_eq!(carried_fence(&turn), None, "{label}: elsewhere");
+        place_other_work_in(&turn, &other, &stopped, "writer", &worktree);
+        assert_eq!(
+            carried_fence(&turn).is_some(),
+            registered_first,
+            "{label}: only work that may have run with the run reaches it"
+        );
+        let checkpoint = turn.finish();
+        if registered_first {
+            assert_refused(&turn, &checkpoint, &other);
+        } else {
+            assert_credited(&turn, &checkpoint, &run, "succeeded");
+        }
+    }
+}
+
+#[test]
+fn retained_work_no_transition_applied_reaches_a_report_at_its_publication_cut() {
+    // Work that may have written in the worktree since before the check
+    // ended becomes known to the rule with no transition of its own (a
+    // command whose turn or runtime is gone turns into orphaned work that
+    // way). What the checkpoint computed off the lock is only a candidate:
+    // the report is published after it is reconciled with every retained
+    // hazard.
+    let (turn, worktree) = named_turn("publication-cut");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let other = create_test_project_session(&turn.state, Agent::Claude, &project_id, &worktree);
+    let root_key = engram_worktree_root(&worktree);
+    let since = EngramHost::interference_tick();
+    run_check_in(&turn, &worktree, "check");
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&other).expect("other session");
+        inner.sessions[index]
+            .claude_outstanding
+            .register(ClaudeOutstandingEntry {
+                token: RuntimeToken::Claude("publication-cut-gone".to_owned()),
+                key: "orphaned".to_owned(),
+                origin: ClaudeWorkOrigin::Unattributed,
+                background: false,
+                nested: false,
+                self_gate: false,
+                locations: vec![Some(root_key.clone())],
+                registered_at: since,
+            });
+    }
+    turn.record(|record| {
+        assert_eq!(
+            record.engram.active_turn_checks[0].fenced_by_outstanding,
+            None
+        );
+    });
+    let checkpoint = turn.finish();
+    assert_eq!(
+        checkpoint["verification_evidence"]
+            .as_array()
+            .map_or(0, Vec::len),
+        0,
+        "{checkpoint:#}"
     );
 }

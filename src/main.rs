@@ -755,6 +755,7 @@ include!("engram_work_binding_refresh.rs");
 include!("engram_held_claims.rs");
 include!("engram_turn_checks.rs");
 include!("engram_carried_checks.rs");
+include!("engram_claude_interference.rs");
 include!("engram_check_recognition.rs");
 include!("engram_launcher_stages.rs");
 include!("engram_one_call.rs");

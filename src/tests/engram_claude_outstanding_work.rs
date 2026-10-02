@@ -629,12 +629,24 @@ fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command
     turn.record_mut(|record| record.runtime = SessionRuntime::Claude(successor));
     let unassigned = turn.record(|record| record.unassigned_claude_observations.len());
 
-    // The old reader's buffered result: history, not work during the grant.
+    // The old reader's buffered result: history, not successor work during
+    // the grant, and no proof that the old runtime's command ended. That
+    // command is now outstanding work of a runtime that can never report its
+    // end, overlapping the live grant: the grant is mixed by it, as by any of
+    // the session's own outstanding work, when the result's end reconciles
+    // the session's records with it (`engram_claude_interference.rs`).
     reader.feed(root_bash_result("old-command", "done"));
     turn.record(|record| {
-        assert_eq!(record.engram.active_turn_mixed_attribution, None);
+        assert_eq!(
+            record.engram.active_turn_mixed_attribution.as_deref(),
+            Some(CHECK_GRANT)
+        );
         assert!(record.claude_outstanding.holds("old-command"));
-        assert_eq!(record.unassigned_claude_observations.len(), unassigned);
+        // The only line kept is the grant's exclusion; the result itself is
+        // not kept as anyone's work.
+        assert_eq!(record.unassigned_claude_observations.len(), unassigned + 1);
+        let kept = &record.unassigned_claude_observations.back().unwrap().what;
+        assert!(kept.contains("cannot be credited"), "{kept}");
         assert_eq!(record.session.status, SessionStatus::Active);
         assert_eq!(record.active_turn_generation, generation);
     });
@@ -734,6 +746,7 @@ fn another_sessions_outstanding_work_fences_checks_only_in_the_worktree_it_may_w
                 } else {
                     "another-worktree".to_owned()
                 })],
+                registered_at: EngramHost::interference_tick(),
             });
         }
         let mut recorder = turn.recorder();
@@ -900,6 +913,7 @@ fn deleting_or_collecting_a_session_keeps_its_work_fencing_the_workspace() {
                     nested: false,
                     self_gate: false,
                     locations: vec![Some(root_key.clone())],
+                    registered_at: EngramHost::interference_tick(),
                 });
             if collect {
                 inner.retain_sessions(|record| record.session.id != other);
@@ -946,6 +960,26 @@ fn deleting_or_collecting_a_session_keeps_its_work_fencing_the_workspace() {
     }
 }
 
+/// Whether `work`, left by a deleted session, may write in the worktree with
+/// key `root` for an open check of another session, by the interference rule.
+fn may_write_in(work: &ClaudeOutstandingWork, root: &str) -> bool {
+    let owner = EngramHazardOwner::Deleted {
+        cause: ClaudeHazardCause::DeletedSession {
+            session_id: "gone".to_owned(),
+        },
+    };
+    let subject = EngramInterferenceSubject {
+        session: usize::MAX,
+        key: "check",
+        root: root.to_owned(),
+        ended_at: None,
+        simple_full_gate: false,
+    };
+    engram_hazards_of_work(&owner, work, None, 0, true, None)
+        .iter()
+        .any(|hazard| engram_claude_interference(hazard, &subject).is_some())
+}
+
 #[test]
 fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
     let token = RuntimeToken::Claude("locations".to_owned());
@@ -957,6 +991,7 @@ fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
         nested: true,
         self_gate: false,
         locations,
+        registered_at: EngramHost::interference_tick(),
     };
     let mut work = ClaudeOutstandingWork::default();
     // Registered where its session worked and the root its grant named.
@@ -967,19 +1002,21 @@ fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
     // Later placed elsewhere: the place joins, nothing is lost.
     work.place("task", &[Some("placed".to_owned())]);
     for root in ["workdir", "named-root", "placed"] {
-        assert!(work.may_write_in(root), "{root}");
+        assert!(may_write_in(&work, root), "{root}");
     }
     assert!(
-        !work.may_write_in("disjoint"),
+        !may_write_in(&work, "disjoint"),
         "a disjoint worktree stays eligible"
     );
     // A place TermAl could not name stands for any.
     work.place("task", &[None]);
-    assert!(work.may_write_in("disjoint"));
+    assert!(may_write_in(&work, "disjoint"));
 
     // Detail dropped past the bound keeps where the dropped work may write.
     let mut bounded = ClaudeOutstandingWork::default();
-    bounded.register(entry("first", vec![Some("evicted-root".to_owned())]));
+    let first = entry("first", vec![Some("evicted-root".to_owned())]);
+    let first_registered = first.registered_at;
+    bounded.register(first);
     for index in 0..CLAUDE_OUTSTANDING_WORK_LIMIT {
         bounded.register(entry(
             &format!("more-{index}"),
@@ -988,7 +1025,9 @@ fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
     }
     assert!(bounded.unknown);
     assert!(!bounded.holds("first"));
-    assert!(bounded.may_write_in("evicted-root"));
+    assert!(may_write_in(&bounded, "evicted-root"));
+    // And since when: the earliest registration of what was dropped.
+    assert_eq!(bounded.unknown_registered_at, first_registered);
 
     // A removed session's work keeps its places on the host, and taking it
     // twice adds nothing.
@@ -996,7 +1035,8 @@ fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
     host.absorb(&bounded);
     host.absorb(&bounded);
     assert_eq!(host.entries.len(), bounded.entries.len());
-    assert!(host.unknown && host.may_write_in("evicted-root"));
+    assert!(host.unknown && may_write_in(&host, "evicted-root"));
+    assert_eq!(host.unknown_registered_at, first_registered);
 }
 
 #[test]
@@ -1007,12 +1047,14 @@ fn a_command_moved_to_the_background_excludes_its_grant_before_its_partial_outpu
     assert!(turn.record(|record| !record.engram.active_turn_checks[0].overlapped));
     // Its output so far already shows passing tests, but Claude Code moved
     // it to the background: it runs on.
-    reader.feed(json!({"type": "user", "message": {"role": "user", "content": [{
+    reader.feed(
+        json!({"type": "user", "message": {"role": "user", "content": [{
             "type": "tool_result", "tool_use_id": "moved-test",
             "content": "Command did not complete within its 120s timeout and was moved to the \
                 background (ID: b9)."}]},
         "tool_use_result": {"stdout": PASSING, "stderr": "", "interrupted": false,
-            "backgroundTaskId": "b9"}}));
+            "backgroundTaskId": "b9"}}),
+    );
     turn.record(|record| {
         assert_eq!(
             record.engram.active_turn_mixed_attribution.as_deref(),
@@ -1030,7 +1072,10 @@ fn a_command_moved_to_the_background_excludes_its_grant_before_its_partial_outpu
             Some(EngramCommandExit::NotFinished),
             "the move is not its end"
         );
-        assert_eq!(system_texts(record, "Evidence restricted for this session"), 1);
+        assert_eq!(
+            system_texts(record, "Evidence restricted for this session"),
+            1
+        );
     });
     reader.feed(named_result(&prompt));
     let checkpoints = checkpoint_requests(&turn);
@@ -1071,7 +1116,10 @@ fn only_a_top_level_simple_full_gate_call_is_its_own_gate() {
         "a compound launch is not"
     );
     assert_eq!(
-        started(bash("node scripts/test-launcher.mjs focused -- cargo test"), false),
+        started(
+            bash("node scripts/test-launcher.mjs focused -- cargo test"),
+            false
+        ),
         vec![("call".to_owned(), true, false)],
         "another mode is not"
     );
@@ -1089,7 +1137,10 @@ fn a_one_off_exclusion_with_nothing_outstanding_gives_no_restriction_notice() {
             Some(CHECK_GRANT)
         );
         assert!(!claude_session_work_restricts(record));
-        assert_eq!(system_texts(record, "Evidence restricted for this session"), 0);
+        assert_eq!(
+            system_texts(record, "Evidence restricted for this session"),
+            0
+        );
         assert_eq!(system_texts(record, "Evidence restriction lifted"), 0);
     });
 }

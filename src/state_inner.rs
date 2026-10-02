@@ -557,6 +557,7 @@ impl StateInner {
         let record = self.sessions.remove(index);
         // Its outstanding Claude work outlives it, in the same section.
         self.orphan_claude_work(&record.session.id, &record.claude_outstanding);
+        EngramHost::reconcile_orphaned_claude_work(self, &record.session.id);
         let id = record.session.id.clone();
         self.record_removed_session(id);
         record
@@ -583,6 +584,7 @@ impl StateInner {
         // Their outstanding Claude work outlives them, in the same section.
         for (session_id, work) in &orphaned {
             self.orphan_claude_work(session_id, work);
+            EngramHost::reconcile_orphaned_claude_work(self, session_id);
         }
         for id in removed_ids {
             self.record_removed_session(id);

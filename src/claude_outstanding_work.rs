@@ -214,24 +214,31 @@ fn claude_evidence_released_notice(record: &SessionRecord) -> String {
     )
 }
 
-/// Excludes the session's live grant from work that is not its own: the
-/// grant is marked mixed, so its own source report is withheld as uncertain,
-/// and its checks still open to writes are fenced, with the session's own
-/// unresolved work as the stored cause. Called under the state lock, before
-/// or in the same section as the work's effects. The mark is sticky for the
-/// grant; nothing clears it but the next grant. A newly effective exclusion
-/// makes the session's notice due. `self_gate` names the call of a
-/// recognised simple full gate whose own promotion is the exclusion: its own
-/// check is not fenced by it (`claude_session_work_restricts_except`).
-fn claude_exclude_live_grant(record: &mut SessionRecord, self_gate: Option<&str>) {
+/// Excludes the session's live grant from activity of another turn or a
+/// replaced runtime that this frame proves now: the grant is marked mixed
+/// (`claude_mark_grant_mixed`) and its checks still open to writes are
+/// fenced, with the session's own unresolved work as the stored cause. Work
+/// that stays outstanding reaches checks and grants through the interference
+/// rule (`engram_claude_interference.rs`). Called under the state lock, in
+/// the section that applies the activity.
+fn claude_exclude_live_grant(record: &mut SessionRecord) {
     for check in &mut record.engram.active_turn_checks {
-        if check.open_to_writes() && Some(check.key.as_str()) != self_gate {
+        if check.open_to_writes() {
             check.overlapped = true;
             check
                 .fenced_by_outstanding
                 .get_or_insert(ClaudeHazardCause::OwnSession);
         }
     }
+    claude_mark_grant_mixed(record);
+}
+
+/// Marks the session's live grant mixed: what changed in its interval may be
+/// Claude work its root turn cannot be credited with, so its own source
+/// report is withheld as uncertain. The mark is sticky for the grant; nothing
+/// clears it but the next grant. A newly effective mark makes the session's
+/// notice due. Under the state lock.
+fn claude_mark_grant_mixed(record: &mut SessionRecord) {
     let Some(grant_id) = record.engram.active_grant_id.clone() else {
         return;
     };
@@ -294,7 +301,7 @@ fn claude_exclude_observation(
                 record,
                 unassigned_claude_observation_text(observation),
             );
-            claude_exclude_live_grant(record, None);
+            claude_exclude_live_grant(record);
         }
         ClaudeObservationDisposition::Replaced => {
             if matches!(
@@ -302,7 +309,7 @@ fn claude_exclude_observation(
                 EngramRecorderObservation::CommandStarted { .. }
                     | EngramRecorderObservation::CommandDescribed { .. }
             ) {
-                claude_exclude_live_grant(record, None);
+                claude_exclude_live_grant(record);
             }
         }
     }
@@ -334,15 +341,20 @@ struct ClaudeOutstandingEntry {
     background: bool,
     /// A subagent started it.
     nested: bool,
-    /// It is a top-level call of a recognised simple full gate
-    /// (`engram_is_simple_full_launcher`): it does not fence the check and the
-    /// carried run it launched itself, and nothing else.
+    /// It is a top-level call of a recognised simple full gate: by the
+    /// interference rule (`engram_claude_interference.rs`) it does not fence
+    /// the check and the carried run it launched itself, and fences
+    /// everything else.
     self_gate: bool,
     /// Where it may write: the worktrees known when it was registered (the
     /// session's workdir worktree, the grant's named root) and every place
     /// its command was later placed. Only grows while the work is
     /// outstanding; `None` is a worktree TermAl could not name, so any.
     locations: Vec<Option<String>>,
+    /// When it was registered on the interference clock
+    /// (`engram_claude_interference.rs`): it may have written from then on,
+    /// wherever it is later found to run.
+    registered_at: u64,
 }
 
 impl ClaudeOutstandingEntry {
@@ -369,6 +381,8 @@ struct ClaudeOutstandingWork {
     unknown: bool,
     /// Where the dropped work may write, kept when its detail was dropped.
     unknown_locations: Vec<Option<String>>,
+    /// The earliest registration of the dropped work.
+    unknown_registered_at: u64,
     /// A restriction newly took effect and the session has not said so yet.
     notice_due: bool,
     /// The session said its evidence is restricted, and has not yet said it
@@ -389,10 +403,21 @@ impl ClaudeOutstandingWork {
         if self.entries.len() >= CLAUDE_OUTSTANDING_WORK_LIMIT
             && let Some(dropped) = self.entries.pop_front()
         {
-            self.unknown = true;
-            claude_merge_locations(&mut self.unknown_locations, &dropped.locations);
+            self.keep_unknown(&dropped.locations, dropped.registered_at);
         }
         self.entries.push_back(entry);
+    }
+
+    /// Keeps work whose detail is gone as unknown: where it may write, and
+    /// since when.
+    fn keep_unknown(&mut self, locations: &[Option<String>], registered_at: u64) {
+        self.unknown_registered_at = if self.unknown {
+            self.unknown_registered_at.min(registered_at)
+        } else {
+            registered_at
+        };
+        self.unknown = true;
+        claude_merge_locations(&mut self.unknown_locations, locations);
     }
 
     /// The command `key` was placed in `worktrees`: they join where its
@@ -448,31 +473,13 @@ impl ClaudeOutstandingWork {
 
     /// Whether any work restricts the session's turn `turn_generation` of
     /// the runtime `current` (`ClaudeOutstandingEntry::is_hazard`), or
-    /// unknown work does; the recognised simple full gate whose exact call is
-    /// `self_gate` (of `current`, at top level) does not count.
-    fn restricts_except(
-        &self,
-        current: Option<&RuntimeToken>,
-        turn_generation: u64,
-        self_gate: Option<&str>,
-    ) -> bool {
+    /// unknown work does: the current status an agent is told.
+    fn restricts(&self, current: Option<&RuntimeToken>, turn_generation: u64) -> bool {
         self.unknown
-            || self.entries.iter().any(|entry| {
-                entry.is_hazard(current, turn_generation)
-                    && !(entry.self_gate
-                        && !entry.nested
-                        && Some(entry.key.as_str()) == self_gate
-                        && Some(&entry.token) == current)
-            })
-    }
-
-    /// Whether any of it, known or unknown, may write in the worktree with
-    /// key `root`.
-    fn may_write_in(&self, root: &str) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| EngramHost::worktrees_may_hold(&entry.locations, root))
-            || (self.unknown && EngramHost::worktrees_may_hold(&self.unknown_locations, root))
+            || self
+                .entries
+                .iter()
+                .any(|entry| entry.is_hazard(current, turn_generation))
     }
 
     /// Takes in `other`'s work (a removed session's), keeping what each may
@@ -482,42 +489,18 @@ impl ClaudeOutstandingWork {
             self.register(entry.clone());
         }
         if other.unknown {
-            self.unknown = true;
-            claude_merge_locations(&mut self.unknown_locations, &other.unknown_locations);
+            self.keep_unknown(&other.unknown_locations, other.unknown_registered_at);
         }
     }
 }
 
-/// Whether Claude work may restrict `record`'s current turn now
-/// (`ClaudeOutstandingWork::restricts`).
+/// Whether Claude work restricts `record`'s current turn now
+/// (`ClaudeOutstandingWork::restricts`): the status its notices tell.
 fn claude_session_work_restricts(record: &SessionRecord) -> bool {
-    claude_session_work_restricts_except(record, None)
-}
-
-/// As `claude_session_work_restricts`, for the check the call `self_gate`
-/// starts when it is a recognised simple full gate: its own outstanding call
-/// does not fence it, every other hazard does.
-fn claude_session_work_restricts_except(record: &SessionRecord, self_gate: Option<&str>) -> bool {
-    record.claude_outstanding.restricts_except(
+    record.claude_outstanding.restricts(
         record.runtime.runtime_token().as_ref(),
         record.active_turn_generation,
-        self_gate,
     )
-}
-
-/// Where the outstanding call `key` of `record` may write, and whether it is
-/// a recognised simple full gate, when it restricts the session: what an
-/// extension of its scope must fence (`engram_fence_checks_for_claude_work`).
-fn claude_hazard_scope(record: &SessionRecord, key: &str) -> Option<(Vec<Option<String>>, bool)> {
-    let current = record.runtime.runtime_token();
-    record
-        .claude_outstanding
-        .entries
-        .iter()
-        .find(|entry| {
-            entry.key == key && entry.is_hazard(current.as_ref(), record.active_turn_generation)
-        })
-        .map(|entry| (entry.locations.clone(), entry.self_gate))
 }
 
 /// Outstanding Claude work a removed session left, kept on the host so its
@@ -551,35 +534,16 @@ impl StateInner {
         }
     }
 
-    /// Why the worktree with key `root` is restricted for checks of the
+    /// Why the worktree with key `root` is restricted now for checks of the
     /// session at `index` by Claude work of any other session, live or
-    /// removed, that may write there.
+    /// removed, that may write there: the current status, projected by the
+    /// interference rule from the facts its fences use.
     fn claude_work_restricting_worktree(
         &self,
         index: Option<usize>,
         root: &str,
     ) -> Option<ClaudeHazardCause> {
-        let other = self
-            .sessions
-            .iter()
-            .enumerate()
-            .find(|(other, record)| {
-                Some(*other) != index
-                    && record.claude_outstanding.may_write_in(root)
-                    && EngramHost::session_may_write(self, *other)
-            })
-            .map(|(_, record)| ClaudeHazardCause::OtherSession {
-                session_id: record.session.id.clone(),
-                name: record.session.name.clone(),
-            });
-        other.or_else(|| {
-            self.claude_orphaned_work
-                .iter()
-                .find(|orphan| orphan.work.may_write_in(root))
-                .map(|orphan| ClaudeHazardCause::DeletedSession {
-                    session_id: orphan.session_id.clone(),
-                })
-        })
+        EngramHost::claude_current_restriction(self, index, root)
     }
 }
 
@@ -727,11 +691,9 @@ impl AppState {
             &inner.sessions[index],
             &EngramObservationProvenance::Claude(provenance.clone()),
         );
-        // Work that restricts the session from now on, newly registered or
-        // promoted: what is already running where it may write is fenced.
-        let mut hazards: Vec<(String, Vec<Option<String>>, bool)> = Vec::new();
-        let mut promoted_self_gate = None;
-        let mut promoted = false;
+        // Work registered or promoted here: what it may overlap is reconciled
+        // with it through the interference rule once the registry holds it.
+        let mut changed: Vec<String> = Vec::new();
         {
             let record = &mut inner.sessions[index];
             let locations = EngramHost::session_write_locations(record);
@@ -744,14 +706,16 @@ impl AppState {
                     nested,
                     self_gate: *self_gate,
                     locations: locations.clone(),
+                    registered_at: EngramHost::interference_tick(),
                 };
                 if entry.is_hazard(current.as_ref(), turn_generation) {
-                    hazards.push((key.clone(), entry.locations.clone(), *self_gate));
+                    changed.push(key.clone());
                 }
                 record.claude_outstanding.register(entry);
             }
             // A result that says its call runs on in the background moves it
-            // there now, before the parser can end its check.
+            // there now, before the parser can end its check. It keeps its
+            // registration: it may have written since then.
             for (key, moved_to_background) in &work.results {
                 if !moved_to_background {
                     continue;
@@ -763,26 +727,24 @@ impl AppState {
                     .find(|entry| entry.token == provenance.token && entry.key == *key)
                 {
                     entry.background = true;
-                    promoted = true;
-                    if entry.self_gate {
-                        promoted_self_gate = Some(key.clone());
-                    }
-                    hazards.push((key.clone(), entry.locations.clone(), entry.self_gate));
+                    changed.push(key.clone());
                 }
             }
-            let starts_background = work.started.iter().any(|(_, background, _)| *background);
+            // Activity of another turn, or a replaced runtime's new activity,
+            // excludes the grant now, whether or not it left work running.
             let excludes = match disposition {
                 ClaudeObservationDisposition::Foreign => true,
                 ClaudeObservationDisposition::Replaced => work.starts_work,
-                ClaudeObservationDisposition::Current => starts_background || promoted,
-                ClaudeObservationDisposition::Unowned => false,
+                ClaudeObservationDisposition::Current | ClaudeObservationDisposition::Unowned => {
+                    false
+                }
             };
             if excludes {
-                claude_exclude_live_grant(record, promoted_self_gate.as_deref());
+                claude_exclude_live_grant(record);
             }
         }
-        for (key, locations, self_gate) in &hazards {
-            EngramHost::fence_checks_for_claude_work(&mut inner, index, key, locations, *self_gate);
+        if !changed.is_empty() {
+            EngramHost::reconcile_claude_work(&mut inner, index, &changed);
         }
     }
 

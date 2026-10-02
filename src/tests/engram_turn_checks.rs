@@ -484,6 +484,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         overlapped: false,
         fenced_by_outstanding: None,
         watcher_fence: None,
+        ended_at: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
@@ -1391,6 +1392,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         overlapped: false,
         fenced_by_outstanding: None,
         watcher_fence: None,
+        ended_at: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
@@ -1446,6 +1448,7 @@ pub(super) fn finished_check(
         overlapped: false,
         fenced_by_outstanding: None,
         watcher_fence: None,
+        ended_at: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),

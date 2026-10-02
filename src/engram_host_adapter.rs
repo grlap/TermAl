@@ -4129,6 +4129,11 @@ impl AppState {
                         &grant_id,
                         target.as_ref(),
                     );
+                    // What was computed off the lock is only a candidate:
+                    // Claude work registered, promoted or placed meanwhile
+                    // reaches its records and its grant here, at the cut that
+                    // publishes them (`engram_claude_interference.rs`).
+                    engram_reconcile_claude_consumer(&mut inner, index);
                     engram_merge_live_overlaps(
                         &inner.sessions[index].engram.active_turn_checks,
                         &mut resolved_checks,

@@ -151,35 +151,43 @@ impl EngramHost<'_> {
         locations
     }
 
-    /// Whether `worktrees` may hold the worktree with key `root`: one of them
-    /// is it, or one is a worktree TermAl could not name.
-    pub(crate) fn worktrees_may_hold(worktrees: &[Option<String>], root: &str) -> bool {
-        engram_worktrees_may_hold(worktrees, root)
+    /// The next instant of the interference clock
+    /// (`engram_claude_interference.rs`).
+    pub(crate) fn interference_tick() -> u64 {
+        engram_interference_tick()
     }
 
-    /// Applies outstanding Claude work of the session at `owner` to the
-    /// checks and carried runs already running where it may write
-    /// (`engram_fence_checks_for_claude_work`). Called under the state lock.
-    pub(crate) fn fence_checks_for_claude_work(
-        inner: &mut StateInner,
-        owner: usize,
-        key: &str,
-        locations: &[Option<String>],
-        self_gate: bool,
-    ) {
-        engram_fence_checks_for_claude_work(inner, owner, key, locations, self_gate);
+    /// The outstanding Claude work `keys` of the session at `owner` was
+    /// registered, promoted or placed further: every unpublished record and
+    /// live grant it may overlap is reconciled with it
+    /// (`engram_reconcile_claude_work`). Called under the state lock.
+    pub(crate) fn reconcile_claude_work(inner: &mut StateInner, owner: usize, keys: &[String]) {
+        engram_reconcile_claude_work(inner, owner, keys);
+    }
+
+    /// The deleted session `session_id` left its outstanding Claude work on
+    /// the host (`engram_reconcile_orphaned_claude_work`). Called under the
+    /// state lock, in the section that removes the session.
+    pub(crate) fn reconcile_orphaned_claude_work(inner: &mut StateInner, session_id: &str) {
+        engram_reconcile_orphaned_claude_work(inner, session_id);
+    }
+
+    /// Why a check of the session at `index` starting now in the worktree
+    /// with key `root` would be fenced by another session's or a deleted
+    /// session's Claude work (`engram_claude_current_restriction`). Called
+    /// under the state lock.
+    pub(crate) fn claude_current_restriction(
+        inner: &StateInner,
+        index: Option<usize>,
+        root: &str,
+    ) -> Option<ClaudeHazardCause> {
+        engram_claude_current_restriction(inner, index, root)
     }
 
     /// Whether the command line `line` is a recognised, simple full-gate
     /// launch (`engram_is_simple_full_launcher`).
     pub(crate) fn is_simple_full_launcher_line(line: &str) -> bool {
         engram_check_command(line).is_some_and(|command| engram_is_simple_full_launcher(&command))
-    }
-
-    /// Whether the session at `index` may write: a read-only delegation child
-    /// cannot. Called under the state lock.
-    pub(crate) fn session_may_write(inner: &StateInner, index: usize) -> bool {
-        engram_session_may_write(inner, index)
     }
 
     /// The watcher saw `changes` in a workspace. Its one caller, the watcher
