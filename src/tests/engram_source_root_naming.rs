@@ -1201,12 +1201,14 @@ fn source_root_unknown_at_checkpoint_withholds_previously_finished_check_evidenc
     let (claimed, worktree, token) = named_root_turn(label, true);
     claimed.state.note_engram_command_started(
         &claimed.session_id,
+        &EngramObservationProvenance::Ambient,
         "checked-before-unknown",
         Some("cargo test"),
         Some(worktree.to_str().unwrap()),
     );
     claimed.state.note_engram_command_finished(
         &claimed.session_id,
+        &EngramObservationProvenance::Ambient,
         "checked-before-unknown",
         "cargo test",
         "test result: ok. 1 passed",
@@ -5069,12 +5071,14 @@ fn opening_capture_keeps_admitted_basis(transition: &str) {
         let run_check = |key: &str, root: &FsPath| {
             claimed.state.note_engram_command_started(
                 &claimed.session_id,
+                &EngramObservationProvenance::Ambient,
                 key,
                 Some("cargo test"),
                 Some(root.to_str().unwrap()),
             );
             claimed.state.note_engram_command_finished(
                 &claimed.session_id,
+                &EngramObservationProvenance::Ambient,
                 key,
                 "cargo test",
                 "test result: ok. 1 passed",
@@ -5789,6 +5793,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
         claimed.record(|record| record.engram.pending_source_root_line = None);
         claimed.state.note_engram_command_started(
             &claimed.session_id,
+            &EngramObservationProvenance::Ambient,
             "test",
             Some("cargo test"),
             Some(second.to_str().expect("UTF-8 fixture path")),
@@ -5945,6 +5950,7 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
     };
     claimed.state.note_engram_command_started(
         &claimed.session_id,
+        &EngramObservationProvenance::Ambient,
         "focused-test",
         Some("cargo test"),
         Some(second.to_str().expect("UTF-8 fixture path")),
@@ -5956,6 +5962,7 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
     );
     claimed.state.note_engram_command_finished(
         &claimed.session_id,
+        &EngramObservationProvenance::Ambient,
         "focused-test",
         "cargo test",
         "test result: ok. 1 passed",

@@ -1467,6 +1467,10 @@ termal/
 |   |-- agent_readiness.rs   # CLI availability probing cache
 |   |-- claude.rs            # Claude NDJSON message handling
 |   |-- claude_spawn.rs      # Claude CLI subprocess spawn + wire writers
+|   |-- claude_turn_ownership.rs # Which turn/attempt a Claude stdout frame belongs to
+|   |-- claude_frame_router.rs # One per-frame plan: parser, replay, retry, terminal, control origin
+|   |-- claude_frame_application.rs # The one function that applies each frame's plan
+|   |-- claude_runtime_turns.rs # Turns Claude Code starts itself; result finalization
 |   |-- claude_args.rs       # Claude CLI argv construction + message parsing
 |   |-- codex.rs             # Codex shared-runtime spawn + session state
 |   |-- codex_engram_bootstrap.rs # New-thread instruction composition + async config/read

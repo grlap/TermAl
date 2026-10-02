@@ -2359,6 +2359,19 @@ struct EngramSessionState {
     /// fingerprint does not make the admitted workspace unconfirmed.
     active_turn_root_capture: Option<EngramRootCapture>,
     active_turn_naming_identity: Option<(EngramAuthorityStoreKey, String)>,
+    /// Where the last checkpoint Engram acknowledged left the workspace
+    /// (`engram_turn_continuity.rs`). Advanced only by an acknowledged
+    /// checkpoint, so retries never advance it twice. In memory only.
+    continuity_anchor: Option<EngramContinuityAnchor>,
+    /// For the named grant, how its turn's measured begin compares with
+    /// `continuity_anchor`: a change between the two turns is kept here,
+    /// apart from the turn's own begin basis. In memory only.
+    active_turn_continuity: Option<(String, EngramTurnContinuity)>,
+    /// The grant whose measurement interval a Claude turn no prompt owned
+    /// overlapped (`claude_runtime_turns.rs`): what changed between its begin
+    /// and close may be that turn's or the grant's, so the grant's own source
+    /// report is withheld as uncertain (`engram_turn_report`). In memory only.
+    active_turn_mixed_attribution: Option<String>,
     /// The work's source root the turn `active_grant_id` began with, when its
     /// claim has one (`engram_source_roots.rs`): every basis and check credit
     /// of that turn is taken there instead of in the workdir. `None` measures
@@ -2497,6 +2510,9 @@ impl Default for EngramSessionState {
             active_turn_start_basis: None,
             active_turn_root_capture: None,
             active_turn_naming_identity: None,
+            continuity_anchor: None,
+            active_turn_continuity: None,
+            active_turn_mixed_attribution: None,
             active_turn_source_root: None,
             active_turn_other_source_roots: Vec::new(),
             named_root: None,
@@ -3886,10 +3902,16 @@ impl AppState {
     fn engram_checkpoint_grant_locked(
         inner: &StateInner,
         session_id: &str,
+        purpose: EngramCheckpointPurpose,
         runtime_token: Option<&RuntimeToken>,
         active_turn_generation: Option<u64>,
         project_reset_owner_generation: Option<u64>,
-    ) -> Option<(usize, String, Option<EngramBindingTarget>)> {
+    ) -> Option<(
+        usize,
+        String,
+        Option<EngramBindingTarget>,
+        EngramCheckpointPurpose,
+    )> {
         let index = inner.find_session_index(session_id)?;
         let record = &inner.sessions[index];
         if runtime_token.is_some_and(|token| !record.runtime.matches_runtime_token(token)) {
@@ -3901,6 +3923,18 @@ impl AppState {
             return None;
         }
         if runtime_token.is_some() && record.runtime_stop_in_progress {
+            return None;
+        }
+        // A turn Claude Code started by itself was granted nothing: a grant
+        // still open on the session belongs to no turn of it, so no terminal
+        // path of that turn reports its execution there, whether the caller
+        // holds the runtime token or the stop fence
+        // (`claude_runtime_turns.rs`). An independent settlement may still
+        // close such a leftover grant, reporting no turn's execution.
+        let resolved = purpose.resolve(record);
+        if resolved == EngramCheckpointPurpose::TurnTerminal
+            && unmediated_claude_turn_is_current(record)
+        {
             return None;
         }
         let grant_id = record.engram.active_grant_id.clone()?;
@@ -3928,7 +3962,7 @@ impl AppState {
             // enabled in that case.
             return None;
         }
-        Some((index, grant_id, target))
+        Some((index, grant_id, target, resolved))
     }
 
     /// Closes the session's begun grant with one checkpoint. `turn_outcome`
@@ -3938,6 +3972,7 @@ impl AppState {
     fn checkpoint_engram_turn_off_lock(
         &self,
         session_id: &str,
+        purpose: EngramCheckpointPurpose,
         runtime_token: Option<&RuntimeToken>,
         active_turn_generation: Option<u64>,
         next_intent: EngramNextIntent,
@@ -3954,11 +3989,12 @@ impl AppState {
         // whether its report needs a fresh basis. Nothing is claimed yet, so
         // the bounded basis capture that follows runs outside the
         // checkpoint_in_progress window that session teardown waits for.
-        let (planned_grant_id, capture, card_source_root) = {
+        let (planned_grant_id, planned_purpose, capture, card_source_root) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some((index, grant_id, _)) = Self::engram_checkpoint_grant_locked(
+            let Some((index, grant_id, _, resolved)) = Self::engram_checkpoint_grant_locked(
                 &inner,
                 session_id,
+                purpose,
                 runtime_token,
                 active_turn_generation,
                 project_reset_owner_generation,
@@ -3970,8 +4006,12 @@ impl AppState {
                 // capture this attempt could never report.
                 return EngramCheckpointOutcome::Skipped;
             }
-            let capture =
-                match engram_turn_report_plan(&inner.sessions[index], &grant_id, turn_outcome) {
+            let capture = match engram_checkpoint_report_plan(
+                &inner.sessions[index],
+                &grant_id,
+                resolved,
+                turn_outcome,
+            ) {
                     EngramTurnReportPlan::Fresh { place, sealed, .. } => Some((
                         place,
                         sealed,
@@ -3994,7 +4034,7 @@ impl AppState {
                             .as_ref(),
                     )
                 });
-            (grant_id, capture, card_source_root)
+            (grant_id, resolved, capture, card_source_root)
         };
         // The closing basis, and the checks the turn ran with their own
         // snapshots and toolchain labels, all off the lock. One budget bounds
@@ -4031,9 +4071,10 @@ impl AppState {
         // tracking.
         let snapshot = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some((index, grant_id, target)) = Self::engram_checkpoint_grant_locked(
+            let Some((index, grant_id, target, resolved)) = Self::engram_checkpoint_grant_locked(
                 &inner,
                 session_id,
+                purpose,
                 runtime_token,
                 active_turn_generation,
                 project_reset_owner_generation,
@@ -4042,6 +4083,11 @@ impl AppState {
             };
             if grant_id != planned_grant_id {
                 // Another turn began meanwhile; its own close reports it.
+                return EngramCheckpointOutcome::Skipped;
+            }
+            if resolved != planned_purpose {
+                // The context changed off the lock (a turn's provenance came
+                // or went): never fall back to the other purpose.
                 return EngramCheckpointOutcome::Skipped;
             }
             if !inner
@@ -4056,7 +4102,12 @@ impl AppState {
             // same grant may have built and cached the report while this
             // attempt captured its basis, and the cache wins so every
             // checkpoint of the grant repeats the first report verbatim.
-            let plan = engram_turn_report_plan(&inner.sessions[index], &grant_id, turn_outcome);
+            let plan = engram_checkpoint_report_plan(
+                &inner.sessions[index],
+                &grant_id,
+                resolved,
+                turn_outcome,
+            );
             let report = match plan {
                 EngramTurnReportPlan::Nothing => EngramTurnReport::default(),
                 EngramTurnReportPlan::Cached(report) => report,
@@ -4301,6 +4352,9 @@ impl AppState {
                 .engram
                 .clear_checkpoint_if_owned_by(project_reset_owner_generation);
             if decision == EngramControlCardDecision::Grant {
+                // Acknowledged: the continuity anchor moves to where this
+                // turn left the workspace (`engram_turn_continuity.rs`).
+                advance_engram_continuity_anchor(record, session_id, grant_id);
                 record.engram.active_grant_id = None;
                 if exited {
                     record.engram.rebind_required = true;
@@ -4349,6 +4403,7 @@ impl AppState {
         };
         self.checkpoint_engram_turn_off_lock(
             session_id,
+            EngramCheckpointPurpose::TurnTerminal,
             Some(runtime_token),
             active_turn_generation,
             next_intent,
@@ -5452,6 +5507,12 @@ impl AppState {
                 if record.engram.uncertain_grant_id.as_deref() == Some(grant_id.as_str()) {
                     record.engram.uncertain_grant_id = None;
                 }
+                // Claude work an earlier turn or runtime started may still be
+                // running and writing (`claude_outstanding_work.rs`): this
+                // grant's interval overlaps it from its first instant, so it
+                // begins mixed, in the same section that begins it, and its
+                // checks start fenced while that work stays outstanding.
+                claude_begin_grant_beside_outstanding_work(record, &grant_id);
                 record.engram.active_grant_id = Some(grant_id);
             }
             // A begin handed to the transport whose outcome this record does

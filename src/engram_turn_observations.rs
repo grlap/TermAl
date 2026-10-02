@@ -35,6 +35,64 @@ enum EngramTurnReportPlan {
     },
 }
 
+/// Why a checkpoint closes a grant (`engram_checkpoint_grant_locked`). The
+/// runtime token and the stop fence decide whether a caller may act at all;
+/// the purpose decides whose execution the checkpoint may report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngramCheckpointPurpose {
+    /// The turn that just ended reports its own execution on the grant it ran
+    /// under. Skipped while the session's current turn was granted nothing
+    /// (a turn Claude Code started by itself): it has no execution to report
+    /// on any grant, whatever its outcome.
+    TurnTerminal,
+    /// An independent lifecycle or recovery action closes a leftover grant
+    /// and reports no turn's execution. A report an earlier attempt for that
+    /// same grant already built is preserved, repeated verbatim; without one,
+    /// the settlement carries no observation.
+    Settlement,
+    /// A teardown (revocation, deletion): `TurnTerminal` when the session's
+    /// current turn owns the grant, `Settlement` when the current turn was
+    /// granted nothing. Resolved under the lock from the turn's provenance,
+    /// at the plan and again at the claim.
+    Teardown,
+}
+
+impl EngramCheckpointPurpose {
+    /// `TurnTerminal` or `Settlement`, from what `record` holds now.
+    fn resolve(self, record: &SessionRecord) -> Self {
+        match self {
+            Self::Teardown if unmediated_claude_turn_is_current(record) => Self::Settlement,
+            Self::Teardown => Self::TurnTerminal,
+            purpose => purpose,
+        }
+    }
+}
+
+/// What a checkpoint of `purpose` (resolved) closing `grant_id` reports. A
+/// settlement reports no turn's execution: no outcome, no fresh source
+/// capture, no checks or carried credit. A report an earlier attempt for the
+/// same grant built is repeated verbatim instead of being replaced by an
+/// empty one, so the grant's own uncertain checkpoint is never overwritten.
+fn engram_checkpoint_report_plan(
+    record: &SessionRecord,
+    grant_id: &str,
+    purpose: EngramCheckpointPurpose,
+    outcome: Option<EngramExecutionOutcome>,
+) -> EngramTurnReportPlan {
+    if purpose != EngramCheckpointPurpose::Settlement {
+        return engram_turn_report_plan(record, grant_id, outcome);
+    }
+    if record.engram.work_binding.is_none() {
+        return EngramTurnReportPlan::Nothing;
+    }
+    match &record.engram.active_turn_report {
+        Some((cached_grant_id, report)) if cached_grant_id == grant_id => {
+            EngramTurnReportPlan::Cached(report.clone())
+        }
+        _ => EngramTurnReportPlan::Nothing,
+    }
+}
+
 /// Decides what a checkpoint closing `grant_id` with `outcome` reports.
 /// Engram admits observations only from a session bound to claimed work; an
 /// unbound session's checkpoint reports nothing, or the evidence gate would
@@ -257,9 +315,7 @@ fn engram_turn_execution_observation(
         .as_ref()
         .map(|_| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
     Some(EngramExecutionObservationInput {
-        observation_id: sha256_hex(
-            format!("termal-turn-observation:{session_id}:{grant_id}").as_bytes(),
-        ),
+        observation_id: engram_turn_observation_id(session_id, grant_id),
         // The intent this grant was issued for. A grant restored across a
         // restart has none in memory; its observation then names the grant.
         action_fingerprint: record
@@ -277,6 +333,13 @@ fn engram_turn_execution_observation(
         source_basis: end_basis,
         observed_at,
     })
+}
+
+/// The id of the execution observation the turn of `grant_id` reports for
+/// itself: deterministic for the grant, so retries repeat it and the
+/// continuity anchor finds it (`engram_turn_continuity.rs`).
+fn engram_turn_observation_id(session_id: &str, grant_id: &str) -> String {
+    sha256_hex(format!("termal-turn-observation:{session_id}:{grant_id}").as_bytes())
 }
 
 /// The source identity of a workspace at one moment: the canonical worktree
@@ -669,6 +732,9 @@ impl AppState {
                     .engram
                     .set_opening_diagnostic(turn_generation, grant_id, reason);
             }
+            // Compared with where the last acknowledged checkpoint left the
+            // workspace, apart from the begin basis (`engram_turn_continuity.rs`).
+            record_engram_turn_continuity(record, session_id, grant_id);
         }
     }
 

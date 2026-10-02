@@ -128,6 +128,10 @@ impl StateInner {
             active_turn_start_message_count: None,
             active_turn_file_changes: BTreeMap::new(),
             active_turn_file_change_grace_deadline: None,
+            unmediated_claude_turn: None,
+            adopted_claude_turn_generation: None,
+            claude_outstanding: ClaudeOutstandingWork::default(),
+            unassigned_claude_observations: VecDeque::new(),
             agent_commands: Vec::new(),
             codex_approval_policy: self.preferences.default_codex_approval_policy,
             codex_reasoning_effort: self.preferences.default_codex_reasoning_effort,
@@ -551,6 +555,8 @@ impl StateInner {
     /// underlying `Vec::remove` it wraps.
     fn remove_session_at(&mut self, index: usize) -> SessionRecord {
         let record = self.sessions.remove(index);
+        // Its outstanding Claude work outlives it, in the same section.
+        self.orphan_claude_work(&record.session.id, &record.claude_outstanding);
         let id = record.session.id.clone();
         self.record_removed_session(id);
         record
@@ -563,13 +569,21 @@ impl StateInner {
         F: FnMut(&SessionRecord) -> bool,
     {
         let mut removed_ids: Vec<String> = Vec::new();
+        let mut orphaned: Vec<(String, ClaudeOutstandingWork)> = Vec::new();
         self.sessions.retain(|record| {
             let retained = keep(record);
             if !retained {
                 removed_ids.push(record.session.id.clone());
+                if record.claude_outstanding.any() {
+                    orphaned.push((record.session.id.clone(), record.claude_outstanding.clone()));
+                }
             }
             retained
         });
+        // Their outstanding Claude work outlives them, in the same section.
+        for (session_id, work) in &orphaned {
+            self.orphan_claude_work(session_id, work);
+        }
         for id in removed_ids {
             self.record_removed_session(id);
         }

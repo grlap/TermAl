@@ -392,6 +392,7 @@ fn claude_and_acp_handoff_supersession_is_success_without_provider_or_rejection(
                         attachments: vec![],
                         replay_generation: "test".into(),
                         text: "must not deliver".into(),
+                        turn_generation: 1,
                     },
                 }
             };

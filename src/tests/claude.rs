@@ -1349,147 +1349,6 @@ fn claude_hook_lifecycle_events_are_safety_only_and_do_not_reach_the_transcript(
 }
 
 #[test]
-fn claude_live_frame_sequence_keeps_only_pre_effect_overloads_replayable() {
-    let overloaded = json!({
-        "type": "result",
-        "subtype": "success",
-        "is_error": true,
-        "api_error_status": 529,
-        "result": "API Error: 529 Overloaded."
-    });
-    let prompt_echo = json!({
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": [{
-                "type": "text",
-                "text": "Review this change."
-            }]
-        }
-    });
-
-    let mut state = ClaudeTurnState::default();
-    let mut recorder = TestRecorder::default();
-    let mut session_id = None;
-    let mut observed_generation = None;
-
-    // Claude Code 2.1.220 emits process-scoped SessionStart hooks before the
-    // first prompt. The new prompt generation resets any out-of-turn parser
-    // state, while exact process-local hook/status frames remain effect-free.
-    handle_claude_event(
-        &json!({
-            "type": "system",
-            "subtype": "hook_started",
-            "hook_event": "SessionStart"
-        }),
-        &mut session_id,
-        &mut state,
-        &mut recorder,
-    )
-    .expect("SessionStart hook should be consumed");
-    handle_claude_event(
-        &json!({
-            "type": "system",
-            "subtype": "future_post_turn_event"
-        }),
-        &mut session_id,
-        &mut state,
-        &mut recorder,
-    )
-    .expect("out-of-turn unknown event should fail closed");
-    assert!(state.replay_became_unsafe);
-    reset_claude_turn_state_for_replay_generation(
-        &mut observed_generation,
-        Some("live-generation-1"),
-        &mut state,
-        &mut recorder,
-    )
-    .expect("new generation should establish a clean turn boundary");
-    assert!(!state.replay_became_unsafe);
-    for event in [
-        json!({
-            "type": "system",
-            "subtype": "status",
-            "status": "requesting"
-        }),
-        prompt_echo.clone(),
-        json!({
-            "type": "rate_limit_event",
-            "rate_limit_info": {
-                "status": "allowed"
-            }
-        }),
-    ] {
-        handle_claude_event(&event, &mut session_id, &mut state, &mut recorder)
-            .expect("known effect-free frame should be consumed");
-    }
-    assert!(!state.replay_became_unsafe);
-    assert!(matches!(
-        classify_claude_transient_api_result(
-            &overloaded,
-            "session-live-sequence",
-            0,
-            !state.replay_became_unsafe
-        ),
-        Some(ClaudeTransientApiResult::Retry { status: 529, .. })
-    ));
-
-    // Prompt hooks occur after the prompt boundary and may have side effects.
-    handle_claude_event(
-        &json!({
-            "type": "system",
-            "subtype": "hook_response",
-            "hook_event": "UserPromptSubmit"
-        }),
-        &mut session_id,
-        &mut state,
-        &mut recorder,
-    )
-    .expect("prompt hook should be tolerated but fail replay closed");
-    assert_eq!(
-        classify_claude_transient_api_result(
-            &overloaded,
-            "session-live-sequence",
-            0,
-            !state.replay_became_unsafe
-        ),
-        None
-    );
-
-    reset_claude_turn_state_for_replay_generation(
-        &mut observed_generation,
-        Some("live-generation-2"),
-        &mut state,
-        &mut recorder,
-    )
-    .expect("next prompt generation should reset the prior turn");
-    handle_claude_event(
-        &json!({
-            "type": "stream_event",
-            "event": {
-                "type": "content_block_delta",
-                "delta": {
-                    "text": "partial assistant output"
-                }
-            }
-        }),
-        &mut session_id,
-        &mut state,
-        &mut recorder,
-    )
-    .expect("partial assistant output should be recorded");
-    assert_eq!(
-        classify_claude_transient_api_result(
-            &overloaded,
-            "session-live-sequence",
-            0,
-            !state.replay_became_unsafe
-        ),
-        None
-    );
-}
-
-#[test]
 fn claude_retry_replays_the_exact_last_written_prompt() {
     let prompt = ClaudePromptCommand {
         attachments: vec![PromptImageAttachment {
@@ -1502,6 +1361,7 @@ fn claude_retry_replays_the_exact_last_written_prompt() {
         }],
         replay_generation: "retry-generation-1".to_owned(),
         text: "review this exact prompt".to_owned(),
+        turn_generation: 1,
     };
     let mut writer = Vec::new();
     let replay_prompt = Arc::new(Mutex::new(None));
@@ -1509,14 +1369,20 @@ fn claude_retry_replays_the_exact_last_written_prompt() {
     write_claude_runtime_command(
         &mut writer,
         &replay_prompt,
+        &new_claude_turn_ownership(),
         ClaudeRuntimeCommand::Prompt(prompt),
     )
     .expect("initial prompt should be written");
     write_claude_runtime_command(
         &mut writer,
         &replay_prompt,
+        &new_claude_turn_ownership(),
         ClaudeRuntimeCommand::RetryLastPrompt {
-            replay_generation: "retry-generation-1".to_owned(),
+            ticket: ClaudeRetryTicket {
+                replay_generation: "retry-generation-1".to_owned(),
+                turn_generation: 1,
+                attempt: 1,
+            },
             retry_detail: "Retrying Claude automatically.".to_owned(),
         },
     )
@@ -1528,7 +1394,13 @@ fn claude_retry_replays_the_exact_last_written_prompt() {
         .map(|line| serde_json::from_str::<Value>(line).expect("valid Claude NDJSON"))
         .collect::<Vec<_>>();
     assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0], messages[1]);
+    assert_eq!(messages[0]["message"], messages[1]["message"]);
+    assert_eq!(messages[0]["type"], messages[1]["type"]);
+    assert_eq!(messages[0]["uuid"], "retry-generation-1");
+    assert_ne!(
+        messages[1]["uuid"], messages[0]["uuid"],
+        "the retry is a new attempt with its own uuid"
+    );
 }
 
 #[test]
@@ -1544,12 +1416,14 @@ fn claude_stale_retry_generation_is_ignored_and_terminal_clear_releases_prompt()
         }],
         replay_generation: "current-generation".to_owned(),
         text: "retain only until terminal result".to_owned(),
+        turn_generation: 1,
     };
     let mut writer = Vec::new();
     let replay_prompt = Arc::new(Mutex::new(None));
     write_claude_runtime_command(
         &mut writer,
         &replay_prompt,
+        &new_claude_turn_ownership(),
         ClaudeRuntimeCommand::Prompt(prompt),
     )
     .expect("initial prompt should be written");
@@ -1558,8 +1432,13 @@ fn claude_stale_retry_generation_is_ignored_and_terminal_clear_releases_prompt()
     write_claude_runtime_command(
         &mut writer,
         &replay_prompt,
+        &new_claude_turn_ownership(),
         ClaudeRuntimeCommand::RetryLastPrompt {
-            replay_generation: "stale-generation".to_owned(),
+            ticket: ClaudeRetryTicket {
+                replay_generation: "stale-generation".to_owned(),
+                turn_generation: 1,
+                attempt: 1,
+            },
             retry_detail: "Stale retry.".to_owned(),
         },
     )
@@ -1583,8 +1462,13 @@ fn claude_stale_retry_generation_is_ignored_and_terminal_clear_releases_prompt()
     write_claude_runtime_command(
         &mut writer,
         &replay_prompt,
+        &new_claude_turn_ownership(),
         ClaudeRuntimeCommand::RetryLastPrompt {
-            replay_generation: "current-generation".to_owned(),
+            ticket: ClaudeRetryTicket {
+                replay_generation: "current-generation".to_owned(),
+                turn_generation: 1,
+                attempt: 1,
+            },
             retry_detail: "Retry after terminal cleanup.".to_owned(),
         },
     )

@@ -4514,6 +4514,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
                         "parallel-message".to_owned(),
                     )]),
                     streaming_text_message_id: Some("stream-message".to_owned()),
+                    ..SessionRecorderState::default()
                 },
                 thread_id: Some("conversation-123".to_owned()),
                 turn_id: Some("turn-1".to_owned()),
@@ -4634,6 +4635,7 @@ fn shared_codex_retryable_error_preserves_turn_state_and_accepts_recovered_outpu
                         "agent-message".to_owned(),
                     )]),
                     streaming_text_message_id: None,
+                    ..SessionRecorderState::default()
                 },
                 thread_id: Some("conversation-123".to_owned()),
                 turn_id: Some("turn-1".to_owned()),
@@ -4829,6 +4831,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
                         "parallel-message".to_owned(),
                     )]),
                     streaming_text_message_id: Some("stream-message".to_owned()),
+                    ..SessionRecorderState::default()
                 },
                 thread_id: Some("conversation-123".to_owned()),
                 turn_id: Some("turn-1".to_owned()),

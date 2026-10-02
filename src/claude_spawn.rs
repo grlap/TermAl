@@ -166,36 +166,54 @@ fn clear_claude_replay_prompt_if_matches(
 }
 
 /// Writes one runtime command and retains the exact last successfully-written
-/// prompt for transient API replay.
+/// prompt for transient API replay. A prompt's owner is reserved in
+/// `ownership` before its bytes are written, so the reader can name the turn
+/// the prompt opens however the write and the runtime's frames interleave, and
+/// it is released when the write fails.
 fn write_claude_runtime_command(
     writer: &mut impl Write,
     replay_prompt: &ClaudeReplayPrompt,
+    ownership: &ClaudeTurnOwnership,
     command: ClaudeRuntimeCommand,
 ) -> Result<()> {
     match command {
         ClaudeRuntimeCommand::Prompt(prompt) => {
             let replay_generation = prompt.replay_generation.clone();
             let wire_prompt = prompt.clone();
+            let owner = claude_host_prompt_owner(&prompt);
+            let attempt_uuid = owner.attempt_uuid.clone();
+            lock_claude_turn_ownership(ownership).reserve(owner);
             *replay_prompt
                 .lock()
                 .expect("Claude replay prompt mutex poisoned") = Some(prompt);
-            if let Err(err) = write_claude_prompt_message(writer, &wire_prompt) {
+            if let Err(err) = write_claude_prompt_message(writer, &wire_prompt, &attempt_uuid) {
                 clear_claude_replay_prompt_if_matches(replay_prompt, &replay_generation);
+                lock_claude_turn_ownership(ownership).release(&attempt_uuid);
                 return Err(err);
             }
             Ok(())
         }
-        ClaudeRuntimeCommand::RetryLastPrompt {
-            replay_generation, ..
-        } => {
+        ClaudeRuntimeCommand::RetryLastPrompt { ticket, .. } => {
             let prompt = replay_prompt
                 .lock()
                 .expect("Claude replay prompt mutex poisoned")
                 .as_ref()
-                .filter(|prompt| prompt.replay_generation == replay_generation)
+                .filter(|prompt| prompt.replay_generation == ticket.replay_generation)
                 .cloned();
             if let Some(prompt) = prompt {
-                write_claude_prompt_message(writer, &prompt)?;
+                // A fresh uuid for the attempt, so a late frame of the failed
+                // attempt never names this one.
+                let owner = claude_host_prompt_attempt_owner(
+                    &prompt,
+                    ticket.attempt,
+                    Uuid::new_v4().to_string(),
+                );
+                let attempt_uuid = owner.attempt_uuid.clone();
+                lock_claude_turn_ownership(ownership).reserve(owner);
+                if let Err(err) = write_claude_prompt_message(writer, &prompt, &attempt_uuid) {
+                    lock_claude_turn_ownership(ownership).release(&attempt_uuid);
+                    return Err(err);
+                }
             }
             Ok(())
         }
@@ -209,24 +227,164 @@ fn write_claude_runtime_command(
     }
 }
 
+/// The writer thread's receive loop: each command, in order, until every
+/// sender of the channel is gone (the runtime handle and the reader dropped
+/// theirs) or the runtime can no longer be written to. Commands still queued
+/// when the last sender goes are written first. `context` carries no sender,
+/// so the loop never keeps its own channel open.
+fn run_claude_writer(
+    context: &ClaudeRuntimeContext,
+    writer: &mut impl Write,
+    input_rx: mpsc::Receiver<ClaudeRuntimeCommand>,
+) {
+    while let Ok(command) = input_rx.recv() {
+        if !apply_claude_writer_command(context, writer, command) {
+            break;
+        }
+    }
+}
+
+/// Carries out one command on the runtime's stdin, as the writer thread
+/// does. A delayed retry is written only while it is still the pending
+/// attempt of the live turn on this runtime, and it is taken here, so it is
+/// written at most once; every other command is written as given. Returns
+/// `false` once the runtime cannot be written to.
+fn apply_claude_writer_command(
+    context: &ClaudeRuntimeContext,
+    writer: &mut impl Write,
+    command: ClaudeRuntimeCommand,
+) -> bool {
+    if let ClaudeRuntimeCommand::RetryLastPrompt {
+        ticket,
+        retry_detail,
+    } = &command
+    {
+        let replay_generation = &ticket.replay_generation;
+        if !claude_retry_is_current(
+            &context.state,
+            &context.session_id,
+            &context.token,
+            &context.replay_prompt,
+            &context.ownership,
+            ticket,
+        ) || !lock_claude_turn_ownership(&context.ownership).take_pending_retry(ticket)
+        {
+            release_claude_replay_prompt_of_refused_retry(
+                &context.replay_prompt,
+                &context.ownership,
+                ticket,
+            );
+            return true;
+        }
+        match context.state.note_turn_retry_if_runtime_and_generation_match(
+            &context.session_id,
+            &context.token,
+            ticket.turn_generation,
+            retry_detail,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                clear_claude_replay_prompt_if_matches(&context.replay_prompt, replay_generation);
+                return true;
+            }
+            Err(err) => {
+                clear_claude_replay_prompt_if_matches(&context.replay_prompt, replay_generation);
+                let _ = context.state.fail_turn_if_runtime_matches(
+                    &context.session_id,
+                    &context.token,
+                    &format!("failed to record Claude automatic retry: {err:#}"),
+                );
+                return true;
+            }
+        }
+        if !context.state.turn_retry_allowed_if_runtime_and_generation_match(
+            &context.session_id,
+            &context.token,
+            ticket.turn_generation,
+        ) {
+            clear_claude_replay_prompt_if_matches(&context.replay_prompt, replay_generation);
+            return true;
+        }
+    }
+    if let Err(err) =
+        write_claude_runtime_command(writer, &context.replay_prompt, &context.ownership, command)
+    {
+        let _ = context.state.handle_runtime_exit_if_matches(
+            &context.session_id,
+            &context.token,
+            Some(&format!("failed to write prompt to Claude stdin: {err:#}")),
+        );
+        return false;
+    }
+    true
+}
+
+/// Whether the delayed retry `ticket` may still be written: it is the retry
+/// pending (no newer prompt or attempt replaced it), the replay prompt still
+/// holds its prompt, and its turn is still the session's live turn on this
+/// runtime (no stop, no new turn, no new runtime).
+fn claude_retry_is_current(
+    state: &AppState,
+    session_id: &str,
+    runtime_token: &RuntimeToken,
+    replay_prompt: &ClaudeReplayPrompt,
+    ownership: &ClaudeTurnOwnership,
+    ticket: &ClaudeRetryTicket,
+) -> bool {
+    lock_claude_turn_ownership(ownership).retry_is_pending(ticket)
+        && claude_replay_generation(replay_prompt).as_deref()
+            == Some(ticket.replay_generation.as_str())
+        && state.turn_retry_allowed_if_runtime_and_generation_match(
+            session_id,
+            runtime_token,
+            ticket.turn_generation,
+        )
+}
+
+/// Releases the replay prompt of a refused retry `ticket`, unless another
+/// retry of the same prompt is pending and still needs it.
+fn release_claude_replay_prompt_of_refused_retry(
+    replay_prompt: &ClaudeReplayPrompt,
+    ownership: &ClaudeTurnOwnership,
+    ticket: &ClaudeRetryTicket,
+) {
+    let other_pending = lock_claude_turn_ownership(ownership)
+        .pending_retry
+        .as_ref()
+        .is_some_and(|pending| {
+            pending != ticket && pending.replay_generation == ticket.replay_generation
+        });
+    if !other_pending {
+        clear_claude_replay_prompt_if_matches(replay_prompt, &ticket.replay_generation);
+    }
+}
+
 fn dispatch_claude_retry_if_current(
     state: &AppState,
     session_id: &str,
     runtime_token: &RuntimeToken,
     retry_sender: &Sender<ClaudeRuntimeCommand>,
     replay_prompt: &ClaudeReplayPrompt,
-    replay_generation: &str,
+    ownership: &ClaudeTurnOwnership,
+    ticket: &ClaudeRetryTicket,
     retry_detail: &str,
 ) -> bool {
-    if !state.turn_retry_allowed_if_runtime_matches(session_id, runtime_token) {
-        clear_claude_replay_prompt_if_matches(replay_prompt, replay_generation);
+    if !claude_retry_is_current(
+        state,
+        session_id,
+        runtime_token,
+        replay_prompt,
+        ownership,
+        ticket,
+    ) {
+        release_claude_replay_prompt_of_refused_retry(replay_prompt, ownership, ticket);
         return false;
     }
     if let Err(err) = retry_sender.send(ClaudeRuntimeCommand::RetryLastPrompt {
-        replay_generation: replay_generation.to_owned(),
+        ticket: ticket.clone(),
         retry_detail: retry_detail.to_owned(),
     }) {
-        clear_claude_replay_prompt_if_matches(replay_prompt, replay_generation);
+        clear_claude_replay_prompt_if_matches(replay_prompt, &ticket.replay_generation);
         let _ = state.fail_turn_if_runtime_matches(
             session_id,
             runtime_token,
@@ -235,24 +393,6 @@ fn dispatch_claude_retry_if_current(
         return false;
     }
     true
-}
-
-fn reset_claude_turn_state_for_replay_generation<R: TurnRecorder + ?Sized>(
-    observed_replay_generation: &mut Option<String>,
-    replay_generation: Option<&str>,
-    turn_state: &mut ClaudeTurnState,
-    recorder: &mut R,
-) -> Result<bool> {
-    let Some(replay_generation) = replay_generation else {
-        return Ok(false);
-    };
-    if observed_replay_generation.as_deref() == Some(replay_generation) {
-        return Ok(false);
-    }
-
-    reset_claude_turn_state(turn_state, recorder)?;
-    *observed_replay_generation = Some(replay_generation.to_owned());
-    Ok(true)
 }
 
 // Claude receives its MCP configuration as a private file path, never as an
@@ -455,6 +595,9 @@ fn spawn_claude_runtime(
     let (input_tx, input_rx) = mpsc::channel::<ClaudeRuntimeCommand>();
 
     let replay_prompt = Arc::new(Mutex::new(None));
+    // Which turn each stdout frame belongs to, shared by the writer (which
+    // reserves a prompt's owner before writing it) and the reader.
+    let turn_ownership = new_claude_turn_ownership();
     // Reader-side protocol failures can require terminating a still-live
     // child. The waiter owns runtime cleanup, so carry the actionable reason
     // across the process exit instead of first recording one failure and then
@@ -466,6 +609,10 @@ fn spawn_claude_runtime(
         let writer_state = state.clone();
         let writer_runtime_token = RuntimeToken::Claude(runtime_id.clone());
         let writer_replay_prompt = replay_prompt.clone();
+        let writer_turn_ownership = turn_ownership.clone();
+        let writer_cwd = cwd.clone();
+        // The writer owns no sender of the command channel it receives on,
+        // so its loop ends once the runtime handle and the reader are gone.
         std::thread::spawn(move || {
             let mut stdin = stdin;
             if let Err(err) = write_claude_initialize(&mut stdin, &writer_state, &writer_session_id)
@@ -478,71 +625,15 @@ fn spawn_claude_runtime(
                 return;
             }
 
-            while let Ok(command) = input_rx.recv() {
-                if let ClaudeRuntimeCommand::RetryLastPrompt {
-                    replay_generation,
-                    retry_detail,
-                } = &command
-                {
-                    if !writer_state.turn_retry_allowed_if_runtime_matches(
-                        &writer_session_id,
-                        &writer_runtime_token,
-                    ) {
-                        clear_claude_replay_prompt_if_matches(
-                            &writer_replay_prompt,
-                            replay_generation,
-                        );
-                        continue;
-                    }
-                    match writer_state.note_turn_retry_if_runtime_matches(
-                        &writer_session_id,
-                        &writer_runtime_token,
-                        retry_detail,
-                    ) {
-                        Ok(true) => {}
-                        Ok(false) => {
-                            clear_claude_replay_prompt_if_matches(
-                                &writer_replay_prompt,
-                                replay_generation,
-                            );
-                            continue;
-                        }
-                        Err(err) => {
-                            clear_claude_replay_prompt_if_matches(
-                                &writer_replay_prompt,
-                                replay_generation,
-                            );
-                            let _ = writer_state.fail_turn_if_runtime_matches(
-                                &writer_session_id,
-                                &writer_runtime_token,
-                                &format!("failed to record Claude automatic retry: {err:#}"),
-                            );
-                            continue;
-                        }
-                    }
-                    if !writer_state.turn_retry_allowed_if_runtime_matches(
-                        &writer_session_id,
-                        &writer_runtime_token,
-                    ) {
-                        clear_claude_replay_prompt_if_matches(
-                            &writer_replay_prompt,
-                            replay_generation,
-                        );
-                        continue;
-                    }
-                }
-                let write_result =
-                    write_claude_runtime_command(&mut stdin, &writer_replay_prompt, command);
-
-                if let Err(err) = write_result {
-                    let _ = writer_state.handle_runtime_exit_if_matches(
-                        &writer_session_id,
-                        &writer_runtime_token,
-                        Some(&format!("failed to write prompt to Claude stdin: {err:#}")),
-                    );
-                    break;
-                }
-            }
+            let writer_context = ClaudeRuntimeContext::new(
+                writer_state,
+                writer_session_id,
+                writer_runtime_token,
+                writer_turn_ownership,
+                writer_replay_prompt,
+                writer_cwd,
+            );
+            run_claude_writer(&writer_context, &mut stdin, input_rx);
         });
     }
 
@@ -552,6 +643,7 @@ fn spawn_claude_runtime(
         let reader_input_tx = input_tx.clone();
         let reader_runtime_token = RuntimeToken::Claude(runtime_id.clone());
         let reader_replay_prompt = replay_prompt.clone();
+        let reader_turn_ownership = turn_ownership.clone();
         let reader_process = process.clone();
         let reader_runtime_exit_error_override = runtime_exit_error_override.clone();
         // The reviewer child's own working directory, pre-normalized. The read-only
@@ -566,20 +658,25 @@ fn spawn_claude_runtime(
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut raw_line = String::new();
-            let mut turn_state = ClaudeTurnState::default();
+            let context = ClaudeRuntimeContext::new(
+                reader_state.clone(),
+                reader_session_id.clone(),
+                reader_runtime_token.clone(),
+                reader_turn_ownership.clone(),
+                reader_replay_prompt.clone(),
+                reader_cwd.clone(),
+            );
+            let mut frames =
+                ClaudeReaderFrames::new(&context, reader_input_tx.clone(), model_options_tx);
             let mut recorder =
                 SessionRecorder::new(reader_state.clone(), reader_session_id.clone());
-            let mut resolved_session_id: Option<String> = None;
-            let mut initialize_model_options_tx = model_options_tx;
-            let mut completed_api_attempts = 0u32;
-            let mut observed_replay_generation: Option<String> = None;
 
             loop {
                 raw_line.clear();
                 let bytes_read = match reader.read_line(&mut raw_line) {
                     Ok(bytes_read) => bytes_read,
                     Err(err) => {
-                        if let Some(tx) = initialize_model_options_tx.take() {
+                        if let Some(tx) = frames.initialize_model_options_tx.take() {
                             let _ =
                                 tx.send(Err(format!("failed to read stdout from Claude: {err}")));
                         }
@@ -599,7 +696,7 @@ fn spawn_claude_runtime(
                 let message: Value = match serde_json::from_str(raw_line.trim_end()) {
                     Ok(message) => message,
                     Err(err) => {
-                        if let Some(tx) = initialize_model_options_tx.take() {
+                        if let Some(tx) = frames.initialize_model_options_tx.take() {
                             let _ =
                                 tx.send(Err(format!("failed to parse Claude JSON line: {err}")));
                         }
@@ -613,341 +710,32 @@ fn spawn_claude_runtime(
                 };
                 release_private_claude_mcp_config(&mut reader_mcp_config_file);
 
-                let message_type = message.get("type").and_then(Value::as_str);
-                let is_result = message.get("type").and_then(Value::as_str) == Some("result");
-                let is_error = message
-                    .get("is_error")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let error_summary = is_result.then(|| summarize_error(&message));
-                let replay_generation = claude_replay_generation(&reader_replay_prompt);
-                if let Err(err) = reset_claude_turn_state_for_replay_generation(
-                    &mut observed_replay_generation,
-                    replay_generation.as_deref(),
-                    &mut turn_state,
-                    &mut recorder,
-                ) {
-                    let _ = reader_state.fail_turn_if_runtime_matches(
-                        &reader_session_id,
-                        &reader_runtime_token,
-                        &format!("failed to begin Claude turn: {err:#}"),
-                    );
-                    break;
-                }
-                let transient_api_result = classify_claude_transient_api_result(
-                    &message,
-                    &reader_session_id,
-                    completed_api_attempts,
-                    !turn_state.replay_became_unsafe && replay_generation.is_some(),
-                );
-
-                if let Some(agent_commands) = claude_agent_commands(&message) {
-                    if let Err(err) =
-                        reader_state.sync_session_agent_commands(&reader_session_id, agent_commands)
-                    {
-                        let _ = reader_state.fail_turn_if_runtime_matches(
-                            &reader_session_id,
-                            &reader_runtime_token,
-                            &format!("failed to sync Claude agent commands: {err:#}"),
-                        );
-                        break;
-                    }
-                }
-
-                if let Some(model_options) = claude_model_options(&message) {
-                    if let Err(err) = reader_state.sync_session_model_options(
-                        &reader_session_id,
-                        None,
-                        model_options.clone(),
-                    ) {
-                        if let Some(tx) = initialize_model_options_tx.take() {
-                            let _ = tx
-                                .send(Err(format!("failed to sync Claude model options: {err:#}")));
-                        }
-                        let _ = reader_state.fail_turn_if_runtime_matches(
-                            &reader_session_id,
-                            &reader_runtime_token,
-                            &format!("failed to sync Claude model options: {err:#}"),
-                        );
-                        break;
-                    }
-
-                    if let Some(tx) = initialize_model_options_tx.take() {
-                        let _ = tx.send(Ok(model_options));
-                    }
-                }
-
-                if message_type == Some("control_request") {
-                    // A permission request may already have led to an external
-                    // side effect. Once one is observed, replay must fail closed.
-                    turn_state.replay_became_unsafe = true;
-                    // Approval mode and delegation-child identity are read
-                    // under one state lock so the attendedness policy never
-                    // sees a torn pair.
-                    let (approval_mode, delegation_child) =
-                        match reader_state.claude_control_request_context(&reader_session_id) {
-                            Ok(context) => context,
-                            Err(err) => {
-                                let _ = reader_state.fail_turn_if_runtime_matches(
-                                &reader_session_id,
-                                &reader_runtime_token,
-                                &format!(
-                                    "failed to resolve Claude approval mode for session: {err:#}"
-                                ),
-                            );
-                                break;
-                            }
-                        };
-
-                    let action = match classify_claude_control_request(
-                        &message,
-                        &mut turn_state,
-                        approval_mode,
-                        delegation_child,
-                        &reader_cwd,
-                        reader_state.claude_host_admission(&reader_session_id, &message),
-                    ) {
-                        Ok(action) => action,
-                        Err(err) => {
-                            let detail =
-                                format!("failed to handle Claude control request: {err:#}");
-                            if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
-                                &reader_process,
-                                &reader_runtime_exit_error_override,
-                                &detail,
-                            ) {
-                                let _ = reader_state.fail_turn_if_runtime_matches(
-                                    &reader_session_id,
-                                    &reader_runtime_token,
-                                    &format!(
-                                        "{detail}; failed to stop the Claude runtime: {kill_error:#}"
-                                    ),
-                                );
-                            }
-                            break;
-                        }
-                    };
-
-                    if let Some(action) = action {
-                        let action_result =
-                            finish_claude_assistant_text_stream(&mut turn_state, &mut recorder)
-                                .and_then(|_| {
-                                    use ClaudeControlRequestAction as Action;
-                                    match action {
-                                        Action::QueueApproval {
-                                            title,
-                                            command,
-                                            detail,
-                                            approval,
-                                        } => recorder.push_claude_approval(
-                                            &title, &command, &detail, approval,
-                                        ),
-                                        Action::QueueUserInput {
-                                            title,
-                                            detail,
-                                            questions,
-                                            request,
-                                        } => recorder.push_claude_user_input_request(
-                                            &title, &detail, questions, request,
-                                        ),
-                                        Action::Respond(decision) => reader_input_tx
-                                            .send(ClaudeRuntimeCommand::PermissionResponse(
-                                                decision,
-                                            ))
-                                            .map_err(|err| {
-                                                anyhow!(
-                                                    "failed to auto-approve Claude tool \
-                                                     request: {err}"
-                                                )
-                                            }),
-                                        Action::RecordSelfResolvedQuestion {
-                                            title,
-                                            detail,
-                                            questions,
-                                            response,
-                                        } => {
-                                            // The audit card is recorded first so the transcript
-                                            // explains the answer the runtime is about to receive.
-                                            recorder.push_claude_self_resolved_user_input(
-                                                &title, &detail, questions,
-                                            )?;
-                                            reader_input_tx
-                                                .send(ClaudeRuntimeCommand::PermissionResponse(
-                                                    response,
-                                                ))
-                                                .map_err(|err| {
-                                                    anyhow!(
-                                                        "failed to self-resolve Claude \
-                                                         question: {err}"
-                                                    )
-                                                })
-                                        }
-                                        Action::RecordSelfResolvedQuestionError {
-                                            detail,
-                                            response,
-                                        } => {
-                                            recorder.error(&detail)?;
-                                            reader_input_tx
-                                                .send(ClaudeRuntimeCommand::PermissionResponse(
-                                                    response,
-                                                ))
-                                                .map_err(|err| {
-                                                    anyhow!(
-                                                        "failed to self-resolve malformed Claude \
-                                                         question: {err}"
-                                                    )
-                                                })
-                                        }
-                                    }
-                                });
-
-                        if let Err(err) = action_result {
-                            let detail =
-                                format!("failed to handle Claude control request: {err:#}");
-                            if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
-                                &reader_process,
-                                &reader_runtime_exit_error_override,
-                                &detail,
-                            ) {
-                                let _ = reader_state.fail_turn_if_runtime_matches(
-                                    &reader_session_id,
-                                    &reader_runtime_token,
-                                    &format!(
-                                        "{detail}; failed to stop the Claude runtime: {kill_error:#}"
-                                    ),
-                                );
-                            }
-                            break;
-                        }
-                    }
-                    continue;
-                } else if message_type == Some("control_cancel_request") {
-                    turn_state.replay_became_unsafe = true;
-                    if let Some(request_id) = message.get("request_id").and_then(Value::as_str) {
-                        if let Err(err) = reader_state.clear_claude_pending_interaction_by_request(
-                            &reader_session_id,
-                            request_id,
+                // Every effect of the frame is applied by the one shared
+                // function (`claude_frame_application.rs`); only stopping the
+                // process, on its explicit outcome, happens here.
+                match apply_claude_frame(&context, &mut frames, &mut recorder, &message).next {
+                    ClaudeFrameApplied::Continue => {}
+                    ClaudeFrameApplied::Stop => break,
+                    ClaudeFrameApplied::TerminateRuntime(detail) => {
+                        if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
+                            &reader_process,
+                            &reader_runtime_exit_error_override,
+                            &detail,
                         ) {
-                            // Without the owning session, the cancellation cannot be
-                            // reconciled with the persisted request card. Stop this reader
-                            // instead of accepting more control traffic for stale state.
-                            let detail =
-                                format!("failed to cancel Claude interaction request: {err:#}");
-                            if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
-                                &reader_process,
-                                &reader_runtime_exit_error_override,
-                                &detail,
-                            ) {
-                                let _ = reader_state.fail_turn_if_runtime_matches(
-                                    &reader_session_id,
-                                    &reader_runtime_token,
-                                    &format!(
-                                        "{detail}; failed to stop the Claude runtime: {kill_error:#}"
-                                    ),
-                                );
-                            }
-                            break;
-                        }
-                    }
-                    continue;
-                }
-
-                match transient_api_result {
-                    Some(ClaudeTransientApiResult::Retry {
-                        completed_attempts,
-                        delay,
-                        status,
-                    }) => {
-                        let retry_detail = format!(
-                            "Claude API returned transient status {status}; retrying \
-                             automatically (attempt {} of \
-                             {CLAUDE_TRANSIENT_API_RETRY_ATTEMPTS}).",
-                            completed_attempts + 1
-                        );
-                        if let Err(err) = reset_claude_turn_state(&mut turn_state, &mut recorder) {
                             let _ = reader_state.fail_turn_if_runtime_matches(
                                 &reader_session_id,
                                 &reader_runtime_token,
                                 &format!(
-                                    "failed to reset Claude turn for automatic retry: {err:#}"
+                                    "{detail}; failed to stop the Claude runtime: {kill_error:#}"
                                 ),
                             );
-                            break;
-                        } else {
-                            completed_api_attempts = completed_attempts;
-                            let retry_sender = reader_input_tx.clone();
-                            let retry_state = reader_state.clone();
-                            let retry_session_id = reader_session_id.clone();
-                            let retry_runtime_token = reader_runtime_token.clone();
-                            let retry_replay_prompt = reader_replay_prompt.clone();
-                            let replay_generation = replay_generation
-                                .clone()
-                                .expect("classified retry should have a replay generation");
-                            std::thread::spawn(move || {
-                                std::thread::sleep(delay);
-                                dispatch_claude_retry_if_current(
-                                    &retry_state,
-                                    &retry_session_id,
-                                    &retry_runtime_token,
-                                    &retry_sender,
-                                    &retry_replay_prompt,
-                                    &replay_generation,
-                                    &retry_detail,
-                                );
-                            });
-                            continue;
                         }
-                    }
-                    Some(ClaudeTransientApiResult::Exhausted { .. }) | None => {}
-                }
-
-                if let Some(replay_generation) = replay_generation.as_deref() {
-                    clear_claude_replay_prompt_if_matches(&reader_replay_prompt, replay_generation);
-                }
-
-                if claude_event_marks_engram_context_nudge(&message) {
-                    reader_state.mark_engram_context_nudge_pending(&reader_session_id);
-                }
-
-                if let Err(err) = handle_claude_event(
-                    &message,
-                    &mut resolved_session_id,
-                    &mut turn_state,
-                    &mut recorder,
-                ) {
-                    let _ = reader_state.fail_turn_if_runtime_matches(
-                        &reader_session_id,
-                        &reader_runtime_token,
-                        &format!("failed to handle Claude event: {err:#}"),
-                    );
-                    break;
-                }
-
-                if is_result {
-                    completed_api_attempts = 0;
-                    if is_error {
-                        if let Some(detail) = error_summary.as_deref() {
-                            let _ = reader_state.mark_turn_error_if_runtime_matches(
-                                &reader_session_id,
-                                &reader_runtime_token,
-                                detail,
-                            );
-                        }
-                    } else {
-                        if let Err(err) = reader_state.finish_turn_ok_if_runtime_matches(
-                            &reader_session_id,
-                            &reader_runtime_token,
-                        ) {
-                            eprintln!(
-                                "runtime state warning> failed to finalize Claude turn for session `{}`: {err:#}",
-                                reader_session_id
-                            );
-                        }
+                        break;
                     }
                 }
             }
 
-            if let Some(tx) = initialize_model_options_tx.take() {
+            if let Some(tx) = frames.initialize_model_options_tx.take() {
                 let _ = tx.send(Err(
                     "Claude exited before reporting model options".to_owned()
                 ));
@@ -1050,32 +838,20 @@ fn write_claude_initialize(
 fn write_claude_prompt_message(
     writer: &mut impl Write,
     prompt: &ClaudePromptCommand,
+    attempt_uuid: &str,
 ) -> Result<()> {
-    let mut content = Vec::new();
-    if !prompt.text.trim().is_empty() {
-        content.push(json!({
-            "type": "text",
-            "text": prompt.text.as_str(),
-        }));
-    }
-    for attachment in &prompt.attachments {
-        content.push(json!({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": attachment.metadata.media_type.as_str(),
-                "data": attachment.data.as_str(),
-            }
-        }));
-    }
-
+    // The attempt's own identity: the replay generation for a prompt's first
+    // attempt, a fresh uuid for each retry. A runtime that reports message
+    // lifecycles names it back in `command_lifecycle` frames and in the
+    // `result` of the attempt's turn (`claude_turn_ownership.rs`).
     write_claude_message(
         writer,
         &json!({
             "type": "user",
+            "uuid": attempt_uuid,
             "message": {
                 "role": "user",
-                "content": content,
+                "content": claude_prompt_content(prompt),
             }
         }),
     )

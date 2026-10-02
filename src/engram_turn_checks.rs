@@ -332,6 +332,11 @@ struct EngramTurnCheck {
     /// content it did not test: its outcome is unknown. Set when the overlap
     /// happens, never reconstructed later.
     overlapped: bool,
+    /// Why Claude work with no verified completion fenced it, stored when it
+    /// was fenced (`claude_outstanding_work.rs`): the reason a successful run
+    /// of it earns no credit is told as that cause, not as an overlap to run
+    /// again, and a later end of that work does not erase it.
+    fenced_by_outstanding: Option<ClaudeHazardCause>,
     /// For a launcher full gate still being launched: a file change the
     /// workspace watcher saw in its worktree meanwhile. It carries over as the
     /// fence of the carried check (`engram_carry_check`), since the run may
@@ -378,6 +383,8 @@ enum EngramWithheldReason {
     Overlapped,
     /// Its output showed no passing test.
     NoPassingTest,
+    /// Claude work with no verified completion restricted it.
+    OutstandingClaudeWork,
 }
 
 /// A check the report leaves out, with why, for the log and for the line its
@@ -387,6 +394,8 @@ struct EngramWithheldCheck {
     program: String,
     fingerprint: String,
     reason: EngramWithheldReason,
+    /// What restricted it, for `OutstandingClaudeWork`.
+    cause: Option<ClaudeHazardCause>,
 }
 
 /// Takes out of `resolved` every check whose command ended successfully but
@@ -409,11 +418,14 @@ fn engram_withhold_unjudged_successes(
         withheld.push(EngramWithheldCheck {
             program: kept.check.command.program.clone(),
             fingerprint: engram_check_fingerprint(&kept.check.command),
-            reason: if kept.check.overlapped {
+            reason: if kept.check.fenced_by_outstanding.is_some() {
+                EngramWithheldReason::OutstandingClaudeWork
+            } else if kept.check.overlapped {
                 EngramWithheldReason::Overlapped
             } else {
                 EngramWithheldReason::NoPassingTest
             },
+            cause: kept.check.fenced_by_outstanding.clone(),
         });
         false
     });
@@ -424,11 +436,26 @@ fn engram_withhold_unjudged_successes(
 /// naming the test by program and fingerprint as the log does: the command
 /// line itself can carry a secret.
 fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
+    if withheld.reason == EngramWithheldReason::OutstandingClaudeWork {
+        let cause = withheld
+            .cause
+            .as_ref()
+            .unwrap_or(&ClaudeHazardCause::OwnSession)
+            .describe();
+        return format!(
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned \
+             no credit and was not recorded: {cause}. Running it again there, stopping or \
+             deleting a session, or starting a fresh one in the same workspace does not change \
+             that; it can earn credit once Claude reports that work ended.",
+            withheld.program, withheld.fingerprint
+        );
+    }
     let why = match withheld.reason {
         EngramWithheldReason::Overlapped => {
             "another command, an edit or another writable session reached its worktree while it ran"
         }
         EngramWithheldReason::NoPassingTest => "its output shows no passing test",
+        EngramWithheldReason::OutstandingClaudeWork => unreachable!("told above"),
     };
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned no \
@@ -512,13 +539,19 @@ fn engram_resolve_turn_checks(
 /// the live record, not the copy.
 fn engram_merge_live_overlaps(live: &[EngramTurnCheck], resolved: &mut [EngramResolvedCheck]) {
     for resolved in resolved {
-        if live.iter().any(|check| {
-            check.overlapped
-                && check.grant_id == resolved.check.grant_id
-                && check.sequence == resolved.check.sequence
-        }) {
+        let Some(check) = live.iter().find(|check| {
+            check.grant_id == resolved.check.grant_id && check.sequence == resolved.check.sequence
+        }) else {
+            continue;
+        };
+        if check.overlapped {
             resolved.check.overlapped = true;
             resolved.outcome = EngramExecutionOutcome::Unknown;
+        }
+        // A cause Claude work stored meanwhile goes with it, so the report
+        // published now names why (`claude_outstanding_work.rs`).
+        if resolved.check.fenced_by_outstanding.is_none() {
+            resolved.check.fenced_by_outstanding = check.fenced_by_outstanding.clone();
         }
     }
 }
@@ -715,13 +748,17 @@ fn engram_note_command_worktrees(
 }
 
 /// The session at `index` starts a turn: the commands of its earlier turn are
-/// over (a background one it launched then is no longer followed), and it
-/// may now write under a check another session of its worktree has open.
+/// over (a background one it launched then is no longer followed), except
+/// Claude work still outstanding (`claude_outstanding_work.rs`), which may go
+/// on writing where it was placed; and it may now write under a check another
+/// session of its worktree has open.
 fn engram_note_turn_started(inner: &mut StateInner, index: usize) {
-    inner.sessions[index]
+    let record = &mut inner.sessions[index];
+    let outstanding = &record.claude_outstanding;
+    record
         .engram
         .running_command_worktrees
-        .clear();
+        .retain(|(key, _)| outstanding.holds(key));
     engram_mark_checks_overlapped_by(inner, index, EngramWriterAct::Presence);
 }
 
@@ -917,6 +954,7 @@ impl AppState {
     fn note_engram_command_started(
         &self,
         session_id: &str,
+        provenance: &EngramObservationProvenance,
         key: &str,
         ran: Option<&str>,
         cwd: Option<&str>,
@@ -950,7 +988,14 @@ impl AppState {
             };
             let record = &inner.sessions[index];
             let engram = &record.engram;
-            let mediated = engram.work_binding.is_some() && engram.active_grant_id.is_some();
+            // Work of another turn, of a turn no prompt owns or of a replaced
+            // runtime is attributed to no grant, though the session may hold
+            // one (`claude_outstanding_work.rs`). Read here to resolve the
+            // target off the lock; decided again under it below.
+            let mediated = engram.work_binding.is_some()
+                && engram.active_grant_id.is_some()
+                && claude_observation_disposition(record, provenance)
+                    == ClaudeObservationDisposition::Current;
             (
                 record.session.workdir.clone(),
                 // A turn whose claim names a source root credits tests there.
@@ -1096,6 +1141,9 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
+        // Whether the session's grant may take this command, decided in the
+        // section that applies it.
+        let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
         // Any session's command may write, under a check another session
         // still has open in a worktree the command runs in.
         let record = inner
@@ -1119,16 +1167,35 @@ impl AppState {
                 worktrees.clone()
             },
         );
-        engram_note_shell_move(
-            record,
-            key,
-            &runtime,
-            shell_move,
-            (position.as_deref(), moving_to),
-            loss,
-        );
-        if let Some(line) = withheld_line {
+        // Outstanding Claude work keeps every place its command was placed,
+        // and what already runs there is fenced (`claude_outstanding_work.rs`).
+        let placed_hazard = if reads_only {
+            None
+        } else {
+            record.claude_outstanding.place(key, &worktrees);
+            claude_hazard_scope(record, key)
+        };
+        // A replaced runtime's shell is not the session's: its `cd` moves
+        // nothing the session's commands start from.
+        if disposition != ClaudeObservationDisposition::Replaced {
+            engram_note_shell_move(
+                record,
+                key,
+                &runtime,
+                shell_move,
+                (position.as_deref(), moving_to),
+                loss,
+            );
+        }
+        if disposition == ClaudeObservationDisposition::Current
+            && let Some(line) = withheld_line
+        {
             record.engram.set_pending_source_root_line(line);
+        }
+        // Outstanding Claude work whose scope grew fences what already runs
+        // there first, so the checks it reaches keep its cause.
+        if let Some((locations, self_gate)) = placed_hazard {
+            engram_fence_checks_for_claude_work(&mut inner, index, key, &locations, self_gate);
         }
         // A carried check of another session is fenced for this command
         // where it may write, unless it only reads.
@@ -1141,6 +1208,24 @@ impl AppState {
                 unplaced,
             },
         );
+        // A command the session's grant may not take has fenced and marked
+        // above like any other; it may also write under the session's own
+        // open checks, but it is attributed to no grant: no check starts, no
+        // running key is kept for it, and the live grant is excluded from it
+        // (`claude_outstanding_work.rs`).
+        if disposition != ClaudeObservationDisposition::Current {
+            for check in &mut inner.sessions[index].engram.active_turn_checks {
+                if check.open_to_writes() {
+                    check.overlapped = true;
+                }
+            }
+            claude_exclude_observation(
+                &mut inner.sessions[index],
+                disposition,
+                &EngramRecorderObservation::CommandStarted { key, ran, cwd },
+            );
+            return;
+        }
         let engram = &inner.sessions[index].engram;
         if engram.work_binding.is_none() {
             return;
@@ -1152,6 +1237,12 @@ impl AppState {
             engram_other_writer_in(&inner, index, &engram_path_key(&target.root))
         });
         let provenance = engram_turn_root_capture_locked(&inner, session_id);
+        // Claude work of any other session, live or removed, that may write
+        // in the check's worktree with no verified completion, whatever that
+        // session's status (`claude_outstanding_work.rs`).
+        let other_outstanding = target.as_ref().and_then(|(_, _, target)| {
+            inner.claude_work_restricting_worktree(Some(index), &engram_path_key(&target.root))
+        });
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -1247,6 +1338,20 @@ impl AppState {
         let sandbox = record
             .active_codex_sandbox_mode
             .map(|mode| mode.as_cli_value().to_owned());
+        // Claude work that restricts this session (background, subagent or
+        // orphaned work with no verified completion), or another session's
+        // that may write in its worktree, may write under the check
+        // (`claude_outstanding_work.rs`).
+        // A recognised simple full gate's own call is not a writer to the
+        // check it starts (`claude_outstanding_work.rs`).
+        let self_gate = recognised
+            .as_ref()
+            .filter(|command| engram_is_simple_full_launcher(command))
+            .map(|_| key);
+        let restricted_by = claude_session_work_restricts_except(record, self_gate)
+            .then_some(ClaudeHazardCause::OwnSession)
+            .or(other_outstanding);
+        let foreign_work = restricted_by.is_some();
         let sequence = record.engram.next_turn_check_sequence;
         record.engram.next_turn_check_sequence += 1;
         record.engram.active_turn_checks.push(EngramTurnCheck {
@@ -1259,7 +1364,8 @@ impl AppState {
             started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             sandbox,
             start_basis,
-            overlapped: others_running || other_writer || named_late,
+            overlapped: others_running || other_writer || named_late || foreign_work,
+            fenced_by_outstanding: restricted_by,
             watcher_fence: None,
             end: None,
         });
@@ -1276,6 +1382,7 @@ impl AppState {
     fn note_engram_command_described(
         &self,
         session_id: &str,
+        provenance: &EngramObservationProvenance,
         key: &str,
         ran: Option<&str>,
         cwd: Option<&str>,
@@ -1370,17 +1477,30 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
+        let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        engram_note_shell_move(
-            record,
-            key,
-            &runtime,
-            shell_move,
-            (position.as_deref(), moving_to),
-            loss,
-        );
+        if disposition != ClaudeObservationDisposition::Current {
+            // Attributed to no grant: the live grant is excluded from it. A
+            // command it describes started no check, so none is dropped.
+            claude_exclude_observation(
+                record,
+                disposition,
+                &EngramRecorderObservation::CommandDescribed { key, ran, cwd },
+            );
+        }
+        // A replaced runtime's shell is not the session's.
+        if disposition != ClaudeObservationDisposition::Replaced {
+            engram_note_shell_move(
+                record,
+                key,
+                &runtime,
+                shell_move,
+                (position.as_deref(), moving_to),
+                loss,
+            );
+        }
         if let (Some(cwd), Some(remembered)) =
             (cwd, record.engram.running_command_keys.get_mut(key))
         {
@@ -1419,6 +1539,15 @@ impl AppState {
                     worktrees.clone()
                 },
             );
+            let placed_hazard = if reads_only {
+                None
+            } else {
+                record.claude_outstanding.place(key, &worktrees);
+                claude_hazard_scope(record, key)
+            };
+            if let Some((locations, self_gate)) = placed_hazard {
+                engram_fence_checks_for_claude_work(&mut inner, index, key, &locations, self_gate);
+            }
             engram_mark_checks_overlapped_by(
                 &mut inner,
                 index,
@@ -1439,6 +1568,7 @@ impl AppState {
     fn note_engram_command_finished(
         &self,
         session_id: &str,
+        provenance: &EngramObservationProvenance,
         key: &str,
         command: &str,
         output: &str,
@@ -1488,6 +1618,9 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
+        // Whether the session's grant may take this end, decided in the
+        // section that applies it.
+        let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
         engram_note_session_worktree(
             inner
                 .session_mut_by_index(index)
@@ -1536,8 +1669,11 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        // A `cd` the command made counts from now on, if it ran.
-        engram_settle_shell_move(record, key, exit);
+        // A `cd` the command made counts from now on, if it ran; a replaced
+        // runtime's shell is not the session's.
+        if disposition != ClaudeObservationDisposition::Replaced {
+            engram_settle_shell_move(record, key, exit);
+        }
         if exit != Some(EngramCommandExit::NotFinished) {
             record.engram.running_command_keys.remove(key);
             record.engram.withheld_command_keys.remove(key);
@@ -1545,6 +1681,24 @@ impl AppState {
                 .engram
                 .running_command_worktrees
                 .retain(|(running, _)| running != key);
+        }
+        // An end of another turn's or a replaced runtime's command ends none
+        // of the grant's checks: it is kept for no grant and the live grant
+        // is excluded from it (`claude_outstanding_work.rs`). One a turn no
+        // prompt owns hides is kept as unassigned, and still ends a check its
+        // own key started.
+        claude_exclude_observation(
+            record,
+            disposition,
+            &EngramRecorderObservation::CommandFinished {
+                key,
+                command,
+                output,
+                exit,
+            },
+        );
+        if disposition.excludes_live_grant() {
+            return;
         }
         let workers = record.engram.capture_workers.clone();
         let Some(position) = record
@@ -1624,9 +1778,20 @@ impl AppState {
     /// check it started is dropped, since it never ran and would otherwise
     /// stay open to writes until the next grant, and a `cd` it would have made
     /// moves nothing.
-    fn note_engram_command_abandoned(&self, session_id: &str, key: &str) {
+    fn note_engram_command_abandoned(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+    ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id) {
+            let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
+            claude_exclude_observation(
+                &mut inner.sessions[index],
+                disposition,
+                &EngramRecorderObservation::CommandAbandoned { key },
+            );
             let engram = &mut inner.sessions[index].engram;
             engram.running_command_keys.remove(key);
             engram.withheld_command_keys.remove(key);
@@ -1702,7 +1867,11 @@ impl AppState {
     /// The agent reported a file edit in `session_id`: any check still open to
     /// writes may see content the edit changed, in this session or in
     /// another of the same worktree.
-    fn note_engram_workspace_edit(&self, session_id: &str) {
+    fn note_engram_workspace_edit(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+    ) {
         // The session's worktree, resolved off the lock for overlap marking.
         let workdir = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1716,6 +1885,14 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
+        // An edit the session's grant may not take is kept for no grant, and
+        // the live grant is excluded from it, in this same section.
+        let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
+        claude_exclude_observation(
+            &mut inner.sessions[index],
+            disposition,
+            &EngramRecorderObservation::WorkspaceEdit,
+        );
         engram_note_session_worktree(
             inner
                 .session_mut_by_index(index)
@@ -1776,10 +1953,18 @@ fn engram_turn_report(
         .active_turn_intent_fingerprint
         .clone()
         .unwrap_or_else(|| sha256_hex(format!("termal-turn-grant:{grant_id}").as_bytes()));
+    // A Claude turn no prompt owned overlapped this grant's measurement
+    // interval (`claude_runtime_turns.rs`): what changed since the begin
+    // basis may be that turn's or the grant's. No change is reported against
+    // the begin basis then, and the turn's own observation is withheld unless
+    // a reported check gives it a base of its own; each check keeps its own
+    // proof.
+    let mixed = record.engram.active_turn_mixed_attribution.as_deref() == Some(grant_id);
     let mut last_reported = record
         .engram
         .active_turn_start_basis
         .as_ref()
+        .filter(|_| !mixed)
         .map(|basis| basis.source_revision.clone());
     let mut reported_check = false;
     // Environment records before this index were observed before the last
@@ -1802,7 +1987,10 @@ fn engram_turn_report(
             "{session_id}:{}:{}:{}",
             check.grant_id, check.sequence, check.key
         );
-        if mutation_granted && last_reported.as_deref() != Some(basis.source_revision.as_str()) {
+        if mutation_granted
+            && !(mixed && !reported_check)
+            && last_reported.as_deref() != Some(basis.source_revision.as_str())
+        {
             report.observations.push(EngramExecutionObservationInput {
                 observation_id: sha256_hex(format!("termal-turn-change:{check_id}").as_bytes()),
                 action_fingerprint: intent_fingerprint.clone(),
@@ -1906,12 +2094,25 @@ fn engram_turn_report(
         .then_some(last_reported)
         .flatten();
     let judged_alone = reported_revision.is_none();
+    if mixed && judged_alone {
+        // Judged against the begin basis alone, the turn's observation would
+        // either call the overlap a clean no-change turn or give the whole
+        // difference to the grant: neither is known, so none is reported.
+        eprintln!(
+            "engram> session={session_id} grant={grant_id} a turn no prompt owned overlapped \
+             this grant's measurement interval; its own source observation is withheld as \
+             uncertain"
+        );
+        return (report, None);
+    }
     let own = own_observation(reported_revision);
     report.observations.extend(own.clone());
     // Without its own observation (withheld), the turn has nothing to fall
     // back to. One judged against the begin-time basis already is the
     // fallback's, judged (and any withholding logged) once.
-    let fallback = reported_check
+    // A mixed grant's fallback would be judged against the begin basis
+    // alone, which is what its uncertainty withholds.
+    let fallback = (reported_check && !mixed)
         .then(|| EngramTurnReport {
             observations: if judged_alone {
                 own

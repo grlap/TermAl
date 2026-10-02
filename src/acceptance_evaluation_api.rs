@@ -1277,6 +1277,10 @@ impl AppState {
                     // The requester learns which records its judge did not
                     // get whole while it can still record the proof elsewhere.
                     acceptance_brief_cut_notice(&task.work_ref, &cuts),
+                    // And why tests it ran under an evidence restriction
+                    // earned no credit (`claude_outstanding_work.rs`); the
+                    // judge's brief never carries the requester's state.
+                    self.claude_evidence_restriction_notice(parent_session_id, &place),
                 ]);
                 Ok(AcceptanceEvaluationRequestResponse::Spawned {
                     delegation,
@@ -1344,6 +1348,7 @@ impl AppState {
                         root_notice,
                         unmeasured,
                         acceptance_same_session_cut_notice(&task.work_ref, &cuts),
+                        self.claude_evidence_restriction_notice(parent_session_id, &place),
                     ]),
                     evidence_omissions: acceptance_brief_omissions(&cuts),
                     criterion_evidence: task.criterion_evidence,

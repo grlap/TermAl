@@ -251,6 +251,10 @@ struct ClaudePromptCommand {
     /// turn that reached the same persistent runtime in the meantime.
     replay_generation: String,
     text: String,
+    /// The session turn generation this prompt was dispatched under: a
+    /// `result` of the turn this prompt opens finalizes that generation only
+    /// (`claude_turn_ownership.rs`).
+    turn_generation: u64,
 }
 
 /// Represents a Claude runtime command.
@@ -259,9 +263,12 @@ enum ClaudeRuntimeCommand {
     Prompt(ClaudePromptCommand),
     /// Internal: replays the last accepted prompt after a transient Claude API
     /// rejection. The writer owns the saved prompt so the retry cannot drift
-    /// from the exact text and attachments originally dispatched.
+    /// from the exact text and attachments originally dispatched. `ticket`
+    /// names the prompt, its turn generation and the attempt the retry
+    /// writes; the writer writes it only while it is still the retry pending
+    /// (`claude_frame_router.rs`).
     RetryLastPrompt {
-        replay_generation: String,
+        ticket: ClaudeRetryTicket,
         retry_detail: String,
     },
     PermissionResponse(ClaudePermissionDecision),
@@ -801,10 +808,21 @@ struct SessionRecorderState {
     command_messages: HashMap<String, String>,
     parallel_agents_messages: HashMap<String, String>,
     streaming_text_message_id: Option<String>,
+    /// Who produced what the recorder observes now (a Claude frame's runtime
+    /// and turn), given to the Engram sink with each observation. Set by the
+    /// caller for each frame; a turn reset leaves it.
+    observation_provenance: EngramObservationProvenance,
+    /// Commands whose message a turn reset keeps: a Claude subagent's tool
+    /// calls still pending across the root turn's reset, so their late
+    /// results update the same card.
+    kept_command_keys: HashSet<String>,
 }
 
 fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
-    recorder_state.command_messages.clear();
+    let kept = &recorder_state.kept_command_keys;
+    recorder_state
+        .command_messages
+        .retain(|key, _| kept.contains(key));
     recorder_state.parallel_agents_messages.clear();
     recorder_state.streaming_text_message_id = None;
 }

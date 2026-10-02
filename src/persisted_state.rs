@@ -265,6 +265,7 @@ impl PersistedState {
             // starts at `0`, so a fresh load has no pending writes.
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),
+            claude_orphaned_work: Vec::new(),
             settings_persist_dirty: false,
             remote_settings_persist_dirty: false,
             remote_delta_persist_dirty: false,
@@ -572,6 +573,10 @@ impl PersistedSessionRecord {
             active_turn_start_message_count: None,
             active_turn_file_changes: BTreeMap::new(),
             active_turn_file_change_grace_deadline: None,
+            unmediated_claude_turn: None,
+            adopted_claude_turn_generation: None,
+            claude_outstanding: ClaudeOutstandingWork::default(),
+            unassigned_claude_observations: VecDeque::new(),
             agent_commands: Vec::new(),
             codex_approval_policy: self.codex_approval_policy,
             codex_reasoning_effort: self.codex_reasoning_effort,

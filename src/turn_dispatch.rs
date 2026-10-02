@@ -597,6 +597,7 @@ impl AppState {
                         attachments: attachments.clone(),
                         replay_generation: Uuid::new_v4().to_string(),
                         text: runtime_prompt.clone(),
+                        turn_generation: active_turn_generation,
                     },
                     engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),

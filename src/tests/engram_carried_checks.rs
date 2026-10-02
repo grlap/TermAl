@@ -849,6 +849,46 @@ fn run_own_command(turn: &CheckedTurn, worktree: &FsPath, key: &str, command: &s
 }
 
 #[test]
+fn a_command_of_a_turn_no_prompt_owns_still_fences_the_carried_gate() {
+    // A turn Claude Code starts by itself is attributed to no grant, but what
+    // it runs in the worktree may write there all the same
+    // (`claude_runtime_turns.rs`).
+    let (turn, worktree) = named_turn("carried-unowned-turn");
+    launch_gate(&turn, &worktree, false);
+    let token = turn.record(|record| {
+        record
+            .runtime
+            .runtime_token()
+            .expect("the begun turn should own the runtime")
+    });
+    let ownership = new_claude_turn_ownership();
+    for frame in [
+        json!({"type": "system", "subtype": "task_notification", "task_id": "b1",
+            "status": "completed"}),
+        json!({"type": "system", "subtype": "init"}),
+        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "on it"}]}}),
+    ] {
+        turn.state
+            .observe_claude_frame_ownership(&turn.session_id, &token, &ownership, &frame);
+    }
+    assert!(turn.record(unmediated_claude_turn_hides_observations));
+    run_own_command(&turn, &worktree, "unowned-build", "cargo build");
+    let owner = lock_claude_turn_ownership(&ownership)
+        .close_for_result(&json!({"type": "result", "is_error": false}));
+    turn.state
+        .finish_claude_result(&turn.session_id, &token, owner, None)
+        .expect("the unowned turn's result is routed");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+
+    assert_refused(
+        &turn,
+        &checkpoint,
+        "this session ran a `cargo` command there",
+    );
+}
+
+#[test]
 fn a_read_only_line_of_another_runtime_still_refuses_the_gate() {
     // Only a Claude session's lines are read as Bash; another runtime's
     // line may run under PowerShell, where the same text can mean a write.
@@ -934,7 +974,8 @@ fn a_command_of_the_holder_that_writes_in_the_worktree_refuses_the_gate() {
 fn an_edit_the_holder_reports_refuses_the_gate() {
     let (turn, worktree) = named_turn("carried-own-edit");
     launch_gate(&turn, &worktree, false);
-    turn.state.note_engram_workspace_edit(&turn.session_id);
+    turn.state
+        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
     finish_run(&worktree, "passed", &"f".repeat(64));
     let checkpoint = turn.finish();
 
@@ -951,7 +992,8 @@ fn a_write_after_the_run_ended_leaves_the_gate_to_the_basis_check() {
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
     run_own_command(&turn, &worktree, "commit", "git commit -m done");
-    turn.state.note_engram_workspace_edit(&turn.session_id);
+    turn.state
+        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
     assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_none()));
     let checkpoint = turn.finish();
     assert_credited(&turn, &checkpoint, &run, "succeeded");
@@ -1550,7 +1592,8 @@ fn another_session_starting_a_turn_leaves_a_carried_gate_alone_until_it_writes()
             "a turn start alone fences nothing: same_worktree={same_worktree}"
         );
 
-        turn.state.note_engram_workspace_edit(&other);
+        turn.state
+            .note_engram_workspace_edit(&other, &EngramObservationProvenance::Ambient);
         let fence = carried_fence(&turn);
         assert_eq!(fence.is_some(), same_worktree, "{fence:?}");
         if let Some(fence) = fence {
@@ -3076,5 +3119,291 @@ fn another_sessions_command_later_described_in_the_worktree_refuses_the_gate() {
         &turn,
         &checkpoint,
         "ran a command there (its line TermAl was not told)",
+    );
+}
+
+/// The provenance a Claude reader gives the frames of the turn running on
+/// `turn`'s session now.
+fn claude_turn_provenance(turn: &CheckedTurn) -> ClaudeObservationProvenance {
+    ClaudeObservationProvenance {
+        token: turn.record(|record| record.runtime.runtime_token().expect("runtime")),
+        origin: ClaudeWorkOrigin::Attempt {
+            turn_generation: turn.record(|record| record.active_turn_generation),
+        },
+    }
+}
+
+/// Claude's background launch of the full gate in `worktree` as call `key`,
+/// in the one-call form, as its stdout reader applies it: the call admitted
+/// first, as outstanding background work, then started and ended at the
+/// sink with the reader's provenance (`claude_outstanding_work.rs`).
+fn launch_claude_background_gate(turn: &CheckedTurn, worktree: &FsPath, key: &str) {
+    let root = engram_source_root_display(
+        &fs::canonicalize(worktree)
+            .expect("the worktree canonicalizes")
+            .to_string_lossy(),
+    );
+    let line = format!("pushd \"{root}\" && node scripts/test-launcher.mjs full");
+    let provenance = claude_turn_provenance(turn);
+    let frame = json!({"type": "assistant", "message": {"content": [{"type": "tool_use",
+        "id": key, "name": "Bash", "input": {"command": line, "run_in_background": true}}]}});
+    turn.state.admit_claude_frame(
+        &turn.session_id,
+        &provenance,
+        false,
+        &claude_frame_work(&frame, false),
+    );
+    let claude = EngramObservationProvenance::Claude(provenance);
+    turn.state.engram_host().observe(
+        &turn.session_id,
+        &claude,
+        EngramRecorderObservation::CommandStarted {
+            key,
+            ran: Some(&line),
+            cwd: None,
+        },
+    );
+    turn.wait_for_snapshots();
+    turn.state.engram_host().observe(
+        &turn.session_id,
+        &claude,
+        EngramRecorderObservation::CommandFinished {
+            key,
+            command: &line,
+            output: "Command running in background with ID: b1.",
+            exit: Some(EngramCommandExit::NotFinished),
+        },
+    );
+}
+
+/// Admits a background call `key` of `name` on the session `session_id`,
+/// with `provenance`, as its reader would: outstanding Claude work.
+fn admit_background_call(
+    turn: &CheckedTurn,
+    session_id: &str,
+    provenance: &ClaudeObservationProvenance,
+    key: &str,
+    name: &str,
+) {
+    let frame = json!({"type": "assistant", "message": {"content": [{"type": "tool_use",
+        "id": key, "name": name, "input": {"command": "sleep 60", "prompt": "work",
+            "run_in_background": true}}]}});
+    turn.state.admit_claude_frame(
+        session_id,
+        provenance,
+        false,
+        &claude_frame_work(&frame, false),
+    );
+}
+
+#[test]
+fn a_claude_background_gate_carries_and_is_credited_beside_its_own_outstanding_launch() {
+    let (turn, worktree) = named_turn("self-gate-clean");
+    launch_claude_background_gate(&turn, &worktree, "gate");
+    turn.record(|record| {
+        assert!(
+            record.claude_outstanding.holds("gate"),
+            "its launch is outstanding background work"
+        );
+        assert_eq!(record.engram.carried_checks.len(), 1, "and it is carried");
+        let carried = &record.engram.carried_checks[0];
+        assert_eq!(carried.fence, None);
+        assert_eq!(carried.check.fenced_by_outstanding, None);
+        assert_eq!(
+            record.engram.active_turn_mixed_attribution.as_deref(),
+            Some(CHECK_GRANT),
+            "the grant that launched it stays mixed"
+        );
+    });
+    let start_basis =
+        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    // Once carried, the gate's own call still does not fence its run, while
+    // the same hazard of any other call would.
+    let root_key = engram_worktree_root(&worktree);
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&turn.session_id).expect("the root");
+        EngramHost::fence_checks_for_claude_work(
+            &mut inner,
+            index,
+            "gate",
+            &[Some(root_key.clone())],
+            true,
+        );
+        assert_eq!(inner.sessions[index].engram.carried_checks[0].fence, None);
+    }
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let checkpoint = turn.finish();
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+}
+
+#[test]
+fn any_other_outstanding_work_still_refuses_a_claude_background_gate() {
+    // Earlier background work of its own session.
+    let (turn, worktree) = named_turn("self-gate-earlier-work");
+    let provenance = claude_turn_provenance(&turn);
+    admit_background_call(&turn, &turn.session_id, &provenance, "earlier", "Bash");
+    launch_claude_background_gate(&turn, &worktree, "gate");
+    turn.record(|record| {
+        assert!(record.engram.carried_checks.is_empty(), "it is not carried");
+        let pending = record
+            .engram
+            .pending_source_root_line
+            .clone()
+            .unwrap_or_default();
+        assert!(
+            pending.contains("this session's own Claude work"),
+            "the refusal names the stored cause: {pending}"
+        );
+        assert!(
+            !pending.contains("two minutes"),
+            "and promises no relaunch: {pending}"
+        );
+    });
+
+    // Two launches of the same line cannot exempt each other.
+    let (turn, worktree) = named_turn("self-gate-twice");
+    launch_claude_background_gate(&turn, &worktree, "gate-1");
+    assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
+    // The second launch of the same line: its check starts fenced by the
+    // first launch's outstanding call, which is not its own.
+    let root = engram_source_root_display(
+        &fs::canonicalize(&worktree)
+            .expect("the worktree canonicalizes")
+            .to_string_lossy(),
+    );
+    let line = format!("pushd \"{root}\" && node scripts/test-launcher.mjs full");
+    let provenance = claude_turn_provenance(&turn);
+    let frame = json!({"type": "assistant", "message": {"content": [{"type": "tool_use",
+        "id": "gate-2", "name": "Bash", "input": {"command": line, "run_in_background": true}}]}});
+    turn.state.admit_claude_frame(
+        &turn.session_id,
+        &provenance,
+        false,
+        &claude_frame_work(&frame, false),
+    );
+    turn.state.engram_host().observe(
+        &turn.session_id,
+        &EngramObservationProvenance::Claude(provenance.clone()),
+        EngramRecorderObservation::CommandStarted {
+            key: "gate-2",
+            ran: Some(&line),
+            cwd: None,
+        },
+    );
+    turn.record(|record| {
+        let second = record
+            .engram
+            .active_turn_checks
+            .iter()
+            .find(|check| check.key == "gate-2")
+            .expect("the second launch starts a check");
+        assert_eq!(
+            second.fenced_by_outstanding,
+            Some(ClaudeHazardCause::OwnSession),
+            "the first launch is not the second's own call"
+        );
+    });
+    turn.wait_for_snapshots();
+    turn.state.engram_host().observe(
+        &turn.session_id,
+        &EngramObservationProvenance::Claude(provenance),
+        EngramRecorderObservation::CommandFinished {
+            key: "gate-2",
+            command: &line,
+            output: "Command running in background with ID: b2.",
+            exit: Some(EngramCommandExit::NotFinished),
+        },
+    );
+    turn.record(|record| {
+        assert_eq!(
+            record.engram.carried_checks.len(),
+            1,
+            "the second is refused"
+        );
+        let first = &record.engram.carried_checks[0];
+        assert_eq!(first.check.key, "gate-1");
+        assert_eq!(
+            first.check.fenced_by_outstanding,
+            Some(ClaudeHazardCause::OwnSession),
+            "and the second's launch fences the first"
+        );
+        assert!(first.fence.is_some());
+    });
+}
+
+#[test]
+fn another_sessions_background_work_fences_a_carried_gate_already_running_where_it_may_write() {
+    // A background Task launch, which reports no command start, fences the
+    // gate at once.
+    let (turn, worktree) = named_turn("carried-other-task");
+    launch_gate(&turn, &worktree, false);
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let other = create_test_project_session(&turn.state, Agent::Claude, &project_id, &worktree);
+    let stopped = ClaudeObservationProvenance {
+        token: RuntimeToken::Claude("carried-other-task-runtime".to_owned()),
+        origin: ClaudeWorkOrigin::Unattributed,
+    };
+    admit_background_call(&turn, &other, &stopped, "task", "Task");
+    let fence = carried_fence(&turn).expect("the running gate is fenced");
+    assert!(fence.contains(&other), "{fence}");
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0]
+            .check
+            .fenced_by_outstanding
+            .clone()),
+        Some(ClaudeHazardCause::OtherSession {
+            session_id: other.clone(),
+            name: "Test".to_owned(),
+        })
+    );
+
+    // Work registered elsewhere fences nothing, until a later command of it
+    // is placed in the gate's worktree.
+    let (turn, worktree) = named_turn("carried-other-extension");
+    launch_gate(&turn, &worktree, false);
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let elsewhere = sibling_worktree(&turn, "carried-other-extension-sibling");
+    let other = create_test_project_session(&turn.state, Agent::Claude, &project_id, &elsewhere);
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&other).expect("other session");
+        let workdir = inner.sessions[index].session.workdir.clone();
+        inner.sessions[index].engram.workdir_worktree =
+            Some((workdir, engram_worktree_root(&elsewhere)));
+    }
+    let stopped = ClaudeObservationProvenance {
+        token: RuntimeToken::Claude("carried-other-extension-runtime".to_owned()),
+        origin: ClaudeWorkOrigin::Unattributed,
+    };
+    admit_background_call(&turn, &other, &stopped, "writer", "Bash");
+    assert_eq!(carried_fence(&turn), None, "elsewhere fences nothing");
+    let cwd = fs::canonicalize(&worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    turn.state.engram_host().observe(
+        &other,
+        &EngramObservationProvenance::Claude(stopped),
+        EngramRecorderObservation::CommandStarted {
+            key: "writer",
+            ran: Some("touch notes.txt"),
+            cwd: Some(&cwd),
+        },
+    );
+    let fence = carried_fence(&turn).expect("the extension fences the gate");
+    assert!(fence.contains(&other), "{fence}");
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0]
+            .check
+            .fenced_by_outstanding
+            .clone()),
+        Some(ClaudeHazardCause::OtherSession {
+            session_id: other.clone(),
+            name: "Test".to_owned(),
+        }),
+        "the extended hazard stores its own cause"
     );
 }
