@@ -9,6 +9,21 @@ thread_local! {
     // Manual AppState fixtures explicitly lack the production persist worker.
     // Tests can disable this allowance to exercise the stopped-writer refusal.
     static TEST_ENGRAM_AUTHORITY_MANUAL_WRITER: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    // Acceptance setup fixtures model an already-settled canonical read. Their
+    // synchronous SQLite setup is not a simulated authority deadline witness.
+    static TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn with_engram_fixture_persistence_budget<T>(operation: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.set(self.0));
+        }
+    }
+    let _restore = Restore(TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.replace(true)));
+    operation()
 }
 
 fn engram_authority_manual_writer_allowed() -> bool {
@@ -312,7 +327,10 @@ impl EngramNamedRootReadResponse {
             || self.run.generation <= 0
             || !feed(&self.read_cut)
             || self.read_cut.position < 0
-            || !matches!(self.run.state.as_str(), "open" | "completed" | "cancelled")
+            || !matches!(
+                self.run.state.as_str(),
+                "open" | "claimed" | "active" | "completed" | "cancelled"
+            )
         {
             return Err(ApiError::bad_gateway(
                 "named-root read has a contradictory canonical run association",
@@ -1331,6 +1349,10 @@ impl AppState {
         deadline: std::time::Instant,
     ) -> Result<(), ApiError> {
         let budget = deadline.saturating_duration_since(std::time::Instant::now());
+        #[cfg(test)]
+        let mut acknowledgement_deadline = deadline;
+        #[cfg(not(test))]
+        let acknowledgement_deadline = deadline;
         let (fence, waiter) = PersistFence::new(
             PersistFenceTarget::EngramWorkAuthority(Box::new(image.clone())),
             deadline,
@@ -1360,12 +1382,19 @@ impl AppState {
                     ));
                 }
                 let mut cache = SqlitePersistConnectionCache::new();
+                let persistence_started = std::time::Instant::now();
                 persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta)
                     .map_err(|error| {
                         ApiError::internal(format!(
                             "named-root authority persistence is unconfirmed: {error:#}"
                         ))
                     })?;
+                if TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.get()) {
+                    // Exclude only actual manual fixture persistence. Expired
+                    // entry budgets, content/owner checks and connected writer
+                    // deadlines still use their original authority allowance.
+                    acknowledgement_deadline += persistence_started.elapsed();
+                }
             }
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1374,7 +1403,7 @@ impl AppState {
                 "named-root acknowledgement belongs to a superseded authority image",
             ));
         }
-        if std::time::Instant::now() >= deadline {
+        if std::time::Instant::now() >= acknowledgement_deadline {
             return Err(ApiError::conflict(format!(
                 "named-root acknowledgement exceeded its remaining {} ms authority budget",
                 budget.as_millis()

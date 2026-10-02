@@ -117,7 +117,8 @@ impl ClaimedRoot {
                 );
             let proof = json!({"project_id":store.project_id,"work_id":binding.work_id,"run_id":binding.run_id,
                 "claim_id":binding.claim_id,"root_execution_id":binding.root_execution_id,
-                "run":{"state":"open","generation":roots.run_generations[&binding.run_id]},
+                "run":{"state":if projected["state"] == "unbound_by_release" { "open" } else { "claimed" },
+                    "generation":roots.run_generations[&binding.run_id]},
                 "named_root":projected,"latest_event":event,
                 "read_cut":{"feed":{"kind":"run_execution","id":binding.run_id},"position":cut}});
             roots.root_reads.insert(binding.claim_id.clone(), proof);

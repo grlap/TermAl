@@ -33,6 +33,16 @@ fn install_store(state: &AppState, project: &str, root: &FsPath) {
 }
 
 fn acknowledge_fixture_work(state: &AppState, store: &EngramAuthorityStoreKey, core: &Value) {
+    with_engram_fixture_persistence_budget(|| {
+        acknowledge_fixture_work_with_budget(state, store, core);
+    });
+}
+
+fn acknowledge_fixture_work_with_budget(
+    state: &AppState,
+    store: &EngramAuthorityStoreKey,
+    core: &Value,
+) {
     let binding = EngramControlWorkBinding {
         work_id: core["status"]["work"]["work_id"]
             .as_str()
@@ -70,6 +80,153 @@ fn acknowledge_fixture_work(state: &AppState, store: &EngramAuthorityStoreKey, c
 
 fn modes(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_owned()).collect()
+}
+
+#[test]
+fn fixture_authority_acknowledgement_excludes_stalled_manual_persistence() {
+    let (state, project, _, root) = fixture();
+    super::work_visualizer::install_store(&state, &project, &root);
+    let store = established_store(&state, &project).unwrap();
+    let writer = sqlite_state_write_lock(state.persistence_path.as_path());
+    let held = lock_sqlite_state_writer(&writer);
+    let ticket = sqlite_state_writer_issued_tickets(&writer) + 1;
+    let worker_state = state.clone();
+    let worker_store = store.clone();
+    let task = std::thread::spawn(move || {
+        acknowledge_fixture_work(
+            &worker_state,
+            &worker_store,
+            &evidence_selection::canonical_core_receipt(),
+        );
+        assert!(!TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.get()));
+    });
+    wait_for_sqlite_state_writer_issued_tickets(&writer, ticket);
+    // The actual writer has entered synchronous persistence. Keep its ticket
+    // blocked for the entire original fixture allowance, guaranteeing that
+    // acknowledgement happens after that deadline rather than racing it.
+    std::thread::sleep(Duration::from_secs(2));
+    drop(held);
+    task.join()
+        .expect("fixture persistence must not consume its authority budget");
+    let inner = state.inner.lock().unwrap();
+    let history = inner
+        .engram_work_naming_history
+        .iter()
+        .find(|history| {
+            history.store == store
+                && history.work_id
+                    == evidence_selection::canonical_core_receipt()["status"]["work"]["work_id"]
+                        .as_str()
+                        .unwrap()
+        })
+        .unwrap();
+    assert_eq!(history.epoch, ENGRAM_NAMING_HISTORY_EPOCH);
+    assert_eq!(
+        history.transition.as_ref().unwrap().phase,
+        EngramAuthorityPhase::Published
+    );
+    assert!(!engram_authority_work_unresolved(
+        &inner,
+        &store,
+        &history.work_id
+    ));
+    assert_eq!(history.proofs.len(), 1);
+}
+
+#[test]
+fn fixture_authority_budget_keeps_expired_and_connected_acknowledgements_withheld() {
+    let (mut state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let store = established_store(&state, &project).unwrap();
+    let binding = state.inner.lock().unwrap().engram_work_naming_history[0]
+        .transition
+        .as_ref()
+        .unwrap()
+        .binding
+        .clone();
+    let error = with_engram_fixture_persistence_budget(|| {
+        state.prepare_engram_authority_until(
+            &store,
+            &binding,
+            std::time::Instant::now() - Duration::from_secs(1),
+        )
+    })
+    .unwrap_err();
+    assert!(
+        error.message.contains("acknowledgement exceeded"),
+        "{error:?}"
+    );
+    assert!(!TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.get()));
+    let writer = sqlite_state_write_lock(state.persistence_path.as_path());
+    let tickets_before = sqlite_state_writer_issued_tickets(&writer);
+    let (tx, rx) = std::sync::mpsc::channel();
+    state.persist_tx = tx;
+    let error = with_engram_fixture_persistence_budget(|| {
+        state.prepare_engram_authority(&store, &binding, Duration::from_millis(10))
+    })
+    .unwrap_err();
+    assert!(
+        error.message.contains("persistence is unconfirmed"),
+        "{error:?}"
+    );
+    assert!(matches!(rx.try_recv().unwrap(), PersistRequest::Fence(_)));
+    assert_eq!(sqlite_state_writer_issued_tickets(&writer), tickets_before);
+    let inner = state.inner.lock().unwrap();
+    assert!(engram_authority_work_unresolved(
+        &inner,
+        &store,
+        &binding.work_id
+    ));
+    assert_eq!(
+        inner.engram_work_naming_history[0]
+            .transition
+            .as_ref()
+            .unwrap()
+            .phase,
+        EngramAuthorityPhase::Prepared
+    );
+}
+
+#[test]
+fn fixture_authority_budget_rejects_superseded_manual_images() {
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let store = established_store(&state, &project).unwrap();
+    let binding = state.inner.lock().unwrap().engram_work_naming_history[0]
+        .transition
+        .as_ref()
+        .unwrap()
+        .binding
+        .clone();
+    let writer = sqlite_state_write_lock(state.persistence_path.as_path());
+    let held = lock_sqlite_state_writer(&writer);
+    let ticket = sqlite_state_writer_issued_tickets(&writer) + 1;
+    let worker_state = state.clone();
+    let worker_store = store.clone();
+    let task = std::thread::spawn(move || {
+        with_engram_fixture_persistence_budget(|| {
+            worker_state.prepare_engram_authority(&worker_store, &binding, Duration::from_secs(2))
+        })
+    });
+    wait_for_sqlite_state_writer_issued_tickets(&writer, ticket);
+    state.inner.lock().unwrap().engram_work_naming_history[0]
+        .transition
+        .as_mut()
+        .unwrap()
+        .id
+        .push_str("-superseded");
+    drop(held);
+    let error = task.join().unwrap().unwrap_err();
+    assert!(
+        error.message.contains("superseded authority image"),
+        "{error:?}"
+    );
+    let inner = state.inner.lock().unwrap();
+    assert!(engram_authority_work_unresolved(
+        &inner,
+        &store,
+        &inner.engram_work_naming_history[0].work_id
+    ));
 }
 
 fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAcceptanceEvaluation {

@@ -45,6 +45,7 @@ struct BoundaryFaultTransport {
     inner: ProcessEngramControlTransport,
     faults: Mutex<VecDeque<BoundaryFault>>,
     observations: Mutex<Vec<BoundaryObservation>>,
+    root_reads: Mutex<Vec<EngramNamedRootReadResponse>>,
     evaluate_entered: Mutex<Option<mpsc::Sender<()>>>,
 }
 
@@ -54,6 +55,7 @@ impl BoundaryFaultTransport {
             inner: ProcessEngramControlTransport::default(),
             faults: Mutex::new(faults.into_iter().collect()),
             observations: Mutex::new(Vec::new()),
+            root_reads: Mutex::new(Vec::new()),
             evaluate_entered: Mutex::new(None),
         })
     }
@@ -109,6 +111,14 @@ impl EngramControlTransport for BoundaryFaultTransport {
             }
         }
         let result = self.inner.request(connection, request, timeout);
+        if operation == "named_root_read"
+            && let Ok(reply) = &result
+        {
+            self.root_reads
+                .lock()
+                .unwrap()
+                .push(parse_engram_result(reply.clone()).expect("real canonical reader response"));
+        }
         eprintln!(
             "live boundary operation={operation} elapsed={:?} outcome={}",
             started_at.elapsed(),
@@ -199,6 +209,14 @@ impl EngramControlTransport for BoundaryFaultTransport {
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         self.inner
             .read_work_binding_for_boot(connection, preference, timeout)
+    }
+
+    fn read_held_claims(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        self.inner.read_held_claims(connection, timeout)
     }
 }
 
@@ -953,3 +971,7 @@ fn live_root_restart_after_lost_begin_never_blindly_redelivers() {
 // launcher's `live` mode runs them.
 #[path = "engram_carried_gate_live.rs"]
 mod carried_gate_live;
+
+// Claim recovery and named-root completion through the real control plane.
+#[path = "engram_named_root_completion_live.rs"]
+mod named_root_completion_live;
