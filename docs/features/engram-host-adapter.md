@@ -818,6 +818,17 @@ happens elsewhere. The agent therefore names the item's worktree once with
   longer delivers a queued warning that recovery is still incomplete. This
   does not remove the original opening's unconfirmed diagnostic or historical
   messages explaining why an earlier check received no credit.
+  Selection-loss instructions use the same current-status mechanism, scoped
+  additionally to the claim and the lost naming identity. A canonical
+  restoration, replacement or termination retires the obsolete instruction;
+  unresolved publication does not. A different admitted store, work or claim
+  suppresses delivery while retaining the instruction for a return to the
+  still-live claim. A successful explicit clear also supersedes its covered
+  preexisting instruction, without restoring authority or credit. Failed or
+  pending clears and newer notice instances remain pending. At the final
+  owner-checked handoff, only TermAl's own prompt slot is recomposed; quoted
+  user text and historical check messages remain intact. Notice instances
+  are acknowledged only after an accepted provider send.
   Recovery uses the current canonical cut; it does not reconstruct the
   opening of a replayed begin receipt, which carries no feed cut. That original
   turn remains without credited source provenance. A later fresh begin can

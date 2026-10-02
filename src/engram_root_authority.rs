@@ -1499,12 +1499,13 @@ impl AppState {
                             active_store == store && work == &owner.binding.work_id
                         })
                 {
-                    record.engram.authority_recovery_notice = Some(EngramAuthorityRecoveryNotice {
-                        id: Uuid::new_v4().to_string(),
-                        store: store.clone(),
-                        work_id: owner.binding.work_id.clone(),
-                        line: line.clone(),
-                    });
+                    record.engram.queue_source_root_notice(
+                        EngramSourceRootNoticeKind::AuthorityRecovery {
+                            store: store.clone(),
+                            work_id: owner.binding.work_id.clone(),
+                            line: line.clone(),
+                        },
+                    );
                 }
             }
         }

@@ -30,11 +30,11 @@ fn source_root_legacy_recovery_between_admission_and_handoff_preserves_opening_a
     let line = claimed.record(|record| {
         record
             .engram
-            .authority_recovery_notice
-            .as_ref()
+            .source_root_notices
+            .first()
             .unwrap()
-            .line
-            .clone()
+            .line()
+            .to_owned()
     });
     let TurnDispatch::PersistentCodex { command, .. } = &mut dispatch else {
         panic!("Codex fixture");
@@ -113,7 +113,7 @@ fn source_root_legacy_unresolved_warning_delivers_and_withholds_check() {
     claimed
         .state
         .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert!(claimed.record(|record| record.engram.authority_recovery_notice.is_some()));
+    assert!(claimed.record(|record| !record.engram.source_root_notices.is_empty()));
     assert!(matches!(
         handoff_prepared_turn_dispatch(&claimed.state, dispatch).unwrap(),
         HandoffPreparedTurnDispatchOutcome::Delivered
@@ -128,7 +128,7 @@ fn source_root_legacy_unresolved_warning_delivers_and_withholds_check() {
         "{prompt}"
     );
     assert!(
-        claimed.record(|record| record.engram.authority_recovery_notice.is_none()),
+        claimed.record(|record| record.engram.source_root_notices.is_empty()),
         "accepted send acknowledges current status"
     );
     observe_legacy_check(&claimed, "legacy-unresolved-check", &worktree);
@@ -186,7 +186,7 @@ fn source_root_legacy_recovery_warning_survives_failed_provider_send() {
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
     assert!(
-        record.engram.authority_recovery_notice.is_some(),
+        !record.engram.source_root_notices.is_empty(),
         "failed send is not delivery"
     );
     assert!(!record.engram.opening_diagnostic.as_ref().unwrap().delivered);
@@ -329,11 +329,11 @@ fn source_root_legacy_forward_name_correlates_fresh_capture_warning_and_check() 
     let issued_warning = claimed.record(|record| {
         record
             .engram
-            .authority_recovery_notice
-            .as_ref()
+            .source_root_notices
+            .first()
             .unwrap()
-            .line
-            .clone()
+            .line()
+            .to_owned()
     });
     assert!(
         issued_warning.contains("recovery remains incomplete"),

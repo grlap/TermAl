@@ -2169,8 +2169,9 @@ impl AppState {
             {
                 if engram_named_root_read_obsoletes(&entry, Some(state), read_generation) {
                     inner.engram_work_source_roots.retain(|root| root != &entry);
-                    inner.sessions[index].engram.set_pending_source_root_line(
-                        "[TermAl] Engram no longer confirms this claim's local source-root selection. Name its worktree again before editing or testing there.".to_owned());
+                    inner.sessions[index].engram.queue_source_root_notice(
+                        EngramSourceRootNoticeKind::SelectionLoss { selection: entry },
+                    );
                 }
             }
             if let EngramNamedRootState::Bound { generation, .. }

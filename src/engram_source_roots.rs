@@ -179,34 +179,157 @@ struct EngramOpeningPrompt {
     base: String,
 }
 
-/// Current recovery status, separate from historical naming/check messages.
-/// Runtime-only and scoped to the canonical store/work whose publication
-/// issued it. Reissuing equal prose creates a distinct delivery instance.
+/// Current status, separate from historical naming/check messages. Runtime
+/// only; equal prose for a successor is a different delivery instance.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramAuthorityRecoveryNotice {
+struct EngramSourceRootNotice {
     id: String,
-    store: EngramAuthorityStoreKey,
-    work_id: String,
-    line: String,
+    kind: EngramSourceRootNoticeKind,
 }
 
-fn refresh_engram_authority_recovery_notice_locked(inner: &mut StateInner, index: usize) {
-    let Some(notice) = inner.sessions[index]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EngramSourceRootNoticeKind {
+    AuthorityRecovery {
+        store: EngramAuthorityStoreKey,
+        work_id: String,
+        line: String,
+    },
+    SelectionLoss {
+        selection: EngramWorkSourceRoot,
+    },
+}
+
+impl EngramSourceRootNotice {
+    fn scope(&self) -> (&EngramAuthorityStoreKey, &str, Option<&str>) {
+        match &self.kind {
+            EngramSourceRootNoticeKind::AuthorityRecovery { store, work_id, .. } => {
+                (store, work_id, None)
+            }
+            EngramSourceRootNoticeKind::SelectionLoss { selection } => (
+                &selection.store,
+                &selection.work_id,
+                Some(&selection.claim_id),
+            ),
+        }
+    }
+
+    fn line(&self) -> &str {
+        match &self.kind {
+            EngramSourceRootNoticeKind::AuthorityRecovery { line, .. } => line,
+            EngramSourceRootNoticeKind::SelectionLoss { .. } => {
+                "[TermAl] Engram no longer confirms this claim's local source-root selection. Name its worktree again before editing or testing there."
+            }
+        }
+    }
+
+    fn retired(&self, inner: &StateInner) -> bool {
+        let (store, work, _) = self.scope();
+        if engram_authority_work_unresolved(inner, store, work) {
+            return false;
+        }
+        let EngramSourceRootNoticeKind::SelectionLoss { selection: lost } = &self.kind else {
+            return true;
+        };
+        let Some(history) = inner
+            .engram_work_naming_history
+            .iter()
+            .find(|history| &history.store == store && history.work_id == work)
+        else {
+            return false;
+        };
+        let proof = history
+            .proofs
+            .iter()
+            .find(|proof| proof.binding.claim_id == lost.claim_id);
+        let Some(proof) = proof else {
+            return false;
+        };
+        if matches!(proof.read.run.state.as_str(), "completed" | "cancelled")
+            || matches!(
+                proof.read.named_root,
+                EngramNamedRootState::UnboundByRelease { .. }
+            )
+        {
+            return true;
+        }
+        // A pending local name is not restoration: require the published
+        // work image and its exact canonical binding, not tool success prose.
+        engram_work_source_root_for_claim(
+            &inner.engram_work_source_roots,
+            store,
+            work,
+            &lost.claim_id,
+        )
+        .is_some_and(|current| {
+            current.generation >= lost.generation
+                && matches!(&proof.read.named_root,
+                    EngramNamedRootState::Bound { workspace_id, generation, named_at }
+                    if workspace_id == &current.root
+                        && *generation == current.generation as i64
+                        && engram_named_at_matches(named_at, &current.named_at))
+        })
+    }
+
+    fn applies_to(&self, record: &SessionRecord) -> bool {
+        let (store, work, claim) = self.scope();
+        record
+            .engram
+            .active_turn_naming_identity
+            .as_ref()
+            .is_some_and(|(active_store, active_work)| active_store == store && active_work == work)
+            && claim.is_none_or(|claim| {
+                record
+                    .engram
+                    .active_turn_source_binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.work_id == work && binding.claim_id == claim)
+            })
+    }
+}
+
+fn refresh_engram_source_root_notices_locked(
+    inner: &mut StateInner,
+    index: usize,
+) -> Vec<EngramSourceRootNotice> {
+    let pending = std::mem::take(&mut inner.sessions[index].engram.source_root_notices);
+    // Scope mismatch only suppresses delivery. No producer is guaranteed to
+    // recreate the notice when this session returns to the still-live claim.
+    let retained: Vec<_> = pending
+        .into_iter()
+        .filter(|notice| !notice.retired(inner))
+        .collect();
+    let delivered = retained
+        .iter()
+        .filter(|notice| notice.applies_to(&inner.sessions[index]))
+        .cloned()
+        .collect();
+    inner.sessions[index].engram.source_root_notices = retained;
+    delivered
+}
+
+fn acknowledge_engram_source_root_notices_locked(
+    record: &mut SessionRecord,
+    delivered: &[EngramSourceRootNotice],
+) {
+    // The current handoff holds StateInner through queue acceptance. Keeping
+    // exact-instance equality also fences a delayed acknowledgement helper.
+    record
         .engram
-        .authority_recovery_notice
-        .as_ref()
-    else {
-        return;
-    };
-    let same_work = inner.sessions[index]
-        .engram
-        .active_turn_naming_identity
-        .as_ref()
-        .is_some_and(|(store, work)| store == &notice.store && work == &notice.work_id);
-    // This is presentation only: never clear the opening capture, diagnostic,
-    // pending intent or recovery guard to make a warning disappear.
-    if !same_work || !engram_authority_work_unresolved(inner, &notice.store, &notice.work_id) {
-        inner.sessions[index].engram.authority_recovery_notice = None;
+        .source_root_notices
+        .retain(|notice| !delivered.contains(notice));
+}
+
+impl EngramSessionState {
+    fn queue_source_root_notice(&mut self, kind: EngramSourceRootNoticeKind) {
+        let notice = EngramSourceRootNotice {
+            id: Uuid::new_v4().to_string(),
+            kind,
+        };
+        // Replace only a newer current status for this exact scope and kind.
+        // Another live claim's undelivered instruction remains pending.
+        self.source_root_notices
+            .retain(|prior| prior.scope() != notice.scope());
+        self.source_root_notices.push(notice);
     }
 }
 
@@ -216,6 +339,7 @@ fn refresh_engram_authority_recovery_notice_locked(inner: &mut StateInner, index
 fn refresh_engram_source_root_prompt_locked(
     record: &mut SessionRecord,
     dispatch: &mut TurnDispatch,
+    notices: &[EngramSourceRootNotice],
 ) -> Option<EngramOpeningDiagnostic> {
     let generation = dispatch.active_turn_generation();
     if record.active_turn_generation != generation {
@@ -248,8 +372,7 @@ fn refresh_engram_source_root_prompt_locked(
             ..
         } => (&mut command.prompt, opening_prompt),
     };
-    let recovery = record.engram.authority_recovery_notice.as_ref();
-    if diagnostic.is_none() && recovery.is_none() && slot.is_none() {
+    if diagnostic.is_none() && notices.is_empty() && slot.is_none() {
         return None;
     }
     // Restore only our own composed slot, never search user text for a notice.
@@ -262,8 +385,8 @@ fn refresh_engram_source_root_prompt_locked(
     if let Some(notice) = &diagnostic {
         lines.push(notice.reason.notice());
     }
-    if let Some(notice) = recovery {
-        lines.push(notice.line.clone());
+    for notice in notices {
+        lines.push(notice.line().to_owned());
     }
     *prompt = if lines.is_empty() {
         base.clone()
@@ -385,7 +508,7 @@ impl EngramSessionState {
         self.pending_source_root_line = None;
         self.source_root_line_delivery = None;
         self.opening_diagnostic = None;
-        self.authority_recovery_notice = None;
+        self.source_root_notices.clear();
     }
 }
 
@@ -1553,7 +1676,16 @@ impl AppState {
         })?;
         // `known` fences concurrent selections while the held-claims and
         // lifecycle reads run off the lock.
-        let (target, workdir, project_id, project_root, known, validations_live, sealable) = {
+        let (
+            target,
+            workdir,
+            project_id,
+            project_root,
+            known,
+            validations_live,
+            sealable,
+            notice_snapshot,
+        ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -1602,6 +1734,7 @@ impl AppState {
                 inner.engram_work_source_roots.clone(),
                 inner.engram_source_root_validations_live.clone(),
                 sealable,
+                engram.source_root_notices.clone(),
             )
         };
         let store = target.settings.authority_store_key.clone().ok_or_else(|| {
@@ -2226,6 +2359,53 @@ impl AppState {
         let index = inner.find_session_index(session_id).ok_or_else(|| {
             ApiError::conflict("naming session disappeared after persistence acknowledgement")
         })?;
+        // An acknowledged explicit clear supersedes only instructions that
+        // existed when this request began. Absence or an Ended read alone
+        // never means the holder deliberately cleared a name. This changes
+        // presentation only; it restores no authority or evidence eligibility.
+        if validated.is_none()
+            && inner.sessions[index].session.workdir == workdir
+            && inner.sessions[index].session.project_id == project_id
+            && Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                .ok()
+                .flatten()
+                .is_some_and(|current| {
+                    current.connection == target.connection
+                        && current.settings.same_admission_settings(&target.settings)
+                        && current.work_binding.as_ref().map(|binding| {
+                            (
+                                &binding.root_execution_id,
+                                &binding.work_id,
+                                &binding.run_id,
+                                &binding.claim_id,
+                            )
+                        }) == target.work_binding.as_ref().map(|binding| {
+                            (
+                                &binding.root_execution_id,
+                                &binding.work_id,
+                                &binding.run_id,
+                                &binding.claim_id,
+                            )
+                        })
+                })
+            && !engram_authority_work_unresolved(&inner, &store, &claim.work_id)
+            && engram_work_source_root_for_work(
+                &inner.engram_work_source_roots,
+                &store,
+                &claim.work_id,
+            )
+            .is_none()
+        {
+            let covered: Vec<_> = notice_snapshot
+                .into_iter()
+                .filter(|notice| {
+                    matches!(&notice.kind, EngramSourceRootNoticeKind::SelectionLoss { selection }
+                    if selection.store == store && selection.work_id == claim.work_id
+                        && selection.claim_id == claim.claim_id)
+                })
+                .collect();
+            acknowledge_engram_source_root_notices_locked(&mut inner.sessions[index], &covered);
+        }
         // Announce success only after the selection and receipt are durable.
         inner
             .session_mut_by_index(index)

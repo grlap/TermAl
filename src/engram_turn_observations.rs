@@ -530,7 +530,13 @@ impl AppState {
                     .and_then(|settings| settings.authority_store_key.clone())
                     .map(|store| (store, binding.work_id.clone()))
             };
+            let source_binding = if record.engram.active_turn_root_capture.is_some() {
+                record.engram.active_turn_source_binding.clone()
+            } else {
+                Some(binding.clone())
+            };
             inner.sessions[index].engram.active_turn_naming_identity = naming_identity;
+            inner.sessions[index].engram.active_turn_source_binding = source_binding;
             inner.sessions[index].engram.active_turn_source_root = turn_root;
             // The turn-start sweep (`engram_note_turn_started`) ran before the
             // root was known: an open check in it is marked now, as one in

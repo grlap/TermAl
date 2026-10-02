@@ -130,7 +130,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         .state
         .recover_engram_authority_runs(session, Duration::from_secs(2));
     assert!(fixture.record(session, |record| {
-        record.engram.authority_recovery_notice.is_some()
+        !record.engram.source_root_notices.is_empty()
     }));
     let named = fixture
         .live

@@ -2359,6 +2359,9 @@ struct EngramSessionState {
     /// fingerprint does not make the admitted workspace unconfirmed.
     active_turn_root_capture: Option<EngramRootCapture>,
     active_turn_naming_identity: Option<(EngramAuthorityStoreKey, String)>,
+    /// The admitted association for current-status presentation, retained even
+    /// when no named root or filesystem basis could be captured.
+    active_turn_source_binding: Option<EngramControlWorkBinding>,
     /// The work's source root the turn `active_grant_id` began with, when its
     /// claim has one (`engram_source_roots.rs`): every basis and check credit
     /// of that turn is taken there instead of in the workdir. `None` measures
@@ -2384,8 +2387,9 @@ struct EngramSessionState {
     source_root_line_delivery: Option<(String, u64)>,
     /// Runtime-only presentation owned by the captured opening, not the next prompt.
     opening_diagnostic: Option<EngramOpeningDiagnostic>,
-    /// Current canonical recovery status, projected again at provider handoff.
-    authority_recovery_notice: Option<EngramAuthorityRecoveryNotice>,
+    /// Current scoped status, projected again at provider handoff. Unrelated
+    /// undelivered scopes remain pending for a later return to their claim.
+    source_root_notices: Vec<EngramSourceRootNotice>,
     /// What the first closing checkpoint of the named grant reported for its
     /// turn, reused verbatim by every retry of that checkpoint so the
     /// idempotency key repeats: the turn's observations and the evidence of
@@ -2499,13 +2503,14 @@ impl Default for EngramSessionState {
             active_turn_start_basis: None,
             active_turn_root_capture: None,
             active_turn_naming_identity: None,
+            active_turn_source_binding: None,
             active_turn_source_root: None,
             active_turn_other_source_roots: Vec::new(),
             named_root: None,
             pending_source_root_line: None,
             source_root_line_delivery: None,
             opening_diagnostic: None,
-            authority_recovery_notice: None,
+            source_root_notices: Vec::new(),
             active_turn_report: None,
             active_turn_report_fallback: None,
             active_turn_grant_mutates: None,
@@ -5449,6 +5454,7 @@ impl AppState {
                 record.engram.active_turn_start_basis = None;
                 record.engram.active_turn_root_capture = None;
                 record.engram.active_turn_naming_identity = None;
+                record.engram.active_turn_source_binding = None;
                 record.engram.active_turn_source_root = None;
                 record.engram.active_turn_other_source_roots.clear();
                 record.engram.active_turn_report = None;

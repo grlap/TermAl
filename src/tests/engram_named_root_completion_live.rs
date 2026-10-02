@@ -6,6 +6,9 @@ use super::*;
 #[path = "engram_legacy_root_recovery_live.rs"]
 mod legacy_recovery;
 
+#[path = "engram_source_root_confirmation_live.rs"]
+mod selection_confirmation;
+
 struct CompletionFixture {
     live: LiveRootFixture,
     root: PathBuf,
