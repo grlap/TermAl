@@ -67,7 +67,7 @@ impl AppState {
             return;
         };
         match self.commit_locked(&mut inner) {
-            Ok(revision) => self.publish_parent_delegation_card_delta(revision, delta),
+            Ok(revision) => self.publish_parent_delegation_card_delta(&inner, revision, delta),
             Err(error) => eprintln!("acceptance card refresh failed: {error:#}"),
         }
     }

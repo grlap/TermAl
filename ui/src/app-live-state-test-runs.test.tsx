@@ -87,6 +87,47 @@ it("adopts pending waits, revision-gates wait state and clears omitted waits", (
   expect(hook.result.current.testRunWaits).toEqual([]);
 });
 
+it("consumes a current-server dispatch failure revision before the next ordinary delta", () => {
+  vi.stubGlobal("EventSource", Stream);
+  const fetchState = vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  act(() => hook.result.current.adoptState(snapshot(3), { allowUnknownServerInstance: true }));
+  const callsBefore = fetchState.mock.calls.length;
+  const failure = { type: "testRunWaitResumeDispatchFailed", serverInstanceId: "test-server", revision: 4, sessionId: "owner", error: "cannot dispatch" };
+  act(() => Stream.latest.emit(failure));
+  expect(hook.result.current.testRunWaitFailures.owner).toEqual(failure);
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(4);
+  act(() => Stream.latest.emit({ type: "testRunChanged", serverInstanceId: "test-server", revision: 5, run: makeTestRun({ state: "passed" }) }));
+  expect(hook.result.current.testRuns[0].state).toBe("passed");
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(5);
+  expect(fetchState).toHaveBeenCalledTimes(callsBefore);
+});
+
+it("repairs a real gap before a current-server dispatch failure without adopting its revision", async () => {
+  vi.stubGlobal("EventSource", Stream);
+  const fetchState = vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  act(() => hook.result.current.adoptState(snapshot(3), { allowUnknownServerInstance: true }));
+  const callsBefore = fetchState.mock.calls.length;
+  const failure = { type: "testRunWaitResumeDispatchFailed", serverInstanceId: "test-server", revision: 5, sessionId: "owner", error: "cannot dispatch" };
+  act(() => Stream.latest.emit(failure));
+  expect(hook.result.current.testRunWaitFailures.owner).toEqual(failure);
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+  await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(callsBefore + 1));
+});
+
+it.each(["server-b", undefined])("does not adopt a failure revision from an unproven server %s", serverInstanceId => {
+  vi.stubGlobal("EventSource", Stream);
+  vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  act(() => hook.result.current.adoptState(snapshot(3), { allowUnknownServerInstance: true }));
+  act(() => Stream.latest.emit({ type: "testRunWaitResumeDispatchFailed", serverInstanceId, revision: 4, sessionId: "owner", error: "cannot dispatch" }));
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+});
+
 it.each([3, 2])("retains dispatch failure at revision %s after consumed snapshot/delta at 3, without changing revision", failureRevision => {
   vi.stubGlobal("EventSource", Stream);
   vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
@@ -94,8 +135,8 @@ it.each([3, 2])("retains dispatch failure at revision %s after consumed snapshot
   const hook = renderHook(() => useAppLiveState(options));
   const wait = makeTestRunWait();
   act(() => hook.result.current.adoptState({ ...snapshot(1), testRunWaits: [wait] }, { allowUnknownServerInstance: true }));
-  // Actual backend ordering: snapshot R removes the wait, consumed(R), failed(R)
-  // (or an older dispatch revision). The failure is not a snapshot mutation.
+  // Compatibility with older hosts/replays: snapshot R removes the wait,
+  // consumed(R), failed(R) (or an older dispatch revision).
   act(() => hook.result.current.adoptState({ ...snapshot(3), testRunWaits: [] }));
   act(() => Stream.latest.emit({ type: "testRunWaitConsumed", serverInstanceId: "test-server", revision: 3, waitId: wait.id, sessionId: wait.sessionId, reason: "completed" }));
   const failure = { type: "testRunWaitResumeDispatchFailed", revision: failureRevision, sessionId: wait.sessionId, error: "cannot dispatch" };

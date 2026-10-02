@@ -696,16 +696,16 @@ impl AppState {
         let state_broadcast_mailbox = Arc::new(StateBroadcastMailbox::default());
 
         // Background state-broadcast thread: drains a bounded ordered mailbox
-        // of state snapshots and delta payloads, serializes snapshots to JSON,
-        // and forwards each payload, in that order, to the ordered stream
-        // channel `/api/events` reads.
+        // of owned snapshots and typed deltas. Producers enqueue under the
+        // same state lock that allocates their revision; this worker serializes
+        // both kinds after releasing the state and mailbox locks, then forwards
+        // them in that order to the stream channel `/api/events` reads.
         // Consecutive state snapshots coalesce before they reach this thread,
         // but a snapshot queued before a delta must be sent before that delta;
         // otherwise the browser can see delta N+1 while still waiting for
         // state N and trigger an avoidable `/api/state` repair fetch. If a
         // large snapshot stalls this thread, the mailbox drops the oldest
-        // pending work at capacity and clients repair any revision gap through
-        // the existing `/api/state` recovery path.
+        // pending work at capacity rather than blocking the commit lock.
         //
         // The stream channel holds 512 events of either kind. Tokio rounds a
         // broadcast capacity up to a power of two, so 512 is the smallest

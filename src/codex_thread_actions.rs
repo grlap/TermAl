@@ -186,12 +186,15 @@ impl AppState {
             .expect("just-created Codex session must be present in the index");
         let session = AppState::wire_session_from_record(created_record);
         let delta_session = AppState::wire_session_summary_from_record(created_record);
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::SessionCreated {
+                revision,
+                session_id: session.id.clone(),
+                session: delta_session,
+            },
+        );
         drop(inner);
-        self.publish_delta(&DeltaEvent::SessionCreated {
-            revision,
-            session_id: session.id.clone(),
-            session: delta_session,
-        });
 
         Ok(CreateSessionResponse {
             session_id: session.id.clone(),

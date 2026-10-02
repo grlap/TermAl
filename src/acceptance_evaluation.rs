@@ -629,15 +629,26 @@ struct AcceptanceEvaluationTask {
     evidence_basis: i64,
     /// Oldest first, as the tracker's window orders them.
     evidence: Vec<AcceptanceEvaluationEvidence>,
+    /// Exact selected records and canonical projections outside the window;
+    /// discovery order is not tracker chronology.
+    indexed_evidence: Vec<AcceptanceEvaluationEvidence>,
     evidence_omitted: usize,
     /// The last successful read boundary and the host reason it stopped there.
     evidence_paging: AcceptanceEvidencePaging,
+    criterion_evidence: Vec<AcceptanceCriterionEvidence>,
+    active_run_id: Option<String>,
+    /// Core identity is bracketed independently of the agent's safe projection.
+    canonical_identity: Option<AcceptanceEvidenceIdentity>,
 }
 
 fn parse_acceptance_evaluation_task(
     windowed: Value,
     full: Value,
 ) -> std::result::Result<AcceptanceEvaluationTask, ApiError> {
+    let active_run_id = windowed
+        .pointer("/status/work/active_run_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let evidence_paging = acceptance_evidence_paging(&windowed);
     let show: EngramShowForEvaluation = serde_json::from_value(windowed)
         .map_err(|e| ApiError::bad_gateway(format!("engram work show: invalid receipt: {e}")))?;
@@ -730,10 +741,20 @@ fn parse_acceptance_evaluation_task(
             .collect(),
         evidence_omitted: show.notes_omitted.unwrap_or(0),
         evidence_paging,
+        criterion_evidence: Vec::new(),
+        indexed_evidence: Vec::new(),
+        active_run_id,
+        canonical_identity: None,
     })
 }
 
 impl AcceptanceEvaluationTask {
+    fn canonical_work_id(&self) -> Option<&str> {
+        self.canonical_identity
+            .as_ref()
+            .map(|identity| identity.work_id.as_str())
+            .or(self.work_id.as_deref())
+    }
     fn target_seed(
         &self,
         mode: AcceptanceEvaluationMode,
@@ -757,7 +778,7 @@ impl AcceptanceEvaluationTask {
             source_fingerprint,
             source_root,
             source_claim,
-            work_id: self.work_id.clone(),
+            work_id: self.canonical_work_id().map(str::to_owned),
         }
     }
 }
@@ -918,7 +939,10 @@ fn acceptance_brief_carried_failure(
             if let Some(newest) = carried.newest.as_ref() {
                 acceptance_brief_failed_contract(
                     &mut lines,
-                    &format!("Failing criteria of the later evaluation {}", newest.evaluation),
+                    &format!(
+                        "Failing criteria of the later evaluation {}",
+                        newest.evaluation
+                    ),
                     &newest.criteria,
                     &newest.blocking,
                     &newest.bindings,
@@ -1211,9 +1235,16 @@ fn acceptance_brief_unread_boundary_with_detail(
     } else {
         "no continuation was supplied".to_owned()
     };
-    Some(format!("Unread evidence: {} entries; individual unread locators are unknown; paging stopped: {}; {}; read cut: {}. The continuation describes the captured boundary and may have expired; it grants no tracker access.",
-        cuts.unread, cuts.paging.reason.as_deref().unwrap_or("not reported"), continuation,
-        cuts.paging.read_cut.as_ref().map_or("not supplied".to_owned(), Value::to_string)))
+    Some(format!(
+        "Unread evidence: {} entries; individual unread locators are unknown; paging stopped: {}; {}; read cut: {}. The continuation describes the captured boundary and may have expired; it grants no tracker access.",
+        cuts.unread,
+        cuts.paging.reason.as_deref().unwrap_or("not reported"),
+        continuation,
+        cuts.paging
+            .read_cut
+            .as_ref()
+            .map_or("not supplied".to_owned(), Value::to_string)
+    ))
 }
 
 /// What a brief does not carry whole. The requester is told, because an
@@ -1325,10 +1356,13 @@ fn acceptance_brief_cut_notice(work_ref: &str, cuts: &AcceptanceBriefCuts) -> Op
 /// This session may read evidence through its existing tracker tools. Listing
 /// bodies omitted from its brief must not forbid passing on evidence it reads.
 fn acceptance_same_session_brief_cuts(task: &AcceptanceEvaluationTask) -> AcceptanceBriefCuts {
+    let mut seen = BTreeSet::new();
     AcceptanceBriefCuts {
         left_out: task
             .evidence
             .iter()
+            .chain(task.indexed_evidence.iter())
+            .filter(|entry| seen.insert(&entry.locator))
             .map(|entry| acceptance_brief_text(&entry.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS))
             .collect(),
         unread: task.evidence_omitted,
@@ -1359,7 +1393,7 @@ fn acceptance_same_session_cut_notice_with_detail(
         .map(|line| format!(" {line}"))
         .unwrap_or_default();
     Some(format!(
-        "This brief for `{}` carries no evidence bodies. Read the recorded evidence with your own permitted `show --notes --gates` tools before judging it. The host read {} not carried in this brief ({}).{boundary}",
+        "This brief for `{}` does not carry every evidence body whole. Read the recorded evidence with your own permitted `show --notes --gates` tools before judging it. The host read {} not carried in this brief ({}).{boundary}",
         acceptance_brief_text(work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         acceptance_entry_count(cuts.left_out.len()),
         if detail == AcceptanceOmissionDetail::Full {
@@ -1412,19 +1446,41 @@ fn build_acceptance_evaluator_brief(
         }
     }
     let mut floor = usize::MAX;
+    // Optional indexed bodies give way before the chronological window.
+    // Selected old proof must not crowd out a newer failed check.
+    for index_detail in [
+        AcceptanceOmissionDetail::Full,
+        AcceptanceOmissionDetail::Compact,
+        AcceptanceOmissionDetail::Minimal,
+    ] {
+        let brief = render_acceptance_evaluator_brief_with_index_detail(
+            task,
+            cwd,
+            listed,
+            0,
+            MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
+            AcceptanceOmissionDetail::Full,
+            AcceptanceOmissionDetail::Minimal,
+            index_detail,
+        );
+        if brief.prompt.len() <= max_bytes {
+            return Ok(brief);
+        }
+    }
     for detail in [
         AcceptanceOmissionDetail::Full,
         AcceptanceOmissionDetail::Compact,
         AcceptanceOmissionDetail::Minimal,
     ] {
         let render = |shown, clipped, outcome_bytes| {
-            render_acceptance_evaluator_brief_with_details(
+            render_acceptance_evaluator_brief_with_index_detail(
                 task,
                 cwd,
                 shown,
                 clipped,
                 outcome_bytes,
                 detail,
+                AcceptanceOmissionDetail::Minimal,
                 AcceptanceOmissionDetail::Minimal,
             )
         };
@@ -1486,6 +1542,28 @@ fn render_acceptance_evaluator_brief_with_details(
     detail: AcceptanceOmissionDetail,
     carried: AcceptanceOmissionDetail,
 ) -> AcceptanceEvaluatorBrief {
+    render_acceptance_evaluator_brief_with_index_detail(
+        task,
+        cwd,
+        shown,
+        clipped,
+        outcome_bytes,
+        detail,
+        carried,
+        detail,
+    )
+}
+
+fn render_acceptance_evaluator_brief_with_index_detail(
+    task: &AcceptanceEvaluationTask,
+    cwd: &str,
+    shown: usize,
+    clipped: usize,
+    outcome_bytes: usize,
+    detail: AcceptanceOmissionDetail,
+    carried: AcceptanceOmissionDetail,
+    index_detail: AcceptanceOmissionDetail,
+) -> AcceptanceEvaluatorBrief {
     let (left_out, listed) = task.evidence.split_at(task.evidence.len() - shown);
     let locator_of = |evidence: &AcceptanceEvaluationEvidence| {
         acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS)
@@ -1497,6 +1575,7 @@ fn render_acceptance_evaluator_brief_with_details(
         ..AcceptanceBriefCuts::default()
     };
     let mut evidence = Vec::with_capacity(listed.len() + 1);
+    let mut fully_rendered = BTreeSet::new();
     for (index, entry) in listed.iter().enumerate() {
         let (line, was_clipped) = acceptance_brief_evidence_line(entry, index < clipped);
         if was_clipped {
@@ -1505,8 +1584,12 @@ fn render_acceptance_evaluator_brief_with_details(
         if entry.cut_by_tracker {
             cuts.cut_by_tracker.push(locator_of(entry));
         }
+        if !was_clipped && !entry.cut_by_tracker && entry.summary.is_some() {
+            fully_rendered.insert(entry.locator.clone());
+        }
         evidence.push(line);
     }
+    acceptance_criterion_evidence_cuts(task, &mut cuts, index_detail, &fully_rendered);
     if evidence.is_empty() {
         evidence.push("  (none shown)".to_owned());
     }
@@ -1542,6 +1625,7 @@ Acceptance criteria — judge every one, by number:\n\
 {criteria}\n\
 \n\
 {carried}\
+{criterion_evidence}\
 Evidence recorded on the task — cite by locator:\n\
 {evidence}\n\
 \n\
@@ -1575,6 +1659,8 @@ of the result packet described below.",
         title = acceptance_brief_text(&task.title, MAX_ACCEPTANCE_BRIEF_TITLE_CHARS),
         outcome = acceptance_brief_outcome(&task.outcome, outcome_bytes),
         criteria = acceptance_brief_criteria(task),
+        criterion_evidence =
+            render_acceptance_criterion_evidence(task, index_detail, &fully_rendered, false),
         evidence = evidence.join("\n"),
         cwd = acceptance_brief_text(cwd, MAX_DELEGATION_CWD_CHARS),
         submit_tool = TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
@@ -1601,37 +1687,73 @@ fn acceptance_contract_too_large(
 
 /// `same_session` spawns nothing: the caller judges its own work and records
 /// it through its own tracker tool, against the bases read here. It carries no
-/// evidence bodies. Its omission inventory and its verification list are
+/// unselected evidence bodies. Its omission inventory and its verification list are
 /// context that shrink before the complete criteria are refused under the
 /// evaluator's same byte bound.
 /// `source_fingerprint` is the host's content revision of this session's
 /// worktree, taken when the evaluation was requested; the brief asks the
 /// session to declare it, so its own turn's report of that same revision does
 /// not void the evaluation.
+#[cfg(test)]
 fn build_same_session_acceptance_brief(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     max_bytes: usize,
 ) -> std::result::Result<String, ApiError> {
+    build_same_session_acceptance_brief_and_cuts(task, source_fingerprint, max_bytes)
+        .map(|(brief, _)| brief)
+}
+
+fn build_same_session_acceptance_brief_and_cuts(
+    task: &AcceptanceEvaluationTask,
+    source_fingerprint: Option<&str>,
+    max_bytes: usize,
+) -> std::result::Result<(String, AcceptanceBriefCuts), ApiError> {
     let mut floor = usize::MAX;
+    for index_detail in [
+        AcceptanceOmissionDetail::Full,
+        AcceptanceOmissionDetail::Compact,
+        AcceptanceOmissionDetail::Minimal,
+    ] {
+        let brief = render_same_session_acceptance_brief_with_index_detail(
+            task,
+            source_fingerprint,
+            AcceptanceOmissionDetail::Full,
+            index_detail,
+        );
+        if brief.len() <= max_bytes {
+            let mut cuts = acceptance_same_session_brief_cuts(task);
+            acceptance_criterion_evidence_cuts(task, &mut cuts, index_detail, &BTreeSet::new());
+            return Ok((brief, cuts));
+        }
+    }
     for detail in [
         AcceptanceOmissionDetail::Full,
         AcceptanceOmissionDetail::Compact,
         AcceptanceOmissionDetail::Minimal,
     ] {
-        let brief = if detail == AcceptanceOmissionDetail::Full {
-            render_same_session_acceptance_brief(task, source_fingerprint)
-        } else {
-            render_same_session_acceptance_brief_with_detail(task, source_fingerprint, detail)
-        };
+        let brief = render_same_session_acceptance_brief_with_index_detail(
+            task,
+            source_fingerprint,
+            detail,
+            AcceptanceOmissionDetail::Minimal,
+        );
         if brief.len() <= max_bytes {
-            return Ok(brief);
+            let mut cuts = acceptance_same_session_brief_cuts(task);
+            acceptance_criterion_evidence_cuts(
+                task,
+                &mut cuts,
+                AcceptanceOmissionDetail::Minimal,
+                &BTreeSet::new(),
+            );
+            return Ok((brief, cuts));
         }
         floor = floor.min(brief.len());
     }
     Err(acceptance_contract_too_large(task, floor, max_bytes))
 }
 
+#[cfg(test)]
 fn render_same_session_acceptance_brief(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
@@ -1643,16 +1765,27 @@ fn render_same_session_acceptance_brief(
     )
 }
 
+#[cfg(test)]
 fn render_same_session_acceptance_brief_with_detail(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     detail: AcceptanceOmissionDetail,
 ) -> String {
+    render_same_session_acceptance_brief_with_index_detail(task, source_fingerprint, detail, detail)
+}
+
+fn render_same_session_acceptance_brief_with_index_detail(
+    task: &AcceptanceEvaluationTask,
+    source_fingerprint: Option<&str>,
+    detail: AcceptanceOmissionDetail,
+    index_detail: AcceptanceOmissionDetail,
+) -> String {
     // The value is host-measured ("content-v1:" and hex), never tracker text.
     let source = source_fingerprint
         .map(|fingerprint| format!(", source_fingerprint {fingerprint}"))
         .unwrap_or_default();
-    let cuts = acceptance_same_session_brief_cuts(task);
+    let mut cuts = acceptance_same_session_brief_cuts(task);
+    acceptance_criterion_evidence_cuts(task, &mut cuts, index_detail, &BTreeSet::new());
     let omissions = acceptance_same_session_cut_notice_with_detail(&task.work_ref, &cuts, detail)
         .unwrap_or_else(|| "No evidence entries were omitted.".to_owned());
     format!(
@@ -1669,6 +1802,7 @@ Record it with your own Engram `evaluate` tool: mode same_session, acceptance_ba
 what you found. A pass must cite at least one evidence locator from `show {work_ref} --notes \
 --gates`. Missing proof is insufficient_evidence, never pass. {admission_rule}\n\n\
 {verifications}\
+{criterion_evidence}\
 Evidence not shown in this brief: {omissions}\n\
 Omitted evidence does not establish that proof is absent on the item; say 'not shown' in the rationale with the known locator or continuation if it was not read.",
         work_ref = acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
@@ -1685,6 +1819,7 @@ Omitted evidence does not establish that proof is absent on the item; say 'not s
             .as_ref()
             .map(|carried| format!(", supersedes {}", carried.evaluation))
             .unwrap_or_default(),
+        criterion_evidence = render_acceptance_criterion_evidence(task, index_detail, &BTreeSet::new(), true),
     )
 }
 
@@ -2262,6 +2397,7 @@ fn compact_acceptance_evaluation_request_result(response: &Value) -> Value {
         "acceptanceEvaluation": delegation.get("acceptanceEvaluation"),
         "notice": response.get("notice"),
         "evidenceOmissions": response.get("evidenceOmissions"),
+        "criterionEvidence": response.get("criterionEvidence"),
         "next": "Wait with termal_resume_after_delegations for this delegationId; the fan-in says what the tracker recorded. Do not request another evaluation of the same task while this one runs.",
     })
 }

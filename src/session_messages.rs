@@ -1,9 +1,9 @@
 // Session-message mutation helpers — the five `AppState` methods that
 // every runtime event handler ultimately calls to add to or modify a
 // session transcript. Each method follows the same two-step pattern:
-// mutate `SessionRecord.session.messages` under the state mutex and
-// publish a matching `DeltaEvent` (see `src/wire.rs`) so every connected
-// SSE subscriber sees the change.
+// mutate `SessionRecord.session.messages` and enqueue its matching typed
+// `DeltaEvent` (see `src/wire.rs`) in the same state-mutex critical section.
+// The ordered broadcaster serializes it after the lock is released.
 //
 // Three of the five participate in streaming-text reconciliation.
 // `append_text_delta` and `replace_text_message` are driven by the
@@ -53,6 +53,7 @@ impl AppState {
         // summaries should refresh for a newly recorded resolved audit card
         // as well as for a card that is still waiting on the operator.
         let should_refresh_delegation = message.is_interaction_request();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             revision,
             message,
@@ -62,7 +63,6 @@ impl AppState {
             status,
             session_mutation_stamp,
         ) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -100,18 +100,22 @@ impl AppState {
             )
         };
 
-        self.publish_delta(&DeltaEvent::MessageCreated {
-            revision,
-            session_id: session_id.to_owned(),
-            message_id: message.id().to_owned(),
-            message_index,
-            message_count,
-            message,
-            preview,
-            status,
-            session_queue: None,
-            session_mutation_stamp: Some(session_mutation_stamp),
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::MessageCreated {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message.id().to_owned(),
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_queue: None,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            },
+        );
+        drop(inner);
         if should_refresh_delegation {
             if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
                 eprintln!(
@@ -146,6 +150,7 @@ impl AppState {
         anchor_message_id: &str,
         message: Message,
     ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             revision,
             message,
@@ -155,7 +160,6 @@ impl AppState {
             status,
             session_mutation_stamp,
         ) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -193,18 +197,22 @@ impl AppState {
             )
         };
 
-        self.publish_delta(&DeltaEvent::MessageCreated {
-            revision,
-            session_id: session_id.to_owned(),
-            message_id: message.id().to_owned(),
-            message_index,
-            message_count,
-            message,
-            preview,
-            status,
-            session_queue: None,
-            session_mutation_stamp: Some(session_mutation_stamp),
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::MessageCreated {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message.id().to_owned(),
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_queue: None,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            },
+        );
+        drop(inner);
         Ok(())
     }
 
@@ -223,6 +231,7 @@ impl AppState {
     /// reasoning/assistant deltas in `src/codex_events.rs`, ACP
     /// `text_delta` in `src/acp.rs`).
     fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             preview,
             revision,
@@ -231,7 +240,6 @@ impl AppState {
             text_start_byte,
             session_mutation_stamp,
         ) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -289,16 +297,28 @@ impl AppState {
             )
         };
 
-        self.publish_delta(&DeltaEvent::TextDelta {
-            revision,
-            session_id: session_id.to_owned(),
-            message_id: message_id.to_owned(),
-            message_index,
-            message_count,
-            text_start_byte,
-            delta: delta.to_owned(),
-            preview,
-            session_mutation_stamp: Some(session_mutation_stamp),
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::TextDelta {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                message_count,
+                text_start_byte,
+                delta: delta.to_owned(),
+                preview,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            },
+        );
+
+        drop(inner);
+
+        #[cfg(test)]
+        TEST_AFTER_TEXT_COMMIT.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().take() {
+                hook();
+            }
         });
 
         Ok(())
@@ -316,6 +336,7 @@ impl AppState {
     /// `append_text_delta` when their message-stop handler detects a
     /// mismatch.
     fn replace_text_message(&self, session_id: &str, message_id: &str, text: &str) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             preview,
             revision,
@@ -324,7 +345,6 @@ impl AppState {
             replacement_text,
             session_mutation_stamp,
         ) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -384,17 +404,21 @@ impl AppState {
             )
         };
 
-        self.publish_delta(&DeltaEvent::TextReplace {
-            revision,
-            session_id: session_id.to_owned(),
-            message_id: message_id.to_owned(),
-            message_index,
-            message_count,
-            text: replacement_text,
-            preview,
-            session_mutation_stamp: Some(session_mutation_stamp),
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::TextReplace {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                message_count,
+                text: replacement_text,
+                preview,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            },
+        );
 
+        drop(inner);
         Ok(())
     }
 
@@ -419,6 +443,7 @@ impl AppState {
         let command_language = Some(shell_language().to_owned());
         let output_language = infer_command_output_language(command).map(str::to_owned);
 
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             preview,
             revision,
@@ -428,7 +453,6 @@ impl AppState {
             session_status,
             session_mutation_stamp,
         ) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -546,35 +570,42 @@ impl AppState {
         };
 
         if let Some(message) = created_message {
-            self.publish_delta(&DeltaEvent::MessageCreated {
-                revision,
-                session_id: session_id.to_owned(),
-                message_id: message_id.to_owned(),
-                message_index,
-                message_count,
-                message,
-                preview,
-                status: session_status,
-                session_queue: None,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageCreated {
+                    revision,
+                    session_id: session_id.to_owned(),
+                    message_id: message_id.to_owned(),
+                    message_index,
+                    message_count,
+                    message,
+                    preview,
+                    status: session_status,
+                    session_queue: None,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            );
         } else {
-            self.publish_delta(&DeltaEvent::CommandUpdate {
-                revision,
-                session_id: session_id.to_owned(),
-                message_id: message_id.to_owned(),
-                message_index,
-                message_count,
-                command: command.to_owned(),
-                command_language,
-                output: output.to_owned(),
-                output_language,
-                status,
-                preview,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::CommandUpdate {
+                    revision,
+                    session_id: session_id.to_owned(),
+                    message_id: message_id.to_owned(),
+                    message_index,
+                    message_count,
+                    command: command.to_owned(),
+                    command_language,
+                    output: output.to_owned(),
+                    output_language,
+                    status,
+                    preview,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            );
         }
 
+        drop(inner);
         Ok(())
     }
 
@@ -595,6 +626,7 @@ impl AppState {
         message_id: &str,
         agents: Vec<ParallelAgentProgress>,
     ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             preview,
             revision,
@@ -604,7 +636,6 @@ impl AppState {
             session_status,
             session_mutation_stamp,
         ) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -682,31 +713,38 @@ impl AppState {
         };
 
         if let Some(message) = created_message {
-            self.publish_delta(&DeltaEvent::MessageCreated {
-                revision,
-                session_id: session_id.to_owned(),
-                message_id: message_id.to_owned(),
-                message_index,
-                message_count,
-                message,
-                preview,
-                status: session_status,
-                session_queue: None,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageCreated {
+                    revision,
+                    session_id: session_id.to_owned(),
+                    message_id: message_id.to_owned(),
+                    message_index,
+                    message_count,
+                    message,
+                    preview,
+                    status: session_status,
+                    session_queue: None,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            );
         } else {
-            self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
-                revision,
-                session_id: session_id.to_owned(),
-                message_id: message_id.to_owned(),
-                message_index,
-                message_count,
-                agents,
-                preview,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::ParallelAgentsUpdate {
+                    revision,
+                    session_id: session_id.to_owned(),
+                    message_id: message_id.to_owned(),
+                    message_index,
+                    message_count,
+                    agents,
+                    preview,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            );
         }
 
+        drop(inner);
         Ok(())
     }
 }

@@ -44,8 +44,8 @@ impl AppState {
             request.end_message_id.as_deref(),
         )?;
 
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (marker, revision, session_mutation_stamp) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(&session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
@@ -70,12 +70,15 @@ impl AppState {
                 })?;
             (marker, revision, session_mutation_stamp)
         };
-        self.publish_delta(&DeltaEvent::ConversationMarkerCreated {
-            revision,
-            session_id: session_id.clone(),
-            marker: marker.clone(),
-            session_mutation_stamp: Some(session_mutation_stamp),
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::ConversationMarkerCreated {
+                revision,
+                session_id: session_id.clone(),
+                marker: marker.clone(),
+                session_mutation_stamp: Some(session_mutation_stamp),
+            },
+        );
         Ok(ConversationMarkerResponse {
             marker,
             revision,
@@ -122,8 +125,8 @@ impl AppState {
         };
         let marker =
             self.patch_local_conversation_marker(&session_id, existing_marker.clone(), request)?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (marker, revision, session_mutation_stamp) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(&session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
@@ -152,12 +155,15 @@ impl AppState {
                 })?;
             (marker, revision, session_mutation_stamp)
         };
-        self.publish_delta(&DeltaEvent::ConversationMarkerUpdated {
-            revision,
-            session_id: session_id.clone(),
-            marker: marker.clone(),
-            session_mutation_stamp: Some(session_mutation_stamp),
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::ConversationMarkerUpdated {
+                revision,
+                session_id: session_id.clone(),
+                marker: marker.clone(),
+                session_mutation_stamp: Some(session_mutation_stamp),
+            },
+        );
         Ok(ConversationMarkerResponse {
             marker,
             revision,
@@ -306,8 +312,8 @@ impl AppState {
             return self.proxy_remote_delete_conversation_marker(&session_id, &marker_id);
         }
 
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, session_mutation_stamp) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(&session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
@@ -345,12 +351,15 @@ impl AppState {
                 })?;
             (revision, session_mutation_stamp)
         };
-        self.publish_delta(&DeltaEvent::ConversationMarkerDeleted {
-            revision,
-            session_id: session_id.clone(),
-            marker_id: marker_id.clone(),
-            session_mutation_stamp: Some(session_mutation_stamp),
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::ConversationMarkerDeleted {
+                revision,
+                session_id: session_id.clone(),
+                marker_id: marker_id.clone(),
+                session_mutation_stamp: Some(session_mutation_stamp),
+            },
+        );
         Ok(DeleteConversationMarkerResponse {
             marker_id,
             revision,

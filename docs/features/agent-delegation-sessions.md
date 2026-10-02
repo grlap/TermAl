@@ -1275,7 +1275,7 @@ termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitD
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
 termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
 termal_submit_review_result({ schemaVersion, status, summary, findings, commandsRun, filesInspected, notes, suggestedTrackerUpdates }) -> MailboxAppendReceipt
-termal_evaluate_acceptance({ workRef, agent?, model? }) -> DelegationResponse & { mode, workRef, notice? } | { mode: "same_session", workRef, acceptanceBasis, evidenceBasis, sourceFingerprint?, brief, notice? }
+termal_evaluate_acceptance({ workRef, agent?, model?, criterionEvidence?: [{ criterion, locators }] }) -> DelegationResponse & { mode, workRef, criterionEvidence, notice? } | { mode: "same_session", workRef, acceptanceBasis, evidenceBasis, sourceFingerprint?, brief, criterionEvidence, notice? }
 termal_submit_acceptance_evaluation({ schemaVersion, verdicts: [{ criterion, verdict, basis?, rationale, evidence? }] }) -> { schemaVersion, delegationId, workRef, mode, attemptKey, recordedAt, receipt, receiptTruncated? }
 termal_send_to_session({ sessionId, message, idempotencyKey, topic?, stateStamp?, class? }) -> { sessionId, resolvedFrom, mailboxId, messageId, sequence, unreadDepth, notificationDisposition, duplicate }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }

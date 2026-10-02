@@ -8257,7 +8257,7 @@ fn failed_background_authority_retry_does_not_fail_an_unrelated_settings_edit() 
         Ok(_) => panic!("the scripted retirement should remain unconfirmed"),
         Err(error) => error,
     };
-    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR, "{error:?}");
 
     grant_b.deadline_ms = Some(4_321);
     state

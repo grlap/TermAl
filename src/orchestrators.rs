@@ -949,18 +949,19 @@ impl AppState {
     /// Publishes orchestrators updated.
     fn publish_orchestrators_updated(
         &self,
+        inner: &StateInner,
         revision: u64,
         orchestrators: Vec<OrchestratorInstance>,
     ) {
-        let sessions = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            referenced_sessions_for_orchestrators(&inner, &orchestrators)
-        };
-        self.publish_delta(&DeltaEvent::OrchestratorsUpdated {
-            revision,
-            orchestrators,
-            sessions,
-        });
+        let sessions = referenced_sessions_for_orchestrators(inner, &orchestrators);
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::OrchestratorsUpdated {
+                revision,
+                orchestrators,
+                sessions,
+            },
+        );
     }
 
     /// Creates orchestrator instance.

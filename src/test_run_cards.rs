@@ -705,7 +705,7 @@ impl AppState {
         entries: &[TestRunEntry],
         changed: &HashSet<String>,
         failures: &HashMap<String, TestRunCardFailureRead>,
-        publish: &dyn Fn(&DeltaEvent),
+        publish: &dyn Fn(&StateInner, &DeltaEvent),
     ) {
         let now = chrono::Utc::now();
         let indexed: HashSet<&str> = entries
@@ -871,7 +871,7 @@ impl AppState {
             .retain(|run_id, _| indexed.contains(run_id.as_str()));
         for delta in deltas {
             match self.commit_persisted_delta_locked(inner) {
-                Ok(revision) => publish(&delta.into_event(revision)),
+                Ok(revision) => publish(&inner, &delta.into_event(revision)),
                 Err(err) => {
                     // The transcript and the map already changed in memory and
                     // are persisted by the next commit; clients resync on the

@@ -50,8 +50,8 @@ impl CardFixture {
         let alive = alive.to_vec();
         let events = self.events.clone();
         self.state
-            .refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|event| {
-                self.state.publish_delta(event);
+            .refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|inner, event| {
+                self.state.publish_delta_locked(inner, event.clone());
                 events.borrow_mut().push(event.clone());
             });
     }
@@ -518,8 +518,8 @@ fn an_unreadable_failure_read_keeps_the_excerpt_and_is_retried() {
                 }
                 true
             },
-            &|event| {
-                fixture.state.publish_delta(event);
+            &|inner, event| {
+                fixture.state.publish_delta_locked(inner, event.clone());
                 events.borrow_mut().push(event.clone());
             },
         );
@@ -640,7 +640,9 @@ fn after_a_restart_the_transcript_decides_whether_a_card_is_terminal() {
         let mut results = running(7, "rust-tests");
         results["runId"] = json!("test-crash");
         fs::write(run_dir.join("results.json"), results.to_string()).unwrap();
-        state.refresh_test_runs_with(&|pid, _| pid == 7, &|event| state.publish_delta(event));
+        state.refresh_test_runs_with(&|pid, _| pid == 7, &|inner, event| {
+            state.publish_delta_locked(inner, event.clone())
+        });
         {
             let mut inner = state.inner.lock().unwrap();
             inner.test_run_cards.get_mut("test-crash").unwrap().terminal = true;
@@ -652,7 +654,9 @@ fn after_a_restart_the_transcript_decides_whether_a_card_is_terminal() {
     fs::remove_dir_all(&run_dir).unwrap();
 
     let restarted = boot();
-    restarted.refresh_test_runs_with(&|_, _| false, &|event| restarted.publish_delta(event));
+    restarted.refresh_test_runs_with(&|_, _| false, &|inner, event| {
+        restarted.publish_delta_locked(inner, event.clone())
+    });
     let inner = restarted.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&owner).unwrap()];
     let card = record
@@ -815,8 +819,8 @@ fn cards_are_reconciled_by_the_first_scan_after_a_restart() {
         fs::write(run_dir.join("results.json"), results.to_string()).unwrap();
     };
     let refresh = |state: &AppState, alive: &'static [u32]| {
-        state.refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|event| {
-            state.publish_delta(event)
+        state.refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|inner, event| {
+            state.publish_delta_locked(inner, event.clone())
         });
     };
     let (resident_owner, cold_owner) = {

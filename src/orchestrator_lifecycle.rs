@@ -42,8 +42,8 @@ impl AppState {
         if let Some(target) = self.remote_orchestrator_target(instance_id)? {
             return self.proxy_remote_pause_orchestrator_instance(target);
         }
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (state, orchestrators) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let instance = inner
                 .orchestrator_instances
                 .iter_mut()
@@ -69,7 +69,7 @@ impl AppState {
                 inner.orchestrator_instances.clone(),
             )
         };
-        self.publish_orchestrators_updated(state.revision, orchestrators);
+        self.publish_orchestrators_updated(&inner, state.revision, orchestrators);
         Ok(state)
     }
 
@@ -78,8 +78,8 @@ impl AppState {
         if let Some(target) = self.remote_orchestrator_target(instance_id)? {
             return self.proxy_remote_resume_orchestrator_instance(target);
         }
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (state, orchestrators) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let instance = inner
                 .orchestrator_instances
                 .iter_mut()
@@ -107,7 +107,9 @@ impl AppState {
                 inner.orchestrator_instances.clone(),
             )
         };
-        self.publish_orchestrators_updated(state.revision, orchestrators);
+        self.publish_orchestrators_updated(&inner, state.revision, orchestrators);
+        // Transition dispatch reacquires StateInner and can deliver runtime I/O.
+        drop(inner);
         self.resume_pending_orchestrator_transitions()
             .map_err(|err| {
                 ApiError::internal(format!(
@@ -422,8 +424,8 @@ impl AppState {
                 return Err(err);
             }
 
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let (state, orchestrators) = {
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let instance_index = inner
                     .orchestrator_instances
                     .iter()
@@ -464,7 +466,7 @@ impl AppState {
                     inner.orchestrator_instances.clone(),
                 )
             };
-            self.publish_orchestrators_updated(state.revision, orchestrators);
+            self.publish_orchestrators_updated(&inner, state.revision, orchestrators);
             Ok(state)
         })();
         if stop_result.is_err() && resume_after_abort {
@@ -491,6 +493,11 @@ impl AppState {
 
     /// Resumes pending orchestrator transitions.
     fn resume_pending_orchestrator_transitions(&self) -> Result<()> {
+        #[cfg(test)]
+        assert!(
+            self.inner.is_not_held_by_current_thread_for_test(),
+            "orchestrator transition dispatch must run after releasing the state lock"
+        );
         let mut changed = false;
         loop {
             if !self.accept_next_pending_orchestrator_transition()? {
@@ -499,9 +506,9 @@ impl AppState {
             changed = true;
         }
 
+        let stopping_orchestrator_ids = self.stopping_orchestrator_ids_snapshot();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let delta = {
-            let stopping_orchestrator_ids = self.stopping_orchestrator_ids_snapshot();
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let deadlocked =
                 mark_deadlocked_orchestrator_instances(&mut inner, &stopping_orchestrator_ids);
             if deadlocked {
@@ -514,7 +521,7 @@ impl AppState {
             }
         };
         if let Some((revision, orchestrators)) = delta {
-            self.publish_orchestrators_updated(revision, orchestrators);
+            self.publish_orchestrators_updated(&inner, revision, orchestrators);
         }
 
         Ok(())

@@ -267,8 +267,8 @@ impl AppState {
         self.start_remote_event_bridge_for_lease(&response_lease)
             .map_err(remote_create_authority_error)?;
         let remote_session = remote_response.session.clone();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, local_session_id, local_session, changed, delta_session) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
             let resolution = resolve_remote_project_binding_locked(&inner, &binding);
             if resolution != RemoteProjectBindingResolution::Current {
@@ -349,6 +349,7 @@ impl AppState {
         // with `remote_codex_proxies.rs::proxy_remote_fork_codex_thread`
         // via the helper below.
         self.announce_remote_session_created_if_changed(
+            &inner,
             changed,
             revision,
             &local_session_id,

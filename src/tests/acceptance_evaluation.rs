@@ -19,6 +19,9 @@ mod bindings;
 #[path = "acceptance_evaluation_carried_failure.rs"]
 mod carried_failure;
 
+#[path = "acceptance_evaluation_evidence.rs"]
+mod evidence_selection;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 fn modes(words: &[&str]) -> Vec<String> {
@@ -427,6 +430,7 @@ fn evaluation_request(agent: Option<Agent>) -> RequestAcceptanceEvaluationReques
         work_ref: "w-task".to_owned(),
         agent,
         model: None,
+        criterion_evidence: Vec::new(),
     }
 }
 
@@ -5061,11 +5065,11 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
     // source capture under the freeze budget.
     assert_eq!(
         acceptance_evaluation_request_tracker_budget(),
-        call * 10 + policy + REVIEW_FREEZE_TIMEOUT
+        call * 10 + policy + REVIEW_FREEZE_TIMEOUT + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
     );
     assert_eq!(
         acceptance_evaluation_paging_reserve(),
-        call * 3 + policy + REVIEW_FREEZE_TIMEOUT
+        call * 3 + policy + REVIEW_FREEZE_TIMEOUT + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
     );
     // Two sends, two acknowledged states (`pending` before, the outcome
     // after) and the second source capture.

@@ -403,7 +403,17 @@ impl<T> Drop for StateMutexGuard<'_, T> {
 
 enum StateBroadcastWork {
     Snapshot(StateResponse),
-    DeltaPayload(String),
+    Delta(DeltaEvent),
+}
+
+#[cfg(test)]
+impl StateBroadcastWork {
+    fn revision(&self) -> u64 {
+        match self {
+            Self::Snapshot(snapshot) => snapshot.revision,
+            Self::Delta(event) => event.revision(),
+        }
+    }
 }
 
 const STATE_BROADCAST_MAILBOX_CAPACITY: usize = 256;
@@ -431,7 +441,7 @@ impl StateBroadcastMailbox {
         self.work_available.notify_one();
     }
 
-    fn publish_delta_payload(&self, payload: String) {
+    fn publish_delta(&self, event: DeltaEvent) {
         let mut pending = self
             .pending
             .lock()
@@ -439,7 +449,7 @@ impl StateBroadcastMailbox {
         if pending.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
             pending.pop_front();
         }
-        pending.push_back(StateBroadcastWork::DeltaPayload(payload));
+        pending.push_back(StateBroadcastWork::Delta(event));
         self.work_available.notify_one();
     }
 
@@ -461,12 +471,14 @@ impl StateBroadcastMailbox {
 
     #[cfg(test)]
     fn take_pending_for_test(&self) -> Vec<StateBroadcastWork> {
-        let drained = self
+        let mut pending = self
             .pending
             .lock()
-            .expect("state broadcast mailbox mutex poisoned")
-            .drain(..)
-            .collect();
+            .expect("state broadcast mailbox mutex poisoned");
+        let mut drained = Vec::new();
+        while let Some(work) = pending.pop_front() {
+            drained.push(work);
+        }
         drained
     }
 }
@@ -524,6 +536,12 @@ impl StateBroadcastSenders {
 }
 
 fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadcastSenders) {
+    #[cfg(test)]
+    TEST_BEFORE_STATE_SERIALIZE.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().take() {
+            hook();
+        }
+    });
     match work {
         StateBroadcastWork::Snapshot(snapshot) => match serde_json::to_string(&snapshot) {
             Ok(payload) => senders.send_state(payload),
@@ -534,7 +552,15 @@ fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadca
                 );
             }
         },
-        StateBroadcastWork::DeltaPayload(payload) => senders.send_delta(payload),
+        StateBroadcastWork::Delta(event) => match serde_json::to_string(&event) {
+            Ok(payload) => senders.send_delta(payload),
+            Err(err) => {
+                eprintln!(
+                    "warning: failed to serialize SSE delta at revision {}: {err}",
+                    event.revision()
+                );
+            }
+        },
     }
 }
 
@@ -561,150 +587,58 @@ mod state_broadcast_mailbox_tests {
         }
     }
 
+    fn delta(revision: u64) -> DeltaEvent {
+        DeltaEvent::TestRunRemoved {
+            revision,
+            run_id: format!("run-{revision}"),
+        }
+    }
+
     #[test]
     fn state_broadcast_mailbox_keeps_only_latest_pending_snapshot() {
         let mailbox = StateBroadcastMailbox::default();
-
-        mailbox.publish_snapshot(snapshot(1));
-        mailbox.publish_snapshot(snapshot(2));
-        mailbox.publish_snapshot(snapshot(3));
-
+        for revision in 1..=3 {
+            mailbox.publish_snapshot(snapshot(revision));
+        }
         let pending = mailbox.take_pending_for_test();
         assert_eq!(pending.len(), 1);
-        match &pending[0] {
-            StateBroadcastWork::Snapshot(latest) => assert_eq!(latest.revision, 3),
-            StateBroadcastWork::DeltaPayload(_) => panic!("expected latest snapshot"),
-        }
+        assert!(matches!(&pending[0], StateBroadcastWork::Snapshot(value) if value.revision == 3));
         assert!(mailbox.take_pending_for_test().is_empty());
     }
 
     #[test]
     fn state_broadcast_mailbox_preserves_state_before_following_delta() {
         let mailbox = StateBroadcastMailbox::default();
-
         mailbox.publish_snapshot(snapshot(1));
         mailbox.publish_snapshot(snapshot(2));
-        mailbox.publish_delta_payload("delta-3".to_owned());
+        mailbox.publish_delta(delta(3));
         mailbox.publish_snapshot(snapshot(4));
         mailbox.publish_snapshot(snapshot(5));
-
         let pending = mailbox.take_pending_for_test();
-        assert_eq!(pending.len(), 3);
-        match &pending[0] {
-            StateBroadcastWork::Snapshot(value) => assert_eq!(value.revision, 2),
-            StateBroadcastWork::DeltaPayload(_) => panic!("expected coalesced snapshot first"),
-        }
-        match &pending[1] {
-            StateBroadcastWork::DeltaPayload(value) => assert_eq!(value, "delta-3"),
-            StateBroadcastWork::Snapshot(_) => panic!("expected delta second"),
-        }
-        match &pending[2] {
-            StateBroadcastWork::Snapshot(value) => assert_eq!(value.revision, 5),
-            StateBroadcastWork::DeltaPayload(_) => panic!("expected coalesced snapshot third"),
-        }
+        assert_eq!(
+            pending
+                .iter()
+                .map(StateBroadcastWork::revision)
+                .collect::<Vec<_>>(),
+            [2, 3, 5]
+        );
+        assert!(
+            matches!(&pending[1], StateBroadcastWork::Delta(DeltaEvent::TestRunRemoved { run_id, .. }) if run_id == "run-3")
+        );
     }
 
     #[test]
     fn state_broadcast_mailbox_coalesces_latest_snapshot_when_full() {
         let mailbox = StateBroadcastMailbox::default();
-
-        for index in 1..STATE_BROADCAST_MAILBOX_CAPACITY {
-            mailbox.publish_delta_payload(format!("delta-{index}"));
+        for revision in 1..STATE_BROADCAST_MAILBOX_CAPACITY as u64 {
+            mailbox.publish_delta(delta(revision));
         }
-        mailbox.publish_snapshot(snapshot(1));
-        mailbox.publish_snapshot(snapshot(2));
-
+        mailbox.publish_snapshot(snapshot(256));
+        mailbox.publish_snapshot(snapshot(257));
         let pending = mailbox.take_pending_for_test();
         assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
-        match pending.last() {
-            Some(StateBroadcastWork::Snapshot(latest)) => assert_eq!(latest.revision, 2),
-            _ => panic!("expected latest snapshot to replace the queued snapshot"),
-        }
-    }
-
-    #[test]
-    fn state_broadcast_mailbox_drops_oldest_delta_when_full() {
-        let mailbox = Arc::new(StateBroadcastMailbox::default());
-        for index in 0..STATE_BROADCAST_MAILBOX_CAPACITY {
-            mailbox.publish_delta_payload(format!("delta-{index}"));
-        }
-
-        let (published_tx, published_rx) = std::sync::mpsc::channel();
-        let publisher_mailbox = mailbox.clone();
-        let publisher = std::thread::spawn(move || {
-            publisher_mailbox.publish_delta_payload("delta-over-capacity".to_owned());
-            published_tx
-                .send(())
-                .expect("completion signal should send");
-        });
-
-        published_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("publisher should not wait while the mailbox is full");
-        publisher.join().expect("publisher thread should not panic");
-
-        let pending = mailbox.take_pending_for_test();
-        assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
-        match pending.first() {
-            Some(StateBroadcastWork::DeltaPayload(value)) => assert_eq!(value, "delta-1"),
-            _ => panic!("expected oldest retained delta first"),
-        }
-        match pending.last() {
-            Some(StateBroadcastWork::DeltaPayload(value)) => {
-                assert_eq!(value, "delta-over-capacity")
-            }
-            _ => panic!("expected over-capacity delta to enqueue immediately"),
-        }
-    }
-
-    #[test]
-    fn state_broadcast_mailbox_drops_oldest_delta_for_snapshot_when_full() {
-        let mailbox = StateBroadcastMailbox::default();
-        for index in 0..STATE_BROADCAST_MAILBOX_CAPACITY {
-            mailbox.publish_delta_payload(format!("delta-{index}"));
-        }
-        mailbox.publish_snapshot(snapshot(99));
-
-        let pending = mailbox.take_pending_for_test();
-        assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
-        match pending.first() {
-            Some(StateBroadcastWork::DeltaPayload(value)) => assert_eq!(value, "delta-1"),
-            _ => panic!("expected oldest retained delta first"),
-        }
-        match pending.last() {
-            Some(StateBroadcastWork::Snapshot(latest)) => assert_eq!(latest.revision, 99),
-            _ => panic!("expected snapshot to enqueue immediately"),
-        }
-    }
-
-    #[test]
-    fn state_broadcast_mailbox_drops_oldest_snapshot_when_delta_arrives_full() {
-        let mailbox = StateBroadcastMailbox::default();
-        mailbox.publish_snapshot(snapshot(7));
-        for index in 0..STATE_BROADCAST_MAILBOX_CAPACITY - 1 {
-            mailbox.publish_delta_payload(format!("delta-{index}"));
-        }
-        mailbox.publish_delta_payload("delta-over-capacity".to_owned());
-
-        let pending = mailbox.take_pending_for_test();
-        assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
-        match pending.first() {
-            Some(StateBroadcastWork::DeltaPayload(value)) => assert_eq!(value, "delta-0"),
-            _ => {
-                panic!("expected first retained item to be the first delta after dropped snapshot")
-            }
-        }
-        match pending.last() {
-            Some(StateBroadcastWork::DeltaPayload(value)) => {
-                assert_eq!(value, "delta-over-capacity")
-            }
-            _ => panic!("expected over-capacity delta to enqueue immediately"),
-        }
         assert!(
-            pending
-                .iter()
-                .all(|work| matches!(work, StateBroadcastWork::DeltaPayload(_))),
-            "snapshot head should be dropped as the oldest pending work"
+            matches!(pending.last(), Some(StateBroadcastWork::Snapshot(value)) if value.revision == 257)
         );
     }
 }

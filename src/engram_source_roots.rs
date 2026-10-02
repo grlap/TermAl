@@ -975,7 +975,7 @@ fn engram_run_source_root_validation_within(
         }
     }
     if live
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |running| {
+        .try_update(Ordering::SeqCst, Ordering::SeqCst, |running| {
             (running < limit).then_some(running + 1)
         })
         .is_err()

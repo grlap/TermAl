@@ -475,14 +475,14 @@ impl AppState {
         shutdown_error: Option<&str>,
     ) -> EngramMcpRuntimeRevocationFinalization {
         let (
-            revision,
-            pending_interaction_updates,
-            created_messages,
+            _revision,
+            _pending_interaction_updates,
+            _created_messages,
             should_dispatch_next,
             may_dispatch_requeued_mailbox,
             failed_mailbox_notification,
             should_refresh_delegation,
-            stopped_wait_refresh,
+            _stopped_wait_refresh,
             persist_error,
             effective_shutdown_error,
         ) = {
@@ -580,8 +580,8 @@ impl AppState {
             let mut thread_id_to_suppress = None;
             let (
                 has_queued_prompts,
-                pending_interaction_updates,
-                created_messages,
+                mut pending_interaction_updates,
+                mut created_messages,
                 failed_mailbox_notification,
             ) = {
                 let record = inner
@@ -707,9 +707,25 @@ impl AppState {
                 Ok(revision) => (
                     {
                         self.publish_test_run_waits_consumed(
+                            &inner,
                             revision,
                             &stopped_test_run_waits,
                             TestRunWaitConsumedReason::SessionStopped,
+                        );
+                        self.publish_message_created_delta_parts(
+                            &inner,
+                            revision,
+                            std::mem::take(&mut created_messages),
+                        );
+                        self.publish_message_updated_delta_parts(
+                            &inner,
+                            revision,
+                            std::mem::take(&mut pending_interaction_updates),
+                        );
+                        self.publish_delegation_wait_consumed_deltas(
+                            &inner,
+                            revision,
+                            &stopped_wait_refresh.consumed_waits,
                         );
                         Some(revision)
                     },
@@ -778,15 +794,6 @@ impl AppState {
                     }
                 }
             });
-
-        if let Some(revision) = revision {
-            self.publish_message_created_delta_parts(revision, created_messages);
-            self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
-            self.publish_delegation_wait_consumed_deltas(
-                revision,
-                &stopped_wait_refresh.consumed_waits,
-            );
-        }
 
         let mut failures = Vec::new();
         if let Some(error) = effective_shutdown_error {
@@ -1316,8 +1323,8 @@ impl AppState {
         let preserve_accepted_turn_state = mode.preserves_accepted_turn_state();
         let (
             commit_result,
-            created_messages,
-            updated_messages,
+            _created_messages,
+            _updated_messages,
             has_queued_prompts,
             failed_mailbox_notification,
             deferred_stop_callbacks,
@@ -1428,8 +1435,8 @@ impl AppState {
                 && !inner.sessions[index].active_turn_file_changes.is_empty())
             .then(|| inner.next_message_id());
             let (
-                created_messages,
-                updated_messages,
+                mut created_messages,
+                mut updated_messages,
                 has_queued_prompts,
                 failed_mailbox_notification,
                 deferred_stop_callbacks,
@@ -1556,6 +1563,18 @@ impl AppState {
                 // Error/runtime state at the committed revision.
                 self.publish_state_locked(&inner);
             }
+            if let Ok(revision) = &commit_result {
+                self.publish_message_created_delta_parts(
+                    &inner,
+                    *revision,
+                    std::mem::take(&mut created_messages),
+                );
+                self.publish_message_updated_delta_parts(
+                    &inner,
+                    *revision,
+                    std::mem::take(&mut updated_messages),
+                );
+            }
             (
                 commit_result,
                 created_messages,
@@ -1577,9 +1596,7 @@ impl AppState {
                 );
             }
         }
-        let revision = commit_result?;
-        self.publish_message_created_delta_parts(revision, created_messages);
-        self.publish_message_updated_delta_parts(revision, updated_messages);
+        let _revision = commit_result?;
         if let Err(error) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!(
                 "state warning> failed to refresh delegation after atomic turn failure: {error:#}"
@@ -1879,7 +1896,7 @@ impl AppState {
             expected_active_turn_generation,
         );
         let stopping_orchestrator_session_ids = self.stopping_orchestrator_session_ids_snapshot();
-        let (should_dispatch_next, orchestrator_delta) = {
+        let (should_dispatch_next, _orchestrator_delta) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -1978,14 +1995,15 @@ impl AppState {
                     .expect("session index should be valid"),
             );
             self.commit_locked(&mut inner)?;
-            let orchestrator_delta = orchestrator_changed
-                .then(|| (inner.revision, inner.orchestrator_instances.clone()));
-            (true, orchestrator_delta)
+            if orchestrator_changed {
+                self.publish_orchestrators_updated(
+                    &inner,
+                    inner.revision,
+                    inner.orchestrator_instances.clone(),
+                );
+            }
+            (true, ())
         };
-
-        if let Some((revision, orchestrators)) = orchestrator_delta {
-            self.publish_orchestrators_updated(revision, orchestrators);
-        }
 
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after turn completion: {err:#}");
@@ -2075,8 +2093,8 @@ impl AppState {
         let cleaned = error_message.map(str::trim).unwrap_or("");
         let (
             should_dispatch_next,
-            pending_interaction_updates,
-            created_messages,
+            _pending_interaction_updates,
+            _created_messages,
             exited_mailbox_notification,
             commit_result,
         ) = {
@@ -2141,8 +2159,8 @@ impl AppState {
                     .then(|| inner.next_message_id());
             let (
                 has_queued_prompts,
-                pending_interaction_updates,
-                created_messages,
+                mut pending_interaction_updates,
+                mut created_messages,
                 exited_mailbox_notification,
             ) = {
                 let record = inner
@@ -2209,6 +2227,18 @@ impl AppState {
                 record.set_auto_dispatch_blocked(true);
                 clear_active_turn_file_change_tracking(record);
             }
+            if let Ok(revision) = &commit_result {
+                self.publish_message_created_delta_parts(
+                    &inner,
+                    *revision,
+                    std::mem::take(&mut created_messages),
+                );
+                self.publish_message_updated_delta_parts(
+                    &inner,
+                    *revision,
+                    std::mem::take(&mut pending_interaction_updates),
+                );
+            }
             (
                 has_queued_prompts,
                 pending_interaction_updates,
@@ -2225,9 +2255,7 @@ impl AppState {
                 );
             }
         }
-        let revision = commit_result?;
-        self.publish_message_created_delta_parts(revision, created_messages);
-        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
+        let _revision = commit_result?;
 
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");
@@ -2468,8 +2496,8 @@ impl AppState {
         sync_session_interaction_state(record, resolved_preview);
         let updates = message_updated_delta_parts_for_indices(record, changed_message_indices);
         let revision = self.commit_locked(&mut inner)?;
+        self.publish_message_updated_delta_parts(&inner, revision, updates);
         drop(inner);
-        self.publish_message_updated_delta_parts(revision, updates);
         Ok(())
     }
 }

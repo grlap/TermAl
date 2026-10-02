@@ -439,12 +439,24 @@ export function createAppLiveStateTransportEventHandlers(
           return;
         }
       }
-      // A dispatch outcome is emitted after the consumed snapshot/delta and may
-      // have that same (or an older) revision. It is not a state mutation: never
-      // advance the global revision or put it in the transient connection slot.
-      // The hook deduplicates outcomes independently of snapshot adoption.
+      // Dispatch outcomes have their own ordered revision on current servers.
+      // Consume a contiguous current-server revision so the next delta does
+      // not look lost. Older hosts/replays may share the consumed revision;
+      // keep their notices without advancing. The hook deduplicates outcomes
+      // independently of snapshot adoption and rejects retired-server notices.
       if (delta.type === "testRunWaitResumeDispatchFailed") {
         applyTestRunDeltaLocally?.(delta);
+        if (classifyDeltaServerIdentity(
+          delta.serverInstanceId, lastSeenServerInstanceIdRef.current, seenServerInstanceIdsRef.current,
+        ) === "current") {
+          const action = decideDeltaRevisionAction(currentRevision, delta.revision);
+          observeDelta(delta, action);
+          if (action === "apply") {
+            latestStateRevisionRef.current = delta.revision;
+          } else if (action === "resync") {
+            requestStateResync({ rearmOnFailure: true });
+          }
+        }
         return;
       }
       // Delegation and test-run wait deltas carry only part of their commit

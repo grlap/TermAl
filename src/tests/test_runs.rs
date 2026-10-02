@@ -43,8 +43,8 @@ impl RunFixture {
     fn refresh(&self, alive: &[u32]) -> bool {
         let alive = alive.to_vec();
         self.state
-            .refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|event| {
-                self.state.publish_delta(event)
+            .refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|inner, event| {
+                self.state.publish_delta_locked(inner, event.clone())
             })
     }
 
@@ -414,7 +414,9 @@ fn a_detail_only_change_moves_the_detail_version() {
     assert_eq!(fixture.summary("test-detail-only"), after);
     let restarted = test_app_state();
     create_test_project(&restarted, &fixture.root, "Restarted");
-    restarted.refresh_test_runs_with(&|_, _| false, &|event| restarted.publish_delta(event));
+    restarted.refresh_test_runs_with(&|_, _| false, &|inner, event| {
+        restarted.publish_delta_locked(inner, event.clone())
+    });
     let reindexed = restarted
         .test_run_summaries(None)
         .into_iter()
@@ -515,7 +517,7 @@ fn every_delta_is_published_under_the_lock_that_allocated_its_revision() {
         Some(passed_results()),
     );
     let published = Mutex::new(Vec::new());
-    let probe = |event: &DeltaEvent| {
+    let probe = |inner: &StateInner, event: &DeltaEvent| {
         let revision = match event {
             DeltaEvent::TestRunChanged { revision, .. }
             | DeltaEvent::TestRunRemoved { revision, .. } => *revision,
@@ -523,7 +525,7 @@ fn every_delta_is_published_under_the_lock_that_allocated_its_revision() {
         };
         let held = !fixture.state.inner.is_not_held_by_current_thread_for_test();
         published.lock().unwrap().push((revision, held));
-        fixture.state.publish_delta(event);
+        fixture.state.publish_delta_locked(inner, event.clone());
     };
     fixture
         .state
@@ -1555,8 +1557,8 @@ fn a_reused_pid_reads_unknown_while_the_real_writer_reads_running() {
 
     fixture
         .state
-        .refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|event| {
-            fixture.state.publish_delta(event)
+        .refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|inner, event| {
+            fixture.state.publish_delta_locked(inner, event.clone())
         });
     assert_eq!(
         fixture.summary("test-live-writer").state,
@@ -1671,8 +1673,8 @@ fn a_launcher_that_finishes_between_the_read_and_the_liveness_check_reads_its_ve
 
     fixture
         .state
-        .refresh_test_runs_with(&finish_then_exit, &|event| {
-            fixture.state.publish_delta(event)
+        .refresh_test_runs_with(&finish_then_exit, &|inner, event| {
+            fixture.state.publish_delta_locked(inner, event.clone())
         });
 
     assert_eq!(
@@ -1710,8 +1712,8 @@ fn a_detached_run_that_hands_over_and_finishes_between_checks_reads_its_verdict(
 
     fixture
         .state
-        .refresh_test_runs_with(&hand_over_then_finish, &|event| {
-            fixture.state.publish_delta(event)
+        .refresh_test_runs_with(&hand_over_then_finish, &|inner, event| {
+            fixture.state.publish_delta_locked(inner, event.clone())
         });
 
     assert_eq!(fixture.summary("test-handoff").state, TestRunState::Passed);
@@ -1733,8 +1735,8 @@ fn a_failed_read_after_the_check_leaves_this_rescan_unknown_and_the_next_one_rea
     };
     fixture
         .state
-        .refresh_test_runs_with(&corrupt_then_gone, &|event| {
-            fixture.state.publish_delta(event)
+        .refresh_test_runs_with(&corrupt_then_gone, &|inner, event| {
+            fixture.state.publish_delta_locked(inner, event.clone())
         });
     assert_eq!(
         fixture.summary("test-reread-fails").state,
@@ -1838,9 +1840,11 @@ fn a_run_still_handing_over_when_the_reads_run_out_has_no_reason() {
         fs::write(&results_path, results.to_string()).expect("results should write");
         false
     };
-    fixture.state.refresh_test_runs_with(&hand_over, &|event| {
-        fixture.state.publish_delta(event)
-    });
+    fixture
+        .state
+        .refresh_test_runs_with(&hand_over, &|inner, event| {
+            fixture.state.publish_delta_locked(inner, event.clone())
+        });
     let summary = fixture.summary("test-endless-handover");
     assert_eq!(summary.state, TestRunState::Unknown);
     assert_eq!(summary.unknown_reason, None);
@@ -2129,8 +2133,14 @@ fn rescans_are_serialized() {
     };
     fixture
         .state
-        .refresh_test_runs_with(&check, &|event| fixture.state.publish_delta(event));
-    assert_eq!(held.get(), Some(true), "the rescan lock is held while it reads");
+        .refresh_test_runs_with(&check, &|inner, event| {
+            fixture.state.publish_delta_locked(inner, event.clone())
+        });
+    assert_eq!(
+        held.get(),
+        Some(true),
+        "the rescan lock is held while it reads"
+    );
     let rescan = fixture.state.inner.lock().unwrap().test_runs.rescan.clone();
     assert!(rescan.try_lock().is_ok(), "and released after");
 }
@@ -2153,7 +2163,9 @@ fn an_abandoned_run_is_read_again_once_not_on_every_rescan() {
         counted.set(counted.get() + 1);
         false
     };
-    let publish = |event: &DeltaEvent| fixture.state.publish_delta(event);
+    let publish = |inner: &StateInner, event: &DeltaEvent| {
+        fixture.state.publish_delta_locked(inner, event.clone())
+    };
 
     fixture.state.refresh_test_runs_with(&gone, &publish);
     assert_eq!(fixture.summary("test-abandoned").state, TestRunState::Unknown);

@@ -506,7 +506,7 @@ impl AppState {
     /// queued-prompt cancellation, and the abort-retry tick. Never terminalizes
     /// a delegation; the ordinary refresh owns that.
     fn sync_delegation_attempt_for_child_session(&self, child_session_id: &str) {
-        let (revision, lifecycle_delta, wait_refresh) = {
+        let (revision, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(delegation_id) = inner
                 .find_session_index(child_session_id)
@@ -556,7 +556,18 @@ impl AppState {
                     Err(error) => Err(error),
                 };
             match committed {
-                Ok((revision, wait_refresh)) => (revision, lifecycle_delta, wait_refresh),
+                Ok((revision, wait_refresh)) => {
+                    // Events are enqueued under the lock that committed them,
+                    // with that revision; delivery to the parent runs after.
+                    self.enqueue_delegation_refresh_locked(
+                        &inner,
+                        revision,
+                        lifecycle_delta.as_ref(),
+                        &DetachedDelegationChildRuntime::default(),
+                        &wait_refresh,
+                    );
+                    (revision, wait_refresh)
+                }
                 Err(error) => {
                     eprintln!(
                         "delegation> failed persisting the attempt state of `{delegation_id}`: {error:#}"
@@ -566,12 +577,6 @@ impl AppState {
                 }
             }
         };
-        if let Some(delta) = lifecycle_delta {
-            self.publish_delegation_lifecycle_delta(revision, delta);
-        }
-        if wait_refresh.did_mutate() {
-            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
-        }
         self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
     }
 }

@@ -33,8 +33,11 @@ fn acceptance_evaluation_call_worst_case(timeout: Duration) -> Duration {
 }
 
 /// Worst-case time of one request: the windowed and the complete task read,
-/// every evidence continuation page, the policy read, and the capture of the
-/// declared source fingerprint, bounded by the freeze budget. The request
+/// every evidence continuation page, the policy read, the shared criterion
+/// evidence discovery budget, and the capture of the declared source
+/// fingerprint, bounded by the freeze budget. The request
+/// includes the core identity bracket inside the existing discovery allowance,
+/// not as additional command allowances; eligible task reads share it too.
 /// path's own deadline is this; the bridge's HTTP allowance is this and the
 /// evaluator's spawn on top (`DelegationLongCall::EvaluationRequest`), so the
 /// bridge never gives up on a request the backend is still serving.
@@ -42,6 +45,7 @@ fn acceptance_evaluation_request_tracker_budget() -> Duration {
     let task_reads = 3 + (MAX_ACCEPTANCE_EVIDENCE_PAGES as u32 - 1);
     acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * task_reads
         + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
+        + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
         + REVIEW_FREEZE_TIMEOUT
 }
 
@@ -86,13 +90,16 @@ fn acceptance_evaluation_notices<const N: usize>(notices: [Option<String>; N]) -
 }
 
 /// What must still fit after a continuation page: that page, the complete
-/// task read, the caller's held-claims read, the policy read and the source
-/// capture. Paging stops once the
+/// task read, the caller's held-claims read, the policy read, criterion evidence
+/// discovery and the source capture. Paging stops once the
 /// deadline cannot fund it; the steps that decide the request are never the
 /// ones cut.
+/// Canonical discovery additionally reserves its closing show/core share from
+/// the same sixty-second deadline before any optional evidence paging.
 fn acceptance_evaluation_paging_reserve() -> Duration {
     acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * 3
         + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
+        + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
         + REVIEW_FREEZE_TIMEOUT
 }
 
@@ -140,7 +147,15 @@ fn acceptance_evaluation_request_tool_definition() -> Value {
                     "enum": ["Codex", "Claude"],
                     "description": "Evaluator agent. Overrides the project default; Auto prefers the other ready Claude/Codex vendor, otherwise this session's agent."
                 },
-                "model": { "type": "string", "description": "Evaluator model override. Requires an explicit agent so Auto cannot send a vendor-specific model to another vendor." }
+                "model": { "type": "string", "description": "Evaluator model override. Requires an explicit agent so Auto cannot send a vendor-specific model to another vendor." },
+                "criterionEvidence": {
+                    "type": "array", "maxItems": MAX_ACCEPTANCE_SELECTED_RECORDS,
+                    "description": "Explicit criterion-to-evidence associations. TermAl reads these records whole even outside the newest notes window; this is discovery, not a claim that they satisfy the criterion.",
+                    "items": {"type": "object", "additionalProperties": false, "required": ["criterion", "locators"],
+                        "properties": {"criterion": {"type": "integer", "minimum": 1},
+                            "locators": {"type": "array", "minItems": 1, "maxItems": MAX_ACCEPTANCE_SELECTED_RECORDS,
+                                "items": {"type": "string", "pattern": "^([a-f0-9]{32}|[a-f0-9]{64})$"}}}}
+                }
             }
         }
     })
@@ -222,6 +237,8 @@ struct RequestAcceptanceEvaluationRequest {
     agent: Option<Agent>,
     #[serde(default)]
     model: Option<String>,
+    #[serde(default)]
+    criterion_evidence: Vec<AcceptanceCriterionEvidenceRequest>,
 }
 
 #[derive(Serialize)]
@@ -237,6 +254,7 @@ enum AcceptanceEvaluationRequestResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         notice: Option<String>,
         evidence_omissions: Value,
+        criterion_evidence: Vec<AcceptanceCriterionEvidence>,
     },
     SameSession {
         mode: AcceptanceEvaluationMode,
@@ -251,6 +269,7 @@ enum AcceptanceEvaluationRequestResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         notice: Option<String>,
         evidence_omissions: Value,
+        criterion_evidence: Vec<AcceptanceCriterionEvidence>,
     },
 }
 
@@ -401,10 +420,13 @@ fn acceptance_evaluation_spawn_admission_locked(
     // The root was looked up before the fingerprint was taken off the lock;
     // a rename, a clear or a first name since then would leave the evaluator
     // judging a tree the work is no longer (or not yet) measured in.
-    let claim = seed.source_root.as_ref().map(|root| AcceptanceEvaluationSourceClaim {
-        work_id: root.work_id.clone(),
-        claim_id: root.claim_id.clone(),
-    });
+    let claim = seed
+        .source_root
+        .as_ref()
+        .map(|root| AcceptanceEvaluationSourceClaim {
+            work_id: root.work_id.clone(),
+            claim_id: root.claim_id.clone(),
+        });
     let root_now = engram_evaluation_source_root(
         &inner.engram_work_source_roots,
         &seed.store,
@@ -649,6 +671,7 @@ impl AppState {
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
         let work_ref = request.work_ref.trim().to_owned();
         validate_acceptance_evaluation_work_ref(&work_ref)?;
+        validate_acceptance_criterion_evidence_request(&request.criterion_evidence)?;
         if request.model.is_some() && request.agent.is_none() {
             return Err(ApiError::bad_request(
                 "An evaluator model override requires an explicit agent (Claude or Codex)",
@@ -694,19 +717,72 @@ impl AppState {
         }
         // Two reads: the CLI refuses `--full` together with the evidence
         // windows, and the windowed read clips long criteria.
+        let mut core_args = show_args.clone();
+        core_args.extend(["core", "inspect", work_ref.as_str(), "--json"].map(str::to_owned));
+        let mut discovery =
+            self.acceptance_evidence_discovery_target(parent_session_id, &target.store)?;
+        // Start the canonical bracket before the anonymous agent window. One
+        // absolute allowance covers both core reads and all intervening reads.
+        let canonical_deadline = discovery
+            .target
+            .as_ref()
+            .map(|_| (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
+        let discovery_deadline =
+            canonical_deadline.map(|limit| limit - ACCEPTANCE_EVIDENCE_CLOSING_RESERVE);
+        if let Some(limit) = discovery_deadline {
+            match read(
+                connection,
+                &core_args,
+                acceptance_criterion_evidence_read_timeout(limit, &now)?,
+            ) {
+                Ok(opening) => discovery.identity = acceptance_core_identity(&opening)?,
+                Err(error) if acceptance_core_inspect_unsupported(&error) => {
+                    discovery.unavailable = "Engram does not support canonical core identity reads";
+                }
+                Err(error) => {
+                    return Err(acceptance_evaluation_transport_error(
+                        "engram work core inspect",
+                        error,
+                    ))
+                }
+            }
+        }
         let mut full_args = show_args.clone();
         show_args
             .extend(["show", work_ref.as_str(), "--notes", "--gates", "--json"].map(str::to_owned));
         full_args.extend(["show", work_ref.as_str(), "--full", "--json"].map(str::to_owned));
-        let mut show = read(connection, &show_args, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+        let task_timeout = || {
+            discovery_deadline.map_or(Ok(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT), |limit| {
+                acceptance_criterion_evidence_read_timeout(limit, &now)
+            })
+        };
+        let mut show = read(connection, &show_args, task_timeout()?)
             .map_err(|e| acceptance_evaluation_transport_error("engram work show", e))?;
-        // Older evidence sits behind the byte-bounded first window. A failed
-        // continuation only shortens the brief; it never fails the request.
+        let initial_basis = discovery
+            .identity
+            .as_ref()
+            .map(|identity| acceptance_initial_evidence_basis(&show, identity))
+            .transpose()?;
+        let mut canonical_window = if initial_basis.is_some() && show.get("notes_window").is_some() {
+            let window = acceptance_notes_window(&show)?;
+            if window.newer != 0 {
+                return Err(ApiError::bad_gateway(
+                    "engram work show: initial notes window is not the newest window",
+                ));
+            }
+            Some(window)
+        } else {
+            None
+        };
+        let mut notes_cursors = BTreeSet::new();
+        // Ordinary legacy paging can shorten the brief. Once canonical
+        // identity is acquired, contradictory carriers and page failures abort.
         let mut older_pages = Vec::new();
         let mut collected = acceptance_evidence_page_len(&show);
         let mut after = acceptance_evidence_continuation(&show);
         let mut paging_stop = None;
         while let Some(token) = after.take() {
+            notes_cursors.insert(token.clone());
             if older_pages.len() + 1 >= MAX_ACCEPTANCE_EVIDENCE_PAGES {
                 paging_stop = Some("page_limit");
                 break;
@@ -715,9 +791,20 @@ impl AppState {
                 paging_stop = Some("entry_limit");
                 break;
             }
-            // A slow store shortens the brief; it never outruns the caller's
-            // HTTP allowance or starves the reads that decide the request.
-            if now() + acceptance_evaluation_paging_reserve() > deadline {
+            // Pre-issue budget limits can shorten the brief without outrunning
+            // the HTTP allowance or starving the reads that decide the request.
+            // Share the remaining discovery time between this optional page
+            // and the mandatory full read, funding both lock retries. The
+            // configured timeout is a cap, not a requirement to spend it all.
+            let page_timeout =
+                discovery_deadline.map_or(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT, |limit| {
+                    (limit
+                        .saturating_duration_since(now())
+                        .saturating_sub(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY * 2)
+                        / 4)
+                    .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+                });
+            if now() + acceptance_evaluation_paging_reserve() > deadline || page_timeout.is_zero() {
                 paging_stop = Some("time_budget");
                 eprintln!(
                     "acceptance evaluation> the read budget for `{work_ref}` is spent; the brief lists the evidence read so far"
@@ -728,13 +815,31 @@ impl AppState {
             let json_flag = page_args.pop();
             page_args.extend(["--after".to_owned(), token]);
             page_args.extend(json_flag);
-            match read(connection, &page_args, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) {
+            match read(connection, &page_args, page_timeout) {
                 Ok(page) => {
+                    if let Some(identity) = &discovery.identity {
+                        canonical_window = Some(acceptance_compact_notes_carrier(
+                            &page,
+                            identity,
+                            initial_basis.as_ref().expect("captured initial basis"),
+                            canonical_window.as_ref().expect("captured catalog window"),
+                            &notes_cursors,
+                        )?);
+                    }
                     collected += acceptance_evidence_page_len(&page);
                     after = acceptance_evidence_continuation(&page);
                     older_pages.push(page);
                 }
                 Err(error) => {
+                    // The CLI maps a refused cursor to Transport and invalid
+                    // stdout to Protocol. Neither can settle a capture that
+                    // already acquired canonical identity.
+                    if discovery.identity.is_some() {
+                        return Err(acceptance_evaluation_transport_error(
+                            "engram work show canonical discovery page",
+                            error,
+                        ));
+                    }
                     paging_stop = Some("transport_failure");
                     eprintln!(
                         "acceptance evaluation> older evidence of `{work_ref}` was not read; the brief lists the newest entries only: {error}"
@@ -756,9 +861,75 @@ impl AppState {
         } else {
             None
         });
-        let full = read(connection, &full_args, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+        let full = read(connection, &full_args, task_timeout()?)
             .map_err(|e| acceptance_evaluation_transport_error("engram work show --full", e))?;
-        let task = parse_acceptance_evaluation_task(show, full)?;
+        if let Some(identity) = &discovery.identity {
+            validate_acceptance_projection_identity(&show["status"]["work"], identity)?;
+            acceptance_full_contract_identity(&full, identity)?;
+            if show["acceptance_basis"].as_i64() != Some(identity.revision) {
+                return Err(ApiError::conflict("the task revision changed after the opening core identity; request a new evaluation"));
+            }
+        }
+        let mut task = parse_acceptance_evaluation_task(show, full)?;
+        task.canonical_identity = discovery.identity.clone();
+        let evidence_deadline = canonical_deadline
+            .unwrap_or_else(|| (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
+        let body_deadline = discovery_deadline.unwrap_or(evidence_deadline);
+        read_requested_acceptance_evidence(
+            &mut task,
+            &request.criterion_evidence,
+            connection,
+            &show_args,
+            &read,
+            body_deadline,
+            &now,
+        )?;
+        self.read_acceptance_binding_evidence(
+            &target.store,
+            &mut task,
+            &discovery,
+            body_deadline,
+            &now,
+        )?;
+        if let Some(identity) = &discovery.identity {
+            // W1 precedes I1: a same-number cut on a replacement run must not
+            // attach to the opening run merely because the scalar cut agrees.
+            let closing_show = read(
+                connection,
+                &show_args,
+                acceptance_criterion_evidence_read_timeout(
+                    evidence_deadline - ACCEPTANCE_EVIDENCE_CLOSING_RESERVE / 2,
+                    &now,
+                )?,
+            )
+            .map_err(|error| {
+                acceptance_evaluation_transport_error("engram work show closing basis", error)
+            })?;
+            validate_acceptance_evidence_basis(&task, &closing_show)?;
+            let closing = read(
+                connection,
+                &core_args,
+                acceptance_criterion_evidence_read_timeout(evidence_deadline, &now)?,
+            )
+            .map_err(|error| {
+                acceptance_evaluation_transport_error(
+                    "engram work core inspect closing identity",
+                    error,
+                )
+            })?;
+            if acceptance_core_identity(&closing)?.as_ref() != Some(identity) {
+                return Err(ApiError::conflict("the task's canonical work/run identity changed during discovery; request a new evaluation"));
+            }
+        }
+        if canonical_deadline.is_some() || !request.criterion_evidence.is_empty() {
+            acceptance_criterion_evidence_read_timeout(evidence_deadline, &now)?;
+        }
+        self.revalidate_acceptance_discovery_authority(
+            parent_session_id,
+            &target.store,
+            &discovery,
+            connection,
+        )?;
 
         // The request names its work independently of the control turn's
         // binding. Read live claims under the requester's own identity;
@@ -796,11 +967,13 @@ impl AppState {
                 ));
             }
             let matches_ref = claim.short_ref == task.work_ref;
-            let matches_id = task.work_id.as_ref().is_some_and(|id| claim.work_id == *id);
+            let matches_id = task
+                .canonical_work_id()
+                .is_some_and(|id| claim.work_id == id);
             if !matches_ref && !matches_id {
                 continue;
             }
-            if !matches_ref || task.work_id.is_some() && !matches_id {
+            if !matches_ref || task.canonical_work_id().is_some() && !matches_id {
                 return Err(ApiError::bad_gateway(
                     "engram work core held: requested claim has inconsistent work identity",
                 ));
@@ -869,7 +1042,7 @@ impl AppState {
                 &target.store,
                 requested_claim.as_ref(),
                 &task.work_ref,
-                task.work_id.as_deref(),
+                task.canonical_work_id(),
             );
             let source_claim = source_root
                 .is_none()
@@ -960,6 +1133,7 @@ impl AppState {
                     work_ref: task.work_ref,
                     notice,
                     evidence_omissions: acceptance_brief_omissions(&cuts),
+                    criterion_evidence: task.criterion_evidence,
                 })
             }
             AcceptanceEvaluationMode::SameSession => {
@@ -979,14 +1153,14 @@ impl AppState {
                 }
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
                 let unmeasured = unmeasured(&source_fingerprint);
-                let cuts = acceptance_same_session_brief_cuts(&task);
+                let (brief, cuts) = build_same_session_acceptance_brief_and_cuts(
+                    &task,
+                    source_fingerprint.as_deref(),
+                    MAX_ACCEPTANCE_BRIEF_BYTES,
+                )?;
                 Ok(AcceptanceEvaluationRequestResponse::SameSession {
                     mode,
-                    brief: build_same_session_acceptance_brief(
-                        &task,
-                        source_fingerprint.as_deref(),
-                        MAX_ACCEPTANCE_BRIEF_BYTES,
-                    )?,
+                    brief,
                     acceptance_basis: task.acceptance_basis,
                     evidence_basis: task.evidence_basis,
                     source_fingerprint,
@@ -1001,6 +1175,7 @@ impl AppState {
                         acceptance_same_session_cut_notice(&task.work_ref, &cuts),
                     ]),
                     evidence_omissions: acceptance_brief_omissions(&cuts),
+                    criterion_evidence: task.criterion_evidence,
                     work_ref: task.work_ref,
                 })
             }
@@ -1124,9 +1299,9 @@ impl AppState {
             }
             match &target.source_root {
                 Some(source_root) => Some(source_root.place()),
-                None => inner
-                    .find_session_index(child)
-                    .map(|index| EngramBasisPlace::Workdir(inner.sessions[index].session.workdir.clone())),
+                None => inner.find_session_index(child).map(|index| {
+                    EngramBasisPlace::Workdir(inner.sessions[index].session.workdir.clone())
+                }),
             }
         };
         // Without a revision taken at the request there is nothing to compare.
@@ -1805,12 +1980,12 @@ async fn run_acceptance_evaluation_submit_request(
     request: Result<Json<SubmitAcceptanceEvaluationRequest>, JsonRejection>,
     permits: Arc<tokio::sync::Semaphore>,
     submit: impl FnOnce(
-        AppState,
-        &str,
-        SubmitAcceptanceEvaluationRequest,
-    ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError>
-    + Send
-    + 'static,
+            AppState,
+            &str,
+            SubmitAcceptanceEvaluationRequest,
+        ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError>
+        + Send
+        + 'static,
 ) -> Result<Json<AcceptanceEvaluationSubmitResponse>, ApiError> {
     let Json(request) =
         request.map_err(|e| api_json_rejection("acceptance evaluation submission", e))?;

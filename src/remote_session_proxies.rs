@@ -259,15 +259,18 @@ impl AppState {
             } else {
                 None
             };
+            if let Some(revision) = revision {
+                if wait_refresh.did_mutate() {
+                    self.publish_delegation_wait_consumed_deltas(
+                        &inner,
+                        revision,
+                        &wait_refresh.consumed_waits,
+                    );
+                }
+            }
             (self.snapshot_from_inner(&inner), revision, wait_refresh)
         };
         if let Some(revision) = revision {
-            if wait_refresh.did_mutate() {
-                self.publish_delegation_wait_consumed_deltas(
-                    revision,
-                    &wait_refresh.consumed_waits,
-                );
-            }
             self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         }
         Ok(snapshot)

@@ -57,8 +57,8 @@ impl AppState {
             ));
         }
         let remote_session = remote_response.session.clone();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, local_session_id, local_session, changed, delta_session) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
             // Project deletion detaches the source session under this same
             // state mutex. Resolve the attachment only inside the final fork
@@ -128,6 +128,7 @@ impl AppState {
         // [`AppState::announce_remote_session_created_if_changed`]
         // and its invocation from `remote_create_proxies.rs`.
         self.announce_remote_session_created_if_changed(
+            &inner,
             changed,
             revision,
             &local_session_id,

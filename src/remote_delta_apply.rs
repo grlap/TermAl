@@ -220,8 +220,8 @@ impl AppState {
                         session.id
                     ));
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let Some((published_session_id, delta_session, revision)) = ({
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -272,14 +272,19 @@ impl AppState {
                         Some((published_session_id, delta_session, revision))
                     }
                 }) else {
+                    drop(inner);
                     self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 };
-                self.publish_delta(&DeltaEvent::SessionCreated {
-                    revision,
-                    session_id: published_session_id,
-                    session: delta_session,
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::SessionCreated {
+                        revision,
+                        session_id: published_session_id,
+                        session: delta_session,
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::MessageCreated {
@@ -322,6 +327,7 @@ impl AppState {
                 ) {
                     return Ok(());
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (
                     local_session_id,
                     applied_message_index,
@@ -329,7 +335,6 @@ impl AppState {
                     message_count,
                     session_mutation_stamp,
                 ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -425,18 +430,22 @@ impl AppState {
                         session_mutation_stamp,
                     )
                 };
-                self.publish_delta(&DeltaEvent::MessageCreated {
-                    revision,
-                    session_id: local_session_id,
-                    message_id,
-                    message_index: applied_message_index,
-                    message_count,
-                    message,
-                    preview,
-                    status,
-                    session_queue,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::MessageCreated {
+                        revision,
+                        session_id: local_session_id,
+                        message_id,
+                        message_index: applied_message_index,
+                        message_count,
+                        message,
+                        preview,
+                        status,
+                        session_queue,
+                        session_mutation_stamp: Some(session_mutation_stamp),
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::MessageUpdated {
@@ -484,6 +493,7 @@ impl AppState {
                 ) {
                     return Ok(());
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (
                     local_session_id,
                     applied_message_index,
@@ -491,7 +501,6 @@ impl AppState {
                     revision,
                     session_mutation_stamp,
                 ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -548,17 +557,21 @@ impl AppState {
                         session_mutation_stamp,
                     )
                 };
-                self.publish_delta(&DeltaEvent::MessageUpdated {
-                    revision,
-                    session_id: local_session_id,
-                    message_id,
-                    message_index: applied_message_index,
-                    message_count,
-                    message,
-                    preview,
-                    status,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::MessageUpdated {
+                        revision,
+                        session_id: local_session_id,
+                        message_id,
+                        message_index: applied_message_index,
+                        message_count,
+                        message,
+                        preview,
+                        status,
+                        session_mutation_stamp: Some(session_mutation_stamp),
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::TextDelta {
@@ -588,6 +601,7 @@ impl AppState {
                 ) {
                     return Ok(());
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (
                     local_session_id,
                     message_index,
@@ -596,7 +610,6 @@ impl AppState {
                     text_start_byte,
                     session_mutation_stamp,
                 ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -691,17 +704,21 @@ impl AppState {
                         session_mutation_stamp,
                     )
                 };
-                self.publish_delta(&DeltaEvent::TextDelta {
-                    revision,
-                    session_id: local_session_id,
-                    message_id,
-                    message_index,
-                    message_count,
-                    text_start_byte,
-                    delta,
-                    preview,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::TextDelta {
+                        revision,
+                        session_id: local_session_id,
+                        message_id,
+                        message_index,
+                        message_count,
+                        text_start_byte,
+                        delta,
+                        preview,
+                        session_mutation_stamp: Some(session_mutation_stamp),
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::TextReplace {
@@ -730,6 +747,7 @@ impl AppState {
                 ) {
                     return Ok(());
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (
                     local_session_id,
                     message_index,
@@ -737,7 +755,6 @@ impl AppState {
                     revision,
                     session_mutation_stamp,
                 ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -803,16 +820,20 @@ impl AppState {
                         session_mutation_stamp,
                     )
                 };
-                self.publish_delta(&DeltaEvent::TextReplace {
-                    revision,
-                    session_id: local_session_id,
-                    message_id,
-                    message_index,
-                    message_count,
-                    text,
-                    preview,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::TextReplace {
+                        revision,
+                        session_id: local_session_id,
+                        message_id,
+                        message_index,
+                        message_count,
+                        text,
+                        preview,
+                        session_mutation_stamp: Some(session_mutation_stamp),
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::CommandUpdate {
@@ -851,6 +872,7 @@ impl AppState {
                 ) {
                     return Ok(());
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (
                     local_session_id,
                     created_message,
@@ -860,7 +882,6 @@ impl AppState {
                     session_status,
                     session_mutation_stamp,
                 ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -979,34 +1000,41 @@ impl AppState {
                     )
                 };
                 if let Some(message) = created_message {
-                    self.publish_delta(&DeltaEvent::MessageCreated {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        message,
-                        preview,
-                        status: session_status,
-                        session_queue: None,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
+                    self.publish_delta_locked(
+                        &inner,
+                        DeltaEvent::MessageCreated {
+                            revision,
+                            session_id: local_session_id,
+                            message_id,
+                            message_index: applied_message_index,
+                            message_count,
+                            message,
+                            preview,
+                            status: session_status,
+                            session_queue: None,
+                            session_mutation_stamp: Some(session_mutation_stamp),
+                        },
+                    );
                 } else {
-                    self.publish_delta(&DeltaEvent::CommandUpdate {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        command,
-                        command_language,
-                        output,
-                        output_language,
-                        status,
-                        preview,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
+                    self.publish_delta_locked(
+                        &inner,
+                        DeltaEvent::CommandUpdate {
+                            revision,
+                            session_id: local_session_id,
+                            message_id,
+                            message_index: applied_message_index,
+                            message_count,
+                            command,
+                            command_language,
+                            output,
+                            output_language,
+                            status,
+                            preview,
+                            session_mutation_stamp: Some(session_mutation_stamp),
+                        },
+                    );
                 }
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::ParallelAgentsUpdate {
@@ -1041,6 +1069,7 @@ impl AppState {
                 ) {
                     return Ok(());
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (
                     local_session_id,
                     created_message,
@@ -1050,7 +1079,6 @@ impl AppState {
                     session_status,
                     session_mutation_stamp,
                 ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -1157,30 +1185,37 @@ impl AppState {
                     )
                 };
                 if let Some(message) = created_message {
-                    self.publish_delta(&DeltaEvent::MessageCreated {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        message,
-                        preview,
-                        status: session_status,
-                        session_queue: None,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
+                    self.publish_delta_locked(
+                        &inner,
+                        DeltaEvent::MessageCreated {
+                            revision,
+                            session_id: local_session_id,
+                            message_id,
+                            message_index: applied_message_index,
+                            message_count,
+                            message,
+                            preview,
+                            status: session_status,
+                            session_queue: None,
+                            session_mutation_stamp: Some(session_mutation_stamp),
+                        },
+                    );
                 } else {
-                    self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        agents,
-                        preview,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
+                    self.publish_delta_locked(
+                        &inner,
+                        DeltaEvent::ParallelAgentsUpdate {
+                            revision,
+                            session_id: local_session_id,
+                            message_id,
+                            message_index: applied_message_index,
+                            message_count,
+                            agents,
+                            preview,
+                            session_mutation_stamp: Some(session_mutation_stamp),
+                        },
+                    );
                 }
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::ConversationMarkerCreated {
@@ -1195,8 +1230,8 @@ impl AppState {
                         marker.session_id
                     ));
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (local_session_id, localized_marker, revision, session_mutation_stamp) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -1242,12 +1277,16 @@ impl AppState {
                         session_mutation_stamp,
                     )
                 };
-                self.publish_delta(&DeltaEvent::ConversationMarkerCreated {
-                    revision,
-                    session_id: local_session_id,
-                    marker: localized_marker,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::ConversationMarkerCreated {
+                        revision,
+                        session_id: local_session_id,
+                        marker: localized_marker,
+                        session_mutation_stamp: Some(session_mutation_stamp),
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::ConversationMarkerUpdated {
@@ -1262,8 +1301,8 @@ impl AppState {
                         marker.session_id
                     ));
                 }
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (local_session_id, localized_marker, revision, session_mutation_stamp) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -1309,12 +1348,16 @@ impl AppState {
                         session_mutation_stamp,
                     )
                 };
-                self.publish_delta(&DeltaEvent::ConversationMarkerUpdated {
-                    revision,
-                    session_id: local_session_id,
-                    marker: localized_marker,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::ConversationMarkerUpdated {
+                        revision,
+                        session_id: local_session_id,
+                        marker: localized_marker,
+                        session_mutation_stamp: Some(session_mutation_stamp),
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::ConversationMarkerDeleted {
@@ -1323,8 +1366,8 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
                 ..
             } => {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let Some((local_session_id, revision, session_mutation_stamp)) = ({
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_session_applied_delta_revision(
                         remote_id,
@@ -1363,15 +1406,20 @@ impl AppState {
                     inner.note_remote_applied_revision(remote_id, remote_revision);
                     Some((local_session_id, revision, session_mutation_stamp))
                 }) else {
+                    drop(inner);
                     self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 };
-                self.publish_delta(&DeltaEvent::ConversationMarkerDeleted {
-                    revision,
-                    session_id: local_session_id,
-                    marker_id,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::ConversationMarkerDeleted {
+                        revision,
+                        session_id: local_session_id,
+                        marker_id,
+                        session_mutation_stamp: Some(session_mutation_stamp),
+                    },
+                );
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::OrchestratorsUpdated {
@@ -1379,8 +1427,8 @@ impl AppState {
                 sessions,
                 ..
             } => {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let (revision, localized_orchestrators) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
                     ensure_expected_route(&inner)?;
                     if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                         return Ok(());
@@ -1414,7 +1462,8 @@ impl AppState {
                     inner.note_remote_applied_revision(remote_id, remote_revision);
                     (revision, inner.orchestrator_instances.clone())
                 };
-                self.publish_orchestrators_updated(revision, localized_orchestrators);
+                self.publish_orchestrators_updated(&inner, revision, localized_orchestrators);
+                drop(inner);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::CodexUpdated {

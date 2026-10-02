@@ -1660,7 +1660,7 @@ for want of evaluator authority.
 
 **Request.** `termal_evaluate_acceptance`, or
 `POST /api/sessions/{id}/acceptance-evaluations` with
-`{ "workRef", "agent"?, "model"? }`. TermAl:
+`{ "workRef", "agent"?, "model"?, "criterionEvidence"? }`. TermAl:
 
 1. builds the [Work view](work-visualizer.md)'s host reader for the session's
    project, so task and policy reads run under the operator-validated binary,
@@ -1699,6 +1699,79 @@ for want of evaluator authority.
    `sub_agent` then `same_session`. The order is the host's, not the order in
    which the policy lists them. A pin the policy does not admit is refused
    naming both.
+
+**Evidence by criterion.** A requester can supply explicit associations such as
+`"criterionEvidence": [{"criterion": 1, "locators": ["FULL_RECORD_ID"]}]`.
+Positions are distinct, positive and present on the task. At most 16 criteria
+and 16 distinct full 32- or 64-character lowercase hexadecimal record ids may be selected, with no duplicate ids
+within a row. This is a discovery hint, never a caller-supplied verdict or
+prompt. The host reads each selected record once with `show REF --note ID`,
+including records older than the notes window, and rejects wrong-item,
+wrong-locator, non-holder or incomplete receipts. A selected body must fit the
+16-KiB read bound. A final task read must retain the same work identity, active
+run, acceptance revision and evidence basis; movement refuses the request
+before an evaluator starts.
+
+The ordinary agent `show` projections omit canonical work and run IDs. When
+existing turn-gated authority is available, the host first resolves the requested
+work with the read-only `work core inspect` boundary, before the notes and full
+criteria reads. It retains that canonical work/revision/active-run association
+separately from the agent projection. After all discovery it reads the notes
+basis again, then inspects the canonical identity again. Both must agree with
+the opening bracket, even if a replacement run has the same numeric evidence
+cut. Supplied identity fields are checked; omitted projection IDs are supported.
+The existing store and control connection/token are also revalidated locally.
+
+Receipts are decoded by the operation that requested them. An ordinary notes
+continuation carries `work.short_ref` and its notes window, without the initial
+show's `status.work` or acceptance/evidence bases. The host retains the initial
+bases separately, validates the continuation's reference and any extra identity
+or basis assertions, and checks contiguous window counts, ordering and the same
+project catalog position. The catalog position is distinct from the active-run
+evidence basis; page receipt timestamps may differ. A null catalog expiry means
+there is no time boundary; a supplied expiry must be a positive integer.
+Opaque cursors are passed
+back unchanged. Malformed headers, contradictory identities, changed cuts and
+repeated cursors refuse discovery. Held claims must match both the canonical
+work ID and reference, even when the ordinary show omitted the ID; a mismatch
+cannot select the session's workdir instead.
+
+For bound criteria with canonical work/run identities, the host also reads
+`acceptance_binding_read` through its existing turn-gated Engram session and
+current routing token. Missing existing turn-gated authority, a missing routing
+token, legacy receipts without identities, or a definitively unsupported operation
+leave the canonical index unavailable. Evaluation proceeds using the existing
+tracker reads, with an explicit `canonical index unavailable` association and no
+inferred closure. Discovery never enables control or binds a session. Transport,
+integrity and moving-basis errors still refuse the request. The consumer exhausts
+at most 16 whole pages of eight rows and 16 KiB
+each, validating their common project, work, revision, active run and run cut,
+counts, sequential criterion positions and continuations. It never admits a
+partial index. The first page's captured run head must equal the evidence basis
+already read; the caller does not supply a cut to the operation.
+
+This index exposes the **original recorded obligation closure**, with its full
+verification id, check kind, result, command fingerprint, source and producer.
+It computes no present freshness and is not an exhaustive index of all later
+applicable checks. A newer failed check remains separate evidence. An explicit
+association likewise does not establish that a record satisfies a criterion.
+The evaluator must still check the evidence and use the existing observed-pass
+and citation rules.
+
+The independent brief places the criterion index before the ordinary evidence
+list. The same-session brief lists window verifications newest first before the
+index. Older selected records and canonical host projections stay separate from
+the chronological window. The final rendering plan records which bodies the
+ordinary list actually carries whole after its forty-entry limit and clipping.
+An omitted or partial selected body can be supplied once through the index,
+including an old record already fetched in the window. Optional index
+details shrink before window evidence is clipped or omitted, preserving newer
+failed checks. Canonical summaries are labeled host projections, not stored
+record bodies. Both responses (including the compact spawned result) carry `criterionEvidence`
+rows with `criterion`, full `locators` and `association`. Index bodies and then
+index detail can shrink before complete criteria are refused; each clipped or
+omitted body remains in `evidenceOmissions`. Captured notes-window omission
+counts still describe that window and can overlap separately selected records.
 
 `independent_session` spawns an evaluator delegation and returns the ordinary
 creation response plus `mode` and `workRef`; the parent waits with
@@ -1755,13 +1828,28 @@ it at completion yet.
 **Read budget.** Every tracker call runs through the one-retry lock policy, so
 it can cost two command timeouts plus the retry delay. One function computes
 the worst case of a request (the two task reads, up to seven continuation
-pages, the policy read and the source capture, bounded by the freeze budget)
+pages, the policy read, a shared 60-second criterion-evidence discovery budget,
+and the source capture, bounded by the freeze budget)
 and both sides use it: the MCP bridge adds it to its HTTP allowance, and the
-request path takes it as its own deadline. Before each continuation page the
+request path takes it as its own deadline. Core identity reads add no allowance:
+when canonical discovery is eligible, its one absolute 60-second budget starts
+before the opening inspect and covers the intervening task reads, selected
+records, closure pages and final validation. Twenty seconds of that same budget
+is reserved for the closing notes/core bracket; each call funds any lock retry
+from its remaining share. Before each continuation page the
 host checks that the deadline still funds that page, the two reads that decide
 the request and the capture; when it does not, paging stops and the brief
 lists the evidence read so far. The bridge therefore never gives up on a
-request the backend is still serving.
+request the backend is still serving. Selected detail reads and canonical
+closure pages share the discovery deadline. Optional paging also checks the
+discovery reserve and gives way to the mandatory final validation. CLI timeouts fund the possible
+lock retry within the remaining allowance. Once canonical identity is captured,
+any failed issued notes-page call refuses the request, including CLI cursor
+refusals classified as transport failures, malformed JSON and timeouts, even if
+the overall allowance still has time. Skipping a page before issuing it because
+the remaining budget cannot fund it is a separate, disclosed omission.
+Spending the allowance refuses the request
+instead of starting an evaluator with a partial criterion index.
 
 **Store identity.** The bases and the work ref mean something only in the store
 they were read from. The host keeps that store (the project id and database

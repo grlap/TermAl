@@ -48,13 +48,14 @@
 // Snapshot serialization offload. `publish_state_locked` builds the
 // `StateResponse` *inside* the state lock (required — snapshot
 // fields read `inner`) but hands the owned snapshot off to a
-// dedicated broadcaster thread for JSON serialization via `publish_snapshot`.
-// The mailbox coalesces consecutive snapshots and keeps retained deltas ordered
-// behind any retained snapshot that was queued first, so delta N+1 cannot
-// overtake state N. When it reaches capacity, it drops the oldest pending work
-// rather than blocking producers while they hold `StateInner`; dropped deltas
-// surface as normal revision gaps and clients repair from `/api/state`. That
-// keeps the state mutex off the slow-serialization critical path for
+// dedicated broadcaster thread for JSON serialization via `publish_snapshot_locked`.
+// Snapshots and owned typed deltas enter the same mailbox before releasing the
+// lock that allocated their revision. It coalesces adjacent snapshots without
+// moving a delta across them; retained queue order equals commit order. The
+// worker serializes both kinds after releasing the mailbox mutex and holds no
+// StateInner guard. The bounded queue retains the base eviction policy: drop
+// the oldest pending work rather than block a producer under the state mutex.
+// This keeps the state mutex off the slow-serialization critical path for
 // commit-heavy routes like `put_workspace_layout`. When there is no broadcaster
 // mailbox (notably: test builds that construct `AppState` without spawning the
 // broadcaster thread) we fall back to synchronous serialize + broadcast so tests
@@ -64,6 +65,12 @@
 enum PersistDispatch {
     BackgroundQueued,
     Synchronous,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_AFTER_TEXT_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_BEFORE_STATE_SERIALIZE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 impl AppState {
@@ -298,13 +305,13 @@ impl AppState {
     // snapshot; the delta event carries the new revision instead. Persisting the
     // full state on every streamed chunk makes long responses increasingly slow,
     // so durable persistence is deferred until the next non-delta commit.
-    /// Commit variant that bumps the revision + wakes the persist
-    /// thread but broadcasts a delta event instead of a full snapshot.
+    /// Commit variant that bumps the revision without publishing a snapshot.
+    /// Persistence is deferred until the next persist-triggering commit.
     ///
-    /// Callers are expected to have already emitted the matching
-    /// `DeltaEvent` via [`Self::publish_delta`] before calling this —
-    /// the revision bump then happens atomically under the same lock
-    /// so clients see the delta and revision tick together. Used from
+    /// Callers commit first, then enqueue the owned `DeltaEvent` carrying
+    /// the returned revision via [`Self::publish_delta_locked`] before
+    /// releasing this same state lock. Revision allocation and enqueue
+    /// therefore follow one commit order. Used from
     /// the per-session mutation helpers in `session_messages.rs` and
     /// `turn_lifecycle.rs` where full snapshots would be overkill.
     fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
@@ -429,16 +436,21 @@ impl AppState {
         self.shutdown_signal_tx.send_replace(true);
     }
 
-    /// Serializes a `DeltaEvent` to JSON and queues it on the ordered
-    /// state/delta broadcaster. Callers typically follow up with
-    /// [`Self::commit_delta_locked`] under the same lock so the revision tick
-    /// and the delta land atomically from the client's perspective.
-    fn publish_delta(&self, event: &DeltaEvent) {
-        if let Ok(payload) = serde_json::to_string(event) {
-            if let Some(mailbox) = &self.state_broadcast_mailbox {
-                mailbox.publish_delta_payload(payload);
-                return;
-            }
+    /// Enqueues the owned delta after its commit, before releasing the same
+    /// state lock. The broadcaster serializes it off-lock in commit order.
+    /// The synchronous fallback exists for test states without a worker.
+    fn publish_delta_locked(&self, inner: &StateInner, event: DeltaEvent) {
+        debug_assert_eq!(inner.revision, event.revision());
+        #[cfg(test)]
+        assert!(
+            !self.inner.is_not_held_by_current_thread_for_test(),
+            "delta enqueue requires the commit lock"
+        );
+        if let Some(mailbox) = &self.state_broadcast_mailbox {
+            mailbox.publish_delta(event);
+            return;
+        }
+        if let Ok(payload) = serde_json::to_string(&event) {
             self.state_broadcast_senders.send_delta(payload);
         }
     }
@@ -448,7 +460,7 @@ impl AppState {
     /// local record.
     ///
     /// `remote_create_proxies.rs` and `remote_codex_proxies.rs`
-    /// both run the same post-lock-drop flow: call
+    /// both run the same locked commit/enqueue flow: call
     /// `ensure_remote_proxy_session_record`, observe a `changed`
     /// boolean, and emit a `SessionCreated` delta only when that
     /// boolean is true. Emitting the delta unconditionally would
@@ -479,6 +491,7 @@ impl AppState {
     /// any other path. Different semantic layer, different gate.
     fn announce_remote_session_created_if_changed(
         &self,
+        inner: &StateInner,
         changed: bool,
         revision: u64,
         session_id: &str,
@@ -489,11 +502,14 @@ impl AppState {
         }
         let delta_session =
             delta_session.expect("changed remote session creation must include a delta summary");
-        self.publish_delta(&DeltaEvent::SessionCreated {
-            revision,
-            session_id: session_id.to_owned(),
-            session: delta_session,
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::SessionCreated {
+                revision,
+                session_id: session_id.to_owned(),
+                session: delta_session,
+            },
+        );
     }
 
     /// Broadcasts a batch of file-change events on the `file_events`
@@ -667,18 +683,18 @@ impl AppState {
     }
 
     /// Fire-and-forget metadata-first snapshot broadcast, paired with
-    /// [`Self::publish_delta`] for deltas; serialization errors are logged but
+    /// [`Self::publish_delta_locked`] for deltas; serialization errors are logged but
     /// do not propagate.
     ///
     /// The snapshot is built from `inner` while the caller still holds
     /// the state mutex (required — `inner` fields are read here), but
     /// JSON serialization is offloaded to a dedicated broadcaster
-    /// thread via [`Self::publish_snapshot`]. This keeps the state mutex off
+    /// thread via [`Self::publish_snapshot_locked`]. This keeps the state mutex off
     /// the serialization critical path for requests (e.g.,
     /// `put_workspace_layout`) that commit under the lock.
     fn publish_state_locked(&self, inner: &StateInner) {
         let snapshot = self.snapshot_from_inner(inner);
-        self.publish_snapshot(snapshot);
+        self.publish_snapshot_locked(inner, snapshot);
     }
 
     /// Publishes a pre-built snapshot as an SSE state event.
@@ -690,7 +706,13 @@ impl AppState {
     /// overflow instead of blocking a producer under the state mutex. Falls
     /// back to synchronous serialize + broadcast if no mailbox exists (test
     /// builds that construct `AppState` manually without a broadcaster thread).
-    fn publish_snapshot(&self, snapshot: StateResponse) {
+    fn publish_snapshot_locked(&self, inner: &StateInner, snapshot: StateResponse) {
+        debug_assert_eq!(inner.revision, snapshot.revision);
+        #[cfg(test)]
+        assert!(
+            !self.inner.is_not_held_by_current_thread_for_test(),
+            "snapshot enqueue requires the commit lock"
+        );
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             mailbox.publish_snapshot(snapshot);
             return;

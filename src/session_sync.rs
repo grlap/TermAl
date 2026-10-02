@@ -442,8 +442,8 @@ impl AppState {
     /// shared Codex runtime so the UI can render "N requests remaining"
     /// / "resets at T" without polling the upstream API itself.
     fn note_codex_rate_limits(&self, rate_limits: CodexRateLimits) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, codex) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             if inner.codex.rate_limits.as_ref() == Some(&rate_limits) {
                 return Ok(());
             }
@@ -452,7 +452,7 @@ impl AppState {
             let revision = self.commit_persisted_delta_locked(&mut inner)?;
             (revision, inner.codex.clone())
         };
-        self.publish_delta(&DeltaEvent::CodexUpdated { revision, codex });
+        self.publish_delta_locked(&inner, DeltaEvent::CodexUpdated { revision, codex });
         Ok(())
     }
 
@@ -460,8 +460,8 @@ impl AppState {
     /// update hints, login reminders, etc.) on `AppState` so the UI
     /// can render it as a banner on the next state broadcast.
     fn note_codex_notice(&self, notice: CodexNotice) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, codex) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             if inner
                 .codex
                 .notices
@@ -485,7 +485,7 @@ impl AppState {
             let revision = self.commit_persisted_delta_locked(&mut inner)?;
             (revision, inner.codex.clone())
         };
-        self.publish_delta(&DeltaEvent::CodexUpdated { revision, codex });
+        self.publish_delta_locked(&inner, DeltaEvent::CodexUpdated { revision, codex });
         Ok(())
     }
 

@@ -290,7 +290,7 @@ fn bounded_content_revision_capture<T: Send + 'static>(
         }
     }
     if live
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+        .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
             (count < limit).then_some(count + 1)
         })
         .is_err()

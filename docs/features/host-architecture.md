@@ -714,21 +714,33 @@ receives is outside this brief.
 
 1. **A revision and its event are queued in one step.** Every commit that
    produces a delta hands the delta to the broadcaster's mailbox before the
-   state lock is released, as snapshots already are. Today a delta is
-   serialised by the committing thread (`publish_delta`,
-   `sse_broadcast.rs:436`) and the mailbox holds the string. The step changes
-   the mailbox's delta payload to the typed event and moves the
-   serialisation of deltas to the broadcaster's thread, where snapshots are
-   serialised already. Queue order then equals revision order for deltas and
-   snapshots alike. With that move the cost under the lock is one queue
-   push; the step's proof measures the lock's hold time before and after.
-2. **Overflow is announced.** When the mailbox is full, the broadcaster does
+   state lock is released, as snapshots already are. `publish_delta_locked`
+   requires that lock's state reference and accepts an owned `DeltaEvent`.
+   The committing thread constructs the typed event and enqueues it; the
+   broadcaster serialises it after releasing the mailbox mutex, without
+   acquiring the state mutex. Queue order equals commit order for deltas and
+   snapshots alike. Adjacent snapshots may coalesce, but never across a
+   delta. Runtime cleanup and external dispatch remain outside the commit
+   lock. A dispatch-failure observation made afterward takes its own revision
+   instead of publishing with the earlier dispatch's revision. The client
+   consumes a contiguous dispatch-failure revision from the current server;
+   a real gap still requires an authoritative snapshot.
+   The deterministic AppState tests suspend a text publisher immediately
+   after its critical section, and suspend the real serializer while a
+   concurrent commit completes. The measurement fixture compares mutex hold
+   times with the base implementation on the same text chunk and records the
+   worker's serialization time; timing values are observations, not pass
+   thresholds. Test states constructed without a broadcaster retain their
+   synchronous serialization fallback.
+2. **Planned target: overflow is announced.** This remains a separate follow-up;
+   today's bounded mailbox silently drops its oldest entry at capacity.
+   In the target, when the mailbox is full, the broadcaster does
    not discard the oldest entry silently. It records that a range was lost
    and sends every client the marker it already sends a lagging client
    (`lagged`), followed by a snapshot at or after the lost range, built as
    `lagged_recovery_events` builds one today (`api_sse.rs:193`). The loss is
    counted and logged.
-3. **The comment is corrected.** `publish_delta`'s documentation states the
+3. **The comment is corrected.** `publish_delta_locked`'s documentation states the
    contract of point 1.
 4. **The watcher's consumers move off the per-event path.** File-change
    tracking and the carried fence read the watcher's batches, not each notify
@@ -736,9 +748,9 @@ receives is outside this brief.
    admission and the maximum batch age of section 4.4; without them a
    received write could miss a checkpoint's cut.
 
-Points 1 and 2 change behaviour and the tests that pin today's drop. They are
-a step of their own (section 10), agreed with the holder of the
-streamed-prefix defect so that the server and client halves meet:
+Point 1 is implemented here. Point 2 remains a separate behaviour change
+with its own tests (section 10), coordinated with the streamed-prefix fix
+so that the server and client halves meet:
 
 - The fix for that defect, committed and awaiting integration and not on
   `master` at `28e9ed5`, covers point 2 (a loss in the mailbox sets a flag that survives further
@@ -746,8 +758,8 @@ streamed-prefix defect so that the server and client halves meet:
   the client's repair of the visible transcript on that signal. It corrects
   the comment of point 3 without claiming the order is fixed. If it lands
   first, the step keeps what it landed.
-- Point 1 is not part of that fix and remains this brief's. Until it lands,
-  a delta can still be queued behind a newer snapshot or delta.
+- Point 1 queues retained deltas and snapshots in commit order. It does not
+  establish the loss announcement and recovery guarantees of point 2.
 - The client needs no per-session sequence from the server for its repair:
   the existing per-session mutation stamp and message count suffice.
 

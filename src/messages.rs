@@ -343,42 +343,50 @@ fn message_created_delta_parts_for_indices(
 impl AppState {
     fn publish_message_created_delta_parts(
         &self,
+        inner: &StateInner,
         revision: u64,
         creates: Vec<MessageCreatedDeltaParts>,
     ) {
         for created in creates {
-            self.publish_delta(&DeltaEvent::MessageCreated {
-                revision,
-                session_id: created.session_id,
-                message_id: created.message_id,
-                message_index: created.message_index,
-                message_count: created.message_count,
-                message: created.message,
-                preview: created.preview,
-                status: created.status,
-                session_queue: created.session_queue,
-                session_mutation_stamp: Some(created.session_mutation_stamp),
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageCreated {
+                    revision,
+                    session_id: created.session_id,
+                    message_id: created.message_id,
+                    message_index: created.message_index,
+                    message_count: created.message_count,
+                    message: created.message,
+                    preview: created.preview,
+                    status: created.status,
+                    session_queue: created.session_queue,
+                    session_mutation_stamp: Some(created.session_mutation_stamp),
+                },
+            );
         }
     }
 
     fn publish_message_updated_delta_parts(
         &self,
+        inner: &StateInner,
         revision: u64,
         updates: Vec<MessageUpdatedDeltaParts>,
     ) {
         for update in updates {
-            self.publish_delta(&DeltaEvent::MessageUpdated {
-                revision,
-                session_id: update.session_id,
-                message_id: update.message_id,
-                message_index: update.message_index,
-                message_count: update.message_count,
-                message: update.message,
-                preview: update.preview,
-                status: update.status,
-                session_mutation_stamp: Some(update.session_mutation_stamp),
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageUpdated {
+                    revision,
+                    session_id: update.session_id,
+                    message_id: update.message_id,
+                    message_index: update.message_index,
+                    message_count: update.message_count,
+                    message: update.message,
+                    preview: update.preview,
+                    status: update.status,
+                    session_mutation_stamp: Some(update.session_mutation_stamp),
+                },
+            );
         }
     }
 }

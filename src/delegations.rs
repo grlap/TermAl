@@ -717,23 +717,29 @@ impl AppState {
         if let Some(mut guard) = isolated_worktree_cleanup_guard.take() {
             guard.disarm();
         }
-        drop(inner);
-        self.publish_delta(&DeltaEvent::SessionCreated {
-            revision,
-            session_id: child_session.id.clone(),
-            session: child_delta_session,
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::SessionCreated {
+                revision,
+                session_id: child_session.id.clone(),
+                session: child_delta_session,
+            },
+        );
         if let Some(delta) = parent_card_delta {
-            self.publish_parent_delegation_card_delta(revision, delta);
+            self.publish_parent_delegation_card_delta(&inner, revision, delta);
         }
-        self.publish_delta(&DeltaEvent::DelegationCreated {
-            revision,
-            delegation: delegation_summary_from_record(&record),
-        });
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::DelegationCreated {
+                revision,
+                delegation: delegation_summary_from_record(&record),
+            },
+        );
 
         // Binding is external process I/O and must never run under the global
         // state mutex. It completes before the child's first synchronous turn
         // dispatch so that evaluate can use the persisted routing token.
+        drop(inner);
         self.bind_engram_delegation_best_effort(&record);
 
         #[cfg(test)]
@@ -753,8 +759,8 @@ impl AppState {
                             "failed to persist test delegation cancelation: {err:#}"
                         ))
                     })?;
+                    self.publish_delegation_lifecycle_delta(&inner, revision, delta);
                     drop(inner);
-                    self.publish_delegation_lifecycle_delta(revision, delta);
                 }
             }
         }
@@ -847,6 +853,13 @@ impl AppState {
                 inner.revision
             };
             let delegation = inner.delegations[index].clone();
+            self.enqueue_delegation_refresh_locked(
+                &inner,
+                revision,
+                lifecycle_delta.as_ref(),
+                &detached_child,
+                &wait_refresh,
+            );
             (
                 revision,
                 delegation,
@@ -963,6 +976,13 @@ impl AppState {
                 .acceptance_evaluation
                 .as_ref()
                 .map(DelegationAcceptanceEvaluation::client_view);
+            self.enqueue_delegation_refresh_locked(
+                &inner,
+                revision,
+                lifecycle_delta.as_ref(),
+                &detached_child,
+                &wait_refresh,
+            );
             (
                 revision,
                 result,
@@ -1107,12 +1127,12 @@ impl AppState {
             validate_delegation_wait_parent_locked(&inner, &parent_session_id)?;
             validate_delegation_wait_targets_locked(&inner, &wait)?;
             inner.delegation_waits.push(wait.clone());
-            self.commit_locked(&mut inner).map_err(|err| {
+            let created_revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation wait: {err:#}"))
-            })?
+            })?;
+            self.publish_delegation_wait_created(&inner, created_revision, wait.clone());
+            created_revision
         };
-
-        self.publish_delegation_wait_created(created_revision, wait.clone());
 
         let (revision, wait_queue_result, refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1123,6 +1143,11 @@ impl AppState {
                         "failed to persist delegation wait refresh: {err:#}"
                     ))
                 })?;
+                self.publish_delegation_wait_consumed_deltas(
+                    &inner,
+                    revision,
+                    &refresh.consumed_waits,
+                );
                 (revision, refresh.queue_result_for_wait(&wait_id), refresh)
             } else {
                 (
@@ -1134,9 +1159,6 @@ impl AppState {
         };
         let resume_prompt_queued = wait_queue_result.prompt_queued;
         let resume_dispatch_requested = wait_queue_result.dispatch_requested;
-        if refresh.did_mutate() {
-            self.publish_delegation_wait_consumed_deltas(revision, &refresh.consumed_waits);
-        }
         self.dispatch_delegation_wait_resumes(revision, refresh.dispatch_parents.clone());
 
         Ok(DelegationWaitResponse {
@@ -1196,6 +1218,13 @@ impl AppState {
                     turn: None,
                     server_instance_id: self.server_instance_id.clone(),
                 };
+                self.enqueue_delegation_refresh_locked(
+                    &inner,
+                    revision,
+                    lifecycle_delta.as_ref(),
+                    &detached_child,
+                    &wait_refresh,
+                );
                 drop(inner);
                 self.publish_delegation_refresh_side_effects(
                     revision,
@@ -1207,6 +1236,13 @@ impl AppState {
             }
             let child_session_id = delegation.child_session_id.clone();
             let cancel_reason = delegation_child_cancel_reason_locked(&inner, &child_session_id);
+            self.enqueue_delegation_refresh_locked(
+                &inner,
+                revision,
+                lifecycle_delta.as_ref(),
+                &detached_child,
+                &wait_refresh,
+            );
             drop(inner);
             self.publish_delegation_refresh_side_effects(
                 revision,
@@ -1266,6 +1302,13 @@ impl AppState {
             inner.revision
         };
         let delegation = inner.delegations[index].clone();
+        self.enqueue_delegation_refresh_locked(
+            &inner,
+            revision,
+            lifecycle_delta.as_ref(),
+            &detached_child,
+            &wait_refresh,
+        );
         drop(inner);
         self.publish_delegation_refresh_side_effects(
             revision,
@@ -1417,6 +1460,13 @@ impl AppState {
                 } else {
                     inner.revision
                 };
+                self.enqueue_delegation_refresh_locked(
+                    &inner,
+                    revision,
+                    refresh_delta.as_ref(),
+                    &detached_child,
+                    &wait_refresh,
+                );
                 drop(inner);
                 self.publish_delegation_refresh_side_effects(
                     revision,
@@ -1455,6 +1505,13 @@ impl AppState {
             } else {
                 inner.revision
             };
+            self.enqueue_delegation_refresh_locked(
+                &inner,
+                revision,
+                refresh_delta.as_ref(),
+                &detached_child,
+                &wait_refresh,
+            );
             drop(inner);
             let admission = DelegationFollowupAdmission {
                 state: self.clone(),
@@ -1555,6 +1612,13 @@ impl AppState {
             let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
             let revision = self.commit_locked(&mut inner)?;
+            self.enqueue_delegation_refresh_locked(
+                &inner,
+                revision,
+                Some(&lifecycle_delta),
+                &detached_child,
+                &wait_refresh,
+            );
             (revision, lifecycle_delta, detached_child, wait_refresh)
         };
         self.publish_delegation_refresh_side_effects(
@@ -1566,6 +1630,31 @@ impl AppState {
         Ok(())
     }
 
+    fn enqueue_delegation_refresh_locked(
+        &self,
+        inner: &StateInner,
+        revision: u64,
+        lifecycle_delta: Option<&DelegationLifecycleDelta>,
+        detached_child: &DetachedDelegationChildRuntime,
+        wait_refresh: &DelegationWaitRefresh,
+    ) {
+        for delta in &detached_child.transcript_deltas {
+            self.publish_delegation_child_transcript_delta(inner, revision, delta.clone());
+        }
+        if let Some(delta) = lifecycle_delta {
+            self.publish_delegation_lifecycle_delta(inner, revision, delta.clone());
+        }
+        if wait_refresh.did_mutate() {
+            self.publish_delegation_wait_consumed_deltas(
+                inner,
+                revision,
+                &wait_refresh.consumed_waits,
+            );
+        }
+    }
+
+    // Runtime cleanup and provider delivery deliberately happen after the
+    // locked caller has enqueued every event for its committed revision.
     fn publish_delegation_refresh_side_effects(
         &self,
         revision: u64,
@@ -1663,15 +1752,6 @@ impl AppState {
                     Some(cleanup_reason),
                 );
             }
-        }
-        for delta in detached_child.transcript_deltas {
-            self.publish_delegation_child_transcript_delta(revision, delta);
-        }
-        if let Some(delta) = lifecycle_delta {
-            self.publish_delegation_lifecycle_delta(revision, delta);
-        }
-        if wait_refresh.did_mutate() {
-            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
         }
         self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         trace_shared_codex_event(
@@ -1868,7 +1948,7 @@ impl AppState {
         child_session_id: &str,
         detail: &str,
     ) -> Result<(), ApiError> {
-        let (revision, lifecycle_delta, detached_child, wait_refresh) = {
+        let (revision, _lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_delegation_index(delegation_id)
@@ -1883,6 +1963,13 @@ impl AppState {
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation failure: {err:#}"))
             })?;
+            self.enqueue_delegation_refresh_locked(
+                &inner,
+                revision,
+                Some(&lifecycle_delta),
+                &detached_child,
+                &wait_refresh,
+            );
             (revision, lifecycle_delta, detached_child, wait_refresh)
         };
 
@@ -1893,18 +1980,16 @@ impl AppState {
                 eprintln!("delegation cleanup warning> {err:#}");
             }
         }
-        for delta in detached_child.transcript_deltas {
-            self.publish_delegation_child_transcript_delta(revision, delta);
-        }
-        self.publish_delegation_lifecycle_delta(revision, lifecycle_delta);
-        if wait_refresh.did_mutate() {
-            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
-        }
         self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         Ok(())
     }
 
-    fn publish_delegation_lifecycle_delta(&self, revision: u64, delta: DelegationLifecycleDelta) {
+    fn publish_delegation_lifecycle_delta(
+        &self,
+        inner: &StateInner,
+        revision: u64,
+        delta: DelegationLifecycleDelta,
+    ) {
         match delta {
             DelegationLifecycleDelta::Updated {
                 delegation_id,
@@ -1913,15 +1998,18 @@ impl AppState {
                 hold,
                 parent_card_delta,
             } => {
-                self.publish_delta(&DeltaEvent::DelegationUpdated {
-                    revision,
-                    delegation_id,
-                    status,
-                    updated_at,
-                    hold,
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::DelegationUpdated {
+                        revision,
+                        delegation_id,
+                        status,
+                        updated_at,
+                        hold,
+                    },
+                );
                 if let Some(delta) = parent_card_delta {
-                    self.publish_parent_delegation_card_delta(revision, delta);
+                    self.publish_parent_delegation_card_delta(&inner, revision, delta);
                 }
             }
             DelegationLifecycleDelta::Completed {
@@ -1930,14 +2018,17 @@ impl AppState {
                 completed_at,
                 parent_card_delta,
             } => {
-                self.publish_delta(&DeltaEvent::DelegationCompleted {
-                    revision,
-                    delegation_id,
-                    result: delegation_result_summary(&result),
-                    completed_at,
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::DelegationCompleted {
+                        revision,
+                        delegation_id,
+                        result: delegation_result_summary(&result),
+                        completed_at,
+                    },
+                );
                 if let Some(delta) = parent_card_delta {
-                    self.publish_parent_delegation_card_delta(revision, delta);
+                    self.publish_parent_delegation_card_delta(&inner, revision, delta);
                 }
             }
             DelegationLifecycleDelta::Failed {
@@ -1946,14 +2037,17 @@ impl AppState {
                 failed_at,
                 parent_card_delta,
             } => {
-                self.publish_delta(&DeltaEvent::DelegationFailed {
-                    revision,
-                    delegation_id,
-                    result: delegation_result_summary(&result),
-                    failed_at,
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::DelegationFailed {
+                        revision,
+                        delegation_id,
+                        result: delegation_result_summary(&result),
+                        failed_at,
+                    },
+                );
                 if let Some(delta) = parent_card_delta {
-                    self.publish_parent_delegation_card_delta(revision, delta);
+                    self.publish_parent_delegation_card_delta(&inner, revision, delta);
                 }
             }
             DelegationLifecycleDelta::Canceled {
@@ -1962,58 +2056,87 @@ impl AppState {
                 reason,
                 parent_card_delta,
             } => {
-                self.publish_delta(&DeltaEvent::DelegationCanceled {
-                    revision,
-                    delegation_id,
-                    canceled_at,
-                    reason,
-                });
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::DelegationCanceled {
+                        revision,
+                        delegation_id,
+                        canceled_at,
+                        reason,
+                    },
+                );
                 if let Some(delta) = parent_card_delta {
-                    self.publish_parent_delegation_card_delta(revision, delta);
+                    self.publish_parent_delegation_card_delta(&inner, revision, delta);
                 }
             }
         }
     }
 
-    fn publish_delegation_wait_created(&self, revision: u64, wait: DelegationWaitRecord) {
-        self.publish_delta(&DeltaEvent::DelegationWaitCreated {
-            revision,
-            server_instance_id: self.server_instance_id.clone(),
-            wait,
-        });
+    fn publish_delegation_wait_created(
+        &self,
+        inner: &StateInner,
+        revision: u64,
+        wait: DelegationWaitRecord,
+    ) {
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::DelegationWaitCreated {
+                revision,
+                server_instance_id: self.server_instance_id.clone(),
+                wait,
+            },
+        );
     }
 
     fn publish_delegation_wait_consumed_deltas(
         &self,
+        inner: &StateInner,
         revision: u64,
         waits: &[ConsumedDelegationWait],
     ) {
         for consumed in waits {
-            self.publish_delta(&DeltaEvent::DelegationWaitConsumed {
-                revision,
-                server_instance_id: self.server_instance_id.clone(),
-                wait_id: consumed.wait.id.clone(),
-                parent_session_id: consumed.wait.parent_session_id.clone(),
-                reason: consumed.reason,
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::DelegationWaitConsumed {
+                    revision,
+                    server_instance_id: self.server_instance_id.clone(),
+                    wait_id: consumed.wait.id.clone(),
+                    parent_session_id: consumed.wait.parent_session_id.clone(),
+                    reason: consumed.reason,
+                },
+            );
         }
     }
 
     fn publish_delegation_wait_resume_dispatch_failed(
         &self,
-        revision: u64,
+        _origin_revision: u64,
         parent_session_id: &str,
         error: String,
     ) {
-        self.publish_delta(&DeltaEvent::DelegationWaitResumeDispatchFailed {
-            revision,
-            parent_session_id: parent_session_id.to_owned(),
-            error,
-        });
+        // External dispatch has already released its commit lock. This new
+        // observation needs its own revision rather than replaying that old one.
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let revision = match self.commit_delta_locked(&mut inner) {
+            Ok(revision) => revision,
+            Err(error) => {
+                eprintln!("delegation wait warning> failed committing dispatch failure: {error:#}");
+                return;
+            }
+        };
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::DelegationWaitResumeDispatchFailed {
+                revision,
+                parent_session_id: parent_session_id.to_owned(),
+                error,
+            },
+        );
     }
 
     fn publish_parent_delegation_card_delta(
         &self,
+        inner: &StateInner,
         revision: u64,
         delta: ParentDelegationCardDelta,
     ) {
@@ -2027,18 +2150,21 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
-            } => self.publish_delta(&DeltaEvent::MessageCreated {
-                revision,
-                session_id,
-                message_id,
-                message_index,
-                message_count,
-                message,
-                preview,
-                status,
-                session_queue: None,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            }),
+            } => self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageCreated {
+                    revision,
+                    session_id,
+                    message_id,
+                    message_index,
+                    message_count,
+                    message,
+                    preview,
+                    status,
+                    session_queue: None,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            ),
             ParentDelegationCardDelta::Updated {
                 session_id,
                 message_id,
@@ -2047,21 +2173,25 @@ impl AppState {
                 agents,
                 preview,
                 session_mutation_stamp,
-            } => self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
-                revision,
-                session_id,
-                message_id,
-                message_index,
-                message_count,
-                agents,
-                preview,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            }),
+            } => self.publish_delta_locked(
+                &inner,
+                DeltaEvent::ParallelAgentsUpdate {
+                    revision,
+                    session_id,
+                    message_id,
+                    message_index,
+                    message_count,
+                    agents,
+                    preview,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            ),
         }
     }
 
     fn publish_delegation_child_transcript_delta(
         &self,
+        inner: &StateInner,
         revision: u64,
         delta: DelegationChildTranscriptDelta,
     ) {
@@ -2075,18 +2205,21 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
-            } => self.publish_delta(&DeltaEvent::MessageCreated {
-                revision,
-                session_id,
-                message_id,
-                message_index,
-                message_count,
-                message,
-                preview,
-                status,
-                session_queue: None,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            }),
+            } => self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageCreated {
+                    revision,
+                    session_id,
+                    message_id,
+                    message_index,
+                    message_count,
+                    message,
+                    preview,
+                    status,
+                    session_queue: None,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            ),
             DelegationChildTranscriptDelta::MessageUpdated {
                 session_id,
                 message_id,
@@ -2096,17 +2229,20 @@ impl AppState {
                 preview,
                 status,
                 session_mutation_stamp,
-            } => self.publish_delta(&DeltaEvent::MessageUpdated {
-                revision,
-                session_id,
-                message_id,
-                message_index,
-                message_count,
-                message,
-                preview,
-                status,
-                session_mutation_stamp: Some(session_mutation_stamp),
-            }),
+            } => self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageUpdated {
+                    revision,
+                    session_id,
+                    message_id,
+                    message_index,
+                    message_count,
+                    message,
+                    preview,
+                    status,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                },
+            ),
         }
     }
 
@@ -2217,9 +2353,13 @@ impl AppState {
                 return Ok(());
             }
             let revision = self.commit_locked(&mut inner)?;
+            self.publish_delegation_wait_consumed_deltas(
+                &inner,
+                revision,
+                &wait_refresh.consumed_waits,
+            );
             (revision, wait_refresh)
         };
-        self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
         self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         Ok(())
     }

@@ -452,18 +452,22 @@ enum TestRunWaitValidation {
 impl AppState {
     fn publish_test_run_waits_consumed(
         &self,
+        inner: &StateInner,
         revision: u64,
         waits: &[TestRunWaitRecord],
         reason: TestRunWaitConsumedReason,
     ) {
         for wait in waits {
-            self.publish_delta(&DeltaEvent::TestRunWaitConsumed {
-                revision,
-                server_instance_id: self.server_instance_id.clone(),
-                wait_id: wait.id.clone(),
-                session_id: wait.session_id.clone(),
-                reason,
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::TestRunWaitConsumed {
+                    revision,
+                    server_instance_id: self.server_instance_id.clone(),
+                    wait_id: wait.id.clone(),
+                    session_id: wait.session_id.clone(),
+                    reason,
+                },
+            );
         }
     }
 
@@ -610,11 +614,14 @@ impl AppState {
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist the test run wait: {err:#}"))
             })?;
-            self.publish_delta(&DeltaEvent::TestRunWaitCreated {
-                revision,
-                server_instance_id: self.server_instance_id.clone(),
-                wait: wait.clone(),
-            });
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::TestRunWaitCreated {
+                    revision,
+                    server_instance_id: self.server_instance_id.clone(),
+                    wait: wait.clone(),
+                },
+            );
             (revision, wait)
         };
         // Runs that already settled resume at once, which is also how a
@@ -783,7 +790,12 @@ impl AppState {
             match self.commit_locked(&mut inner) {
                 Ok(revision) => {
                     for (wait, reason) in &consumed {
-                        self.publish_test_run_waits_consumed(revision, std::slice::from_ref(wait), *reason);
+                        self.publish_test_run_waits_consumed(
+                            &inner,
+                            revision,
+                            std::slice::from_ref(wait),
+                            *reason,
+                        );
                     }
                     refresh.revision = Some(revision);
                 }
@@ -803,7 +815,7 @@ impl AppState {
 
     /// Starts a queued resume now for a session that is idle and not
     /// latched, as for delegation waits.
-    fn dispatch_test_run_wait_resumes(&self, revision: u64, session_ids: Vec<String>) {
+    fn dispatch_test_run_wait_resumes(&self, _revision: u64, session_ids: Vec<String>) {
         let mut seen = BTreeSet::new();
         for session_id in session_ids {
             if !seen.insert(session_id.clone()) {
@@ -826,12 +838,25 @@ impl AppState {
             };
             if let Some(error) = error {
                 eprintln!("test run wait warning> {error}");
-                self.publish_delta(&DeltaEvent::TestRunWaitResumeDispatchFailed {
-                    revision,
-                    session_id: session_id.clone(),
-                    error,
-                    server_instance_id: self.server_instance_id.clone(),
-                });
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let revision = match self.commit_delta_locked(&mut inner) {
+                    Ok(revision) => revision,
+                    Err(error) => {
+                        eprintln!(
+                            "test run wait warning> failed committing dispatch failure: {error:#}"
+                        );
+                        continue;
+                    }
+                };
+                self.publish_delta_locked(
+                    &inner,
+                    DeltaEvent::TestRunWaitResumeDispatchFailed {
+                        revision,
+                        session_id: session_id.clone(),
+                        error,
+                        server_instance_id: self.server_instance_id.clone(),
+                    },
+                );
             }
         }
     }

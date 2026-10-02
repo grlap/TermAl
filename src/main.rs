@@ -776,6 +776,7 @@ include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");
 include!("acceptance_evaluation.rs");
 include!("acceptance_evaluation_api.rs");
+include!("acceptance_evidence_selection.rs");
 include!("acceptance_settings.rs");
 include!("acceptance_evaluation_cards.rs");
 include!("coordination_cli.rs");

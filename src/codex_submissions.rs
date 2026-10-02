@@ -325,7 +325,7 @@ impl AppState {
                 status,
                 session_mutation_stamp: Some(session_mutation_stamp),
             };
-            self.publish_delta(&event);
+            self.publish_delta_locked(&inner, event);
         };
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!(

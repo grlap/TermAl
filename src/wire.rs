@@ -3443,3 +3443,36 @@ enum DeltaEvent {
         server_instance_id: String,
     },
 }
+
+impl DeltaEvent {
+    fn revision(&self) -> u64 {
+        match self {
+            Self::SessionCreated { revision, .. }
+            | Self::MessageCreated { revision, .. }
+            | Self::MessageUpdated { revision, .. }
+            | Self::TextDelta { revision, .. }
+            | Self::TextReplace { revision, .. }
+            | Self::CommandUpdate { revision, .. }
+            | Self::ParallelAgentsUpdate { revision, .. }
+            | Self::TestRunCardUpdated { revision, .. }
+            | Self::ConversationMarkerCreated { revision, .. }
+            | Self::ConversationMarkerUpdated { revision, .. }
+            | Self::ConversationMarkerDeleted { revision, .. }
+            | Self::CodexUpdated { revision, .. }
+            | Self::OrchestratorsUpdated { revision, .. }
+            | Self::DelegationCreated { revision, .. }
+            | Self::DelegationWaitCreated { revision, .. }
+            | Self::DelegationWaitConsumed { revision, .. }
+            | Self::DelegationWaitResumeDispatchFailed { revision, .. }
+            | Self::DelegationUpdated { revision, .. }
+            | Self::DelegationCompleted { revision, .. }
+            | Self::DelegationFailed { revision, .. }
+            | Self::DelegationCanceled { revision, .. }
+            | Self::TestRunChanged { revision, .. }
+            | Self::TestRunRemoved { revision, .. }
+            | Self::TestRunWaitCreated { revision, .. }
+            | Self::TestRunWaitConsumed { revision, .. }
+            | Self::TestRunWaitResumeDispatchFailed { revision, .. } => *revision,
+        }
+    }
+}

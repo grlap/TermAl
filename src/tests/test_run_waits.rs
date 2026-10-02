@@ -56,8 +56,8 @@ impl WaitFixture {
     fn scan(&self, alive: &[u32]) {
         let alive = alive.to_vec();
         self.state
-            .refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|event| {
-                self.state.publish_delta(event)
+            .refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|inner, event| {
+                self.state.publish_delta_locked(inner, event.clone())
             });
         self.state.refresh_test_run_waits();
     }
@@ -203,7 +203,9 @@ fn a_run_launched_just_now_is_found_by_the_forced_rescan() {
             &|| {
                 fixture
                     .state
-                    .refresh_test_runs_with(&|pid, _| pid == 7, &|event| fixture.state.publish_delta(event));
+                    .refresh_test_runs_with(&|pid, _| pid == 7, &|inner, event| {
+                        fixture.state.publish_delta_locked(inner, event.clone())
+                    });
             },
         )
         .unwrap();
@@ -407,7 +409,9 @@ fn a_run_that_fails_after_the_reads_are_picked_is_read_before_resuming() {
     fixture.state.refresh_test_run_waits_pausing(&|| {
         fixture
             .state
-            .refresh_test_runs_with(&|_, _| false, &|event| fixture.state.publish_delta(event));
+            .refresh_test_runs_with(&|_, _| false, &|inner, event| {
+                fixture.state.publish_delta_locked(inner, event.clone())
+            });
     });
     assert!(
         fixture.queued_prompts().is_empty(),
@@ -666,9 +670,17 @@ fn a_run_named_by_a_pending_wait_stays_indexed_past_retention() {
         fixture.write(&format!("test-newer-{index:02}"), Some(passed()));
     }
     fixture.busy();
-    fixture.state.refresh_test_runs_with(&|_, _| false, &|event| fixture.state.publish_delta(event));
+    fixture
+        .state
+        .refresh_test_runs_with(&|_, _| false, &|inner, event| {
+            fixture.state.publish_delta_locked(inner, event.clone())
+        });
     assert!(
-        fixture.state.test_run_summaries(None).iter().any(|run| run.run_id == "test-a-old"),
+        fixture
+            .state
+            .test_run_summaries(None)
+            .iter()
+            .any(|run| run.run_id == "test-a-old"),
         "held for its wait"
     );
     fixture.state.refresh_test_run_waits();

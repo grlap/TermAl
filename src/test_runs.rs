@@ -408,8 +408,8 @@ impl AppState {
     /// next rescan's interval.
     #[cfg(not(test))]
     fn refresh_test_runs(&self) -> bool {
-        self.refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|event| {
-            self.publish_delta(event)
+        self.refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|inner, event| {
+            self.publish_delta_locked(inner, event.clone())
         })
     }
 
@@ -421,7 +421,7 @@ impl AppState {
     fn refresh_test_runs_with(
         &self,
         writer_may_be_alive: &TestRunLiveness,
-        publish: &dyn Fn(&DeltaEvent),
+        publish: &dyn Fn(&StateInner, &DeltaEvent),
     ) -> bool {
         // One rescan at a time, from its first read to its last commit. A
         // rescan that panicked leaves nothing half-done behind the lock, so a
@@ -687,7 +687,7 @@ impl AppState {
                 continue;
             }
             match self.commit_delta_locked(&mut inner) {
-                Ok(revision) => publish(&DeltaEvent::TestRunRemoved { revision, run_id }),
+                Ok(revision) => publish(&inner, &DeltaEvent::TestRunRemoved { revision, run_id }),
                 Err(err) => {
                     eprintln!("test runs> failed to record a removed run: {err:#}");
                     failed = true;
@@ -703,7 +703,7 @@ impl AppState {
             match self.commit_delta_locked(&mut inner) {
                 Ok(revision) => {
                     published_changed.insert(run.run_id.clone());
-                    publish(&DeltaEvent::TestRunChanged { revision, run });
+                    publish(&inner, &DeltaEvent::TestRunChanged { revision, run });
                 }
                 Err(err) => {
                     eprintln!("test runs> failed to record a changed run: {err:#}");

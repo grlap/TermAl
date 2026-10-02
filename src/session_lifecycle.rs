@@ -193,7 +193,7 @@ impl AppState {
             runtime_to_kill,
             delegation_runtimes_to_kill,
             revision,
-            delegation_lifecycle_deltas,
+            _delegation_lifecycle_deltas,
             delegation_wait_refresh,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -234,6 +234,14 @@ impl AppState {
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
+            for delta in &delegation_reconciliation.lifecycle_deltas {
+                self.publish_delegation_lifecycle_delta(&inner, revision, delta.clone());
+            }
+            self.publish_delegation_wait_consumed_deltas(
+                &inner,
+                revision,
+                &delegation_wait_refresh.consumed_waits,
+            );
             (
                 runtime,
                 delegation_reconciliation.runtimes_to_kill,
@@ -267,15 +275,6 @@ impl AppState {
             {
                 eprintln!("session cleanup warning> {err:#}");
             }
-        }
-        for delta in delegation_lifecycle_deltas {
-            self.publish_delegation_lifecycle_delta(revision, delta);
-        }
-        if delegation_wait_refresh.did_mutate() {
-            self.publish_delegation_wait_consumed_deltas(
-                revision,
-                &delegation_wait_refresh.consumed_waits,
-            );
         }
         self.dispatch_delegation_wait_resumes(revision, delegation_wait_refresh.dispatch_parents);
 
@@ -364,8 +363,16 @@ impl AppState {
         let reconcile_waits = lifecycle.is_some();
         let committed = self.commit_locked(&mut inner);
         if committed.is_ok() {
+            for delta in &detached.transcript_deltas {
+                self.publish_delegation_child_transcript_delta(
+                    &inner,
+                    inner.revision,
+                    delta.clone(),
+                );
+            }
             if let Some(delta) = lifecycle {
                 self.publish_delegation_lifecycle_delta(
+                    &inner,
                     inner.revision,
                     strip_parent_card_delta(delta),
                 );
@@ -622,7 +629,7 @@ impl AppState {
         } else {
             format!("Stop failed in the background: {cleaned}")
         };
-        let (revision, creates, replay) = {
+        let (_revision, replay) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_visible_session_index(session_id) else {
                 return;
@@ -708,9 +715,9 @@ impl AppState {
                     inner.revision
                 }
             };
-            (revision, creates, replay)
+            self.publish_message_created_delta_parts(&inner, revision, creates);
+            (revision, replay)
         };
-        self.publish_message_created_delta_parts(revision, creates);
         if let Some((Some(runtime_token), callbacks)) = replay {
             self.replay_deferred_runtime_stop_callbacks(session_id, &runtime_token, callbacks);
         }
@@ -1293,7 +1300,7 @@ impl AppState {
                 Ok(None)
             };
 
-            let (pending_interaction_updates, created_messages) = {
+            let (mut pending_interaction_updates, mut created_messages) = {
                 let record = &inner.sessions[index];
                 (
                     message_updated_delta_parts_for_indices(record, pending_interaction_indices),
@@ -1305,9 +1312,25 @@ impl AppState {
                 Ok(revision) => Ok((
                     {
                         self.publish_test_run_waits_consumed(
+                            &inner,
                             revision,
                             &stopped_test_run_waits,
                             TestRunWaitConsumedReason::SessionStopped,
+                        );
+                        self.publish_message_created_delta_parts(
+                            &inner,
+                            revision,
+                            std::mem::take(&mut created_messages),
+                        );
+                        self.publish_message_updated_delta_parts(
+                            &inner,
+                            revision,
+                            std::mem::take(&mut pending_interaction_updates),
+                        );
+                        self.publish_delegation_wait_consumed_deltas(
+                            &inner,
+                            revision,
+                            &stopped_wait_refresh.consumed_waits,
                         );
                         queued_turn_result
                     },
@@ -1375,11 +1398,11 @@ impl AppState {
         };
         let (
             queued_turn_result,
-            pending_interaction_updates,
-            created_messages,
-            stopped_wait_refresh,
+            _pending_interaction_updates,
+            _created_messages,
+            _stopped_wait_refresh,
             stopped_mailbox_notification,
-            revision,
+            _revision,
         ) = match transition {
             Ok(transition) => transition,
             Err((error, queued_runtime_to_shutdown, stopped_mailbox_notification)) => {
@@ -1413,12 +1436,6 @@ impl AppState {
                 return Err(error);
             }
         };
-        self.publish_message_created_delta_parts(revision, created_messages);
-        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
-        self.publish_delegation_wait_consumed_deltas(
-            revision,
-            &stopped_wait_refresh.consumed_waits,
-        );
         if let Some(notification) = stopped_mailbox_notification.as_ref() {
             if let Err(error) = self.requeue_rejected_mailbox_notification(notification) {
                 eprintln!(

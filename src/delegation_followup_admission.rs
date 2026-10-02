@@ -165,7 +165,14 @@ impl AppState {
             return Ok((inner.revision, refresh));
         }
         match self.commit_locked(inner) {
-            Ok(revision) => Ok((revision, refresh)),
+            Ok(revision) => {
+                self.publish_delegation_wait_consumed_deltas(
+                    inner,
+                    revision,
+                    &refresh.consumed_waits,
+                );
+                Ok((revision, refresh))
+            }
             Err(error) => {
                 inner.delegation_waits = waits_before;
                 for (index, queue, peers, pending, stamp) in parents_before {
@@ -211,7 +218,7 @@ impl AppState {
         let revision = inner.revision;
         if committed.is_ok() {
             if let Some(delta) = delta {
-                self.publish_delegation_lifecycle_delta(revision, delta);
+                self.publish_delegation_lifecycle_delta(&inner, revision, delta);
             }
         }
         let (wait_commit, waits) = if committed.is_ok() {
@@ -340,7 +347,7 @@ impl AppState {
             }
         }
         if let Some(delta) = delta {
-            self.publish_delegation_lifecycle_delta(revision, delta);
+            self.publish_delegation_lifecycle_delta(&inner, revision, delta);
         }
         Ok(revision)
     }
@@ -416,7 +423,6 @@ impl AppState {
             );
         }
         committed?;
-        self.publish_delegation_wait_consumed_deltas(revision, &refresh.consumed_waits);
         self.dispatch_delegation_wait_resumes(revision, refresh.dispatch_parents);
         Ok(())
     }

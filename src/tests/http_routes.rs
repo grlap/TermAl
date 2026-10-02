@@ -329,8 +329,7 @@ impl Drop for OrderedStateBroadcasterHarness {
         if let Some(start_tx) = self.start_tx.take() {
             let _ = start_tx.send(());
         }
-        self.mailbox
-            .publish_delta_payload("__termal_test_stop__".to_owned());
+        self.mailbox.publish_snapshot(self.state.summary_snapshot());
         if let Some(thread_handle) = self.thread_handle.take() {
             let _ = thread_handle.join();
         }

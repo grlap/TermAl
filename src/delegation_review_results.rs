@@ -554,6 +554,13 @@ impl AppState {
                     "failed to persist structured delegation review result: {err:#}"
                 ))
             })?;
+            self.enqueue_delegation_refresh_locked(
+                &inner,
+                revision,
+                lifecycle_delta.as_ref(),
+                &detached_child,
+                &wait_refresh,
+            );
             (revision, lifecycle_delta, detached_child, wait_refresh)
         };
         self.publish_delegation_refresh_side_effects(

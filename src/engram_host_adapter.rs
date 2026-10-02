@@ -599,6 +599,14 @@ enum EngramControlRequest {
     SessionStatus {
         routing_token: String,
     },
+    AcceptanceBindingRead {
+        routing_token: String,
+        work_id: String,
+        expected_work_revision: i64,
+        run_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+    },
     TurnEvaluate {
         routing_token: String,
         idempotency_key: String,
@@ -1528,6 +1536,9 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                     .insert(idempotency_key.clone(), (intent, response.clone()));
                 response
             }
+            EngramControlRequest::AcceptanceBindingRead { .. } => Err(Self::remote_error(
+                "unsupported_operation", "this admission fixture does not model acceptance evidence reads",
+            )),
             EngramControlRequest::TurnCheckpoint {
                 routing_token,
                 grant_id,
@@ -3721,8 +3732,8 @@ impl AppState {
         fail_mode: EngramControlFailMode,
         elapsed: Duration,
     ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, creates) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
@@ -3777,7 +3788,7 @@ impl AppState {
             };
             (revision, creates)
         };
-        self.publish_message_created_delta_parts(revision, creates);
+        self.publish_message_created_delta_parts(&inner, revision, creates);
     }
 
     /// The grant a checkpoint for `session_id` would close, with the target
@@ -4161,8 +4172,8 @@ impl AppState {
         project_reset_owner_generation: Option<u64>,
     ) {
         let exited = matches!(card.next_intent, Some(EngramNextIntent::Exit));
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, creates) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
@@ -4206,7 +4217,7 @@ impl AppState {
             };
             (revision, creates)
         };
-        self.publish_message_created_delta_parts(revision, creates);
+        self.publish_message_created_delta_parts(&inner, revision, creates);
     }
 
     fn checkpoint_successful_engram_turn_off_lock(
@@ -5118,8 +5129,8 @@ impl AppState {
         card: EngramControlCard,
         defer_not_before: Option<chrono::DateTime<chrono::Utc>>,
     ) -> EngramDispatchRecordFinish {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, creates) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return EngramDispatchRecordFinish::Superseded;
             };
@@ -5375,7 +5386,7 @@ impl AppState {
             };
             (revision, creates)
         };
-        self.publish_message_created_delta_parts(revision, creates);
+        self.publish_message_created_delta_parts(&inner, revision, creates);
         EngramDispatchRecordFinish::Ready
     }
 
@@ -5390,8 +5401,8 @@ impl AppState {
         error_message: &str,
     ) -> Result<bool> {
         let cleaned = error_message.trim();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, creates) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(false);
             };
@@ -5441,7 +5452,7 @@ impl AppState {
             let revision = self.commit_locked(&mut inner)?;
             (revision, creates)
         };
-        self.publish_message_created_delta_parts(revision, creates);
+        self.publish_message_created_delta_parts(&inner, revision, creates);
         Ok(true)
     }
 

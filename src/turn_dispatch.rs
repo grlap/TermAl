@@ -270,19 +270,27 @@ impl AppState {
         )
     }
 
-    fn publish_started_turn_message_delta(&self, revision: u64, delta: StartedTurnMessageDelta) {
-        self.publish_delta(&DeltaEvent::MessageCreated {
-            revision,
-            session_id: delta.session_id,
-            message_id: delta.message_id,
-            message_index: delta.message_index,
-            message_count: delta.message_count,
-            message: delta.message,
-            preview: delta.preview,
-            status: delta.status,
-            session_queue: None,
-            session_mutation_stamp: Some(delta.session_mutation_stamp),
-        });
+    fn publish_started_turn_message_delta(
+        &self,
+        inner: &StateInner,
+        revision: u64,
+        delta: StartedTurnMessageDelta,
+    ) {
+        self.publish_delta_locked(
+            &inner,
+            DeltaEvent::MessageCreated {
+                revision,
+                session_id: delta.session_id,
+                message_id: delta.message_id,
+                message_index: delta.message_index,
+                message_count: delta.message_count,
+                message: delta.message,
+                preview: delta.preview,
+                status: delta.status,
+                session_queue: None,
+                session_mutation_stamp: Some(delta.session_mutation_stamp),
+            },
+        );
     }
 
     /// Promotes the current queue head while the caller still owns the state
@@ -1475,12 +1483,12 @@ impl AppState {
                         ));
                     }
                 };
-                drop(inner);
                 let StartedTurn {
                     dispatch,
                     message_delta,
                 } = started;
-                self.publish_started_turn_message_delta(revision, message_delta);
+                self.publish_started_turn_message_delta(&inner, revision, message_delta);
+                drop(inner);
                 return Ok(Some(StartedQueuedTurn { dispatch, queued }));
             }
         }
@@ -1708,12 +1716,12 @@ impl AppState {
                     };
                 }
             };
-            drop(inner);
             let StartedTurn {
                 dispatch,
                 message_delta,
             } = started;
-            self.publish_started_turn_message_delta(revision, message_delta);
+            self.publish_started_turn_message_delta(&inner, revision, message_delta);
+            drop(inner);
             return Ok(Some(StartedQueuedTurn {
                 dispatch,
                 queued: snapshot.0,
@@ -2080,8 +2088,12 @@ impl AppState {
                                 .as_ref()
                                 .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
                         );
+                        self.publish_started_turn_message_delta(
+                            &inner,
+                            revision,
+                            started.message_delta,
+                        );
                         drop(inner);
-                        self.publish_started_turn_message_delta(revision, started.message_delta);
                         return Ok(if started_current_mailbox {
                             DispatchTurnResult::Dispatched(started.dispatch)
                         } else {
@@ -2143,8 +2155,8 @@ impl AppState {
                         return Err(self.finish_queued_followup_start_error(error));
                     }
                 };
+                self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
                 drop(inner);
-                self.publish_started_turn_message_delta(revision, started.message_delta);
                 return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
             }
 
@@ -2171,8 +2183,8 @@ impl AppState {
                     .map_err(|err| {
                         ApiError::internal(format!("failed to persist session state: {err:#}"))
                     })?;
+                self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
                 drop(inner);
-                self.publish_started_turn_message_delta(revision, started.message_delta);
                 return Ok(DispatchTurnResult::Dispatched(started.dispatch));
             }
 
@@ -2223,8 +2235,8 @@ impl AppState {
                         return Err(self.finish_queued_followup_start_error(error));
                     }
                 };
+                self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
                 drop(inner);
-                self.publish_started_turn_message_delta(revision, started.message_delta);
                 return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
             }
 
@@ -2250,8 +2262,8 @@ impl AppState {
                 .map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
+            self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
             drop(inner);
-            self.publish_started_turn_message_delta(revision, started.message_delta);
             return Ok(DispatchTurnResult::Dispatched(started.dispatch));
         }
 
