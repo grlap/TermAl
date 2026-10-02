@@ -667,6 +667,33 @@ fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command
 }
 
 #[test]
+fn a_late_duplicate_of_work_proven_complete_does_not_mix_the_successor_grant() {
+    let turn = CheckedTurn::start("stale-duplicate", true);
+    let generation = turn.record(|record| record.active_turn_generation);
+    let ownership = new_claude_turn_ownership();
+    let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
+    let prompt = host_prompt("The prompt.", generation);
+    lock_claude_turn_ownership(&ownership).reserve(claude_host_prompt_owner(&prompt));
+    reader.feed(capable_init());
+    reader.feed(lifecycle(&prompt, "started"));
+    // The command ends, proven by its correlated result, while its runtime
+    // is still the session's: nothing of it is outstanding.
+    reader.feed(root_bash("done-command", LONG_COMMAND, false));
+    reader.feed(root_bash_result("done-command", "done"));
+    assert!(turn.record(|record| !record.claude_outstanding.holds("done-command")));
+    // The runtime is replaced, and the old reader delivers the same result
+    // again: receiving a stale frame alone shows no work overlapping the
+    // grant, so it stays clean.
+    let (successor, _commands) = test_claude_runtime_handle("stale-duplicate-successor");
+    turn.record_mut(|record| record.runtime = SessionRuntime::Claude(successor));
+    reader.feed(root_bash_result("done-command", "done"));
+    turn.record(|record| {
+        assert_eq!(record.engram.active_turn_mixed_attribution, None);
+        assert!(!record.claude_outstanding.any());
+    });
+}
+
+#[test]
 fn an_excluded_session_says_why_once_and_says_so_again_when_the_work_ends() {
     let (turn, mut reader, second, _ownership) = straddling_root("evidence-notice");
     // The restriction took effect when A launched its background task: the
