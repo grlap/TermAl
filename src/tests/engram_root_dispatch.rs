@@ -16,6 +16,9 @@ mod retained_disposition;
 #[path = "engram_abort_retry.rs"]
 mod abort_retry;
 
+#[path = "engram_acknowledged_mailbox_wake.rs"]
+mod acknowledged_mailbox_wake;
+
 #[path = "engram_delegation_held.rs"]
 mod delegation_held;
 

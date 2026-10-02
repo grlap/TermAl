@@ -392,11 +392,17 @@ async fn mailbox_http_receipt_ack_is_separate_and_rejects_mixed_boundaries() {
                 .await;
         assert_eq!(ack["unreadCount"], 0);
     }
+    // The receipt acknowledgement, repeated, keeps the one accepted wake.
     let inner = state.inner.lock().unwrap();
+    let queued = &inner.sessions[inner.find_session_index(&target_id).unwrap()].queued_prompts;
+    assert_eq!(queued.len(), 1);
     assert!(
-        inner.sessions[inner.find_session_index(&target_id).unwrap()]
-            .queued_prompts
-            .is_empty()
+        queued[0]
+            .pending_prompt
+            .text
+            .contains("already acknowledged"),
+        "{}",
+        queued[0].pending_prompt.text
     );
 }
 
@@ -2109,26 +2115,29 @@ fn recovery_never_regresses_an_existing_wake_to_an_older_sequence() {
     assert!(pending.text.contains(&format!("#{}", second.sequence)));
 }
 
-#[test]
-fn acknowledgement_eagerly_removes_the_covered_queued_wake() {
+// Acknowledgement advances the data cursor only (here through the legacy
+// numeric acknowledgement route). The accepted wake keeps its place; its
+// visible text stops claiming unread mail at once.
+#[tokio::test]
+async fn acknowledgement_keeps_the_queued_wake_and_rewrites_its_text() {
     let (state, sender_id, target_id) = mailbox_test_state();
     let receipt = state
         .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
         .expect("mailbox send should queue one wake-up");
-    state
-        .mailbox_store
-        .read_range(&target_id, &receipt.mailbox_id, None, 10)
-        .unwrap();
-
-    let summary = state
-        .acknowledge_mailbox_and_remove_covered_wakeups(
-            &target_id,
-            &receipt.mailbox_id,
-            0,
-            receipt.sequence,
-        )
-        .expect("acknowledgement should succeed");
-    assert_eq!(summary.unread_count, 0);
+    let base = format!("/api/sessions/{target_id}/mailboxes/{}", receipt.mailbox_id);
+    mailbox_cursor_http_post(
+        &state,
+        format!("{base}/read"),
+        json!({"issueReceipt": true}),
+    )
+    .await;
+    let summary = mailbox_cursor_http_post(
+        &state,
+        format!("{base}/acknowledge"),
+        json!({"expectedProcessedThrough": 0, "processedThrough": receipt.sequence}),
+    )
+    .await;
+    assert_eq!(summary["unreadCount"], 0);
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let target = inner
@@ -2136,18 +2145,27 @@ fn acknowledgement_eagerly_removes_the_covered_queued_wake() {
         .iter()
         .find(|record| record.session.id == target_id)
         .expect("target should exist");
-    assert!(
-        target.queued_prompts.is_empty(),
-        "a queued wake covered by the durable cursor must disappear immediately"
+    assert_eq!(
+        target.queued_prompts.len(),
+        1,
+        "acknowledging the data must not cancel the accepted wake"
     );
-    assert!(
-        target.session.pending_prompts.is_empty(),
+    let text = &target.queued_prompts[0].pending_prompt.text;
+    assert!(text.contains("already acknowledged"), "{text}");
+    assert!(!text.contains("unread message(s)"), "{text}");
+    assert_eq!(
+        &target.session.pending_prompts[0].text, text,
         "the public pending-prompt projection must stay in sync"
     );
 }
 
+// A zero-unread head is dropped only when the row's delivery record shows a
+// handoff already covered its boundary; an acknowledgement alone keeps it
+// (see `mailbox_acknowledged_wake.rs`). No production path is known to leave
+// a non-retained queued head over a delivered row, so this branch is
+// defensive and the delivery record is written directly.
 #[test]
-fn queue_drain_skips_a_stale_wake_left_after_the_cursor_advanced() {
+fn queue_drain_skips_a_wake_whose_boundary_a_handoff_already_covered() {
     let (state, sender_id, target_id) = mailbox_test_state();
     let receipt = state
         .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
@@ -2160,6 +2178,10 @@ fn queue_drain_skips_a_stale_wake_left_after_the_cursor_advanced() {
         .mailbox_store
         .acknowledge(&target_id, &receipt.mailbox_id, 0, receipt.sequence)
         .expect("the test should advance the durable cursor without queue cleanup");
+    state
+        .mailbox_store
+        .mark_notifications_delivered_through(&target_id, &receipt.mailbox_id, receipt.sequence)
+        .expect("the test should record the covering handoff");
 
     let input_rx = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -2193,7 +2215,7 @@ fn queue_drain_skips_a_stale_wake_left_after_the_cursor_advanced() {
     let dispatch = state
         .dispatch_next_queued_turn(&target_id, true)
         .expect("queue drain should succeed")
-        .expect("ordinary prompt should remain after the stale wake is dropped");
+        .expect("ordinary prompt should remain after the covered wake is dropped");
     let prompt = match &dispatch {
         TurnDispatch::PersistentClaude { command, .. } => command.text.as_str(),
         _ => panic!("expected Claude ordinary prompt"),
@@ -2203,7 +2225,7 @@ fn queue_drain_skips_a_stale_wake_left_after_the_cursor_advanced() {
     assert!(matches!(
         recv_within_guard(
             &input_rx,
-            "queue drain skips a stale wake left after the cursor advanced: runtime command 1"
+            "queue drain skips a wake a handoff already covered: runtime command 1"
         ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
@@ -3343,9 +3365,17 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
             .iter()
             .find(|record| record.session.id == target_id)
             .expect("target should exist");
+        assert_eq!(
+            target.queued_prompts.len(),
+            1,
+            "the HTTP acknowledgement must keep the accepted wake"
+        );
         assert!(
-            target.queued_prompts.is_empty(),
-            "the HTTP acknowledgement must retire its covered queued wake"
+            target.queued_prompts[0]
+                .pending_prompt
+                .text
+                .contains("already acknowledged"),
+            "the kept wake must stop claiming unread mail"
         );
     }
 

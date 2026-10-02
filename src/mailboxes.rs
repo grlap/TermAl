@@ -155,6 +155,26 @@ struct MailboxUnreadWakeup {
     topic: Option<String>,
 }
 
+/// The queue head as dispatch-time revalidation saw it under the state lock.
+#[derive(Clone, Debug)]
+struct FrontMailboxHead {
+    prompt_id: String,
+    mailbox_id: String,
+    message_id: String,
+    sequence: u64,
+    text: String,
+    source: Option<MessageSource>,
+}
+
+/// One optimistic revalidation read: the head snapshot plus what the mailbox
+/// store said about it off the state lock.
+#[derive(Clone, Debug)]
+struct FrontMailboxRevalidation {
+    head: FrontMailboxHead,
+    wakeup: Option<MailboxUnreadWakeup>,
+    boundary: Option<MailboxWakeBoundary>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct MailboxWakeQueueOutcome {
     accepted: bool,
@@ -866,37 +886,81 @@ impl AppState {
     ///
     /// A mailbox wake can sit behind a long-running turn while the receiver
     /// independently reads and acknowledges the same mailbox. Acknowledgement
-    /// is authoritative, so a covered wake must never be promoted into a fresh
-    /// agent turn. Returns `true` when the queue head changed and the caller
-    /// should inspect it again.
+    /// advances the data cursor only: an accepted wake whose mail is all
+    /// acknowledged stays as the continuation turn, with text that claims no
+    /// unread mail. It is dropped only when its boundary row is no longer
+    /// visible or the row's delivery record shows a handoff already covered
+    /// it. Returns `true` when the queue head changed and the caller should
+    /// inspect it again.
     fn revalidate_front_mailbox_wakeup_for_session(&self, session_id: &str) -> Result<bool> {
-        let Some((prompt_id, mailbox_id)) = ({
+        let Some(read) = self.read_front_mailbox_revalidation(session_id)? else {
+            return Ok(false);
+        };
+        self.apply_front_mailbox_revalidation(session_id, read)
+    }
+
+    /// Snapshots the queue head under the state lock, then reads its mailbox
+    /// off the lock. Never hold the mailbox connection mutex together with
+    /// StateInner.
+    fn read_front_mailbox_revalidation(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<FrontMailboxRevalidation>> {
+        let Some(head) = ({
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
                 .find_session_index(session_id)
                 .and_then(|index| inner.sessions[index].queued_prompts.front())
                 .filter(|queued| !queued.is_engram_retained())
                 .and_then(|queued| {
-                    queued
-                        .pending_prompt
-                        .source
-                        .as_ref()
-                        .and_then(|source| source.mailbox.as_ref())
-                        .map(|mailbox| {
-                            (queued.pending_prompt.id.clone(), mailbox.mailbox_id.clone())
-                        })
+                    let mailbox = queued.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
+                    Some(FrontMailboxHead {
+                        prompt_id: queued.pending_prompt.id.clone(),
+                        mailbox_id: mailbox.mailbox_id.clone(),
+                        message_id: mailbox.message_id.clone(),
+                        sequence: mailbox.sequence,
+                        text: queued.pending_prompt.text.clone(),
+                        source: queued.pending_prompt.source.clone(),
+                    })
                 })
         }) else {
-            return Ok(false);
+            return Ok(None);
         };
-
-        // Never hold the mailbox connection mutex together with StateInner.
-        // The prompt id + sequence checks below make this optimistic read safe:
-        // if another sender or acknowledgement wins the state lock first, we
-        // retry against the new queue head.
         let wakeup = self
             .mailbox_store
-            .unread_wakeup_for_mailbox(session_id, &mailbox_id)?;
+            .unread_wakeup_for_mailbox(session_id, &head.mailbox_id)?;
+        let boundary = match wakeup {
+            Some(_) => None,
+            None => self.mailbox_store.mailbox_wake_boundary(
+                session_id,
+                &head.mailbox_id,
+                &head.message_id,
+            )?,
+        };
+        Ok(Some(FrontMailboxRevalidation {
+            head,
+            wakeup,
+            boundary,
+        }))
+    }
+
+    /// Applies an off-lock read to the queue head it was taken from.
+    ///
+    /// The read is optimistic. It applies only while the head is unchanged
+    /// since the snapshot: same prompt, text and source. A send or an
+    /// acknowledgement that rewrote the head in the meantime keeps the head's
+    /// identity and boundary, so identity alone cannot tell; any such change
+    /// makes the caller re-inspect instead of writing the older snapshot back.
+    fn apply_front_mailbox_revalidation(
+        &self,
+        session_id: &str,
+        read: FrontMailboxRevalidation,
+    ) -> Result<bool> {
+        let FrontMailboxRevalidation {
+            head,
+            wakeup,
+            boundary,
+        } = read;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(false);
@@ -905,17 +969,19 @@ impl AppState {
             .queued_prompts
             .front()
             .is_some_and(|queued| {
-                queued.pending_prompt.id == prompt_id
-                    && queued
-                        .pending_prompt
-                        .source
-                        .as_ref()
-                        .and_then(|source| source.mailbox.as_ref())
-                        .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
+                queued.pending_prompt.id == head.prompt_id
+                    && queued.pending_prompt.text == head.text
+                    && queued.pending_prompt.source == head.source
             });
         if !front_matches {
             return Ok(true);
         }
+        let FrontMailboxHead {
+            mailbox_id,
+            message_id: head_message_id,
+            sequence: head_sequence,
+            ..
+        } = head;
         // Authorization may have been prepared during the off-lock mailbox
         // read. Its text/source is now replay input, not a coalescible wake.
         if inner.sessions[index]
@@ -930,10 +996,29 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            record.queued_prompts.pop_front();
-            sync_pending_prompts(record);
-            self.commit_locked(&mut inner)?;
-            return Ok(true);
+            let queued = record
+                .queued_prompts
+                .front_mut()
+                .expect("validated mailbox queue head should exist");
+            let Some(boundary) = boundary.filter(|boundary| !boundary.delivered) else {
+                record.queued_prompts.pop_front();
+                sync_pending_prompts(record);
+                self.commit_locked(&mut inner)?;
+                return Ok(true);
+            };
+            let changed = rewrite_queued_wake_as_continuation(
+                queued,
+                &mailbox_id,
+                &head_message_id,
+                head_sequence,
+                boundary,
+            );
+            if changed || queued.source != QueuedPromptSource::Mailbox {
+                queued.source = QueuedPromptSource::Mailbox;
+                sync_pending_prompts(record);
+                self.commit_locked(&mut inner)?;
+            }
+            return Ok(false);
         };
 
         let record = inner
@@ -943,18 +1028,6 @@ impl AppState {
             .queued_prompts
             .front_mut()
             .expect("validated mailbox queue head should exist");
-        let existing_sequence = queued
-            .pending_prompt
-            .source
-            .as_ref()
-            .and_then(|source| source.mailbox.as_ref())
-            .map_or(0, |mailbox| mailbox.sequence);
-        if existing_sequence > wakeup.sequence {
-            // A send committed after the optimistic store read and already
-            // refreshed this prompt. Never regress it to the older snapshot.
-            return Ok(false);
-        }
-
         let text = mailbox_notification_text(
             &wakeup.mailbox_id,
             wakeup.unread_count,
@@ -1004,70 +1077,6 @@ impl AppState {
                 }
             }
         }
-    }
-
-    /// Removes queued wakes already covered by a successful acknowledgement.
-    ///
-    /// Dispatch-time revalidation remains authoritative across crashes. This
-    /// eager sweep avoids retaining visibly stale queue entries during normal
-    /// operation and establishes a clear lock winner for concurrent ack/send.
-    fn remove_acknowledged_mailbox_wakeups(
-        &self,
-        session_id: &str,
-        mailbox_id: &str,
-        processed_through: u64,
-    ) -> Result<bool> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else {
-            return Ok(false);
-        };
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        let original_len = record.queued_prompts.len();
-        record.queued_prompts.retain(|queued| {
-            !queued
-                .pending_prompt
-                .source
-                .as_ref()
-                .and_then(|source| source.mailbox.as_ref())
-                .is_some_and(|mailbox| {
-                    mailbox.mailbox_id == mailbox_id && mailbox.sequence <= processed_through
-                })
-        });
-        if record.queued_prompts.len() == original_len {
-            return Ok(false);
-        }
-        sync_pending_prompts(record);
-        self.commit_locked(&mut inner)?;
-        Ok(true)
-    }
-
-    fn acknowledge_mailbox_and_remove_covered_wakeups(
-        &self,
-        session_id: &str,
-        mailbox_id: &str,
-        expected_processed_through: u64,
-        processed_through: u64,
-    ) -> Result<MailboxSummary> {
-        let summary = self.mailbox_store.acknowledge(
-            session_id,
-            mailbox_id,
-            expected_processed_through,
-            processed_through,
-        )?;
-        if let Err(err) =
-            self.remove_acknowledged_mailbox_wakeups(session_id, mailbox_id, processed_through)
-        {
-            // The durable CAS already committed. Returning an error would make
-            // a correct retry conflict on the old expected cursor; dispatch-
-            // time revalidation is the authoritative fallback.
-            eprintln!(
-                "mailbox> acknowledgement committed but queued-wake cleanup failed for \
-                 `{session_id}` / `{mailbox_id}`: {err:#}"
-            );
-        }
-        Ok(summary)
     }
 
     fn reconcile_unread_mailbox_wakeups_after_boot(&self) {
@@ -1234,14 +1243,14 @@ async fn acknowledge_mailbox(
                     .map(|participant| participant.processed_through)
                     .unwrap_or(0);
                 if let Err(err) =
-                    state.remove_acknowledged_mailbox_wakeups(&session_id, &mailbox_id, through)
+                    state.refresh_acknowledged_mailbox_wakeups(&session_id, &mailbox_id, through)
                 {
-                    eprintln!("mailbox> receipt committed but wake cleanup failed: {err:#}");
+                    eprintln!("mailbox> receipt committed but wake refresh failed: {err:#}");
                 }
                 Ok(summary)
             }
             (None, Some(expected), Some(through)) => state
-                .acknowledge_mailbox_and_remove_covered_wakeups(
+                .acknowledge_mailbox_and_refresh_covered_wakeups(
                     &session_id,
                     &mailbox_id,
                     expected,

@@ -208,6 +208,52 @@ one-time boot pass covers every unread inbound mailbox because delivered turns
 that died in the crash have no narrower recovery path. The complete
 authoritative list remains available through `termal_list_mailboxes`.
 
+### Acknowledgement does not cancel an accepted wake
+
+A message accepted while its receiver is running a turn queues a wake behind
+that turn (`queuedBehindActiveTurn`, or `heldBehindPausedQueue` behind a
+paused queue). The receiver often reads and acknowledges that message within
+the turn that is still running. Acknowledgement advances the data cursor only.
+The accepted wake keeps its queue position, identity and boundary, and the
+turn after the current one still starts. An Engram-controlled root's
+turn-end checkpoint therefore says `continue`, not `wait`.
+
+On acknowledgement, through either the receipt or the numeric route, each
+covered queued wake is rewritten so it no longer claims unread mail:
+
+```text
+[TermAl mailbox notification]
+Mailbox `mailbox-example`: messages through #7 (latest from Sol) were accepted while this wake was queued and are already acknowledged. Nothing is unread.
+Topic: architecture
+This is the queued continuation wake: resume the next-turn work your context calls for, or end the turn if there is none. Do not send a reply only to acknowledge it.
+```
+
+Arrivals coalesce as before: one wake per mailbox, at the newest accepted
+boundary. Mail acknowledged from several mailboxes in one turn therefore keeps
+one continuation per mailbox, run in queue order. Dispatch-time revalidation
+keeps a head with no unread mail as this continuation, rewriting its text if
+the acknowledgement-time refresh did not. Its store read is optimistic: it
+applies only while the head's prompt, text and source are unchanged, so it
+never writes the older unread text back over a head that an acknowledgement
+rewrote in the meantime. It drops the head only in two cases: the boundary
+row is no longer visible to the receiver, or the row's delivery record
+(`notificationState` `deliveredToIdleSession`) shows that a handoff already
+covered it. A message delivered directly to an idle receiver queues no wake.
+A turn that acknowledges only its own delivered boundary therefore starts no
+further turn.
+
+Retained Engram heads are replay input. Acknowledgement neither removes nor
+rewrites them, and revalidation skips them. A retained head whose mail is
+acknowledged while it is retained is therefore replayed with its original
+text, which still names the unread count it had when it was retained. Stop, a
+paused queue and explicit Cancel keep their meaning: a held continuation waits
+for the explicit resume, and a cancelled one never runs.
+
+This rule covers the normal path only. Failure and restart recovery still
+rebuild wakes from unread mail. A continuation whose mail was already
+acknowledged is therefore not guaranteed to survive a runtime failure, a
+rejected handoff or a host restart before its turn starts.
+
 ### Dispatch outcome versus notification state
 
 The send receipt and a later mailbox read intentionally expose different

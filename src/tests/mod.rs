@@ -72,6 +72,7 @@ mod kimi;
 mod kimi_approvals;
 mod kimi_read_only;
 mod load_sensitive_limits;
+mod mailbox_acknowledged_wake;
 mod mailboxes;
 mod opencode_approvals;
 mod opencode_config;

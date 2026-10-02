@@ -804,6 +804,7 @@ include!("persist.rs");
 include!("persist_fence.rs");
 include!("coordination_persist.rs");
 include!("mailboxes.rs");
+include!("mailbox_acknowledged_wake.rs");
 include!("delegation_review_results.rs");
 include!("coordination_board.rs");
 include!("board_routes.rs");
