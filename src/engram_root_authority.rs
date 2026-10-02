@@ -9,21 +9,6 @@ thread_local! {
     // Manual AppState fixtures explicitly lack the production persist worker.
     // Tests can disable this allowance to exercise the stopped-writer refusal.
     static TEST_ENGRAM_AUTHORITY_MANUAL_WRITER: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
-    // Acceptance setup fixtures model an already-settled canonical read. Their
-    // synchronous SQLite setup is not a simulated authority deadline witness.
-    static TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-#[cfg(test)]
-fn with_engram_fixture_persistence_budget<T>(operation: impl FnOnce() -> T) -> T {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.set(self.0));
-        }
-    }
-    let _restore = Restore(TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.replace(true)));
-    operation()
 }
 
 fn engram_authority_manual_writer_allowed() -> bool {
@@ -670,7 +655,8 @@ impl AppState {
         binding: Option<&EngramControlWorkBinding>,
         budget: Duration,
     ) -> Result<(), EngramTransportError> {
-        self.guard_engram_root_read_until(target, binding, std::time::Instant::now() + budget)
+        let clock = self.engram_budget_clock();
+        self.guard_engram_root_read_until(target, binding, clock.now() + budget)
             .map(|_| ())
     }
 
@@ -830,7 +816,8 @@ impl AppState {
         deadline: std::time::Instant,
         settle_abandoned_writes: bool,
     ) -> Result<(), ApiError> {
-        let budget = deadline.saturating_duration_since(std::time::Instant::now());
+        let clock = self.engram_budget_clock();
+        let budget = deadline.saturating_duration_since(clock.now());
         let (target, runs, abandoned) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let history = inner
@@ -886,7 +873,7 @@ impl AppState {
         }
         let reserve = budget / 4;
         for binding in runs {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(clock.now());
             let Some(_read_budget) = left.checked_sub(reserve).filter(|left| !left.is_zero())
             else {
                 break;
@@ -1005,7 +992,8 @@ impl AppState {
     /// Restart and reconnect/refresh maintenance also enumerates bare guards,
     /// not just removed-session journals. Current focus is never substituted.
     fn recover_engram_authority_runs(&self, session_id: &str, budget: Duration) {
-        let deadline = std::time::Instant::now() + budget.min(Duration::from_secs(2));
+        let clock = self.engram_budget_clock();
+        let deadline = clock.now() + budget.min(Duration::from_secs(2));
         let (store, runs) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(store) =
@@ -1088,7 +1076,7 @@ impl AppState {
             (store, runs)
         };
         for binding in runs {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(clock.now());
             if left.is_zero() {
                 break;
             }
@@ -1122,7 +1110,8 @@ impl AppState {
         binding: &EngramControlWorkBinding,
         budget: Duration,
     ) -> Result<EngramNamedRootReadResponse, ApiError> {
-        self.read_engram_authority_fact_until(target, binding, std::time::Instant::now() + budget)
+        let clock = self.engram_budget_clock();
+        self.read_engram_authority_fact_until(target, binding, clock.now() + budget)
     }
 
     fn read_engram_authority_fact_until(
@@ -1141,6 +1130,7 @@ impl AppState {
         binding: &EngramControlWorkBinding,
         deadline: std::time::Instant,
     ) -> Result<EngramNamedRootReadResponse, EngramAuthorityReadFailure> {
+        let clock = self.engram_budget_clock();
         let store = target
             .settings
             .authority_store_key
@@ -1161,7 +1151,7 @@ impl AppState {
                     error.message,
                 ))
             })?;
-        let budget = deadline.saturating_duration_since(std::time::Instant::now());
+        let budget = deadline.saturating_duration_since(clock.now());
         if budget.is_zero() {
             return Err(EngramAuthorityReadFailure::Source(ApiError::conflict(
                 "named-root canonical read budget was spent; authority remains withheld",
@@ -1239,7 +1229,8 @@ impl AppState {
         binding: &EngramControlWorkBinding,
         budget: Duration,
     ) -> Result<EngramAuthorityTransition, ApiError> {
-        self.prepare_engram_authority_until(store, binding, std::time::Instant::now() + budget)
+        let clock = self.engram_budget_clock();
+        self.prepare_engram_authority_until(store, binding, clock.now() + budget)
     }
 
     fn prepare_engram_authority_until(
@@ -1248,6 +1239,7 @@ impl AppState {
         binding: &EngramControlWorkBinding,
         deadline: std::time::Instant,
     ) -> Result<EngramAuthorityTransition, ApiError> {
+        let clock = self.engram_budget_clock();
         let recovery = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -1261,9 +1253,16 @@ impl AppState {
         };
         if let Some(image) = recovery {
             self.confirm_engram_authority_image_until(&image, deadline)?;
+            #[cfg(test)]
+            self.test_engram_authority_ack_boundary("before_recovery_publication");
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if !image.still_owned(&inner) {
                 return Err(ApiError::conflict("recovery candidate was superseded"));
+            }
+            if clock.now() >= deadline {
+                return Err(ApiError::conflict(
+                    "named-root recovery publication exceeded its operation budget",
+                ));
             }
             inner
                 .engram_work_naming_history
@@ -1348,14 +1347,12 @@ impl AppState {
         image: &EngramAuthorityImage,
         deadline: std::time::Instant,
     ) -> Result<(), ApiError> {
-        let budget = deadline.saturating_duration_since(std::time::Instant::now());
-        #[cfg(test)]
-        let mut acknowledgement_deadline = deadline;
-        #[cfg(not(test))]
-        let acknowledgement_deadline = deadline;
-        let (fence, waiter) = PersistFence::new(
+        let clock = self.engram_budget_clock();
+        let budget = deadline.saturating_duration_since(clock.now());
+        let (fence, waiter) = PersistFence::new_with_clock(
             PersistFenceTarget::EngramWorkAuthority(Box::new(image.clone())),
             deadline,
+            clock.clone(),
         );
         if self
             .persist_tx
@@ -1375,6 +1372,7 @@ impl AppState {
             }
             #[cfg(test)]
             {
+                self.test_engram_authority_ack_boundary("before_delta");
                 let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
                 if !image.matches_metadata(&delta.metadata) {
                     return Err(ApiError::conflict(
@@ -1382,28 +1380,23 @@ impl AppState {
                     ));
                 }
                 let mut cache = SqlitePersistConnectionCache::new();
-                let persistence_started = std::time::Instant::now();
                 persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta)
                     .map_err(|error| {
                         ApiError::internal(format!(
                             "named-root authority persistence is unconfirmed: {error:#}"
                         ))
                     })?;
-                if TEST_ENGRAM_FIXTURE_PERSISTENCE_BUDGET.with(|flag| flag.get()) {
-                    // Exclude only actual manual fixture persistence. Expired
-                    // entry budgets, content/owner checks and connected writer
-                    // deadlines still use their original authority allowance.
-                    acknowledgement_deadline += persistence_started.elapsed();
-                }
             }
         }
+        #[cfg(test)]
+        self.test_engram_authority_ack_boundary("before_owner_check");
         let inner = self.inner.lock().expect("state mutex poisoned");
         if !image.still_owned(&inner) {
             return Err(ApiError::conflict(
                 "named-root acknowledgement belongs to a superseded authority image",
             ));
         }
-        if std::time::Instant::now() >= acknowledgement_deadline {
+        if clock.now() >= deadline {
             return Err(ApiError::conflict(format!(
                 "named-root acknowledgement exceeded its remaining {} ms authority budget",
                 budget.as_millis()
@@ -1422,7 +1415,8 @@ impl AppState {
         owner: &EngramAuthorityTransition,
         budget: Duration,
     ) -> Result<(), ApiError> {
-        self.publish_engram_authority_until(store, owner, std::time::Instant::now() + budget)
+        let clock = self.engram_budget_clock();
+        self.publish_engram_authority_until(store, owner, clock.now() + budget)
     }
 
     fn publish_engram_authority_until(
@@ -1431,6 +1425,7 @@ impl AppState {
         owner: &EngramAuthorityTransition,
         deadline: std::time::Instant,
     ) -> Result<(), ApiError> {
+        let clock = self.engram_budget_clock();
         self.recover_engram_authority_batch_until(store, owner, deadline, false)?;
         let image = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1459,10 +1454,17 @@ impl AppState {
             EngramAuthorityImage::capture(&inner, store, &owner.binding.work_id)?
         };
         self.confirm_engram_authority_image_until(&image, deadline)?;
+        #[cfg(test)]
+        self.test_engram_authority_ack_boundary("before_publication");
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if !image.still_owned(&inner) {
             return Err(ApiError::conflict(
                 "named-root candidate changed after acknowledgement",
+            ));
+        }
+        if clock.now() >= deadline {
+            return Err(ApiError::conflict(
+                "named-root publication exceeded its operation budget",
             ));
         }
         let history = inner
