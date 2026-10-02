@@ -353,6 +353,8 @@ impl AppState {
         started_at: std::time::Instant,
         owner: &EngramQueuedAdmissionOwner,
     ) -> std::result::Result<(), EngramTransportError> {
+        let clock = self.engram_budget_clock();
+        let deadline = started_at + Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS);
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id).ok_or_else(|| {
@@ -369,10 +371,7 @@ impl AppState {
                 content: engram_admission_live_content(record),
             }
         };
-        let (fence, waiter) = PersistFence::new(
-            target,
-            started_at + Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS),
-        );
+        let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock.clone());
         if self
             .persist_tx
             .send(PersistRequest::Fence(Box::new(fence)))
@@ -394,6 +393,11 @@ impl AppState {
             })?;
         }
         self.require_queued_engram_owner(session_id, owner, "Admission durability fence")?;
+        if clock.now() >= deadline {
+            return Err(EngramTransportError::deadline(
+                "Engram admission durability arrived after its operation budget",
+            ));
+        }
         Ok(())
     }
     fn retire_queued_engram_evaluation(
@@ -1134,7 +1138,7 @@ impl AppState {
                 &intent.session_id,
                 target
                     .admission_started_at
-                    .unwrap_or_else(std::time::Instant::now),
+                    .unwrap_or_else(|| target.budget_clock.now()),
                 owner,
             )?;
             return Ok(request);
@@ -1182,7 +1186,7 @@ impl AppState {
             &intent.session_id,
             target
                 .admission_started_at
-                .unwrap_or_else(std::time::Instant::now),
+                .unwrap_or_else(|| target.budget_clock.now()),
             owner,
         )?;
         Ok(request)

@@ -9,7 +9,7 @@
 // Does not own: running stages, stage success, or the launcher summary's
 // other sections, which stay in `test-launcher.mjs`; nor the Node event
 // encoding, which `node-test-duration-reporter.mjs` writes.
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
 export const durationBudgetMs = 2000;
@@ -76,12 +76,30 @@ export function durationReportPlan(stage, runDir) {
   }
 }
 
-function displayPath(file, base) {
+// The run's base as given and, when the file system resolves it to another
+// path, as resolved. A runner started in a directory names its files under
+// the resolved path (macOS's /var is a link to /private/var), so a base
+// reached through a link must be compared in both forms.
+function reportBases(base) {
+  if (!base) return [];
+  const bases = [base];
+  try {
+    const resolved = realpathSync.native(base);
+    if (resolved !== base) bases.push(resolved);
+  } catch {
+    // A base that cannot be resolved is compared as given.
+  }
+  return bases;
+}
+
+function displayPath(file, bases) {
   if (typeof file !== "string") return "(unknown file)";
   const native = file.split("/").join(sep);
-  if (base && isAbsolute(native)) {
-    const local = relative(base, native);
-    if (local && !local.startsWith("..") && !isAbsolute(local)) return portable(local);
+  if (isAbsolute(native)) {
+    for (const base of bases) {
+      const local = relative(base, native);
+      if (local && !local.startsWith("..") && !isAbsolute(local)) return portable(local);
+    }
   }
   return portable(native);
 }
@@ -98,14 +116,14 @@ function recordedText(value) {
 // is not one.
 const vitestTimeout = /^(?:Error: )?Test timed out in \d+ms/mu;
 
-function vitestTests(report, base) {
+function vitestTests(report, bases) {
   if (!Array.isArray(report?.testResults)) {
     throw new Error("Vitest report has no testResults list");
   }
   const tests = [];
   const files = [];
   for (const fileResult of report.testResults) {
-    const file = recordedText(displayPath(fileResult?.name, base));
+    const file = recordedText(displayPath(fileResult?.name, bases));
     // Vitest's file span: first test start to last test end, hooks between
     // tests included, import and environment excluded.
     if (Number.isFinite(fileResult?.startTime) && Number.isFinite(fileResult?.endTime)) {
@@ -125,14 +143,14 @@ function vitestTests(report, base) {
   return { tests, files };
 }
 
-function nodeTests(text, base) {
+function nodeTests(text, bases) {
   const tests = [];
   const files = [];
   const stacks = new Map();
   for (const raw of text.split("\n")) {
     if (!raw.trim()) continue;
     const event = JSON.parse(raw);
-    const file = recordedText(displayPath(event.file, base));
+    const file = recordedText(displayPath(event.file, bases));
     if (event.type === "test:summary") {
       if (event.file && Number.isFinite(event.durationMs)) {
         files.push({ file, durationMs: event.durationMs });
@@ -185,9 +203,10 @@ export function readDurationReport(
     return { ...report, status: "missing", reason: error.code === "ENOENT" ? "the runner wrote no duration artifact" : error.message };
   }
   try {
+    const bases = reportBases(base);
     const { tests, files } = plan.kind === "vitest-json"
-      ? vitestTests(JSON.parse(text), base)
-      : nodeTests(text, base);
+      ? vitestTests(JSON.parse(text), bases)
+      : nodeTests(text, bases);
     const counted = tests.filter((test) => !["skipped", "pending", "todo"].includes(test.state));
     const overBudget = counted
       .filter((test) => test.durationMs !== null && test.durationMs >= budgetMs)

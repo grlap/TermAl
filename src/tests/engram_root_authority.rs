@@ -2,6 +2,10 @@
 // authority publication boundary. Reuses production naming fixtures.
 use super::*;
 
+mod budget {
+    include!("engram_budget_authority.rs");
+}
+
 struct FailingAdmissionRootReader {
     control: Arc<ScriptedEngramControlTransport>,
     fail_after: &'static str,
@@ -140,7 +144,7 @@ fn source_root_authority_admission_separates_root_owner_from_routing_claim_and_q
     ] {
         let label = format!("admission-owner-{mode}");
         let grant = format!("{label}-grant");
-        let claimed = ClaimedRoot::new(
+        let claimed = ClaimedRoot::new_scripted(
             &label,
             vec![
                 bind_reply("owner-token"),
@@ -284,7 +288,7 @@ fn source_root_authority_admission_withholds_auxiliary_read_failures_and_legacy_
     ] {
         let label = format!("admission-withheld-{mode}");
         let grant = format!("{label}-grant");
-        let claimed = ClaimedRoot::new(
+        let claimed = ClaimedRoot::new_scripted(
             &label,
             vec![
                 bind_reply("withheld-token"),
@@ -596,7 +600,7 @@ fn unclaimed_opening_keeps_claimed_diagnostics_absent(unknown: bool) {
     } else {
         begin_reply(grant)
     };
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind,
@@ -695,7 +699,7 @@ fn unclaimed_opening_keeps_claimed_diagnostics_absent(unknown: bool) {
 fn source_root_authority_invalid_held_association_cannot_poison_a_later_name() {
     for case in ["missing", "work", "claim", "fence", "run", "execution"] {
         let label = format!("invalid-association-{case}");
-        let claimed = ClaimedRoot::new(&label, Vec::new());
+        let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
         let worktree = add_claimed_root_worktree(&claimed.root);
         prepare_claimed_root_naming(&claimed, &label);
         claimed_root_store(&claimed);
@@ -775,7 +779,7 @@ fn source_root_authority_invalid_held_association_cannot_poison_a_later_name() {
 #[test]
 fn source_root_authority_shared_staging_and_cleanup_require_retained_association() {
     let label = "shared-intent-association";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -1381,7 +1385,7 @@ fn source_root_canonical_run_state_and_history_contract() {
 
 fn authority_review_first_contact(case: &str) {
     let label = "authority-first-contact";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let (binding, token) = claimed.record(|record| {
@@ -1468,7 +1472,7 @@ fn authority_review_first_contact(case: &str) {
 #[test]
 fn source_root_authority_review_failed_prior_run_is_recoverable_after_claim_change() {
     let label = "authority-recovery-drain";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);
     name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
     let store = claimed_root_store(&claimed);
@@ -1540,7 +1544,7 @@ fn source_root_authority_review_failed_prior_run_is_recoverable_after_claim_chan
 #[test]
 fn source_root_authority_review_no_event_cannot_erase_unexplained_positive_legacy_history() {
     let label = "authority-legacy-origin";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
@@ -1627,6 +1631,9 @@ fn source_root_authority_review_no_event_cannot_erase_unexplained_positive_legac
 fn source_root_authority_review_admitted_retirement_waits_for_connected_ack() {
     let label = "authority-admitted-retirement-ack";
     let (claimed, _, _) = named_root_turn(label, true);
+    claimed
+        .state
+        .install_test_engram_budget_clock(EngramBudgetClock::Real);
     let journal = claimed
         .state
         .inner
@@ -1715,7 +1722,7 @@ fn authority_review_staging_writer_lock(cleanup: bool) {
     } else {
         "authority-event-stage-lock"
     };
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);
     name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
@@ -1788,7 +1795,7 @@ fn authority_disconnected_writer_lock_independence(candidate: bool) {
     } else {
         "authority-prepared-lock"
     };
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);
     name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
     let store = claimed_root_store(&claimed);
@@ -1827,7 +1834,7 @@ fn authority_disconnected_writer_lock_independence(candidate: bool) {
 #[test]
 fn source_root_authority_renewed_claim_settles_the_same_canonical_run() {
     let label = "authority-renewed-claim";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);
     name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
     let store = claimed_root_store(&claimed);
@@ -1889,7 +1896,7 @@ fn connected_authority_candidate_ack(supersede: bool) {
     } else {
         "authority-unrelated-work"
     };
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);
     name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
     let store = claimed_root_store(&claimed);
@@ -1916,6 +1923,9 @@ fn connected_authority_candidate_ack(supersede: bool) {
         &proof,
     )
     .unwrap();
+    claimed
+        .state
+        .install_test_engram_budget_clock(EngramBudgetClock::Real);
     let mut state = claimed.state.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     state.persist_tx = tx;
@@ -1986,7 +1996,7 @@ fn connected_authority_candidate_ack(supersede: bool) {
 #[test]
 fn source_root_authority_canonical_frontier_orders_runs_and_events() {
     let label = "authority-canonical-clock";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);
     name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
     let inner = claimed.state.inner.lock().unwrap();
@@ -2291,7 +2301,7 @@ fn connected_authority_settlement_failure(entry: &'static str) {
 #[test]
 fn source_root_authority_foreign_generation_cannot_hide_a_later_claim_name() {
     let label = "authority-cross-claim-history";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -2710,7 +2720,7 @@ fn source_root_authority_review_expired_admission_does_not_fall_back_to_standalo
 #[test]
 fn source_root_authority_review_no_event_keeps_potentially_executable_pending_write() {
     let label = "authority-no-event-pending-write";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let (binding, token) = claimed.record(|record| {
@@ -2822,7 +2832,7 @@ fn source_root_authority_review_stopped_production_writer_refuses_staging_and_cl
         } else {
             "authority-stopped-stage"
         };
-        let claimed = ClaimedRoot::new(label, Vec::new());
+        let claimed = ClaimedRoot::new_scripted(label, Vec::new());
         let tree = add_claimed_root_worktree(&claimed.root);
         name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
         let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
@@ -3095,7 +3105,7 @@ fn source_root_authority_review_prepared_ack_deadline_explains_no_candidate_fenc
 
 #[test]
 fn source_root_opening_notice_recomposition_and_acknowledgement_keep_exact_owners() {
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         "opening-notice-owner",
         vec![
             bind_reply("notice-owner-token"),
@@ -3198,7 +3208,7 @@ fn source_root_opening_notice_recomposition_and_acknowledgement_keep_exact_owner
 fn source_root_opening_notice_failed_provider_send_is_not_delivery() {
     let label = "opening-notice-send-failed";
     let grant = "opening-notice-send-failed-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("notice-token"),

@@ -71,6 +71,7 @@ fn engram_source_root_capture_budget(left: Duration, control_left: Duration) -> 
 /// Charge only time spent in control I/O, so filesystem captures between
 /// status and bind cannot refresh or exhaust the shared dispatch allowance.
 fn engram_source_root_control_within<T>(
+    clock: &EngramBudgetClock,
     remaining: &mut Duration,
     wall_left: Duration,
     call: impl FnOnce(Duration) -> Result<T, ApiError>,
@@ -81,9 +82,9 @@ fn engram_source_root_control_within<T>(
             "named-root control budget exhausted; retry the same request to settle any pending intent",
         ));
     }
-    let started = std::time::Instant::now();
+    let started = clock.now();
     let result = call(budget);
-    let elapsed = started.elapsed();
+    let elapsed = clock.elapsed_since(started);
     *remaining = remaining.saturating_sub(elapsed);
     if elapsed >= budget {
         return Err(ApiError::bad_gateway(
@@ -1469,9 +1470,10 @@ impl AppState {
         session_id: &str,
         request: EngramSourceRootRequest,
     ) -> std::result::Result<EngramSourceRootResponse, ApiError> {
+        let clock = self.engram_budget_clock();
         // Everything below shares one budget, within the bridge's wait.
-        let deadline = std::time::Instant::now() + ENGRAM_SOURCE_ROOT_NAMING_BUDGET;
-        let left = || deadline.saturating_duration_since(std::time::Instant::now());
+        let deadline = clock.now() + ENGRAM_SOURCE_ROOT_NAMING_BUDGET;
+        let left = || deadline.saturating_duration_since(clock.now());
         let mut control_left = Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS);
         let work = request.work.trim().to_owned();
         if work.is_empty() || work.len() > 256 {
@@ -1504,7 +1506,7 @@ impl AppState {
             }
             Some(Some(path)) => Some(path.to_owned()),
         };
-        engram_source_root_control_within(&mut control_left, left(), |budget| {
+        engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
             self.resolve_removed_engram_roots(session_id, None, budget);
             Ok(())
         })?;
@@ -1567,15 +1569,18 @@ impl AppState {
                  the session has bound",
             )
         })?;
-        let held = engram_source_root_control_within(&mut control_left, left(), |budget| {
-            target
-                .adapter
-                .read_held_claims(
-                    &target.connection,
-                    ENGRAM_WORK_BINDING_COMMAND_TIMEOUT.min(budget),
-                )
-                .map_err(|error| ApiError::bad_gateway(format!("engram work core held: {error}")))
-        })?;
+        let held =
+            engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
+                target
+                    .adapter
+                    .read_held_claims(
+                        &target.connection,
+                        ENGRAM_WORK_BINDING_COMMAND_TIMEOUT.min(budget),
+                    )
+                    .map_err(|error| {
+                        ApiError::bad_gateway(format!("engram work core held: {error}"))
+                    })
+            })?;
         #[cfg(test)]
         if let Some(meanwhile) =
             TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| hook.borrow_mut().take())
@@ -1652,8 +1657,8 @@ impl AppState {
             let token = target.routing_token.as_ref().ok_or_else(|| {
                 ApiError::conflict("Engram session must be bound before naming a root")
             })?;
-            engram_source_root_control_within(&mut control_left, left(), |budget| {
-                let phase_deadline = (std::time::Instant::now() + budget).min(deadline);
+            engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
+                let phase_deadline = (clock.now() + budget).min(deadline);
                 self.guard_engram_root_read_until(
                     &target,
                     target.work_binding.as_ref(),
@@ -1737,9 +1742,10 @@ impl AppState {
                 && engram_named_root_absent(&event.root.root)
         });
         if let Some(event) = missing_pending {
-            let receipt = engram_source_root_control_within(&mut control_left, left(), |budget| {
-                self.send_engram_root_event(&target, &event, budget)
-            })?;
+            let receipt =
+                engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
+                    self.send_engram_root_event(&target, &event, budget)
+                })?;
             self.retire_engram_root_replay(
                 &event,
                 &receipt.receipt,
@@ -1973,9 +1979,10 @@ impl AppState {
             // filesystem capture or control transport runs under this lock.
             self.stage_engram_root_event_locked(&mut inner, &event, Some(&association.binding))?;
             drop(inner);
-            let receipt = engram_source_root_control_within(&mut control_left, left(), |budget| {
-                self.send_engram_root_event(&target, &event, budget)
-            })?;
+            let receipt =
+                engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
+                    self.send_engram_root_event(&target, &event, budget)
+                })?;
             if retrying
                 && event.kind == EngramNamedRootKind::Bound
                 && !engram_root_event_matches_state(&event, remote_root.as_ref())
@@ -1986,6 +1993,7 @@ impl AppState {
                 let replay_fence =
                     EngramRootReadFence::capture(&self.inner.lock().expect("state mutex poisoned"));
                 let status = engram_source_root_control_within(
+                    &clock,
                     &mut control_left,
                     left(),
                     |budget| {

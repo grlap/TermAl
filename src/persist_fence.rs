@@ -11,7 +11,10 @@ delegation admission, provider delivery, SQL schema, or HTTP response policy.
 #[derive(Clone)]
 enum PersistFenceTarget {
     EngramWorkAuthority(Box<EngramAuthorityImage>),
-    EngramAdmission { session_id: String, content: Value },
+    EngramAdmission {
+        session_id: String,
+        content: Value,
+    },
     Delegation(Box<DelegationRecord>),
     WaitRegistration(DelegationWaitRecord),
     /// The test-run card epoch, which must be durable before any card is
@@ -50,9 +53,16 @@ impl PersistFenceTarget {
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         match self {
             Self::EngramWorkAuthority(image) => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM app_state WHERE key = ?1", [SQLITE_METADATA_KEY], |row| row.get(0)).optional()?;
-                let Some(stored) = stored else {return Ok(false);};
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM app_state WHERE key = ?1",
+                        [SQLITE_METADATA_KEY],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let metadata: PersistedState = serde_json::from_str(&stored)?;
                 Ok(image.matches_metadata(&metadata))
             }
@@ -109,6 +119,7 @@ struct PersistFenceCompletion {
     result: Mutex<Option<PersistFenceResult>>,
     changed: Condvar,
     deadline: std::time::Instant,
+    clock: EngramBudgetClock,
 }
 
 impl PersistFenceCompletion {
@@ -147,10 +158,19 @@ struct PersistFenceWaiter {
 impl PersistFence {
     #[cfg_attr(not(test), allow(dead_code))]
     fn new(target: PersistFenceTarget, deadline: std::time::Instant) -> (Self, PersistFenceWaiter) {
+        Self::new_with_clock(target, deadline, EngramBudgetClock::Real)
+    }
+
+    fn new_with_clock(
+        target: PersistFenceTarget,
+        deadline: std::time::Instant,
+        clock: EngramBudgetClock,
+    ) -> (Self, PersistFenceWaiter) {
         let completion = Arc::new(PersistFenceCompletion {
             result: Mutex::new(None),
             changed: Condvar::new(),
             deadline,
+            clock,
         });
         (
             Self {
@@ -163,7 +183,8 @@ impl PersistFence {
 
     fn finish(&self, result: PersistFenceResult) {
         self.completion
-            .resolve_at(result, std::time::Instant::now());
+            .resolve_at(result, self.completion.clock.now());
+        self.completion.clock.notify();
     }
 }
 
@@ -179,6 +200,14 @@ impl Drop for PersistFence {
 impl PersistFenceWaiter {
     /// Blocking boundary: the caller must release StateInner before entering.
     fn wait(self) -> PersistFenceResult {
+        #[cfg(test)]
+        if matches!(self.completion.clock, EngramBudgetClock::Scripted(_)) {
+            return self
+                .completion
+                .clock
+                .wait_scripted(self.completion.deadline, |now| self.completion.poll_at(now))
+                .unwrap_or(Err(PersistFenceError::Deadline));
+        }
         let mut slot = self
             .completion
             .result
@@ -209,6 +238,15 @@ impl PersistFenceWaiter {
     /// at that moment. The fence stays live up to its own deadline, so the
     /// caller may look at its state and wait again. Same blocking boundary.
     fn wait_until(&self, until: std::time::Instant) -> Option<PersistFenceResult> {
+        #[cfg(test)]
+        if matches!(self.completion.clock, EngramBudgetClock::Scripted(_)) {
+            return self
+                .completion
+                .clock
+                .wait_scripted(until.min(self.completion.deadline), |now| {
+                    self.completion.poll_at(now)
+                });
+        }
         let mut slot = self
             .completion
             .result
@@ -239,8 +277,11 @@ impl PersistFenceWaiter {
     /// The content this fence names was superseded, so nobody waits for it
     /// any more: resolve it, and the worker stops retrying on its behalf.
     fn abandon(self) {
-        self.completion
-            .resolve_at(Err(PersistFenceError::Deadline), std::time::Instant::now());
+        self.completion.resolve_at(
+            Err(PersistFenceError::Deadline),
+            self.completion.clock.now(),
+        );
+        self.completion.clock.notify();
     }
 }
 
@@ -278,7 +319,7 @@ impl PersistFenceBatch {
         self.pending.retain(|fence| {
             fence
                 .completion
-                .poll_at(std::time::Instant::now())
+                .poll_at(fence.completion.clock.now())
                 .is_none()
         });
     }
@@ -300,7 +341,7 @@ impl PersistFenceBatch {
         self.pending.retain(|fence| {
             if fence
                 .completion
-                .poll_at(std::time::Instant::now())
+                .poll_at(fence.completion.clock.now())
                 .is_some()
             {
                 return false;

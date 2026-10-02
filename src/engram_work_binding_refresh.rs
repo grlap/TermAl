@@ -111,12 +111,13 @@ impl AppState {
         started_at: std::time::Instant,
         owner: Option<&EngramQueuedAdmissionOwner>,
     ) -> std::result::Result<(), EngramTransportError> {
+        let clock = target.budget_clock.clone();
         let session_id = target.connection.session_id.clone();
         // A backed-off bind could not act on a change before the turn, and
         // would withhold the turn trying to.
         if target
             .next_bind_retry_at
-            .is_some_and(|retry_at| retry_at > std::time::Instant::now())
+            .is_some_and(|retry_at| retry_at > clock.now())
         {
             return Ok(());
         }
@@ -133,10 +134,7 @@ impl AppState {
             };
             (
                 engram.work_binding.clone(),
-                engram_refused_work_bindings_in_window(
-                    &engram.refused_work_bindings,
-                    std::time::Instant::now(),
-                ),
+                engram_refused_work_bindings_in_window(&engram.refused_work_bindings, clock.now()),
             )
         };
         let Some(timeout) = target
@@ -193,7 +191,7 @@ impl AppState {
         let (binding, withheld) = engram_binding_after_refusal(
             read,
             &mut record.engram.refused_work_bindings,
-            std::time::Instant::now(),
+            clock.now(),
         );
         if withheld {
             eprintln!(
@@ -241,7 +239,7 @@ impl AppState {
                     engram.work_binding.clone(),
                     engram_refused_work_bindings_in_window(
                         &engram.refused_work_bindings,
-                        std::time::Instant::now(),
+                        inner.engram_budget_clock.now(),
                     ),
                 )
             })
@@ -267,15 +265,13 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return read;
         };
+        let now = inner.engram_budget_clock.now();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
         let read_description = describe_engram_work_binding(read.as_ref());
-        let (binding, withheld) = engram_binding_after_refusal(
-            read,
-            &mut record.engram.refused_work_bindings,
-            std::time::Instant::now(),
-        );
+        let (binding, withheld) =
+            engram_binding_after_refusal(read, &mut record.engram.refused_work_bindings, now);
         if withheld {
             eprintln!(
                 "engram> session={session_id} the bind read {read_description}, which Engram \
@@ -300,6 +296,7 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
+        let now = inner.engram_budget_clock.now();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -312,7 +309,7 @@ impl AppState {
         if refused.len() >= ENGRAM_REFUSED_WORK_BINDING_LIMIT {
             refused.remove(0);
         }
-        refused.push((binding.clone(), std::time::Instant::now()));
+        refused.push((binding.clone(), now));
     }
 
     /// Records that Engram refused as stale the binding `sent_under`, the one

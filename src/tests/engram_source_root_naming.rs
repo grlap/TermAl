@@ -259,7 +259,7 @@ fn resolve_removed_roots_with_one_attempt(claimed: &ClaimedRoot, claim: Option<&
 #[test]
 fn source_root_review_round_six_rejects_a_receipt_for_another_run_and_retries() {
     let label = "receipt-wrong-run";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
@@ -327,7 +327,7 @@ fn source_root_review_round_six_rejects_a_receipt_for_another_run_and_retries() 
 #[test]
 fn source_root_review_round_six_release_read_persists_new_history_and_rolls_back_failure() {
     let label = "learn-released-history";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let (token, binding) = claimed.record(|record| {
@@ -422,7 +422,7 @@ fn covering_removed_root_read(journal: &EngramNamedRootJournal, released: bool) 
 #[test]
 fn source_root_review_naming_history_tracks_publication_and_keeps_exact_replay_idempotent() {
     let label = "naming-history-publication";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let named = name_root(
         &claimed,
@@ -529,7 +529,7 @@ fn source_root_review_removed_root_reclamation_requires_covering_lifecycle_proof
         "persist-failure",
     ] {
         let label = "removed-root-read";
-        let mut claimed = ClaimedRoot::new(label, Vec::new());
+        let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
         let worktree = add_claimed_root_worktree(&claimed.root);
         name_root(
             &claimed,
@@ -668,7 +668,7 @@ fn source_root_review_removed_root_reclamation_requires_covering_lifecycle_proof
 #[test]
 fn source_root_review_released_removed_sessions_make_progress_past_journal_capacity() {
     let label = "removed-root-capacity";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     claimed_root_store(&claimed);
     let worktree = add_claimed_root_worktree(&claimed.root);
@@ -796,7 +796,7 @@ fn source_root_orphaned_explicit_clear_recovers_without_reassigning_its_reporter
 
 fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool) {
     let label = "orphaned-intent-recovery";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     if cleanup {
@@ -1020,7 +1020,7 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
 #[test]
 fn source_root_stale_read_cannot_retire_an_orphan_or_replace_a_newer_selection() {
     let label = "orphan-stale-read";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -1115,7 +1115,7 @@ fn source_root_stale_read_cannot_retire_an_orphan_or_replace_a_newer_selection()
 #[test]
 fn source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent() {
     let label = "orphan-persist-failure";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -1270,7 +1270,7 @@ fn source_root_unknown_at_checkpoint_withholds_previously_finished_check_evidenc
 #[test]
 fn source_root_review_normalized_wire_timestamp_preserves_the_binding_and_intent() {
     let label = "wire-time-normalization";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let named = name_root(
         &claimed,
@@ -1360,7 +1360,7 @@ fn source_root_review_normalized_wire_timestamp_preserves_the_binding_and_intent
 #[test]
 fn source_root_review_missing_retry_normalizes_dot_steps() {
     let label = "missing-root-dot-retry";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -1438,7 +1438,7 @@ fn source_root_review_begin_readback_unknown(fail_read: bool) {
         .guard_engram_root_read_until(
             &target,
             binding.as_ref(),
-            std::time::Instant::now() + DEADLOCK_GUARD,
+            target.budget_clock.now() + DEADLOCK_GUARD,
         )
         .unwrap();
     let before = claimed.transport.requests().len();
@@ -1457,7 +1457,7 @@ fn source_root_review_begin_readback_unknown(fail_read: bool) {
             &token,
             binding.as_ref(),
             Some(EngramNamedRootState::None),
-            std::time::Instant::now()
+            target.budget_clock.now()
                 + if fail_read {
                     Duration::from_secs(1)
                 } else {
@@ -1755,7 +1755,7 @@ fn source_root_writer_failure_keeps_the_intent_and_sends_no_binding() {
 #[test]
 fn source_root_missing_after_a_lost_reply_replays_then_queues_the_exact_cleanup() {
     let label = "binding-lost-then-missing";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -1849,7 +1849,7 @@ fn a_source_root_clear_keeps_the_closing_turns_original_named_generation() {
 #[test]
 fn a_stale_source_root_begin_receipt_uses_fresh_status_before_removing_a_later_name() {
     let label = "binding-replayed-begin";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let named = name_root(
         &claimed,
@@ -1899,7 +1899,7 @@ fn a_stale_source_root_begin_receipt_uses_fresh_status_before_removing_a_later_n
 #[test]
 fn source_root_reconciliation_persistence_failure_withholds_until_repaired() {
     let label = "binding-reconcile-persist";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -1963,7 +1963,7 @@ fn source_root_reconciliation_persistence_failure_withholds_until_repaired() {
 
 #[test]
 fn source_root_readback_requires_durable_guards_and_keeps_known_history_idempotent() {
-    let claimed = ClaimedRoot::new("binding-readback-owner", Vec::new());
+    let claimed = ClaimedRoot::new_scripted("binding-readback-owner", Vec::new());
     prepare_claimed_root_naming(&claimed, "binding-readback-owner");
     let store = claimed_root_store(&claimed);
     let (token, binding) = claimed.record(|record| {
@@ -2035,33 +2035,51 @@ fn source_root_readback_requires_durable_guards_and_keeps_known_history_idempote
 #[test]
 fn source_root_control_phases_share_the_remaining_allowance_and_reject_late_replies() {
     let mut remaining = Duration::from_secs(1);
-    engram_source_root_control_within(&mut remaining, Duration::from_secs(2), |budget| {
-        assert_eq!(budget, Duration::from_secs(1));
-        std::thread::sleep(Duration::from_millis(2));
-        Ok(())
-    })
+    engram_source_root_control_within(
+        &EngramBudgetClock::Real,
+        &mut remaining,
+        Duration::from_secs(2),
+        |budget| {
+            assert_eq!(budget, Duration::from_secs(1));
+            std::thread::sleep(Duration::from_millis(2));
+            Ok(())
+        },
+    )
     .unwrap();
     assert!(remaining < Duration::from_secs(1));
     let after_first = remaining;
-    engram_source_root_control_within(&mut remaining, Duration::from_secs(2), |budget| {
-        assert_eq!(
-            budget, after_first,
-            "a second phase cannot refresh the allowance"
-        );
-        Ok(())
-    })
+    engram_source_root_control_within(
+        &EngramBudgetClock::Real,
+        &mut remaining,
+        Duration::from_secs(2),
+        |budget| {
+            assert_eq!(
+                budget, after_first,
+                "a second phase cannot refresh the allowance"
+            );
+            Ok(())
+        },
+    )
     .unwrap();
-    let error = engram_source_root_control_within(&mut remaining, Duration::from_nanos(1), |_| {
-        std::thread::sleep(Duration::from_millis(1));
-        Ok(())
-    })
+    let error = engram_source_root_control_within(
+        &EngramBudgetClock::Real,
+        &mut remaining,
+        Duration::from_nanos(1),
+        |_| {
+            std::thread::sleep(Duration::from_millis(1));
+            Ok(())
+        },
+    )
     .unwrap_err();
     assert!(error.message.contains("after its budget"));
     remaining = Duration::ZERO;
     assert!(
-        engram_source_root_control_within::<()>(&mut remaining, Duration::from_secs(2), |_| {
-            panic!("an exhausted allowance must not start another phase")
-        })
+        engram_source_root_control_within::<()>(
+            &EngramBudgetClock::Real,
+            &mut remaining,
+            Duration::from_secs(2),
+            |_| { panic!("an exhausted allowance must not start another phase") }
+        )
         .is_err()
     );
 }
@@ -2069,7 +2087,7 @@ fn source_root_control_phases_share_the_remaining_allowance_and_reject_late_repl
 #[test]
 fn newer_source_root_readback_cannot_be_stamped_with_the_old_journal_generation() {
     let label = "binding-newer-provenance";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let named = name_root(
         &claimed,
@@ -2110,7 +2128,7 @@ fn newer_source_root_readback_cannot_be_stamped_with_the_old_journal_generation(
 #[test]
 fn source_root_staging_failure_sends_nothing_and_retains_the_same_retry_intent() {
     let label = "binding-staging-failure";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     name_root(
@@ -2208,7 +2226,7 @@ fn source_root_staging_failure_sends_nothing_and_retains_the_same_retry_intent()
 #[test]
 fn a_lost_receipt_replayed_after_release_cannot_revive_the_old_generation() {
     let label = "binding-released-replay";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -2297,7 +2315,7 @@ fn a_lost_receipt_replayed_after_release_cannot_revive_the_old_generation() {
 #[test]
 fn source_root_review_delayed_read_cannot_overwrite_a_same_generation_end() {
     let label = "review-same-generation-read";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -2426,7 +2444,7 @@ fn source_root_review_known_retirement_preserves_the_admitted_snapshot() {
 #[test]
 fn source_root_review_different_active_guard_survives_focus_away() {
     let label = "review-other-active";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -2494,7 +2512,7 @@ fn source_root_review_different_active_guard_survives_focus_away() {
 #[test]
 fn source_root_review_stale_replay_retires_without_a_replacement_name() {
     let label = "review-retired-replay";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     let (token, binding) = claimed.record(|record| {
@@ -2673,7 +2691,7 @@ fn source_root_review_stale_replay_retires_without_a_replacement_name() {
 #[test]
 fn source_root_review_obsolete_main_checkout_cannot_stamp_an_absent_projection() {
     let label = "review-obsolete-checkout";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     add_claimed_root_worktree(&claimed.root);
     let named = name_root(
         &claimed,
@@ -2738,7 +2756,7 @@ fn source_root_review_obsolete_main_checkout_cannot_stamp_an_absent_projection()
 #[test]
 fn source_root_review_reconciliation_survives_focus_away_and_restore() {
     let label = "review-reconciliation-focus";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -2823,7 +2841,7 @@ fn source_root_review_reconciliation_survives_focus_away_and_restore() {
 #[test]
 fn source_root_review_live_removal_never_reports_a_restore_end() {
     let label = "review-live-removal";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -2856,7 +2874,7 @@ fn source_root_review_live_removal_never_reports_a_restore_end() {
 #[test]
 fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
     let label = "review-successive-claims";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed_root_store(&claimed);
@@ -2917,7 +2935,7 @@ fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
 #[test]
 fn source_root_review_other_claim_clear_retires_only_local_authorization() {
     let label = "review-other-claim-clear";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -2980,7 +2998,7 @@ fn source_root_review_other_claim_clear_retires_only_local_authorization() {
 #[test]
 fn source_root_review_cleanup_assignment_persist_failure_retains_guarded_intent_without_send() {
     let label = "review-cleanup-assignment";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -3032,7 +3050,7 @@ fn source_root_review_cleanup_assignment_persist_failure_retains_guarded_intent_
 #[test]
 fn an_orphaned_name_queues_its_exact_end_before_restore_drops_the_path() {
     let label = "binding-orphan";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -3064,7 +3082,7 @@ fn an_orphaned_name_queues_its_exact_end_before_restore_drops_the_path() {
 #[test]
 fn a_lost_named_root_reply_replays_the_persisted_intent_after_restore() {
     let label = "binding-lost-reply";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -3136,7 +3154,7 @@ fn a_lost_named_root_reply_replays_the_persisted_intent_after_restore() {
 #[test]
 fn a_named_root_refusal_publishes_no_root_and_allows_a_repaired_request() {
     let label = "binding-refused";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed
@@ -3177,7 +3195,7 @@ fn a_named_root_refusal_publishes_no_root_and_allows_a_repaired_request() {
 #[test]
 fn named_root_readback_distinguishes_release_from_fence_changes() {
     let label = "binding-lifecycle";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let named = name_root(
         &claimed,
@@ -3278,7 +3296,7 @@ fn named_root_response_variants_include_forward_compatible_unknown_and_absence()
 #[test]
 fn clearing_a_root_records_its_original_identity_and_stamps_workdir_captures_as_ended() {
     let label = "binding-ended-basis";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -3338,7 +3356,7 @@ fn claimed_root_store(claimed: &ClaimedRoot) -> EngramAuthorityStoreKey {
 #[test]
 fn source_root_compatibility_missing_projection_recovers_owner_without_an_absence_shortcut() {
     let label = "compatibility-missing-projection";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let (token, binding) = claimed.record(|record| {
@@ -3378,7 +3396,7 @@ fn source_root_compatibility_omission_reads_bound_and_released_history_without_r
         } else {
             "compatibility-bound"
         };
-        let claimed = ClaimedRoot::new(label, Vec::new());
+        let claimed = ClaimedRoot::new_scripted(label, Vec::new());
         let worktree = add_claimed_root_worktree(&claimed.root);
         let named = name_root(
             &claimed,
@@ -3467,7 +3485,7 @@ fn source_root_compatibility_claimed_without_store_is_uncertain_from_opening() {
     let label = "compatibility-no-store";
     let grant = "compatibility-no-store-grant";
     let fresh_grant = "compatibility-no-store-fresh-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("compatibility-no-store-token"),
@@ -3548,7 +3566,7 @@ fn source_root_compatibility_legacy_begin_recovers_only_the_later_fresh_turn() {
     let label = "compatibility-legacy-begin";
     let old_grant = "compatibility-legacy-grant";
     let fresh_grant = "compatibility-fresh-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("compatibility-token"),
@@ -3634,7 +3652,7 @@ fn source_root_compatibility_legacy_begin_recovers_only_the_later_fresh_turn() {
 fn source_root_compatibility_late_identity_does_not_upgrade_an_uncertain_turn() {
     let label = "compatibility-late-identity";
     let grant = "compatibility-late-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("compatibility-late-token"),
@@ -3724,7 +3742,7 @@ fn pending_line(claimed: &ClaimedRoot) -> Option<String> {
 #[test]
 fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_share() {
     let label = "naming-refusals";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
 
     let other_work = EngramHeldClaims {
@@ -3911,7 +3929,7 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
 #[test]
 fn the_same_root_named_again_keeps_its_generation_and_a_name_after_a_clear_gets_a_new_one() {
     let label = "naming-generations";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let held = || vec![claimed_root_held(label)];
 
@@ -4034,7 +4052,7 @@ fn change_engram_settings(state: &AppState, change: impl Fn(&mut EngramProjectSe
 #[test]
 fn a_name_is_refused_when_engram_control_is_off_or_the_project_changes_meanwhile() {
     let label = "naming-project-fence";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let nothing_named = |claimed: &ClaimedRoot, case: &str| {
         assert!(
@@ -4189,7 +4207,7 @@ fn a_git_bash_drive_spelling_names_the_worktree() {
     // Git Bash's `pwd` prints `/c/…` for `C:/…`; read as written it would be
     // joined to the workdir.
     let label = "naming-msys-drive";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     let windows = engram_source_root_display(&canonical.to_string_lossy()).replace('\\', "/");
@@ -4252,7 +4270,7 @@ fn fill_list(claimed: &ClaimedRoot, store: &EngramAuthorityStoreKey, named_by: &
 #[test]
 fn a_full_list_does_not_infer_release_from_a_holders_missing_claims() {
     let label = "naming-reclaim";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let store = claimed_root_store(&claimed);
     let other = other_session(&claimed);
@@ -4288,7 +4306,7 @@ fn a_full_list_does_not_infer_release_from_a_holders_missing_claims() {
 #[test]
 fn an_authoritative_end_frees_only_the_matching_claim_for_a_new_name() {
     let label = "naming-reclaim-own";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let store = claimed_root_store(&claimed);
     let other = other_session(&claimed);
@@ -4363,7 +4381,7 @@ fn source_root_journal_keeps_cached_evidence_until_its_last_reference_ends() {
 #[test]
 fn source_root_journal_reclaims_released_history_only_after_authoritative_readback() {
     let label = "journal-released-history";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let named = name_root(
         &claimed,
@@ -4409,7 +4427,7 @@ fn source_root_journal_reclaims_released_history_only_after_authoritative_readba
 #[test]
 fn source_root_journal_compacts_settled_history_without_losing_generation_on_restore() {
     let label = "journal-compaction";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -4490,7 +4508,7 @@ fn source_root_journal_compacts_settled_history_without_losing_generation_on_res
 #[test]
 fn source_root_journal_full_of_pending_intents_refuses_without_discarding_them() {
     let label = "naming-journal-full";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -4565,7 +4583,7 @@ fn source_root_journal_full_of_pending_intents_refuses_without_discarding_them()
 fn a_bound_claim_tells_the_agent_where_its_turns_are_measured_in_its_first_prompt() {
     let label = "naming-bind-line";
     let grant_id = "turn-observation-naming-bind-line-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("turn-observation-naming-bind-line-token"),
@@ -4599,7 +4617,7 @@ fn a_bound_claim_tells_the_agent_where_its_turns_are_measured_in_its_first_promp
 fn a_line_set_after_the_prompt_was_built_waits_for_the_next_prompt() {
     let label = "naming-late-line";
     let grant_id = "turn-observation-naming-late-line-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("turn-observation-naming-late-line-token"),
@@ -4637,7 +4655,7 @@ fn a_line_the_prompt_carried_given_again_after_its_build_stays_the_last_line() {
     // again, or the clear would end the next prompt's lines.
     let label = "naming-line-again";
     let grant_id = "turn-observation-naming-line-again-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("turn-observation-naming-line-again-token"),
@@ -4681,7 +4699,7 @@ fn a_session_that_engram_disables_drops_its_waiting_lines() {
     // line waiting for the next prompt would tell of measurements that no
     // longer happen. A failure that only delays the session keeps it.
     let label = "naming-disabled-drops-lines";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     claimed.record(|record| {
         record
             .engram
@@ -4797,7 +4815,7 @@ fn source_root_stale_opening_capture_cannot_change_a_delivered_successor() {
     let label = "stale-opening-successor";
     let old_grant = format!("turn-observation-{label}-grant");
     let fresh_grant = format!("turn-observation-{label}-fresh-grant");
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply(&format!("turn-observation-{label}-token")),
@@ -4931,7 +4949,7 @@ fn opening_capture_keeps_admitted_basis(transition: &str) {
     let uncertain = matches!(transition, "pending" | "unknown");
     let grant_id = format!("turn-observation-{label}-grant");
     let fresh_grant = format!("turn-observation-{label}-fresh-grant");
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply(&format!("turn-observation-{label}-token")),
@@ -5226,7 +5244,7 @@ fn opening_capture_keeps_admitted_basis(transition: &str) {
 #[test]
 fn a_watcher_event_in_a_named_root_beside_the_workdir_counts_while_the_grant_is_held() {
     let label = "naming-watcher-sibling";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     // The session works in a directory beside the named root, not above it.
@@ -5301,7 +5319,7 @@ fn a_watcher_event_in_a_named_root_beside_the_workdir_counts_while_the_grant_is_
 #[test]
 fn the_naming_route_answers_with_the_handlers_statuses() {
     let label = "naming-route";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let worktree = add_claimed_root_worktree(&claimed.root);
     claimed_root_store(&claimed);
@@ -5354,7 +5372,7 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
     // routes its events to that session's scope and marks the unscoped copy
     // as a duplicate; the turn measured in the root still counts them.
     let label = "naming-watcher-scoped";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     let project_root = fs::canonicalize(&claimed.root).expect("the root canonicalizes");
@@ -5468,7 +5486,7 @@ fn a_turn_admitted_with_a_named_root_marks_a_check_open_in_that_root() {
     // installs it marks another session's check still open in that root.
     let label = "naming-admission-overlap";
     let grant_id = "turn-observation-naming-admission-overlap-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("turn-observation-naming-admission-overlap-token"),
@@ -5554,7 +5572,7 @@ fn a_name_landing_after_the_held_read_is_not_overwritten() {
     // its commit: the call's baseline is the list before the read, so it
     // sees the change and refuses rather than overwrite the newer name.
     let label = "naming-late-other";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     let store = claimed_root_store(&claimed);
     let held = claimed_root_held(label);
@@ -5606,7 +5624,7 @@ fn a_name_landing_after_the_held_read_is_not_overwritten() {
 #[test]
 fn an_explicit_null_path_is_refused_on_the_route() {
     let label = "naming-route-null";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -5656,7 +5674,7 @@ fn a_name_given_again_after_a_clear_is_the_last_line_the_agent_reads() {
     // Name, clear, name the same root again before the next prompt: the
     // pending lines end on the name, the state the turn is measured in.
     let label = "naming-name-clear-name";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -5690,7 +5708,7 @@ fn a_name_given_again_after_a_clear_is_the_last_line_the_agent_reads() {
 #[test]
 fn named_claim_fixture_refuses_an_unregistered_run_without_applying_the_name() {
     let label = "unregistered-named-claim";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     claimed_root_store(&claimed);
@@ -5735,7 +5753,7 @@ fn named_claim_fixture_refuses_an_unregistered_run_without_applying_the_name() {
 fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
     for case in ["distinct", "shared", "expired"] {
         let label = format!("two-claims-{case}");
-        let claimed = ClaimedRoot::new(
+        let claimed = ClaimedRoot::new_scripted(
             &label,
             vec![
                 bind_reply("two-claims-token"),
@@ -5837,7 +5855,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
 #[test]
 fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
     let label = "focused-named-claim";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("first-token"),

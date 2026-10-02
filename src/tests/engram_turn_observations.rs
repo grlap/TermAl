@@ -148,6 +148,7 @@ fn start_mediated_turn_with_script(
 ) -> RunningMediatedTurn {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-turn-observation-{label}"));
+    state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
     let temp_root = state
         .test_temp_root
         .as_ref()
@@ -517,6 +518,14 @@ struct ClaimedRoot {
 }
 
 impl ClaimedRoot {
+    fn new_scripted(label: &str, responses: Vec<ScriptedEngramControlResponse>) -> Self {
+        let fixture = Self::new(label, responses);
+        fixture
+            .state
+            .install_test_engram_budget_clock(EngramBudgetClock::scripted());
+        fixture
+    }
+
     fn new(label: &str, responses: Vec<ScriptedEngramControlResponse>) -> Self {
         let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(&format!(
             "engram-turn-observation-{label}"
@@ -608,7 +617,7 @@ fn a_root_session_on_claimed_work_reports_the_source_change_its_turn_made() {
     // mutation and a turn that changed source reports it, rather than being
     // withheld as a read-only child's would be.
     let grant_id = "turn-observation-root-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         "root",
         vec![
             bind_reply("turn-observation-root-token"),
@@ -1119,7 +1128,7 @@ fn a_turn_is_judged_by_the_effects_its_own_grant_requested() {
     // that changed source under that grant reports nothing rather than a
     // mutate_local claim the grant never covered.
     let grant_id = "turn-observation-replayed-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         "replayed-evaluate",
         vec![
             bind_reply("turn-observation-replayed-token"),
@@ -1662,7 +1671,7 @@ fn a_turn_on_a_claim_with_a_named_source_root_is_measured_in_that_worktree() {
     // once; its turns on that claim are measured there.
     let label = "named-root";
     let grant_id = "turn-observation-named-root-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("turn-observation-named-root-token"),
@@ -1730,7 +1739,7 @@ fn a_turn_on_a_claim_with_a_named_source_root_is_measured_in_that_worktree() {
 /// the work's source root before the turn is dispatched, else during it.
 fn named_root_turn(label: &str, name_first: bool) -> (ClaimedRoot, PathBuf, RuntimeToken) {
     let grant_id = format!("turn-observation-{label}-grant");
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply(&format!("turn-observation-{label}-token")),
@@ -1869,7 +1878,7 @@ fn without_a_closing_basis_a_watcher_event_inside_the_named_root_is_a_change() {
 fn an_edit_in_the_main_checkout_is_no_change_of_a_turn_measured_in_a_named_root() {
     let label = "named-root-main-edit";
     let grant_id = "turn-observation-named-root-main-edit-grant";
-    let claimed = ClaimedRoot::new(
+    let claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("turn-observation-named-root-main-edit-token"),

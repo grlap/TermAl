@@ -3065,6 +3065,7 @@ struct EngramBindingTarget {
     work_binding: Option<EngramControlWorkBinding>,
     source_root_read_fence: EngramRootReadFence,
     adapter: Arc<EngramHostAdapter>,
+    budget_clock: EngramBudgetClock,
     admission_started_at: Option<std::time::Instant>,
     #[cfg(test)]
     test_dispatch_budget: Option<Duration>,
@@ -3126,7 +3127,7 @@ impl EngramBindingTarget {
         &self,
         deadline: std::time::Instant,
     ) -> Result<Duration, EngramTransportError> {
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let remaining = deadline.saturating_duration_since(self.budget_clock.now());
         if remaining.is_zero() {
             return Err(EngramTransportError::deadline(
                 "Engram operation budget exhausted before transport",
@@ -3505,14 +3506,16 @@ impl AppState {
         self.recover_prepared_engram_sessions_after_boot(plan);
     }
 
-    /// Coordinates eager recovery only until the configured wall-clock
+    /// Coordinates eager recovery only until the configured monotonic
     /// budget. Workers are ordinary owned threads rather than scoped threads,
     /// so one transport that ignores its request timeout cannot hold the
     /// coordinator beyond the budget. Completed work always counts, even when
     /// its result arrives after the coordinator stops waiting; only targets
     /// that have not finished remain readiness-fenced for a lazy retry.
     fn recover_prepared_engram_sessions_after_boot(&self, plan: EngramBootRecoveryPlan) {
-        let started_at = std::time::Instant::now();
+        let clock = self.engram_budget_clock();
+        let started_at = clock.now();
+        let deadline = started_at + plan.budget;
         let target_ids = plan
             .targets
             .iter()
@@ -3524,9 +3527,7 @@ impl AppState {
         let mut in_flight = HashSet::<String>::new();
 
         loop {
-            while in_flight.len() < ENGRAM_BOOT_RECOVERY_CONCURRENCY
-                && started_at.elapsed() < plan.budget
-            {
+            while in_flight.len() < ENGRAM_BOOT_RECOVERY_CONCURRENCY && clock.now() < deadline {
                 let Some(target) = pending.pop_front() else {
                     break;
                 };
@@ -3535,6 +3536,7 @@ impl AppState {
                 let thread_name = format!("engram-recover-{session_id}");
                 let state = self.clone();
                 let sender = completion_tx.clone();
+                let worker_clock = clock.clone();
                 let accepting_completions = accepting_completions.clone();
                 match std::thread::Builder::new()
                     .name(thread_name)
@@ -3559,6 +3561,8 @@ impl AppState {
                             .expect("boot recovery completion gate mutex poisoned");
                         if *accepting {
                             let _ = sender.send(completion);
+                            drop(accepting);
+                            worker_clock.notify();
                         } else {
                             drop(accepting);
                             state.finish_late_engram_restart_recovery(completion);
@@ -3580,16 +3584,16 @@ impl AppState {
             if in_flight.is_empty() {
                 break;
             }
-            let Some(remaining) = plan.budget.checked_sub(started_at.elapsed()) else {
+            let Some(remaining) = deadline.checked_duration_since(clock.now()) else {
                 break;
             };
             if remaining.is_zero() {
                 break;
             }
-            match completion_rx.recv_timeout(remaining) {
+            match clock.recv_until(&completion_rx, deadline) {
                 Ok(completion) => {
                     in_flight.remove(&completion.session_id);
-                    if started_at.elapsed() <= plan.budget {
+                    if clock.now() <= deadline {
                         self.finish_engram_restart_recovery(
                             &completion.session_id,
                             completion.elapsed,
@@ -3629,13 +3633,13 @@ impl AppState {
         if unfinished > 0 {
             eprintln!(
                 "engram> boot-recovery command=overall elapsed_ms={} outcome=budget_exhausted budget_ms={} unfinished={unfinished}",
-                duration_millis(started_at.elapsed()),
+                duration_millis(clock.elapsed_since(started_at)),
                 plan.budget.as_millis()
             );
         } else {
             eprintln!(
                 "engram> boot-recovery command=overall elapsed_ms={} outcome=complete budget_ms={} unfinished=0",
-                duration_millis(started_at.elapsed()),
+                duration_millis(clock.elapsed_since(started_at)),
                 plan.budget.as_millis()
             );
         }
@@ -5798,6 +5802,7 @@ impl AppState {
             source_root_read_fence: EngramRootReadFence::capture(inner),
             admission_started_at: None,
             adapter: inner.engram_host_adapter.clone(),
+            budget_clock: inner.engram_budget_clock.clone(),
             #[cfg(test)]
             test_dispatch_budget: inner.test_engram_dispatch_budget,
             #[cfg(test)]
@@ -5892,6 +5897,7 @@ impl AppState {
             runtime_snapshot: parent.runtime.runtime_token(),
             admission_started_at: None,
             adapter: inner.engram_host_adapter.clone(),
+            budget_clock: inner.engram_budget_clock.clone(),
             #[cfg(test)]
             test_dispatch_budget: inner.test_engram_dispatch_budget,
             #[cfg(test)]
@@ -6088,6 +6094,7 @@ impl AppState {
         trace_boot_recovery: bool,
         owner: Option<&EngramQueuedAdmissionOwner>,
     ) -> std::result::Result<String, EngramTransportError> {
+        let clock = self.engram_budget_clock();
         let runtime_enabled = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -6111,16 +6118,14 @@ impl AppState {
             ));
         }
         if let Some(retry_at) = target.next_bind_retry_at
-            && let Some(remaining) = retry_at.checked_duration_since(std::time::Instant::now())
+            && let Some(remaining) = retry_at.checked_duration_since(clock.now())
         {
             return Err(EngramTransportError::backoff(format!(
                 "Engram bind retry is delayed for {} ms",
                 remaining.as_millis()
             )));
         }
-        let recovery_started_at = target
-            .admission_started_at
-            .unwrap_or_else(std::time::Instant::now);
+        let recovery_started_at = target.admission_started_at.unwrap_or_else(|| clock.now());
         // An uncertain grant can only be settled by a session status, so it
         // takes the rebind path even when nothing else asked for one.
         let was_rebind =
@@ -6132,7 +6137,7 @@ impl AppState {
                     .ok_or_else(|| {
                         EngramTransportError::deadline("Engram rebind budget exhausted")
                     })?;
-                let status_started_at = std::time::Instant::now();
+                let status_started_at = clock.now();
                 if let Some(owner) = owner {
                     self.require_queued_engram_owner(
                         &target.connection.session_id,
@@ -6167,7 +6172,7 @@ impl AppState {
                         &target.connection.session_id,
                         "session_status",
                         1,
-                        status_started_at.elapsed(),
+                        clock.elapsed_since(status_started_at),
                         &status,
                     );
                 }
@@ -6219,7 +6224,7 @@ impl AppState {
                             .ok_or_else(|| {
                                 EngramTransportError::deadline("Engram rebind budget exhausted")
                             })?;
-                        let checkpoint_started_at = std::time::Instant::now();
+                        let checkpoint_started_at = clock.now();
                         if let Some(owner) = owner {
                             self.require_queued_engram_owner(
                                 &target.connection.session_id,
@@ -6278,7 +6283,7 @@ impl AppState {
                                 &target.connection.session_id,
                                 "turn_checkpoint",
                                 1,
-                                checkpoint_started_at.elapsed(),
+                                clock.elapsed_since(checkpoint_started_at),
                                 &checkpoint,
                             );
                         }
@@ -6375,12 +6380,12 @@ impl AppState {
 
         let mut stale_retry_used = false;
         let mut rejected_bind_request: Option<EngramControlRequest> = None;
-        let binding_root_started = std::time::Instant::now();
+        let binding_root_started = clock.now();
         let binding_deadline = target.root_operation_deadline(binding_root_started);
         let mut bound_root_guard = None;
         let (binding, bound_request) = loop {
             let attempt = usize::from(stale_retry_used) + 1;
-            let bind_started_at = std::time::Instant::now();
+            let bind_started_at = clock.now();
             let request = if let Some(started_at) = target.admission_started_at {
                 self.queued_engram_bind_request(
                     &target,
@@ -6471,7 +6476,7 @@ impl AppState {
                     &target.connection.session_id,
                     "session_bind",
                     attempt,
-                    bind_started_at.elapsed(),
+                    clock.elapsed_since(bind_started_at),
                     &result,
                 );
             }
@@ -6803,7 +6808,7 @@ impl AppState {
         }
         if target.routing_token.is_none() || target.rebind_required || target.circuit_open {
             if let Some(retry_at) = target.next_bind_retry_at
-                && let Some(remaining) = retry_at.checked_duration_since(std::time::Instant::now())
+                && let Some(remaining) = retry_at.checked_duration_since(target.budget_clock.now())
             {
                 return Err(EngramTransportError::backoff(format!(
                     "Engram bind retry is backed off for {} ms",
@@ -6827,7 +6832,8 @@ impl AppState {
         &self,
         intent: &EngramTurnIntentSnapshot,
     ) -> Option<EngramPendingDispatch> {
-        let started_at = std::time::Instant::now();
+        let clock = self.engram_budget_clock();
+        let started_at = clock.now();
         let (disabled_reason, admission_owner) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let record = inner
@@ -6848,7 +6854,7 @@ impl AppState {
                     ),
                     code,
                 },
-                evaluate_latency_ms: duration_millis(started_at.elapsed()),
+                evaluate_latency_ms: duration_millis(clock.elapsed_since(started_at)),
                 started_at,
                 awaiting_runtime_stop_resolution: false,
                 begin_requested: None,
@@ -6876,7 +6882,7 @@ impl AppState {
                         code,
                         detail: error.message,
                     },
-                    evaluate_latency_ms: duration_millis(started_at.elapsed()),
+                    evaluate_latency_ms: duration_millis(clock.elapsed_since(started_at)),
                     started_at,
                     awaiting_runtime_stop_resolution: false,
                     begin_requested: None,
@@ -7118,7 +7124,7 @@ impl AppState {
             dispatch_generation: intent.dispatch_generation,
             intent_fingerprint: intent.intent_fingerprint.clone(),
             evaluated,
-            evaluate_latency_ms: duration_millis(started_at.elapsed()),
+            evaluate_latency_ms: duration_millis(clock.elapsed_since(started_at)),
             started_at,
             awaiting_runtime_stop_resolution: false,
             begin_requested: None,
@@ -7183,6 +7189,7 @@ impl AppState {
     }
 
     fn record_engram_transport_failure(&self, session_id: &str, error: &EngramTransportError) {
+        let clock = self.engram_budget_clock();
         // Local binding integrity is not evidence about the transport's health.
         if error.kind == EngramTransportErrorKind::LocalState {
             return;
@@ -7220,7 +7227,7 @@ impl AppState {
                 record.engram.circuit_open =
                     record.engram.consecutive_transport_failures >= ENGRAM_CIRCUIT_BREAKER_FAILURES;
                 record.engram.next_bind_retry_at = Some(
-                    std::time::Instant::now()
+                    clock.now()
                         + engram_bind_retry_delay(record.engram.consecutive_transport_failures),
                 );
             }
@@ -7234,6 +7241,7 @@ impl AppState {
         error: &EngramTransportError,
         owner: Option<&EngramQueuedAdmissionOwner>,
     ) {
+        let clock = self.engram_budget_clock();
         // A late reply belongs to the captured queue head. It must not poison
         // a successor's circuit/backoff state after cancellation supersedes
         // that owner.
@@ -7278,8 +7286,7 @@ impl AppState {
             record.engram.circuit_open =
                 record.engram.consecutive_transport_failures >= ENGRAM_CIRCUIT_BREAKER_FAILURES;
             record.engram.next_bind_retry_at = Some(
-                std::time::Instant::now()
-                    + engram_bind_retry_delay(record.engram.consecutive_transport_failures),
+                clock.now() + engram_bind_retry_delay(record.engram.consecutive_transport_failures),
             );
         }
         record.engram.rebind_required = true;

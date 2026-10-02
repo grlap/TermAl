@@ -916,14 +916,18 @@ fn engram_turn_root_capture_locked(inner: &StateInner, session_id: &str) -> Engr
     }
 }
 
-fn engram_removed_root_read_now() -> std::time::Instant {
+fn engram_removed_root_read_now(clock: &EngramBudgetClock) -> std::time::Instant {
+    #[cfg(test)]
+    if matches!(clock, EngramBudgetClock::Scripted(_)) {
+        return clock.now();
+    }
     #[cfg(test)]
     if let Some(now) = TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK
         .with(|clock| clock.borrow_mut().as_mut().map(|clock| clock()))
     {
         return now;
     }
-    std::time::Instant::now()
+    clock.now()
 }
 
 impl AppState {
@@ -935,11 +939,12 @@ impl AppState {
         claim: Option<&str>,
         budget: Duration,
     ) {
-        let deadline = engram_removed_root_read_now() + budget.min(Duration::from_secs(2));
+        let clock = self.engram_budget_clock();
+        let deadline = engram_removed_root_read_now(&clock) + budget.min(Duration::from_secs(2));
         if claim.is_none() {
             self.recover_engram_authority_runs(
                 session_id,
-                deadline.saturating_duration_since(engram_removed_root_read_now()),
+                deadline.saturating_duration_since(engram_removed_root_read_now(&clock)),
             );
         }
         let (target, journals) = {
@@ -999,7 +1004,7 @@ impl AppState {
             (target, journals)
         };
         for (before, selected_before) in journals {
-            let budget = deadline.saturating_duration_since(engram_removed_root_read_now());
+            let budget = deadline.saturating_duration_since(engram_removed_root_read_now(&clock));
             if budget.is_zero() {
                 break;
             }
@@ -1021,7 +1026,7 @@ impl AppState {
             else {
                 continue;
             };
-            let budget = deadline.saturating_duration_since(std::time::Instant::now());
+            let budget = deadline.saturating_duration_since(clock.now());
             if budget.is_zero() {
                 break;
             }
@@ -1162,12 +1167,13 @@ impl AppState {
         state: Option<EngramNamedRootState>,
         budget: Duration,
     ) -> Result<(), EngramTransportError> {
+        let clock = self.engram_budget_clock();
         self.reconcile_engram_begin_root_until(
             target,
             routing_token,
             binding,
             state,
-            std::time::Instant::now() + budget,
+            clock.now() + budget,
             None,
             None,
         )
@@ -1184,6 +1190,7 @@ impl AppState {
         mut guard: Option<EngramAcknowledgedRootGuard>,
         admission_owner: Option<&EngramQueuedAdmissionOwner>,
     ) -> Result<EngramRootReconcileOutcome, EngramTransportError> {
+        let clock = self.engram_budget_clock();
         let (read_generation, needs_status) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let entry = target
@@ -1205,7 +1212,7 @@ impl AppState {
             (EngramRootReadFence::capture(&inner), needs_status)
         };
         if needs_status {
-            if std::time::Instant::now() >= deadline {
+            if clock.now() >= deadline {
                 state = Some(EngramNamedRootState::Unknown);
             } else {
                 if guard.as_ref().is_none_or(|guard| {
@@ -1271,6 +1278,7 @@ impl AppState {
             &EngramNamedRootState,
         )>,
     ) -> Result<(), ApiError> {
+        let clock = self.engram_budget_clock();
         let (target, binding) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let binding = engram_root_journal(
@@ -1296,7 +1304,7 @@ impl AppState {
                 .ok_or_else(|| ApiError::conflict("replay retirement has no reader connection"))?;
             (target, binding)
         };
-        let deadline = std::time::Instant::now() + target.settings.call_timeout();
+        let deadline = clock.now() + target.settings.call_timeout();
         let owner = self.prepare_engram_authority_until(&event.root.store, &binding, deadline)?;
         let proof = self.read_engram_authority_fact_until(&target, &binding, deadline)?;
         if proof.read_cut.position < receipt.position.position {
@@ -1372,7 +1380,8 @@ impl AppState {
     /// budget. It never grows admission's bind path or holds the state lock
     /// across Engram I/O. A failed send remains in the durable journal.
     fn flush_engram_root_cleanup(&self, session_id: &str, budget: Duration) {
-        let deadline = std::time::Instant::now() + budget;
+        let clock = self.engram_budget_clock();
+        let deadline = clock.now() + budget;
         let prepared = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(target) =
@@ -1535,7 +1544,8 @@ impl AppState {
         event: &EngramNamedRootEvent,
         budget: Duration,
     ) -> Result<EngramRootEventReply, ApiError> {
-        self.send_engram_root_event_until(target, event, std::time::Instant::now() + budget)
+        let clock = self.engram_budget_clock();
+        self.send_engram_root_event_until(target, event, clock.now() + budget)
     }
 
     fn send_engram_root_event_until(
@@ -1544,6 +1554,7 @@ impl AppState {
         event: &EngramNamedRootEvent,
         deadline: std::time::Instant,
     ) -> Result<EngramRootEventReply, ApiError> {
+        let clock = self.engram_budget_clock();
         let binding = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             engram_root_journal(
@@ -1570,7 +1581,7 @@ impl AppState {
         let token = target.routing_token.as_deref().ok_or_else(|| {
             ApiError::conflict("Engram session is not bound; retry naming after its next admission")
         })?;
-        if std::time::Instant::now() >= deadline {
+        if clock.now() >= deadline {
             return Err(ApiError::bad_gateway(
                 "named-root transition is pending; its naming budget expired before transport",
             ));
@@ -1649,7 +1660,7 @@ impl AppState {
         let proof = self.read_engram_authority_fact(
             target,
             &binding,
-            deadline.saturating_duration_since(std::time::Instant::now()),
+            deadline.saturating_duration_since(clock.now()),
         )?;
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1795,6 +1806,7 @@ impl AppState {
         expected_connection: Option<&EngramConnectionConfig>,
         budget: Duration,
     ) -> Result<(), EngramTransportError> {
+        let clock = self.engram_budget_clock();
         self.reconcile_engram_named_root_with_fence_until(
             session_id,
             expected_token,
@@ -1802,7 +1814,7 @@ impl AppState {
             state,
             fence,
             expected_connection,
-            std::time::Instant::now() + budget,
+            clock.now() + budget,
         )
     }
 
