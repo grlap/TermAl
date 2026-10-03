@@ -150,10 +150,10 @@ in Engram::Advisor's session, recorded verbatim):
   onto master (as of 2026-09-27: Termal::Opus2); send the handoff by TermAl
   mailbox. If no owner has been assigned, request the assignment from the
   task coordinator (as of 2026-09-27: Termal::Fable2) before integration.
-- The tracker is Engram. Beads was retired on 2026-09-28 after a verified
-  import and removed from the repository on 2026-10-03 on Greg's word
-  ('Nie jest potrzebny. Możemy Usunąc beads completnie.'); its history is
-  kept in the imported Engram items.
+- The tracker is Engram; agents run no bd command. Beads was retired on
+  2026-09-28 after a verified import and removed from the repository on
+  2026-10-03 on Greg's word ('Nie jest potrzebny. Możemy Usunąc beads
+  completnie.'); its history is kept in the imported Engram items.
 - Changes to this section, or to any repository instruction or command
   file that grants or limits commit, push, tracker or approval authority,
   land under the standing rule only after (a) both projects' coordinators
