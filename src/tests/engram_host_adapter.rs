@@ -198,6 +198,7 @@ fn engram_context_nudge_truncation_preserves_utf8_boundaries() {
 #[test]
 fn repository_declaration_changes_reset_existing_session_runtimes() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -290,6 +291,8 @@ fn failed_engram_context_refresh_stays_pending_for_retry() {
     assert!(inner.sessions[index].engram.context_nudge_pending);
     assert!(!inner.sessions[index].engram.context_nudge_in_progress);
     assert!(inner.sessions[index].engram.pending_context_nudge.is_none());
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -1498,6 +1501,24 @@ pub(super) fn enable_test_project_engram(state: &AppState, project_id: &str, roo
         .expect("Engram test project settings should persist");
 }
 
+/// A settings test that reads no Engram budget clock: nothing snapshotted the
+/// state's clock, so the test needs no clock choice. Other real-time limits,
+/// such as the readiness probe's, are not budget-clock reads. A path that
+/// starts reading the clock fails here and must choose one first. Choosing a
+/// clock counts as a read, so only tests that choose none can call this.
+fn assert_engram_budget_clock_unread(state: &AppState) {
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_budget_clock_snapshots
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "this settings test must not reach an Engram operation budget"
+    );
+}
+
 #[test]
 fn dispatch_budget_override_is_state_local_and_snapshotted() {
     fn parent_target(state: &AppState, session_id: &str) -> EngramBindingTarget {
@@ -1510,7 +1531,9 @@ fn dispatch_budget_override_is_state_local_and_snapshotted() {
     let ordering_state = test_app_state();
     let budget_state = test_app_state();
     let mut parents = Vec::new();
+    let mut clocks = Vec::new();
     for state in [&ordering_state, &budget_state] {
+        clocks.push(state.select_test_scripted_engram_budget_clock());
         let root = state
             .test_temp_root
             .as_ref()
@@ -1524,16 +1547,30 @@ fn dispatch_budget_override_is_state_local_and_snapshotted() {
     ordering_state.install_control_test_transport(ScriptedEngramControlTransport::new([]));
     let ordering_target = parent_target(&ordering_state, &parents[0]);
     let budget_target = parent_target(&budget_state, &parents[1]);
-    let expired_production_start =
-        std::time::Instant::now() - Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS + 1);
+    assert_eq!(budget_target.test_dispatch_budget, None);
+    // Each state's dispatch budget starts on its own scripted clock. Before
+    // the production budget is spent, both targets still have time.
+    let ordering_start = clocks[0].now();
+    let production_start = clocks[1].now();
     assert_eq!(
-        ordering_target.remaining_dispatch_timeout(expired_production_start),
+        ordering_target.remaining_dispatch_timeout(ordering_start),
+        Some(ordering_target.settings.call_timeout()),
+    );
+    assert_eq!(
+        budget_target.remaining_dispatch_timeout(production_start),
+        Some(budget_target.settings.call_timeout()),
+        "an unspent production budget leaves a full call to dispatch"
+    );
+    for clock in &clocks {
+        clock.advance(Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS + 1));
+    }
+    assert_eq!(
+        ordering_target.remaining_dispatch_timeout(ordering_start),
         Some(ordering_target.settings.call_timeout()),
         "ordering fixtures retain their per-call cap with scheduling headroom",
     );
-    assert_eq!(budget_target.test_dispatch_budget, None);
     assert_eq!(
-        budget_target.remaining_dispatch_timeout(expired_production_start),
+        budget_target.remaining_dispatch_timeout(production_start),
         None
     );
 
@@ -1659,6 +1696,7 @@ fn start_scripted_engram_delegation(
     transport: Arc<ScriptedEngramControlTransport>,
 ) -> (AppState, String, RuntimeToken) {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(suffix);
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -1708,6 +1746,7 @@ fn start_scripted_engram_delegation(
 #[test]
 fn delegated_turn_binds_evaluates_begins_and_checkpoints_once() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s1");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2051,6 +2090,7 @@ fn work_claim_mismatch_is_a_nonretrying_session_configuration_fault() {
     );
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-a0-work-mismatch");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2189,6 +2229,7 @@ fn checkpoint_observations_are_serialized_and_participate_in_idempotency() {
 #[test]
 fn mailbox_and_orchestrator_sources_each_evaluate_and_begin_once() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-source-kinds");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2341,6 +2382,9 @@ fn live_engram_store_turn_gated_bind_evaluate_begin_checkpoint_e2e() {
 
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-live-turn-gated-e2e");
+    // A real Engram process answers on its own time; this test measures
+    // the live store, not scheduling, so its budgets run on real time.
+    state.declare_test_real_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2462,6 +2506,7 @@ fn live_engram_store_turn_gated_bind_evaluate_begin_checkpoint_e2e() {
 fn routing_token_replay_from_another_session_is_withheld_without_begin() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-routing-token-replay");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2602,6 +2647,7 @@ fn routing_token_replay_from_another_session_is_withheld_without_begin() {
 fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-checkpoint-required");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2747,6 +2793,7 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
 fn checkpoint_required_evaluation_withholds_automatic_mailbox_work() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-mailbox-evaluate-block");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2868,6 +2915,7 @@ fn checkpoint_required_evaluation_withholds_automatic_mailbox_work() {
 #[test]
 fn unreachable_engram_degrades_within_deadline_and_withholds_prompt() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s6");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -2930,6 +2978,7 @@ fn unreachable_engram_degrades_within_deadline_and_withholds_prompt() {
 #[test]
 fn stale_begin_is_reevaluated_once_before_runtime_delivery() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s2");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -3076,6 +3125,7 @@ fn issued_but_unbegun_checkpoint_matches_only_grant_not_begun() {
 fn non_expiring_begin_refusal_is_withheld_and_arms_rebind() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-non-expiring-begin-refusal");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -3158,6 +3208,7 @@ fn non_expiring_begin_refusal_is_withheld_and_arms_rebind() {
 fn turn_already_open_evaluation_decision_is_withheld_and_arms_fresh_bind_repair() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-open-turn-decision");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -3295,6 +3346,7 @@ fn turn_already_open_evaluation_decision_is_withheld_and_arms_fresh_bind_repair(
 fn issued_grant_invalidated_before_begin_is_withheld_and_arms_rebind() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-issued-before-begin");
+    let clock = state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -3341,8 +3393,8 @@ fn issued_grant_invalidated_before_begin_is_withheld_and_arms_rebind() {
     let transport = StatefulEngramControlTransport::new();
     state.install_control_test_transport(transport.clone());
 
-    // This test specifically exercises the real hot-path deadline; only the
-    // ordering fixtures use the state-local scheduling override.
+    // This test specifically exercises the production hot-path budget; only
+    // the ordering fixtures use the state-local scheduling override.
     state
         .inner
         .lock()
@@ -3369,20 +3421,30 @@ fn issued_grant_invalidated_before_begin_is_withheld_and_arms_rebind() {
         .grant_state(&child_id)
         .0
         .expect("evaluate should leave one issued grant before delivery");
+    // The begin budget started at evaluate on the scripted clock. Unspent, it
+    // leaves time to begin; spent across its boundary, it leaves none.
     {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(&child_id)
             .expect("child should exist");
-        let pending = inner
-            .session_mut_by_index(index)
-            .expect("child should be mutable")
+        let started_at = inner.sessions[index]
             .engram
             .pending_dispatch
-            .as_mut()
-            .expect("evaluate should stage a pending dispatch");
-        pending.started_at =
-            std::time::Instant::now() - Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS + 1);
+            .as_ref()
+            .expect("evaluate should stage a pending dispatch")
+            .started_at;
+        let target =
+            AppState::engram_binding_target_for_session_shape_locked(&inner, &child_id, true)
+                .expect("the child's target should resolve")
+                .expect("the child should have an Engram target");
+        drop(inner);
+        assert!(
+            target.remaining_dispatch_timeout(started_at).is_some(),
+            "an unspent begin budget leaves time to begin"
+        );
+        clock.advance(Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS + 1));
+        assert_eq!(target.remaining_dispatch_timeout(started_at), None);
     }
     deliver_turn_dispatch(&state, first_dispatch)
         .expect("an expired Engram begin budget parks the original prompt without delivery");
@@ -3442,6 +3504,7 @@ fn issued_grant_invalidated_before_begin_is_withheld_and_arms_rebind() {
 fn stop_abandons_an_off_adapter_pending_grant_and_rebinds_before_the_next_dispatch() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-stop-abandoned-pending");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -3659,6 +3722,7 @@ fn runtime_exit_abandons_an_off_adapter_pending_grant_and_arms_rebind() {
 #[test]
 fn slow_control_transport_never_holds_the_state_mutex() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s6b");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -3843,6 +3907,7 @@ fn project_engram_verification_is_redacted_and_does_not_mutate_settings() {
             .is_none(),
         "Verify must not persist the proposed settings"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -3899,6 +3964,7 @@ fn project_engram_verification_and_save_require_no_grant() {
             .as_ref()
             .is_some_and(|settings| { settings.enabled && !settings.turn_gated_control })
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -3934,6 +4000,7 @@ fn client_snapshot_derives_repository_engram_declaration_without_grant_fields() 
     assert!(project.get("engramGrantConfigured").is_none());
     assert_eq!(project["engramOperatorDisabled"], false);
     assert!(project["engram"].get("workAuthorityGrant").is_none());
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -4024,9 +4091,12 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
             .contains("disable every enabled Engram project")
     );
 
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert_eq!(inner.preferences.engram.home, root.to_string_lossy());
-    assert_eq!(inner.preferences.engram.boot_recovery_budget_ms, 7_500);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(inner.preferences.engram.home, root.to_string_lossy());
+        assert_eq!(inner.preferences.engram.boot_recovery_budget_ms, 7_500);
+    }
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -4110,6 +4180,7 @@ fn project_engram_connection_accepts_the_default_path_command() {
     assert_eq!(binary_path, PathBuf::from("engram"));
     assert_eq!(project_file, root.join(".engram-project"));
     assert_eq!(home, root);
+    assert_engram_budget_clock_unread(&state);
 }
 
 fn fixture_authority_revoke_args_path(root: &FsPath) -> PathBuf {
