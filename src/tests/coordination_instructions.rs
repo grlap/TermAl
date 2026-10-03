@@ -31,7 +31,7 @@ fn guidance_session(agent: Agent) -> (AppState, String) {
 
 fn claude_initialize_frame(state: &AppState, session_id: &str) -> Value {
     let mut bytes = Vec::new();
-    write_claude_initialize(&mut bytes, state, session_id).unwrap();
+    write_claude_initialize(&mut bytes, state, session_id, None).unwrap();
     serde_json::from_slice(bytes.trim_ascii_end()).unwrap()
 }
 

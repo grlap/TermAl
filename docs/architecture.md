@@ -1050,10 +1050,13 @@ transcript cards. This broader fail-closed coverage deliberately trades some
 retry availability for protection against replaying effects introduced by
 future or unrecognized protocol events.
 The parser starts each accepted prompt generation with fresh turn-local state.
-Claude's exact text/image `user` echo, process-scoped `SessionStart` hooks, the
-`status=requesting` admission envelope, and quota-only `rate_limit_event` are
-the explicitly verified effect-free frames; tool results, prompt hooks, output,
-and unknown shapes remain replay barriers.
+Claude's exact text/image `user` echo, the process's startup `SessionStart` hooks
+(only before its first `init`), the `status=requesting` admission envelope, and
+quota-only `rate_limit_event` are the explicitly verified effect-free frames.
+Tool results, prompt hooks, `SessionStart` hooks after the first `init` (which
+also run on every compaction), hook callbacks, output, and unknown shapes
+remain replay barriers. See the SessionStart compact hook in
+[the Engram host adapter brief](./features/engram-host-adapter.md).
 Delayed retries are bound to the originating prompt generation,
 revalidate the live runtime immediately before writing, and are discarded when
 the runtime enters Stop or is replaced. The saved prompt is cleared when its

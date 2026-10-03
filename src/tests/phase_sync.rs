@@ -209,6 +209,10 @@ impl WorkContextGate {
                 Err(error) => panic!("work-context fixture accept failed: {error}"),
             }
         };
+        // On Windows a socket accepted from the non-blocking listener is
+        // non-blocking too: a fixture that has connected but not yet sent its
+        // ready byte would fail the read at once instead of being waited for.
+        peer.set_nonblocking(false).unwrap();
         peer.set_read_timeout(Some(DEADLOCK_GUARD)).unwrap();
         let mut ready = [0];
         peer.read_exact(&mut ready)

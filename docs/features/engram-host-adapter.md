@@ -263,7 +263,8 @@ MCP; host orientation does not replace that read.
 This protects the delivery cursor, not the completeness of recovery: the host
 prepares the nudge at the next TermAl prompt dispatch, not synchronously at the
 compaction boundary. It does not guarantee an Engram block before the model's
-first action in an automatically continued post-compaction turn.
+first action in an automatically continued post-compaction turn. For Claude,
+the SessionStart compact hook below closes that gap where it can.
 
 The command receives the same `ENGRAM_*` environment values as the MCP child,
 and its actor/context flags are byte-identical to that environment. Its trimmed
@@ -292,6 +293,76 @@ bytes each; missing, oversized, or evicted ids may signal again. Deduplication i
 best effort and is not the mechanism that protects ordinary delivery. Configuration
 changes retain their separate invalidation behavior. These rules preserve host
 handoff; they do not prove that a model read or obeyed the delivered context.
+
+### Claude: the SessionStart compact hook
+
+Claude Code runs SessionStart hooks with source `compact` while it compacts,
+and attaches a hook's `additionalContext` to the first continuation after the
+compaction. TermAl registers one such hook as a control-channel callback in the
+initialize request of a Claude runtime whose session is Engram-configured at
+spawn, exactly when the runtime also gets the Engram MCP server: base-enabled,
+local, declared, with a binary and a home (`src/claude_compact_hook.rs`). Before this, initialize sent `hooks: {}`
+and the host left any `hook_callback` control request unanswered; the earlier
+note that the host already handled hook control events was wrong for callbacks.
+
+- **Snapshot.** Registration is decided once, before initialize is written,
+  and the runtime's responder is installed with it. Enabling Engram later adds
+  no hook to a running runtime: no second initialize, no restart. That session
+  keeps the next-prompt nudge until its runtime is next created.
+- **Answer.** Live Claude Code 2.1.288 sends the callback during status
+  `compacting`, before `compact_boundary`, and compaction waits for the answer.
+  A callback naming this runtime's callback id, SessionStart and source
+  `compact` asks for a fresh context for this compaction. The same bounded
+  `work next --peek` read as the nudge then runs on a worker, off the state lock
+  and off the stdout reader. The answer goes through the runtime's one writer:
+  the fenced context as `hookSpecificOutput.additionalContext`, or an empty
+  answer when there is none (not applicable, a failed read, a settings change
+  meanwhile, or no context ready within the answer budget). The budget is the
+  context command's timeout plus four seconds. The hook is registered with a
+  timeout 20 seconds longer, so the host's empty answer comes before Claude Code
+  would cancel. A page fetched before the compaction and not yet sent is dropped,
+  and the answer is read afresh under the compaction's new generation.
+- **Correlation.** When the callback arrives the host records the compaction's
+  refresh request and takes a ticket: the generation the compaction's own read
+  claims and the session's Engram settings identity (project, its settings,
+  the actor). The answer is only the page the hook's own read fetched for that
+  generation. The hook does not wait for another read or reuse a page it did not
+  fetch, and it does not read again when the generation moves on during its read.
+  Each of those cases, and a changed settings identity, gives the empty answer;
+  any page fetched meanwhile stays for the next prompt. The answer budget runs
+  from the callback's arrival to the end of the write: context still queued
+  past it is written as the empty answer, and context whose write ends after it
+  is not delivered.
+- **One answer.** One pending owner per request takes the answer: the worker's
+  result, the budget's empty answer, or Claude Code's `control_cancel_request`,
+  after which nothing is written. A cancel that lands while the answer is being
+  written lets the write finish but delivers nothing. An answer for a runtime
+  that is no longer the session's is dropped. A duplicate callback is answered
+  once. Any other
+  well-formed callback gets an empty hook answer, never a permission decision;
+  one with no callback id or input gets an error answer. The runtime's echo of
+  the host's answer on stdout is not a new frame.
+- **Delivery and fallback.** The page counts as delivered only once the writer
+  has finished writing the answer, in time and uncancelled, for that
+  still-current runtime, generation and settings identity; then the next
+  prompt carries no second block. Otherwise the page, or the request for one,
+  stays pending and the next prompt carries it as before. A registered
+  callback always asks for a fresh context itself, even after a compaction
+  that ended without its boundary. The `compact_boundary` that follows it does
+  not ask again; a boundary with no callback before it asks as before.
+- **Replay.** The callback is a replay barrier for the attempt it reaches. If
+  it arrives while a written prompt waits between turns, that prompt's next
+  attempt inherits the barrier. It observes no turn, so it opens and closes
+  none. SessionStart hook frames (`hook_started`, `hook_progress`,
+  `hook_response`) are startup bookkeeping only before the runtime's first
+  `init`. After it, including after the `init` a compaction repeats, they are
+  barriers like any other hook (Claude replay safety in
+  [architecture](../architecture.md)).
+
+A written answer is local delivery to the runtime; it is not proof that the
+model used the context. That is judged on a live compaction by the
+`hook_additional_context` attachment on the post-compaction transcript chain,
+not by the model's own report.
 
 For a **new Codex thread** with Engram enabled, TermAl also reads the effective
 configuration through the same app-server's `config/read`, using the thread's
