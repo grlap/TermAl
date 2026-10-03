@@ -2282,6 +2282,19 @@ impl AppState {
         {
             return TurnDispatchDeliveryOutcome::Rejected(error);
         }
+        // A test can hold the child here, after its best-effort bind and
+        // before its admission, as a late-scheduled thread would be.
+        #[cfg(test)]
+        {
+            let stall = self
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .test_delegation_child_admission_stall;
+            if let Some(stall) = stall {
+                std::thread::sleep(stall);
+            }
+        }
         let dispatch = match self.dispatch_turn(
             child_session_id,
             SendMessageRequest {

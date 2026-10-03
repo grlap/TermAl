@@ -302,15 +302,75 @@ fn root_stop_while_bind_waits_prevents_late_provider_handoff() {
     assert_eq!(transport.requests().len(), 1);
 }
 
-fn root_fixture(
-    responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
-) -> (
+type RootFixture = (
     AppState,
     String,
     mpsc::Receiver<CodexRuntimeCommand>,
     Arc<ScriptedEngramControlTransport>,
-) {
+);
+
+/// A root session on a scripted Engram budget clock. Admission budgets and
+/// the bind backoff run on that clock, so a late-scheduled thread cannot move
+/// them; a test about their expiry advances the clock across the boundary.
+fn root_fixture(responses: impl IntoIterator<Item = ScriptedEngramControlResponse>) -> RootFixture {
+    root_fixture_on_clock(
+        responses,
+        AppState::select_test_scripted_engram_budget_clock,
+    )
+}
+
+/// The same root session on real time, for a test that shows what real
+/// scheduling delay does to a budget or backoff.
+fn root_fixture_on_real_clock(
+    responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
+) -> RootFixture {
+    root_fixture_on_clock(responses, AppState::declare_test_real_engram_budget_clock)
+}
+
+/// Arms the session's bind backoff `delay` ahead on the state's scripted
+/// clock, the clock `elapse_bind_backoff` advances.
+fn arm_bind_backoff(state: &AppState, session: &str, delay: Duration) {
+    let retry_at = state.engram_budget_clock().now() + delay;
+    let mut inner = state.inner.lock().unwrap();
+    let index = inner.find_session_index(session).unwrap();
+    inner.sessions[index].engram.next_bind_retry_at = Some(retry_at);
+}
+
+/// Lets the session's armed bind backoff run out the way time does: the
+/// state's scripted budget clock advances just past it. The backoff is first
+/// shown still pending, then due. A session with no armed backoff has none
+/// to elapse.
+fn elapse_bind_backoff(state: &AppState, session: &str) {
+    let clock = state.engram_budget_clock();
+    let retry_at = {
+        let inner = state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(session).unwrap()]
+            .engram
+            .next_bind_retry_at
+    };
+    let Some(retry_at) = retry_at else {
+        return;
+    };
+    let before = clock.now();
+    assert!(
+        retry_at > before,
+        "the bind backoff must still be pending before its time passes"
+    );
+    // Past the instant itself: a backoff at exactly now still delays a bind.
+    clock.advance(retry_at.duration_since(before) + Duration::from_millis(1));
+    assert!(
+        retry_at < clock.now(),
+        "the bind backoff is due once its time has passed"
+    );
+}
+
+fn root_fixture_on_clock(
+    responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
+    choose_clock: fn(&AppState) -> EngramBudgetClock,
+) -> RootFixture {
     let (state, receiver) = test_app_state_with_delegation_codex_runtime("engram-root-runtime");
+    // The clock is chosen before Engram is enabled or any target exists.
+    choose_clock(&state);
     let root = state
         .test_temp_root
         .as_ref()

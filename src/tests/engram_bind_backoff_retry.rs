@@ -88,9 +88,7 @@ fn bind_real_settings_reset_case(withdrawal: bool, mailbox_coalescing: Option<bo
         inner.sessions[index].set_auto_dispatch_blocked(true);
     }
     if withdrawal {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.next_bind_retry_at = Some(Instant::now() + Duration::from_secs(3600));
+        arm_bind_backoff(&state, &session, Duration::from_secs(3600));
     }
     let send = |key: &str, topic: &str| SendMailboxMessageRequest {
         target_session_id: session.clone(), message: "durable reset-race body".to_owned(),
@@ -442,13 +440,6 @@ fn acknowledge_bind_retry(state: &AppState, session: &str) {
     assert!(record.engram.bind_retry.as_ref().unwrap().acknowledged);
 }
 
-fn elapse_bind_backoff(state: &AppState, session: &str) {
-    let mut inner = state.inner.lock().unwrap();
-    let index = inner.find_session_index(session).unwrap();
-    // Existing backoff fixture seam; the operation-budget clock is separate.
-    inner.sessions[index].engram.next_bind_retry_at = None;
-}
-
 fn bind_failure() -> ScriptedEngramControlResponse {
     ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline("bind reply lost")))
 }
@@ -484,8 +475,8 @@ fn bind_returned_dispatch_real_mailbox_coalescing_settles_and_admits_only_new_co
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
         inner.sessions[index].set_auto_dispatch_blocked(true);
-        inner.sessions[index].engram.next_bind_retry_at = Some(Instant::now() + Duration::from_secs(3600));
     }
+    arm_bind_backoff(&state, &session, Duration::from_secs(3600));
     let send = |key: &str, topic: &str| SendMailboxMessageRequest {
         target_session_id: session.clone(), message: "durable body only".to_owned(),
         idempotency_key: key.to_owned(), topic: Some(topic.to_owned()), state_stamp: None,
@@ -570,11 +561,7 @@ fn bind_returned_dispatch_real_mailbox_coalescing_settles_and_admits_only_new_co
 fn bind_withdrawal_retires_only_its_exact_known_unprepared_promotion() {
     for change in ["exact", "different-marker", "turn", "retained"] {
         let (state, session, receiver, transport) = root_fixture([]);
-        {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].engram.next_bind_retry_at = Some(Instant::now() + Duration::from_secs(3600));
-        }
+        arm_bind_backoff(&state, &session, Duration::from_secs(3600));
         let dispatch = root_dispatch(&state, &session, false);
         require_unprepared_owned_bind_dispatch(&state, &session, &dispatch);
         let EngramTurnDeliveryPreparation::RetainedBindRetry(proof) = state.prepare_engram_turn_delivery_off_lock(&session, dispatch.engram_dispatch_generation().unwrap()) else { panic!("typed failure required"); };
@@ -622,11 +609,7 @@ fn bind_returned_dispatch_cancel_case(successor: bool) {
     let (state, session, receiver, transport) = root_fixture([
         bind_reply("fresh-bind"), grant_reply("fresh-grant"), begin_reply("fresh-grant"),
     ]);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.next_bind_retry_at = Some(Instant::now() + Duration::from_secs(3600));
-    }
+    arm_bind_backoff(&state, &session, Duration::from_secs(3600));
     let dispatch = root_dispatch(&state, &session, false);
     require_unprepared_owned_bind_dispatch(&state, &session, &dispatch);
     let original = {
@@ -1222,15 +1205,14 @@ fn a_transient_first_bind_failure_retries_after_backoff_without_resume() {
     );
     assert_eq!(operations(&transport), ["session_bind"]);
     {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = &mut inner.sessions[index];
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         assert!(record.orchestrator_auto_dispatch_blocked);
         assert!(record.queued_prompts[0].engram_waiting);
-        // Existing control fixtures represent elapsed bind backoff this way;
-        // no Resume, new prompt, or forged delivery receipt is supplied.
-        record.engram.next_bind_retry_at = None;
     }
+    // The backoff runs out on the scripted clock; no Resume, new prompt, or
+    // forged delivery receipt is supplied.
+    elapse_bind_backoff(&state, &session);
 
     let due = chrono::Utc::now() + chrono::Duration::seconds(10);
     state.engram_abort_retry_tick(due);
@@ -1306,6 +1288,10 @@ fn repeated_bind_failures_keep_exact_wire_identity_and_obey_circuit_backoff() {
     deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
     for expected_attempts in 1..=3 {
         acknowledge_bind_retry(&state, &session);
+        // The backoff is measured on the state's scripted clock, the one
+        // elapse_bind_backoff advances, so it stays pending however fast
+        // the iterations run.
+        let clock_now = state.engram_budget_clock().now();
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -1314,8 +1300,7 @@ fn repeated_bind_failures_keep_exact_wire_identity_and_obey_circuit_backoff() {
                 record.engram.bind_retry.as_ref().unwrap().attempts,
                 expected_attempts
             );
-            record.engram.next_bind_retry_at =
-                Some(std::time::Instant::now() + Duration::from_secs(60));
+            record.engram.next_bind_retry_at = Some(clock_now + Duration::from_secs(60));
             if expected_attempts == 3 {
                 assert!(record.engram.circuit_open);
             }
@@ -1648,8 +1633,9 @@ fn authority_ack_expiry_parks_then_the_existing_tick_delivers_without_resume() {
     for expire in [false, true] {
         let label = format!("bind-authority-ack-{expire}");
         let (mut state, session, receiver, _) = root_fixture([]);
-        let clock = EngramBudgetClock::scripted();
-        state.install_test_engram_budget_clock(clock.clone());
+        // The fixture's scripted clock, which every target and fence of this
+        // state reads; advancing it is the only way time passes here.
+        let clock = state.engram_budget_clock();
         let binding = test_control_work_binding(&label, 1);
         let transport = ScriptedEngramControlTransport::new_with_work_bindings(
             [

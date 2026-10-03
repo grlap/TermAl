@@ -1329,13 +1329,10 @@ fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
                 (parent.clone(), None)
             };
             if child && lost_bind {
-                {
-                    let mut inner = state.inner.lock().unwrap();
-                    let index = inner.find_session_index(&session).unwrap();
-                    inner.sessions[index].engram.next_bind_retry_at = None;
-                }
+                elapse_bind_backoff(&state, &session);
                 state.resume_session_queue(&session).unwrap();
             }
+            elapse_bind_backoff(&state, &session);
             let (prompt_id, retained) = {
                 let mut inner = state.inner.lock().unwrap();
                 let index = inner.find_session_index(&session).unwrap();
@@ -1348,7 +1345,6 @@ fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
                 project.engram.as_mut().unwrap().binary_path =
                     Some("changed-engram-authority-binary".into());
                 let record = &mut inner.sessions[index];
-                record.engram.next_bind_retry_at = None;
                 let queued = &record.queued_prompts[0];
                 assert!(
                     queued.has_engram_intent(),
@@ -1407,6 +1403,59 @@ fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
     }
 }
 
+/// Real time a child's admission is held after its eager bind: just longer
+/// than the first bind backoff (`engram_bind_retry_delay(1)`, 1 s).
+const LATE_CHILD_ADMISSION: Duration = Duration::from_millis(1_100);
+
+/// The positive control for the stall above. On real time, a child admission
+/// held past the bind backoff finds the backoff spent, so it rebinds and
+/// delivers at once; that is what made the held-child test depend on the
+/// scheduler before its fixture moved to the scripted clock.
+#[test]
+fn a_late_child_admission_on_real_time_outlives_the_bind_backoff_and_delivers() {
+    let (state, parent, receiver, _transport) = root_fixture_on_real_clock([
+        bind_reply("parent"),
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline("lost reply"))),
+        rebind_reply("child"),
+        grant_reply("retry"),
+        begin_reply("retry"),
+    ]);
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .test_delegation_child_admission_stall = Some(LATE_CHILD_ADMISSION);
+    let created = state
+        .create_read_only_delegation(
+            &parent,
+            CreateDelegationRequest {
+                prompt: "initial child prompt".into(),
+                title: Some("late child".into()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Explorer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+    let child = created.delegation.child_session_id;
+    {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
+        assert_eq!(
+            record.session.status,
+            SessionStatus::Active,
+            "a real-time backoff spent during the stall no longer holds the child"
+        );
+        assert!(record.queued_prompts.is_empty());
+    }
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+}
+
 #[test]
 fn held_child_initial_and_followup_authorization_survive_polling_then_resume() {
     for followup in [false, true] {
@@ -1439,6 +1488,18 @@ fn held_child_initial_and_followup_authorization_survive_polling_then_resume() {
             responses.push(grant_reply("retry"));
             responses.push(begin_reply("retry"));
             let (state, parent, receiver, transport) = root_fixture(responses);
+            if failure == "bind" && !followup {
+                // The child's admission runs late, past the 1 s bind backoff
+                // its lost eager bind armed, as on a loaded machine. The
+                // backoff is on the scripted clock, so it still holds. (With a
+                // follow-up the eager bind succeeds and the lost reply comes
+                // in the follow-up admission, which this stall does not reach.)
+                state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .test_delegation_child_admission_stall = Some(LATE_CHILD_ADMISSION);
+            }
             let created = state
                 .create_read_only_delegation(
                     &parent,
@@ -1514,12 +1575,10 @@ fn held_child_initial_and_followup_authorization_survive_polling_then_resume() {
             };
             assert!(receiver.try_recv().is_err());
             if failure == "bind" {
-                // Initial child setup also makes a best-effort eager bind
-                // before its queued admission. Advance that existing retry
-                // backoff deterministically; do not synchronize with sleeps.
-                let mut inner = state.inner.lock().unwrap();
-                let index = inner.find_session_index(&child).unwrap();
-                inner.sessions[index].engram.next_bind_retry_at = None;
+                // The lost bind armed a retry backoff. Its time passes on the
+                // scripted clock, not by waiting; the stall above is the
+                // late-scheduling witness, not synchronization.
+                elapse_bind_backoff(&state, &child);
             }
             state.resume_session_queue(&child).unwrap();
             assert!(matches!(

@@ -1463,6 +1463,11 @@ struct StateInner {
     engram_budget_clock_snapshots: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     test_engram_authority_ack_boundary: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// Real time a delegation child's first turn waits before its admission,
+    /// after the child's best-effort bind (`start_delegation_child_turn`): a
+    /// scheduler delay a test can apply on purpose.
+    #[cfg(test)]
+    test_delegation_child_admission_stall: Option<Duration>,
     /// Ordering fixtures use scheduling headroom without changing budget tests
     /// in other states or the production dispatch deadline.
     #[cfg(test)]
@@ -1635,6 +1640,8 @@ impl StateInner {
             engram_budget_clock_snapshots: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             test_engram_authority_ack_boundary: None,
+            #[cfg(test)]
+            test_delegation_child_admission_stall: None,
             #[cfg(test)]
             test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),

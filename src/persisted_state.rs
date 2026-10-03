@@ -199,6 +199,8 @@ impl PersistedState {
             #[cfg(test)]
             test_engram_authority_ack_boundary: None,
             #[cfg(test)]
+            test_delegation_child_admission_stall: None,
+            #[cfg(test)]
             test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),
             engram_declaration_checked_project_ids: HashSet::new(),
