@@ -2940,89 +2940,121 @@ fn source_root_authority_review_stopped_production_writer_refuses_staging_and_cl
 
 #[test]
 fn source_root_authority_review_one_total_deadline_covers_prepare_read_and_publish() {
-    let label = "authority-total-multiple-phases";
-    let claimed = ClaimedRoot::new(label, Vec::new());
-    prepare_claimed_root_naming(&claimed, label);
-    let store = claimed_root_store(&claimed);
-    let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
-    let target = AppState::engram_binding_target_for_session_shape_locked(
-        &claimed.state.inner.lock().unwrap(),
-        &claimed.session_id,
-        true,
-    )
-    .unwrap()
-    .unwrap();
-    let total = target.settings.call_timeout();
-    let deadline = std::time::Instant::now() + total;
-    let mut state = claimed.state.clone();
-    let (tx, rx) = std::sync::mpsc::channel();
-    state.persist_tx = tx;
-    let worker = state.clone();
-    let worker_store = store.clone();
-    let worker_binding = binding.clone();
-    let task = std::thread::spawn(move || {
-        let owner =
-            worker.prepare_engram_authority_until(&worker_store, &worker_binding, deadline)?;
-        let proof = worker.read_engram_authority_fact_until(&target, &worker_binding, deadline)?;
-        AppState::learn_engram_authority_locked(
-            &mut worker.inner.lock().unwrap(),
-            &worker_store,
-            &owner,
-            &proof,
-        )?;
-        worker.publish_engram_authority_until(&worker_store, &owner, deadline)
-    });
-    let mut batch = PersistFenceBatch::default();
-    let mut cache = SqlitePersistConnectionCache::new();
-    receive_naming_authority_fence(&rx, &mut batch, &task);
-    let prepared = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &prepared,
-        &mut batch,
-    )
-    .unwrap();
-    receive_naming_authority_fence(&rx, &mut batch, &task);
-    // The publication fence shares the ORIGINAL deadline. Deliberately delay
-    // only its commit past that deadline; no phase receives a refreshed total.
-    std::thread::sleep(
-        deadline.saturating_duration_since(std::time::Instant::now()) + Duration::from_millis(5),
-    );
-    let candidate = collect_persist_delta_from_shared_state(&state.inner, prepared.watermark);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &candidate,
-        &mut batch,
-    )
-    .unwrap();
-    assert!(task.join().unwrap().is_err());
-    let inner = state.inner.lock().unwrap();
-    assert!(engram_authority_work_unresolved(
-        &inner,
-        &store,
-        &binding.work_id
-    ));
-    assert_eq!(
-        inner.engram_work_naming_history[0]
-            .transition
-            .as_ref()
-            .unwrap()
-            .phase,
-        EngramAuthorityPhase::Candidate
-    );
-    assert_eq!(
-        engram_root_capture_locked(&inner, &claimed.session_id),
-        EngramRootCapture::Unconfirmed
-    );
-    let reads = claimed
-        .transport
-        .requests()
-        .iter()
-        .filter(|request| request.request["operation"] == "named_root_read")
-        .count();
-    assert_eq!(reads, 1, "no fresh authority I/O after total expiry");
+    for expired in [false, true] {
+        let label = if expired {
+            "authority-total-multiple-phases-expired"
+        } else {
+            "authority-total-multiple-phases-unadvanced"
+        };
+        let claimed = ClaimedRoot::new_scripted(label, Vec::new());
+        let clock = claimed.state.engram_budget_clock();
+        prepare_claimed_root_naming(&claimed, label);
+        let store = claimed_root_store(&claimed);
+        let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
+        let target = AppState::engram_binding_target_for_session_shape_locked(
+            &claimed.state.inner.lock().unwrap(),
+            &claimed.session_id,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+        let total = target.settings.call_timeout();
+        let deadline = clock.now() + total;
+        let mut state = claimed.state.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        state.persist_tx = tx;
+        let worker = state.clone();
+        let worker_store = store.clone();
+        let worker_binding = binding.clone();
+        let task = std::thread::spawn(move || {
+            let owner = worker.prepare_engram_authority_until(
+                &worker_store,
+                &worker_binding,
+                deadline,
+            )?;
+            let proof =
+                worker.read_engram_authority_fact_until(&target, &worker_binding, deadline)?;
+            AppState::learn_engram_authority_locked(
+                &mut worker.inner.lock().unwrap(),
+                &worker_store,
+                &owner,
+                &proof,
+            )?;
+            worker.publish_engram_authority_until(&worker_store, &owner, deadline)
+        });
+        let mut batch = PersistFenceBatch::default();
+        let mut cache = SqlitePersistConnectionCache::new();
+        receive_naming_authority_fence(&rx, &mut batch, &task);
+        // Both controls spend part of the same budget before Prepared ACK.
+        // A refreshed publication budget would therefore have a later deadline.
+        clock.advance(total / 2);
+        let prepared = collect_persist_delta_from_shared_state(&state.inner, 0);
+        persist_delta_with_fences(
+            &mut cache,
+            state.persistence_path.as_path(),
+            &prepared,
+            &mut batch,
+        )
+        .unwrap();
+        receive_naming_authority_fence(&rx, &mut batch, &task);
+        let original_candidate_deadline = batch.pending.len() == 1
+            && batch.pending[0].completion.deadline == deadline;
+        if !original_candidate_deadline {
+            // Settle the worker before reporting a deadline-regression failure.
+            batch.fail(PersistFenceError::WriteFailed(
+                "Candidate fence refreshed the total budget".to_owned(),
+            ));
+            task.join().unwrap().unwrap_err();
+            panic!("Candidate fence must carry the original total deadline");
+        }
+        // Only the expired control crosses the original deadline, and only
+        // after the actual Candidate fence is observed.
+        if expired {
+            clock.advance(
+                deadline.saturating_duration_since(clock.now()) + Duration::from_millis(1),
+            );
+        }
+        let candidate = collect_persist_delta_from_shared_state(&state.inner, prepared.watermark);
+        persist_delta_with_fences(
+            &mut cache,
+            state.persistence_path.as_path(),
+            &candidate,
+            &mut batch,
+        )
+        .unwrap();
+        let result = task.join().unwrap();
+        assert_eq!(result.is_err(), expired, "{label}: {result:?}");
+        let inner = state.inner.lock().unwrap();
+        assert_eq!(
+            engram_authority_work_unresolved(&inner, &store, &binding.work_id),
+            expired
+        );
+        assert_eq!(
+            inner.engram_work_naming_history[0]
+                .transition
+                .as_ref()
+                .unwrap()
+                .phase,
+            if expired {
+                EngramAuthorityPhase::Candidate
+            } else {
+                EngramAuthorityPhase::Published
+            }
+        );
+        if expired {
+            assert_eq!(
+                engram_root_capture_locked(&inner, &claimed.session_id),
+                EngramRootCapture::Unconfirmed
+            );
+        }
+        let reads = claimed
+            .transport
+            .requests()
+            .iter()
+            .filter(|request| request.request["operation"] == "named_root_read")
+            .count();
+        assert_eq!(reads, 1, "{label}: exactly one canonical authority read");
+    }
 }
 
 #[test]
