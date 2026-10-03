@@ -1198,12 +1198,43 @@ impl TestEngramSettlementControl {
         capture.is_none_or(|capture| capture.wait_until(deadline).is_some())
     }
 
-    /// As `completed_by`, panicking when the settlement did not complete.
-    fn wait_completed(&self, deadline: std::time::Instant) {
-        assert!(
-            self.completed_by(deadline),
-            "the held settlement and its end snapshot did not finish in time"
-        );
+    /// The basis of the end snapshot the settlement that took this hold
+    /// started, once by `deadline` the settlement returned and that snapshot
+    /// was published with a basis: what a witness of a late snapshot needs.
+    /// Unlike cleanup (`completed_by`), a settlement that returned without
+    /// starting an end snapshot does not complete it, and is told at once.
+    fn try_completed(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<EngramExecutionSourceBasis, TestEngramSettlementIncomplete> {
+        let mut state = test_engram_settlement_hold_state(&self.shared);
+        while !state.settled {
+            let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
+                return Err(TestEngramSettlementIncomplete::NotSettled);
+            };
+            state = self
+                .shared
+                .1
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        let Some(capture) = state.capture.clone() else {
+            return Err(TestEngramSettlementIncomplete::NoEndSnapshot);
+        };
+        drop(state);
+        match capture.wait_until(deadline) {
+            None => Err(TestEngramSettlementIncomplete::EndSnapshotUnfinished),
+            Some(None) => Err(TestEngramSettlementIncomplete::EndSnapshotWithoutBasis),
+            Some(Some(basis)) => Ok(basis),
+        }
+    }
+
+    /// As `try_completed`, panicking unless the settlement completed.
+    fn wait_completed(&self, deadline: std::time::Instant) -> EngramExecutionSourceBasis {
+        self.try_completed(deadline).unwrap_or_else(|why| {
+            panic!("the held settlement did not complete with its end snapshot: {why:?}")
+        })
     }
 }
 
@@ -1229,6 +1260,21 @@ impl Drop for TestEngramSettlementControl {
             eprintln!("a held carried settlement had not finished when its test let go of it");
         }
     }
+}
+
+/// Why a held settlement did not complete with its end snapshot's basis
+/// (`TestEngramSettlementControl::try_completed`).
+#[cfg(test)]
+#[derive(Debug, PartialEq)]
+enum TestEngramSettlementIncomplete {
+    /// The settlement had not returned by the deadline.
+    NotSettled,
+    /// It returned without starting an end snapshot.
+    NoEndSnapshot,
+    /// Its end snapshot was not published by the deadline.
+    EndSnapshotUnfinished,
+    /// Its end snapshot was published without a basis.
+    EndSnapshotWithoutBasis,
 }
 
 /// Holds the next settlement of the carried run in the worktree `root`.

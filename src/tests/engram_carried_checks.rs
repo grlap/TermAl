@@ -725,7 +725,10 @@ fn launch_gate(turn: &CheckedTurn, worktree: &FsPath, detached: bool) {
     // The launch's source snapshot is taken on its own thread.
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time")
+        .expect("the launch snapshot has a basis");
 }
 
 /// The launcher's run directory for `worktree`, from Git itself.
@@ -1532,7 +1535,9 @@ fn a_gate_launched_in_the_one_call_form_is_carried_and_credited() {
     assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time");
     // Reading its summary from the same form leaves it unfenced.
     let summary =
         format!("pushd \"{root}\" && node scripts/test-launcher.mjs summary test-carried");
@@ -1629,7 +1634,9 @@ fn launch_gate_in_the_background_one_call(turn: &CheckedTurn, worktree: &FsPath)
     assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time");
     root
 }
 
@@ -2334,7 +2341,9 @@ fn a_failed_gate_launched_in_the_one_call_form_keeps_its_exit() {
         .expect("the launch result should record");
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time");
     let run = finish_run(&worktree, "failed", &"f".repeat(64));
     let checkpoint = turn.finish();
 
@@ -3217,7 +3226,9 @@ fn a_claude_background_gate_carries_and_is_credited_beside_its_own_outstanding_l
     });
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time");
     // Once carried, the gate's own call still does not fence its run when
     // it is reconciled again.
     {
@@ -3537,7 +3548,9 @@ fn a_newly_found_place_reaches_a_carried_run_until_its_settlement_snapshot_close
         }
         let start_basis =
             turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-        start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+        start_basis
+            .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+            .expect("the launch snapshot was taken in time");
         finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
         assert!(
@@ -3586,7 +3599,9 @@ fn work_registered_after_every_settlement_capture_closed_leaves_the_carried_run_
     let (other, stopped) = other_claude_session_elsewhere(&turn, label);
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time");
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
     let runtime_token = turn.record(|record| {
@@ -3815,7 +3830,9 @@ fn each_settlement_candidate_is_judged_by_its_own_closure() {
     turn.state.poll_engram_carried_runs();
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time");
     let early = Arc::new(EngramBasisCapture::default());
     let late = Arc::new(EngramBasisCapture::default());
     early.finish(None);
@@ -3900,7 +3917,10 @@ fn three_turns_with_a_terminal_carried_run(label: &str) -> (CheckedTurn, PathBuf
     turn.finish();
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time")
+        .expect("the launch snapshot has a basis");
     finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
     (turn, worktree)
@@ -3974,6 +3994,15 @@ fn a_settlement_that_misses_its_deadline_grants_nothing_late_and_its_retry_sees_
             .record(|record| record.engram.carried_checks[0].run_directory.clone())
             .expect("the run was found");
         let guard = || std::time::Instant::now() + DEADLOCK_GUARD;
+        // The launch snapshot was taken with a basis before A.
+        let launch = turn.record(|record| {
+            record.engram.carried_checks[0]
+                .check
+                .start_basis
+                .wait_until(std::time::Instant::now())
+                .flatten()
+                .expect("the launch snapshot has a basis")
+        });
         let late = install_test_engram_settlement_hold(&carried_root(&turn), true);
         let second = finish_next_turn(&turn);
         late.wait_taken(guard());
@@ -3992,7 +4021,11 @@ fn a_settlement_that_misses_its_deadline_grants_nothing_late_and_its_retry_sees_
         // A's snapshot finishes now, after its checkpoint gave up on it, and
         // with it everything of A's settlement.
         late.release();
-        late.wait_completed(guard());
+        assert_eq!(
+            late.wait_completed(guard()),
+            launch,
+            "{label}: A's late end snapshot was taken, at the launch's source"
+        );
         turn.state.poll_engram_carried_runs();
         let checkpoints = checkpoint_requests(&turn);
         assert_eq!(checkpoints.len(), 2, "{label}: nothing more reached Engram");
@@ -4040,6 +4073,12 @@ fn a_carried_run_whose_launch_snapshot_is_pending_stays_carried_and_settles_once
     let hold = install_test_engram_settlement_hold(&carried_root(&turn), true);
     let second = finish_next_turn(&turn);
     hold.wait_taken(std::time::Instant::now() + DEADLOCK_GUARD);
+    // Its settlement returned without starting an end snapshot: a witness of
+    // a late snapshot refuses that at once, and cleanup still accepts it.
+    assert_eq!(
+        hold.try_completed(std::time::Instant::now() + DEADLOCK_GUARD),
+        Err(TestEngramSettlementIncomplete::NoEndSnapshot)
+    );
     hold.release();
     assert!(second.get("verification_evidence").is_none(), "{second:#}");
     assert_eq!(
@@ -4090,32 +4129,22 @@ fn concurrent_closers_consume_once_and_the_winner_is_judged_by_its_own_snapshot(
             true,
         );
         let worktree = turn.root.join(".worktrees").join("wt");
+        let mut closers = Closers::default();
         launch_gate(&turn, &worktree, false);
-        let start_basis =
-            turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-        start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
         let (other, stopped) = other_claude_session_elsewhere(&turn, &label);
         let root = carried_root(&turn);
-        let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
-        let closer = || {
-            let state = turn.state.clone();
-            let session_id = turn.session_id.clone();
-            let token = runtime_token.clone();
-            std::thread::spawn(move || {
-                let _ = state.finish_turn_ok_if_runtime_matches(&session_id, &token);
-            })
-        };
         let guard = || std::time::Instant::now() + DEADLOCK_GUARD;
         let holds = [
             install_test_engram_settlement_hold(&root, false),
             install_test_engram_settlement_hold(&root, false),
         ];
-        // Each closer takes its own hold, in order.
-        let first_closer = closer();
+        // Each closer takes its own hold, in order: closer 0 hold 0, closer 1
+        // hold 1.
+        assert_eq!(closers.spawn(&turn), 0);
         holds[0].wait_taken(guard());
-        let second_closer = closer();
+        assert_eq!(closers.spawn(&turn), 1);
         holds[1].wait_taken(guard());
         let (early, late) = match capture_first {
             Closer::First => (0, 1),
@@ -4137,8 +4166,6 @@ fn concurrent_closers_consume_once_and_the_winner_is_judged_by_its_own_snapshot(
             (capture_first, winner),
             (Closer::First, Closer::First) | (Closer::Second, Closer::Second)
         );
-        // The closer holding hold 0 is the first closer.
-        let mut closers = [Some(first_closer), Some(second_closer)];
         let (winner_index, loser_index, winner_gate, loser_gate) = if winner_is_early {
             (early, late, early_gate, late_gate)
         } else {
@@ -4146,11 +4173,7 @@ fn concurrent_closers_consume_once_and_the_winner_is_judged_by_its_own_snapshot(
         };
         // The winner publishes and finishes first; only then does the other.
         winner_gate.release();
-        closers[winner_index]
-            .take()
-            .expect("the winner's thread")
-            .join()
-            .expect("the winning closer should not panic");
+        closers.join(winner_index);
         let checkpoints = checkpoint_requests(&turn);
         let report = cached_report(&turn);
         assert_eq!(checkpoints.len(), 1, "{label}: {checkpoints:#?}");
@@ -4160,11 +4183,7 @@ fn concurrent_closers_consume_once_and_the_winner_is_judged_by_its_own_snapshot(
             "{label}: the winner's complete request"
         );
         loser_gate.release();
-        closers[loser_index]
-            .take()
-            .expect("the other closer's thread")
-            .join()
-            .expect("the other closer should not panic");
+        closers.join(loser_index);
         assert_eq!(
             checkpoint_requests(&turn),
             checkpoints,
@@ -4213,7 +4232,9 @@ fn a_session_removed_while_its_checkpoint_settles_is_consumed_once_by_its_teardo
     launch_gate(&turn, &worktree, false);
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the launch snapshot was taken in time");
     finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
     let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
