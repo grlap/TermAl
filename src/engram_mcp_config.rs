@@ -550,6 +550,12 @@ fn run_engram_context_nudge(
     let context_generation = format!("termal-{}-{}", target.host_instance_id, target.generation);
     let mut command = engram_command(&target.command);
     configure_terminal_process_tree(&mut command);
+    // Test-only: the child's temporary files stay in its Engram home
+    // (src/engram_test_child_temp.rs).
+    #[cfg(test)]
+    for (name, value) in engram_test_child_temp_env(FsPath::new(&target.home)) {
+        command.env(name, value);
+    }
     command
         .arg("--project-file")
         .arg(&target.project_file)

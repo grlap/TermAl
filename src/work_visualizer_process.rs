@@ -102,6 +102,13 @@ fn work_read_launch_command(connection: &EngramConnectionConfig) -> BoundedReadC
         } else {
             command.env_remove(ENGRAM_ACTOR_CONTEXT_ENV);
         }
+        // Test-only: the child's temporary files stay in its Engram home
+        // (src/engram_test_child_temp.rs). The non-Windows branch gets this
+        // from apply_engram_connection_environment.
+        #[cfg(test)]
+        for (name, value) in engram_test_child_temp_env(&connection.home) {
+            command.env(name, value);
+        }
     }
     command
 }

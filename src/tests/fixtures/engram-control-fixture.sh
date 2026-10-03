@@ -177,6 +177,7 @@ if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
     case "$mode" in
       fixture-readiness-old) printf 'unknown subcommand readiness\n' >&2; exit 2 ;;
       fixture-readiness-malformed) printf '{}\n'; exit 0 ;;
+      fixture-report-temp) printf 'TEMP=%s\nTMP=%s\n' "${TEMP:-}" "${TMP:-}"; exit 0 ;;
       fixture-readiness-refusal) printf '{"ready":true}\n'; exit 1 ;;
     esac
   fi

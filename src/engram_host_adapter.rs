@@ -417,6 +417,12 @@ fn run_engram_diagnostic_args_until(
     {
         command = engram_absence_powershell_command(binary_path, project_file, home, args)?;
     }
+    // Test-only: the child's temporary files stay in its Engram home
+    // (src/engram_test_child_temp.rs).
+    #[cfg(test)]
+    for (name, value) in engram_test_child_temp_env(home) {
+        command.env(name, value);
+    }
     configure_terminal_process_tree(&mut command);
     let mut child = command
         .current_dir(project_root)
@@ -1937,6 +1943,12 @@ fn run_engram_authority_revoke_command(
 ) -> std::result::Result<(), EngramTransportError> {
     let mut command = engram_command(binary_path);
     configure_terminal_process_tree(&mut command);
+    // Test-only: the child's temporary files stay in its Engram home
+    // (src/engram_test_child_temp.rs).
+    #[cfg(test)]
+    for (name, value) in engram_test_child_temp_env(home) {
+        command.env(name, value);
+    }
     let mut child = command
         .arg("--project-file")
         .arg(project_file)
@@ -2146,6 +2158,12 @@ fn apply_engram_connection_environment(command: &mut Command, connection: &Engra
         command.env(ENGRAM_ACTOR_CONTEXT_ENV, actor_context);
     } else {
         command.env_remove(ENGRAM_ACTOR_CONTEXT_ENV);
+    }
+    // Test-only: the child's temporary files stay in its Engram home
+    // (src/engram_test_child_temp.rs).
+    #[cfg(test)]
+    for (name, value) in engram_test_child_temp_env(&connection.home) {
+        command.env(name, value);
     }
 }
 
