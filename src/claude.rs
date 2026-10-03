@@ -991,10 +991,12 @@ fn claude_bash_command_has_background_separator(command: &str) -> bool {
 
 /// Pure readers: they consume stdin/files and write only to stdout. The hashers
 /// are here so reviewers can fingerprint a diff (`git diff … | sha256sum`) to prove
-/// content identity — a common, entirely read-only review technique.
+/// content identity — a common, entirely read-only review technique. `cmp`
+/// compares two files for the same reason; it has no option that writes a file.
 const CLAUDE_READ_ONLY_BASH_COMMANDS: &[&str] = &[
     "cat",
     "cksum",
+    "cmp",
     "echo",
     "grep",
     "head",

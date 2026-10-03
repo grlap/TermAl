@@ -114,6 +114,48 @@ fn a_refused_bash_request_names_the_rule_it_broke_and_the_allowed_form() {
     }
 }
 
+// `cmp` compares two files and writes only to stdout, so a read-only child can
+// check that two files are identical without hashing them. Redirection and
+// chaining stay refused around it, and `git hash-object` stays refused: it runs
+// gitattributes clean filters.
+#[test]
+fn a_read_only_delegation_may_compare_two_files_with_cmp() {
+    for command in [
+        "cmp a b",
+        "cmp -s a b",
+        "cmp a b | cat",
+        "cmp AGENTS.md CLAUDE.md",
+    ] {
+        read_only_answer(
+            "Bash",
+            json!({ "command": command }),
+            ClaudeApprovalMode::ReadOnlyAutoApprove,
+            true,
+            WORKSPACE,
+        )
+        .unwrap_or_else(|refusal| panic!("{command} should be allowed: {refusal}"));
+    }
+    for (command, rule) in [
+        ("cmp a b > f", "redirection"),
+        ("cmp a b >> f", "redirection"),
+        ("cmp a b; touch f", "`;` and line breaks"),
+        ("git hash-object a", "`git hash-object` is not one"),
+        ("git hash-object -w a", "`git hash-object` is not one"),
+        (
+            "git diff | git hash-object --stdin",
+            "`git hash-object` is not one",
+        ),
+    ] {
+        let refusal = bash_refusal(command);
+        assert_refusal_shape(&refusal, command);
+        assert!(refusal.contains(rule), "{command}: {refusal}");
+        assert!(
+            !refusal.contains("`cmp` is not one"),
+            "{command}: {refusal}"
+        );
+    }
+}
+
 // The rule named is the one the check applied first, on lines that break more
 // than one rule or spell a command in a way the shell de-quotes.
 #[test]
