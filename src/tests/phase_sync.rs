@@ -389,6 +389,13 @@ pub(super) fn receive_before_cleanup<T>(
     result
 }
 
+/// The environment variable through which each process of a Windows
+/// process-tree fixture names itself, as a comma-separated PID list, so the
+/// test can wait for every one of them before removing its temp root. Set by
+/// src/tests/fixtures/engram-doctor-pipe-fixture.ps1 and the descendant script
+/// that `prepare_engram_control_process_tree_fixture` writes; read here.
+pub(super) const TEST_FIXTURE_TREE_PIDS_ENV: &str = "TERMAL_TEST_FIXTURE_TREE_PIDS";
+
 /// Self-exec target for process-tree fixtures. Readiness is acknowledged by the
 /// parent test before stdout releases the control fixture's startup handshake.
 #[test]
@@ -399,6 +406,19 @@ fn parked_control_descendant() {
     let mut stream = std::net::TcpStream::connect(endpoint).expect("connect descendant readiness");
     stream.set_read_timeout(Some(DEADLOCK_GUARD)).unwrap();
     stream.write_all(&std::process::id().to_be_bytes()).unwrap();
+    // The fixture processes above this one that named themselves, so the
+    // test can wait for every process of the tree before removing its root.
+    let ancestors: Vec<u32> = std::env::var(TEST_FIXTURE_TREE_PIDS_ENV)
+        .unwrap_or_default()
+        .split(',')
+        .filter(|pid| !pid.trim().is_empty())
+        .map(|pid| pid.trim().parse().expect("fixture tree PID should parse"))
+        .collect();
+    let count = u32::try_from(ancestors.len()).expect("fixture tree should be small");
+    stream.write_all(&count.to_be_bytes()).unwrap();
+    for pid in ancestors {
+        stream.write_all(&pid.to_be_bytes()).unwrap();
+    }
     let mut ready = [0];
     stream
         .read_exact(&mut ready)

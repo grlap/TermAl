@@ -6,6 +6,10 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     if ($args[$i] -eq "--project-file") { $projectFile = $args[$i + 1] }
     if ($args[$i] -eq "--home") { $engramHome = $args[$i + 1] }
 }
+# The tree's processes work in the test's temp root: each names itself so the
+# test can wait for all of them before it removes that root
+# (TEST_FIXTURE_TREE_PIDS_ENV in src/tests/phase_sync.rs).
+$env:TERMAL_TEST_FIXTURE_TREE_PIDS = "$PID"
 $info = [System.Diagnostics.ProcessStartInfo]::new()
 $info.FileName = "powershell.exe"
 $childScript = Join-Path $engramHome "engram-descendant.ps1"
