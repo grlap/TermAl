@@ -317,7 +317,7 @@ fn selection_loss_fixture(
 fn source_root_selection_warning_survives_failed_send_and_old_acknowledgement() {
     let label = "confirmation-failed-send";
     let grant = "confirmation-failed-send-grant";
-    let (claimed, _, lost) = selection_loss_fixture(
+    let (mut claimed, _, lost) = selection_loss_fixture(
         label,
         vec![
             bind_reply("confirmation-failed-send-token"),
@@ -350,7 +350,7 @@ fn source_root_selection_warning_survives_failed_send_and_old_acknowledgement() 
     let pending = claimed.record(|record| record.engram.source_root_notices.clone());
     let state = claimed.state.clone();
     let session = claimed.session_id.clone();
-    drop(claimed.runtime_rx);
+    claimed.close_runtime_channel();
     assert!(handoff_prepared_turn_dispatch(&state, dispatch).is_err());
     let inner = state.inner.lock().unwrap();
     assert_eq!(

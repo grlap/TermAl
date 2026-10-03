@@ -157,7 +157,7 @@ fn source_root_legacy_unresolved_warning_delivers_and_withholds_check() {
 fn source_root_legacy_recovery_warning_survives_failed_provider_send() {
     let label = "legacy-failed-notice";
     let grant = "legacy-failed-grant";
-    let claimed = ClaimedRoot::new_scripted(
+    let mut claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("legacy-failed-token"),
@@ -181,7 +181,7 @@ fn source_root_legacy_recovery_warning_survives_failed_provider_send() {
         .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     let state = claimed.state.clone();
     let session = claimed.session_id.clone();
-    drop(claimed.runtime_rx);
+    claimed.close_runtime_channel();
     assert!(handoff_prepared_turn_dispatch(&state, dispatch).is_err());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];

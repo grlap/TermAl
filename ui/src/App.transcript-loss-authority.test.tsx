@@ -526,6 +526,50 @@ describe("App transcript loss ownership", () => {
     });
   });
 
+  // The stream does not suppress a retained event for an older global revision
+  // after a catch-up snapshot; the global revision governs metadata, while a
+  // body delta is governed by its per-session body sequence and epoch.
+  it("after adopting a catch-up snapshot, processes an older-global body delta its body sequence still needs", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const observed = observeApp();
+      const context = await renderAppWithProjectAndSession();
+      try {
+        const initial = recoveryState(1);
+        Object.assign(initial, observed.supportingSlices());
+        act(() => { observed.live().adoptState(initial, { force: true }); });
+        await seed(observed, wireSession(1, [body(0, "Before")], 1));
+        vi.spyOn(api, "fetchSessionTail").mockReturnValue(new Promise(() => {}));
+        // The catch-up snapshot at R = 12 says the session's body sequence is
+        // at 2, but carries no message body.
+        const snapshot = recoveryState(12);
+        Object.assign(snapshot, observed.supportingSlices());
+        snapshot.sessions = [{ ...snapshot.sessions[0], bodySeq: 2, messageCount: 2,
+          sessionMutationStamp: 12, status: "idle", preview: "Snapshot preview" }];
+        act(() => {
+          observed.live().adoptState(snapshot);
+          // A retained delta of global revision 4, below R, is the body that
+          // sequence 2 still needs.
+          latestEventSource().dispatchNamedEvent("delta", JSON.stringify({ type: "messageCreated",
+            revision: 4, sessionId: ID, sessionSeq: 2, bodySeqEpoch: INSTANCE,
+            messageId: "history-1", messageIndex: 1, messageCount: 2, message: body(1, "Retained older body"),
+            status: "active", preview: "Older SSE preview", sessionMutationStamp: 4,
+          }));
+        });
+        await settleAsyncUi();
+        observed.expectBodies([body(0, "Before"), body(1, "Retained older body")], true);
+        expect(document.querySelector('[data-message-id="history-1"]')).toHaveTextContent("Retained older body");
+        for (const projection of [observed.ref(), observed.store(), observed.rendered()]) {
+          expect(projection).toMatchObject({ status: "idle", preview: "Snapshot preview", sessionMutationStamp: 12 });
+        }
+        expect(observed.revision()).toBe(12);
+        // The tail stub never resolves, so the body asserted above came from
+        // the retained delta, never from a read. Whether the snapshot's own
+        // read had started before the delta arrived depends only on dispatch
+        // timing, which is not part of this contract and is not asserted.
+      } finally { context.cleanup(); }
+    });
+  });
+
   it.each(["next", "same"] as const)("M2: %s global revision still admits current body-delta metadata", async order => {
     await withVerifiedNoReactActWarnings(async () => {
       const observed = observeApp();

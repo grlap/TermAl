@@ -507,6 +507,12 @@ fn a_completed_turn_that_changed_source_reports_a_mutating_observation_with_its_
     );
 }
 
+/// The toolchain label every check a `ClaimedRoot` starts gets. Taking a real
+/// one runs the host's rustup in the check's worktree on a detached thread,
+/// which can outlive the test and keep its temporary root from being removed.
+const CLAIMED_ROOT_TOOLCHAIN: &str =
+    "rustc 1.90.0 (fixture 2025-09-14); cargo 1.90.0 (fixture 2025-07-30)";
+
 /// A root session, bound to claimed work, in a Git repository of its own,
 /// behind a scripted control plane answering `responses`.
 struct ClaimedRoot {
@@ -515,6 +521,14 @@ struct ClaimedRoot {
     root: PathBuf,
     transport: Arc<ScriptedEngramControlTransport>,
     runtime_rx: std::sync::mpsc::Receiver<CodexRuntimeCommand>,
+    /// Told "settling" when teardown starts waiting for capture workers.
+    teardown_events: Mutex<Option<std::sync::mpsc::Sender<&'static str>>>,
+}
+
+impl Drop for ClaimedRoot {
+    fn drop(&mut self) {
+        self.settle_capture_workers();
+    }
 }
 
 impl ClaimedRoot {
@@ -527,6 +541,11 @@ impl ClaimedRoot {
     }
 
     fn new(label: &str, responses: Vec<ScriptedEngramControlResponse>) -> Self {
+        // Checks started on this test thread settle their toolchain capture
+        // inline, so no probe outlives the fixture.
+        TEST_ENGRAM_TOOLCHAIN_LABEL.with(|fixture| {
+            *fixture.borrow_mut() = Some(Some(CLAIMED_ROOT_TOOLCHAIN.to_owned()));
+        });
         let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(&format!(
             "engram-turn-observation-{label}"
         ));
@@ -563,6 +582,58 @@ impl ClaimedRoot {
             root,
             transport,
             runtime_rx,
+            teardown_events: Mutex::new(None),
+        }
+    }
+
+    /// Drops the runtime's receiving end, so later sends to the runtime fail,
+    /// while the fixture itself stays owned until its teardown.
+    fn close_runtime_channel(&mut self) {
+        let (_closed, receiver) = std::sync::mpsc::channel();
+        drop(std::mem::replace(&mut self.runtime_rx, receiver));
+    }
+
+    /// Waits until no capture worker of this session runs. A basis snapshot
+    /// or toolchain probe still running in the fixture's worktree keeps the
+    /// temporary root from being removed when the state drops. A hung worker
+    /// fails the test by the watchdog, never by a longer wait.
+    fn settle_capture_workers(&self) {
+        let workers = {
+            let Ok(inner) = self.state.inner.lock() else {
+                return;
+            };
+            inner
+                .find_session_index(&self.session_id)
+                .map(|index| inner.sessions[index].engram.capture_workers.clone())
+        };
+        let Some(workers) = workers else {
+            return;
+        };
+        let running = || workers.load(std::sync::atomic::Ordering::SeqCst);
+        if running() == 0 {
+            return;
+        }
+        if let Ok(events) = self.teardown_events.lock()
+            && let Some(events) = events.as_ref()
+        {
+            let _ = events.send("settling");
+        }
+        let started = std::time::Instant::now();
+        while running() > 0 {
+            if started.elapsed() >= DEADLOCK_GUARD {
+                let detail = format!(
+                    "ClaimedRoot teardown: {} capture workers still running after {:?}",
+                    running(),
+                    started.elapsed()
+                );
+                if std::thread::panicking() {
+                    eprintln!("{detail}");
+                    return;
+                }
+                panic!("{detail}");
+            }
+            // Back off repeated observations of the worker count.
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 

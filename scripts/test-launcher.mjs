@@ -33,6 +33,14 @@ import {
   nodeDurationReporterFile,
   readDurationReport,
 } from "./test-durations.mjs";
+import {
+  accountingSummaryLines,
+  accountVitestArtifact,
+  categoryName,
+  loadCategoryManifest,
+  partialCheckLabel,
+  resolveCategory,
+} from "./test-categories-plan.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
@@ -40,6 +48,7 @@ const diagnosticLimit = 2400;
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 export const helperTestFiles = Object.freeze([
   "scripts/review-freeze-fingerprint.test.mjs",
+  "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
   "scripts/test-temp-root.test.mjs",
@@ -48,6 +57,7 @@ export const helperTestFiles = Object.freeze([
 const helperSupportFiles = Object.freeze([
   nodeDurationReporterFile,
   "scripts/review-freeze-fingerprint.mjs",
+  "scripts/test-categories-plan.mjs",
   "scripts/test-durations.mjs",
   "scripts/test-launcher.mjs",
   "scripts/test-temp-root.mjs",
@@ -126,15 +136,66 @@ export function requiredStages(platform = process.platform, env = process.env) {
       args: ["node_modules/vitest/vitest.mjs", "run"],
       cwd: "ui",
       durationReport: "vitest-json",
+      // Child rows per UI project, from this run's own report.
+      uiProjects: "all",
     },
   ];
 }
+
+// One UI category run: that Vitest project alone, under the same
+// configuration the full gate uses, accounted the same way.
+export function categoryStage(project) {
+  return {
+    name: categoryName(project),
+    command: process.execPath,
+    args: ["node_modules/vitest/vitest.mjs", "run", "--project", project.name],
+    cwd: "ui",
+    durationReport: "vitest-json",
+    uiProjects: [project.name],
+  };
+}
+
+// The per-project rows of a Vitest stage, from the report this same run wrote.
+// Never throws: a manifest or report that cannot be read leaves the
+// accounting unknown, which the caller treats as not complete.
+async function accountUiProjects(root, stage, report) {
+  try {
+    if (report?.kind !== "vitest-json") {
+      throw new Error("UI project accounting needs the stage's Vitest JSON report");
+    }
+    const manifest = await loadCategoryManifest(root);
+    const accounted = stage.uiProjects === "all"
+      ? manifest.projects.map((project) => project.name)
+      : stage.uiProjects;
+    for (const name of accounted) {
+      if (!manifest.projects.some((project) => project.name === name)) {
+        throw new Error(`ui/test-categories.ts declares no project ${name}`);
+      }
+    }
+    return accountVitestArtifact({ manifest, uiRoot: stage.cwd, accounted, artifact: report.artifact });
+  } catch (error) {
+    return { status: "unknown", reason: error.message, problems: [], projects: [] };
+  }
+}
+
+const validUiProjects = (value) => value === undefined || value === "all" ||
+  (Array.isArray(value) && value.length > 0 &&
+    value.every((name) => typeof name === "string" && /^[a-z][a-z0-9-]*$/u.test(name)));
 
 export function requiredFiles(root = repository) {
   return [
     join(root, "scripts", "test-rust.sh"),
     ...[...helperTestFiles, ...helperSupportFiles].map((path) => join(root, path)),
     join(root, "ui", "node_modules", "typescript", "bin", "tsc"),
+    join(root, "ui", "node_modules", "vitest", "vitest.mjs"),
+    join(root, "ui", "test-categories.ts"),
+  ];
+}
+
+export function categoryRequiredFiles(root = repository) {
+  return [
+    join(root, "scripts", "test-categories-plan.mjs"),
+    join(root, "ui", "test-categories.ts"),
     join(root, "ui", "node_modules", "vitest", "vitest.mjs"),
   ];
 }
@@ -214,6 +275,7 @@ export async function createRun({
   needsCargo = false,
   liveEngram,
   full = false,
+  scope,
   detached = false,
 }, env = process.env) {
   const normalizedRoot = resolve(root);
@@ -242,6 +304,8 @@ export async function createRun({
     needsCargo,
     liveEngram,
     full,
+    // A partial check says so in every artifact; only `full` is the gate.
+    ...(scope ? { scope } : {}),
     // Read by TermAl's run index (docs/features/test-runs.md): whether the
     // stages run in a detached worker, and the process that stands for the
     // run until a worker records its own pid in results.json.
@@ -255,6 +319,7 @@ export async function createRun({
     runId,
     state: "running",
     started: request.started,
+    ...(scope ? { scope } : {}),
     stages: (stages ?? []).map(({ name }) => ({ name, state: "unrun" })),
   });
   try {
@@ -436,7 +501,9 @@ function validateInitialRequest(runDir, request, env) {
         !/^[a-zA-Z0-9_-]+$/u.test(stage.name) || names.has(stage.name) ||
         typeof stage.command !== "string" || !Array.isArray(stage.args) ||
         !stage.args.every((arg) => typeof arg === "string") ||
-        (stage.durationReport !== undefined && !durationReportKinds.includes(stage.durationReport))) {
+        (stage.durationReport !== undefined && !durationReportKinds.includes(stage.durationReport)) ||
+        !validUiProjects(stage.uiProjects) ||
+        (stage.uiProjects !== undefined && stage.durationReport !== "vitest-json")) {
       throw new Error("worker request contains an invalid stage");
     }
     names.add(stage.name);
@@ -643,6 +710,15 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
         state: outcome.code === 0 && !outcome.error ? "passed" : "failed",
       });
       if (report) entry.durations = readDurationReport(report, stage.cwd);
+      if (stage.uiProjects !== undefined) {
+        entry.accounting = await accountUiProjects(request.root, stage, report);
+        // A project that failed, did not run, ran out of order or cannot be
+        // accounted fails the stage: missing results never read as complete.
+        if (entry.state === "passed" && entry.accounting.status !== "complete") {
+          entry.state = "failed";
+          entry.error = `UI project accounting ${entry.accounting.status}: ${entry.accounting.reason ?? "no reason recorded"}`;
+        }
+      }
       entry.diagnostics = await diagnostics(entry.log, entry.state === "failed");
       save(resultPath, result);
       if (entry.state === "failed") break;
@@ -653,8 +729,9 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
       throw new Error(driftError("input drift: results do not validate the current source", expectedInput, after));
     }
     result.state = result.stages.every((stage) => stage.state === "passed") ? "passed" : "failed";
-    result.exitCode = result.stages.find((stage) => stage.state === "failed")?.code ??
-      (result.state === "passed" ? 0 : 1);
+    // A stage failed by its accounting exited 0 itself; the run still fails.
+    const failedStage = result.stages.find((stage) => stage.state === "failed");
+    result.exitCode = failedStage ? failedStage.code || 1 : result.state === "passed" ? 0 : 1;
   } catch (error) {
     result.state = "failed";
     result.exitCode = 1;
@@ -679,6 +756,9 @@ export async function summarize(runDir) {
     `${terminal ? result.state === "passed" ? "PASS" : "FAIL" : "UNKNOWN (no terminal result; running or interrupted)"} ${result.runId} exit=${terminal ? result.exitCode : "unknown"}`,
     `results: ${join(runDir, "results.json")}`,
   ];
+  if (result.scope?.kind === "category") {
+    lines.push(`scope: category ${result.scope.category} (Vitest project ${result.scope.project}): ${result.scope.label ?? partialCheckLabel}`);
+  }
   const investigation = result.failureInvestigation ??
     (terminal && result.state === "failed" ? failureInvestigation(runDir) : undefined);
   if (investigation) {
@@ -712,6 +792,7 @@ export async function summarize(runDir) {
     }
     if (stage.diagnostics?.truncated) lines.push("[diagnostics truncated; full output in log]");
   }
+  lines.push(...accountingSummaryLines(result.stages));
   lines.push(...durationSummaryLines(result.stages));
   if (result.limitations) lines.push(result.limitations);
   return `${lines.join("\n")}\n`;
@@ -1082,10 +1163,23 @@ async function main(args) {
     await finish(runDir, { workerHandshake: true });
     return;
   }
-  if (!["full", "focused", "live"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS...] | summary|notify|recover RUN_DIR");
+  if (!["full", "focused", "live", "category"].includes(mode)) {
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS...] | category NAME [--notify SESSION] [--detach] | summary|notify|recover RUN_DIR");
+  }
+  // A category is resolved, or refused, before any run directory exists.
+  let category;
+  if (mode === "category") {
+    const name = args.shift();
+    if (!name || name.startsWith("-")) {
+      throw new Error("category requires a NAME: one of the UI categories in ui/test-categories.ts");
+    }
+    category = resolveCategory(await loadCategoryManifest(repository), name);
   }
   const options = parseCommon(args);
+  if (mode === "category" && (options.rest.length || options.liveBinary || options.liveSha256 ||
+      options.requiredBinaryEnv.length)) {
+    throw new Error("category takes only NAME, --notify and --detach");
+  }
   if (mode === "full" && options.rest.length) throw new Error("full takes no command");
   if (mode === "focused" && !options.rest.length) throw new Error("focused requires -- COMMAND ARGS");
   if (mode === "live" && (options.rest.length || !options.liveBinary || !options.liveSha256)) {
@@ -1101,12 +1195,26 @@ async function main(args) {
     ? requiredStages()
     : mode === "live"
       ? [liveStage()]
-      : [{ name: "focused", command: options.rest[0], args: options.rest.slice(1) }];
+      : mode === "category"
+        ? [categoryStage(category)]
+        : [{ name: "focused", command: options.rest[0], args: options.rest.slice(1) }];
   const runDir = await createRun({
     stages,
     notifyTo: options.notifyTo,
     requiredBinaryEnv: options.requiredBinaryEnv,
-    prerequisiteFiles: mode === "full" ? requiredFiles() : mode === "live" ? [join(repository, "src", "tests", "engram_root_recovery_live.rs")] : [],
+    prerequisiteFiles: mode === "full"
+      ? requiredFiles()
+      : mode === "live"
+        ? [join(repository, "src", "tests", "engram_root_recovery_live.rs")]
+        : mode === "category" ? categoryRequiredFiles() : [],
+    ...(mode === "category"
+      ? { scope: {
+        kind: "category",
+        category: categoryName(category),
+        project: category.name,
+        label: partialCheckLabel,
+      } }
+      : {}),
     needsCargo: mode === "full" || mode === "live",
     liveEngram: mode === "live"
       ? { path: options.liveBinary, expectedSha256: options.liveSha256 }
