@@ -1,6 +1,7 @@
 // Exercises the UI category planner without running Vitest: category names
 // from the real manifest, and the per-project accounting of a run's report.
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -319,6 +320,56 @@ test("projects sharing a group are checked together against the earlier groups o
   assert.match(early.problems.join("\n"), /ui-component started before ui-unit ended/u);
   assert.match(early.problems.join("\n"), /ui-heavy started before ui-unit ended/u);
   assert.equal(early.status, "incomplete");
+});
+
+test("a UI root reached through a directory link accounts files the runner names resolved", (t) => {
+  // macOS's temporary directories are under /var, a link to /private/var: a
+  // runner started there names its files under the resolved path.
+  const scratchRoot = join(projectRoot, ".tmp");
+  mkdirSync(scratchRoot, { recursive: true });
+  const directory = mkdtempSync(join(scratchRoot, "categories-fixture-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const real = join(directory, "real");
+  const link = join(directory, "link");
+  mkdirSync(real);
+  symlinkSync(real, link, "junction");
+  const resolved = realpathSync.native(real);
+  const reportUnder = (base, files) => {
+    let clock = 1000;
+    return JSON.stringify({
+      testResults: files.map((file) => {
+        const startTime = clock;
+        clock += 10;
+        return {
+          name: join(base, file).split("\\").join("/"),
+          status: "passed",
+          startTime,
+          endTime: startTime + 10,
+          assertionResults: [{ fullName: `${file} works`, status: "passed" }],
+        };
+      }),
+    });
+  };
+  // Named under the resolved path, accounted against the linked root.
+  const resolvedNames = account({ uiRoot: link, reportText: reportUnder(resolved, sampleBaseline) });
+  assert.deepEqual(resolvedNames.problems, []);
+  assert.equal(resolvedNames.status, "complete");
+  assert.deepEqual(resolvedNames.projects.map((row) => row.executedFiles), [2, 1]);
+  // A selected file the report does not name is still unrun.
+  const oneMissing = account({ uiRoot: link, reportText: reportUnder(resolved, sampleBaseline.slice(1)) });
+  assert.equal(oneMissing.status, "incomplete");
+  assert.deepEqual(oneMissing.projects[0].unrun, ["src/a.test.ts"]);
+  // Named as given, through the link: still accounted.
+  const givenNames = account({ uiRoot: link, reportText: reportUnder(link, sampleBaseline) });
+  assert.deepEqual(givenNames.problems, []);
+  assert.equal(givenNames.status, "complete");
+  // A file outside both forms of the root is still a problem, never matched.
+  const outside = account({
+    uiRoot: link,
+    reportText: reportUnder(directory, [...sampleBaseline.map((file) => join("real", file)), "elsewhere/src/a.test.ts"]),
+  });
+  assert.match(outside.problems.join("\n"), /elsewhere\/src\/a\.test\.ts ran but no accounted project selects it/u);
+  assert.equal(outside.status, "incomplete");
 });
 
 test("a category run accounts its own project only", () => {

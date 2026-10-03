@@ -11,7 +11,7 @@
 // `projectSelects`), running stages, results files or the summary
 // (test-launcher.mjs), or per-test durations (test-durations.mjs).
 // New module.
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -72,13 +72,32 @@ export function listUiTestFiles(uiRoot) {
   return files.sort();
 }
 
-function uiRelative(uiRoot, file) {
+// The UI root as given and, when the file system resolves it to another path,
+// as resolved. A runner started in a directory names its files under the
+// resolved path (macOS's /var is a link to /private/var), so a root reached
+// through a link is compared in both forms, the given one first.
+function uiRootBases(uiRoot) {
+  const bases = [uiRoot];
+  try {
+    const resolved = realpathSync.native(uiRoot);
+    if (resolved !== uiRoot) bases.push(resolved);
+  } catch {
+    // A root that cannot be resolved is compared as given.
+  }
+  return bases;
+}
+
+// The file's path relative to the first base that contains it, with forward
+// slashes, or undefined when no base does.
+function uiRelative(bases, file) {
   if (typeof file !== "string") return undefined;
   const native = file.split("/").join(sep);
   if (!isAbsolute(native)) return undefined;
-  const local = relative(uiRoot, native);
-  if (!local || local.startsWith("..") || isAbsolute(local)) return undefined;
-  return local.split(sep).join("/");
+  for (const base of bases) {
+    const local = relative(base, native);
+    if (local && !local.startsWith("..") && !isAbsolute(local)) return local.split(sep).join("/");
+  }
+  return undefined;
 }
 
 const bounded = (list) => list.slice(0, recordedFileLimit);
@@ -167,8 +186,9 @@ export function accountVitestRun({ manifest, uiRoot, baseline, accounted, report
     };
   }
   const executed = new Map(projects.map((project) => [project.name, []]));
+  const bases = uiRootBases(uiRoot);
   for (const result of report.testResults) {
-    const file = uiRelative(uiRoot, result?.name);
+    const file = uiRelative(bases, result?.name);
     const owner = file === undefined ? undefined : owners.get(file);
     if (owner === undefined || !executed.has(owner)) {
       problems.push(`${file ?? String(result?.name)} ran but no accounted project selects it`);
