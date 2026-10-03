@@ -447,6 +447,14 @@ impl AppState {
                 inner.engram_host_adapter = Arc::new(EngramHostAdapter { transport });
             }
         });
+        #[cfg(test)]
+        TEST_ENGRAM_BOOT_BUDGET_CLOCK.with(|slot| {
+            if let Some(clock) = slot.borrow().clone() {
+                inner
+                    .select_test_engram_budget_clock(clock)
+                    .expect("a test boot chooses its clock before any snapshot");
+            }
+        });
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
         match discover_codex_threads(&default_workdir, &discovery_scopes) {
             Ok(discovery) => {

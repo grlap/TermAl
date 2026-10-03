@@ -239,7 +239,7 @@ impl AppState {
                     engram.work_binding.clone(),
                     engram_refused_work_bindings_in_window(
                         &engram.refused_work_bindings,
-                        inner.engram_budget_clock.now(),
+                        inner.engram_budget_clock_snapshot().now(),
                     ),
                 )
             })
@@ -265,7 +265,7 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return read;
         };
-        let now = inner.engram_budget_clock.now();
+        let now = inner.engram_budget_clock_snapshot().now();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -296,7 +296,7 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
-        let now = inner.engram_budget_clock.now();
+        let now = inner.engram_budget_clock_snapshot().now();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");

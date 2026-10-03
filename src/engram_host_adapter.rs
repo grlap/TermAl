@@ -1048,6 +1048,9 @@ struct RecordedEngramControlRequest {
 thread_local! {
     static TEST_ENGRAM_BOOT_TRANSPORT: std::cell::RefCell<Option<Arc<dyn EngramControlTransport>>> =
         std::cell::RefCell::new(None);
+    /// The budget clock a test boot chooses before its own recovery runs.
+    static TEST_ENGRAM_BOOT_BUDGET_CLOCK: std::cell::RefCell<Option<EngramBudgetClock>> =
+        std::cell::RefCell::new(None);
 }
 
 #[cfg(test)]
@@ -2354,6 +2357,48 @@ impl AppState {
             result
         })
     }
+
+    /// As `new_with_paths`, with the state's budget clock chosen before the
+    /// boot's own recovery takes a snapshot.
+    fn new_with_paths_and_clock_for_test(
+        default_workdir: String,
+        persistence_path: PathBuf,
+        orchestrator_templates_path: PathBuf,
+        clock: EngramBudgetClock,
+    ) -> Result<Self> {
+        TEST_ENGRAM_BOOT_BUDGET_CLOCK.with(|slot| {
+            let previous = slot.replace(Some(clock));
+            let result = Self::new_with_paths(
+                default_workdir,
+                persistence_path,
+                orchestrator_templates_path,
+            );
+            slot.replace(previous);
+            result
+        })
+    }
+
+    /// As `new_with_paths_and_engram_transport_for_test`, with the state's
+    /// budget clock chosen before the boot's own recovery takes a snapshot.
+    fn new_with_paths_engram_transport_and_clock_for_test(
+        default_workdir: String,
+        persistence_path: PathBuf,
+        orchestrator_templates_path: PathBuf,
+        transport: Arc<dyn EngramControlTransport>,
+        clock: EngramBudgetClock,
+    ) -> Result<Self> {
+        TEST_ENGRAM_BOOT_BUDGET_CLOCK.with(|slot| {
+            let previous = slot.replace(Some(clock));
+            let result = Self::new_with_paths_and_engram_transport_for_test(
+                default_workdir,
+                persistence_path,
+                orchestrator_templates_path,
+                transport,
+            );
+            slot.replace(previous);
+            result
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -3644,6 +3689,15 @@ impl AppState {
         let (completion_tx, completion_rx) = mpsc::channel::<EngramBootRecoveryCompletion>();
         let accepting_completions = Arc::new(Mutex::new(true));
         let mut in_flight = HashSet::<String>::new();
+        // A test fixture's failure on a detached worker (a panicking fixture
+        // transport, a guard) is degraded below like any other; it is also
+        // kept here and raised again on the caller's thread, so the owning
+        // test fails instead of reporting it only on stderr. This covers the
+        // workers whose completion arrives before this coordinator returns;
+        // a worker still running when the batch budget expires finishes on
+        // the late path after the list is read.
+        #[cfg(test)]
+        let worker_panics = Arc::new(Mutex::new(Vec::<String>::new()));
 
         loop {
             while in_flight.len() < ENGRAM_BOOT_RECOVERY_CONCURRENCY && clock.now() < deadline {
@@ -3657,6 +3711,8 @@ impl AppState {
                 let sender = completion_tx.clone();
                 let worker_clock = clock.clone();
                 let accepting_completions = accepting_completions.clone();
+                #[cfg(test)]
+                let worker_panics = worker_panics.clone();
                 match std::thread::Builder::new()
                     .name(thread_name)
                     .spawn(move || {
@@ -3664,7 +3720,20 @@ impl AppState {
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             state.bind_engram_target_off_lock_traced(target)
                         }))
-                        .unwrap_or_else(|_| {
+                        .unwrap_or_else(|payload| {
+                            #[cfg(test)]
+                            worker_panics
+                                .lock()
+                                .expect("boot recovery worker panic list mutex poisoned")
+                                .push(
+                                    payload
+                                        .downcast_ref::<&str>()
+                                        .map(|text| (*text).to_owned())
+                                        .or_else(|| payload.downcast_ref::<String>().cloned())
+                                        .unwrap_or_else(|| "a non-text panic".to_owned()),
+                                );
+                            #[cfg(not(test))]
+                            drop(payload);
                             state.clear_engram_bind_in_progress(&worker_session_id);
                             Err(EngramTransportError::transport(
                                 "restart recovery worker panicked",
@@ -3761,6 +3830,17 @@ impl AppState {
                 duration_millis(clock.elapsed_since(started_at)),
                 plan.budget.as_millis()
             );
+        }
+        #[cfg(test)]
+        {
+            let panics = std::mem::take(
+                &mut *worker_panics
+                    .lock()
+                    .expect("boot recovery worker panic list mutex poisoned"),
+            );
+            if !panics.is_empty() {
+                panic!("a boot recovery worker failed: {}", panics.join("; "));
+            }
         }
     }
 
@@ -5930,7 +6010,7 @@ impl AppState {
             source_root_read_fence: EngramRootReadFence::capture(inner),
             admission_started_at: None,
             adapter: inner.engram_host_adapter.clone(),
-            budget_clock: inner.engram_budget_clock.clone(),
+            budget_clock: inner.engram_budget_clock_snapshot(),
             #[cfg(test)]
             test_dispatch_budget: inner.test_engram_dispatch_budget,
             #[cfg(test)]
@@ -6025,7 +6105,7 @@ impl AppState {
             runtime_snapshot: parent.runtime.runtime_token(),
             admission_started_at: None,
             adapter: inner.engram_host_adapter.clone(),
-            budget_clock: inner.engram_budget_clock.clone(),
+            budget_clock: inner.engram_budget_clock_snapshot(),
             #[cfg(test)]
             test_dispatch_budget: inner.test_engram_dispatch_budget,
             #[cfg(test)]

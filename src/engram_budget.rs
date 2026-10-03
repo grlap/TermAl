@@ -147,6 +147,45 @@ impl EngramBudgetClock {
     }
 }
 
+impl StateInner {
+    /// The one reader of the state's budget clock. Every snapshot, the
+    /// off-lock accessor's and the target constructors' alike, goes through
+    /// here, so one operation never mixes two clocks. A transient read of
+    /// `now()` counts too: a fixture must choose its clock before any Engram
+    /// path has read one.
+    fn engram_budget_clock_snapshot(&self) -> EngramBudgetClock {
+        #[cfg(test)]
+        self.engram_budget_clock_snapshots
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.engram_budget_clock.clone()
+    }
+
+    /// A fixture's choice of clock. The first choice must come before any
+    /// snapshot: a target or worker holding the old clock would run one
+    /// operation on two clocks. A later choice keeps the first one.
+    #[cfg(test)]
+    fn select_test_engram_budget_clock(
+        &mut self,
+        clock: EngramBudgetClock,
+    ) -> std::result::Result<EngramBudgetClock, &'static str> {
+        if !self.engram_budget_clock_selected {
+            if self
+                .engram_budget_clock_snapshots
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != 0
+            {
+                return Err(
+                    "a fixture must choose its Engram budget clock before enabling Engram or \
+                     starting any target or worker",
+                );
+            }
+            self.engram_budget_clock = clock;
+            self.engram_budget_clock_selected = true;
+        }
+        Ok(self.engram_budget_clock_snapshot())
+    }
+}
+
 impl AppState {
     fn engram_budget_clock(&self) -> EngramBudgetClock {
         // Real time is the sole production clock. Acquiring the fixture's
@@ -160,17 +199,43 @@ impl AppState {
             self.inner
                 .lock()
                 .expect("state mutex poisoned")
-                .engram_budget_clock
-                .clone()
+                .engram_budget_clock_snapshot()
         }
     }
 
     #[cfg(test)]
     fn install_test_engram_budget_clock(&self, clock: EngramBudgetClock) {
-        self.inner
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        inner.engram_budget_clock = clock;
+        inner.engram_budget_clock_selected = true;
+    }
+
+    /// Chooses a shared scripted clock for this state's Engram operations,
+    /// unless a clock was already chosen, and returns the clock in force: a
+    /// fixture that enables Engram again keeps its clock.
+    #[cfg(test)]
+    fn select_test_scripted_engram_budget_clock(&self) -> EngramBudgetClock {
+        self.select_test_engram_budget_clock(EngramBudgetClock::scripted())
+    }
+
+    /// The choice is made under the state lock; a refused choice panics only
+    /// after the lock is released, so the fixture's failure does not poison it.
+    #[cfg(test)]
+    fn select_test_engram_budget_clock(&self, clock: EngramBudgetClock) -> EngramBudgetClock {
+        let chosen = self
+            .inner
             .lock()
             .expect("state mutex poisoned")
-            .engram_budget_clock = clock;
+            .select_test_engram_budget_clock(clock);
+        chosen.unwrap_or_else(|refusal| panic!("{refusal}"))
+    }
+
+    /// Declares that this state's Engram operations run on real time on
+    /// purpose, as a budget-expiry test needs, unless a clock was already
+    /// chosen.
+    #[cfg(test)]
+    fn declare_test_real_engram_budget_clock(&self) -> EngramBudgetClock {
+        self.select_test_engram_budget_clock(EngramBudgetClock::Real)
     }
 
     #[cfg(test)]
