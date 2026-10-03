@@ -61,6 +61,39 @@ For an authorized focused check, pass an argument array after `--`:
 node scripts/test-launcher.mjs focused -- node --test scripts/test-launcher.test.mjs
 ```
 
+To run one UI test category on its own, name it after its Vitest project (see
+[UI test categories](#ui-test-categories)):
+
+```bash
+node scripts/test-launcher.mjs category ui-heavy
+```
+
+The categories are `ui-unit`, `ui-component`, `ui-heavy` and `ui-app`, read
+from `CATEGORY_PROJECTS` in `ui/test-categories.ts`; an unknown or missing name
+is refused before any run exists. A category run is a partial check, not the
+full gate: its `request.json` and `results.json` carry a `scope` saying so,
+`full` stays `false`, and the summary names that scope before its stages. A
+category run uses the same Vitest configuration as the full gate, with
+`--project` added.
+Passing category runs never add up to a full gate. TermAl does not credit a
+category run as a test check.
+
+The full gate's Vitest stage, and a category run, record one child row per UI
+project under the stage's `accounting`, taken from that same run's JSON report
+(`scripts/test-categories-plan.mjs`): the files the project selects and the
+ones that ran, its test counts, and whether its files' test windows overlapped
+and the projects ran in their declared order. The rows are children of the one
+stage, not further stages. A project that failed, ran nothing, left a selected
+file unrun or a test unfinished, or ran files whose test windows overlap, a
+file that ran outside the plan, a file result that is not whole (no file
+status, test list, test statuses or valid times), and a report that is missing
+or unreadable each fail the stage, even when Vitest exited 0; rows that cannot
+be established are `unknown`, never passed. A file whose tests were all skipped
+has no test window and is left out of the order and overlap checks. `ui-heavy`
+is the serialized lane: the Vitest configuration runs its files one at a time
+in a group of their own. The accounting is a backstop to that: it sees only
+the reported test windows, not collection or environment setup.
+
 Name a shell explicitly when one is required. On Windows, direct `.cmd` and
 `.bat` executables are rejected; use Node with the package's JavaScript CLI or
 an explicit known native shell. No launcher preset installs dependencies,

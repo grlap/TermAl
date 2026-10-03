@@ -20,6 +20,8 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  categoryRequiredFiles,
+  categoryStage,
   createRun,
   diagnostics,
   ensureCargoTargetDirectory,
@@ -235,6 +237,144 @@ test("a passing stage stays passed whatever its duration artifact holds", async 
       assert.match(await summarize(runDir), /^PASS /u, label);
     }
   });
+});
+
+test("the full gate accounts every UI project, and a category runs one under the same configuration", () => {
+  const vitest = requiredStages().find(({ name }) => name === "vitest");
+  assert.equal(vitest.uiProjects, "all");
+  assert.equal(vitest.durationReport, "vitest-json");
+  const heavy = { name: "heavy", groupOrder: 3 };
+  const category = categoryStage(heavy);
+  assert.equal(category.name, "ui-heavy");
+  assert.equal(category.cwd, vitest.cwd);
+  assert.equal(category.command, vitest.command);
+  // Only the project selector differs: the same vite.config.ts applies.
+  assert.deepEqual(category.args, [...vitest.args, "--project", "heavy"]);
+  assert.deepEqual(category.uiProjects, ["heavy"]);
+  assert.equal(category.durationReport, "vitest-json");
+  for (const path of ["scripts/test-categories-plan.mjs", "ui/test-categories.ts", "ui/node_modules/vitest/vitest.mjs"]) {
+    assert.ok(categoryRequiredFiles(projectRoot).includes(join(projectRoot, path)), path);
+  }
+  assert.ok(requiredFiles(projectRoot).includes(join(projectRoot, "ui", "test-categories.ts")));
+});
+
+// A repository with a two-project UI manifest and a stage that writes a
+// Vitest JSON report naming whichever files STAGE_FILES lists.
+async function uiProjectRepository(t, callback) {
+  await repository(t, async (root, env) => {
+    mkdirSync(join(root, "ui", "src"), { recursive: true });
+    writeFileSync(join(root, "ui", "test-categories.ts"), [
+      "export type CategoryProject = { readonly name: string; readonly include: readonly string[]; readonly exclude: readonly string[]; readonly groupOrder: number };",
+      "export const CATEGORY_PROJECTS: readonly CategoryProject[] = [",
+      "  { name: \"unit\", include: [\"src/a.test.ts\"], exclude: [], groupOrder: 1 },",
+      "  { name: \"heavy\", include: [\"src/c.test.tsx\"], exclude: [], groupOrder: 2 },",
+      "];",
+      "export function projectSelects(project: CategoryProject, file: string): boolean {",
+      "  return project.include.includes(file) && !project.exclude.includes(file);",
+      "}",
+      "",
+    ].join("\n"));
+    writeFileSync(join(root, "ui", "src", "a.test.ts"), "");
+    writeFileSync(join(root, "ui", "src", "c.test.tsx"), "");
+    writeFileSync(join(root, "ui", "stage.mjs"), [
+      "import { writeFileSync } from 'node:fs';",
+      "import { resolve } from 'node:path';",
+      "const target = process.argv.find((arg) => arg.startsWith('--outputFile.json='));",
+      "const files = (process.env.STAGE_FILES ?? '').split(',').filter(Boolean);",
+      "if (target && process.env.STAGE_NO_REPORT !== '1') {",
+      "  let clock = 1000;",
+      "  writeFileSync(target.slice('--outputFile.json='.length), JSON.stringify({ testResults: files.map((file) => {",
+      "    const startTime = clock; clock += 10;",
+      "    return { name: resolve(file).replaceAll(String.fromCharCode(92), '/'), status: 'passed', startTime,",
+      "      endTime: startTime + 10, assertionResults: [{ fullName: file, status: 'passed' }] };",
+      "  }) }));",
+      "}",
+      "",
+    ].join("\n"));
+    execFileSync("git", ["add", "ui"], { cwd: root, env });
+    await callback(root);
+  });
+}
+
+const uiStage = (overrides = {}) => ({
+  name: "vitest",
+  command: process.execPath,
+  args: ["stage.mjs"],
+  cwd: "ui",
+  durationReport: "vitest-json",
+  uiProjects: "all",
+  ...overrides,
+});
+
+test("a Vitest stage that exits 0 still fails when a UI project did not run or cannot be accounted", async (t) => {
+  await uiProjectRepository(t, async (root) => {
+    for (const [label, env, status, accounting, row] of [
+      ["every project ran", { STAGE_FILES: "src/a.test.ts,src/c.test.tsx" }, "passed", "complete", "ui-heavy [serialized lane]: passed: 1/1 files"],
+      ["the heavy project ran nothing", { STAGE_FILES: "src/a.test.ts" }, "failed", "incomplete", "ui-heavy [serialized lane]: empty"],
+      ["no report was written", { STAGE_NO_REPORT: "1" }, "failed", "unknown", "ui-heavy [serialized lane]: unknown"],
+    ]) {
+      const runEnv = { ...fixtureEnv, ...env };
+      const runDir = await createRun({ root, stages: [uiStage()] }, runEnv);
+      const result = await executeRun(runDir, runEnv);
+      const [entry] = result.stages;
+      assert.equal(entry.code, 0, `${label}: the runner itself exited 0`);
+      assert.equal(entry.state, status, label);
+      assert.equal(result.state, status, label);
+      assert.equal(result.exitCode, status === "passed" ? 0 : 1, label);
+      assert.equal(entry.accounting.status, accounting, label);
+      assert.deepEqual(entry.accounting.projects.map((child) => [child.kind, child.category]), [
+        ["test", "ui-unit"],
+        ["test", "ui-heavy"],
+      ], label);
+      assert.deepEqual(json(join(runDir, "results.json")).stages[0].accounting, entry.accounting, label);
+      const summary = await summarize(runDir);
+      assert.match(summary, status === "passed" ? /^PASS /u : /^FAIL /u, label);
+      assert.match(summary, new RegExp(`^vitest projects: ${accounting}`, "mu"), label);
+      assert.ok(summary.includes(`  ${row}`), `${label}: ${summary}`);
+      if (status === "failed") assert.match(entry.error, /UI project accounting/u, label);
+    }
+  });
+});
+
+test("a category run is a partial check in its request, results and summary", async (t) => {
+  await uiProjectRepository(t, async (root) => {
+    const runEnv = { ...fixtureEnv, STAGE_FILES: "src/c.test.tsx" };
+    const scope = { kind: "category", category: "ui-heavy", project: "heavy", label: "partial check, not the full gate" };
+    const runDir = await createRun({
+      root,
+      stages: [uiStage({ name: "ui-heavy", uiProjects: ["heavy"] })],
+      scope,
+    }, runEnv);
+    const request = json(join(runDir, "request.json"));
+    assert.equal(request.full, false, "a category is never the full gate");
+    assert.deepEqual(request.scope, scope);
+    const result = await executeRun(runDir, runEnv);
+    assert.equal(result.state, "passed");
+    assert.deepEqual(result.scope, scope);
+    assert.deepEqual(result.stages[0].accounting.projects.map((child) => child.category), ["ui-heavy"]);
+    const summary = await summarize(runDir);
+    assert.match(summary, /^scope: category ui-heavy \(Vitest project heavy\): partial check, not the full gate$/mu);
+    assert.ok(summary.indexOf("scope:") < summary.indexOf("ui-heavy projects:"), "the scope comes first");
+  });
+});
+
+test("the category command refuses a missing or unknown name before any run exists", () => {
+  for (const [args, message] of [
+    [["category"], /category requires a NAME/u],
+    [["category", "ui-bogus"], /unknown category: ui-bogus; known categories: ui-unit, ui-component, ui-heavy, ui-app/u],
+    [["category", "--detach"], /category requires a NAME/u],
+    [["category", "ui-heavy", "--", "echo"], /category takes only NAME, --notify and --detach/u],
+  ]) {
+    let failure;
+    try {
+      execFileSync(process.execPath, [launcherScript, ...args], { env: fixtureEnv, encoding: "utf8", stdio: "pipe" });
+    } catch (error) {
+      failure = error;
+    }
+    assert.ok(failure, `${args.join(" ")} must fail`);
+    assert.match(`${failure.stdout}${failure.stderr}`, message, args.join(" "));
+    assert.doesNotMatch(`${failure.stdout}${failure.stderr}`, /^(?:RUN|STARTED) /mu, `${args.join(" ")}: no run`);
+  }
 });
 
 test("a request naming an unknown duration report kind is rejected before any stage runs", async (t) => {
@@ -1130,7 +1270,7 @@ test("helper scripts run when started through a linked directory", async (t) => 
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const real = join(base, "real");
   mkdirSync(join(real, "scripts"), { recursive: true });
-  for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs"]) {
+  for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs"]) {
     copyFileSync(join(projectRoot, "scripts", name), join(real, "scripts", name));
   }
   const linked = join(base, "linked");
@@ -1163,7 +1303,7 @@ test("a foreground run prints its run receipt before any stage completes", async
     // from inside the fixture.
     const scripts = join(root, "scripts");
     mkdirSync(scripts);
-    for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs"]) {
+    for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs"]) {
       copyFileSync(join(projectRoot, "scripts", name), join(scripts, name));
     }
     const gate = mkdtempSync(join(testTempDirectory(), "launcher-receipt-"));

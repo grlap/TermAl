@@ -5848,6 +5848,99 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
 }
 
 #[test]
+fn claimed_root_checks_carry_the_fixture_toolchain_label_settled_at_their_start() {
+    // A real toolchain capture runs rustup in the check's worktree on a
+    // detached thread; one still running when the fixture drops keeps its
+    // temporary root from being removed.
+    let label = "fixture-toolchain";
+    let (claimed, worktree, runtime_token) = named_root_turn(label, true);
+    claimed.state.note_engram_command_started(
+        &claimed.session_id,
+        "fixture-toolchain-test",
+        Some("cargo test"),
+        Some(worktree.to_str().expect("UTF-8 fixture path")),
+    );
+    let toolchain = claimed.record(|record| {
+        assert_eq!(
+            record.engram.active_turn_checks.len(),
+            1,
+            "the check in the named root is recorded"
+        );
+        record.engram.active_turn_checks[0].toolchain.clone()
+    });
+    assert!(
+        toolchain.is_ready(),
+        "the toolchain capture must be settled when the check starts"
+    );
+    assert_eq!(
+        toolchain.wait_until(std::time::Instant::now()),
+        Some(Some(CLAIMED_ROOT_TOOLCHAIN.to_owned()))
+    );
+    claimed
+        .state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &runtime_token)
+        .expect("the turn closes");
+}
+
+#[test]
+fn claimed_root_teardown_waits_for_its_capture_workers_before_removing_its_root() {
+    let claimed = ClaimedRoot::new_scripted("teardown-captures", Vec::new());
+    let temp_root = claimed
+        .state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .to_owned();
+    let workers = claimed.record(|record| record.engram.capture_workers.clone());
+    // One capture worker of the session, held until released, which reports
+    // whether the fixture's temporary root still existed when it finished.
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let worker_gate = gate.clone();
+    let worker_root = temp_root.clone();
+    let held = EngramCapture::spawn(&workers, move || {
+        let (open, opened) = &*worker_gate;
+        let _ = opened
+            .wait_timeout_while(
+                open.lock().expect("gate mutex poisoned"),
+                DEADLOCK_GUARD,
+                |open| !*open,
+            )
+            .expect("gate mutex poisoned");
+        worker_root.exists()
+    });
+    let (events_tx, events_rx) = std::sync::mpsc::channel();
+    *claimed
+        .teardown_events
+        .lock()
+        .expect("teardown events mutex poisoned") = Some(events_tx.clone());
+    let teardown = std::thread::spawn(move || {
+        drop(claimed);
+        let _ = events_tx.send("dropped");
+    });
+    // Teardown either starts waiting for the held worker or finishes first.
+    let first = events_rx
+        .recv_timeout(DEADLOCK_GUARD)
+        .expect("teardown reports its progress");
+    let (open, opened) = &*gate;
+    *open.lock().expect("gate mutex poisoned") = true;
+    opened.notify_all();
+    let root_outlived_worker = held
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .expect("the released worker finishes");
+    teardown.join().expect("teardown should finish");
+    assert_eq!(
+        first, "settling",
+        "teardown must wait for the session's capture workers"
+    );
+    assert!(
+        root_outlived_worker,
+        "the temporary root must outlive the capture workers running in it"
+    );
+    assert!(!temp_root.exists(), "teardown still removes the root");
+}
+
+#[test]
 fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
     let label = "focused-named-claim";
     let claimed = ClaimedRoot::new_scripted(

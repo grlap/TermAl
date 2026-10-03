@@ -12462,6 +12462,19 @@ struct BoundedBootRecoveryTransport {
     requests: std::sync::atomic::AtomicUsize,
     first_batch: Mutex<(usize, bool)>,
     first_batch_changed: Condvar,
+    // The first worker to read its work binding is held there: after its
+    // bind operation's deadline exists, before that bind reaches transport.
+    held_worker: Mutex<BootRecoveryHeldWorker>,
+    held_worker_changed: Condvar,
+    // Requests that returned, and the sessions whose bind reached transport.
+    settled: Mutex<(usize, Vec<String>)>,
+    settled_changed: Condvar,
+}
+
+#[derive(Default)]
+struct BootRecoveryHeldWorker {
+    session_id: Option<String>,
+    released: bool,
 }
 
 impl BoundedBootRecoveryTransport {
@@ -12472,7 +12485,46 @@ impl BoundedBootRecoveryTransport {
             requests: std::sync::atomic::AtomicUsize::new(0),
             first_batch: Mutex::new((0, false)),
             first_batch_changed: Condvar::new(),
+            held_worker: Mutex::new(BootRecoveryHeldWorker::default()),
+            held_worker_changed: Condvar::new(),
+            settled: Mutex::new((0, Vec::new())),
+            settled_changed: Condvar::new(),
         })
+    }
+
+    fn wait_for_held_worker(&self) -> String {
+        let held = self
+            .held_worker
+            .lock()
+            .expect("bounded recovery hold mutex poisoned");
+        let (held, _timeout) = self
+            .held_worker_changed
+            .wait_timeout_while(held, DEADLOCK_GUARD, |held| held.session_id.is_none())
+            .expect("bounded recovery hold should wait");
+        held.session_id
+            .clone()
+            .expect("no boot recovery worker reached its work binding read")
+    }
+
+    fn release_held_worker(&self) {
+        self.held_worker
+            .lock()
+            .expect("bounded recovery hold mutex poisoned")
+            .released = true;
+        self.held_worker_changed.notify_all();
+    }
+
+    fn wait_for_settled_requests(&self, count: usize) -> Vec<String> {
+        let settled = self
+            .settled
+            .lock()
+            .expect("bounded recovery settled mutex poisoned");
+        let (settled, _timeout) = self
+            .settled_changed
+            .wait_timeout_while(settled, DEADLOCK_GUARD, |settled| settled.0 < count)
+            .expect("bounded recovery settled requests should wait");
+        assert_eq!(settled.0, count, "boot recovery requests did not settle");
+        settled.1.clone()
     }
 }
 
@@ -12530,7 +12582,43 @@ impl EngramControlTransport for BoundedBootRecoveryTransport {
             ))),
         };
         self.active.fetch_sub(1, Ordering::SeqCst);
+        {
+            let mut settled = self
+                .settled
+                .lock()
+                .expect("bounded recovery settled mutex poisoned");
+            settled.0 += 1;
+            if request["operation"] == "session_bind" {
+                settled.1.push(connection.session_id.clone());
+            }
+        }
+        self.settled_changed.notify_all();
         result
+    }
+
+    fn read_work_binding(
+        &self,
+        connection: &EngramConnectionConfig,
+        _preference: EngramBindingPreference<'_>,
+        _timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        let mut held = self
+            .held_worker
+            .lock()
+            .expect("bounded recovery hold mutex poisoned");
+        if held.session_id.is_none() {
+            held.session_id = Some(connection.session_id.clone());
+            self.held_worker_changed.notify_all();
+            let (released, _timeout) = self
+                .held_worker_changed
+                .wait_timeout_while(held, DEADLOCK_GUARD, |held| !held.released)
+                .expect("bounded recovery hold should wait");
+            assert!(
+                released.released,
+                "boot recovery fixture never released its held worker"
+            );
+        }
+        Ok(None)
     }
 
     fn shutdown_session(&self, _session_id: &str) {}
@@ -13069,98 +13157,248 @@ fn boot_recovery_phase_log_names_target_command_duration_and_outcome() {
 fn boot_recovery_bounds_worker_concurrency_across_many_targets() {
     use std::sync::atomic::Ordering;
 
-    let (state, runtime_rx) =
-        test_app_state_with_delegation_codex_runtime("engram-bounded-boot-recovery");
-    let root = state
-        .test_temp_root
-        .as_ref()
-        .expect("test root should exist")
-        .path()
-        .join("engram-bounded-boot-recovery-project");
-    fs::create_dir_all(&root).expect("project root should exist");
-    fs::write(root.join(".engram-project"), "fixture-ready")
-        .expect("Engram project marker should exist");
-    let home = root.join("engram-home");
-    fs::create_dir_all(&home).expect("Engram home should exist");
-    let project_id = create_test_project(&state, &root, "Engram bounded boot recovery");
-    let parent_session_ids = (0..3)
-        .map(|_| create_test_project_session(&state, Agent::Codex, &project_id, &root))
-        .collect::<Vec<_>>();
-    let mut child_session_ids = Vec::new();
-    for index in 0..10 {
-        let created = state
-            .create_read_only_delegation(
-                &parent_session_ids[index / 4],
-                CreateDelegationRequest {
-                    prompt: format!("Create recovery target {index}."),
-                    title: Some(format!("Engram recovery target {index}")),
-                    cwd: None,
-                    agent: Some(Agent::Codex),
-                    model: None,
-                    mode: Some(DelegationMode::Reviewer),
-                    write_policy: Some(DelegationWritePolicy::ReadOnly),
-                },
-            )
-            .expect("Engram-off delegation should start");
-        assert!(matches!(
-            receive_synchronous_engram_prompt(
-                &state,
-                &runtime_rx,
-                "runtime should receive the setup prompt"
-            )
-            .expect("runtime should receive the setup prompt"),
-            CodexRuntimeCommand::Prompt { .. }
-        ));
-        child_session_ids.push(created.delegation.child_session_id);
-    }
-    let settings = EngramProjectSettings {
-        acceptance_evaluation: None,
-        enabled: true,
-        turn_gated_control: true,
-        binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
-        home: Some(home.to_string_lossy().into_owned()),
-        work_authority_grant: None,
-        authority_store_key: None,
-        deadline_ms: Some(250),
-    };
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner
-            .projects
-            .iter_mut()
-            .find(|project| project.id == project_id)
-            .expect("project should exist")
-            .engram = Some(settings);
-        // This fixture checks batch ownership across thirteen targets. Use
-        // diagnostic scheduling headroom; expiry has its own budget test.
-        inner.preferences.engram.boot_recovery_budget_ms = MAX_ENGRAM_BOOT_RECOVERY_BUDGET_MS;
-        for record in &mut inner.sessions {
-            if parent_session_ids.contains(&record.session.id)
-                || child_session_ids.contains(&record.session.id)
-            {
-                record.engram.routing_token = Some(format!("stale-{}", record.session.id));
-                record.engram.rebind_required = true;
-            }
-        }
-        state
-            .commit_locked(&mut inner)
-            .expect("recovery setup should persist");
-    }
-    let transport = BoundedBootRecoveryTransport::new();
-    state.install_control_test_transport(transport.clone());
-
-    state.recover_engram_sessions_after_boot();
+    let mut fixture = BoundedBootRecoveryFixture::new("engram-bounded-boot-recovery");
+    let held_session_id = fixture.transport.wait_for_held_worker();
+    // Real time passes beyond the former 250 ms operation allowance while the
+    // held bind waits before transport; the scripted budget clock does not.
+    let held_since = std::time::Instant::now();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(held_since.elapsed() > Duration::from_millis(250));
+    assert_eq!(fixture.clock.now(), fixture.logical_start);
+    fixture.transport.release_held_worker();
+    fixture.join_recovery();
 
     assert_eq!(
-        transport.requests.load(Ordering::SeqCst),
-        (child_session_ids.len() + parent_session_ids.len()) * 2,
+        fixture.transport.requests.load(Ordering::SeqCst),
+        fixture.target_count * 2,
         "every parent/child target should run status plus fresh bind"
     );
+    for (session_id, outcome) in fixture.restart_outcomes() {
+        assert_eq!(
+            outcome,
+            Some((EngramControlCardDecision::Grant, None)),
+            "{session_id} should recover"
+        );
+    }
+    assert!(
+        fixture
+            .transport
+            .wait_for_settled_requests(fixture.target_count * 2)
+            .contains(&held_session_id),
+        "the held worker's bind should reach transport on its logical budget"
+    );
     assert_eq!(
-        transport.max_active.load(Ordering::SeqCst),
+        fixture.transport.max_active.load(Ordering::SeqCst),
         ENGRAM_BOOT_RECOVERY_CONCURRENCY,
         "boot recovery should fill but never exceed one bounded worker batch"
     );
+}
+
+#[test]
+fn boot_recovery_held_worker_expires_when_its_logical_budget_is_consumed() {
+    use std::sync::atomic::Ordering;
+
+    let mut fixture = BoundedBootRecoveryFixture::new("engram-bounded-boot-recovery-expiry");
+    let held_session_id = fixture.transport.wait_for_held_worker();
+    // Every other target finishes status plus bind; the held one has only its
+    // status. Only then is logical time consumed, so no other operation sees it.
+    let bound = fixture
+        .transport
+        .wait_for_settled_requests(fixture.target_count * 2 - 1);
+    assert!(!bound.contains(&held_session_id));
+    fixture
+        .clock
+        .advance(fixture.operation_budget + Duration::from_millis(1));
+    fixture.transport.release_held_worker();
+    fixture.join_recovery();
+
+    assert_eq!(
+        fixture.transport.requests.load(Ordering::SeqCst),
+        fixture.target_count * 2 - 1,
+        "the expired bind must not reach transport"
+    );
+    assert!(
+        !fixture
+            .transport
+            .wait_for_settled_requests(fixture.target_count * 2 - 1)
+            .contains(&held_session_id)
+    );
+    assert_eq!(
+        fixture.transport.max_active.load(Ordering::SeqCst),
+        ENGRAM_BOOT_RECOVERY_CONCURRENCY
+    );
+    // The held bind stopped on its consumed operation budget, not on any other
+    // failure, and only it did.
+    for (session_id, outcome) in fixture.restart_outcomes() {
+        let expected = if session_id == held_session_id {
+            (
+                EngramControlCardDecision::Degraded,
+                Some("deadline_exceeded".to_owned()),
+            )
+        } else {
+            (EngramControlCardDecision::Grant, None)
+        };
+        assert_eq!(outcome, Some(expected), "{session_id}");
+    }
+}
+
+/// Thirteen stale-bound targets (three parents, ten delegation children) whose
+/// boot recovery runs on its own thread against one scripted budget clock.
+struct BoundedBootRecoveryFixture {
+    transport: Arc<BoundedBootRecoveryTransport>,
+    clock: EngramBudgetClock,
+    logical_start: std::time::Instant,
+    operation_budget: Duration,
+    target_count: usize,
+    target_session_ids: Vec<String>,
+    recovery: Option<std::thread::JoinHandle<()>>,
+    state: AppState,
+    _runtime_rx: mpsc::Receiver<CodexRuntimeCommand>,
+}
+
+impl BoundedBootRecoveryFixture {
+    fn join_recovery(&mut self) {
+        self.recovery
+            .take()
+            .expect("boot recovery should be running")
+            .join()
+            .expect("boot recovery coordinator should finish");
+    }
+
+    /// Each target's restart card: its decision and refusal code.
+    fn restart_outcomes(
+        &self,
+    ) -> Vec<(String, Option<(EngramControlCardDecision, Option<String>)>)> {
+        let inner = self.state.inner.lock().expect("state mutex poisoned");
+        self.target_session_ids
+            .iter()
+            .map(|session_id| {
+                let record = inner
+                    .sessions
+                    .iter()
+                    .find(|record| &record.session.id == session_id)
+                    .expect("recovery target should exist");
+                let outcome =
+                    record
+                        .session
+                        .messages
+                        .iter()
+                        .rev()
+                        .find_map(|message| match message {
+                            Message::EngramControl { card, .. }
+                                if card.stage == EngramControlStage::Restart =>
+                            {
+                                Some((card.decision, card.refusal_code.clone()))
+                            }
+                            _ => None,
+                        });
+                (session_id.clone(), outcome)
+            })
+            .collect()
+    }
+
+    fn new(label: &str) -> Self {
+        let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(label);
+        let root = state
+            .test_temp_root
+            .as_ref()
+            .expect("test root should exist")
+            .path()
+            .join("engram-bounded-boot-recovery-project");
+        fs::create_dir_all(&root).expect("project root should exist");
+        fs::write(root.join(".engram-project"), "fixture-ready")
+            .expect("Engram project marker should exist");
+        let home = root.join("engram-home");
+        fs::create_dir_all(&home).expect("Engram home should exist");
+        let project_id = create_test_project(&state, &root, "Engram bounded boot recovery");
+        let parent_session_ids = (0..3)
+            .map(|_| create_test_project_session(&state, Agent::Codex, &project_id, &root))
+            .collect::<Vec<_>>();
+        let mut child_session_ids = Vec::new();
+        for index in 0..10 {
+            let created = state
+                .create_read_only_delegation(
+                    &parent_session_ids[index / 4],
+                    CreateDelegationRequest {
+                        prompt: format!("Create recovery target {index}."),
+                        title: Some(format!("Engram recovery target {index}")),
+                        cwd: None,
+                        agent: Some(Agent::Codex),
+                        model: None,
+                        mode: Some(DelegationMode::Reviewer),
+                        write_policy: Some(DelegationWritePolicy::ReadOnly),
+                    },
+                )
+                .expect("Engram-off delegation should start");
+            assert!(matches!(
+                receive_synchronous_engram_prompt(
+                    &state,
+                    &runtime_rx,
+                    "runtime should receive the setup prompt"
+                )
+                .expect("runtime should receive the setup prompt"),
+                CodexRuntimeCommand::Prompt { .. }
+            ));
+            child_session_ids.push(created.delegation.child_session_id);
+        }
+        let settings = EngramProjectSettings {
+            acceptance_evaluation: None,
+            enabled: true,
+            turn_gated_control: true,
+            binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
+            home: Some(home.to_string_lossy().into_owned()),
+            work_authority_grant: None,
+            authority_store_key: None,
+            deadline_ms: Some(250),
+        };
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            inner
+                .projects
+                .iter_mut()
+                .find(|project| project.id == project_id)
+                .expect("project should exist")
+                .engram = Some(settings);
+            for record in &mut inner.sessions {
+                if parent_session_ids.contains(&record.session.id)
+                    || child_session_ids.contains(&record.session.id)
+                {
+                    record.engram.routing_token = Some(format!("stale-{}", record.session.id));
+                    record.engram.rebind_required = true;
+                }
+            }
+            state
+                .commit_locked(&mut inner)
+                .expect("recovery setup should persist");
+        }
+        let transport = BoundedBootRecoveryTransport::new();
+        state.install_control_test_transport(transport.clone());
+        // Each operation's 250 ms and the batch's configured budget are logical:
+        // they are charged only by explicit advancement, never by scheduling.
+        let clock = EngramBudgetClock::scripted();
+        state.install_test_engram_budget_clock(clock.clone());
+        let logical_start = clock.now();
+
+        let recovery_state = state.clone();
+        let recovery = std::thread::spawn(move || {
+            recovery_state.recover_engram_sessions_after_boot();
+        });
+        Self {
+            transport,
+            clock,
+            logical_start,
+            operation_budget: Duration::from_millis(250),
+            target_count: child_session_ids.len() + parent_session_ids.len(),
+            target_session_ids: parent_session_ids
+                .iter()
+                .chain(&child_session_ids)
+                .cloned()
+                .collect(),
+            recovery: Some(recovery),
+            state,
+            _runtime_rx: runtime_rx,
+        }
+    }
 }
 
 #[test]

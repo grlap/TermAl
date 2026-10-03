@@ -1130,7 +1130,10 @@ fn authority_review_restart_recovers(prepared_only: bool) {
     } else {
         "authority-restart-candidate"
     };
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    // Recovery after the restore is measured on this scripted clock, so its
+    // 2 s budget is logical; nothing below advances it.
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
+    let clock = claimed.state.engram_budget_clock();
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
@@ -1156,8 +1159,9 @@ fn authority_review_restart_recovers(prepared_only: bool) {
     let session = claimed.session_id.clone();
     let task = std::thread::spawn(move || {
         // This fixture drives a committed crash image, not expiry. Its
-        // existing phase guard funds one operation across all three phases.
-        let deadline = std::time::Instant::now() + TEST_PHASE_DEADLOCK_GUARD;
+        // existing phase guard funds one operation across all three phases,
+        // on the state's own clock.
+        let deadline = worker.engram_budget_clock().now() + TEST_PHASE_DEADLOCK_GUARD;
         let owner = worker
             .prepare_engram_authority_until(&worker_store, &worker_binding, deadline)
             .inspect_err(|error| eprintln!("restart preparation failed: {error:?}"))?;
@@ -1234,8 +1238,20 @@ fn authority_review_restart_recovers(prepared_only: bool) {
         }
     );
     *claimed.state.inner.lock().unwrap() = restored;
+    // A state loaded from disk starts on the real clock; the fixture's clock
+    // goes with the restored state, as its transport does.
+    claimed
+        .state
+        .install_test_engram_budget_clock(clock.clone());
     install_control_only_transport(&claimed.state, claimed.transport.clone());
     prepare_claimed_root_naming(&claimed, label);
+    // The restored state must still run on the fixture's scripted clock.
+    clock.advance(Duration::from_millis(1));
+    assert_eq!(
+        claimed.state.engram_budget_clock().now(),
+        clock.now(),
+        "the restored state must keep the fixture's scripted clock"
+    );
     claimed
         .state
         .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
@@ -3208,7 +3224,7 @@ fn source_root_opening_notice_recomposition_and_acknowledgement_keep_exact_owner
 fn source_root_opening_notice_failed_provider_send_is_not_delivery() {
     let label = "opening-notice-send-failed";
     let grant = "opening-notice-send-failed-grant";
-    let claimed = ClaimedRoot::new_scripted(
+    let mut claimed = ClaimedRoot::new_scripted(
         label,
         vec![
             bind_reply("notice-token"),
@@ -3220,7 +3236,7 @@ fn source_root_opening_notice_failed_provider_send_is_not_delivery() {
     let dispatch = claimed.dispatch();
     let state = claimed.state.clone();
     let session = claimed.session_id.clone();
-    drop(claimed.runtime_rx);
+    claimed.close_runtime_channel();
     assert!(deliver_turn_dispatch(&state, dispatch).is_err());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];

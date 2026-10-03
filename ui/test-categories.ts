@@ -15,9 +15,10 @@ environment of each: node for unit, jsdom for the others.
     needing the DOM.
 Every *.test.ts is in exactly one of the unit, DOM and app lists, so a new one
 is placed on purpose; the guard fails until it is.
-Does not own: selecting a category for a review round or a gate (the
-launcher does not do that yet; it is a later change there, not here), or the
-per-test duration report (scripts/test-durations.mjs).
+Does not own: running a category or accounting a run per project (the
+launcher's `category` mode and scripts/test-categories-plan.mjs, which read
+CATEGORY_PROJECTS and projectSelects from here), choosing what runs in a
+review round, or the per-test duration report (scripts/test-durations.mjs).
 New file; the two projects it replaces were inline in vite.config.ts.
 */
 
