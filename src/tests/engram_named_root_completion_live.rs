@@ -9,6 +9,9 @@ mod legacy_recovery;
 #[path = "engram_source_root_confirmation_live.rs"]
 mod selection_confirmation;
 
+#[path = "engram_named_root_sighting_live.rs"]
+mod sighting_live;
+
 struct CompletionFixture {
     live: LiveRootFixture,
     root: PathBuf,

@@ -993,10 +993,21 @@ struct BindingEvidenceTransport {
 impl EngramControlTransport for BindingEvidenceTransport {
     fn request(
         &self,
-        _: &EngramConnectionConfig,
+        connection: &EngramConnectionConfig,
         request: &EngramControlRequest,
         _: Duration,
     ) -> Result<Value, EngramTransportError> {
+        // Every request reads the named-root sighting first: no root here.
+        if let EngramControlRequest::NamedRootSightingRead {
+            work_ref,
+            run_id,
+            run_cut,
+        } = request
+        {
+            return Ok(scripted_no_root_sighting(
+                connection, work_ref, run_id, *run_cut,
+            ));
+        }
         assert!(matches!(
             request,
             EngramControlRequest::AcceptanceBindingRead { .. }

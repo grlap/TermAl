@@ -612,6 +612,15 @@ enum EngramControlRequest {
         run_id: String,
         claim_id: String,
     },
+    /// Host-private: the initial sighting of the root a work's run binds at
+    /// `run_cut` (the head when absent). Needs no routing token or bound
+    /// session (`acceptance_named_root_sighting.rs`).
+    NamedRootSightingRead {
+        work_ref: String,
+        run_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_cut: Option<i64>,
+    },
     NamedRootBind {
         routing_token: String,
         claim_id: String,
@@ -1043,7 +1052,32 @@ struct ScriptedEngramControlTransport {
     /// What each held-claims read returns, in order; the last one repeats,
     /// and none scripted fails the read.
     held_claims: Mutex<VecDeque<std::result::Result<EngramHeldClaims, EngramTransportError>>>,
+    /// What each `named_root_sighting_read` returns, in order; with none
+    /// scripted, the read answers that no root is bound
+    /// (`scripted_no_root_sighting`).
+    sighting_reads: Mutex<VecDeque<std::result::Result<Value, EngramTransportError>>>,
     shutdowns: Mutex<Vec<String>>,
+}
+
+/// A version-1 `named_root_sighting_read` answer binding no root, for the
+/// work, run and cut the read asked about, in the project its connection's
+/// declaration names, as the real control process routes it.
+#[cfg(test)]
+fn scripted_no_root_sighting(
+    connection: &EngramConnectionConfig,
+    work_ref: &str,
+    run_id: &str,
+    run_cut: Option<i64>,
+) -> Value {
+    let project_id = fs::read_to_string(&connection.project_file)
+        .map(|declaration| declaration.trim().to_owned())
+        .unwrap_or_default();
+    let cut = run_cut.unwrap_or(0);
+    json!({
+        "schema_version": 1, "project_id": project_id, "work_id": work_ref, "run_id": run_id,
+        "read_cut": cut, "head_cut": cut, "current_binding": null, "binding_changed": false,
+        "root": {"state": "none"}
+    })
 }
 
 #[cfg(test)]
@@ -1056,8 +1090,20 @@ impl ScriptedEngramControlTransport {
             work_bindings: Mutex::new(VecDeque::new()),
             refused_at_reads: Mutex::new(Vec::new()),
             held_claims: Mutex::new(VecDeque::new()),
+            sighting_reads: Mutex::new(VecDeque::new()),
             shutdowns: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Scripts what the next `named_root_sighting_read`s return, in order.
+    fn script_sighting_reads(
+        &self,
+        reads: impl IntoIterator<Item = std::result::Result<Value, EngramTransportError>>,
+    ) {
+        self.sighting_reads
+            .lock()
+            .expect("scripted Engram sighting reads mutex poisoned")
+            .extend(reads);
     }
 
     fn new_with_work_bindings(
@@ -1073,6 +1119,7 @@ impl ScriptedEngramControlTransport {
             work_bindings: Mutex::new(work_bindings.into_iter().collect()),
             refused_at_reads: Mutex::new(Vec::new()),
             held_claims: Mutex::new(VecDeque::new()),
+            sighting_reads: Mutex::new(VecDeque::new()),
             shutdowns: Mutex::new(Vec::new()),
         })
     }
@@ -1149,6 +1196,23 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
                 connection: connection.clone(),
                 request: serde_json::to_value(request).expect("Engram request should serialize"),
             });
+        if let EngramControlRequest::NamedRootSightingRead {
+            work_ref,
+            run_id,
+            run_cut,
+        } = request
+        {
+            return self
+                .sighting_reads
+                .lock()
+                .expect("scripted Engram sighting reads mutex poisoned")
+                .pop_front()
+                .unwrap_or_else(|| {
+                    Ok(scripted_no_root_sighting(
+                        connection, work_ref, run_id, *run_cut,
+                    ))
+                });
+        }
         if let Some(roots) = self.named_roots.lock().unwrap().as_mut() {
             if let Some(reply) = roots.request(&connection.session_id, request) {
                 return reply;
@@ -1394,7 +1458,8 @@ impl EngramControlTransport for StatefulEngramControlTransport {
 
         match request {
             EngramControlRequest::NamedRootBind { .. }
-            | EngramControlRequest::NamedRootRead { .. } => Err(Self::remote_error(
+            | EngramControlRequest::NamedRootRead { .. }
+            | EngramControlRequest::NamedRootSightingRead { .. } => Err(Self::remote_error(
                 "unsupported_test_operation",
                 "this grant-lifecycle fixture does not model named roots",
             )),

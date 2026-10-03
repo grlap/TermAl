@@ -1196,6 +1196,20 @@ impl AppState {
             });
             (source_root, source_claim)
         };
+        // Before either mode creates an evaluator or a brief, whether or not a
+        // root is named here: Engram refuses to record an evaluation of a
+        // named root it has not sighted at the task's evidence basis, and a
+        // root bound on only one side is a conflict
+        // (`acceptance_named_root_sighting.rs`).
+        self.require_acceptance_named_root_sighting(
+            parent_session_id,
+            &target.connection,
+            &target.store,
+            &task,
+            source_root.as_ref(),
+            deadline,
+            &now,
+        )?;
         let place = source_root.as_ref().map_or_else(
             || EngramBasisPlace::Workdir(parent_workdir.clone()),
             AcceptanceEvaluationSourceRoot::place,

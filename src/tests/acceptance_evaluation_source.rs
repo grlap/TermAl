@@ -344,6 +344,18 @@ fn acceptance_requested_claim_controls_the_root_even_when_another_claim_is_bound
             &state,
             "requested-claim-runtime",
         );
+        // Engram has sighted the requested root at the task's evidence basis.
+        if matches!(case, "shared" | "distinct") {
+            let requested_root = state.inner.lock().unwrap().engram_work_source_roots[1]
+                .root
+                .clone();
+            super::sighting::install_sighting_transport(
+                &state,
+                &requested_root,
+                2,
+                super::sighting::present_sighting(),
+            );
+        }
         let (expected_actor, expected_context) = {
             let inner = state.inner.lock().expect("state mutex poisoned");
             let record = &inner.sessions[inner.find_session_index(&parent).unwrap()];
@@ -485,7 +497,7 @@ fn acceptance_does_not_fall_back_to_workdir_when_the_authoritative_root_has_no_s
 /// the scripted tracker writes its store and its argument log there while the
 /// request runs; they are ignored, as a real store outside the repository
 /// never shows in its revision.
-fn make_workdir_a_worktree(root: &FsPath) {
+pub(super) fn make_workdir_a_worktree(root: &FsPath) {
     init_git_document_test_repo(root);
     fs::write(
         root.join(".gitignore"),
@@ -894,6 +906,13 @@ fn acceptance_request_on_a_named_source_root_runs_and_measures_the_evaluator_the
     super::delegation_support::install_delegation_codex_runtime(
         &state,
         "acceptance-evaluation-runtime",
+    );
+    // Engram has sighted the root at the task's evidence basis.
+    super::sighting::install_sighting_transport(
+        &state,
+        &named_root,
+        1,
+        super::sighting::present_sighting(),
     );
     let response = state
         .request_acceptance_evaluation_with_runner(

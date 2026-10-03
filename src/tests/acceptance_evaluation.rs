@@ -10,6 +10,9 @@ use std::sync::atomic::AtomicUsize;
 #[path = "acceptance_evaluation_source.rs"]
 mod source;
 
+#[path = "acceptance_evaluation_sighting.rs"]
+mod sighting;
+
 #[path = "acceptance_evaluation_omissions.rs"]
 mod omissions;
 
@@ -32,6 +35,9 @@ type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>
 fn install_store(state: &AppState, project: &str, root: &FsPath) {
     state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
     super::work_visualizer::install_store(state, project, root);
+    // Every request reads Engram's named-root sighting first; unless a test
+    // scripts one, Engram binds no root.
+    state.install_test_engram_transport(ScriptedEngramControlTransport::new([]));
     let store = established_store(state, project).expect("fixture store");
     acknowledge_fixture_work(state, &store, &evidence_selection::canonical_core_receipt());
 }
