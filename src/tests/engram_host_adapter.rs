@@ -12984,6 +12984,7 @@ impl EngramControlTransport for BlockingBootRecoveryTransport {
 async fn background_boot_recovery_serves_state_and_gates_only_pending_sessions() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-background-boot-recovery");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -13151,6 +13152,9 @@ async fn background_boot_recovery_serves_state_and_gates_only_pending_sessions()
 fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-budgeted-boot-recovery");
+    // The eager-recovery budget is logical: only this test's advance below
+    // consumes it, so the blocked workers outlast it on every schedule.
+    let clock = state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -13234,6 +13238,17 @@ fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
     let coordinator_joiner = std::thread::spawn(move || {
         let _ = coordinator_tx.send(recovery_worker.join());
     });
+    // Positive control: the coordinator is parked on the budget clock. It is
+    // that clock's only waiter here, because the blocked workers wait on the
+    // transport's own gate, never in the scripted driver. With the clock
+    // unadvanced, nothing can end its wait, so it has not returned.
+    clock.wait_for_scripted_waiter();
+    assert!(
+        coordinator_rx.try_recv().is_err(),
+        "the coordinator must keep waiting while its budget is unconsumed"
+    );
+    // Consuming the budget, and only that, ends the wait.
+    clock.advance(Duration::from_millis(MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS));
     phase_sync::receive(
         &coordinator_rx,
         "budgeted coordinator returns before blocked targets release",
@@ -13311,6 +13326,7 @@ fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
 #[test]
 fn unstarted_boot_recovery_target_retries_lazily_on_first_use() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -13573,6 +13589,9 @@ impl BoundedBootRecoveryFixture {
 
     fn new(label: &str) -> Self {
         let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(label);
+        // Each operation's 250 ms and the batch's configured budget are logical:
+        // they are charged only by explicit advancement, never by scheduling.
+        let clock = state.select_test_scripted_engram_budget_clock();
         let root = state
             .test_temp_root
             .as_ref()
@@ -13647,10 +13666,6 @@ impl BoundedBootRecoveryFixture {
         }
         let transport = BoundedBootRecoveryTransport::new();
         state.install_control_test_transport(transport.clone());
-        // Each operation's 250 ms and the batch's configured budget are logical:
-        // they are charged only by explicit advancement, never by scheduling.
-        let clock = EngramBudgetClock::scripted();
-        state.install_test_engram_budget_clock(clock.clone());
         let logical_start = clock.now();
 
         let recovery_state = state.clone();
@@ -13679,6 +13694,7 @@ impl BoundedBootRecoveryFixture {
 fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-issued-boot-recovery-before");
+    state.select_test_scripted_engram_budget_clock();
     let temp_root_guard = state
         .test_temp_root
         .as_ref()
@@ -13759,11 +13775,13 @@ fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
         child_id.clone(),
         issued_grant_id.clone(),
     );
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
+    // The restarted state chooses its clock before its boot recovery reads it.
+    let restarted = AppState::new_with_paths_engram_transport_and_clock_for_test(
         root.to_string_lossy().into_owned(),
         persistence_path,
         templates_path,
         recovery_transport.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should recover an issued grant through a fresh bind");
 
@@ -13812,6 +13830,7 @@ fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
 #[test]
 fn crash_restart_checkpoints_open_grant_rebinds_once_and_evaluates_next_turn() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s12-before");
+    state.select_test_scripted_engram_budget_clock();
     let temp_root_guard = state
         .test_temp_root
         .as_ref()
@@ -13861,11 +13880,13 @@ fn crash_restart_checkpoints_open_grant_rebinds_once_and_evaluates_next_turn() {
 
     let recovery_transport =
         RestartEngramControlTransport::new(child_id.clone(), "open-before-crash".to_owned());
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
+    // The restarted state chooses its clock before its boot recovery reads it.
+    let restarted = AppState::new_with_paths_engram_transport_and_clock_for_test(
         root.to_string_lossy().into_owned(),
         persistence_path,
         templates_path,
         recovery_transport.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should recover through the scripted Engram transport");
 
@@ -13981,6 +14002,7 @@ impl EngramControlTransport for BlockingShutdownEngramTransport {
 fn missing_session_mid_bind_reaps_off_lock_even_when_shutdown_blocks() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-missing-mid-bind");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -14046,6 +14068,7 @@ fn missing_session_mid_bind_reaps_off_lock_even_when_shutdown_blocks() {
 #[test]
 fn defer_card_records_that_turn_gating_withheld_the_prompt() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-card-defer");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -14124,6 +14147,7 @@ fn defer_card_records_that_turn_gating_withheld_the_prompt() {
 fn fatal_bind_error_disables_transport_and_records_a_withheld_card() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-fatal-bind-card");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -14271,6 +14295,7 @@ fn state_snapshot_and_persistence_omit_removed_work_authority_grant() {
             .get("workAuthorityGrant")
             .is_none()
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 fn set_test_project_engram_mcp_settings(
@@ -14484,6 +14509,7 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
         .and_then(|project| project.get("engram"))
         .expect("client project should retain public Engram settings");
     assert!(client_engram.get("workAuthorityGrant").is_none());
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14520,6 +14546,7 @@ fn engram_actor_context_collapses_controls_and_omits_oversized_fields() {
         Some("agent=claude;reasoning=high"),
         "an oversized model field must be omitted at a field boundary"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14639,6 +14666,7 @@ fn engram_mcp_and_agent_process_identity_match_for_every_agent_kind() {
             "{agent:?} process shell and MCP child must receive byte-identical Engram variables"
         );
     }
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14812,12 +14840,14 @@ fn acp_session_setup_uses_the_engram_snapshot_that_spawned_its_process() {
         ]),
         "MCP setup must use the descriptor that also configured the ACP process environment"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn base_only_engram_injects_mcp_and_refreshes_start_and_compaction_context() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-base-context-nudge");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15074,6 +15104,8 @@ fn settings_reset_supersedes_an_inflight_engram_context_refresh() {
     assert!(!record.engram.context_nudge_pending);
     assert!(!record.engram.context_nudge_in_progress);
     assert!(record.engram.pending_context_nudge.is_some());
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -15131,6 +15163,8 @@ fn claude_mcp_snapshot_composition_is_state_lock_safe() {
             .len(),
         1
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -15151,6 +15185,8 @@ fn cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config() {
     let missing_workdir = root.join("missing-runtime-workdir");
     let (result_tx, result_rx) = mpsc::sync_channel(1);
 
+    // The worker takes the state; this handle reads its budget clock after.
+    let budget_state = state.clone();
     std::thread::spawn(move || {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -15190,6 +15226,7 @@ fn cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config() {
         error.starts_with("failed to start persistent Claude session:"),
         "unexpected cold Claude startup error: {error}"
     );
+    assert_engram_budget_clock_unread(&budget_state);
 }
 
 #[test]
@@ -15281,6 +15318,7 @@ fn claude_private_mcp_config_file_carries_only_non_secret_engram_context() {
         })
     );
     assert!(!grantless_json.contains("operator-secret-grant"));
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -15340,6 +15378,7 @@ fn per_session_engram_mcp_uses_base_context_and_preserves_ineligible_baselines()
         record.remote_session_id = Some("remote-session".to_owned());
     }
     assert_delegation_mcp_baseline_is_unchanged(&state, &enabled_session);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -15381,11 +15420,13 @@ fn project_patch_round_trips_without_removed_work_authority_grant() {
         .and_then(|project| project.get("engram"))
         .expect("persisted project should retain Engram settings");
     assert!(persisted_engram.get("workAuthorityGrant").is_none());
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn project_deletion_checkpoints_active_engram_grants_and_reaps_sidecars() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-project-delete");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15511,6 +15552,7 @@ fn project_deletion_keeps_retired_authority_across_recreate_and_restart() {
                 .into_inner()
                 .expect("persisted host ledger should rehydrate")
         };
+        assert_engram_budget_clock_unread(&state);
         *state.inner.lock().expect("state mutex poisoned") = reloaded;
 
         let recreated_project_id =
@@ -15521,6 +15563,7 @@ fn project_deletion_keeps_retired_authority_across_recreate_and_restart() {
         };
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(error.message.contains("was retired by TermAl"));
+        assert_engram_budget_clock_unread(&state);
     }
 }
 
@@ -15576,12 +15619,15 @@ fn project_deletion_without_an_engram_binary_still_persists_the_unconfirmed_gran
         .expect("project deletion must not lose the unresolved credential");
     assert_eq!(tombstone.project_root, root.to_string_lossy());
     assert!(!tombstone.revoke_confirmed);
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn project_deletion_fences_adapter_work_while_checkpoint_is_in_flight() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-project-delete-fence");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15668,6 +15714,7 @@ fn project_deletion_fences_adapter_work_while_checkpoint_is_in_flight() {
 fn project_deletion_persist_failure_restores_project_without_resurrecting_grant() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-project-delete-rollback");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15757,6 +15804,7 @@ fn project_deletion_persist_failure_restores_project_without_resurrecting_grant(
 fn concurrent_bind_attempts_share_one_in_flight_operation() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-bind-in-flight");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15829,6 +15877,7 @@ fn global_disable_values_and_bind_retry_schedule_are_explicit() {
 #[test]
 fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-failure-policy");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16017,6 +16066,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
 fn dispatch_card_persist_failure_withholds_granted_delivery() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-dispatch-card-persist-failure");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16346,6 +16396,8 @@ fn global_kill_switch_does_not_suppress_authority_rotation_or_tombstones() {
         .find(|entry| entry.grant_hash == "grant-b")
         .expect("deletion authority must remain in the host ledger");
     assert!(tombstone.revoke_confirmed);
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -16368,6 +16420,7 @@ fn runtime_kill_switch_does_not_strand_an_already_open_grant() {
 
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-runtime-kill-switch");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16440,6 +16493,7 @@ fn runtime_kill_switch_does_not_strand_an_already_open_grant() {
 fn stop_supersedes_an_in_flight_begin_without_overwriting_the_clean_stop() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-stop-during-begin");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16532,6 +16586,7 @@ fn stop_supersedes_an_in_flight_begin_without_overwriting_the_clean_stop() {
 fn failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery() {
     let (state, _codex_runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-failed-stop-during-begin");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16705,6 +16760,7 @@ fn failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery() {
 fn stale_begin_completion_does_not_clear_or_fail_a_live_successor() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-stale-begin-successor");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16828,6 +16884,7 @@ fn stale_begin_completion_does_not_clear_or_fail_a_live_successor() {
 fn start_turn_failure_arms_rebind_for_the_unowned_evaluated_grant() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-start-error-abandon");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
