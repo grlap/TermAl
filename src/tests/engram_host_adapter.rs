@@ -45,6 +45,10 @@ mod unqueued_bind_budget;
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };
+#[cfg(windows)]
+use self::control_transport::{
+    assert_engram_fixture_teardown_covers_its_parent, engram_fixture_descendant_parent,
+};
 use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::phase_sync::{DEADLOCK_GUARD, receive};
 use super::*;
@@ -16785,6 +16789,9 @@ fn check_doctor_descendant_deadline(mode: &str) {
     // Acquires a process handle while the descendant is alive and keeps its
     // lifetime socket open. Dropping it releases an escaped Unix descendant.
     let descendant = ready.wait();
+    // Read while the descendant is parked, so its launching process is alive.
+    #[cfg(windows)]
+    let fixture_parent = engram_fixture_descendant_parent(&descendant);
     let result = receiver.recv_timeout(DEADLOCK_GUARD);
     if result.is_err() {
         drop(descendant);
@@ -16812,6 +16819,8 @@ fn check_doctor_descendant_deadline(mode: &str) {
         );
         assert_engram_control_descendant_was_terminated(&descendant, "doctor process deadline");
     }
+    #[cfg(windows)]
+    assert_engram_fixture_teardown_covers_its_parent(&descendant, fixture_parent);
     drop(descendant);
     worker.join().expect("doctor worker should finish");
 }

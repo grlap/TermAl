@@ -14,6 +14,8 @@
 //! Split out of `src/tests/engram_host_adapter.rs` as a pure code move
 //! (tm-tg1g).
 
+#[cfg(windows)]
+use super::super::phase_sync::TEST_FIXTURE_TREE_PIDS_ENV;
 use super::*;
 
 #[test]
@@ -233,7 +235,7 @@ pub(super) fn prepare_engram_control_process_tree_fixture(
     #[cfg(windows)]
     fs::write(
         temp_root.path().join("engram-descendant.ps1"),
-        format!("$env:TERMAL_TEST_DESCENDANT_ENDPOINT = '{endpoint}'\n& '{}' --exact tests::phase_sync::parked_control_descendant --nocapture\n", executable.to_string_lossy().replace('\'', "''")),
+        format!("$env:TERMAL_TEST_DESCENDANT_ENDPOINT = '{endpoint}'\n# Names this process in the fixture tree (TEST_FIXTURE_TREE_PIDS_ENV).\nif ($env:{tree}) {{ $env:{tree} += \",$PID\" }} else {{ $env:{tree} = \"$PID\" }}\n& '{}' --exact tests::phase_sync::parked_control_descendant --nocapture\n", executable.to_string_lossy().replace('\'', "''"), tree = TEST_FIXTURE_TREE_PIDS_ENV),
     )
     .expect("Windows descendant fixture should write");
     #[cfg(not(windows))]
@@ -275,9 +277,106 @@ fn engram_control_process_tree_request(suffix: &str) -> EngramControlRequest {
 
 pub(super) struct EngramReadyProcess {
     probe: EngramDescendantProbe,
+    // The fixture processes that launched the descendant and named
+    // themselves (Windows). They work in the temp root, so teardown waits for
+    // them as well before the root is removed.
+    #[cfg(windows)]
+    ancestors: Vec<EngramDescendantProbe>,
+    // The descendant's parent, read from a process snapshot before readiness
+    // was acknowledged (Windows): see `engram_fixture_descendant_parent`.
+    #[cfg(windows)]
+    observed_parent: Option<u32>,
     // Kept open until after the termination assertion. Test teardown can then
     // release a surviving fixture without leaving a naturally-timed orphan.
     _lifetime: std::net::TcpStream,
+}
+
+impl EngramReadyProcess {
+    /// The fixture processes its teardown waits for before the temp root
+    /// drops.
+    #[cfg(windows)]
+    pub(super) fn awaited_pids(&self) -> Vec<u32> {
+        std::iter::once(&self.probe)
+            .chain(&self.ancestors)
+            .map(EngramDescendantProbe::pid)
+            .collect()
+    }
+}
+
+/// The fixture process that launched the parked descendant, as the readiness
+/// worker observed it before acknowledging readiness: the descendant was then
+/// waiting for that acknowledgement and its launcher was waiting on it, so
+/// both were alive, whatever the test thread's scheduling afterwards.
+#[cfg(windows)]
+pub(super) fn engram_fixture_descendant_parent(descendant: &EngramReadyProcess) -> Option<u32> {
+    descendant.observed_parent
+}
+
+/// The parent of `leaf` in a process snapshot. `None` when the snapshot no
+/// longer lists the parent (it exited), or when the parent is this test
+/// process itself, which is not a fixture process: a fixture-tree
+/// malfunction for a parked descendant.
+#[cfg(windows)]
+fn engram_snapshot_parent_of(leaf: u32) -> Option<u32> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    assert_ne!(
+        snapshot, INVALID_HANDLE_VALUE,
+        "process snapshot should open"
+    );
+    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+    let mut parent = None;
+    let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+    while more {
+        if entry.th32ProcessID == leaf {
+            parent = Some(entry.th32ParentProcessID);
+            break;
+        }
+        more = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+    }
+    unsafe { CloseHandle(snapshot) };
+    let parent = parent?;
+    let listed = {
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        assert_ne!(
+            snapshot, INVALID_HANDLE_VALUE,
+            "process snapshot should open"
+        );
+        let mut found = false;
+        let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+        while more && !found {
+            found = entry.th32ProcessID == parent;
+            more = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+        }
+        unsafe { CloseHandle(snapshot) };
+        found
+    };
+    (listed && parent != std::process::id()).then_some(parent)
+}
+
+/// The teardown of `descendant` waits for the fixture process that launched
+/// it: that process works in the temp root, so the root must not be dropped
+/// while it can still hold a handle there.
+#[cfg(windows)]
+pub(super) fn assert_engram_fixture_teardown_covers_its_parent(
+    descendant: &EngramReadyProcess,
+    parent: Option<u32>,
+) {
+    let parent = parent.expect(
+        "the descendant's launching fixture process should have been observed alive at readiness",
+    );
+    let awaited = descendant.awaited_pids();
+    assert!(
+        awaited.contains(&parent),
+        "the fixture teardown does not wait for fixture process {parent}, which launched \
+         the descendant and works in the temp root (awaited {awaited:?})"
+    );
 }
 
 pub(super) struct EngramDescendantReady {
@@ -307,10 +406,37 @@ impl EngramDescendantReady {
             let probe = EngramDescendantProbe::open(pid);
             assert!(probe.is_alive(), "descendant must be alive at readiness");
             stream
+                .read_exact(&mut bytes)
+                .expect("descendant should name its fixture tree");
+            let count = u32::from_be_bytes(bytes);
+            assert!(count <= 8, "fixture tree should be small, got {count}");
+            let mut ancestor_pids = Vec::new();
+            for _ in 0..count {
+                stream
+                    .read_exact(&mut bytes)
+                    .expect("descendant should name each fixture process");
+                ancestor_pids.push(u32::from_be_bytes(bytes));
+            }
+            // Opened before the acknowledgement: every fixture process above
+            // the descendant waits for its readiness line, so all are alive.
+            #[cfg(windows)]
+            let ancestors: Vec<EngramDescendantProbe> = ancestor_pids
+                .into_iter()
+                .map(|pid| EngramDescendantProbe::open_labelled(pid, "fixture process"))
+                .collect();
+            #[cfg(not(windows))]
+            drop(ancestor_pids);
+            #[cfg(windows)]
+            let observed_parent = engram_snapshot_parent_of(pid);
+            stream
                 .write_all(&[1])
                 .expect("acknowledge descendant readiness");
             let _ = sender.send(EngramReadyProcess {
                 probe,
+                #[cfg(windows)]
+                ancestors,
+                #[cfg(windows)]
+                observed_parent,
                 _lifetime: stream,
             });
         });
@@ -368,6 +494,24 @@ pub(super) fn assert_engram_control_descendant_was_terminated(
             !descendant.probe.is_alive(),
             "descendant must be exited after {trigger}"
         );
+        // Tree termination is asynchronous: the processes that launched the
+        // descendant can still hold handles in the temp root after its exit
+        // is published, so their exits are awaited too.
+        for ancestor in &descendant.ancestors {
+            let result = unsafe {
+                WaitForSingleObject(
+                    ancestor.0.as_raw_handle(),
+                    DEADLOCK_GUARD.as_millis() as u32,
+                )
+            };
+            assert_eq!(
+                result,
+                WAIT_OBJECT_0,
+                "fixture process {} exit after {trigger} was not published after {:?}",
+                ancestor.pid(),
+                started.elapsed()
+            );
+        }
     }
     #[cfg(not(windows))]
     {
@@ -389,6 +533,11 @@ struct EngramDescendantProbe(std::os::windows::io::OwnedHandle);
 #[cfg(windows)]
 impl EngramDescendantProbe {
     fn open(pid: u32) -> Self {
+        Self::open_labelled(pid, "descendant")
+    }
+
+    /// Opens `pid`, which `what` names in the panic if it is already gone.
+    fn open_labelled(pid: u32, what: &str) -> Self {
         use std::os::windows::io::FromRawHandle;
         use windows_sys::Win32::System::Threading::{
             OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
@@ -403,9 +552,18 @@ impl EngramDescendantProbe {
         };
         assert!(
             !handle.is_null(),
-            "descendant must still be alive before cleanup"
+            "{what} {pid} must still be alive before cleanup"
         );
         Self(unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle) })
+    }
+
+    fn pid(&self) -> u32 {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Threading::GetProcessId;
+
+        let pid = unsafe { GetProcessId(self.0.as_raw_handle()) };
+        assert_ne!(pid, 0, "fixture process id should be readable");
+        pid
     }
 
     fn is_alive(&self) -> bool {
