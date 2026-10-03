@@ -116,8 +116,8 @@ in Engram::Advisor's session, recorded verbatim):
   running work can resume, and the TermAl coordinator sends Greg, through
   Engram::Advisor, 'restart now' with the build hash and reason. Greg
   performs the restart; no agent stops or starts the TermAl host. This
-  covers the timing of TermAl restarts only. A landing under it also
-  installs the
+  covers the timing of TermAl restarts only. A landing under this rule
+  also installs the
   binary built from the exact gated tree (Greg, 2026-09-23, recorded in
   Engram's instructions and extended to TermAl on 2026-09-27: his word
   "commit" for a presented changeset also authorizes pushing it and
