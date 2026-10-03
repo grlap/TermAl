@@ -2403,6 +2403,173 @@ async fn state_events_route_recovers_after_ordered_broadcaster_delta_overflow() 
     assert_eq!(recovery_state.revision, expected_recovery_revision);
 }
 
+/// Commits and publishes a resume dispatch failure the way the test-run wait
+/// dispatcher does: a revision with nothing stored in the state, so its text
+/// exists only in the delta and no snapshot can carry it.
+fn publish_test_dispatch_failure(state: &AppState, session_id: &str, error: &str) -> u64 {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let revision = state
+        .commit_delta_locked(&mut inner)
+        .expect("dispatch failure should commit");
+    state.publish_delta_locked(
+        &inner,
+        DeltaEvent::TestRunWaitResumeDispatchFailed {
+            revision,
+            session_id: session_id.to_owned(),
+            error: error.to_owned(),
+            server_instance_id: state.server_instance_id.clone(),
+        },
+    );
+    revision
+}
+
+/// The revision a `state` or `delta` event carries, read from its payload.
+fn sse_event_revision(name: &str, data: &str) -> Option<u64> {
+    if name != "state" && name != "delta" {
+        return None;
+    }
+    serde_json::from_str::<Value>(data).ok()?["revision"].as_u64()
+}
+
+/// Polls the SSE body once and requires that it has nothing ready. Every
+/// retained broadcast event is ready to the route without waiting, so one poll
+/// is a complete answer once the broadcaster has processed its queue.
+fn assert_no_ready_sse_chunk<S>(body: &mut std::pin::Pin<Box<S>>, context: &str)
+where
+    S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
+{
+    let waker = std::task::Waker::noop();
+    let mut cx = std::task::Context::from_waker(waker);
+    match body.as_mut().poll_next(&mut cx) {
+        std::task::Poll::Pending => {}
+        std::task::Poll::Ready(chunk) => panic!(
+            "{context}: no event may be ready, got {:?}",
+            chunk.map(|chunk| chunk.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+        ),
+    }
+}
+
+// Catch-up snapshots are built for one client outside the broadcast order, so
+// retained broadcast events of a lower revision may follow them and are not
+// suppressed for that revision: whether an older event is redundant depends on
+// what it means, and only the consumer knows that. A lag-recovery snapshot at R is followed by the events
+// the channel still retains, in broadcast order, those below R included; one
+// is a dispatch-failure notice that no snapshot carries.
+#[tokio::test]
+async fn state_events_route_yields_retained_lower_revision_events_after_a_lag_recovery() {
+    let mut harness = OrderedStateBroadcasterHarness::new();
+    let state = harness.state.clone();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = harness.session_id.clone();
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(name, "state");
+    let initial = sse_event_revision(&name, &data).expect("initial revision");
+
+    // 64 events past the 16-slot channel; the dispatch failure is among the
+    // last 16 the channel retains, and three later commits sit above it.
+    const EVENT_COUNT: u64 = 64;
+    for index in 0..EVENT_COUNT - 4 {
+        push_test_text_message(&state, &session_id, format!("Overflow delta {index}"));
+    }
+    let failure_revision = publish_test_dispatch_failure(&state, "owner", "cannot dispatch");
+    for index in 0..3 {
+        push_test_text_message(&state, &session_id, format!("After failure {index}"));
+    }
+    let recovery_revision = initial + EVENT_COUNT;
+    assert_eq!(failure_revision, recovery_revision - 3);
+    harness.release();
+    harness.wait_for_processed(EVENT_COUNT as usize);
+
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!((name.as_str(), data.as_str()), ("lagged", "1"));
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(name, "state");
+    assert_eq!(sse_event_revision(&name, &data), Some(recovery_revision));
+
+    // The retained events follow, all of them, in broadcast order: R-15 to R.
+    let mut retained = Vec::new();
+    for _ in 0..16 {
+        let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+        assert_eq!(name, "delta");
+        let delta: Value = serde_json::from_str(&data).expect("retained delta should parse");
+        retained.push((
+            delta["revision"].as_u64().expect("delta revision"),
+            delta["type"].as_str().unwrap_or_default().to_owned(),
+        ));
+    }
+    let revisions: Vec<u64> = retained.iter().map(|(revision, _)| *revision).collect();
+    assert_eq!(
+        revisions,
+        (recovery_revision - 15..=recovery_revision).collect::<Vec<_>>()
+    );
+    assert!(
+        retained.contains(&(
+            failure_revision,
+            "testRunWaitResumeDispatchFailed".to_owned()
+        )),
+        "the notice below the recovery snapshot must still reach the client: {retained:?}"
+    );
+    assert_no_ready_sse_chunk(&mut body, "after the retained events");
+}
+
+// Connect window: a dispatch failure broadcast after the route subscribed but
+// built into no snapshot (it stores nothing) is yielded after the initial
+// snapshot, even though that snapshot's revision is higher.
+#[tokio::test]
+async fn state_events_route_yields_a_connect_window_notice_below_the_initial_snapshot() {
+    let mut harness = OrderedStateBroadcasterHarness::new();
+    let state = harness.state.clone();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = harness.session_id.clone();
+    // Committed while the broadcaster is held, so both reach the channel only
+    // after the route has subscribed and built its initial snapshot above them.
+    let failure_revision = publish_test_dispatch_failure(&state, "owner", "cannot dispatch");
+    let message_id = push_test_text_message(&state, &session_id, "After the failure");
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(name, "state");
+    let initial = sse_event_revision(&name, &data).expect("initial revision");
+    assert!(failure_revision < initial);
+
+    harness.release();
+    harness.wait_for_processed(2);
+
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(name, "delta");
+    let failure: Value = serde_json::from_str(&data).expect("failure delta should parse");
+    assert_eq!(failure["type"], "testRunWaitResumeDispatchFailed");
+    assert_eq!(failure["revision"].as_u64(), Some(failure_revision));
+    assert_eq!(failure["error"], "cannot dispatch");
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(sse_event_revision(&name, &data), Some(initial));
+    let message: Value = serde_json::from_str(&data).expect("message delta should parse");
+    assert_eq!(message["messageId"], message_id);
+    assert_no_ready_sse_chunk(&mut body, "after the connect-window events");
+}
+
 #[tokio::test]
 async fn state_events_route_streams_parallel_agents_update_sources() {
     let state = test_app_state();

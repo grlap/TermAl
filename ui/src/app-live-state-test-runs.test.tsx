@@ -160,6 +160,34 @@ it.each([3, 2])("retains dispatch failure at revision %s after consumed snapshot
   expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(5);
 });
 
+// The server does not suppress retained broadcast events of a lower revision
+// after a catch-up snapshot; the client sorts them. After adopting a snapshot
+// at R, an older metadata delta cannot roll state back, while a
+// dispatch-failure notice below R, which no snapshot carries, is still
+// surfaced. (An older-global-revision body delta that its body sequence still
+// needs is processed: "after adopting a catch-up snapshot, processes an
+// older-global body delta…" in App.transcript-loss-authority.test.tsx.)
+it("ignores a state delta below the adopted snapshot but still surfaces an older dispatch failure", () => {
+  vi.stubGlobal("EventSource", Stream);
+  const fetchState = vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  const run = makeTestRun({ state: "running" });
+  act(() => hook.result.current.adoptState(snapshot(5, [run]), { allowUnknownServerInstance: true }));
+  const callsBefore = fetchState.mock.calls.length;
+
+  act(() => Stream.latest.emit({ type: "testRunChanged", serverInstanceId: "test-server", revision: 3, run: { ...run, state: "passed" } }));
+  expect(hook.result.current.testRuns).toEqual([run]);
+
+  const failure = { type: "testRunWaitResumeDispatchFailed", serverInstanceId: "test-server", revision: 4, sessionId: "owner", error: "cannot dispatch" };
+  act(() => Stream.latest.emit(failure));
+  expect(hook.result.current.testRunWaitFailures.owner).toEqual(failure);
+
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(5);
+  expect(hook.result.current.testRuns).toEqual([run]);
+  expect(fetchState).toHaveBeenCalledTimes(callsBefore);
+});
+
 it("keeps a failure a restarted server sent before its first snapshot and drops older or untagged ones", () => {
   vi.stubGlobal("EventSource", Stream);
   vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
