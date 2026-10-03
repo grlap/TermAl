@@ -868,9 +868,7 @@ shape, then compares it for equality.
   revision does not consult the index for that. The revision is not byte
   identity: the known limit is a file with no contract rewritten from LF to
   CRLF, which keeps its revision.
-- **What else moves it.** Any tracked file does, the tracker's own included.
-  In TermAl, a `bd` write changes files under `.beads`, which are tracked, so
-  it moves the revision like any other edit.
+- **What else moves it.** Any tracked file does, a tracker export included.
 - **Platform semantics.** On Unix the filesystem's executable bit counts even
   where the repository sets `core.fileMode=false`, so a chmod alone moves the
   revision. On a filesystem that ignores case, renaming a file in case only,

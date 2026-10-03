@@ -95,7 +95,7 @@ fn peer_message_runtime_prompt(prompt: &str, source: &MessageSource) -> String {
     format!(
         "[TermAl cross-session message]\n\
 From session: {:?} (`{}`)\n\
-The sender may be working in a different repository. Do not assume it shares this session's repository instructions, Beads state, or skills.\n\
+The sender may be working in a different repository. Do not assume it shares this session's repository instructions, tracker state, or skills.\n\
 To reply to the sender, use the TermAl MCP tool `termal_send_to_session` with `sessionId` set to `{}`. A normal assistant reply stays only in this session and will not reach the sender.\n\n\
 --- Message from {:?} ---\n\
 {}",

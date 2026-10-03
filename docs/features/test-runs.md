@@ -327,7 +327,7 @@ or log content.
 
 ## Slice 1: UI
 
-The UI is Termal::Codex's, built against this contract. Its beads are
+The UI is Termal::Codex's, built against this contract. Its tracker items are
 tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
 (markers). The server side and this document are Termal::Opus's.
 

@@ -240,8 +240,6 @@ export async function hashUntrackedFiles(root, hooks = {}, env = isolatedGitEnvi
       "--others",
       "--exclude-standard",
       "-z",
-      "--",
-      ":(exclude).beads",
     ],
     root,
     env,
@@ -290,12 +288,12 @@ export async function captureFingerprint(requestedRoot = process.cwd(), sourceEn
     .toString("utf8")
     .trim();
   const trackedIndexDiffSha256 = await hashGitOutput(
-    ["diff", "--cached", "HEAD", "--binary", "--", ":(exclude).beads"],
+    ["diff", "--cached", "HEAD", "--binary"],
     root,
     env,
   );
   const trackedHeadDiffSha256 = await hashGitOutput(
-    ["diff", "HEAD", "--binary", "--", ":(exclude).beads"],
+    ["diff", "HEAD", "--binary"],
     root,
     env,
   );
@@ -305,8 +303,6 @@ export async function captureFingerprint(requestedRoot = process.cwd(), sourceEn
       "--short",
       "-z",
       "--untracked-files=all",
-      "--",
-      ":(exclude).beads",
     ],
     root,
     env,

@@ -2743,7 +2743,7 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
 // source_session_id to a display name while holding the state lock, so a caller
 // cannot spoof another session's name. The runtime prompt also carries a
 // self-contained reply envelope because peer sessions can belong to different
-// repositories and cannot rely on shared Beads state, skills, or instructions.
+// repositories and cannot rely on shared tracker state, skills, or instructions.
 #[test]
 fn peer_message_dispatch_attributes_sender_and_instructs_cross_repo_reply() {
     let state = test_app_state();
@@ -2817,7 +2817,7 @@ fn peer_message_dispatch_attributes_sender_and_instructs_cross_repo_reply() {
     assert!(runtime_prompt.contains("From session: \"Kadry\""));
     assert!(runtime_prompt.contains(&format!("(`{sender_id}`)")));
     assert!(runtime_prompt.contains("different repository"));
-    assert!(runtime_prompt.contains("repository instructions, Beads state, or skills"));
+    assert!(runtime_prompt.contains("repository instructions, tracker state, or skills"));
     assert!(!runtime_prompt.contains("/repos/legal"));
     assert!(!runtime_prompt.contains("/repos/product"));
     assert!(runtime_prompt.contains("TermAl MCP tool `termal_send_to_session`"));

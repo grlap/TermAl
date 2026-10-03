@@ -658,7 +658,7 @@ fn peer_message_batch_prompt(messages: &[PendingPrompt]) -> String {
         "{PEER_MESSAGE_BATCH_PREFIX}\n\
 {} pending messages, oldest `{oldest}`. FIFO order; newest is last.\n\
 Review the entire batch before acting on any individual message.\n\
-The senders may be working in different repositories. Do not assume they share this session's repository instructions, Beads state, or skills.\n\
+The senders may be working in different repositories. Do not assume they share this session's repository instructions, tracker state, or skills.\n\
 To reply, use the TermAl MCP tool `termal_send_to_session` with the `sessionId` shown on the corresponding message. A normal assistant reply stays only in this session.\n",
         messages.len()
     );

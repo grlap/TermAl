@@ -3020,16 +3020,16 @@ fn review_changes_pins_two_review_resume_wait_flow() {
     assert_command_contains(
         review_changes,
         "Do not create, update, comment on, or close tracker items until this\nconsolidation is complete.",
-        "/review-changes must consolidate reviewer findings before mutating Beads",
+        "/review-changes must consolidate reviewer findings before mutating the tracker",
     );
     assert_command_contains(
         review_changes,
         "Search and inspect the existing tracker for each consolidated actionable",
-        "/review-changes must reconcile deduplicated findings with existing Beads work",
+        "/review-changes must reconcile deduplicated findings with existing tracker work",
     );
     assert_command_contains(
         review_changes,
-        "do not reconcile findings with tracker tasks or mutate\nBeads.",
+        "do not reconcile findings with tracker tasks or mutate\nthe tracker.",
         "/review-changes must keep tracker ownership in the writable parent",
     );
     assert_command_contains(

@@ -725,7 +725,7 @@ Required updates:
   - Update completion criteria to include "global state parse time is
     independent of total transcript size".
 
-- Beads tracks remaining actionable work; the retired Markdown bug ledger is
+- Engram tracks remaining actionable work; the retired Markdown bug ledger is
   not a second tracker.
 
 - `docs/test.md`

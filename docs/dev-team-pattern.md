@@ -17,11 +17,11 @@ Roles are ASSIGNED BY THE HUMAN at pairing time — "Sol" and "Fable" are
 the original cast; substitute your own sessions. A joining agent learns
 its role, its counterpart, and its pair mailbox from the human's
 assignment message plus `termal_list_mailboxes` (§7.1). Work items cited
-as `tm-*` throughout are beads — the `bd` issue tracker; run `bd prime`
-for its workflow.
+as `tm-*` throughout are Beads ids, each now the `external_ref` of the
+Engram item it migrated to; the `engram` tools carry the tracker workflow.
 
 **Sol — implementer-investigator.** Writes code, runs experiments, freezes
-diffs, runs parent gates, captures field data, files and closes beads. Owns
+diffs, runs parent gates, captures field data, files and completes tracker items. Owns
 the working tree. Measurement hygiene is part of the role: bracketed
 baselines (B-O-O-B: Baseline, Optimized, Optimized, Baseline — the
 brackets expose host drift), canonical-response SHA parity across modes,
@@ -64,7 +64,7 @@ written, and never inferred.
    exact path inventory and stops editing. The referee audits that frozen
    state read-only, with findings ranked Critical/High/Medium/Low. Without
    the freeze, read-only auditing is theater. No edits land under an active
-   review round; late findings are reconciled as beads or, if the gate has
+   review round; late findings are reconciled as tracker items or, if the gate has
    not spawned, via an explicit unfreeze-and-regate decision with its cost
    stated.
 3. **Predictions before runs.** Every experiment writes its expected outcome
@@ -135,7 +135,7 @@ etiquette below is what actually works.
    pointer.** [AMENDED by §7 — originally this said "shared file store".]
    Full verdicts, checklists, and contracts go INTO the mailbox message
    body (256 KiB cap fits every verdict this pattern has produced), or to
-   beads for repo-permanent decisions. Pull-based reading makes queue
+   tracker items for repo-permanent decisions. Pull-based reading makes queue
    order irrelevant.
 
 **Receiver etiquette:**
@@ -302,10 +302,9 @@ condition→action table. `class` is `routine` only until tm-uwx.3.
    there. Before/after filesystem metadata must match; removal or mutation
    during hashing fails with an explicit instruction to rerun instead of
    declaring an incoherent tree. All patch/status/untracked scopes use
-   the same Git pathspec exclusion for `.beads`, because tracker-export
-   churn is a coordination side effect in the same class as retired
-   `.collab` artifacts. Every declaration includes the exact helper command
-   beside its full output; bare hashes are invalid because verification
+   the same paths. (They once excluded the Beads tracker export under
+   `.beads`; that exclusion went with Beads on 2026-10-03.) Every
+   declaration includes the exact helper command beside its full output; bare hashes are invalid because verification
    must be mechanical. The auditor recomputes at audit start AND end; any
    mismatch voids the audit, and ANY post-declaration edit — including an
    approved cleanup — requires an immediate fresh declaration before
@@ -368,7 +367,7 @@ condition→action table. `class` is `routine` only until tm-uwx.3.
    function (working name `termal_collaboration_guide`) returning this
    pattern and the mailbox contract on demand, so any session can
    bootstrap itself, mint its own local skills, or store the guidance
-   as beads memories.
+   as tracker memories.
 4. **User visibility** (constitutional ask). The human must have a
    first-class view of agent-to-agent conversations. The read-only
    inline viewer (the mailbox card inside a participating session's
@@ -398,8 +397,8 @@ in §5, where it belongs.
 
 ### 7.5 Glossary (terms the pattern assumes)
 
-- **beads / `bd` / `tm-*`**: the issue tracker and its ids; `bd prime`
-  prints its workflow.
+- **`tm-*`**: ids from Beads, the tracker TermAl used until 2026-09-28;
+  each is the `external_ref` of the Engram item it migrated to.
 - **freeze declaration**: the mailbox message pinning a working tree
   for read-only audit — scope, change summary, three §7.2.1 digests.
 - **doorbell**: retired; a pointer-only message from the file-mailbox

@@ -3,7 +3,6 @@ import {
   appendFileSync,
   chmodSync,
   mkdtempSync,
-  mkdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -164,33 +163,12 @@ test("fingerprint includes the exact HEAD commit", async () => {
   }
 });
 
-test("fingerprint is path-safe and excludes tracked and untracked .beads state", async () => {
+test("fingerprint is path-safe for file names with spaces", async () => {
   const root = createRepository();
   try {
-    mkdirSync(join(root, ".beads"));
-    writeFileSync(join(root, ".beads", "tracked state.bin"), "tracked-base\n");
-    run("git", ["add", "-f", ".beads/tracked state.bin"], root);
-    run(
-      "git",
-      ["commit", "--quiet", "--no-gpg-sign", "-m", "tracked beads fixture"],
-      root,
-    );
-
     writeFileSync(join(root, "untracked file.txt"), "one\n");
-    writeFileSync(join(root, ".beads", "ignored state.bin"), "first\n");
     const first = await fingerprint(root);
-
-    writeFileSync(join(root, ".beads", "tracked state.bin"), "tracked-worktree\n");
-    const afterTrackedBeadsWorktree = await fingerprint(root);
-    assert.deepEqual(afterTrackedBeadsWorktree, first);
-
-    run("git", ["add", "-f", ".beads/tracked state.bin"], root);
-    const afterTrackedBeadsIndex = await fingerprint(root);
-    assert.deepEqual(afterTrackedBeadsIndex, first);
-
-    writeFileSync(join(root, ".beads", "ignored state.bin"), "second\n");
-    const afterBeadsOnly = await fingerprint(root);
-    assert.deepEqual(afterBeadsOnly, first);
+    assert.deepEqual(await fingerprint(root), first);
 
     writeFileSync(join(root, "untracked file.txt"), "two\n");
     const afterContent = await fingerprint(root);
@@ -199,7 +177,7 @@ test("fingerprint is path-safe and excludes tracked and untracked .beads state",
       first.untrackedContentSha256,
     );
 
-    writeFileSync(join(root, "tracked.txt"), "non-beads tracked change\n");
+    writeFileSync(join(root, "tracked.txt"), "tracked change\n");
     const afterTrackedContent = await fingerprint(root);
     assert.notEqual(
       afterTrackedContent.trackedHeadDiffSha256,

@@ -520,8 +520,8 @@ behind a typeof check).
 
 ## Known Coverage Gaps
 
-The active follow-up list lives in Beads. Use `bd ready` for currently
-unblocked work and `bd list --status=open` for the wider open inventory.
+The active follow-up list lives in Engram. Use the `engram` `next` tool for
+currently unblocked work and `ls` for the wider open inventory.
 Coverage and type-surface improvements are tracked there alongside their
 priority and dependencies.
 
