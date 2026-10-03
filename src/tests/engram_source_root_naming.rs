@@ -50,7 +50,7 @@ impl ClaimedRoot {
             let mut event = roots.root_reads.get(&binding.claim_id).and_then(|read| read.get("latest_event"))
                 .filter(|event| !event.is_null()).cloned()
                 .or_else(|| roots.latest.get(&binding.claim_id).cloned())
-                .or_else(|| local.as_ref().map(|root| json!({"event":"external-prior-binding",
+                .or_else(|| local.as_ref().map(|root| json!({"event":sha256_hex(b"external-prior-binding"),
                     "position":{"feed":{"kind":"run_execution","id":binding.run_id},"position":1},
                     "kind":"bound","generation":root.generation,"workspace_id":root.root,"named_at":root.named_at})));
             let prior_position = event
@@ -70,7 +70,7 @@ impl ClaimedRoot {
                 } => {
                     if *generation > prior_generation {
                         event = Some(
-                            json!({"event":format!("external-bound-{}-{generation}", binding.claim_id),
+                            json!({"event":sha256_hex(format!("external-bound-{}-{generation}", binding.claim_id).as_bytes()),
                             "position":{"feed":{"kind":"run_execution","id":binding.run_id},"position":prior_position+1},
                             "kind":"bound","generation":generation,"workspace_id":workspace_id,"named_at":named_at}),
                         );
@@ -83,11 +83,11 @@ impl ClaimedRoot {
                         && event["kind"] != "ended"
                     {
                         event["kind"] = json!("ended");
-                        event["event"] = json!(format!(
+                        event["event"] = json!(sha256_hex(format!(
                             "external-ended-{}-{}",
                             binding.claim_id,
                             prior_position + 1
-                        ));
+                        ).as_bytes()));
                         event["position"]["position"] = json!(prior_position + 1);
                     }
                 }
@@ -96,7 +96,7 @@ impl ClaimedRoot {
                 } => {
                     if *last_generation > prior_generation {
                         event = Some(
-                            json!({"event":format!("external-bound-{}-{last_generation}",binding.claim_id),
+                            json!({"event":sha256_hex(format!("external-bound-{}-{last_generation}",binding.claim_id).as_bytes()),
                             "position":{"feed":{"kind":"run_execution","id":binding.run_id},"position":prior_position+1},
                             "kind":"bound","generation":last_generation,
                             "workspace_id":local.as_ref().map(|root| root.root.as_str()).unwrap_or("external-worktree"),
@@ -4975,6 +4975,13 @@ fn opening_capture_keeps_admitted_basis(transition: &str) {
         vec![claimed_root_held(label)],
     )
     .expect("the root is named before the turn");
+    let opening_proof = {
+        let inner = claimed.state.inner.lock().unwrap();
+        let proof = &inner.engram_work_naming_history[0].proofs[0];
+        json!({ "capture_run_cut": proof.read.read_cut.position,
+            "latest_event": proof.read.latest_event.as_ref().map(|event| &event.event),
+            "state": proof.read.named_root })
+    };
     let (state, session_id, work) = (
         claimed.state.clone(),
         claimed.session_id.clone(),
@@ -5032,8 +5039,9 @@ fn opening_capture_keeps_admitted_basis(transition: &str) {
         }));
     });
 
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
-        .expect("the begun root turn should reach the runtime");
+    let outcome = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
+    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Delivered),
+        "the begun root turn should reach the runtime: {outcome:?}");
     let prompt = received_prompt(&claimed);
     assert_eq!(prompt.contains("unconfirmed"), uncertain, "{prompt}");
 
@@ -5237,6 +5245,20 @@ fn opening_capture_keeps_admitted_basis(transition: &str) {
         .expect("a confirmed clear preserves the admitted opening basis");
     assert_eq!(start.source_revision, content_revision_of(&worktree));
     assert_eq!(start.source_root_state, Some(EngramSourceRootState::Named));
+    {
+        let inner = claimed.state.inner.lock().unwrap();
+        let owner = &inner.engram_source_sightings[0];
+        let intent = &owner.observations[0];
+        assert_eq!(intent.root_basis, opening_proof);
+        let EngramSourceObservationPhase::Recorded { request, receipt } = &intent.phase else {
+            panic!("the historical observation must be recorded");
+        };
+        assert_eq!(request["root_basis"], opening_proof);
+        assert_eq!(receipt["accounting"], json!({ "kind": "audit_only", "reason": "root_basis_moved" }));
+        assert!(owner.latest.is_none(), "a historical receipt cannot promote a baseline");
+        let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+        assert!(saved.engram_source_sightings.iter().any(|saved| saved == owner));
+    }
     let observation = finish_claimed_turn(&claimed, &claimed.runtime_token());
     assert_eq!(observation["source_changed"], false, "{observation}");
     assert_eq!(observation["effect"], "observe", "{observation}");
@@ -5245,6 +5267,23 @@ fn opening_capture_keeps_admitted_basis(transition: &str) {
         json!(start.source_root_generation),
         "closing evidence keeps the opening generation"
     );
+    assert!(claimed.state.inner.lock().unwrap().engram_source_sightings.iter()
+        .all(|owner| owner.latest.is_none()), "the historical close promotes no scope");
+    claimed.transport.work_bindings.lock().unwrap().push_back(Ok(Some(
+        test_control_work_binding(&format!("turn-observation-{label}"), 1))));
+    let outcome = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
+    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Delivered), "{outcome:?}");
+    received_prompt(&claimed);
+    let requests = claimed.transport.requests();
+    let fresh = &requests.iter().filter(|request| request.request["operation"] == "execution_observe")
+        .last().unwrap().request;
+    assert_ne!(fresh["root_basis"], opening_proof);
+    assert_eq!(fresh["occurrence"]["source_change"]["detection"], "assumed_missing_baseline");
+    assert!(claimed.state.inner.lock().unwrap().engram_source_sightings.iter()
+        .filter(|owner| owner.scope.source_root_generation == start.source_root_generation)
+        .filter(|owner| owner.scope.source_root_state == start.source_root_state
+            && owner.scope.workspace_id == start.workspace_id)
+        .all(|owner| owner.latest.is_none()));
 }
 
 #[test]

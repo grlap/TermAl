@@ -530,10 +530,10 @@ impl AppState {
                 .delegation_waits
                 .iter()
                 .any(|wait| wait.delegation_ids.iter().any(|id| *id == delegation_id));
-            if change != DelegationAttemptChange::Changed && !watched {
+            if change == DelegationAttemptChange::Unchanged && !watched {
                 return;
             }
-            let lifecycle_delta = if change == DelegationAttemptChange::Changed {
+            let lifecycle_delta = if change != DelegationAttemptChange::Unchanged {
                 delegation_attempt_delta_locked(&mut inner, index)
             } else {
                 None
@@ -547,7 +547,7 @@ impl AppState {
             let committed =
                 match self.commit_followup_wait_refresh_locked(&mut inner, Some(&delegation_id)) {
                     Ok((revision, refresh)) if refresh.did_mutate() => Ok((revision, refresh)),
-                    Ok((revision, refresh)) if change != DelegationAttemptChange::Changed => {
+                    Ok((revision, refresh)) if change == DelegationAttemptChange::Unchanged => {
                         Ok((revision, refresh))
                     }
                     Ok((_, refresh)) => self

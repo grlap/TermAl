@@ -37,6 +37,8 @@ struct PersistedState {
     engram_named_root_journal: Vec<EngramNamedRootJournal>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_work_naming_history: Vec<EngramWorkNamingHistory>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_source_sightings: Vec<EngramSourceSightingOwner>,
     #[serde(
         default,
         skip_serializing_if = "engram_source_root_generation_is_unset"
@@ -99,6 +101,7 @@ impl PersistedState {
             engram_work_source_roots: inner.engram_work_source_roots.clone(),
             engram_named_root_journal: inner.engram_named_root_journal.clone(),
             engram_work_naming_history: inner.engram_work_naming_history.clone(),
+            engram_source_sightings: inner.engram_source_sightings.clone(),
             engram_source_root_generation: inner.engram_source_root_generation,
             pending_coordination_scope_deletions: inner
                 .pending_coordination_scope_deletions
@@ -152,6 +155,7 @@ impl PersistedState {
             engram_work_source_roots: self.engram_work_source_roots.clone(),
             engram_named_root_journal: self.engram_named_root_journal.clone(),
             engram_work_naming_history: self.engram_work_naming_history.clone(),
+            engram_source_sightings: self.engram_source_sightings.clone(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.clone(),
             pending_response_board_project_detachments: self
@@ -208,6 +212,7 @@ impl PersistedState {
             engram_work_source_roots: self.engram_work_source_roots,
             engram_named_root_journal: self.engram_named_root_journal,
             engram_work_naming_history: self.engram_work_naming_history,
+            engram_source_sightings: self.engram_source_sightings,
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_source_root_generation: self.engram_source_root_generation,
@@ -428,6 +433,8 @@ struct PersistedSessionRecord {
     /// Diagnostic journal only: live non-delivery proof never survives restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_bind_retry: Option<EngramBindRetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_source_observation_gate: Option<EngramSourceObservationGate>,
     /// The queue head a user Stop held (`EngramSessionState::stopped_prompt_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_stopped_prompt_id: Option<String>,
@@ -530,6 +537,7 @@ impl PersistedSessionRecord {
                 .collect(),
             engram_abort_retry: record.engram.abort_retry.clone(),
             engram_bind_retry: record.engram.bind_retry.clone(),
+            engram_source_observation_gate: record.engram.source_observation_gate.clone(),
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
@@ -618,6 +626,7 @@ impl PersistedSessionRecord {
                 dispatch_generation: self.engram_dispatch_generation,
                 rebind_required: self.engram_routing_token.is_some(),
                 abort_retry: self.engram_abort_retry.clone(),
+                source_observation_gate: self.engram_source_observation_gate.clone(),
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
                 ..EngramSessionState::default()
             },

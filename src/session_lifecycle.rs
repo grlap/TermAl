@@ -306,6 +306,10 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if inner.sessions[index].engram.source_observation_gate.as_ref()
+            .is_some_and(|gate| gate.prompt_id == prompt_id && !gate.retired) {
+            retire_source_observation_locked(&mut inner, index);
+        }
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -445,6 +449,36 @@ impl AppState {
         session_id: &str,
         owner: Option<EngramQueuedAdmissionOwner>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        let retained_observation = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_visible_session_index(session_id).is_some_and(|index|
+                inner.sessions[index].engram.source_observation_gate.is_some())
+        };
+        if retained_observation {
+            let live_continuation = {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let index = inner.find_visible_session_index(session_id)
+                    .ok_or_else(|| ApiError::not_found("session not found"))?;
+                let record = &mut inner.sessions[index];
+                if owner.as_ref().is_some_and(|owner| !owner.matches(record)) {
+                    return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
+                }
+                let live = record.engram.source_observation_gate.as_ref().is_some_and(|gate| gate.owns(record))
+                    && record.engram.source_observation_continuation.is_some();
+                if live {
+                    if let Some(gate) = &mut record.engram.source_observation_gate {
+                        gate.retry_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                    }
+                }
+                live
+            };
+            if live_continuation {
+                self.source_observation_retry_tick(chrono::Utc::now());
+                return Ok(Some(TurnDispatchDeliveryOutcome::Held { error: None }));
+            }
+        }
+        self.reconcile_retired_source_observations(session_id).map_err(|error|
+            ApiError::conflict(format!("Engram source observation recovery remains withheld: {error}")))?;
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner

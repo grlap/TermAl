@@ -80,6 +80,127 @@ fn poll(waiter: &PersistFenceWaiter) -> Option<PersistFenceResult> {
 }
 
 #[test]
+fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restart() {
+    let mut fixture = FenceFixture::new();
+    let (owner, session_id, admission) = {
+        let mut inner = fixture.inner.lock().unwrap();
+        let created = inner.create_session(Agent::Codex, None,
+            fixture.root.path().to_string_lossy().into_owned(), None, None);
+        let session_id = created.session.id.clone();
+        let index = inner.find_session_index(&session_id).unwrap();
+        let record = inner.session_mut_by_index(index).unwrap();
+        record.engram.dispatch_generation = 42;
+        record.engram.routing_token = Some("original-routing-token".to_owned());
+        record.engram.active_grant_id = Some("begun-grant".to_owned());
+        let basis = EngramExecutionSourceBasis {
+            workspace_id: fixture.root.path().to_string_lossy().into_owned(),
+            source_revision: "content-v1:measured".to_owned(),
+            source_root_generation: Some(1),
+            source_root_state: Some(EngramSourceRootState::Named),
+        };
+        let sighting = EngramSourceSighting { basis: basis.clone(), observed_at: stamp_now() };
+        let owner = EngramSourceSightingOwner {
+            scope: EngramSourceSightingScope {
+                store: EngramAuthorityStoreKey { project_id: "example/project".to_owned(),
+                    database_path: fixture.root.path().join("engram.db") },
+                project_id: "local-project".to_owned(),
+                root_execution_id: "root-execution".to_owned(), work_id: "work".to_owned(),
+                run_id: "run".to_owned(), claim_id: "claim".to_owned(),
+                workspace_id: basis.workspace_id.clone(), source_root_generation: Some(1),
+                source_root_state: Some(EngramSourceRootState::Named),
+            },
+            version: 1, latest: Some(sighting.clone()),
+            observations: vec![EngramSourceObservationIntent {
+                id: "original-observation".to_owned(), session_id: session_id.clone(),
+                prompt_id: "held-head".to_owned(), dispatch_generation: 42,
+                active_turn_generation: 1, grant_id: "begun-grant".to_owned(),
+                binding: EngramControlWorkBinding { root_execution_id: "root-execution".to_owned(),
+                    work_id: "work".to_owned(), run_id: "run".to_owned(), work_revision: 1,
+                    claim_id: "claim".to_owned(), claim_fence: 1 },
+                connection: EngramConnectionConfig {
+                    binary_path: fixture.root.path().join("engram.exe"),
+                    project_file: fixture.root.path().join(".engram-project"),
+                    home: fixture.root.path().join("engram-home"), project_root: fixture.root.path().to_owned(),
+                    actor_id: "observer".to_owned(), actor_context: None, session_id: session_id.clone(),
+                },
+                baseline: None, sighting, root_basis: json!({"state": {"state": "none"}}),
+                routing_token: "original-routing-token".to_owned(), observing_session: Some("producer-session".to_owned()),
+                call_timeout_ms: ENGRAM_DEFAULT_CALL_TIMEOUT_MS,
+                phase: EngramSourceObservationPhase::Prepared {
+                    request: json!({"operation": "execution_observe", "idempotency_key": "original-key"}) },
+                continuation_released: false,
+                finalization_complete: false,
+                delivery_retired: false, grant_settlement: None, grant_settlement_request: None,
+            }],
+        };
+        let gate = EngramSourceObservationGate {
+            scope: owner.scope.clone(), observation_id: "original-observation".to_owned(),
+            owner_version: 1, prompt_id: "held-head".to_owned(), dispatch_generation: 42,
+            active_turn_generation: 1, grant_id: "begun-grant".to_owned(), attempts: 0,
+            policy_refreshed: false, retry_at: stamp_now(), reason: "awaiting actual receipt".to_owned(), retired: false,
+        };
+        let record = &mut inner.sessions[index];
+        record.engram.source_observation_gate = Some(gate);
+        let admission = engram_admission_live_content(record);
+        inner.engram_source_sightings.push(owner.clone());
+        (owner, session_id, admission)
+    };
+    let target = PersistFenceTarget::EngramSourceObservation {
+        owner: Box::new(owner.clone()), session_id: session_id.clone(), admission: admission.clone(),
+    };
+    let matching = fixture.enqueue(target.clone());
+    let mut later_owner = owner.clone();
+    later_owner.version += 1;
+    let different_owner = fixture.enqueue(PersistFenceTarget::EngramSourceObservation {
+        owner: Box::new(later_owner), session_id: session_id.clone(), admission: admission.clone(),
+    });
+    let mut later_admission = admission.clone();
+    later_admission["generation"] = json!(43);
+    let different_admission = fixture.enqueue(PersistFenceTarget::EngramSourceObservation {
+        owner: Box::new(owner.clone()), session_id: session_id.clone(), admission: later_admission,
+    });
+    let finalization = {
+        let inner = fixture.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        source_observation_finalization_content(&PersistedSessionRecord::from_record(record))
+    };
+    let finalized = fixture.enqueue(PersistFenceTarget::EngramSourceFinalization {
+        owner: Box::new(owner.clone()), session_id: session_id.clone(), content: finalization.clone(),
+    });
+    let mut wrong_mirror = finalization;
+    wrong_mirror["uncertainGrant"] = json!("another-recovery-grant");
+    let wrong_finalization = fixture.enqueue(PersistFenceTarget::EngramSourceFinalization {
+        owner: Box::new(owner.clone()), session_id, content: wrong_mirror,
+    });
+    fixture.receive(false);
+    assert!(!fixture.batch.drain(&fixture.rx, false));
+    assert_eq!(fixture.batch.pending.len(), 5, "exercise every queued target in the same actual writer batch");
+    let delta = fixture.collect();
+    assert!(!target.is_in_delta(&delta));
+    assert_eq!(poll(&matching), None, "an in-memory intent is not an acknowledgement");
+    fixture.write(&delta).unwrap();
+    assert_eq!(poll(&matching), Some(Ok(())));
+    assert_eq!(poll(&finalized), Some(Ok(())));
+    assert_eq!(poll(&wrong_finalization), None,
+        "the uncertain-grant cleanup is an independent part of the coupled proof");
+    assert_eq!(poll(&different_owner), None, "an older committed owner cannot ACK a successor");
+    assert_eq!(poll(&different_admission), None, "matching outbox alone cannot ACK another admission");
+    let restored = load_state(&fixture.root.path().join("termal.sqlite")).unwrap().unwrap();
+    assert_eq!(restored.engram_source_sightings, vec![owner]);
+    let restored_session = &restored.sessions[0];
+    assert_eq!(restored_session.engram.source_observation_gate.as_ref().unwrap().observation_id, "original-observation");
+    assert!(restored_session.engram.source_observation_continuation.is_none());
+    assert!(!restored_session.engram.source_opening_disposition.allows_delivery(),
+        "persisted receipt content is not permission to replay a provider after restart");
+    let persisted = PersistedState::from_inner(&restored);
+    let mut old_metadata = serde_json::to_value(persisted.metadata_only()).unwrap();
+    old_metadata.as_object_mut().unwrap().remove("engramSourceSightings");
+    let old: PersistedState = serde_json::from_value(old_metadata).unwrap();
+    assert!(old.engram_source_sightings.is_empty(), "absent persisted measurements stay absent");
+    fixture.batch.fail(PersistFenceError::Shutdown);
+}
+
+#[test]
 fn engram_admission_fence_requires_exact_committed_session_content() {
     let mut fixture = FenceFixture::new();
     let (session_id, content) = {

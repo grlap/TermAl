@@ -19,6 +19,103 @@
 use super::super::run_git_test_command;
 use super::*;
 
+#[path = "engram_source_observations.rs"]
+mod source_observations;
+
+#[test]
+fn a_change_between_named_root_turns_is_recorded_before_the_next_provider_handoff() {
+    let label = "between-named-turns";
+    let (claimed, worktree, first_runtime) = named_root_turn(label, true);
+    let canonical = fs::canonicalize(&worktree).expect("the named worktree canonicalizes");
+    let first_basis = claimed.record(|record| {
+        record.engram.active_turn_start_basis.clone().expect("first opening basis")
+    });
+    assert_eq!(PathBuf::from(&first_basis.workspace_id), canonical);
+    assert_eq!(first_basis.source_root_generation, Some(1));
+    assert_eq!(first_basis.source_root_state, Some(EngramSourceRootState::Named));
+
+    fs::write(worktree.join("README.md"), "changed during the first turn\n")
+        .expect("first source change writes");
+    let first = finish_claimed_turn(&claimed, &first_runtime);
+    assert_eq!(first["source_changed"], true);
+    let baseline = first["source_basis"].clone();
+    assert_eq!(baseline["source_root_generation"], 1);
+
+    // The first checkpoint has finished. This real write is attributed to
+    // neither turn by a watcher; its endpoints disclose only a content change.
+    fs::write(worktree.join("README.md"), "changed between the named turns\n")
+        .expect("the inter-turn source change writes");
+    let current = content_revision_of(&worktree);
+    assert_ne!(baseline["source_revision"], current);
+    let next_grant = format!("turn-observation-{label}-next-grant");
+    claimed.transport.responses.lock().unwrap().extend([
+        grant_reply(&next_grant),
+        begin_reply(&next_grant),
+        checkpoint_reply(&next_grant),
+    ]);
+    // ClaimedRoot scripts one binding read for its original single turn.
+    // The second admission must read the same still-held claim, not the
+    // scripted transport's empty-queue absence default.
+    let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
+    claimed.transport.work_bindings.lock().unwrap().push_back(Ok(Some(binding.clone())));
+    let second_request_start = claimed.transport.requests().len();
+    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
+        .expect("the next admitted turn reaches provider handoff");
+    claimed.record(|record| {
+        assert_eq!(record.engram.work_binding.as_ref(), Some(&binding));
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(next_grant.as_str()));
+    });
+    let _ = received_prompt(&claimed);
+    let at_handoff = claimed.transport.requests().len();
+    let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+    let durable_intent = saved.engram_source_sightings.iter()
+        .flat_map(|owner| &owner.observations)
+        .find(|intent| intent.grant_id == next_grant).expect("the actual durable gap intent exists at handoff");
+    assert!(matches!(&durable_intent.phase, EngramSourceObservationPhase::Recorded { request, receipt }
+        if request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"] == current
+            && receipt["accounting"]["kind"] == "source_change"));
+    assert!(durable_intent.baseline.is_some());
+    let second_basis = claimed.record(|record| {
+        assert!(record.active_turn_file_changes.is_empty(), "no watcher attribution");
+        record.engram.active_turn_start_basis.clone().expect("second opening basis")
+    });
+    assert_eq!(PathBuf::from(&second_basis.workspace_id), canonical);
+    assert_eq!(second_basis.source_root_generation, Some(1));
+    assert_eq!(second_basis.source_root_state, Some(EngramSourceRootState::Named));
+    assert_eq!(second_basis.source_revision, current);
+    claimed.state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
+        .expect("the unchanged second turn closes");
+    let requests = claimed.transport.requests();
+    let checkpoints: Vec<_> = requests.iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint")
+        .collect();
+    assert_eq!(checkpoints.len(), 2);
+    let second = &checkpoints[1].request["observations"][0];
+    assert_eq!(second["source_changed"], false);
+    assert_eq!(second["effect"], "observe");
+    assert_eq!(second["source_basis"]["source_revision"], current);
+    assert_eq!(content_revision_of(&worktree), current, "the second turn made no edit");
+
+    let boundary = (second_request_start..requests.len())
+        .find(|index| requests[*index].request["operation"] == "execution_observe")
+        .expect("the real inter-turn change is recorded separately from the quiet turn");
+    let request = &requests[boundary].request;
+    assert_eq!(request["occurrence"]["kind"], "inter_turn_change");
+    assert_eq!(request["causality"]["kind"], "unknown");
+    assert_eq!(request["policy_basis"]["mode"], "account_if_eligible");
+    let change = &request["occurrence"]["source_change"];
+    assert_eq!(change["detection"], "content_comparison");
+    assert_eq!(change["baseline"]["source_revision"], baseline["source_revision"]);
+    assert_eq!(change["sighting"]["source_basis"]["source_revision"], current);
+    let begin = (second_request_start..boundary)
+        .find(|index| requests[*index].request["operation"] == "turn_begin"
+            && requests[*index].request["grant_id"] == next_grant)
+        .expect("the observation follows the accepted begin");
+    assert!(begin < boundary && boundary < at_handoff,
+        "the boundary observation precedes the provider handoff");
+}
+
 #[test]
 fn a_worktree_root_over_engrams_basis_bound_leaves_the_report_without_a_basis() {
     // Engram refuses a basis field over 512 bytes, and with it the whole
@@ -1824,8 +1921,10 @@ fn named_root_turn(label: &str, name_first: bool) -> (ClaimedRoot, PathBuf, Runt
     if name_first {
         name_claimed_root_source_root(&claimed, label, &worktree);
     }
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
-        .expect("the begun root turn should reach the runtime");
+    let delivery = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
+    assert!(matches!(delivery, TurnDispatchDeliveryOutcome::Delivered),
+        "the positive named-root fixture must deliver: {delivery:?}; {}",
+        claimed.record(|record| record.session.preview.clone()));
     let _ = received_prompt(&claimed);
     if !name_first {
         name_claimed_root_source_root(&claimed, label, &worktree);
