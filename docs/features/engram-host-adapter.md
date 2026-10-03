@@ -2225,7 +2225,11 @@ for want of evaluator authority.
    or unknown, else the host's next preference among the admitted modes,
    `sub_agent` then `same_session`. The order is the host's, not the order in
    which the policy lists them. A pin the policy does not admit is refused
-   naming both.
+   naming both. For an unpinned task whose known policy admits `sub_agent` but
+   not `independent_session`, a saved `same_session` preference is ignored:
+   the request selects `sub_agent`, never silently falls back to same-session.
+   An explicitly admitted task pin still wins, including `same_session`;
+   other admitted sets retain their default-selection behavior.
 
 **Evidence by criterion.** A requester can supply explicit associations such as
 `"criterionEvidence": [{"criterion": 1, "locators": ["FULL_RECORD_ID"]}]`.
@@ -2248,6 +2252,14 @@ basis again, then inspects the canonical identity again. Both must agree with
 the opening bracket, even if a replacement run has the same numeric evidence
 cut. Supplied identity fields are checked; omitted projection IDs are supported.
 The existing store and control connection/token are also revalidated locally.
+
+For `sub_agent`, the requester must be the run's holder or executor. Preflight
+uses the requester's held-claim read and the executor from that same validated
+closing `work core inspect`, not the opening read or a local executor mirror.
+A requester known to be neither is refused with `409` before a child is
+spawned. An absent or null executor is unknown and leaves the final standing
+decision to Engram; malformed executor data or a failed read is an error,
+not permission to proceed.
 
 Receipts are decoded by the operation that requested them. An ordinary notes
 continuation carries `work.short_ref` and its notes window, without the initial
@@ -2300,17 +2312,28 @@ index detail can shrink before complete criteria are refused; each clipped or
 omitted body remains in `evidenceOmissions`. Captured notes-window omission
 counts still describe that window and can overlap separately selected records.
 
-`independent_session` spawns an evaluator delegation and returns the ordinary
-creation response plus `mode` and `workRef`; the parent waits with
+`independent_session` and `sub_agent` spawn an evaluator delegation and return
+the ordinary creation response plus `mode` and `workRef`; the parent waits with
 `termal_resume_after_delegations`. `same_session` spawns nothing and returns
 `{ mode, workRef, acceptanceBasis, evidenceBasis, sourceFingerprint?, brief }`,
 where the brief tells the caller to record the evaluation with its own tracker
 tool, including the `source_fingerprint` when there is one.
-`sub_agent` returns `501`.
 
-**Declared source fingerprint.** After the reads, and only for the two modes
-that use it (never for `sub_agent`), the host takes the
-[content revision](#content-revision) of the worktree the evaluator reads:
+A `sub_agent` target captures immutable `parentSession` and `executionIdentity`
+under the child-creation lock, from the actual parent session and delegation
+identity. The distinct read-only child submits under its own session id;
+the CLI receives the stored pair as `--parent-session` and
+`--execution-identity`, never the caller's assertions. Submit authority and
+the tool capability both refuse a legacy target without the pair, a pair
+that mismatches its parent/delegation, or stray sub-agent metadata on another
+mode. The pair survives persistence and is never reconstructed from the
+current parent. A definitive producer refusal is final for that send, not
+an unknown outcome or a reason to try same-session; an uncertain send keeps
+the original argument list for identical replay.
+
+**Declared source fingerprint.** After the reads, for all three modes,
+the host takes the [content revision](#content-revision) of the worktree the
+evaluator reads:
 the work's named [source root](#source-root) when the requesting session is
 holding the claim that named it (the evaluator child then runs there), else
 the parent's worktree (it runs in the parent's workdir). The host resolves
@@ -2773,8 +2796,10 @@ an unavailable or older binary is **unknown**, not off. Evaluator defaults are
 stored separately in `engram.acceptanceEvaluation`: `defaultMode`, `evaluatorAgent`
 (Claude or Codex), and `evaluatorModel`. Saving defaults does not audit the store,
 reset sessions, or change policy. Task pins win; a default mode is used only when
-the current policy explicitly admits it. Unsupported `sub_agent` defaults are
-rejected server-side; defaults require an existing Engram configuration and do
+the current policy explicitly admits it, except that an unpinned sub-agent-only
+or sub-agent-plus-same-session policy cannot use a saved same-session preference
+to bypass the child producer. `sub_agent` is produced and can be saved as a
+default. Defaults require an existing Engram configuration and do
 not turn an unconfigured project into an operator veto. Explicit request agent/model win over
 project defaults. With no agent preference, choose the other Claude/Codex vendor
 when its readiness check is ready. A request-provided `model` requires an explicit
@@ -2798,7 +2823,9 @@ unlock a newer project's in-flight operation.
 
 The project picker and acceptance-setting dropdowns use the shared themed
 combobox, matching the session-list menus on Windows as well as other platforms.
-Unsupported evaluator modes remain visible but disabled.
+Modes not admitted by the current policy remain visible but disabled;
+an admitted `sub_agent` option is enabled. Settings and readiness report it
+as produced, without the former unsupported-mode warning.
 
 Changing store policy is a separate operator action, submitted with the
 "Confirm policy change" button; no additional confirmation checkbox is required.
@@ -2866,8 +2893,8 @@ count independently of the child transcript. Completion without a submission
 is not a pass; pending/unconfirmed writes remain unknown. A recorded value still
 waiting on its persistence acknowledgement is shown as submission in progress.
 
-Not delivered yet: `sub_agent` mode with a host-attested parent and execution
-identity; a source fingerprint at evaluation and completion; observed build
+Not delivered yet: supplying the evaluated source fingerprint at completion
+for `require_source_freshness`; observed build
 evidence through the control checkpoint; and Work-panel evaluation actions.
 
 ## Premium boot recovery and lazy retry

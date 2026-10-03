@@ -23,11 +23,6 @@ impl AcceptanceEvaluatorDefaults {
     }
 
     fn validate(&self) -> Result<(), ApiError> {
-        if self.default_mode == Some(AcceptanceEvaluationMode::SubAgent) {
-            return Err(ApiError::bad_request(
-                "This host does not produce sub-agent evaluations; choose Auto, same session or independent session",
-            ));
-        }
         if self
             .evaluator_agent
             .is_some_and(|agent| !matches!(agent, Agent::Claude | Agent::Codex))

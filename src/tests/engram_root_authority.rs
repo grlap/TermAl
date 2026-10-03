@@ -2438,7 +2438,7 @@ fn source_root_authority_foreign_generation_cannot_hide_a_later_claim_name() {
         assert!(
             acceptance_evaluation_root_changed_locked(
                 &inner,
-                &seed.clone().into_target("old-request".to_owned())
+                &seed.clone().into_target("old-request".to_owned(), &claimed.session_id)
             ),
             "first submission keeps the original naming token"
         );

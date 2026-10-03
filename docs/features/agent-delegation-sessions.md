@@ -1592,6 +1592,9 @@ type DelegationRecord = {
   acceptanceEvaluation?: {
     workRef: string;
     mode: "same_session" | "sub_agent" | "independent_session";
+    // Immutable sub-agent identity pair; host bookkeeping, not read by the UI.
+    parentSession?: string;
+    executionIdentity?: string;
     acceptanceBasis: number;
     evidenceBasis: number;
     criteriaCount: number;

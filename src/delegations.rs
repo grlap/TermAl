@@ -678,6 +678,10 @@ impl AppState {
             &self.server_instance_id,
             &inner.sessions[child_index],
         );
+        // Identity is captured under the same lock that creates the actual
+        // child and its delegation. It is not part of the request seed.
+        let acceptance_evaluation = evaluation
+            .map(|seed| seed.into_target(delegation_id.clone(), &parent_session_id));
         let record = DelegationRecord {
             id: delegation_id.clone(),
             parent_session_id,
@@ -705,7 +709,7 @@ impl AppState {
             } else {
                 0
             },
-            acceptance_evaluation: evaluation.map(|seed| seed.into_target(delegation_id.clone())),
+            acceptance_evaluation,
             attempt: DelegationAttemptState::default(),
         };
         let delegation_index = inner.delegations.len();

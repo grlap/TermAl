@@ -1535,6 +1535,12 @@ enum AcceptanceEvaluationMode {
 struct DelegationAcceptanceEvaluation {
     work_ref: String,
     mode: AcceptanceEvaluationMode,
+    /// Host-attested at child creation, never supplied by the evaluator.
+    /// Legacy sub-agent targets without this pair cannot submit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent_session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execution_identity: Option<String>,
     acceptance_basis: i64,
     evidence_basis: i64,
     criteria_count: usize,
@@ -1706,6 +1712,10 @@ struct AcceptanceEvaluationBlockingVerdict {
 struct PersistedDelegationAcceptanceEvaluation {
     work_ref: String,
     mode: AcceptanceEvaluationMode,
+    #[serde(default)]
+    parent_session: Option<String>,
+    #[serde(default)]
+    execution_identity: Option<String>,
     acceptance_basis: i64,
     evidence_basis: i64,
     criteria_count: usize,
@@ -1751,6 +1761,8 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
         Self {
             work_ref: persisted.work_ref,
             mode: persisted.mode,
+            parent_session: persisted.parent_session,
+            execution_identity: persisted.execution_identity,
             acceptance_basis: persisted.acceptance_basis,
             evidence_basis: persisted.evidence_basis,
             criteria_count: persisted.criteria_count,

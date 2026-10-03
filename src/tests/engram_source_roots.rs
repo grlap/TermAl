@@ -556,6 +556,8 @@ fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
             let target = DelegationAcceptanceEvaluation {
                 work_ref: "w-a".to_owned(),
                 mode: AcceptanceEvaluationMode::IndependentSession,
+                parent_session: None,
+                execution_identity: None,
                 acceptance_basis: 1,
                 evidence_basis: 1,
                 criteria_count: 1,
