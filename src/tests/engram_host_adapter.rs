@@ -9401,6 +9401,7 @@ enum EngramTerminationCase {
 fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &str) {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-s8-{label}"));
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9511,6 +9512,7 @@ fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &st
 fn timed_out_wait_checkpoint_and_later_exit_use_distinct_idempotency_keys() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-checkpoint-intent-keys");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9627,6 +9629,7 @@ fn terminal_paths_checkpoint_begun_turns_once_with_resumable_intents() {
 #[test]
 fn stop_then_identical_followup_gets_a_fresh_grant_without_rebind() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-stop-followup");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9739,6 +9742,7 @@ fn stop_then_identical_followup_gets_a_fresh_grant_without_rebind() {
 #[test]
 fn remote_proxy_dispatch_never_enters_the_local_engram_adapter() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s9");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9814,6 +9818,7 @@ fn remote_proxy_dispatch_never_enters_the_local_engram_adapter() {
 #[test]
 fn approval_pause_keeps_the_open_grant_until_the_turn_really_finishes() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s10");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9908,6 +9913,7 @@ fn approval_pause_keeps_the_open_grant_until_the_turn_really_finishes() {
 #[test]
 fn disabling_after_begin_clears_state_and_blocks_every_later_control_call() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-disable");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10007,6 +10013,7 @@ fn disabling_after_begin_clears_state_and_blocks_every_later_control_call() {
 fn disable_preserves_uncheckpointed_authority_and_reenable_repairs_the_same_session() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-disable-checkpoint-deadline");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10231,6 +10238,7 @@ fn disable_preserves_uncheckpointed_authority_and_reenable_repairs_the_same_sess
 fn reenable_with_a_different_home_checkpoints_disabled_recovery_in_the_old_store() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-disabled-recovery-home-change");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10385,6 +10393,7 @@ fn reenable_with_a_different_home_checkpoints_disabled_recovery_in_the_old_store
 fn project_reset_persist_failure_restores_old_connection_state_and_releases_fence() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-persist-failure");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10508,6 +10517,7 @@ fn project_reset_persist_failure_restores_old_connection_state_and_releases_fenc
 #[test]
 fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-reconfigure");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10619,6 +10629,7 @@ fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds
 fn project_reset_fence_keeps_a_new_delegation_off_the_old_connection() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-project-reset-fence");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10714,6 +10725,7 @@ fn project_reset_fence_keeps_a_new_delegation_off_the_old_connection() {
 fn no_reset_settings_patch_cannot_invalidate_a_checkpointing_reset() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-settings-patch-reset-race");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10818,6 +10830,7 @@ fn no_reset_settings_patch_cannot_invalidate_a_checkpointing_reset() {
 fn project_reset_wait_releases_a_generation_rejected_pending_dispatch() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-stale-dispatch");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10962,6 +10975,7 @@ fn project_reset_wait_releases_a_generation_rejected_pending_dispatch() {
 fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-stale-begin-successor");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11121,6 +11135,7 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
 fn reset_fenced_begin_finishes_once_while_runtime_stop_is_still_gated() {
     let (state, _codex_runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-stop-begin-finish");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11424,12 +11439,15 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
         Message::Text { text, .. }
             if text.contains("Engram did not authorize this turn for runtime delivery")
     )));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn nested_child_inherits_engram_project_through_an_isolated_parent_chain() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-effective-project");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11557,6 +11575,7 @@ fn nested_child_inherits_engram_project_through_an_isolated_parent_chain() {
 fn nested_delegation_parent_bind_uses_child_authority_shape() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-parent-shape");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11607,6 +11626,7 @@ fn nested_delegation_parent_bind_uses_child_authority_shape() {
 fn nested_delegation_parent_bind_fails_open_when_child_target_is_disabled() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-parent-disabled");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11648,6 +11668,7 @@ fn nested_delegation_parent_bind_fails_open_when_child_target_is_disabled() {
 fn marked_nested_parent_without_delegation_row_has_no_parent_shaped_target() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-parent-missing-row");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11699,6 +11720,7 @@ fn marked_nested_parent_without_delegation_row_has_no_parent_shaped_target() {
 fn invalid_status_token_is_dropped_and_replaced_by_a_fresh_bind() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-invalid-status-token");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11790,6 +11812,7 @@ fn invalid_status_token_is_dropped_and_replaced_by_a_fresh_bind() {
 fn status_without_open_grant_clears_stale_local_grant_without_checkpointing_it() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-authoritative-status");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11862,6 +11885,7 @@ fn status_without_open_grant_clears_stale_local_grant_without_checkpointing_it()
 #[test]
 fn disabling_during_bind_rejects_the_late_token_and_reaps_the_process() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-bind-disable");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11956,6 +11980,7 @@ fn disabling_during_bind_rejects_the_late_token_and_reaps_the_process() {
 #[test]
 fn killing_a_parent_checkpoints_and_reaps_its_active_child_first() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-parent-kill");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -12015,6 +12040,7 @@ fn killing_a_parent_checkpoints_and_reaps_its_active_child_first() {
 fn shared_codex_restart_rebinds_each_bound_session_exactly_once() {
     let runtime_id = "engram-s11";
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(runtime_id);
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -12159,6 +12185,7 @@ fn runtime_loss_does_not_rebind_a_fatally_disabled_child_as_a_parent_target() {
         transport.requests().is_empty(),
         "a fatally disabled child must not fall back to a parent-shaped bind"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -12228,11 +12255,13 @@ fn runtime_loss_does_not_rebind_a_missing_delegation_child_as_a_parent_target() 
         transport.requests().is_empty(),
         "a marked delegation child must not fall back to a parent-shaped bind"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn terminal_transition_during_begin_never_delivers_and_closes_the_stale_grant() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-begin-race");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -12329,6 +12358,7 @@ fn assert_terminal_callback_abandons_blocked_begin(
 ) {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-terminal-tail-{label}"));
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
