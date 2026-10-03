@@ -30,6 +30,15 @@ fn refuse_reply(code: &str) -> ScriptedEngramControlResponse {
     ScriptedEngramControlResponse::Reply(Ok(json!({ "decision": "refuse", "code": code })))
 }
 
+/// This family's Engram setup. The state's shared scripted budget clock is
+/// chosen before Engram is enabled, so the fixture's 250 ms operation budgets
+/// are charged only by explicit advancement, never by how late a worker is
+/// scheduled; enabling again keeps the clock already chosen.
+fn enable_uncertain_begin_engram(state: &AppState, project_id: &str, root: &FsPath) {
+    state.select_test_scripted_engram_budget_clock();
+    enable_test_project_engram(state, project_id, root);
+}
+
 /// Cancels a delegation while the child's `turn_begin` is blocked, then
 /// releases the begin and lets its compensating checkpoint answer with
 /// `settlement`. Returns nothing; every expectation is asserted inside.
@@ -50,7 +59,7 @@ fn assert_cancel_during_blocked_begin_records_the_grant(
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
 
     let evaluated_grant_id = format!("uncertain-begin-{label}-evaluated");
     let begun_grant_id = match blocked_begin {
@@ -293,7 +302,7 @@ fn a_begin_that_fails_in_transport_records_the_grant_until_recovery_confirms_it_
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin transport");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
 
     let grant_id = "uncertain-begin-transport-grant";
     let transport = GatedEngramControlTransport::new([
@@ -409,7 +418,7 @@ fn canceling_the_queued_head_during_a_blocked_begin_records_the_grant_for_recove
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin queue cancel");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
 
     let grant_id = "uncertain-begin-queue-cancel-grant";
     let (begin_step, begin_gate) = gated_engram_step(
@@ -543,14 +552,40 @@ fn canceling_the_queued_head_during_a_blocked_begin_records_the_grant_for_recove
     assert_eq!(child.engram.uncertain_grant_id, None);
 }
 
-#[test]
-fn a_begin_answered_for_another_grant_records_the_evaluated_grant_until_recovery_confirms_it_clean()
-{
-    // A receipt naming a different grant proves nothing about the grant this
-    // begin asked for: Engram may hold it begun. It is recorded as uncertain
-    // when the dispatch record is finished, and a clean status settles it.
-    let (state, _runtime_rx) =
-        test_app_state_with_delegation_codex_runtime("engram-uncertain-begin-mismatch");
+/// The budget clock a restart recovery runs on.
+#[derive(Clone, Copy)]
+enum RecoveryClock {
+    /// The family's shared scripted clock: budgets move only when advanced.
+    Scripted,
+    /// Real time, declared on purpose, so a late worker spends its budget.
+    Real,
+}
+
+/// What a restart recovery of the child did: the operations it sent for the
+/// child, the child's uncertain grant afterwards, the refusal codes of the
+/// restart cards it appended to the child, and the failure the recovery
+/// raised on the calling thread, if any (scripted runs only: on a Real
+/// reload such a failure panics out of the boot itself).
+struct MismatchRecovery {
+    operations: Vec<String>,
+    uncertain_grant_id: Option<String>,
+    restart_refusal_codes: Vec<Option<String>>,
+    worker_failure: Option<String>,
+}
+
+/// Records the evaluated grant as uncertain through a begin answered for
+/// another grant and cancels the child, all on the family's scripted clock.
+/// Then runs restart recovery on `clock`, with every worker held 300 real ms
+/// after the status and before the bind: a worker scheduled late, past the
+/// fixture's 250 ms operation budget. On `Real` only that restart runs on
+/// real time: the persisted state boots again with Real chosen before its
+/// own recovery. With `bind_panics`, the child's bind panics on its worker.
+fn recover_a_begin_answered_for_another_grant(
+    label: &str,
+    clock: RecoveryClock,
+    bind_panics: bool,
+) -> MismatchRecovery {
+    let (state, _runtime_rx) = test_app_state_with_delegation_codex_runtime(label);
     let root = state
         .test_temp_root
         .as_ref()
@@ -560,7 +595,7 @@ fn a_begin_answered_for_another_grant_records_the_evaluated_grant_until_recovery
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin mismatch");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
 
     let grant_id = "uncertain-begin-mismatch-grant";
     let transport = GatedEngramControlTransport::new([
@@ -620,20 +655,165 @@ fn a_begin_answered_for_another_grant_records_the_evaluated_grant_until_recovery
         assert_eq!(child.engram.uncertain_grant_id.as_deref(), Some(grant_id));
     }
     let recovery = RecordingBootRecoveryTransport::new();
-    state.install_control_test_transport(recovery.clone());
-    let plan = state
-        .prepare_engram_sessions_for_boot_recovery()
-        .expect("boot recovery plan should be prepared");
-    state.recover_prepared_engram_sessions_after_boot(plan);
-    assert_eq!(
-        recovery.operations_for(&child_id),
-        ["session_status", "session_bind"]
+    // A worker scheduled late: it is held past the fixture's 250 ms
+    // per-operation deadline after the status and before the bind.
+    recovery.stall_before_bind(Duration::from_millis(300));
+    if bind_panics {
+        recovery.panic_on_bind(&child_id);
+    }
+    let mut worker_failure = None;
+    let recovered = match clock {
+        RecoveryClock::Scripted => {
+            state.install_control_test_transport(recovery.clone());
+            let plan = state
+                .prepare_engram_sessions_for_boot_recovery()
+                .expect("boot recovery plan should be prepared");
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                state.recover_prepared_engram_sessions_after_boot(plan)
+            })) {
+                worker_failure = Some(
+                    payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| {
+                            payload
+                                .downcast_ref::<&str>()
+                                .map(|text| (*text).to_owned())
+                        })
+                        .unwrap_or_default(),
+                );
+            }
+            state.clone()
+        }
+        RecoveryClock::Real => {
+            // The reload boots with the longest recovery batch budget a host
+            // accepts. A boot that returns inside its batch budget has started
+            // every target and finished each one before returning, so the
+            // child's outcome is final when the boot returns: no worker is
+            // left late and no target is left to the lazy first-use path.
+            let batch_budget = Duration::from_millis(MAX_ENGRAM_BOOT_RECOVERY_BUDGET_MS);
+            {
+                let mut inner = state.inner.lock().expect("state mutex poisoned");
+                inner.preferences.engram.boot_recovery_budget_ms =
+                    MAX_ENGRAM_BOOT_RECOVERY_BUDGET_MS;
+                state
+                    .commit_locked(&mut inner)
+                    .expect("the batch budget should persist");
+            }
+            let boot_started = std::time::Instant::now();
+            let reloaded = AppState::new_with_paths_engram_transport_and_clock_for_test(
+                root.to_string_lossy().into_owned(),
+                state.persistence_path.as_ref().clone(),
+                state.orchestrator_templates_path.as_ref().clone(),
+                recovery.clone(),
+                EngramBudgetClock::Real,
+            )
+            .expect("the persisted state should boot again on real time");
+            // The boot's own recovery ran inside this interval, so a boot
+            // shorter than the batch budget never reached the batch deadline.
+            // A host stalled for the whole budget fails here as a starved
+            // fixture; the batch expiry is never the one under test.
+            assert!(
+                boot_started.elapsed() < batch_budget,
+                "the reload outlasted its recovery batch budget"
+            );
+            reloaded
+        }
+    };
+    let outcome = {
+        let inner = recovered.inner.lock().expect("state mutex poisoned");
+        let child = &inner.sessions[inner
+            .find_session_index(&child_id)
+            .expect("child should remain after recovery")];
+        MismatchRecovery {
+            operations: recovery.operations_for(&child_id),
+            uncertain_grant_id: child.engram.uncertain_grant_id.clone(),
+            restart_refusal_codes: child
+                .session
+                .messages
+                .iter()
+                .filter_map(|message| match message {
+                    Message::EngramControl { card, .. }
+                        if card.stage == EngramControlStage::Restart =>
+                    {
+                        Some(card.refusal_code.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+            worker_failure,
+        }
+    };
+    if matches!(clock, RecoveryClock::Real) {
+        // The reloaded state runs its own persist worker on the fixture's
+        // database; stop it so the fixture's temp root can be removed.
+        recovered.shutdown_persist_blocking();
+    }
+    outcome
+}
+
+#[test]
+fn a_begin_answered_for_another_grant_records_the_evaluated_grant_until_recovery_confirms_it_clean()
+{
+    // A receipt naming a different grant proves nothing about the grant this
+    // begin asked for: Engram may hold it begun. It is recorded as uncertain
+    // when the dispatch record is finished, and a clean status settles it,
+    // however late the recovery worker is scheduled.
+    let recovered = recover_a_begin_answered_for_another_grant(
+        "engram-uncertain-begin-mismatch",
+        RecoveryClock::Scripted,
+        false,
     );
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let child = &inner.sessions[inner
-        .find_session_index(&child_id)
-        .expect("child should remain after recovery")];
-    assert_eq!(child.engram.uncertain_grant_id, None);
+    assert_eq!(recovered.operations, ["session_status", "session_bind"]);
+    assert_eq!(recovered.uncertain_grant_id, None);
+    assert_eq!(recovered.restart_refusal_codes, [None]);
+    assert_eq!(recovered.worker_failure, None);
+}
+
+#[test]
+fn a_failure_on_a_recovery_worker_fails_the_owning_test() {
+    // A fixture failure on the detached recovery worker does not end on
+    // stderr: recovery degrades that target as the product does, finishes on
+    // the scripted clock without waiting out its budget, and then raises the
+    // worker's failure again on the calling thread. The helper catches that
+    // panic only to show it and the degraded state; uncaught, it fails the
+    // owning test.
+    let recovered = recover_a_begin_answered_for_another_grant(
+        "engram-uncertain-begin-mismatch-worker-panic",
+        RecoveryClock::Scripted,
+        true,
+    );
+    assert_eq!(
+        recovered.worker_failure.as_deref(),
+        Some("a boot recovery worker failed: fixture recovery worker failure")
+    );
+    assert_eq!(recovered.operations, ["session_status", "session_bind"]);
+    assert_eq!(
+        recovered.restart_refusal_codes,
+        [Some("control_unavailable".to_owned())]
+    );
+}
+
+#[test]
+fn a_late_recovery_worker_on_real_time_spends_its_bind_budget_before_transport() {
+    // The same late worker on real time: the clean status still settles the
+    // grant, but the bind's 250 ms budget, started after the status, is spent
+    // before the bind is sent, so recovery degrades with the budget's
+    // deadline. This is the expiry the scripted clock keeps out of the test
+    // above, and the failure a loaded full gate once showed there. Only the
+    // restart runs on real time; the setup ran on the scripted clock, and a
+    // 300 ms stall can only exceed a 250 ms budget, so load cannot flip it.
+    let recovered = recover_a_begin_answered_for_another_grant(
+        "engram-uncertain-begin-mismatch-real",
+        RecoveryClock::Real,
+        false,
+    );
+    assert_eq!(recovered.operations, ["session_status"]);
+    assert_eq!(recovered.uncertain_grant_id, None);
+    assert_eq!(
+        recovered.restart_refusal_codes,
+        [Some("deadline_exceeded".to_owned())]
+    );
 }
 
 #[test]
@@ -654,7 +834,7 @@ fn canceling_a_child_whose_restored_intent_may_own_a_lost_begin_records_an_unkno
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin restored");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
 
     let transport = GatedEngramControlTransport::new([
         immediate_engram_step("session_bind", bind_reply("uncertain-parent-restored")),
@@ -810,7 +990,7 @@ fn canceled_child_with_uncertain_grant(label: &str) -> CanceledChildWithUncertai
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
 
     let grant_id = format!("uncertain-begin-{label}-grant");
     let transport = GatedEngramControlTransport::new([
@@ -1050,7 +1230,7 @@ fn a_project_reset_on_the_same_store_keeps_an_uncertain_grant_for_the_next_bind(
         assert!(!sibling.engram.rebind_required);
     }
 
-    enable_test_project_engram(&fixture.state, &fixture.project_id, &fixture.root);
+    enable_uncertain_begin_engram(&fixture.state, &fixture.project_id, &fixture.root);
     let recovery = RecordingBootRecoveryTransport::new();
     fixture
         .state
@@ -1150,7 +1330,7 @@ fn dropping_intent_beside_a_live_begin_yields_that_begin_exactly() {
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin live marker");
     let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
     queue_test_engram_prompt(
         &state,
         &session_id,
@@ -1258,7 +1438,7 @@ fn a_begin_whose_outcome_arrives_after_it_was_recorded_uncertain_settles_the_rec
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin late outcome");
     let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
     let dispatch_generation = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -1386,7 +1566,7 @@ fn abandoning_a_dispatch_retires_its_promoted_head_only_after_taking_over_its_in
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin retired head");
     let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
     let target = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         AppState::engram_binding_target_for_session_shape_locked(&inner, &session_id, true)
@@ -1519,7 +1699,7 @@ fn clearing_prompts_by_source_records_a_dropped_intent_unless_the_head_is_kept()
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin clear by source");
     let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
     let target = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         AppState::engram_binding_target_for_session_shape_locked(&inner, &session_id, true)
@@ -1631,7 +1811,7 @@ fn a_same_store_reset_keeps_the_token_of_a_record_whose_intent_alone_may_own_a_b
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin reset intent");
     let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
     let target = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         AppState::engram_binding_target_for_session_shape_locked(&inner, &session_id, true)
@@ -1706,7 +1886,7 @@ fn a_same_store_reset_keeps_the_token_of_a_record_whose_intent_alone_may_own_a_b
         );
     }
 
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
     let recovery = RecordingBootRecoveryTransport::new();
     state.install_control_test_transport(recovery.clone());
     let plan = state
@@ -1750,7 +1930,7 @@ fn an_intent_this_process_issued_records_nothing_when_its_marker_sent_no_begin()
     fs::create_dir_all(&root).expect("project root should exist");
     let project_id = create_test_project(&state, &root, "Engram uncertain begin fresh intent");
     let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    enable_test_project_engram(&state, &project_id, &root);
+    enable_uncertain_begin_engram(&state, &project_id, &root);
     let target = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         AppState::engram_binding_target_for_session_shape_locked(&inner, &session_id, true)

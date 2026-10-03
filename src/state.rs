@@ -1451,7 +1451,16 @@ struct StateInner {
     engram_host_adapter: Arc<EngramHostAdapter>,
     /// One clock domain for control/authority budgets; runtime-only and shared
     /// with targets and recovery workers. Fixtures opt in before operations.
+    /// Read only through `StateInner::engram_budget_clock_snapshot`.
     engram_budget_clock: EngramBudgetClock,
+    /// Whether a fixture chose this state's clock (a scripted clock, or Real
+    /// on purpose); a later choice keeps it (`engram_budget.rs`).
+    #[cfg(test)]
+    engram_budget_clock_selected: bool,
+    /// Snapshots taken of the clock, so a fixture that chooses one after a
+    /// target or worker already holds the old clock fails at once.
+    #[cfg(test)]
+    engram_budget_clock_snapshots: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     test_engram_authority_ack_boundary: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     /// Ordering fixtures use scheduling headroom without changing budget tests
@@ -1620,6 +1629,10 @@ impl StateInner {
             codex: CodexState::default(),
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
             engram_budget_clock: EngramBudgetClock::default(),
+            #[cfg(test)]
+            engram_budget_clock_selected: false,
+            #[cfg(test)]
+            engram_budget_clock_snapshots: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             test_engram_authority_ack_boundary: None,
             #[cfg(test)]

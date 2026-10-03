@@ -28,6 +28,8 @@ pub(super) struct RecordingBootRecoveryTransport {
     failing_sessions: Mutex<HashSet<String>>,
     open_grants: Mutex<HashMap<String, String>>,
     checkpoint_receipts: Mutex<HashMap<String, String>>,
+    bind_stall: Mutex<Option<Duration>>,
+    panicking_binds: Mutex<HashSet<String>>,
 }
 
 impl RecordingBootRecoveryTransport {
@@ -37,7 +39,28 @@ impl RecordingBootRecoveryTransport {
             failing_sessions: Mutex::new(HashSet::new()),
             open_grants: Mutex::new(HashMap::new()),
             checkpoint_receipts: Mutex::new(HashMap::new()),
+            bind_stall: Mutex::new(None),
+            panicking_binds: Mutex::new(HashSet::new()),
         })
+    }
+
+    /// The bind for `session_id` panics on the recovery worker that sends it,
+    /// after it is recorded: a fixture failure on a worker thread.
+    pub(super) fn panic_on_bind(&self, session_id: &str) {
+        self.panicking_binds
+            .lock()
+            .expect("recording transport mutex poisoned")
+            .insert(session_id.to_owned());
+    }
+
+    /// Holds every recovery worker for `stall` of real time in the work
+    /// binding read, after its bind budget has started and before the bind
+    /// is transmitted: a late-scheduled worker, without machine load.
+    pub(super) fn stall_before_bind(&self, stall: Duration) {
+        *self
+            .bind_stall
+            .lock()
+            .expect("recording transport mutex poisoned") = Some(stall);
     }
 
     /// Status for `session_id` reports `grant_id` open until a checkpoint
@@ -107,6 +130,15 @@ impl EngramControlTransport for RecordingBootRecoveryTransport {
                 "fixture recovery transport failure",
             ));
         }
+        if operation == "session_bind"
+            && self
+                .panicking_binds
+                .lock()
+                .expect("recording transport mutex poisoned")
+                .contains(&connection.session_id)
+        {
+            panic!("fixture recovery worker failure");
+        }
         match operation.as_str() {
             "session_status" => {
                 let open_grant_id = self
@@ -154,6 +186,22 @@ impl EngramControlTransport for RecordingBootRecoveryTransport {
         }
     }
 
+    fn read_work_binding(
+        &self,
+        _connection: &EngramConnectionConfig,
+        _preference: EngramBindingPreference<'_>,
+        _timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        let stall = *self
+            .bind_stall
+            .lock()
+            .expect("recording transport mutex poisoned");
+        if let Some(stall) = stall {
+            std::thread::sleep(stall);
+        }
+        Ok(None)
+    }
+
     fn shutdown_session(&self, _session_id: &str) {}
 }
 
@@ -173,10 +221,11 @@ fn boot_recovery_skips_finished_delegation_children_without_a_mirrored_grant() {
         .expect("Engram project marker should exist");
     let home = root.join("engram-home");
     fs::create_dir_all(&home).expect("Engram home should exist");
-    let state = AppState::new_with_paths(
+    let state = AppState::new_with_paths_and_clock_for_test(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
         templates_path.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should boot");
     install_delegation_codex_runtime(&state, "engram-finished-child-boot-recovery");
@@ -411,11 +460,12 @@ fn boot_recovery_skips_finished_delegation_children_without_a_mirrored_grant() {
     // whose grants the first boot settled, keeps all their tokens, and
     // recovers only the roots and the running child.
     let second_boot = RecordingBootRecoveryTransport::new();
-    let reloaded = AppState::new_with_paths_and_engram_transport_for_test(
+    let reloaded = AppState::new_with_paths_engram_transport_and_clock_for_test(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
         templates_path.clone(),
         second_boot.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should boot again");
     let skipped_after_reload = [
@@ -499,10 +549,11 @@ fn a_record_written_before_begins_were_recorded_keeps_recovering_until_a_bind_se
         .expect("Engram project marker should exist");
     let home = root.join("engram-home");
     fs::create_dir_all(&home).expect("Engram home should exist");
-    let state = AppState::new_with_paths(
+    let state = AppState::new_with_paths_and_clock_for_test(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
         templates_path.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should boot");
     install_delegation_codex_runtime(&state, "engram-boot-settlement");
@@ -646,11 +697,12 @@ fn a_record_written_before_begins_were_recorded_keeps_recovering_until_a_bind_se
     // again and now settles; the completed child stays skipped; the root is
     // recovered as always.
     let second_boot = RecordingBootRecoveryTransport::new();
-    let reloaded = AppState::new_with_paths_and_engram_transport_for_test(
+    let reloaded = AppState::new_with_paths_engram_transport_and_clock_for_test(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
         templates_path.clone(),
         second_boot.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should boot again");
     assert_eq!(
@@ -727,10 +779,11 @@ fn a_persisted_uncertain_grant_survives_a_reload_and_keeps_the_finished_child_a_
         .expect("Engram project marker should exist");
     let home = root.join("engram-home");
     fs::create_dir_all(&home).expect("Engram home should exist");
-    let state = AppState::new_with_paths(
+    let state = AppState::new_with_paths_and_clock_for_test(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
         templates_path.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should boot");
     install_delegation_codex_runtime(&state, "engram-uncertain-reload");
@@ -804,11 +857,12 @@ fn a_persisted_uncertain_grant_survives_a_reload_and_keeps_the_finished_child_a_
     // the canceled child a recovery target, and stays when recovery fails.
     let second_boot = RecordingBootRecoveryTransport::new();
     second_boot.fail_session(&child, true);
-    let reloaded = AppState::new_with_paths_and_engram_transport_for_test(
+    let reloaded = AppState::new_with_paths_engram_transport_and_clock_for_test(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
         templates_path.clone(),
         second_boot.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should boot again");
     assert_eq!(
@@ -837,11 +891,12 @@ fn a_persisted_uncertain_grant_survives_a_reload_and_keeps_the_finished_child_a_
 
     // Boot 3 recovers it again, and a clean status settles it.
     let third_boot = RecordingBootRecoveryTransport::new();
-    let settled = AppState::new_with_paths_and_engram_transport_for_test(
+    let settled = AppState::new_with_paths_engram_transport_and_clock_for_test(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
         templates_path.clone(),
         third_boot.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should boot a third time");
     assert_eq!(

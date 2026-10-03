@@ -193,6 +193,10 @@ impl PersistedState {
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
             engram_budget_clock: EngramBudgetClock::default(),
             #[cfg(test)]
+            engram_budget_clock_selected: false,
+            #[cfg(test)]
+            engram_budget_clock_snapshots: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
             test_engram_authority_ack_boundary: None,
             #[cfg(test)]
             test_engram_dispatch_budget: None,
