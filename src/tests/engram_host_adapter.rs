@@ -3726,7 +3726,7 @@ pub(super) fn real_engram_control_fixture_path() -> PathBuf {
     }
 }
 
-fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
+pub(super) fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
     EngramProjectSettings {
         acceptance_evaluation: None,
         enabled: true,
@@ -4250,6 +4250,25 @@ fn engram_mcp_runtime_family_fixture(
     suffix: &str,
     work_authority_grant: Option<&str>,
 ) -> (AppState, PathBuf, String, Vec<String>) {
+    let (state, root, project_id, session_ids, _seam) =
+        engram_mcp_runtime_family_fixture_with_seam(suffix, work_authority_grant, None);
+    (state, root, project_id, session_ids)
+}
+
+/// The runtime-family fixture, with `seam` registered for its Engram home
+/// before the fixture's first settings Save. The returned guard keeps it
+/// registered for the caller's test.
+fn engram_mcp_runtime_family_fixture_with_seam(
+    suffix: &str,
+    work_authority_grant: Option<&str>,
+    seam: Option<fn(&[&FsPath]) -> TestEngramReadinessSeam>,
+) -> (
+    AppState,
+    PathBuf,
+    String,
+    Vec<String>,
+    Option<TestEngramReadinessSeam>,
+) {
     let state = test_app_state();
     let root = state
         .test_temp_root
@@ -4259,6 +4278,7 @@ fn engram_mcp_runtime_family_fixture(
         .join(format!("engram-mcp-runtime-{suffix}"));
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let seam = seam.map(|register| register(&[&root]));
     let project_id = create_test_project(&state, &root, "Engram MCP runtime lifecycle");
     let mut settings = real_fixture_engram_settings(&root);
     settings.work_authority_grant = work_authority_grant.map(str::to_owned);
@@ -4281,7 +4301,7 @@ fn engram_mcp_runtime_family_fixture(
     for session_id in &session_ids {
         attach_engram_mcp_test_runtime(&state, session_id);
     }
-    (state, root, project_id, session_ids)
+    (state, root, project_id, session_ids, seam)
 }
 
 #[test]
@@ -4401,8 +4421,13 @@ fn assert_engram_mcp_quarantine_transition_is_replanned_before_commit(
     initially_quarantined: bool,
     finally_quarantined: bool,
 ) {
-    let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture(label, Some("grant-old"));
+    let (state, root, project_id, session_ids, _readiness) =
+        engram_mcp_runtime_family_fixture_with_seam(
+            label,
+            Some("grant-old"),
+            // Readiness is setup here, not the subject (see the seam file).
+            Some(stage_test_engram_readiness_without_launch),
+        );
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -5317,6 +5342,10 @@ fn engram_mcp_rechecks_retired_grants_under_the_commit_lock_across_projects() {
         .expect("first fixture mode should write");
     fs::write(second_root.join(".engram-project"), "fixture-ready\n")
         .expect("second fixture mode should write");
+    // Readiness is setup here, not the subject: answer it without a process,
+    // and fail at once if any real diagnostic launch would race the budget.
+    let _readiness =
+        stage_test_engram_readiness_without_launch(&[&first_root, &second_root, &second_next_home]);
     let first_id = create_test_project(&state, &first_root, "First retirement racer");
     let second_id = create_test_project(&state, &second_root, "Second retirement racer");
     let mut first = real_fixture_engram_settings(&first_root);
@@ -5392,6 +5421,10 @@ fn engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock() {
         .expect("first fixture mode should write");
     fs::write(second_root.join(".engram-project"), "fixture-ready\n")
         .expect("second fixture mode should write");
+    // Readiness is setup here, not the subject: answer it without a process,
+    // and fail at once if any real diagnostic launch would race the budget.
+    let _readiness =
+        stage_test_engram_readiness_without_launch(&[&first_root, &second_root, &second_next_home]);
     let first_id = create_test_project(&state, &first_root, "First active grant racer");
     let second_id = create_test_project(&state, &second_root, "Second active grant racer");
     let first_original = real_fixture_engram_settings(&first_root);

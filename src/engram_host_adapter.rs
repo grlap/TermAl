@@ -453,6 +453,19 @@ fn run_engram_diagnostic_args_until(
     })?;
     let stdout_reader = start_engram_doctor_reader(stdout, "stdout");
     let stderr_reader = start_engram_doctor_reader(stderr, "stderr");
+    // Test seam: a registered home's launch has outlasted its budget the
+    // moment it resumes, whether or not the child has already exited (on
+    // Unix it is not held suspended). Same cleanup and error as the expiry
+    // branch below (src/engram_readiness_test_seam.rs).
+    #[cfg(test)]
+    if test_engram_diagnostic_launch_expired(home) {
+        stop_engram_doctor_before_reap(&process_tree, &process);
+        wait_for_test_engram_expired_child(&process);
+        return Err(ApiError::bad_request(format!(
+            "Engram {diagnostic} exceeded the {} second enablement deadline",
+            doctor_timeout.as_secs()
+        )));
+    }
     let status = loop {
         match process.try_wait() {
             Ok(Some(status)) => break status,

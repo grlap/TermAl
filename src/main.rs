@@ -765,6 +765,8 @@ include!("engram_write_places.rs");
 include!("engram_check_toolchain.rs");
 include!("engram_control_transport.rs");
 include!("engram_readiness.rs");
+#[cfg(test)]
+include!("engram_readiness_test_seam.rs");
 include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");

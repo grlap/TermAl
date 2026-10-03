@@ -108,14 +108,23 @@ fn run_engram_readiness(
     root: &FsPath,
 ) -> Result<EngramReadinessReceipt, ApiError> {
     let declaration = read_engram_diagnostic_declaration(marker)?;
-    let output = run_engram_diagnostic_within(
-        binary,
-        marker,
-        home,
-        root,
-        "readiness",
-        ENGRAM_READINESS_TIMEOUT,
-    )?;
+    // Test seam: a registered home's readiness is answered without a process
+    // (src/engram_readiness_test_seam.rs); every check below still runs.
+    #[cfg(test)]
+    let staged = staged_test_engram_readiness_output(marker, home);
+    #[cfg(not(test))]
+    let staged: Option<Result<std::process::Output, ApiError>> = None;
+    let output = match staged {
+        Some(output) => output?,
+        None => run_engram_diagnostic_within(
+            binary,
+            marker,
+            home,
+            root,
+            "readiness",
+            ENGRAM_READINESS_TIMEOUT,
+        )?,
+    };
     if read_engram_diagnostic_declaration(marker).ok().as_ref() != Some(&declaration) {
         return Err(ApiError::conflict(
             "Engram declaration changed during readiness; verify again",
