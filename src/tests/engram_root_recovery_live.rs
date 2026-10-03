@@ -452,6 +452,186 @@ fn operation_key(request: &Value) -> &str {
         .expect("mutating Engram request should carry an idempotency key")
 }
 
+fn retry_live_bind_without_resume(fixture: &LiveRootFixture) {
+    let (retry, prepared_bind, waiter) = {
+        let inner = fixture.state.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner
+            .find_session_index(&fixture.session_id)
+            .expect("live root should exist")];
+        let head = record.queued_prompts.front().expect("retained bind head");
+        let retry = record.engram.bind_retry.as_ref().expect("typed bind retry");
+        assert_eq!(retry.proof.prompt_id, head.pending_prompt.id);
+        assert_eq!(retry.proof.phase, engram_bind_retry_phase(head));
+        assert!(matches!(
+            retry.proof.phase,
+            EngramBindRetryPhase::Prepared { .. }
+        ));
+        assert_eq!(
+            retry.proof.dispatch_generation,
+            record.engram.dispatch_generation
+        );
+        assert_eq!(
+            retry.proof.promoted_turn_generation,
+            record.active_turn_generation
+        );
+        assert_eq!(
+            record.engram.bind_retry_runtime,
+            record.runtime.runtime_token()
+        );
+        assert!(record.engram.bind_retry_runtime.is_some());
+        assert_eq!(retry.attempts, 1);
+        assert!(
+            !retry.acknowledged,
+            "park starts with acknowledgement pending"
+        );
+        assert!(!record.engram.abort_retry_acknowledged);
+        assert!(record.engram.abort_retry_saved || record.engram.abort_retry_fence.is_some());
+        assert_eq!(record.session.status, SessionStatus::Idle);
+        assert!(head.engram_waiting);
+        assert!(!head.engram_interrupted);
+        assert!(head.engram_evaluate.is_none());
+        assert!(record.engram.active_grant_id.is_none());
+        assert!(record.engram.uncertain_grant_id.is_none());
+        (
+            retry.clone(),
+            head.engram_bind.clone().expect("prepared bind retained"),
+            record.engram.abort_retry_fence.clone(),
+        )
+    };
+    let due = chrono::DateTime::parse_from_rfc3339(&retry.due_at)
+        .expect("retry has a valid due time")
+        .with_timezone(&chrono::Utc);
+    let saved: PersistedSessionRecord =
+        serde_json::from_str(&persisted_session_json(&fixture.state, &fixture.session_id))
+            .expect("durable parked session");
+    assert_eq!(
+        serde_json::to_value(
+            saved
+                .engram_bind_retry
+                .as_ref()
+                .expect("durable bind retry")
+        )
+        .unwrap(),
+        serde_json::to_value(&retry).unwrap(),
+    );
+    assert_eq!(
+        saved.queued_prompts[0].pending_prompt.id,
+        retry.proof.prompt_id
+    );
+    assert_eq!(
+        serde_json::to_value(&saved.queued_prompts[0].engram_bind).unwrap(),
+        serde_json::to_value(Some(&prepared_bind)).unwrap(),
+    );
+    assert!(saved.queued_prompts[0].engram_waiting);
+    assert!(saved.orchestrator_auto_dispatch_blocked);
+    assert_eq!(fixture.transport.requests_for("session_bind").len(), 1);
+    assert!(fixture.transport.requests_for("turn_evaluate").is_empty());
+    assert!(fixture.transport.requests_for("turn_begin").is_empty());
+
+    // The fixture uses the production synchronous SQLite fallback, not a
+    // fabricated successful fence. If a writer is present, wait off the lock.
+    if let Some(waiter) = waiter {
+        assert!(matches!(
+            waiter
+                .0
+                .wait_until(std::time::Instant::now() + phase_sync::DEADLOCK_GUARD),
+            Some(Ok(()))
+        ));
+    }
+    fixture.state.engram_abort_retry_tick(due);
+    {
+        let inner = fixture.state.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
+        assert!(record.engram.bind_retry.as_ref().unwrap().acknowledged);
+        assert!(record.engram.abort_retry_acknowledged);
+        assert!(record.orchestrator_auto_dispatch_blocked);
+    }
+    let acknowledged: PersistedSessionRecord =
+        serde_json::from_str(&persisted_session_json(&fixture.state, &fixture.session_id))
+            .expect("durable acknowledged session");
+    assert!(
+        acknowledged
+            .engram_bind_retry
+            .as_ref()
+            .unwrap()
+            .acknowledged
+    );
+    assert_eq!(fixture.transport.requests_for("session_bind").len(), 1);
+    assert!(
+        fixture.receiver.try_recv().is_err(),
+        "acknowledgement is not handoff"
+    );
+
+    // Give the scheduler its pre-due time explicitly. There is no Resume in
+    // this schedule, and no retry authority/backoff field is modified.
+    fixture
+        .state
+        .engram_abort_retry_tick(due - chrono::Duration::milliseconds(1));
+    assert_eq!(fixture.transport.requests_for("session_bind").len(), 1);
+    assert!(fixture.transport.requests_for("turn_evaluate").is_empty());
+    assert!(fixture.transport.requests_for("turn_begin").is_empty());
+    assert!(
+        fixture.receiver.try_recv().is_err(),
+        "a pre-due tick cannot deliver"
+    );
+
+    // The producer and the host budget clock are real in this live fixture.
+    // Wait for BOTH published deadlines, rather than assuming a fixed sleep
+    // expires the retry and transport backoff. The guard diagnoses a hang.
+    let guard = phase_sync::PollGuard::new();
+    loop {
+        let backoff_elapsed = {
+            let inner = fixture.state.inner.lock().expect("state mutex poisoned");
+            let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
+            record
+                .engram
+                .next_bind_retry_at
+                .is_none_or(|at| at <= inner.engram_budget_clock.now())
+        };
+        if chrono::Utc::now() >= due && backoff_elapsed {
+            break;
+        }
+        guard.wait("live retained-bind retry due and transport backoff elapsed");
+    }
+    fixture.state.engram_abort_retry_tick(chrono::Utc::now());
+    let observations = fixture.transport.observations();
+    let admission = observations
+        .iter()
+        .filter(|observation| {
+            matches!(
+                observation.request["operation"].as_str(),
+                Some("session_bind" | "turn_evaluate" | "turn_begin")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        admission
+            .iter()
+            .map(|item| item.request["operation"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "session_bind",
+            "session_bind",
+            "turn_evaluate",
+            "turn_begin"
+        ]
+    );
+    assert_eq!(admission[0].disposition, "dropped_after_reply");
+    assert_eq!(admission[1].disposition, "returned");
+    assert_eq!(admission[0].request, admission[1].request);
+    assert_eq!(
+        operation_key(&admission[0].request),
+        operation_key(&admission[1].request)
+    );
+    let inner = fixture.state.inner.lock().expect("state mutex poisoned");
+    let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
+    assert!(
+        record.engram.bind_retry.is_none(),
+        "evaluate retires bind-only scheduling"
+    );
+    assert!(record.engram.bind_retry_runtime.is_none());
+}
+
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn live_root_deadline_retains_cancelable_orchestrator_prompt() {
@@ -699,20 +879,40 @@ fn live_root_lost_committed_replies_replay_exact_requests_once() {
                 .expect("uncertain prompt should remain queued");
             assert_eq!(queued.pending_prompt.text, prompt);
             assert!(queued.has_engram_intent());
-            assert!(record.session.preview.contains("Waiting/Unknown"));
+            if operation == "session_bind" {
+                assert!(record.engram.bind_retry.is_some());
+                assert!(
+                    record
+                        .session
+                        .preview
+                        .contains("bind deferred before delivery")
+                );
+            } else {
+                assert!(record.engram.bind_retry.is_none());
+                assert!(record.session.preview.contains("Waiting/Unknown"));
+            }
             assert!(record.orchestrator_auto_dispatch_blocked);
         }
         let persisted = persisted_session_json(&fixture.state, &fixture.session_id);
         assert!(persisted.contains(&prompt));
         assert!(persisted.contains("engram_"));
 
-        // Transport failures deliberately apply a one-second retry fence.
-        std::thread::sleep(Duration::from_millis(1_100));
-        fixture
-            .state
-            .resume_session_queue(&fixture.session_id)
-            .expect("exact uncertain operation should replay after backoff");
+        if operation == "session_bind" {
+            retry_live_bind_without_resume(&fixture);
+        } else {
+            // Evaluate/begin uncertainty keeps its explicit recovery boundary.
+            std::thread::sleep(Duration::from_millis(1_100));
+            fixture
+                .state
+                .resume_session_queue(&fixture.session_id)
+                .expect("exact uncertain operation should replay after backoff");
+        }
         assert_one_provider_prompt(&fixture.receiver, &fixture.session_id, &prompt);
+        fixture.state.engram_abort_retry_tick(chrono::Utc::now());
+        assert!(
+            fixture.receiver.try_recv().is_err(),
+            "a later tick cannot hand off twice"
+        );
         finish_live_root(&fixture.state, &fixture.session_id);
 
         let requests = fixture.transport.requests_for(operation);
