@@ -1480,7 +1480,7 @@ impl AppState {
         let reason = history.recovery_reason.clone();
         if engram_authority_work_unresolved(&inner, store, &owner.binding.work_id) {
             let line = format!(
-                "[TermAl] Source-root authority recovery remains incomplete: {}. Source, test and evaluation evidence are withheld. Retry the original naming request or refresh authority; a missing historical association requires repair before a fresh evaluation.",
+                "[TermAl] Source-root authority recovery remains incomplete: {}. Source, test and evaluation evidence are withheld. Retry the original naming request or refresh authority. A local-only legacy selection can be named prospectively for a later turn; an unexplained historical association still requires repair before a fresh evaluation.",
                 reason
                     .as_deref()
                     .unwrap_or("retained canonical history is unresolved")
@@ -1499,7 +1499,13 @@ impl AppState {
                             active_store == store && work == &owner.binding.work_id
                         })
                 {
-                    record.engram.set_pending_source_root_line(line.clone());
+                    record.engram.queue_source_root_notice(
+                        EngramSourceRootNoticeKind::AuthorityRecovery {
+                            store: store.clone(),
+                            work_id: owner.binding.work_id.clone(),
+                            line: line.clone(),
+                        },
+                    );
                 }
             }
         }

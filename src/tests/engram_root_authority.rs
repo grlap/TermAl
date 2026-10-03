@@ -3142,11 +3142,11 @@ fn source_root_opening_notice_recomposition_and_acknowledgement_keep_exact_owner
         record.engram.active_grant_id = Some(notice.grant_id.clone());
         record.engram.opening_diagnostic = Some(notice.clone());
         assert_eq!(
-            refresh_engram_source_root_prompt_locked(record, &mut dispatch),
+            refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[]),
             Some(notice.clone())
         );
         assert_eq!(
-            refresh_engram_source_root_prompt_locked(record, &mut dispatch),
+            refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[]),
             Some(notice.clone())
         );
     });
@@ -3171,7 +3171,7 @@ fn source_root_opening_notice_recomposition_and_acknowledgement_keep_exact_owner
         );
         acknowledge_engram_opening_diagnostic_locked(record, &successor);
         assert!(record.engram.opening_diagnostic.as_ref().unwrap().delivered);
-        assert!(refresh_engram_source_root_prompt_locked(record, &mut dispatch).is_none());
+        assert!(refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[]).is_none());
     });
     let TurnDispatch::PersistentCodex { command, .. } = &dispatch else {
         panic!("Codex fixture");
@@ -3191,7 +3191,7 @@ fn source_root_opening_notice_recomposition_and_acknowledgement_keep_exact_owner
         record.engram.active_grant_id = Some(next.grant_id.clone());
         record.engram.opening_diagnostic = Some(next.clone());
         acknowledge_engram_opening_diagnostic_locked(record, &successor);
-        assert!(refresh_engram_source_root_prompt_locked(record, &mut dispatch).is_none());
+        assert!(refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[]).is_none());
         assert_eq!(record.engram.opening_diagnostic, Some(next));
         assert!(
             record

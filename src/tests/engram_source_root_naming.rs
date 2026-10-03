@@ -13,6 +13,12 @@ mod authority {
     include!("engram_root_authority.rs");
 }
 
+#[path = "engram_legacy_root_recovery.rs"]
+mod legacy_recovery;
+
+#[path = "engram_source_root_confirmation.rs"]
+mod confirmation;
+
 impl ClaimedRoot {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.
