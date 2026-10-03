@@ -424,6 +424,9 @@ struct PersistedSessionRecord {
     /// was durable, so loading rebuilds its retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_abort_retry: Option<EngramAbortRetry>,
+    /// Diagnostic journal only: live non-delivery proof never survives restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_bind_retry: Option<EngramBindRetry>,
     /// The queue head a user Stop held (`EngramSessionState::stopped_prompt_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_stopped_prompt_id: Option<String>,
@@ -525,6 +528,7 @@ impl PersistedSessionRecord {
                 .map(EngramCarriedCheck::marker)
                 .collect(),
             engram_abort_retry: record.engram.abort_retry.clone(),
+            engram_bind_retry: record.engram.bind_retry.clone(),
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
@@ -669,6 +673,20 @@ impl PersistedSessionRecord {
         // and be terminalized before the retained authorization is visible.
         if record.engram.recovered_admission {
             record.set_auto_dispatch_blocked(true);
+        }
+        if self.engram_bind_retry.as_ref().is_some_and(|retry| {
+            record
+                .queued_prompts
+                .front()
+                .is_some_and(|head| head.pending_prompt.id == retry.proof.prompt_id)
+        }) {
+            // Even a pre-preparation snapshot has no live phase proof after
+            // restart. Retain the prompt behind the conservative barrier;
+            // preserve existing explicit retained-bind recovery eligibility.
+            record.set_auto_dispatch_blocked(true);
+            if let Some(head) = record.queued_prompts.front_mut() {
+                head.engram_waiting = true;
+            }
         }
         // A saved abort record whose acknowledgement was saved too, in exactly
         // the shape that acknowledgement writes: the head it names is still

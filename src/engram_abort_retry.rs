@@ -148,7 +148,8 @@ fn engram_admission_live_content(record: &SessionRecord) -> Value {
     json!({ "generation": record.engram.dispatch_generation,
         "routing": record.engram.routing_token, "grant": record.engram.active_grant_id,
         "queue": record.queued_prompts.front(),
-        "abortRetry": record.engram.abort_retry })
+        "abortRetry": record.engram.abort_retry,
+        "bindRetry": record.engram.bind_retry })
 }
 
 /// Settles, on `record`, the delivery of its queue head that this host
@@ -469,6 +470,7 @@ impl AppState {
     /// starts the fresh admission of each prompt that is due. Driven by the
     /// test-run index thread's tick; tests call it with their own clock.
     fn engram_abort_retry_tick(&self, now: chrono::DateTime<chrono::Utc>) {
+        let budget_now = self.engram_budget_clock().now();
         let mut due = Vec::new();
         // Sessions whose hold changed: a held delegation child reports it.
         let mut held_changes = Vec::new();
@@ -477,7 +479,9 @@ impl AppState {
             let session_ids = inner
                 .sessions
                 .iter()
-                .filter(|record| record.engram.abort_retry.is_some())
+                .filter(|record| {
+                    record.engram.abort_retry.is_some() || record.engram.bind_retry.is_some()
+                })
                 .map(|record| record.session.id.clone())
                 .collect::<Vec<_>>();
             let mut changed = false;
@@ -500,8 +504,17 @@ impl AppState {
                         .ok()
                         .flatten()
                         .map(|target| engram_abort_authority(&target));
-                let step =
-                    engram_abort_retry_step(&mut inner.sessions[index], authority.as_deref(), now);
+                let bind_retry = inner.sessions[index].engram.bind_retry.is_some();
+                let step = if bind_retry {
+                    engram_bind_retry_step(
+                        &mut inner.sessions[index],
+                        authority.as_deref(),
+                        now,
+                        budget_now,
+                    )
+                } else {
+                    engram_abort_retry_step(&mut inner.sessions[index], authority.as_deref(), now)
+                };
                 match step {
                     EngramAbortRetryStep::Wait => {}
                     EngramAbortRetryStep::Acknowledge => {
@@ -520,7 +533,7 @@ impl AppState {
                         if let Some(owner) =
                             EngramQueuedAdmissionOwner::capture(&inner.sessions[index])
                         {
-                            due.push((session_id, owner));
+                            due.push((session_id, owner, bind_retry));
                         }
                     }
                 }
@@ -532,9 +545,15 @@ impl AppState {
         for session_id in held_changes {
             self.sync_delegation_attempt_for_child_session(&session_id);
         }
-        for (session_id, owner) in due {
+        for (session_id, owner, bind_retry) in due {
             let prompt_id = owner.prompt_id.clone();
-            let started = match self.dispatch_next_queued_turn_for_abort_retry(&session_id, owner) {
+            let retry_owner = owner.clone();
+            let dispatch = if bind_retry {
+                self.dispatch_next_queued_turn_for_bind_retry(&session_id, owner)
+            } else {
+                self.dispatch_next_queued_turn_for_abort_retry(&session_id, owner)
+            };
+            let started = match dispatch {
                 Ok(Some(dispatch)) => {
                     if let Err(error) = deliver_turn_dispatch(self, dispatch)
                         .into_background_result("engram abort retry")
@@ -556,7 +575,11 @@ impl AppState {
                 }
             };
             if !started {
-                self.postpone_engram_abort_retry(&session_id, &prompt_id, now);
+                if bind_retry {
+                    self.postpone_engram_bind_retry(&session_id, &retry_owner, now);
+                } else {
+                    self.postpone_engram_abort_retry(&session_id, &prompt_id, now);
+                }
             }
         }
     }
@@ -618,6 +641,45 @@ impl AppState {
             return Ok(false);
         };
         let record = &mut inner.sessions[index];
+        let bind_names_head = record.engram.bind_retry.as_ref().is_some_and(|retry| {
+            record
+                .queued_prompts
+                .front()
+                .is_some_and(|head| head.pending_prompt.id == retry.proof.prompt_id)
+        });
+        if record.engram.bind_retry.is_some() && !bind_names_head {
+            clear_engram_bind_retry(record);
+            inner.stamp_session_at_index(index);
+            self.commit_locked(&mut inner).map_err(|error| {
+                ApiError::internal(format!("Failed to persist stale bind retry cleanup: {error:#}"))
+            })?;
+            return Ok(false);
+        }
+        // Stop only the current journal's head and move its live owner
+        // generation; stale journals above hold no successor.
+        if record.engram.bind_retry.is_some()
+            && matches!(
+                record.session.status,
+                SessionStatus::Idle | SessionStatus::Error
+            )
+        {
+            clear_engram_bind_retry(record);
+            record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
+            if let Some(head) = record.queued_prompts.front_mut() {
+                head.engram_interrupted = true;
+            }
+            record.engram.stopped_prompt_id = record.queued_prompts.front()
+                .map(|head| head.pending_prompt.id.clone());
+            record.session.live_activity = None;
+            record.set_auto_dispatch_blocked(true);
+            record.session.preview = "Engram: automatic bind retry stopped. Prompt retained; remove it before starting a new operation.".to_owned();
+            sync_pending_prompts(record);
+            inner.stamp_session_at_index(index);
+            self.commit_locked(&mut inner).map_err(|error| {
+                ApiError::internal(format!("Failed to persist stopped bind retry: {error:#}"))
+            })?;
+            return Ok(true);
+        }
         // A record left behind by a head since cancelled holds nothing: drop
         // it and let the ordinary Stop handle the session.
         let names_head = record.engram.abort_retry.as_ref().is_some_and(|retry| {

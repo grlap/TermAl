@@ -50,7 +50,7 @@ impl CapturedStderrProcess {
         )
     }
 
-    fn wait_with_limit(
+    pub(super) fn wait_with_limit(
         mut self,
         limit: Duration,
         phase: &str,

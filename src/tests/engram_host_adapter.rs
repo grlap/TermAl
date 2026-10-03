@@ -4778,70 +4778,71 @@ fn engram_mcp_home_alias_keeps_the_current_store_authority() {
 fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
     // A blank home resolves through USERPROFILE/HOME, and the save verifies
     // the connection by running the (fixture) binary against that home. Scope
-    // both variables to the test root under the home-env mutex, as every
-    // home-redirecting test does: unscoped, this test once wrote the fixture's
-    // placeholder store into the developer's real ~/.engram (tm-47g6).
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let state = test_app_state();
-    let root = state
-        .test_temp_root
-        .as_ref()
-        .expect("test root should exist")
-        .path()
-        .join("engram-invalid-home");
-    fs::create_dir_all(&root).expect("project root should exist");
-    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
-    let project_id = create_test_project(&state, &root, "Engram invalid home");
-    let scoped_user_home = root.join("user-home");
-    let scoped_engram_home = scoped_user_home.join(".engram");
-    fs::create_dir_all(&scoped_engram_home).expect("scoped default Engram home should exist");
-    let _home_env = ScopedEnvVar::set_home_dir(&scoped_user_home);
-    assert_eq!(
-        default_engram_home_path().expect("the scoped user home should resolve"),
-        scoped_engram_home,
-        "the default home must follow the scoped USERPROFILE/HOME"
-    );
+    // both variables before the exact test child starts, never in the suite
+    // parent. Consumers finish before the parent removes the scoped home.
+    home_fixture::run(
+        "tests::engram_host_adapter::engram_enabled_settings_default_blank_home_and_reject_relative_home",
+        |scoped_user_home| {
+            let state = test_app_state();
+            let root = state
+                .test_temp_root
+                .as_ref()
+                .expect("test root should exist")
+                .path()
+                .join("engram-invalid-home");
+            fs::create_dir_all(&root).expect("project root should exist");
+            fs::write(root.join(".engram-project"), "fixture-ready\n")
+                .expect("fixture mode should write");
+            let project_id = create_test_project(&state, &root, "Engram invalid home");
+            let scoped_engram_home = scoped_user_home.join(".engram");
+            fs::create_dir_all(&scoped_engram_home)
+                .expect("scoped default Engram home should exist");
+            assert_eq!(
+                default_engram_home_path().expect("the scoped user home should resolve"),
+                scoped_engram_home,
+                "the default home must follow the scoped USERPROFILE/HOME"
+            );
 
-    let mut blank_home = real_fixture_engram_settings(&root);
-    blank_home.home = Some(String::new());
-    state
-        .update_project_engram_settings(&project_id, blank_home)
-        .expect("an enabled blank home should use the documented default");
-    let expected_home = scoped_engram_home.to_string_lossy().into_owned();
-    assert_eq!(
-        state
-            .inner
-            .lock()
-            .expect("state mutex poisoned")
-            .find_project(&project_id)
-            .and_then(|project| project.engram.as_ref())
-            .and_then(|settings| settings.home.as_deref()),
-        Some(expected_home.as_str())
-    );
-    // The verification ran the fixture against the scoped default home: its
-    // placeholder store is here, inside the test root, and nowhere else.
-    assert!(
-        scoped_engram_home
-            .join("projects")
-            .join(sha256_hex(b"fixture-ready"))
-            .join("engram.db")
-            .is_file(),
-        "the fixture store must be created under the scoped default home"
-    );
+            let mut blank_home = real_fixture_engram_settings(&root);
+            blank_home.home = Some(String::new());
+            state
+                .update_project_engram_settings(&project_id, blank_home)
+                .expect("an enabled blank home should use the documented default");
+            let expected_home = scoped_engram_home.to_string_lossy().into_owned();
+            assert_eq!(
+                state
+                    .inner
+                    .lock()
+                    .expect("state mutex poisoned")
+                    .find_project(&project_id)
+                    .and_then(|project| project.engram.as_ref())
+                    .and_then(|settings| settings.home.as_deref()),
+                Some(expected_home.as_str())
+            );
+            // The verification ran the fixture against the scoped default home: its
+            // placeholder store is here, inside the test root, and nowhere else.
+            assert!(
+                scoped_engram_home
+                    .join("projects")
+                    .join(sha256_hex(b"fixture-ready"))
+                    .join("engram.db")
+                    .is_file(),
+                "the fixture store must be created under the scoped default home"
+            );
 
-    let mut relative_home = real_fixture_engram_settings(&root);
-    relative_home.home = Some(".".to_owned());
-    let error = match state.update_project_engram_settings(&project_id, relative_home) {
-        Ok(_) => panic!("enabled Engram must reject a relative home"),
-        Err(error) => error,
-    };
-    assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(
-        error.message.contains("non-empty absolute path"),
-        "unexpected relative-home validation error: {}",
-        error.message
+            let mut relative_home = real_fixture_engram_settings(&root);
+            relative_home.home = Some(".".to_owned());
+            let error = match state.update_project_engram_settings(&project_id, relative_home) {
+                Ok(_) => panic!("enabled Engram must reject a relative home"),
+                Err(error) => error,
+            };
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert!(
+                error.message.contains("non-empty absolute path"),
+                "unexpected relative-home validation error: {}",
+                error.message
+            );
+        },
     );
 }
 

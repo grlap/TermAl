@@ -2456,6 +2456,10 @@ struct EngramSessionState {
     /// handoff, settled and waiting for its fresh admission
     /// (`engram_abort_retry.rs`). Saved with the session.
     abort_retry: Option<EngramAbortRetry>,
+    /// A retained bind, never evaluated in this live host. The journal is
+    /// durable; the runtime proof is deliberately not restored after restart.
+    bind_retry: Option<EngramBindRetry>,
+    bind_retry_runtime: Option<RuntimeToken>,
     /// The abort record's settlement is durably acknowledged, by its fence or
     /// by being loaded from the store. In memory only.
     abort_retry_acknowledged: bool,
@@ -2529,6 +2533,8 @@ impl Default for EngramSessionState {
             context_refresh_needed: false,
             signalled_compaction_item_ids: VecDeque::new(),
             abort_retry: None,
+            bind_retry: None,
+            bind_retry_runtime: None,
             abort_retry_acknowledged: false,
             abort_retry_saved: false,
             abort_retry_fence: None,
@@ -2612,17 +2618,19 @@ struct EngramPendingDispatch {
     evaluated_work_binding: Option<EngramControlWorkBinding>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum EngramTurnDeliveryPreparation {
     Ready,
     Superseded,
     Rejected,
     PersistenceUnknown,
+    RetainedBindRetry(EngramBindRetryProof),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EngramAuthorizationParkOutcome {
     Parked,
+    Withdrawn,
     Superseded,
     PersistenceUnknown,
 }
@@ -2638,6 +2646,13 @@ enum EngramDispatchRecordFinish {
 
 #[derive(Clone, Debug)]
 enum EngramDispatchEvaluation {
+    /// Produced only by the live pre-evaluate binding boundary. A degraded
+    /// card alone never establishes that a provider delivery was not attempted.
+    RetainedBindFailure {
+        proof: EngramBindRetryProof,
+        code: String,
+        detail: String,
+    },
     Grant {
         grant_id: String,
         delivery_tokens: Vec<String>,
@@ -4389,6 +4404,10 @@ impl AppState {
             target.admission_started_at = Some(pending.started_at);
         }
         let mut evaluation = pending.evaluated.clone();
+        let retained_bind_proof = match &evaluation {
+            EngramDispatchEvaluation::RetainedBindFailure { proof, .. } => Some(proof.clone()),
+            _ => None,
+        };
         let mut evaluate_latency_ms = pending.evaluate_latency_ms;
         let mut begin_latency_ms = None;
         let mut retry_used = false;
@@ -4951,7 +4970,8 @@ impl AppState {
                         EngramControlFailMode::Enforced,
                     );
                 }
-                EngramDispatchEvaluation::Degraded { code, detail } => {
+                EngramDispatchEvaluation::Degraded { code, detail }
+                | EngramDispatchEvaluation::RetainedBindFailure { code, detail, .. } => {
                     let _ = detail;
                     break (
                         EngramControlCardDecision::Degraded,
@@ -5073,7 +5093,10 @@ impl AppState {
                         self.clear_engram_abort_retry_for_delivered_head(session_id);
                         break EngramTurnDeliveryPreparation::Ready;
                     }
-                    break EngramTurnDeliveryPreparation::Rejected;
+                    break match retained_bind_proof.clone() {
+                        Some(proof) => EngramTurnDeliveryPreparation::RetainedBindRetry(proof),
+                        None => EngramTurnDeliveryPreparation::Rejected,
+                    };
                 }
                 EngramDispatchRecordFinish::Superseded => {
                     break EngramTurnDeliveryPreparation::Superseded;
@@ -6768,6 +6791,7 @@ impl AppState {
     ) -> Option<EngramPendingDispatch> {
         let clock = self.engram_budget_clock();
         let started_at = clock.now();
+        let bind_phase_proof = self.capture_engram_bind_retry_proof(intent);
         let (disabled_reason, admission_owner) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let record = inner
@@ -6809,12 +6833,32 @@ impl AppState {
                     admission_owner.as_ref(),
                 );
                 let code = self.engram_failure_card_code(&intent.session_id, &error);
+                let bind_proof = bind_phase_proof.and_then(|proof| {
+                    (!error.disables_session()
+                        && matches!(
+                            error.kind,
+                            EngramTransportErrorKind::Deadline
+                                | EngramTransportErrorKind::Transport
+                                | EngramTransportErrorKind::Backoff
+                        ))
+                    .then(|| {
+                        self.finish_engram_bind_retry_proof(intent, admission_owner.as_ref(), proof)
+                    })
+                    .flatten()
+                });
                 return Some(EngramPendingDispatch {
                     dispatch_generation: intent.dispatch_generation,
                     intent_fingerprint: intent.intent_fingerprint.clone(),
-                    evaluated: EngramDispatchEvaluation::Degraded {
-                        code,
-                        detail: error.message,
+                    evaluated: match bind_proof {
+                        Some(proof) => EngramDispatchEvaluation::RetainedBindFailure {
+                            proof,
+                            code,
+                            detail: error.message,
+                        },
+                        None => EngramDispatchEvaluation::Degraded {
+                            code,
+                            detail: error.message,
+                        },
                     },
                     evaluate_latency_ms: duration_millis(clock.elapsed_since(started_at)),
                     started_at,

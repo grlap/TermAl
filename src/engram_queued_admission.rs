@@ -8,7 +8,8 @@ fn engram_admission_persisted_content(record: &PersistedSessionRecord) -> Value 
     json!({ "generation": record.engram_dispatch_generation,
         "routing": record.engram_routing_token, "grant": record.engram_open_grant_id,
         "queue": record.queued_prompts.front(),
-        "abortRetry": record.engram_abort_retry })
+        "abortRetry": record.engram_abort_retry,
+        "bindRetry": record.engram_bind_retry })
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -498,6 +499,7 @@ impl AppState {
         // A Stop of a retried admission (`engram_abort_retry.rs`) ends its
         // automatic retry in the same write that holds the head again.
         record.engram.abort_retry = None;
+        clear_engram_bind_retry(record);
         record.engram.abort_retry_fence = None;
         record.engram.abort_retry_acknowledged = false;
         record.engram.abort_retry_saved = false;
@@ -1087,6 +1089,10 @@ impl AppState {
                 "Evaluation preparation no longer owns the queued prompt",
             ));
         }
+        // Transfer authority to the existing evaluate/begin protocol before
+        // preparing any evaluation. Bind-only scheduling can never follow an
+        // unknown evaluate/begin result or a provider handoff.
+        clear_engram_bind_retry(record);
         // An acknowledged abort record holds this head interrupted for its
         // retry; the retried admission's evaluation ends that hold once the
         // intent it prepares is stored below, which keeps the head retained.
