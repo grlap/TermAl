@@ -1,6 +1,6 @@
 ---
 name: fix-bug
-description: Fix a bug from beads (bd) by id.
+description: Fix a bug tracked in Engram by its work reference.
 metadata:
   termal:
     title:
@@ -8,15 +8,15 @@ metadata:
       prefix: Fix bug
 ---
 
-Fix a bug tracked in beads by id (e.g., `tm-qu8`).
+Fix a bug tracked in Engram by its work reference (e.g., `w-1a2b3c4d5e6f`). A migrated item's old Beads id (e.g., `tm-qu8`) is its `external_ref`; find the item with the `engram` `search` tool.
 
-Arguments: $ARGUMENTS (required bead id). If omitted, run `bd ready` / `bd list` and ask the user which bug to fix.
+Arguments: $ARGUMENTS (required work reference). If omitted, use the `engram` `next` or `ls` tools and ask the user which bug to fix.
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. All other git commands (diff, status, stash, add, etc.) may be executed freely.**
 
 ## Step 1: Parse the bug
 
-Run `bd show $ARGUMENTS` to load the bug.
+Load the bug with the `engram` `show` tool, and `claim` it before any change.
 
 - If the id is not found → tell the user and **stop**.
 - If the bug is already closed → tell the user and **stop**.
@@ -36,12 +36,12 @@ Evaluate whether the bug is **valid** and whether the **priority is accurate**. 
 
 **If you disagree** (false positive, wrong priority, already fixed, or not worth fixing) → present your reasoning and offer options:
 - Agree with the original assessment and proceed
-- Change priority (`bd priority $ARGUMENTS <0-4>`) and proceed
+- Change priority (the `engram` `update` tool with `revise` and a priority 0-4) and proceed
 - Close as false positive / already fixed
 - Proceed with the fix anyway
 
 If the user chooses to close without fixing:
-1. `bd close $ARGUMENTS --reason "<why>"` (e.g. false-positive / already-fixed)
+1. The `engram` `update` tool with `cancel` and a reason naming where it stands (a false positive, or already fixed elsewhere), or with `supersede` naming the replacement item
 2. Present what was changed and **stop**
 
 ## Step 3: Fix the bug
@@ -56,7 +56,7 @@ Implement the fix:
 3. Keep the fix **minimal and focused** — do not refactor unrelated code
 4. If the approach is ambiguous or there are multiple valid solutions → ask the user before writing code
 
-**Related bugs:** If 2–3 other open bugs share the same root cause or touch the same file (check `bd list` / `bd ready`), mention them to the user and offer to fix them together in one pass. Do not batch more than 3 bugs.
+**Related bugs:** If 2–3 other open bugs share the same root cause or touch the same file (check the `engram` `ls` and `next` tools), mention them to the user and offer to fix them together in one pass. Do not batch more than 3 bugs.
 
 ## Step 4: Verify the fix
 
@@ -78,13 +78,13 @@ After the review completes:
 - **Low or Note findings** → leave them unfixed and file each Low as its own item, or fix them, re-run Step 4, and re-review; an unfixed Low or Note does not block the landing (the commit rule's review condition)
 - **No findings** → proceed
 
-## Step 6: Close the bug in beads
+## Step 6: Complete the bug in Engram
 
 Once the fix is verified and reviewed:
 
-1. Close the issue: `bd close $ARGUMENTS` (add `--reason "<summary>"` if useful)
+1. Request the item's acceptance evaluation (`termal_evaluate_acceptance`) in the turn after its checks, then complete it with the `engram` `done` tool, which consumes that evaluation
 2. Present a final summary:
-   - Bead id and title
+   - Work reference and title
    - What was changed (files modified)
    - How it was verified (checks, tests, review)
    - Any related bugs the user may want to address next

@@ -11,7 +11,7 @@ Inspect staged, unstaged, and untracked changes using multiple specialized revie
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Do not run mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) as part of this command.**
 
-**IMPORTANT: `/review-code` is inspection-only in both direct and delegated sessions. Do NOT attempt to fix bugs, edit files, run mutating Git commands, mutate the tracker, or inspect tracker tasks to reconcile review findings. Read-only startup recovery required by project instructions is allowed. Report findings and proposed tracker follow-ups for the parent `/review-changes` coordinator without changing the workspace or tracker. These proposals are not tracker updates and may duplicate existing issues; only `/review-changes` reconciles them with Beads after consolidating all reviewer results.**
+**IMPORTANT: `/review-code` is inspection-only in both direct and delegated sessions. Do NOT attempt to fix bugs, edit files, run mutating Git commands, mutate the tracker, or inspect tracker tasks to reconcile review findings. Read-only startup recovery required by project instructions is allowed. Report findings and proposed tracker follow-ups for the parent `/review-changes` coordinator without changing the workspace or tracker. These proposals are not tracker updates and may duplicate existing issues; only `/review-changes` reconciles them with the Engram tracker after consolidating all reviewer results.**
 
 **IMPORTANT: Do NOT run compilation, build, test, type-check, lint, benchmark, coverage, or formatting gates from `/review-code`, even when a command appears read-only. This includes `cargo check`, `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt`, TypeScript compilers, Vitest, ESLint, Prettier, and package-manager test/build scripts. The parent `/review-changes` session exclusively owns quality gates. Reviewers may inspect existing source, tests, configuration, diffs, and previously produced output.**
 
@@ -82,7 +82,7 @@ This is TermAl — a WhatsApp-style control room for managing AI coding agents l
 Read docs/architecture.md or relevant source files for deeper context if needed.
 
 ## Known Accepted Patterns (do NOT flag these)
-- Large-file cleanup is ongoing. Do not flag untouched legacy files solely for size, but do flag reviewed files that exceed the active architecture threshold when the issue is not already tracked in beads.
+- Large-file cleanup is ongoing. Do not flag untouched legacy files solely for size, but do flag reviewed files that exceed the active architecture threshold when the issue is not already tracked in Engram.
 - `expect("state mutex poisoned")` on mutex locks — project convention
 - `std::thread::spawn` for agent runtime threads (intentional — blocking stdio)
 - `0.0.0.0` binding on the HTTP server (configurable, documented as local-only)
@@ -140,6 +140,6 @@ Present the consolidated note directly to the user. Do NOT write the review note
 
 ## Step 5: Propose tracker follow-ups
 
-Read-only startup recovery required by project instructions is allowed; all tracker reconciliation and mutations belong to the parent. If the review identifies an actionable issue, test gap, resolved issue, or follow-up, include a `Suggested beads updates` section describing what the parent `/review-changes` session should evaluate for creation, update, comment, or closure. Include the proposed issue type and priority for possible new work, but label every item as a proposal that may already be tracked.
+Read-only startup recovery required by project instructions is allowed; all tracker reconciliation and mutations belong to the parent. If the review identifies an actionable issue, test gap, resolved issue, or follow-up, include a `Suggested tracker updates` section describing what the parent `/review-changes` session should evaluate for creation, update, comment, or closure. Include the proposed issue type and priority for possible new work, but label every item as a proposal that may already be tracked.
 
-If the review is clean, say `No tracker follow-up suggested.` Do not claim that Beads is up to date, that an issue was created or updated, or that a specific existing issue is the correct target because `/review-code` does not reconcile findings with tracker tasks. The parent `/review-changes` workflow owns consolidation, deduplication, tracker lookup, and all tracker mutations.
+If the review is clean, say `No tracker follow-up suggested.` Do not claim that the tracker is up to date, that an issue was created or updated, or that a specific existing issue is the correct target because `/review-code` does not reconcile findings with tracker tasks. The parent `/review-changes` workflow owns consolidation, deduplication, tracker lookup, and all tracker mutations.

@@ -15,7 +15,7 @@ Review current staged and unstaged changes by delegating `/review-code` to two r
 
 **IMPORTANT: This command must use TermAl MCP delegation tools to obtain the review pair — at most two reviews that count, one Codex and one Claude, with at most one Kimi stand-in replacing an unavailable Codex reviewer as Step 3 describes — so a round makes at most three spawns and counts no more than two reviews. A round that ends with fewer than two reviews reports the missing reviewer as unavailable, spawns no further reviewer, and does not satisfy the commit rule's review pair. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-code` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-changes` requires the TermAl delegation MCP bridge.**
 
-Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, mutate the tracker, or query tracker tasks to reconcile findings. Read-only startup recovery required by project instructions is allowed. Their `Suggested beads updates` sections are proposals only. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates; it first consolidates and deduplicates both reviews in Step 5, then reconciles the consolidated result with Beads in Step 6.
+Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, mutate the tracker, or query tracker tasks to reconcile findings. Read-only startup recovery required by project instructions is allowed. Their `Suggested tracker updates` sections are proposals only. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates; it first consolidates and deduplicates both reviews in Step 5, then reconciles the consolidated result with the Engram tracker in Step 6.
 
 Delegated `/review-code` children submit their authoritative result through the
 versioned `termal_submit_review_result` mailbox contract. The backend validates
@@ -98,8 +98,8 @@ automate retry/repair/reviewer loops, weaken or ignore tests, inflate timeouts,
 or change product semantics to obtain green. Escalate when the evidence requires
 product behavior changes, destructive or external actions, missing authority,
 or a genuine blocker. An intermittent symptom is never resolved by labeling it
-"flaky." Search Beads for existing work and create or update the matching item
-with the failure evidence and next action.
+"flaky." Search Engram (`search`, `ls`) for existing work and add or note the
+matching item with the failure evidence and next action.
 This pre-review gate-failure record is an explicit exception to the Step 5
 tracker-timing rule; it must cover only the failed gate, not unreviewed code
 findings. Present the relevant original failure excerpt and full-log path together
@@ -188,31 +188,36 @@ review from prose output, and do not replace a missing submission with
 conclusions inferred from the full Markdown output. Paged full output may be
 shown for diagnosis, but it is not a result protocol.
 
-## Step 6: Reconcile consolidated findings with Beads (bd)
+## Step 6: Reconcile consolidated findings with the Engram tracker
 
 The writable parent owns this entire step. Reviewers may perform required read-only startup recovery, but do not reconcile findings with tracker tasks or mutate
-Beads. Use only the deduplicated findings and follow-ups produced in Step 5:
+the tracker. Use only the deduplicated findings and follow-ups produced in Step 5:
 
 1. Search and inspect the existing tracker for each consolidated actionable
    finding or resolved issue. Suggested issue ids from reviewers are hints, not
    authoritative matches.
 2. Deduplicate against existing work before making any tracker mutation.
 3. Apply the appropriate parent-owned action:
-   - `bd create -t bug -p <0-4> -d "..."` only for an actionable finding that
-     is not already tracked (`-t task` for test gaps and follow-ups).
-   - `bd update <id>` or `bd comment <id>` when the consolidated finding is
-     already tracked.
-   - `bd close <id>` only when the reviewed changes demonstrably fixed the
-     tracked issue.
+   - `add` (kind `bug`, a priority 0-4 and an outcome) only for an actionable
+     finding that is not already tracked (kind `task` for test gaps and
+     follow-ups).
+   - `note`, or `update` with `revise` for a field change, when the
+     consolidated finding is already tracked.
+   - `done` on a claim you hold, after its acceptance evaluation where it has
+     criteria, only when the reviewed changes demonstrably fixed the tracked
+     issue; for tracked work not done here (a false positive, a duplicate, or
+     one already fixed elsewhere), `update` with `cancel` and a reason naming
+     where it stands, or with `supersede` naming the replacement item.
 4. Do not create tracker work for purely informational observations that need
    no action.
 
-If both reviewers report no findings and no tracker cleanup is needed, tell the user `beads is up to date - no changes needed.`
+If both reviewers report no findings and no tracker cleanup is needed, tell the user `the tracker is up to date - no changes needed.`
 
 Outside the explicitly authorized Step 2 gate-failure remediation, this is an
 ordinary review workflow: do not modify source or test files, and make tracker
-updates only through `bd`. Delegated reviewer children remain inspection-only;
-the Step 2 exception never authorizes product-semantic changes.
+updates only through the `engram` tools. Delegated reviewer children remain
+inspection-only; the Step 2 exception never authorizes product-semantic
+changes.
 
 ## Step 7: Audit the final diff before a landing of authority text
 

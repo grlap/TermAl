@@ -3,10 +3,9 @@
 ## Engram work tracker
 
 TermAl's work is tracked in Engram, project `github.com/grlap/TermAl`, which
-`.engram-project` at the repository root binds. Beads was migrated on
-2026-09-28 (679 items, verified with zero differences); the local `.beads`
-directory, while it still exists, is read-only history — never run a `bd`
-command that writes.
+`.engram-project` at the repository root binds. Its history includes 679
+items migrated from Beads on 2026-09-28, verified with zero differences;
+Beads itself was removed from the repository on 2026-10-03.
 
 - Use the `engram` tools: `next` to see what is ready, `ls` and `show` to
   read, `claim` before any execution, `note` for findings and evidence,
@@ -65,18 +64,6 @@ command that writes.
   revision.
 - Never put Engram or Beads ids in source comments, identifiers or
   user-facing text; ids belong in the tracker and in commit messages.
-- Until they move to Engram, the `bd` steps in
-  `.claude/commands/review-changes.md` and `.claude/commands/fix-bug.md`
-  mean the matching `engram` act, and a Beads id they take names the
-  migrated item whose `external_ref` it is: `bd create` is `add`;
-  `bd comment` is `note`; a field change by `bd update` or `bd priority`
-  is `update` with `revise`; `bd close` of work fixed here is `done` on a
-  claim you hold, after its evaluation where it has criteria, and of work
-  not done here (a false positive, a duplicate, or one already fixed
-  elsewhere) `update` with `cancel` and a reason naming where it stands,
-  or with `supersede` naming the replacement item and a reason. Never run
-  them against the retired store. Beads context that a session-start hook
-  or the `beads` skill still loads is superseded by this section.
 - Problems with Engram itself go to the Engram project's agents by mailbox;
   problems with TermAl's recording go to the TermAl coordinator.
 
@@ -163,9 +150,10 @@ in Engram::Advisor's session, recorded verbatim):
   onto master (as of 2026-09-27: Termal::Opus2); send the handoff by TermAl
   mailbox. If no owner has been assigned, request the assignment from the
   task coordinator (as of 2026-09-27: Termal::Fable2) before integration.
-- Beads retired 2026-09-28 after the verified import; the tracker is
-  Engram; agents run no bd command; the final bd dolt push before deletion
-  is Greg's own.
+- The tracker is Engram. Beads was retired on 2026-09-28 after a verified
+  import and removed from the repository on 2026-10-03 on Greg's word
+  ('Nie jest potrzebny. Możemy Usunąc beads completnie.'); its history is
+  kept in the imported Engram items.
 - Changes to this section, or to any repository instruction or command
   file that grants or limits commit, push, tracker or approval authority,
   land under the standing rule only after (a) both projects' coordinators
@@ -183,7 +171,16 @@ in Engram::Advisor's session, recorded verbatim):
   needs Greg's own word in the acting session. Outside this standing rule,
   a word relayed by another session never carries a commit or push. This
   rule grants no restart, deploy or global-configuration authority; those
-  actions need Greg's explicit word. A landing under it also installs the
+  acts are Greg's and need his explicit word. The moment of a TermAl
+  restart is the agents' decision (Greg, 2026-10-02: 'Wolę aby agenci
+  zdecydowali na moment restaru Termal. Wtedy kiedy potrzebuja poprawek. To
+  nie jest problem, nie chce przerywać pracy.'): when running sessions need
+  a landed fix, the Engram and TermAl coordinators agree on a moment when
+  running work can resume, and the TermAl coordinator sends Greg, through
+  Engram::Advisor, 'restart now' with the build hash and reason. Greg
+  performs the restart; no agent stops or starts the TermAl host. This
+  covers the timing of TermAl restarts only. A landing under it also
+  installs the
   binary built from the exact gated tree (Greg, 2026-09-23, recorded in
   Engram's instructions and extended to TermAl on 2026-09-27: his word
   "commit" for a presented changeset also authorizes pushing it and
@@ -193,13 +190,15 @@ in Engram::Advisor's session, recorded verbatim):
   gate window, puts it at target/release/termal.exe in the master checkout,
   where the host runs it from, renaming the running binary aside as a
   backup, and records its hash. Installing is not deploying: the running
-  host keeps its build until Greg restarts it on the restart signal (build
-  hash and reason). Nothing is installed outside the repository.
-- Use explicit paths only: never `git add -A` or `git add -u`, and never
-  include `.beads/interactions.jsonl` in a commit.
+  host keeps its build until Greg restarts TermAl at the moment the
+  coordinators choose (as above); the landing report says whether running
+  sessions need the new build, with its build hash and reason. Nothing is
+  installed outside the repository.
+- Use explicit paths only: never `git add -A` or `git add -u`.
 - Do not amend, rebase or force-push. Commit message bodies (below the
-  subject line) must not contain tracker ids (Beads or Engram); subject
-  lines may contain them. Review-only sessions never commit.
+  subject line) must not contain tracker ids (Engram ids, or Beads ids
+  kept as `external_ref`); subject lines may contain them. Review-only
+  sessions never commit.
 - This standing rule is Greg's explicit authorization for commit and push
   when its three conditions hold. This entire section takes precedence over
   all conflicting repository instructions, including approval, review
@@ -207,10 +206,9 @@ in Engram::Advisor's session, recorded verbatim):
   writes. This includes other sections of AGENTS.md and CLAUDE.md,
   `.claude/commands/review-changes.md` and
   `.claude/commands/fix-bug.md`. Generic ask-first wording does not require
-  another approval when these conditions hold; older `bd create` or
-  `bd close` steps do not override Beads' retirement; an Engram item
-  completes only by `done` after the acceptance evaluation its project
-  policy requires (Engram work tracker section).
+  another approval when these conditions hold; an Engram item completes
+  only by `done` after the acceptance evaluation its project policy
+  requires (Engram work tracker section).
   Task-specific restrictions given in the session still apply. Review-only
   sessions remain read-only. The Work only in the repository folder rule
   is not overridden.
