@@ -15,6 +15,7 @@ import {
   resolveCategory,
   serializedLaneProject,
 } from "./test-categories-plan.mjs";
+import { testTempDirectory } from "./test-temp-root.mjs";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const uiRoot = join(projectRoot, "ui");
@@ -325,9 +326,7 @@ test("projects sharing a group are checked together against the earlier groups o
 test("a UI root reached through a directory link accounts files the runner names resolved", (t) => {
   // macOS's temporary directories are under /var, a link to /private/var: a
   // runner started there names its files under the resolved path.
-  const scratchRoot = join(projectRoot, ".tmp");
-  mkdirSync(scratchRoot, { recursive: true });
-  const directory = mkdtempSync(join(scratchRoot, "categories-fixture-"));
+  const directory = mkdtempSync(join(testTempDirectory(), "categories-fixture-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const real = join(directory, "real");
   const link = join(directory, "link");
