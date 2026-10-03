@@ -2671,7 +2671,7 @@ fn source_root_review_stale_replay_retires_without_a_replacement_name() {
             acceptance_evaluation_spawn_admission_locked(&inner, &claimed.session_id, &seed)
                 .expect_err("retirement and compaction cannot admit the original evaluation");
         assert!(refused.message.contains("naming history"), "{refused:?}");
-        let target = seed.clone().into_target("earlier-attempt".to_owned());
+        let target = seed.clone().into_target("earlier-attempt".to_owned(), &claimed.session_id);
         assert!(
             acceptance_evaluation_root_changed_locked(&inner, &target),
             "the first-submission fence must also reject the original target"

@@ -24,6 +24,7 @@ mod agent_commands;
 mod agent_readiness;
 mod bounded_read_process;
 mod claude;
+mod claude_compact_hook;
 mod claude_frame_router;
 mod claude_permission_boundary;
 mod claude_turn_ownership;

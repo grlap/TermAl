@@ -66,10 +66,7 @@ struct OrphanedWorkflowDispatch {
 const ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES: usize = 2;
 
 fn engram_context_runtime_prompt(context: &str, runtime_prompt: &str) -> String {
-    // The context comes from an external CLI/store. Keep it inside the host
-    // fence even if a work item contains the literal closing delimiter.
-    let context = context.replace('<', "&lt;");
-    format!("<engram-work-context>\n{context}\n</engram-work-context>\n\n{runtime_prompt}")
+    format!("{}\n\n{runtime_prompt}", engram_context_fence(context))
 }
 
 struct StartedQueuedTurn {

@@ -827,6 +827,7 @@ include!("claude_spawn.rs");
 include!("claude_turn_ownership.rs");
 include!("claude_frame_router.rs");
 include!("claude_frame_application.rs");
+include!("claude_compact_hook.rs");
 include!("claude_runtime_turns.rs");
 include!("claude_outstanding_work.rs");
 include!("codex_home.rs");

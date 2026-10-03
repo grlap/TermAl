@@ -516,7 +516,6 @@ fn acceptance_settings_model_bound_matches_the_normalized_value() {
 #[test]
 fn acceptance_settings_defaults_validate_server_side() {
     for value in [
-        json!({"defaultMode":"sub_agent"}),
         json!({"evaluatorAgent":"Gemini"}),
         json!({"evaluatorModel":"gpt-model"}),
         json!({"evaluatorModel":""}),
@@ -529,6 +528,9 @@ fn acceptance_settings_defaults_validate_server_side() {
             StatusCode::BAD_REQUEST
         );
     }
+    let defaults: AcceptanceEvaluatorDefaults =
+        serde_json::from_value(json!({"defaultMode":"sub_agent"})).unwrap();
+    defaults.validate().unwrap();
 }
 
 #[test]

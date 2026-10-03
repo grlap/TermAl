@@ -341,6 +341,21 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> EngramContextNudgePreparation {
+        self.prepare_engram_context_nudge_claiming_off_lock(session_id, None)
+    }
+
+    /// The preparation above. With `compact_hook_generation`, it is a compact
+    /// hook's own read: it starts only for the compaction's refresh request
+    /// and claims exactly that generation, and it neither waits for another
+    /// read nor reuses a page it did not fetch, nor reads again when the
+    /// generation moved on meanwhile; each of those ends as `Failed`, and the
+    /// next prompt carries the context instead.
+    fn prepare_engram_context_nudge_claiming_off_lock(
+        &self,
+        session_id: &str,
+        compact_hook_generation: Option<u64>,
+    ) -> EngramContextNudgePreparation {
+        let hook_read = compact_hook_generation.is_some();
         let mut project_declared =
             self.refresh_engram_project_declaration_for_session_off_lock(session_id);
         let wait_deadline = std::time::Instant::now()
@@ -366,6 +381,14 @@ impl AppState {
                 // Reuse the pending orientation snapshot until runtime admission.
                 // This is only a local prompt cache: peek neither stages nor
                 // acknowledges an Engram delivery page, including on refresh.
+                if hook_read
+                    && (record.engram.pending_context_nudge.is_some()
+                        || !record.engram.context_nudge_pending
+                        || record.engram.context_nudge_in_progress
+                        || !record.engram.context_refresh_needed)
+                {
+                    return EngramContextNudgePreparation::Failed;
+                }
                 if record.engram.pending_context_nudge.is_some() {
                     return EngramContextNudgePreparation::Ready;
                 }
@@ -403,6 +426,9 @@ impl AppState {
                         record.engram.context_nudge_generation
                     }
                     .max(1);
+                    if compact_hook_generation.is_some_and(|expected| expected != generation) {
+                        return EngramContextNudgePreparation::Failed;
+                    }
                     let (actor_id, actor_context) = engram_runtime_actor_identity(
                         &inner.preferences.engram.developer_name,
                         record,
@@ -489,6 +515,11 @@ impl AppState {
                 record.engram.context_nudge_in_progress_generation = None;
             }
             if record.engram.context_nudge_generation != target.generation {
+                if hook_read {
+                    // Superseded while read: a newer read is the next
+                    // prompt's, never this hook's answer.
+                    return EngramContextNudgePreparation::Failed;
+                }
                 drop(inner);
                 continue;
             }
@@ -540,6 +571,201 @@ impl AppState {
         record.engram.context_nudge_delivery_generation = None;
         record.engram.context_nudge_delivery_turn_generation = None;
     }
+
+    /// A compaction's SessionStart hook callback arrived: records its request
+    /// for a fresh context and returns what the callback's answer is
+    /// correlated with: the generation the compaction's own read claims and
+    /// the session's Engram settings identity now. `None` when the session
+    /// has no Engram context to give; the request stays recorded, so the next
+    /// prompt still asks.
+    fn begin_engram_compact_hook_read(&self, session_id: &str) -> Option<EngramCompactHookTicket> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(session_id)?;
+        inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .engram
+            .mark_context_refresh_needed(None);
+        let identity = engram_compact_hook_identity_locked(&inner, session_id)?;
+        let engram = &inner.sessions[index].engram;
+        let generation = if engram.context_refresh_needed {
+            engram.context_nudge_generation.saturating_add(1)
+        } else {
+            engram.context_nudge_generation
+        }
+        .max(1);
+        Some(EngramCompactHookTicket {
+            generation,
+            identity,
+        })
+    }
+
+    /// The work context a compaction's SessionStart hook answers with: the
+    /// page the hook's own read fetched for `ticket`, or `None` when there is
+    /// none to give (not applicable, a failed read, another read under way, a
+    /// generation that moved on, or a settings change meanwhile). The
+    /// compaction already asked for a fresh context: a page fetched before it
+    /// and not yet sent is a superseded local peek, dropped so the answer is
+    /// never an older page under the compaction's new generation. A page a
+    /// prompt is carrying right now stays, and the hook answers without it.
+    fn prepare_engram_compact_hook_context_off_lock(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        ticket: &EngramCompactHookTicket,
+    ) -> Option<String> {
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(session_id)?;
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            if record.engram.context_nudge_delivery_generation.is_some() {
+                return None;
+            }
+            if record.engram.context_refresh_needed {
+                record.engram.pending_context_nudge = None;
+            }
+        }
+        if self.prepare_engram_context_nudge_claiming_off_lock(session_id, Some(ticket.generation))
+            != EngramContextNudgePreparation::Ready
+        {
+            return None;
+        }
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(session_id)?;
+        if inner.sessions[index].engram.context_refresh_needed {
+            // Another compaction asked again while this one was read.
+            return None;
+        }
+        if !compact_hook_page_is_current(&inner, index, token, ticket) {
+            return None;
+        }
+        inner.sessions[index].engram.pending_context_nudge.clone()
+    }
+
+    /// The compact hook's answer for `ticket` was written to runtime `token`:
+    /// that page is delivered, so the next prompt does not carry it again.
+    /// Nothing changes when the runtime is no longer the session's, the
+    /// generation moved on (a newer compaction or a settings change), the
+    /// settings identity changed, or a prompt carrying the page is in flight.
+    /// A later compaction's request for a fresh context stays.
+    fn acknowledge_engram_compact_hook_delivery(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        ticket: &EngramCompactHookTicket,
+    ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        if !compact_hook_page_is_current(&inner, index, token, ticket) {
+            return;
+        }
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        record.engram.pending_context_nudge = None;
+        record.engram.context_nudge_pending = record.engram.context_refresh_needed;
+    }
+
+    /// Whether the page for `ticket` may still be written to runtime `token`
+    /// as the compact hook's answer: the conditions under which its written
+    /// answer is acknowledged.
+    fn engram_compact_hook_context_is_current(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        ticket: &EngramCompactHookTicket,
+    ) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .is_some_and(|index| compact_hook_page_is_current(&inner, index, token, ticket))
+    }
+}
+
+/// What a compact hook callback's answer is correlated with, taken when the
+/// callback arrives.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramCompactHookTicket {
+    /// The generation the compaction's own context read claims.
+    generation: u64,
+    identity: EngramCompactHookIdentity,
+}
+
+/// The Engram settings a session's context is read under: its project, the
+/// project's settings, and the actor the read speaks for. A disable, a reset,
+/// a project change or any settings change makes it differ.
+#[derive(Clone, PartialEq, Eq)]
+struct EngramCompactHookIdentity {
+    project_id: String,
+    root_path: String,
+    settings: EngramProjectSettings,
+    actor: (String, Option<String>),
+}
+
+impl std::fmt::Debug for EngramCompactHookIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngramCompactHookIdentity")
+            .field("project_id", &self.project_id)
+            .field("root_path", &self.root_path)
+            .field("actor", &self.actor)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The session's Engram settings identity, or `None` when its context is
+/// not read at all: no local project, a reset under way, or Engram disabled.
+fn engram_compact_hook_identity_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> Option<EngramCompactHookIdentity> {
+    let project = engram_project_for_session_locked(inner, session_id)?;
+    let settings = project.engram.as_ref()?;
+    if project.remote_id != LOCAL_REMOTE_ID
+        || inner.engram_project_resets.contains(&project.id)
+        || !settings.is_base_enabled()
+    {
+        return None;
+    }
+    let record = &inner.sessions[inner.find_session_index(session_id)?];
+    Some(EngramCompactHookIdentity {
+        project_id: project.id.clone(),
+        root_path: project.root_path.clone(),
+        settings: settings.clone(),
+        actor: engram_runtime_actor_identity(&inner.preferences.engram.developer_name, record),
+    })
+}
+
+/// The compact hook's page for `ticket` is still the session's undelivered
+/// page for runtime `token`: no newer compaction or settings change moved the
+/// generation on, the settings identity is the one the callback met, and no
+/// prompt carrying it is in flight.
+fn compact_hook_page_is_current(
+    inner: &StateInner,
+    index: usize,
+    token: &RuntimeToken,
+    ticket: &EngramCompactHookTicket,
+) -> bool {
+    let record = &inner.sessions[index];
+    record.runtime.matches_runtime_token(token)
+        && record.engram.context_nudge_generation == ticket.generation
+        && record.engram.pending_context_nudge.is_some()
+        && record.engram.context_nudge_delivery_generation.is_none()
+        && engram_compact_hook_identity_locked(inner, &record.session.id).as_ref()
+            == Some(&ticket.identity)
+}
+
+/// The host fence around an Engram work context, as a prompt or a hook's
+/// additional context carries it.
+fn engram_context_fence(context: &str) -> String {
+    // The context comes from an external CLI/store. Keep it inside the host
+    // fence even if a work item contains the literal closing delimiter.
+    let context = context.replace('<', "&lt;");
+    format!("<engram-work-context>\n{context}\n</engram-work-context>")
 }
 
 fn run_engram_context_nudge(

@@ -550,6 +550,9 @@ export type AcceptanceEvaluationSubmission =
 export type DelegationAcceptanceEvaluation = {
   workRef: string;
   mode: AcceptanceEvaluationMode;
+  /** Immutable sub-agent identity pair; host bookkeeping, not read by the UI. */
+  parentSession?: string;
+  executionIdentity?: string;
   acceptanceBasis: number;
   evidenceBasis: number;
   criteriaCount: number;
