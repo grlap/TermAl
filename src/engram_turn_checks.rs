@@ -1899,11 +1899,13 @@ impl AppState {
 
     /// The agent reported a file edit in `session_id`: any check still open to
     /// writes may see content the edit changed, in this session or in
-    /// another of the same worktree.
+    /// another of the same worktree. `target` is the file the tool named, if
+    /// any; it only names the edit in a refusal and fences nothing by itself.
     fn note_engram_workspace_edit(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
+        target: Option<&str>,
     ) {
         // The session's worktree, resolved off the lock for overlap marking.
         let workdir = {
@@ -1924,7 +1926,7 @@ impl AppState {
         claude_exclude_observation(
             &mut inner.sessions[index],
             disposition,
-            &EngramRecorderObservation::WorkspaceEdit,
+            &EngramRecorderObservation::WorkspaceEdit { target },
         );
         engram_note_session_worktree(
             inner
@@ -1939,9 +1941,10 @@ impl AppState {
                 check.overlapped = true;
             }
         }
-        // An edit report names no path, so it fences every carried check of
-        // the session whose run is still going.
-        engram_fence_carried_checks_for_edit(&mut inner.sessions[index]);
+        // An edit report is not placed, even when its tool named a file, so
+        // it fences every carried check of the session whose run is still
+        // going.
+        engram_fence_carried_checks_for_edit(&mut inner.sessions[index], target);
     }
 }
 

@@ -802,6 +802,7 @@ include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("engram_queued_admission.rs");
 include!("engram_abort_retry.rs");
+include!("engram_bind_retry.rs");
 include!("messages.rs");
 include!("workspace_watch.rs");
 include!("codex_discovery.rs");

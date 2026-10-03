@@ -307,6 +307,21 @@ impl AppState {
         allow_blocked_dispatch: bool,
         pending_engram: Option<EngramPendingDispatch>,
     ) -> Result<Option<StartedTurn>> {
+        // An obsolete admission cannot promote or abandon its successor.
+        if let Some(EngramPendingDispatch {
+            evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
+            ..
+        }) = pending_engram.as_ref()
+            && (inner.sessions[index].engram.dispatch_generation != proof.generation_before_promotion
+                || inner.sessions[index].active_turn_generation.wrapping_add(1).max(1)
+                    != proof.promoted_turn_generation
+                || !inner.sessions[index]
+                    .queued_prompts
+                    .front()
+                    .is_some_and(|head| engram_bind_retry_prompt_matches(head, proof)))
+        {
+            return Ok(None);
+        }
         if inner.sessions[index].runtime_stop_in_progress {
             abandon_engram_pending_dispatch(
                 inner
@@ -435,6 +450,17 @@ impl AppState {
     ) -> std::result::Result<StartedTurn, ApiError> {
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
+        }
+        if let Some(EngramPendingDispatch {
+            evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
+            ..
+        }) = pending_engram.as_mut()
+            && record.runtime.runtime_token() != proof.runtime_before_promotion
+        {
+            // The queue/promotion lock still owns this exact attempt. Losing
+            // optional non-delivery proof cannot terminalize its delegation;
+            // carry a typed non-retry hold to delivery, never infer from a card.
+            proof.retry_eligible = false;
         }
         match record.remote_proxy_identity() {
             Ok(None) => {}
@@ -818,6 +844,12 @@ impl AppState {
             queued.promoted_message_index = Some(message_index);
             queued.promotion_disposition_known = true;
         }
+        if let Some(EngramPendingDispatch {
+            evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
+            ..
+        }) = pending_engram.as_mut() {
+            proof.promotion_index = Some(message_index);
+        }
         record.session.live_activity = Some(SessionLiveActivity {
             prompt: prompt.clone(),
             command: None,
@@ -1095,6 +1127,24 @@ impl AppState {
             .map(|started| started.dispatch))
     }
 
+    /// Retry the exact acknowledged retained bind through the ordinary
+    /// admission owner. It cannot release a successor or bypass root repair.
+    fn dispatch_next_queued_turn_for_bind_retry(
+        &self,
+        session_id: &str,
+        owner: EngramQueuedAdmissionOwner,
+    ) -> Result<Option<TurnDispatch>> {
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        Ok(self
+            .start_next_queued_turn_off_lock_for_owner(
+                session_id,
+                true,
+                false,
+                Some(QueuedDrainOwner::BindRetry(owner)),
+            )?
+            .map(|started| started.dispatch))
+    }
+
     /// An explicit Resume bound to the queue head its caller checked (a held
     /// delegation's retained prompt): it bypasses the paused queue only for
     /// `owner`, so a successor exposed by a concurrent cancellation is never
@@ -1342,16 +1392,20 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
+        let budget_clock = self.engram_budget_clock();
         // An explicit Send/Resume bypass is permission for the queue head
         // that existed when this drain began, not for a successor exposed by
         // cancellation while its authorization was off-lock. A retried
         // admission's bypass is the owner it was due for, and a bound Resume's
         // the head its caller checked; never a fresh one.
         let releases_abort_retry = matches!(owner, Some(QueuedDrainOwner::AbortRetry(_)));
+        let releases_bind_retry = matches!(owner, Some(QueuedDrainOwner::BindRetry(_)));
         let bypass_owner = match owner {
-            Some(QueuedDrainOwner::AbortRetry(owner) | QueuedDrainOwner::Resume(owner)) => {
-                Some(owner)
-            }
+            Some(
+                QueuedDrainOwner::AbortRetry(owner)
+                | QueuedDrainOwner::Resume(owner)
+                | QueuedDrainOwner::BindRetry(owner),
+            ) => Some(owner),
             None => allow_blocked_dispatch
                 .then(|| {
                     let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1525,6 +1579,22 @@ impl AppState {
                     .flatten()
                     .map(|target| engram_abort_authority(&target));
                     if !engram_abort_retry_releases(&inner.sessions[index], authority.as_deref()) {
+                        return Ok(None);
+                    }
+                }
+                if releases_bind_retry {
+                    let authority = Self::engram_binding_target_for_session_shape_locked(
+                        &inner, session_id, true,
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|target| engram_abort_authority(&target));
+                    if !engram_bind_retry_releases(&inner.sessions[index], authority.as_deref())
+                        || inner.sessions[index]
+                            .engram
+                            .next_bind_retry_at
+                            .is_some_and(|at| at > budget_clock.now())
+                    {
                         return Ok(None);
                     }
                 }
@@ -2440,4 +2510,6 @@ enum QueuedDrainOwner {
     /// A retried admission due for this head; its acknowledged abort record
     /// must still release it.
     AbortRetry(EngramQueuedAdmissionOwner),
+    /// An acknowledged bind-only journal with host-local phase proof.
+    BindRetry(EngramQueuedAdmissionOwner),
 }

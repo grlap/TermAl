@@ -868,38 +868,29 @@ fn load_gemini_settings_json_ignores_malformed_input() {
 // Guards against a credential-leak regression where a committed repo `.env`
 // would be silently injected into the Gemini ACP child process.
 //
-// Serialized via `TEST_HOME_ENV_MUTEX` and redirects HOME to an empty
-// tempdir so `gemini_env_file_paths` (which reads HOME/USERPROFILE)
-// cannot pick up the developer's real `~/.gemini/.env` or race against
-// sibling tests that redirect HOME. Without the mutex this raced
-// `find_gemini_env_file_reads_home_directory_env_files`, which writes
-// a `~/.env` containing `GEMINI_API_KEY` into its own tempdir; if that
-// test's HOME redirect overlapped this assertion, `overrides` came back
-// non-empty.
+// The exact child starts with an empty home, so home-file discovery cannot
+// consult the developer's keys or a sibling test's synthetic credentials.
 #[test]
 fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-    let temp_root = TestTempRoot::create("termal-gemini-dotenv");
-    let project_root = temp_root.path().join("project");
-    fs::create_dir_all(&project_root).expect("project root should be created");
-    fs::write(
+    home_fixture::run(
+        "tests::acp_gemini::gemini_dotenv_env_pairs_ignore_workspace_env_files",
+        |_home| {
+            let temp_root = TestTempRoot::create("termal-gemini-dotenv");
+            let project_root = temp_root.path().join("project");
+            fs::create_dir_all(&project_root).expect("project root should be created");
+            fs::write(
         project_root.join(".env"),
         "GEMINI_API_KEY=dotenv-gemini-key\nexport GOOGLE_API_KEY='vertex-key'\nGOOGLE_CLOUD_PROJECT=demo-project\nGOOGLE_CLOUD_LOCATION=us-central1\n",
     )
     .expect("Gemini dotenv file should be written");
 
-    let empty_home = temp_root.path().join("home");
-    fs::create_dir_all(&empty_home).expect("empty home dir should be created");
-    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
+            let overrides = gemini_dotenv_env_pairs()
+                .into_iter()
+                .collect::<HashMap<_, _>>();
 
-    let overrides = gemini_dotenv_env_pairs()
-        .into_iter()
-        .collect::<HashMap<_, _>>();
-
-    assert!(overrides.is_empty());
+            assert!(overrides.is_empty());
+        },
+    );
 }
 
 // Pins `find_gemini_env_file` preferring `~/.gemini/.env` and falling back to
@@ -908,28 +899,27 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
 // the fallback order flipping, which would change which key file wins.
 #[test]
 fn find_gemini_env_file_reads_home_directory_env_files() {
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let temp_root = TestTempRoot::create("termal-gemini-home-env");
-    let home_dir = temp_root.path().to_path_buf();
-    let gemini_dir = home_dir.join(".gemini");
-    fs::create_dir_all(&gemini_dir).expect("Gemini home directory should be created");
+    home_fixture::run(
+        "tests::acp_gemini::find_gemini_env_file_reads_home_directory_env_files",
+        |home_dir| {
+            let gemini_dir = home_dir.join(".gemini");
+            fs::create_dir_all(&gemini_dir).expect("Gemini home directory should be created");
 
-    {
-        let _home_env = ScopedEnvVar::set_home_dir(&home_dir);
-        assert_eq!(find_gemini_env_file(), None);
-        let gemini_env = gemini_dir.join(".env");
-        fs::write(&gemini_env, "GEMINI_API_KEY=home-gemini-key\n")
-            .expect("Gemini home env should be written");
-        assert_eq!(find_gemini_env_file(), Some(gemini_env.clone()));
+            {
+                assert_eq!(find_gemini_env_file(), None);
+                let gemini_env = gemini_dir.join(".env");
+                fs::write(&gemini_env, "GEMINI_API_KEY=home-gemini-key\n")
+                    .expect("Gemini home env should be written");
+                assert_eq!(find_gemini_env_file(), Some(gemini_env.clone()));
 
-        fs::remove_file(&gemini_env).expect("Gemini home env should be removed");
-        let fallback_env = home_dir.join(".env");
-        fs::write(&fallback_env, "GEMINI_API_KEY=home-fallback-key\n")
-            .expect("home fallback env should be written");
-        assert_eq!(find_gemini_env_file(), Some(fallback_env));
-    }
+                fs::remove_file(&gemini_env).expect("Gemini home env should be removed");
+                let fallback_env = home_dir.join(".env");
+                fs::write(&fallback_env, "GEMINI_API_KEY=home-fallback-key\n")
+                    .expect("home fallback env should be written");
+                assert_eq!(find_gemini_env_file(), Some(fallback_env));
+            }
+        },
+    );
 }
 
 // Pins `select_acp_auth_method` returning `None` for Gemini when the only
@@ -937,58 +927,43 @@ fn find_gemini_env_file_reads_home_directory_env_files() {
 // selected-auth setting is configured). Guards against auto-selecting
 // `gemini-api-key` from a repo-committed credential file.
 //
-// Serialized via `TEST_HOME_ENV_MUTEX` and explicitly isolates HOME plus
-// every Gemini/Google env var that `select_acp_auth_method` reads. Without
+// The exact child isolates HOME plus every Gemini/Google env var that
+// `select_acp_auth_method` reads before process startup. Without
 // isolation, a sibling test setting a synthetic GEMINI_API_KEY could interfere:
 // `env_var_source("GEMINI_API_KEY")` would see the sibling test's process-
 // env value, `gemini_api_key_source()` would return `Some(...)`, and this
 // assertion would flip from `None` to `Some("gemini-api-key")`.
 #[test]
 fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    home_fixture::run(
+        "tests::acp_gemini::select_acp_auth_method_ignores_workspace_dotenv_credentials",
+        |_home| {
+            let temp_root = TestTempRoot::create("termal-gemini-auth-method");
+            let project_root = temp_root.path().join("project");
+            fs::create_dir_all(&project_root).expect("project root should be created");
+            fs::write(
+                project_root.join(".env"),
+                "GEMINI_API_KEY=dotenv-gemini-key\n",
+            )
+            .expect("Gemini dotenv file should be written");
 
-    let temp_root = TestTempRoot::create("termal-gemini-auth-method");
-    let project_root = temp_root.path().join("project");
-    fs::create_dir_all(&project_root).expect("project root should be created");
-    fs::write(
-        project_root.join(".env"),
-        "GEMINI_API_KEY=dotenv-gemini-key\n",
-    )
-    .expect("Gemini dotenv file should be written");
-
-    // Point HOME at an empty tempdir so `dotenv_var_source` cannot walk
-    // into the developer's real `~/.gemini/.env` or `~/.env`.
-    let empty_home = temp_root.path().join("home");
-    fs::create_dir_all(&empty_home).expect("empty home dir should be created");
-    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
-
-    // Unset every env var `gemini_api_key_source` / `gemini_vertex_auth_source`
-    // inspect. Each `_unset_X` is an RAII guard that restores the original
-    // value on drop, so the developer's real shell env is unaffected.
-    let _unset_api_key = ScopedEnvVar::remove("GEMINI_API_KEY");
-    let _unset_google_api_key = ScopedEnvVar::remove("GOOGLE_API_KEY");
-    let _unset_google_project = ScopedEnvVar::remove("GOOGLE_CLOUD_PROJECT");
-    let _unset_google_location = ScopedEnvVar::remove("GOOGLE_CLOUD_LOCATION");
-    let _unset_use_vertex = ScopedEnvVar::remove("GOOGLE_GENAI_USE_VERTEXAI");
-    let _unset_use_gca = ScopedEnvVar::remove("GOOGLE_GENAI_USE_GCA");
-
-    let initialize_result = json!({
-        "authMethods": [
-            { "id": "vertex-ai" },
-            { "id": "gemini-api-key" }
-        ]
-    });
-    assert_eq!(
-        select_acp_auth_method(
-            &initialize_result,
-            AcpAgent::Gemini,
-            project_root
-                .to_str()
-                .expect("temp path should be valid UTF-8"),
-        ),
-        None
+            let initialize_result = json!({
+                "authMethods": [
+                    { "id": "vertex-ai" },
+                    { "id": "gemini-api-key" }
+                ]
+            });
+            assert_eq!(
+                select_acp_auth_method(
+                    &initialize_result,
+                    AcpAgent::Gemini,
+                    project_root
+                        .to_str()
+                        .expect("temp path should be valid UTF-8"),
+                ),
+                None
+            );
+        },
     );
 }
 
@@ -1002,30 +977,31 @@ fn prepare_termal_gemini_system_settings_writes_override_file() {
         return;
     }
 
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let temp_root = TestTempRoot::create("termal-gemini-system-settings");
-    let project_root = temp_root.path().join("project");
-    fs::create_dir_all(&project_root).expect("Gemini override project root should be created");
-    let empty_home = temp_root.path().join("home");
-    fs::create_dir_all(&empty_home).expect("Gemini override home dir should be created");
-    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
-    let workdir = project_root
-        .to_str()
-        .expect("test workdir should be valid UTF-8");
+    home_fixture::run(
+        "tests::acp_gemini::prepare_termal_gemini_system_settings_writes_override_file",
+        |_home| {
+            let temp_root = TestTempRoot::create("termal-gemini-system-settings");
+            let project_root = temp_root.path().join("project");
+            fs::create_dir_all(&project_root)
+                .expect("Gemini override project root should be created");
+            let workdir = project_root
+                .to_str()
+                .expect("test workdir should be valid UTF-8");
 
-    let settings_path = prepare_termal_gemini_system_settings(workdir)
-        .expect("Gemini settings override should prepare")
-        .expect("Windows should create a Gemini settings override");
-    let written: Value = serde_json::from_str(
-        &fs::read_to_string(&settings_path).expect("Gemini override file should be readable"),
-    )
-    .expect("Gemini override file should parse");
+            let settings_path = prepare_termal_gemini_system_settings(workdir)
+                .expect("Gemini settings override should prepare")
+                .expect("Windows should create a Gemini settings override");
+            let written: Value = serde_json::from_str(
+                &fs::read_to_string(&settings_path)
+                    .expect("Gemini override file should be readable"),
+            )
+            .expect("Gemini override file should parse");
 
-    assert_eq!(
-        written.pointer("/tools/shell/enableInteractiveShell"),
-        Some(&Value::Bool(false))
+            assert_eq!(
+                written.pointer("/tools/shell/enableInteractiveShell"),
+                Some(&Value::Bool(false))
+            );
+        },
     );
 }
 
@@ -1040,50 +1016,38 @@ fn gemini_interactive_shell_warning_respects_workspace_settings() {
         return;
     }
 
-    // Hold the home-env mutex so this test's USERPROFILE and
-    // GEMINI_CLI_SYSTEM_SETTINGS_PATH redirects don't race with other
-    // home-env tests that run in parallel.
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    home_fixture::run(
+        "tests::acp_gemini::gemini_interactive_shell_warning_respects_workspace_settings",
+        |_home| {
+            let temp_root = TestTempRoot::create("termal-gemini-interactive-shell");
+            let project_root = temp_root.path().join("project");
+            let settings_dir = project_root.join(".gemini");
+            fs::create_dir_all(&settings_dir).expect("Gemini settings directory should be created");
+            let settings_path = settings_dir.join("settings.json");
+            let workdir = project_root
+                .to_str()
+                .expect("test workdir should be valid UTF-8");
 
-    let temp_root = TestTempRoot::create("termal-gemini-interactive-shell");
-    let project_root = temp_root.path().join("project");
-    let settings_dir = project_root.join(".gemini");
-    fs::create_dir_all(&settings_dir).expect("Gemini settings directory should be created");
-    let settings_path = settings_dir.join("settings.json");
-    let workdir = project_root
-        .to_str()
-        .expect("test workdir should be valid UTF-8");
+            // The child starts with GEMINI_CLI_SYSTEM_SETTINGS_PATH absent so
+            // the real C:\ProgramData\gemini-cli\settings.json (written by TermAl with
+            // enableInteractiveShell=false) does not shadow the project setting we are
+            // testing here.
+            fs::write(
+                &settings_path,
+                r#"{"tools":{"shell":{"enableInteractiveShell":true}}}"#,
+            )
+            .expect("enabled Gemini settings should be written");
+            let enabled_warning = gemini_interactive_shell_warning(workdir)
+                .expect("enabled interactive shell should warn on Windows");
+            assert!(enabled_warning.contains("TermAl forces Gemini"));
+            assert!(enabled_warning.contains(&display_path_for_user(&settings_path)));
 
-    // Point GEMINI_CLI_SYSTEM_SETTINGS_PATH at a path that does not exist so
-    // the real C:\ProgramData\gemini-cli\settings.json (written by TermAl with
-    // enableInteractiveShell=false) does not shadow the project setting we are
-    // testing here.
-    let absent_system_settings = project_root.join("no-system-settings.json");
-    let _system_env =
-        ScopedEnvVar::set_path("GEMINI_CLI_SYSTEM_SETTINGS_PATH", &absent_system_settings);
-
-    // Redirect USERPROFILE to an empty temp dir so the developer's real
-    // ~/.gemini/settings.json is not consulted either.
-    let empty_home = temp_root.path().join("home");
-    fs::create_dir_all(&empty_home).expect("empty home dir should be created");
-    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
-
-    fs::write(
-        &settings_path,
-        r#"{"tools":{"shell":{"enableInteractiveShell":true}}}"#,
-    )
-    .expect("enabled Gemini settings should be written");
-    let enabled_warning = gemini_interactive_shell_warning(workdir)
-        .expect("enabled interactive shell should warn on Windows");
-    assert!(enabled_warning.contains("TermAl forces Gemini"));
-    assert!(enabled_warning.contains(&display_path_for_user(&settings_path)));
-
-    fs::write(
-        &settings_path,
-        r#"{"tools":{"shell":{"enableInteractiveShell":false}}}"#,
-    )
-    .expect("disabled Gemini settings should be written");
-    assert_eq!(gemini_interactive_shell_warning(workdir), None);
+            fs::write(
+                &settings_path,
+                r#"{"tools":{"shell":{"enableInteractiveShell":false}}}"#,
+            )
+            .expect("disabled Gemini settings should be written");
+            assert_eq!(gemini_interactive_shell_warning(workdir), None);
+        },
+    );
 }

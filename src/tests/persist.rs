@@ -1027,41 +1027,46 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
 #[cfg(windows)]
 #[test]
 fn app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs() {
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .expect("test home env mutex poisoned");
-    let project_root = TestTempRoot::create("termal-bootstrap-verbatim");
-    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
-        .to_string_lossy()
-        .into_owned();
-    let verbatim_root = format!(r"\\?\{normalized_root}");
-    let state_root = TestTempRoot::create("termal-bootstrap-verbatim-state");
-    let _home = ScopedEnvVar::set_home_dir(&state_root);
-    let persistence_path = state_root.join("termal.sqlite");
-    let orchestrator_templates_path = state_root.join("orchestrators.json");
+    home_fixture::run(
+        "tests::persist::app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs",
+        |state_root| {
+            let project_root = TestTempRoot::create("termal-bootstrap-verbatim");
+            let normalized_root =
+                normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
+                    .to_string_lossy()
+                    .into_owned();
+            let verbatim_root = format!(r"\\?\{normalized_root}");
+            let persistence_path = state_root.join("termal.sqlite");
+            let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let state =
-        AppState::new_with_paths(verbatim_root, persistence_path, orchestrator_templates_path)
+            let state = AppState::new_with_paths(
+                verbatim_root,
+                persistence_path,
+                orchestrator_templates_path,
+            )
             .expect("app state should bootstrap from verbatim default workdir");
+            let state = home_fixture::BootState::new(state);
 
-    assert_eq!(state.default_workdir, normalized_root);
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert_eq!(inner.projects.len(), 1);
-    assert_eq!(inner.projects[0].root_path, normalized_root);
-    for agent in [Agent::Codex, Agent::Claude] {
-        let session = inner
-            .sessions
-            .iter()
-            .find(|record| record.session.agent == agent)
-            .expect("bootstrapped live session should exist");
-        assert_eq!(session.session.workdir, normalized_root);
-        assert_eq!(
-            session.session.project_id.as_deref(),
-            Some(inner.projects[0].id.as_str())
-        );
-    }
-    drop(inner);
-    state.shutdown_persist_blocking();
+            assert_eq!(state.default_workdir, normalized_root);
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            assert_eq!(inner.projects.len(), 1);
+            assert_eq!(inner.projects[0].root_path, normalized_root);
+            for agent in [Agent::Codex, Agent::Claude] {
+                let session = inner
+                    .sessions
+                    .iter()
+                    .find(|record| record.session.agent == agent)
+                    .expect("bootstrapped live session should exist");
+                assert_eq!(session.session.workdir, normalized_root);
+                assert_eq!(
+                    session.session.project_id.as_deref(),
+                    Some(inner.projects[0].id.as_str())
+                );
+            }
+            drop(inner);
+            state.shutdown_persist_blocking();
+        },
+    );
 }
 
 #[cfg(windows)]
@@ -4055,7 +4060,15 @@ fn local_history_cursor_and_page_share_the_persisted_read_path() {
     // 66..129 in-memory suffix, forcing the request through the shared SQLite
     // snapshot for both cursor resolution and page loading.
     let page = state
-        .get_session_history(&session_id, Some("message-065"), None, None, None, false, 64)
+        .get_session_history(
+            &session_id,
+            Some("message-065"),
+            None,
+            None,
+            None,
+            false,
+            64,
+        )
         .expect("combined persisted cursor/page read should succeed");
     assert_eq!(page.messages.len(), 64);
     assert_eq!(page.messages.first().map(Message::id), Some("message-001"));

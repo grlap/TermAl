@@ -130,7 +130,7 @@ fn unassigned_claude_observation_text(observation: &EngramRecorderObservation<'_
         EngramRecorderObservation::CommandAbandoned { key } => {
             format!("command {key} abandoned")
         }
-        EngramRecorderObservation::WorkspaceEdit => "a file edit".to_owned(),
+        EngramRecorderObservation::WorkspaceEdit { .. } => "a file edit".to_owned(),
     }
 }
 

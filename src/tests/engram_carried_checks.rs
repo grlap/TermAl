@@ -977,12 +977,180 @@ fn a_command_of_the_holder_that_writes_in_the_worktree_refuses_the_gate() {
 fn an_edit_the_holder_reports_refuses_the_gate() {
     let (turn, worktree) = named_turn("carried-own-edit");
     launch_gate(&turn, &worktree, false);
-    turn.state
-        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
+    turn.state.note_engram_workspace_edit(
+        &turn.session_id,
+        &EngramObservationProvenance::Ambient,
+        None,
+    );
     finish_run(&worktree, "passed", &"f".repeat(64));
     let checkpoint = turn.finish();
 
     assert_refused(&turn, &checkpoint, "this session reported a file edit");
+}
+
+#[test]
+fn an_edit_refusal_names_the_file_the_tool_reported() {
+    // Every reported edit still fences the gate, wherever it landed; the
+    // refusal says which file the tool reported, so the agent can tell which
+    // edit cost the credit.
+    let (turn, worktree) = named_turn("carried-edit-named");
+    launch_gate(&turn, &worktree, false);
+    let reported = turn.root.join("target").join("probe.py");
+    let reported = reported.to_string_lossy().into_owned();
+    turn.recorder()
+        .push_diff(
+            &reported,
+            "Create probe",
+            "+print('probe')",
+            ChangeType::Create,
+        )
+        .expect("the edit should record");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+
+    assert_refused(&turn, &checkpoint, "this session reported a file edit");
+    let line = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the holder should be told");
+    assert!(
+        line.contains(&reported),
+        "the refusal names the reported file: {line}"
+    );
+    assert!(
+        line.contains("tool-reported"),
+        "the target is labelled as reported: {line}"
+    );
+}
+
+/// Launches a carried gate, reports each target as an edit in order, settles
+/// the run passed and returns the refusal the holder is told.
+fn edit_refusal_line(
+    label: &str,
+    targets: impl FnOnce(&FsPath) -> Vec<String>,
+) -> (String, PathBuf) {
+    let (turn, worktree) = named_turn(label);
+    launch_gate(&turn, &worktree, false);
+    for target in targets(&worktree) {
+        turn.recorder()
+            .push_diff(&target, "Edit probe", "+print('probe')", ChangeType::Edit)
+            .expect("the edit should record");
+    }
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+
+    assert_refused(&turn, &checkpoint, "this session reported a file edit");
+    let line = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the holder should be told");
+    (line, worktree)
+}
+
+#[test]
+fn an_edit_refusal_shows_a_relative_target_as_the_tool_reported_it() {
+    // A relative target is shown as given: TermAl does not guess where it
+    // landed, so it is never joined to the worktree, normalised or
+    // canonicalised: its `..` and `.` steps stay as the tool wrote them.
+    let (line, worktree) = edit_refusal_line("carried-edit-relative", |_| {
+        vec!["../outside/./src/probe.rs".to_owned()]
+    });
+
+    assert!(
+        line.contains("(tool-reported target: \"../outside/./src/probe.rs\")"),
+        "{line}"
+    );
+    for placed in [
+        worktree
+            .join("..")
+            .join("outside")
+            .join("src")
+            .join("probe.rs"),
+        worktree.join("../outside/./src/probe.rs"),
+        worktree.parent().unwrap().join("outside"),
+    ] {
+        assert!(
+            !line.contains(&*placed.to_string_lossy()),
+            "no placement is inferred: {line}"
+        );
+    }
+}
+
+#[test]
+fn an_edit_refusal_bounds_a_long_target() {
+    let long = format!("{}.rs", "a".repeat(4096));
+    let (line, _) = edit_refusal_line("carried-edit-long", |_| vec![long.clone()]);
+
+    assert!(
+        line.contains("tool-reported") && line.contains("aaaaaaaa"),
+        "{line}"
+    );
+    assert!(!line.contains(&long), "the whole target is not rendered");
+    assert!(
+        line.contains("a…a") && line.contains("aaa.rs\")"),
+        "the file name is kept: {line}"
+    );
+    assert!(
+        line.len() < 1500,
+        "the rendered target is bounded: {} bytes",
+        line.len()
+    );
+}
+
+#[test]
+fn an_edit_refusal_escapes_control_characters_in_its_target() {
+    let hostile = "evil\nname\r\u{1b}[31m\u{7}\u{0}\u{202e}\".rs".to_owned();
+    let (line, _) = edit_refusal_line("carried-edit-control", |_| vec![hostile]);
+
+    assert!(
+        line.contains(r#"(tool-reported target: "evil\nname\r\u{1b}[31m\u{7}\u{0}\u{202e}\".rs")"#),
+        "{line}"
+    );
+    for control in ['\n', '\r', '\u{1b}', '\u{7}', '\u{0}', '\u{202e}'] {
+        assert!(
+            !line.contains(control),
+            "control {control:?} is escaped: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn an_edit_refusal_names_the_edit_that_first_fenced_the_gate() {
+    // Later edits leave the first fence as it is; the refusal names the edit
+    // that cost the credit, not a list of every file the turn touched.
+    let (line, _) = edit_refusal_line("carried-edit-first", |worktree| {
+        vec![
+            worktree.join("first.py").to_string_lossy().into_owned(),
+            worktree.join("second.py").to_string_lossy().into_owned(),
+        ]
+    });
+
+    assert!(line.contains("first.py"), "{line}");
+    assert!(
+        !line.contains("second.py"),
+        "a later edit does not replace the fence: {line}"
+    );
+}
+
+#[test]
+fn an_edit_with_no_known_target_keeps_the_generic_refusal() {
+    let (turn, worktree) = named_turn("carried-edit-untargeted");
+    launch_gate(&turn, &worktree, false);
+    turn.state.note_engram_workspace_edit(
+        &turn.session_id,
+        &EngramObservationProvenance::Ambient,
+        None,
+    );
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+
+    assert_refused(&turn, &checkpoint, "this session reported a file edit");
+    let line = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the holder should be told");
+    assert!(
+        line.ends_with("this session reported a file edit. Run the gate again."),
+        "{line}"
+    );
+    assert!(!line.contains("tool-reported"), "{line}");
 }
 
 #[test]
@@ -995,8 +1163,11 @@ fn a_write_after_the_run_ended_leaves_the_gate_to_the_basis_check() {
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
     run_own_command(&turn, &worktree, "commit", "git commit -m done");
-    turn.state
-        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
+    turn.state.note_engram_workspace_edit(
+        &turn.session_id,
+        &EngramObservationProvenance::Ambient,
+        None,
+    );
     assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_none()));
     let checkpoint = turn.finish();
     assert_credited(&turn, &checkpoint, &run, "succeeded");
@@ -1598,7 +1769,7 @@ fn another_session_starting_a_turn_leaves_a_carried_gate_alone_until_it_writes()
         );
 
         turn.state
-            .note_engram_workspace_edit(&other, &EngramObservationProvenance::Ambient);
+            .note_engram_workspace_edit(&other, &EngramObservationProvenance::Ambient, None);
         let fence = carried_fence(&turn);
         assert_eq!(fence.is_some(), same_worktree, "{fence:?}");
         if let Some(fence) = fence {

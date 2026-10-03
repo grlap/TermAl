@@ -259,6 +259,54 @@ fn deliver_prepared_turn_dispatch_now(
                     error: Some(engram_persistence_unknown_error()),
                 };
             }
+            EngramTurnDeliveryPreparation::RetainedBindRetry(proof) => {
+                #[cfg(test)]
+                wait_at_bind_disposition_gate(
+                    state, dispatch.session_id(), "caller",
+                );
+                return match state.park_engram_bind_retry(
+                    dispatch.session_id(),
+                    proof,
+                    &runtime_token,
+                    active_turn_generation,
+                ) {
+                    EngramAuthorizationParkOutcome::Parked => {
+                        TurnDispatchDeliveryOutcome::Held { error: None }
+                    }
+                    EngramAuthorizationParkOutcome::Withdrawn => {
+                        // Exactly one ordinary activation, off lock, with fresh
+                        // mailbox/head/owner checks and the existing backoff.
+                        match state.dispatch_next_queued_turn(dispatch.session_id(), false) {
+                            Ok(Some(next)) => deliver_turn_dispatch(state, next),
+                            Ok(None) => TurnDispatchDeliveryOutcome::Superseded,
+                            Err(error) => TurnDispatchDeliveryOutcome::Held {
+                                error: Some(ApiError::internal(format!("Failed to admit current queue after withdrawal: {error:#}"))),
+                            },
+                        }
+                    }
+                    EngramAuthorizationParkOutcome::PersistenceUnknown => {
+                        TurnDispatchDeliveryOutcome::Held {
+                            error: Some(engram_persistence_unknown_error()),
+                        }
+                    }
+                    EngramAuthorizationParkOutcome::Superseded => {
+                        let error_message = "Engram admission invalidated before runtime delivery";
+                        if record_rejected_turn_dispatch(
+                            state,
+                            dispatch.session_id(),
+                            error_message,
+                            None,
+                            Some(dispatch_generation),
+                            &runtime_token,
+                            active_turn_generation,
+                        ) {
+                            TurnDispatchDeliveryOutcome::Rejected(ApiError::conflict(error_message))
+                        } else {
+                            TurnDispatchDeliveryOutcome::Superseded
+                        }
+                    }
+                };
+            }
             EngramTurnDeliveryPreparation::Rejected => {
                 let session_id = dispatch.session_id().to_owned();
                 let mailbox_notification = dispatch.mailbox_notification().cloned();
@@ -277,7 +325,7 @@ fn deliver_prepared_turn_dispatch_now(
                             error: Some(engram_persistence_unknown_error()),
                         };
                     }
-                    EngramAuthorizationParkOutcome::Superseded => {}
+                    EngramAuthorizationParkOutcome::Superseded | EngramAuthorizationParkOutcome::Withdrawn => {}
                 }
                 let rejected = record_rejected_turn_dispatch(
                     state,

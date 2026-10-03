@@ -902,38 +902,34 @@ fn discover_codex_threads_from_home_retains_null_source_without_thread_source_co
 // TermAl sessions.
 #[test]
 fn app_state_boot_imports_a_top_level_codex_thread_without_materializing_its_child() {
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .expect("test home env mutex poisoned");
-    let root = test_temp_dir().join(format!("termal-codex-child-boot-{}", Uuid::new_v4()));
-    let _temp_root = TestTempRoot::own(root.clone());
-    let project_root = root.join("project");
-    let test_home = root.join("home");
-    let shared_codex_home = test_home
-        .join(".termal")
-        .join("codex-home")
-        .join("shared-app-server");
-    fs::create_dir_all(&project_root).expect("project root should exist");
-    let project_root =
-        fs::canonicalize(project_root).expect("project root should canonicalize for discovery");
-    fs::create_dir_all(&shared_codex_home).expect("shared Codex home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&test_home);
-    let source_codex_home = test_home.join(".codex");
-    let _codex_home = ScopedEnvVar::set_path("CODEX_HOME", &source_codex_home);
-    let project_workdir = project_root.to_string_lossy().into_owned();
-    let delegated_child_prompt = format!(
-        "{DELEGATED_CHILD_SESSION_MARKER} `delegation-boot-child`.\n\n\
+    home_fixture::run(
+        "tests::codex_discovery::app_state_boot_imports_a_top_level_codex_thread_without_materializing_its_child",
+        |test_home| {
+            let root = test_temp_dir().join(format!("termal-codex-child-boot-{}", Uuid::new_v4()));
+            let _temp_root = TestTempRoot::own(root.clone());
+            let project_root = root.join("project");
+            let shared_codex_home = test_home
+                .join(".termal")
+                .join("codex-home")
+                .join("shared-app-server");
+            fs::create_dir_all(&project_root).expect("project root should exist");
+            let project_root = fs::canonicalize(project_root)
+                .expect("project root should canonicalize for discovery");
+            fs::create_dir_all(&shared_codex_home).expect("shared Codex home should exist");
+            let project_workdir = project_root.to_string_lossy().into_owned();
+            let delegated_child_prompt = format!(
+                "{DELEGATED_CHILD_SESSION_MARKER} `delegation-boot-child`.\n\n\
          Mode: Reviewer\n\
          Parent session: `session-parent`\n\
          Child session: `session-child`\n\n\
          Task:\nReview the patch"
-    );
+            );
 
-    let connection = rusqlite::Connection::open(shared_codex_home.join("state_5.sqlite"))
-        .expect("Codex state db should open");
-    connection
-        .execute_batch(
-            "create table threads (
+            let connection = rusqlite::Connection::open(shared_codex_home.join("state_5.sqlite"))
+                .expect("Codex state db should open");
+            connection
+                .execute_batch(
+                    "create table threads (
                 id text primary key,
                 cwd text not null,
                 title text not null,
@@ -946,98 +942,100 @@ fn app_state_boot_imports_a_top_level_codex_thread_without_materializing_its_chi
                 thread_source text,
                 updated_at integer not null
             );",
-        )
-        .expect("threads table should be created");
-    connection
-        .execute(
-            "insert into threads (
+                )
+                .expect("threads table should be created");
+            connection
+                .execute(
+                    "insert into threads (
                 id, cwd, title, sandbox_policy, approval_mode, archived,
                 model, reasoning_effort, source, thread_source, updated_at
             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![
-                "thread-child",
-                project_workdir.as_str(),
-                "Nested conversation",
-                r#"{"type":"read-only"}"#,
-                "never",
-                0,
-                "gpt-5-codex",
-                "high",
-                r#"{"subagent":{"thread_spawn":{"parent_thread_id":"thread-parent"}}}"#,
-                "subagent",
-                2,
-            ],
-        )
-        .expect("subagent thread should insert");
-    connection
-        .execute(
-            "insert into threads (
+                    rusqlite::params![
+                        "thread-child",
+                        project_workdir.as_str(),
+                        "Nested conversation",
+                        r#"{"type":"read-only"}"#,
+                        "never",
+                        0,
+                        "gpt-5-codex",
+                        "high",
+                        r#"{"subagent":{"thread_spawn":{"parent_thread_id":"thread-parent"}}}"#,
+                        "subagent",
+                        2,
+                    ],
+                )
+                .expect("subagent thread should insert");
+            connection
+                .execute(
+                    "insert into threads (
                 id, cwd, title, sandbox_policy, approval_mode, archived,
                 model, reasoning_effort, source, thread_source, updated_at
             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![
-                "thread-delegation-child",
-                project_workdir.as_str(),
-                delegated_child_prompt,
-                r#"{"type":"read-only"}"#,
-                "never",
-                0,
-                "gpt-5-codex",
-                "high",
-                "vscode",
-                Option::<&str>::None,
-                3,
-            ],
-        )
-        .expect("TermAl delegation child thread should insert");
-    connection
-        .execute(
-            "insert into threads (
+                    rusqlite::params![
+                        "thread-delegation-child",
+                        project_workdir.as_str(),
+                        delegated_child_prompt,
+                        r#"{"type":"read-only"}"#,
+                        "never",
+                        0,
+                        "gpt-5-codex",
+                        "high",
+                        "vscode",
+                        Option::<&str>::None,
+                        3,
+                    ],
+                )
+                .expect("TermAl delegation child thread should insert");
+            connection
+                .execute(
+                    "insert into threads (
                 id, cwd, title, sandbox_policy, approval_mode, archived,
                 model, reasoning_effort, source, thread_source, updated_at
             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![
-                "thread-parent",
-                project_workdir.as_str(),
-                "Top-level conversation",
-                r#"{"type":"workspace-write"}"#,
-                "on-request",
-                0,
-                "gpt-5-codex",
-                "medium",
-                "vscode",
-                Option::<&str>::None,
-                1,
-            ],
-        )
-        .expect("top-level thread should insert");
-    drop(connection);
+                    rusqlite::params![
+                        "thread-parent",
+                        project_workdir.as_str(),
+                        "Top-level conversation",
+                        r#"{"type":"workspace-write"}"#,
+                        "on-request",
+                        0,
+                        "gpt-5-codex",
+                        "medium",
+                        "vscode",
+                        Option::<&str>::None,
+                        1,
+                    ],
+                )
+                .expect("top-level thread should insert");
+            drop(connection);
 
-    let state = AppState::new_with_paths(
-        project_workdir,
-        test_home.join("termal.sqlite"),
-        test_home.join("orchestrators.json"),
-    )
-    .expect("state should boot");
-    {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        assert!(
-            inner
-                .sessions
-                .iter()
-                .any(|record| record.external_session_id.as_deref() == Some("thread-parent"))
-        );
-        assert!(
+            let state = AppState::new_with_paths(
+                project_workdir,
+                test_home.join("termal.sqlite"),
+                test_home.join("orchestrators.json"),
+            )
+            .expect("state should boot");
+            let state = home_fixture::BootState::new(state);
+            {
+                let inner = state.inner.lock().expect("state mutex poisoned");
+                assert!(
+                    inner.sessions.iter().any(
+                        |record| record.external_session_id.as_deref() == Some("thread-parent")
+                    )
+                );
+                assert!(
             inner
                 .sessions
                 .iter()
                 .all(|record| record.external_session_id.as_deref() != Some("thread-child"))
         );
-        assert!(inner.sessions.iter().all(|record| {
-            record.external_session_id.as_deref() != Some("thread-delegation-child")
-        }));
-    }
-    state.shutdown_persist_blocking();
+                assert!(inner.sessions.iter().all(|record| {
+                    record.external_session_id.as_deref() != Some("thread-delegation-child")
+                }));
+            }
+            state.shutdown_persist_blocking();
+        },
+    );
 }
 
 #[test]
