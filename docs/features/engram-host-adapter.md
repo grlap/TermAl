@@ -1764,6 +1764,33 @@ its launch (`src/engram_carried_checks.rs`).
   watcher sees in the worktree while a full gate is being launched fences it
   once it is carried. A session carries at most four; a fifth drops the
   oldest, whose holder is told.
+- **Missing launch authority.** An enabled session's Current observation of
+  a recognised full-gate start without a work binding or active grant retains
+  only a bounded, memory-only diagnostic, not a check, source snapshot or
+  verification. A matching background or successful detached completion says
+  `it began without a binding to claimed work, so it was not carried` or
+  `the turn has no active grant at its start, so it was not carried`.
+  A failed or compound launch keeps its actual drop reason. The diagnostic
+  observes the one-call directory, or all reported/presumed directories,
+  independently of credit eligibility. Only known directories agreeing on
+  one exact Git worktree keep a root; unknown, network, outside-Git or
+  disagreeing locations keep none. A known root and the original start time
+  protect later launches from borrowing the unmatched run, including in a
+  linked worktree; an unknown root produces the line only. These observations
+  never create claim or source authority.
+  Starts and completions correlate by key, runtime token and turn generation.
+  A duplicate with that full identity refreshes nothing, even if authority
+  later returns. An enabled Current start/finish scan retires stale identities
+  once, reporting `its runtime or turn ended before its launch result;
+  diagnostic tracking dropped`. An eligible matched completion with a
+  different parsed command reports `its command at completion did not match
+  its start`. At the bounded pending-command cap, oldest-first eviction says
+  `the pending-command tracking limit dropped that command's diagnostic
+  tracking`. These loss lines name the original command fingerprint and
+  start time, not a fabricated launch outcome. Disabled or non-Current
+  observations cannot emit these loss notices or gain cleanup authority;
+  an exact disabled completion remains silent. Diagnostics are not persisted
+  across restarts.
 - **The fence.** From its launch until the host reads its run as ended,
   whatever the host sees that may have written in its worktree refuses it,
   and the refusal names what that was: a command another writable session
@@ -1900,10 +1927,15 @@ its launch (`src/engram_carried_checks.rs`).
   record lacks an input fingerprint from before or after its stages (one
   that ended before the launcher measured its input), a launch whose run was
   not found within ten minutes, one whose claim was released or whose root
-  was renamed or cleared, and one six hours after its launch whose run has
-  not ended, or has ended but was never settled because the holder's
-  checkpoints since were on another claim or source root; the holder is told
-  which. Every line about a check's credit is logged as it is set. Those
+  was renamed or cleared. A terminal carry at a checkpoint with a present
+  different claim is refused then: `its claim is no longer the one this
+  session holds`, even when the old root entry remains. Existing fences and
+  root-generation changes take precedence over that reason. An absent
+  binding or nonterminal run does not invent a claim mismatch: it stays
+  subject to the existing fence, generation, conflict and expiry rules.
+  A carry still unsettled six hours after its launch is refused by expiry.
+  Credit always requires the exact same claim. The holder is told which
+  reason applies. Every line about a check's credit is logged as it is set. Those
   that wait for the same prompt are merged into one, so they seldom push out
   a line about the session's source root; past 1,600 bytes the merge keeps
   the newest and cuts the front, saying so. A line a prompt in flight

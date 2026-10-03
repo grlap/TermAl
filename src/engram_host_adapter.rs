@@ -2449,6 +2449,9 @@ struct EngramSessionState {
     /// command ran beside it, each with the directory its runtime reported,
     /// which a repeated start may leave out. In memory only.
     running_command_keys: BTreeMap<String, Option<String>>,
+    /// Correlated starts without verification authority. Diagnostic only;
+    /// bounded, memory-only, and never reconstructed after restart.
+    pending_launch_diagnostics: Vec<EngramLaunchDiagnostic>,
     /// The worktrees each running command of the session may write in, by
     /// its runtime key, `None` for one TermAl could not name
     /// (`engram_turn_checks.rs`): its reported directory's, or the ones its
@@ -2650,6 +2653,7 @@ impl Default for EngramSessionState {
             carried_consumed_runs: Vec::new(),
             carried_unmatched_launches: Vec::new(),
             running_command_keys: BTreeMap::new(),
+            pending_launch_diagnostics: Vec::new(),
             running_command_worktrees: Vec::new(),
             workdir_worktree: None,
             capture_workers: Arc::default(),

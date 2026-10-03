@@ -1724,6 +1724,22 @@ fn engram_take_settled_carried_checks(
             ));
             continue;
         }
+        // A retained root entry is not standing on the current claim. Decide
+        // again under the final lock, before accepting an off-lock result.
+        let same_claim = record.engram.work_binding.as_ref().map(|binding| {
+            binding.claim_id == carried.claim_id
+        });
+        if same_claim == Some(false)
+            && (carried.terminal_digest.is_some()
+                || carried.launcher_gone
+                || carried.run_missing
+                || carried.ambiguous)
+        {
+            lines.push(carried.refusal_line(
+                "its claim is no longer the one this session holds",
+            ));
+            continue;
+        }
         // A poll that read off the lock may have found the conflict after
         // this checkpoint copied the check to settle it.
         if carried.terminal_conflict {
@@ -1744,7 +1760,7 @@ fn engram_take_settled_carried_checks(
             continue;
         }
         match outcome {
-            Some(Ok(Some(resolved))) => {
+            Some(Ok(Some(resolved))) if same_claim == Some(true) => {
                 // This candidate is judged by its own closure: Claude work
                 // registered no later than it may be in what it recorded,
                 // and work registered only after it is not.
@@ -1768,7 +1784,7 @@ fn engram_take_settled_carried_checks(
                 lines.push(carried.refusal_line(&why));
                 continue;
             }
-            Some(Ok(None)) | None => {}
+            Some(Ok(_)) | None => {}
         }
         if let Some(directory) = &carried.run_directory {
             left.retain(|used| used != directory);

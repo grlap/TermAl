@@ -16,6 +16,8 @@
 // only hand over what a command's end said. New fragment beside
 // `engram_host_adapter.rs`, created instead of growing it.
 
+include!("engram_launch_diagnostics.rs");
+
 /// Everything one checkpoint reports about the turn it closes: the turn's
 /// observations in feed order, and the verification and environment evidence
 /// minted from them. Sent as the request's own three lists, each left out
@@ -1024,6 +1026,7 @@ impl AppState {
             position,
             started,
             child,
+            turn_generation,
         ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -1069,6 +1072,7 @@ impl AppState {
                         .map(|check| check.command.clone())
                 }),
                 Self::engram_session_has_child_binding_shape_locked(&inner, session_id),
+                record.active_turn_generation,
             )
         };
         // Where the command's `cd` leads, from where its shell is presumed to
@@ -1084,6 +1088,13 @@ impl AppState {
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
         let worktrees = engram_command_worktrees(&workdir, &write_places, ran, loss.as_ref());
         let mediated = started.is_some();
+        // This location is observation only, resolved without a claim's root
+        // authority. It cannot create a source snapshot or verification.
+        let diagnostic_root = recognised.as_ref()
+            .filter(|command| !mediated && engram_check_is_launcher_full(command))
+            .and_then(|command| {
+                engram_launch_diagnostic_root(command, &workdir, places.as_deref())
+            });
         let target = started.and_then(|started| {
             let command = match ran {
                 Some(_) => recognised.clone()?,
@@ -1187,6 +1198,7 @@ impl AppState {
         // Whether the session's grant may take this command, decided in the
         // section that applies it.
         let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
+        let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
         // Any session's command may write, under a check another session
         // still has open in a worktree the command runs in.
         let record = inner
@@ -1268,13 +1280,39 @@ impl AppState {
             );
             return;
         }
-        let engram = &inner.sessions[index].engram;
-        if engram.work_binding.is_none() {
+        let record = &mut inner.sessions[index];
+        if diagnostics_enabled {
+            engram_prune_launch_diagnostics(record);
+        }
+        if record.engram.pending_launch_diagnostics.iter().any(|mark| {
+            mark.key == key
+                && mark.runtime == record.runtime.runtime_token()
+                && mark.turn_generation == record.active_turn_generation
+        }) {
+            // A duplicate start, including one after binding recovery, must
+            // not refresh its original identity or begin a late check.
             return;
         }
-        let Some(grant_id) = engram.active_grant_id.clone() else {
-            return;
+        let missing_authority = if record.engram.work_binding.is_none() {
+            Some(EngramLaunchMissingAuthority::Binding)
+        } else if record.engram.active_grant_id.is_none() {
+            Some(EngramLaunchMissingAuthority::Grant)
+        } else {
+            None
         };
+        if let Some(reason) = missing_authority {
+            if diagnostics_enabled
+                && record.runtime.runtime_token() == runtime
+                && record.active_turn_generation == turn_generation
+                && record.session.workdir == workdir
+                && let Some(command) = recognised
+            {
+                engram_note_launch_diagnostic(record, key, command, diagnostic_root, reason);
+            }
+            return;
+        }
+        let engram = &record.engram;
+        let grant_id = engram.active_grant_id.clone().expect("authority checked above");
         let other_writer = target.as_ref().is_some_and(|(_, _, target)| {
             engram_other_writer_in(&inner, index, &engram_path_key(&target.root))
         });
@@ -1698,6 +1736,7 @@ impl AppState {
         // by what fenced it: reconciled first with every retained hazard
         // (`engram_claude_interference.rs`).
         engram_reconcile_claude_consumer(&mut inner, index);
+        let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -1732,6 +1771,7 @@ impl AppState {
         if disposition.excludes_live_grant() {
             return;
         }
+        engram_finish_launch_diagnostic(record, key, command, exit, disposition, diagnostics_enabled);
         let workers = record.engram.capture_workers.clone();
         let Some(position) = record
             .engram
@@ -1825,7 +1865,16 @@ impl AppState {
                 disposition,
                 &EngramRecorderObservation::CommandAbandoned { key },
             );
-            let engram = &mut inner.sessions[index].engram;
+            let record = &mut inner.sessions[index];
+            let runtime = record.runtime.runtime_token();
+            let turn_generation = record.active_turn_generation;
+            let engram = &mut record.engram;
+            if disposition == ClaudeObservationDisposition::Current {
+                engram.pending_launch_diagnostics.retain(|mark| {
+                    !(mark.key == key && mark.runtime == runtime
+                        && mark.turn_generation == turn_generation)
+                });
+            }
             engram.running_command_keys.remove(key);
             engram.withheld_command_keys.remove(key);
             engram
