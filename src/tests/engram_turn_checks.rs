@@ -1408,8 +1408,11 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
             check("settled", settled()),
         ];
     });
-    turn.state
-        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
+    turn.state.note_engram_workspace_edit(
+        &turn.session_id,
+        &EngramObservationProvenance::Ambient,
+        None,
+    );
     let overlapped = turn.record(|record| {
         record
             .engram
@@ -2923,8 +2926,11 @@ fn an_acp_check_a_later_start_invalidates_stays_withheld_until_its_call_ends() {
         [("corrected".to_owned(), false)]
     );
     // An edit while the test runs makes it unknown.
-    turn.state
-        .note_engram_workspace_edit(&turn.session_id, &EngramObservationProvenance::Ambient);
+    turn.state.note_engram_workspace_edit(
+        &turn.session_id,
+        &EngramObservationProvenance::Ambient,
+        None,
+    );
     // A correction to another place in the worktree drops the check, and
     // later starts of the same call start none.
     for moved in [

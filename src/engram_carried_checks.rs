@@ -375,8 +375,8 @@ enum EngramWriterAct<'a> {
     /// A command of its ended whose start TermAl was never told: it may have
     /// written wherever the session writes (`engram_writer_worktrees`).
     UnreportedCommand,
-    /// It reported a file edit, which names no path: it may have written
-    /// wherever the session writes.
+    /// It reported a file edit, which TermAl does not place: it may have
+    /// written wherever the session writes.
     Edit,
 }
 
@@ -1562,13 +1562,77 @@ fn engram_is_simple_full_launcher(command: &EngramCheckCommand) -> bool {
 }
 
 /// Fences every carried check of `record` still running for a file edit it
-/// reported, which names no path.
-fn engram_fence_carried_checks_for_edit(record: &mut SessionRecord) {
+/// reported. The edit is not placed: `target`, the file its tool named, only
+/// names it in the refusal, shown as the tool gave it, and a check already
+/// fenced keeps its first cause.
+fn engram_fence_carried_checks_for_edit(record: &mut SessionRecord, target: Option<&str>) {
+    let cause = match target.filter(|target| !target.trim().is_empty()) {
+        Some(target) => format!(
+            "this session reported a file edit (tool-reported target: \"{}\")",
+            engram_display_reported_target(target)
+        ),
+        None => "this session reported a file edit".to_owned(),
+    };
     for carried in &mut record.engram.carried_checks {
         if carried.fence.is_none() && carried.terminal_digest.is_none() {
-            carried.fence = Some("this session reported a file edit".to_owned());
+            carried.fence = Some(cause.clone());
         }
     }
+}
+
+/// The most characters of a reported target a refusal shows: its start and,
+/// since the file name ends it, a longer end.
+const ENGRAM_REPORTED_TARGET_HEAD_CHARS: usize = 60;
+const ENGRAM_REPORTED_TARGET_TAIL_CHARS: usize = 120;
+
+/// `target` as a refusal shows it: each control, bidirectional or invisible
+/// formatting character and each quote escaped, and the middle of a long one
+/// cut. No path is resolved.
+fn engram_display_reported_target(target: &str) -> String {
+    let pieces: Vec<String> = target
+        .chars()
+        .map(|character| match character {
+            '"' => "\\\"".to_owned(),
+            character
+                if character.is_control()
+                    || matches!(
+                        character,
+                        '\u{200B}'..='\u{200F}'
+                            | '\u{202A}'..='\u{202E}'
+                            | '\u{2060}'..='\u{2069}'
+                            | '\u{FEFF}'
+                    ) =>
+            {
+                character.escape_default().to_string()
+            }
+            character => character.to_string(),
+        })
+        .collect();
+    let width = |pieces: &[String]| {
+        pieces
+            .iter()
+            .map(|piece| piece.chars().count())
+            .sum::<usize>()
+    };
+    if width(&pieces) <= ENGRAM_REPORTED_TARGET_HEAD_CHARS + ENGRAM_REPORTED_TARGET_TAIL_CHARS {
+        return pieces.concat();
+    }
+    // Whole escapes only, so a cut never splits one.
+    let (mut head, mut head_width) = (0, 0);
+    while head < pieces.len()
+        && head_width + pieces[head].chars().count() <= ENGRAM_REPORTED_TARGET_HEAD_CHARS
+    {
+        head_width += pieces[head].chars().count();
+        head += 1;
+    }
+    let (mut tail, mut tail_width) = (pieces.len(), 0);
+    while tail > head
+        && tail_width + pieces[tail - 1].chars().count() <= ENGRAM_REPORTED_TARGET_TAIL_CHARS
+    {
+        tail -= 1;
+        tail_width += pieces[tail].chars().count();
+    }
+    format!("{}…{}", pieces[..head].concat(), pieces[tail..].concat())
 }
 
 /// Whether `carried` is past `ENGRAM_CARRIED_CHECK_TTL_SECONDS` at `now`

@@ -226,7 +226,7 @@ fn report_racing_a_foreign_frame(label: &str, stage: ForeignStage) -> Value {
             turn.state.engram_host().observe(
                 &turn.session_id,
                 &EngramObservationProvenance::Claude(provenance.clone()),
-                EngramRecorderObservation::WorkspaceEdit,
+                EngramRecorderObservation::WorkspaceEdit { target: None },
             );
         }
         ForeignStage::Settled => reader.feed(frame.clone()),
@@ -295,7 +295,7 @@ fn the_sink_alone_excludes_the_live_grant_from_another_turns_observation() {
         turn.state.engram_host().observe(
             &turn.session_id,
             &provenance,
-            EngramRecorderObservation::WorkspaceEdit,
+            EngramRecorderObservation::WorkspaceEdit { target: None },
         );
         turn.record(|record| {
             assert_eq!(

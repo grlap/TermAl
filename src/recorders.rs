@@ -822,7 +822,9 @@ fn recorder_push_diff<R: SessionRecorderAccess>(
             change_type,
         },
     )?;
-    recorder.observe(EngramRecorderObservation::WorkspaceEdit);
+    recorder.observe(EngramRecorderObservation::WorkspaceEdit {
+        target: Some(file_path),
+    });
     Ok(())
 }
 

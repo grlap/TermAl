@@ -60,8 +60,10 @@ pub(crate) enum EngramRecorderObservation<'a> {
     },
     /// The command `key` will never report its end.
     CommandAbandoned { key: &'a str },
-    /// The agent reported a file edit.
-    WorkspaceEdit,
+    /// The agent reported a file edit, with the file its tool named where it
+    /// named one. The target is shown as the tool gave it, for diagnostics
+    /// only: an edit fences whatever it names.
+    WorkspaceEdit { target: Option<&'a str> },
 }
 
 impl EngramHost<'_> {
@@ -103,9 +105,9 @@ impl EngramHost<'_> {
                 self.state
                     .note_engram_command_abandoned(session_id, provenance, key);
             }
-            EngramRecorderObservation::WorkspaceEdit => {
+            EngramRecorderObservation::WorkspaceEdit { target } => {
                 self.state
-                    .note_engram_workspace_edit(session_id, provenance);
+                    .note_engram_workspace_edit(session_id, provenance, target);
             }
         }
     }
