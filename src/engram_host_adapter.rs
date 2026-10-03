@@ -2408,6 +2408,7 @@ impl AppState {
 #[derive(Clone, Debug)]
 struct EngramSessionState {
     admission_in_progress: Option<Arc<std::sync::atomic::AtomicBool>>,
+    source_observation_preparations: usize,
     recovered_admission: bool,
     routing_token: Option<String>,
     /// The work binding the accepted bind for `routing_token` carried, if
@@ -2502,6 +2503,7 @@ struct EngramSessionState {
     active_turn_start_basis: Option<EngramExecutionSourceBasis>,
     active_turn_start_observed_at: Option<String>,
     source_observation_gate: Option<EngramSourceObservationGate>,
+    source_observation_delete_requested: bool,
     source_observation_continuation: Option<EngramSourceObservationContinuation>,
     source_opening_disposition: EngramSourceOpeningDisposition,
     source_observation_delivery_grant: Option<String>,
@@ -2651,6 +2653,7 @@ impl Default for EngramSessionState {
     fn default() -> Self {
         Self {
             admission_in_progress: None,
+            source_observation_preparations: 0,
             recovered_admission: false,
             routing_token: None,
             work_binding: None,
@@ -2673,6 +2676,7 @@ impl Default for EngramSessionState {
             active_turn_start_basis: None,
             active_turn_start_observed_at: None,
             source_observation_gate: None,
+            source_observation_delete_requested: false,
             source_observation_continuation: None,
             source_opening_disposition: EngramSourceOpeningDisposition::Pending,
             source_observation_delivery_grant: None,
@@ -4622,12 +4626,16 @@ impl AppState {
         session_id: &str,
         dispatch_generation: u64,
     ) -> EngramTurnDeliveryPreparation {
+        let _source_preparation = self.reserve_source_observation_preparation(session_id);
         let snapshot = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return EngramTurnDeliveryPreparation::Superseded;
             };
             let record = &inner.sessions[index];
+            if record.engram.source_observation_delete_requested {
+                return EngramTurnDeliveryPreparation::ObservationRecovery;
+            }
             let Some(pending) = record.engram.pending_dispatch.clone() else {
                 return EngramTurnDeliveryPreparation::Superseded;
             };

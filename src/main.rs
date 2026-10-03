@@ -755,6 +755,7 @@ include!("engram_source_sightings.rs");
 include!("engram_source_observation_protocol.rs");
 include!("engram_source_observation_recovery.rs");
 include!("engram_source_observation_finalization.rs");
+include!("engram_source_observation_removal.rs");
 include!("engram_source_observation_runtime.rs");
 include!("engram_evaluation_refusal.rs");
 include!("engram_work_binding_refresh.rs");

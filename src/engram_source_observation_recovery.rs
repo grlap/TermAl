@@ -71,6 +71,18 @@ impl AppState {
             }
             return Err(EngramTransportError::protocol("retained source settlement does not match its grant"));
         }
+        // Both current and superseded capture completion settle through here.
+        // Delete owns the original session and its coupled marker ACK, so
+        // automatic completion may preserve facts but must leave its RPC to
+        // explicit Resume, which proves that whole image before recovery.
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.find_session_index(&intent.session_id).is_some_and(|index|
+                inner.sessions[index].engram.source_observation_delete_requested) {
+                return Err(EngramTransportError::local_state(
+                    "Session retained: explicit tracking recovery must acknowledge the deletion marker before settlement"));
+            }
+        }
         let remaining = deadline.saturating_duration_since(target.budget_clock.now());
         if remaining.is_zero() { return Err(EngramTransportError::deadline("retired source capture close budget expired")); }
         let value = target.adapter.request(&intent.connection, &request,

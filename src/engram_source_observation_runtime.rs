@@ -44,6 +44,13 @@ impl AppState {
     fn hold_engram_source_observation(&self, session_id: &str, owner: &EngramQueuedAdmissionOwner, reason: &str) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else { return; };
+        if inner.sessions[index].engram.source_observation_delete_requested {
+            retain_source_observation_removal_locked(&mut inner, &[session_id.to_owned()]);
+            if let Err(error) = self.commit_locked(&mut inner) {
+                eprintln!("engram> session={session_id} retained removal persistence is unknown: {error:#}");
+            }
+            return;
+        }
         let record = &mut inner.sessions[index];
         if !owner.matches(record) {
             if record.engram.source_observation_gate.as_ref().is_some_and(|gate|
@@ -79,7 +86,8 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(&session_id) else { return false; };
         let record = &mut inner.sessions[index];
-        if !record.runtime.matches_runtime_token(dispatch.runtime_token())
+        if record.engram.source_observation_delete_requested
+            || !record.runtime.matches_runtime_token(dispatch.runtime_token())
             || record.active_turn_generation != dispatch.active_turn_generation()
             || dispatch.engram_dispatch_generation() != Some(record.engram.dispatch_generation)
             || record.engram.active_grant_id.is_none() {
@@ -308,7 +316,9 @@ impl AppState {
         let baseline = owner_index.and_then(|position| inner.engram_source_sightings[position].latest.clone());
         let predecessor_pending = owner_index.is_some_and(|position| inner.engram_source_sightings[position].observations.iter()
             .any(|intent| !matches!(intent.phase, EngramSourceObservationPhase::Recorded { .. } | EngramSourceObservationPhase::RefusedPolicy { .. })));
-        let recovery_reason = invariant_reason.clone().or_else(|| predecessor_pending.then(||
+        let recovery_reason = invariant_reason.clone().or_else(||
+            record.engram.source_observation_delete_requested.then(|| SOURCE_OBSERVATION_DELETE_RETAINED.to_owned()))
+            .or_else(|| predecessor_pending.then(||
             "An earlier source observation is still unaccounted; this captured grant is retired for explicit Resume.".to_owned()));
         // Equal samples prove no observed difference, not absence of ABA writes.
         if recovery_reason.is_none() && baseline.as_ref().is_some_and(|before| before.basis == sighting.basis) {

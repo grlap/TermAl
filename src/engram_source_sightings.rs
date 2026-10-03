@@ -186,7 +186,8 @@ struct EngramSourceObservationContinuation {
 
 impl EngramSourceObservationGate {
     fn owns(&self, record: &SessionRecord) -> bool {
-        !self.retired && record.engram.dispatch_generation == self.dispatch_generation
+        !self.retired && !record.engram.source_observation_delete_requested
+            && record.engram.dispatch_generation == self.dispatch_generation
             && record.active_turn_generation == self.active_turn_generation
             && record.engram.active_grant_id.as_ref() == Some(&self.grant_id)
             && record.queued_prompts.front().is_some_and(|head| head.pending_prompt.id == self.prompt_id)
@@ -200,7 +201,8 @@ impl EngramSourceSightingOwner {
 }
 
 fn engram_source_observation_can_deliver(record: &SessionRecord) -> bool {
-    record.engram.source_opening_disposition.allows_delivery()
+    !record.engram.source_observation_delete_requested
+        && record.engram.source_opening_disposition.allows_delivery()
         && record.engram.active_grant_id.is_some()
         && record.engram.active_grant_id == record.engram.source_observation_delivery_grant
         && record.engram.source_observation_gate.as_ref().is_none_or(|gate| gate.owns(record))
@@ -210,16 +212,12 @@ fn engram_source_observation_can_deliver(record: &SessionRecord) -> bool {
 // Session ownership survives settings changes; a shared exact association
 // also fences another session admitting the same work in the same store.
 fn engram_source_observation_holds_admission(inner: &StateInner, index: usize) -> bool {
+    if inner.sessions[index].engram.source_observation_delete_requested { return true; }
     let session_id = &inner.sessions[index].session.id;
     let target = AppState::engram_binding_target_for_session_shape_locked(inner, session_id, true)
         .ok().flatten();
     inner.engram_source_sightings.iter().any(|owner| owner.observations.iter().any(|intent| {
-        if matches!(intent.phase, EngramSourceObservationPhase::RefusedPolicy { .. }) {
-            return false;
-        }
-        let unresolved = !matches!(intent.phase, EngramSourceObservationPhase::Recorded { .. })
-            || (intent.delivery_retired && !intent.finalization_complete);
-        unresolved && (intent.session_id == *session_id || target.as_ref().is_some_and(|target|
+        source_observation_unresolved(intent) && (intent.session_id == *session_id || target.as_ref().is_some_and(|target|
             target.settings.authority_store_key.as_ref() == Some(&owner.scope.store)
                 && target.work_binding.as_ref().is_some_and(|binding|
                     engram_same_recovery_run(binding, &intent.binding))))
@@ -227,7 +225,9 @@ fn engram_source_observation_holds_admission(inner: &StateInner, index: usize) -
 }
 
 fn hold_source_observation_admission(record: &mut SessionRecord) -> bool {
-    let preview = "Engram: retained source observation requires explicit Resume before another admission.";
+    let preview = if record.engram.source_observation_delete_requested {
+        SOURCE_OBSERVATION_DELETE_RETAINED
+    } else { "Engram: retained source observation requires explicit Resume before another admission." };
     let changed = !record.orchestrator_auto_dispatch_blocked || record.session.preview != preview;
     record.set_auto_dispatch_blocked(true);
     record.session.preview = preview.to_owned();

@@ -1,7 +1,7 @@
 //! Automatic observation retries must refresh the parent's public attempt.
 use super::*;
 
-fn attach_observation_delegation(claimed: &ClaimedRoot) -> (String, String) {
+pub(super) fn attach_observation_delegation(claimed: &ClaimedRoot) -> (String, String) {
     let (parent, id) = {
         let mut inner = claimed.state.inner.lock().unwrap();
         let parent = inner.create_session(Agent::Codex, Some("Observation parent".to_owned()),

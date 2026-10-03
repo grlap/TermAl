@@ -431,6 +431,8 @@ export type Session = {
    * Stop leaves behind; nothing starts until the user resumes the queue or
    * sends a new prompt. */
   queuePaused?: boolean;
+  /** Delete retained the original session; Resume recovers tracking only. */
+  sourceTrackingRecovery?: boolean;
   /** Opaque identity/disposition fingerprint for the authoritative queue. */
   queueProjectionHash?: string | null;
   sessionMutationStamp?: number | null;

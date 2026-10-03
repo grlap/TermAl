@@ -861,3 +861,9 @@ mod finalization;
 
 #[path = "engram_source_observation_delegation.rs"]
 mod delegation;
+
+#[path = "engram_source_observation_removal.rs"]
+mod removal;
+
+#[path = "engram_source_observation_delete_races.rs"]
+mod delete_races;

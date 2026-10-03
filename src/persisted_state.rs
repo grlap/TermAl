@@ -182,7 +182,8 @@ impl PersistedState {
         persisted.sessions = inner
             .sessions
             .iter()
-            .filter(|record| !record.hidden)
+            .filter(|record| !record.hidden || source_observation_removal_blocker(inner,
+                &source_observation_removal_set(inner, &record.session.id)).is_some())
             .map(PersistedSessionRecord::from_record)
             .collect();
         persisted
@@ -435,6 +436,8 @@ struct PersistedSessionRecord {
     engram_bind_retry: Option<EngramBindRetry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_source_observation_gate: Option<EngramSourceObservationGate>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    engram_source_observation_delete_requested: bool,
     /// The queue head a user Stop held (`EngramSessionState::stopped_prompt_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_stopped_prompt_id: Option<String>,
@@ -538,6 +541,7 @@ impl PersistedSessionRecord {
             engram_abort_retry: record.engram.abort_retry.clone(),
             engram_bind_retry: record.engram.bind_retry.clone(),
             engram_source_observation_gate: record.engram.source_observation_gate.clone(),
+            engram_source_observation_delete_requested: record.engram.source_observation_delete_requested,
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
@@ -627,6 +631,7 @@ impl PersistedSessionRecord {
                 rebind_required: self.engram_routing_token.is_some(),
                 abort_retry: self.engram_abort_retry.clone(),
                 source_observation_gate: self.engram_source_observation_gate.clone(),
+                source_observation_delete_requested: self.engram_source_observation_delete_requested,
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
                 ..EngramSessionState::default()
             },

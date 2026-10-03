@@ -26,6 +26,11 @@ enum PersistFenceTarget {
         session_id: String,
         content: Value,
     },
+    EngramSourceRemoval {
+        owners: Vec<EngramSourceSightingOwner>,
+        session_id: String,
+        content: Value,
+    },
     Delegation(Box<DelegationRecord>),
     WaitRegistration(DelegationWaitRecord),
     /// The test-run card epoch, which must be durable before any card is
@@ -40,7 +45,8 @@ impl PersistFenceTarget {
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
             Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
-                | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. } => false,
+                | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
+                | Self::EngramSourceRemoval { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
                 .as_deref()
@@ -64,6 +70,19 @@ impl PersistFenceTarget {
     /// not open another connection or treat row existence as proof.
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         match self {
+            Self::EngramSourceRemoval { owners, session_id, content } => {
+                for owner in owners {
+                    if !Self::EngramSourceSightingHistory(Box::new(owner.clone())).is_already_durable(connection)? {
+                        return Ok(false);
+                    }
+                }
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id], |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false); };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(source_observation_removal_content(&actual) == *content)
+            }
             Self::EngramSourceFinalization { owner, session_id, content } => {
                 if !Self::EngramSourceSightingHistory(owner.clone()).is_already_durable(connection)? {
                     return Ok(false);

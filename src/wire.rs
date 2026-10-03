@@ -701,6 +701,9 @@ struct Session {
     /// distinguish "paused, waiting for the user" from "about to start".
     #[serde(default)]
     queue_paused: bool,
+    /// Derived from the original session's retained Delete recovery mode.
+    #[serde(default, skip_serializing_if = "is_false")]
+    source_tracking_recovery: bool,
     /// Opaque identity/disposition fingerprint for the authoritative queued
     /// prompt projection. Broad summaries carry this without prompt bodies so
     /// clients can target hydration only when the queue actually changed.
@@ -792,6 +795,8 @@ struct StateSessionSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     markers: Vec<ConversationMarker>,
     queue_paused: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    source_tracking_recovery: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     queue_projection_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

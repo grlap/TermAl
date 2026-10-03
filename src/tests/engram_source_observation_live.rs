@@ -3,6 +3,51 @@ use super::*;
 
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn source_observation_live_delete_recovers_original_committed_reply() {
+    let fixture = completion_fixture();
+    let session = &fixture.live.session_id;
+    let added = fixture.work(session, &["add", "Recover tracking before deletion", "--json"]);
+    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    fixture.work(session, &["claim", work, "--json"]);
+    fixture.live.state.ensure_engram_session_bound_off_lock(session).unwrap().unwrap();
+    fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
+        work: work.to_owned(), path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+    }).unwrap();
+    fixture.live.transport.faults.lock().unwrap().push_back(BoundaryFault::DropAfterReply { operation: "execution_observe" });
+    let dispatch = dispatch_live_root(&fixture.live.state, session, "Keep the original pending prompt.", None);
+    assert!(matches!(deliver_turn_dispatch(&fixture.live.state, dispatch), TurnDispatchDeliveryOutcome::Held { .. }));
+    assert!(fixture.live.receiver.try_recv().is_err());
+    let original = {
+        let inner = fixture.live.state.inner.lock().unwrap();
+        inner.engram_source_sightings.iter().flat_map(|owner| &owner.observations)
+            .find(|intent| intent.session_id == *session).unwrap().clone()
+    };
+    assert!(matches!(original.phase, EngramSourceObservationPhase::Prepared { .. }));
+    let error = fixture.live.state.kill_session(session).err().expect("retained original owner must survive Delete");
+    assert!(error.message.contains("Session kept"));
+    assert!(fixture.live.transport.requests_for("turn_checkpoint").is_empty(), "Delete refusal precedes teardown");
+    fixture.live.state.resume_local_session_queue(session, None).unwrap();
+    let observations = fixture.live.transport.requests_for("execution_observe");
+    assert_eq!(observations.len(), 2);
+    assert_eq!(observations[0], observations[1]);
+    let checkpoints = fixture.live.transport.requests_for("turn_checkpoint");
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0]["grant_id"], original.grant_id);
+    assert_eq!(fixture.live.transport.requests_for("turn_begin").len(), 1);
+    assert!(fixture.live.receiver.try_recv().is_err(), "original provider prompt cannot replay");
+    fixture.record(session, |record| {
+        assert!(record.engram.source_observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+        assert!(record.session.preview.contains("retry Delete"));
+        assert!(!record.queued_prompts.is_empty());
+    });
+    assert!(fixture.live.state.inner.lock().unwrap().engram_source_sightings.iter()
+        .all(|owner| owner.observations.is_empty()));
+    fixture.live.state.kill_session(session).unwrap();
+    assert!(fixture.live.state.inner.lock().unwrap().find_session_index(session).is_none());
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn between_turn_observation_makes_the_earlier_check_stale() {
     for named in [true, false] {
         let fixture = completion_fixture();
