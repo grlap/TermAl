@@ -36,7 +36,13 @@ type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>
 /// These request/submission fixtures begin after a canonical no-event read
 /// has settled. Enabling a store alone no longer establishes naming absence.
 fn install_store(state: &AppState, project: &str, root: &FsPath) {
-    state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
+    super::engram_host_adapter::select_scripted_engram_budget_clock_before_enable(state);
+    install_store_on_chosen_clock(state, project, root);
+}
+
+/// A further store on a state whose fixture has already chosen its budget
+/// clock: every store of one state runs on that one clock.
+fn install_store_on_chosen_clock(state: &AppState, project: &str, root: &FsPath) {
     super::work_visualizer::install_store(state, project, root);
     // Every request reads Engram's named-root sighting first; unless a test
     // scripts one, Engram binds no root.
@@ -2925,7 +2931,7 @@ fn acceptance_submit_refuses_a_child_whose_project_resolves_to_another_store() {
     let other_root = root.parent().unwrap().join("other-work-project");
     fs::create_dir_all(&other_root).unwrap();
     let other = create_test_project(&state, &other_root, "Other work fixture");
-    install_store(&state, &other, &other_root);
+    install_store_on_chosen_clock(&state, &other, &other_root);
     assert_ne!(
         established_store(&state, &project),
         established_store(&state, &other)

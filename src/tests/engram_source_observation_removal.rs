@@ -589,9 +589,7 @@ fn source_observation_delete_persistence_failure_requires_coupled_ack_before_rec
                         load_state(claimed.state.persistence_path.as_path())
                             .unwrap()
                             .unwrap();
-                    claimed
-                        .state
-                        .install_test_engram_budget_clock(EngramBudgetClock::scripted());
+                    claimed.state.select_test_scripted_engram_budget_clock();
                     install_control_only_transport(&claimed.state, claimed.transport.clone());
                     watermark = 0;
                 }
@@ -740,9 +738,7 @@ fn assert_removed_observer_recovers(removal: u8, restore: bool) {
         *claimed.state.inner.lock().unwrap() = load_state(claimed.state.persistence_path.as_path())
             .unwrap()
             .unwrap();
-        claimed
-            .state
-            .install_test_engram_budget_clock(EngramBudgetClock::scripted());
+        claimed.state.select_test_scripted_engram_budget_clock();
         install_control_only_transport(&claimed.state, claimed.transport.clone());
     }
     claimed

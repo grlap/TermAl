@@ -267,7 +267,7 @@ fn fixture_budget_drivers_wake_on_clock_advance_and_real_completion() {
 #[test]
 fn fixture_authority_acknowledgement_excludes_stalled_manual_persistence() {
     let (state, project, _, root) = fixture();
-    state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
+    super::super::engram_host_adapter::select_scripted_engram_budget_clock_before_enable(&state);
     super::super::work_visualizer::install_store(&state, &project, &root);
     let store = established_store(&state, &project).unwrap();
     let writer = sqlite_state_write_lock(state.persistence_path.as_path());
@@ -338,14 +338,26 @@ fn fixture_authority_budget_keeps_expired_and_connected_acknowledgements_withhel
         "{error:?}"
     );
 
-    state.install_test_engram_budget_clock(EngramBudgetClock::Real);
+    // The connected half runs on the same scripted clock: the unconfirmed
+    // fence wait expires only when the test advances that clock past the
+    // budget, never on real time.
+    let clock = state.engram_budget_clock();
     let writer = sqlite_state_write_lock(state.persistence_path.as_path());
     let tickets_before = sqlite_state_writer_issued_tickets(&writer);
     let (tx, rx) = std::sync::mpsc::channel();
     state.persist_tx = tx;
-    let error = state
-        .prepare_engram_authority(&store, &binding, Duration::from_millis(10))
-        .unwrap_err();
+    let worker = state.clone();
+    let worker_store = store.clone();
+    let worker_binding = binding.clone();
+    let task = std::thread::spawn(move || {
+        worker.prepare_engram_authority(&worker_store, &worker_binding, Duration::from_millis(10))
+    });
+    clock.wait_for_scripted_waiter();
+    // Unadvanced control: the waiting acknowledgement has not expired by
+    // itself.
+    assert!(!task.is_finished());
+    clock.advance(Duration::from_millis(10));
+    let error = task.join().unwrap().unwrap_err();
     assert!(
         error.message.contains("persistence is unconfirmed"),
         "{error:?}"
