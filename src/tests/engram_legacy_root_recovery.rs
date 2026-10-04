@@ -238,9 +238,9 @@ fn restore_local_only_root(claimed: &ClaimedRoot, label: &str, worktree: &FsPath
     let runtime = claimed.record(|record| record.runtime.clone());
     *claimed.state.inner.lock().unwrap() = restored;
     claimed.record(|record| record.runtime = runtime);
-    claimed
-        .state
-        .install_test_engram_budget_clock(EngramBudgetClock::scripted());
+    // The restored state starts unread and with no clock chosen; it chooses
+    // a scripted clock before anything snapshots it.
+    claimed.state.select_test_scripted_engram_budget_clock();
     install_control_only_transport(&claimed.state, claimed.transport.clone());
     prepare_claimed_root_naming(claimed, label);
 }

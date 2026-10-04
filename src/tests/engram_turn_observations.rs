@@ -628,16 +628,30 @@ impl Drop for ClaimedRoot {
     }
 }
 
+/// The Engram budget clock a `ClaimedRoot` chooses before it enables Engram.
+#[derive(Clone, Copy)]
+enum ClaimedRootClock {
+    Scripted,
+    /// Real time on purpose; each caller states why at its call site.
+    Real,
+}
+
 impl ClaimedRoot {
     fn new_scripted(label: &str, responses: Vec<ScriptedEngramControlResponse>) -> Self {
-        let fixture = Self::new(label, responses);
-        fixture
-            .state
-            .install_test_engram_budget_clock(EngramBudgetClock::scripted());
-        fixture
+        Self::new_with_clock(label, responses, ClaimedRootClock::Scripted)
     }
 
-    fn new(label: &str, responses: Vec<ScriptedEngramControlResponse>) -> Self {
+    /// A fixture that runs its Engram operations on real time; the caller
+    /// says why in a comment where it calls this.
+    fn new_real(label: &str, responses: Vec<ScriptedEngramControlResponse>) -> Self {
+        Self::new_with_clock(label, responses, ClaimedRootClock::Real)
+    }
+
+    fn new_with_clock(
+        label: &str,
+        responses: Vec<ScriptedEngramControlResponse>,
+        clock: ClaimedRootClock,
+    ) -> Self {
         // Checks started on this test thread settle their toolchain capture
         // inline, so no probe outlives the fixture.
         TEST_ENGRAM_TOOLCHAIN_LABEL.with(|fixture| {
@@ -646,6 +660,22 @@ impl ClaimedRoot {
         let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(&format!(
             "engram-turn-observation-{label}"
         ));
+        // The clock is chosen before Engram is enabled and before any target
+        // or worker can take a snapshot of it.
+        assert_eq!(
+            state
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .engram_budget_clock_snapshots
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the Engram budget clock must be unread before the fixture chooses it"
+        );
+        match clock {
+            ClaimedRootClock::Scripted => state.select_test_scripted_engram_budget_clock(),
+            ClaimedRootClock::Real => state.declare_test_real_engram_budget_clock(),
+        };
         let root = state
             .test_temp_root
             .as_ref()
@@ -1789,6 +1819,55 @@ fn prepare_claimed_root_naming(claimed: &ClaimedRoot, label: &str) {
             .get_or_insert_with(|| "fixture-root-token".to_owned());
         record.engram.work_binding.get_or_insert(binding);
     });
+}
+
+/// The binding target built for a fixture's session right after it enabled
+/// Engram.
+fn claimed_root_target(claimed: &ClaimedRoot) -> EngramBindingTarget {
+    AppState::engram_binding_target_for_session_shape_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+        true,
+    )
+    .unwrap()
+    .unwrap()
+}
+
+#[test]
+fn a_claimed_root_target_holds_the_scripted_clock_chosen_before_enable() {
+    let label = "clock-scripted-control";
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
+    prepare_claimed_root_naming(&claimed, label);
+    let target = claimed_root_target(&claimed);
+    assert!(
+        matches!(target.budget_clock, EngramBudgetClock::Scripted(_)),
+        "the target takes the scripted clock the fixture chose before enable"
+    );
+    // It is the same clock, not another scripted one: advancing the state's
+    // clock moves the target's.
+    let before = target.budget_clock.now();
+    claimed
+        .state
+        .engram_budget_clock()
+        .advance(Duration::from_millis(7));
+    assert_eq!(
+        target.budget_clock.now(),
+        before + Duration::from_millis(7)
+    );
+}
+
+#[test]
+fn a_claimed_root_target_holds_the_real_clock_declared_before_enable() {
+    let label = "clock-real-control";
+    let claimed = ClaimedRoot::new_real(label, Vec::new());
+    prepare_claimed_root_naming(&claimed, label);
+    assert!(
+        matches!(
+            claimed_root_target(&claimed).budget_clock,
+            EngramBudgetClock::Real
+        ),
+        "the target takes the real clock the fixture declared before enable"
+    );
 }
 
 /// Positive observation fixtures model verified settings before admission;

@@ -429,7 +429,7 @@ fn source_root_authority_admission_distinguishes_candidate_uncertainty_from_miss
     for mode in ["candidate", "guard", "admission"] {
         let label = format!("admission-writer-{mode}");
         let grant = format!("{label}-grant");
-        let mut claimed = ClaimedRoot::new(
+        let mut claimed = ClaimedRoot::new_scripted(
             &label,
             vec![
                 bind_reply("writer-token"),
@@ -873,7 +873,10 @@ fn source_root_authority_shared_staging_and_cleanup_require_retained_association
 fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_owner_change() {
     for mode in ["standalone-expiry", "setup-success", "setup-expiry"] {
         let label = format!("authority-{mode}");
-        let claimed = ClaimedRoot::new(&label, vec![bind_reply("setup-token")]);
+        // Real time on purpose: the expiry modes let the acknowledgement
+        // deadline pass by sleeping past the RPC budget on the real clock; a
+        // scripted clock that nobody advances would never reach it.
+        let claimed = ClaimedRoot::new_real(&label, vec![bind_reply("setup-token")]);
         prepare_confirmed_claimed_opening(&claimed, &label);
         let store = claimed_root_store(&claimed);
         let recorder = Arc::new(AuthorityTimeoutRecorder {
@@ -1039,7 +1042,10 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
 #[test]
 fn source_root_authority_review_delayed_manual_writer_expires_without_owner_supersession() {
     let label = "authority-ack-contention-diagnostic";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    // Real time on purpose: the worker's acknowledgement deadline must pass
+    // while the SQLite writer is held, which the test causes by sleeping past
+    // the RPC budget on the real clock.
+    let claimed = ClaimedRoot::new_real(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let (binding, token) = claimed.record(|record| {
@@ -1250,11 +1256,10 @@ fn authority_review_restart_recovers(prepared_only: bool) {
         }
     );
     *claimed.state.inner.lock().unwrap() = restored;
-    // A state loaded from disk starts on the real clock; the fixture's clock
-    // goes with the restored state, as its transport does.
-    claimed
-        .state
-        .install_test_engram_budget_clock(clock.clone());
+    // A state loaded from disk starts unread and with no clock chosen; the
+    // fixture's clock goes with the restored state, as its transport does,
+    // chosen before anything snapshots the restored state's clock.
+    claimed.state.select_test_engram_budget_clock(clock.clone());
     install_control_only_transport(&claimed.state, claimed.transport.clone());
     prepare_claimed_root_naming(&claimed, label);
     // The restored state must still run on the fixture's scripted clock.
@@ -1322,7 +1327,7 @@ fn source_root_canonical_live_run_states_establish_first_contact_absence() {
 
 #[test]
 fn source_root_canonical_run_state_and_history_contract() {
-    let claimed = ClaimedRoot::new("canonical-state-contract", Vec::new());
+    let claimed = ClaimedRoot::new_scripted("canonical-state-contract", Vec::new());
     prepare_claimed_root_naming(&claimed, "canonical-state-contract");
     let store = claimed_root_store(&claimed);
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
@@ -1659,9 +1664,6 @@ fn source_root_authority_review_no_event_cannot_erase_unexplained_positive_legac
 fn source_root_authority_review_admitted_retirement_waits_for_connected_ack() {
     let label = "authority-admitted-retirement-ack";
     let (claimed, _, _) = named_root_turn(label, true);
-    claimed
-        .state
-        .install_test_engram_budget_clock(EngramBudgetClock::Real);
     let journal = claimed
         .state
         .inner
@@ -1953,9 +1955,6 @@ fn connected_authority_candidate_ack(supersede: bool) {
         &proof,
     )
     .unwrap();
-    claimed
-        .state
-        .install_test_engram_budget_clock(EngramBudgetClock::Real);
     let mut state = claimed.state.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     state.persist_tx = tx;
@@ -2116,7 +2115,7 @@ fn source_root_authority_connected_cleanup_keeps_failed_commit_unknown() {
 
 fn connected_authority_settlement_failure(entry: &'static str) {
     let label = format!("authority-commit-{entry}");
-    let claimed = ClaimedRoot::new(&label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, &label);
     if entry == "replay" {
@@ -2471,7 +2470,7 @@ fn source_root_authority_foreign_generation_cannot_hide_a_later_claim_name() {
 #[test]
 fn source_root_authority_removed_reader_requires_a_durable_pre_io_guard() {
     let label = "authority-connected-reader";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -2665,7 +2664,7 @@ impl EngramControlTransport for AuthorityTimeoutRecorder {
 #[test]
 fn source_root_authority_review_writer_wait_uses_total_headroom_and_preserves_rpc_cap() {
     let label = "authority-total-versus-rpc";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let recorder = Arc::new(AuthorityTimeoutRecorder {
@@ -2708,7 +2707,12 @@ fn source_root_authority_review_writer_wait_uses_total_headroom_and_preserves_rp
     assert!(claimed.state.inner.inner.try_lock().is_ok());
     // Force the local SQL phase beyond the per-RPC interval. The existing
     // fixture total headroom remains separate; no configured limit is raised.
-    std::thread::sleep(rpc + Duration::from_millis(25));
+    // The worker measures its budget on the fixture's scripted clock, so the
+    // interval passes on that clock while the writer is still held.
+    claimed
+        .state
+        .engram_budget_clock()
+        .advance(rpc + Duration::from_millis(25));
     drop(held);
     task.join().unwrap().unwrap();
     let calls = recorder.calls.lock().unwrap();
@@ -2725,7 +2729,10 @@ fn source_root_authority_review_writer_wait_uses_total_headroom_and_preserves_rp
 #[test]
 fn source_root_authority_review_expired_admission_does_not_fall_back_to_standalone_budget() {
     let label = "authority-expired-admission";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    // Real time on purpose: the test builds its admission start and deadlines
+    // from std::time::Instant::now(), and checks the target's expiry against
+    // them, so the target must measure time on the same real clock.
+    let claimed = ClaimedRoot::new_real(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let mut target = AppState::engram_binding_target_for_session_shape_locked(
         &claimed.state.inner.lock().unwrap(),
@@ -3080,7 +3087,10 @@ fn source_root_authority_review_one_total_deadline_covers_prepare_read_and_publi
 #[test]
 fn source_root_authority_review_prepared_ack_deadline_explains_no_candidate_fence() {
     let label = "authority-prepared-ack-expiry";
-    let claimed = ClaimedRoot::new(label, Vec::new());
+    // Real time on purpose: the worker's deadline is std::time::Instant::now()
+    // plus the total budget, and the test withholds the acknowledgement until
+    // that real deadline has passed.
+    let claimed = ClaimedRoot::new_real(label, Vec::new());
     prepare_claimed_root_naming(&claimed, label);
     let store = claimed_root_store(&claimed);
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
