@@ -536,6 +536,9 @@ fn acceptance_settings_defaults_validate_server_side() {
 #[test]
 fn acceptance_settings_connection_edit_preserves_omitted_evaluator_defaults() {
     let (state, project, _, root) = fixture();
+    // The settings edit below binds through Engram's targets, so the test
+    // chooses the one scripted budget clock before the store is enabled.
+    super::engram_host_adapter::select_scripted_engram_budget_clock_before_enable(&state);
     install_store(&state, &project, &root);
     let defaults = AcceptanceEvaluatorDefaults {
         evaluator_agent: Some(Agent::Claude),

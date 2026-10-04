@@ -10,6 +10,9 @@ fn setup() -> (AppState, String, String, PathBuf) {
 }
 
 fn setup_with_state(state: AppState) -> (AppState, String, String, PathBuf) {
+    // The fixture enables Engram through the project's settings below, so it
+    // chooses the one scripted budget clock first, before anything reads it.
+    select_scripted_engram_budget_clock_before_enable(&state);
     let root = state
         .test_temp_root
         .as_ref()
