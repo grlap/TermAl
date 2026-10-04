@@ -966,6 +966,7 @@ fn a_resume_through_fast_discovery_reports_scheduled() {
 #[test]
 fn a_bound_resume_never_admits_a_successor_exposed_after_its_check() {
     let state = test_app_state_with_drained_delegation_codex_runtime("held-bound-resume");
+    state.select_test_scripted_engram_budget_clock();
     let (parent, held, held_child, _, _) = two_explorers(&state);
     hold_child(&state, &held_child, true, false);
     let (owner, held_prompt) = {

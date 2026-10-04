@@ -4139,6 +4139,7 @@ fn runtime_exit_does_not_schedule_orchestrator_transitions() {
 #[test]
 fn killing_a_session_prunes_its_orchestrator_links() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let project_root = state
         .test_temp_root_path()
         .expect("orchestrator tests should own a shared test temp root")

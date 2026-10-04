@@ -84,6 +84,7 @@ fn delegation_terminal_paths_preserve_pending_watcher_observations() {
     ] {
         for read_only in [true, false] {
             let (state, _sender, parent) = mailbox_test_state();
+            state.select_test_scripted_engram_budget_clock();
             let (id, child) = install_required_review_delegation(&state, &parent);
             let root = state.persistence_path.parent().unwrap().to_path_buf();
             let path = root.join("peer-change.rs").to_string_lossy().into_owned();
@@ -172,6 +173,7 @@ fn delegation_terminal_paths_preserve_pending_watcher_observations() {
 fn structured_review_bounds_observation_paths_and_accounts_for_omissions() {
     for path_suffix in ["x".to_owned(), "\u{1}".repeat(1000), "界".repeat(20_000)] {
         let (state, _sender, parent) = mailbox_test_state();
+        state.select_test_scripted_engram_budget_clock();
         let (id, child) = install_required_review_delegation(&state, &parent);
         {
             let mut inner = state.inner.lock().unwrap();
@@ -1346,6 +1348,7 @@ fn required_review_result_fails_closed_when_submission_is_missing() {
 #[test]
 fn removed_review_child_does_not_hide_the_persisted_failed_result() {
     let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
+    state.select_test_scripted_engram_budget_clock();
     let (delegation_id, child_session_id) =
         install_required_review_delegation(&state, &parent_session_id);
     finish_delegation_child_with_assistant_text(
@@ -1488,6 +1491,7 @@ fn completed_structured_review_survives_idle_child_without_final_prose() {
 #[test]
 fn completed_structured_review_survives_child_session_removal() {
     let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
+    state.select_test_scripted_engram_budget_clock();
     let (delegation_id, child_session_id) =
         install_required_review_delegation(&state, &parent_session_id);
     let submission = state

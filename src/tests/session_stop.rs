@@ -378,6 +378,7 @@ fn stop_session_recovers_an_active_session_with_no_runtime() {
 #[test]
 fn stop_projects_the_paused_queue_and_resume_clears_it() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let session_id = test_session_id(&state, Agent::Codex);
 
     {
@@ -517,6 +518,7 @@ fn stop_projects_the_paused_queue_and_resume_clears_it() {
 #[test]
 fn resume_promotes_the_paused_queue_head_and_delivers_it() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let session_id = test_session_id(&state, Agent::Claude);
     let input_rx = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -597,6 +599,7 @@ fn resume_promotes_the_paused_queue_head_and_delivers_it() {
 #[test]
 fn resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused() {
     let mut state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let session_id = test_session_id(&state, Agent::Claude);
     let original_persistence_path = Arc::clone(&state.persistence_path);
     let input_rx = {

@@ -985,6 +985,7 @@ fn transient_send_eligibility_failure_never_evicts_a_participant() {
 #[test]
 fn deliberate_session_deletion_remains_the_mailbox_eviction_authority() {
     let (state, sender_id, target_id) = mailbox_test_state();
+    state.select_test_scripted_engram_budget_clock();
     let first = state
         .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
         .expect("initial mailbox send should succeed");

@@ -231,6 +231,7 @@ fn settled_result_respects_older_prompt_fifo_and_then_delivers() {
 #[test]
 fn settled_result_respects_stop_latch_until_explicit_resume() {
     let fixture = settled_delivery_fixture("stop-latch-delivery");
+    fixture.state.select_test_scripted_engram_budget_clock();
     fixture.busy();
     fixture.state.stop_session(&fixture.session).unwrap();
     let input = runtime(&fixture);

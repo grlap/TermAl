@@ -536,6 +536,7 @@ fn lightweight_test_state_rejects_direct_acp_runtime_spawning() {
 #[test]
 fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let session_id = test_session_id(&state, Agent::Codex);
     let process_owner = phase_sync::ParkedProcess::spawn();
     let process = process_owner.process.clone();
@@ -638,6 +639,7 @@ fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
 #[tokio::test]
 async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let session_id = test_session_id(&state, Agent::Codex);
     let process_owner = phase_sync::ParkedProcess::spawn();
     let process = process_owner.process.clone();
@@ -971,6 +973,7 @@ async fn asynchronous_stop_surfaces_runtime_interrupt_failure_on_the_session() {
 #[test]
 fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interrupt_fails() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let first_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_session(CreateSessionRequest {
@@ -1120,6 +1123,7 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
 #[test]
 fn killing_local_codex_session_prevents_rediscovery_after_restart() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let session_id = test_session_id(&state, Agent::Codex);
     state
         .set_external_session_id(&session_id, "thread-killed".to_owned())

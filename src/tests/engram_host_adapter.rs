@@ -303,6 +303,7 @@ fn failed_engram_context_refresh_stays_pending_for_retry() {
 #[test]
 fn s0_without_project_engram_is_byte_stable_and_never_calls_transport() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s0");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -531,6 +532,7 @@ fn s0_projectless_delegation_is_silent_and_never_calls_transport() {
 #[test]
 fn s0_explicitly_disabled_project_never_calls_or_persists_engram_state() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s0-disabled");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()

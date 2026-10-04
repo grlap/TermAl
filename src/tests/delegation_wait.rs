@@ -423,6 +423,7 @@ fn create_delegation_wait_reports_queue_result_for_returned_wait_only() {
 #[test]
 fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -538,6 +539,7 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
 #[test]
 fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_removed_reason() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -1599,6 +1601,7 @@ fn delegation_wait_reconciles_missing_parent_after_restart() {
 #[test]
 fn delegation_wait_reconciles_when_child_session_is_removed() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(

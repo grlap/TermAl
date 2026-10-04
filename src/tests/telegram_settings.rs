@@ -135,6 +135,7 @@ fn telegram_runtime_current_shape_round_trips_through_both_writers() {
 fn telegram_unknown_file_config_never_overrides_default_app_preferences() {
     for operation in ["status", "update", "delete-project", "delete-session"] {
         let state = test_app_state();
+        state.select_test_scripted_engram_budget_clock();
         let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
         let path = state.telegram_bot_file_path();
         let raw = serde_json::to_vec(&json!({
@@ -772,6 +773,7 @@ fn delete_project_preserves_unrelated_telegram_settings_without_restarting_relay
 fn kill_session_prunes_telegram_state_and_config_references() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("state path should have a parent"))

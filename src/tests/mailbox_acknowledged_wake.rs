@@ -367,6 +367,7 @@ async fn user_prompt_ahead_runs_first_and_the_acknowledged_wake_survives_it() {
 #[tokio::test]
 async fn stop_holds_the_acknowledged_wake_until_an_explicit_resume() {
     let (state, sender_id, target_id) = mailbox_test_state();
+    state.select_test_scripted_engram_budget_clock();
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&target_id).unwrap();
@@ -403,6 +404,7 @@ async fn stop_holds_the_acknowledged_wake_until_an_explicit_resume() {
 #[tokio::test]
 async fn an_acknowledged_wake_held_behind_a_paused_queue_stays_held() {
     let (state, sender_id, target_id) = mailbox_test_state();
+    state.select_test_scripted_engram_budget_clock();
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&target_id).unwrap();

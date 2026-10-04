@@ -535,6 +535,7 @@ fn offline_opencode_model_and_effort_change_defers_effort_membership_validation(
 #[test]
 fn setting_non_codex_external_session_id_does_not_clear_ignored_codex_thread() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let killed_codex_session_id = test_session_id(&state, Agent::Codex);
     state
         .set_external_session_id(&killed_codex_session_id, "thread-shared".to_owned())

@@ -3194,6 +3194,7 @@ fn followup_delegation_rejects_canceled_delegation() {
 #[test]
 fn followup_delegation_rejects_removed_child() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -6335,6 +6336,7 @@ fn delegation_cancel_clears_queued_child_prompts() {
 #[test]
 fn removing_delegation_child_or_parent_terminalizes_records() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let child_removed = state
         .create_read_only_delegation(
@@ -6415,6 +6417,7 @@ fn removing_delegation_child_or_parent_terminalizes_records() {
 #[test]
 fn removing_delegation_parent_cascades_to_nested_delegation_children() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let child = state
         .create_read_only_delegation(
@@ -6538,6 +6541,7 @@ fn removing_delegation_parent_cascades_to_nested_delegation_children() {
 fn removing_delegation_parent_deletes_child_runtime_and_session() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("delegation-parent-remove-runtime");
+    state.select_test_scripted_engram_budget_clock();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let mut delta_events = state.subscribe_delta_events();
     let created = state
