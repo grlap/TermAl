@@ -279,7 +279,7 @@ fn named_root_reclamation_failed_candidate_commit_reserves_capacity_then_restart
         "compaction cannot release a lost-ACK publication's reservation");
     let notice_id = restored.engram_work_naming_history[0].retirements[0].id.clone();
     *claimed.state.inner.lock().unwrap() = restored;
-    claimed.state.install_test_engram_budget_clock(clock);
+    claimed.state.select_test_engram_budget_clock(clock);
     install_control_only_transport(&claimed.state, claimed.transport.clone());
     prepare_claimed_root_naming(&claimed, label);
     let before = read_count(&claimed);
@@ -429,7 +429,7 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
                 inner.engram_work_naming_history[0].retirements);
             *inner = restored;
             drop(inner);
-            claimed.state.install_test_engram_budget_clock(clock.clone());
+            claimed.state.select_test_engram_budget_clock(clock.clone());
             install_control_only_transport(&claimed.state, claimed.transport.clone());
         }
     }
@@ -683,7 +683,7 @@ fn named_root_reclamation_transition_controls_compacted_owner_recovers_candidate
         };
         *claimed.state.inner.lock().unwrap() = serde_json::from_slice::<PersistedState>(&bytes)
             .unwrap().into_inner().unwrap();
-        claimed.state.install_test_engram_budget_clock(clock.clone());
+        claimed.state.select_test_engram_budget_clock(clock.clone());
         install_control_only_transport(&claimed.state, claimed.transport.clone());
         let owner = claimed.state.prepare_engram_authority(&entry.store, &notice.binding,
             ENGRAM_ROOT_RECLAMATION_BUDGET).unwrap();
@@ -712,7 +712,7 @@ fn named_root_reclamation_transition_controls_compacted_owner_recovers_candidate
             EngramAuthorityPhase::Candidate);
         assert!(restored.engram_named_root_journal.is_empty());
         *claimed.state.inner.lock().unwrap() = restored;
-        claimed.state.install_test_engram_budget_clock(clock);
+        claimed.state.select_test_engram_budget_clock(clock);
         install_control_only_transport(&claimed.state, claimed.transport.clone());
         let reads = read_count(&claimed);
         assert!(claimed.state.recover_engram_authority_candidate_until(&entry.store, &entry.work_id,

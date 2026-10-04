@@ -174,7 +174,7 @@ fn source_observation_ambiguous_initial_close_survives_settings_replacement_and_
     let restored = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
     assert!(restored.engram_source_sightings.iter().flat_map(|owner| &owner.observations).any(|intent| intent == &before));
     *claimed.state.inner.lock().unwrap() = restored;
-    claimed.state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
+    claimed.state.select_test_scripted_engram_budget_clock();
     install_control_only_transport(&claimed.state, claimed.transport.clone());
     {
         let mut inner = claimed.state.inner.lock().unwrap();

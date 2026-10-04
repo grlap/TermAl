@@ -178,7 +178,7 @@ fn resume_after_final_ack_loss(quarantine_cleanup: bool, restore: bool) {
             }
             if restore {
                 *claimed.state.inner.lock().unwrap() = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
-                claimed.state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
+                claimed.state.select_test_scripted_engram_budget_clock();
                 install_control_only_transport(&claimed.state, claimed.transport.clone());
                 watermark = 0; // A restored process starts a new persistence worker.
             }
