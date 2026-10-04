@@ -1519,6 +1519,25 @@ fn assert_engram_budget_clock_unread(state: &AppState) {
     );
 }
 
+/// A fixture's choice of the shared scripted Engram budget clock, made before
+/// Engram is enabled or any target or worker exists: nothing may have read
+/// the state's clock yet, so no operation runs on two clocks.
+pub(super) fn select_scripted_engram_budget_clock_before_enable(
+    state: &AppState,
+) -> EngramBudgetClock {
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_budget_clock_snapshots
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the Engram budget clock must be unread before the fixture chooses it"
+    );
+    state.select_test_scripted_engram_budget_clock()
+}
+
 #[test]
 fn dispatch_budget_override_is_state_local_and_snapshotted() {
     fn parent_target(state: &AppState, session_id: &str) -> EngramBindingTarget {

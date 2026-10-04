@@ -5,7 +5,9 @@
 use super::delegation_support::finish_delegation_child_with_assistant_text;
 use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::delegation_support::{install_required_review_delegation, structured_review_request};
-use super::engram_host_adapter::enable_test_project_engram;
+use super::engram_host_adapter::{
+    enable_test_project_engram, select_scripted_engram_budget_clock_before_enable,
+};
 use super::mailboxes::mailbox_test_state;
 use super::*;
 
@@ -1647,6 +1649,9 @@ fn failed_followup_restore_preserves_structured_review_and_polling_cannot_finish
 fn followup_engram_queue_start_failure_settles_instead_of_stranding_running() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("followup-engram-start-failure");
+    // Chosen before the delegation and its queued admission exist; no budget
+    // expires in this test.
+    select_scripted_engram_budget_clock_before_enable(&state);
     let root = state
         .test_temp_root
         .as_ref()
@@ -1735,6 +1740,9 @@ fn retained_followup_promotion_uncertainty_holds_the_attempt_wakes_its_wait_and_
             let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(
                 "retained-followup-promotion-uncertainty",
             );
+            // Chosen before the delegation and its queued admission exist; no
+            // budget expires in this test.
+            select_scripted_engram_budget_clock_before_enable(&state);
             let root = state.test_temp_root.as_ref().unwrap().path().join(format!(
                 "retained-followup-{live_reservation}-{lost_operation}"
             ));
@@ -2022,6 +2030,9 @@ fn disabled_no_intent_promotion_failure_uses_ordinary_followup_settlement() {
     for live_reservation in [true, false] {
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime("ordinary-followup-promotion-failure");
+        // Chosen before the delegation and its queued admission exist; no
+        // budget expires in this test.
+        select_scripted_engram_budget_clock_before_enable(&state);
         let root = state
             .test_temp_root
             .as_ref()
