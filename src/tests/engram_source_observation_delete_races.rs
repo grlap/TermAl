@@ -2,6 +2,177 @@
 use super::*;
 use crate::tests::*;
 
+#[test]
+fn source_observation_reset_settings_keeps_delete_recovery_and_queued_successor() {
+    reset_delete_recovery_case(false);
+}
+
+#[test]
+fn source_observation_reset_project_removal_keeps_delete_recovery_and_queued_successor() {
+    reset_delete_recovery_case(true);
+}
+
+fn reset_observation_project(claimed: &ClaimedRoot, remove: bool) {
+    let project = claimed.record(|record| record.session.project_id.clone().unwrap());
+    if remove {
+        claimed.state.delete_project(&project).unwrap();
+    } else {
+        claimed
+            .state
+            .update_project_engram_settings(&project, EngramProjectSettings::default())
+            .unwrap();
+    }
+}
+
+fn reset_delete_recovery_case(remove: bool) {
+    let claimed = held_observation(if remove {
+        "source-observation-reset-delete-project"
+    } else {
+        "source-observation-reset-delete-settings"
+    });
+    let original = original_intent(&claimed);
+    let head = claimed.record(|record| {
+        record
+            .queued_prompts
+            .front()
+            .unwrap()
+            .pending_prompt
+            .id
+            .clone()
+    });
+    queue_test_engram_prompt(
+        &claimed.state,
+        &claimed.session_id,
+        "Successor must stay paused",
+        QueuedPromptSource::User,
+        None,
+    );
+    assert!(claimed.state.kill_session(&claimed.session_id).is_err());
+    claimed
+        .state
+        .cancel_queued_prompt(&claimed.session_id, &head)
+        .unwrap();
+    reset_observation_project(&claimed, remove);
+    let recovery_visible = claimed.record(|record| {
+        AppState::wire_session_from_record(&claimed.state.server_instance_id, record)
+            .source_tracking_recovery
+    });
+    claimed
+        .state
+        .resume_session_queue(&claimed.session_id)
+        .unwrap();
+    let provider_prompt = claimed
+        .runtime_rx
+        .try_iter()
+        .any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. }));
+    assert!(
+        recovery_visible,
+        "a project reset must retain the deletion recovery action"
+    );
+    assert!(
+        !provider_prompt,
+        "public Resume must recover tracking without dispatching the queued successor"
+    );
+    claimed.record(|record| {
+        assert!(record.engram.source_observation_delete_requested);
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(
+            record.queued_prompts.front().unwrap().pending_prompt.text,
+            "Successor must stay paused"
+        );
+        assert!(record.session.preview.contains("retry Delete"));
+    });
+    finalized_observation_receipt(&claimed, &original);
+    claimed.state.kill_session(&claimed.session_id).unwrap();
+}
+
+#[test]
+fn source_observation_reset_settings_then_delete_keeps_live_capture_owner() {
+    reset_before_capture_delete_case(false);
+}
+
+#[test]
+fn source_observation_reset_project_removal_then_delete_keeps_live_capture_owner() {
+    reset_before_capture_delete_case(true);
+}
+
+fn reset_before_capture_delete_case(remove: bool) {
+    let claimed = opening_fixture(if remove {
+        "source-observation-reset-capture-project"
+    } else {
+        "source-observation-reset-capture-settings"
+    });
+    let state = claimed.state.clone();
+    let session = claimed.session_id.clone();
+    let project = claimed.record(|record| record.session.project_id.clone().unwrap());
+    let observed = Arc::new(Mutex::new(None));
+    let observed_hook = observed.clone();
+    TEST_ENGRAM_BEFORE_SOURCE_OBSERVATION_CAPTURE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                assert!(record.engram.active_turn_start_basis.is_some());
+                assert_eq!(record.engram.source_observation_preparations, 1);
+                assert!(inner.engram_source_sightings.is_empty());
+            }
+            if remove {
+                state.delete_project(&project).unwrap();
+            } else {
+                state
+                    .update_project_engram_settings(&project, EngramProjectSettings::default())
+                    .unwrap();
+            }
+            let count = {
+                let inner = state.inner.lock().unwrap();
+                inner.sessions[inner.find_session_index(&session).unwrap()]
+                    .engram
+                    .source_observation_preparations
+            };
+            let refused = state.kill_session(&session).is_err();
+            *observed_hook.lock().unwrap() = Some((count, refused));
+        }));
+    });
+    let outcome = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
+    let (count, refused) = observed.lock().unwrap().take().unwrap();
+    assert_eq!(
+        count, 1,
+        "a reset must not release a still-live preparation guard"
+    );
+    assert!(
+        refused,
+        "Delete must retain the original session before the late outbox capture"
+    );
+    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Superseded));
+    let original = original_intent(&claimed);
+    assert!(original.delivery_retired);
+    claimed.record(|record| {
+        assert_eq!(record.engram.source_observation_preparations, 0);
+        assert!(record.engram.source_observation_delete_requested);
+    });
+    // The reset consumed the fixture's first checkpoint reply before the
+    // superseded outbox existed. Recovery closes that same original grant.
+    claimed
+        .transport
+        .responses
+        .lock()
+        .unwrap()
+        .push_back(checkpoint_reply(&original.grant_id));
+    claimed
+        .state
+        .resume_session_queue(&claimed.session_id)
+        .unwrap();
+    finalized_observation_receipt(&claimed, &original);
+    claimed.state.kill_session(&claimed.session_id).unwrap();
+    assert!(
+        claimed
+            .runtime_rx
+            .try_iter()
+            .all(|command| !matches!(command, CodexRuntimeCommand::Prompt { .. }))
+    );
+}
+
 struct CaptureDeleteWriter {
     done: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,

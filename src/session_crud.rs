@@ -2963,9 +2963,17 @@ impl AppState {
                         record,
                         "its project's Engram settings changed before it settled",
                     );
-                    record.engram = EngramSessionState::default();
-                    record.engram.source_observation_gate = source_observation_gate;
-                    record.engram.dispatch_generation = dispatch_generation;
+                    // Configuration reset cannot release deletion recovery or
+                    // the live guard that still owns an off-lock capture.
+                    record.engram = EngramSessionState {
+                        source_observation_gate,
+                        source_observation_delete_requested: record
+                            .engram
+                            .source_observation_delete_requested,
+                        source_observation_preparations: record.engram.source_observation_preparations,
+                        dispatch_generation,
+                        ..EngramSessionState::default()
+                    };
                     for line in carried_lines {
                         eprintln!("engram> session={} {line}", record.session.id);
                         record.engram.set_pending_source_root_line(line);
@@ -4716,9 +4724,17 @@ impl AppState {
                     ) {
                         eprintln!("engram> session={} {line}", record.session.id);
                     }
-                    record.engram = EngramSessionState::default();
-                    record.engram.source_observation_gate = source_observation_gate;
-                    record.engram.dispatch_generation = dispatch_generation;
+                    // The original session still owns recovery and any capture
+                    // preparing its outbox after the project is detached.
+                    record.engram = EngramSessionState {
+                        source_observation_gate,
+                        source_observation_delete_requested: record
+                            .engram
+                            .source_observation_delete_requested,
+                        source_observation_preparations: record.engram.source_observation_preparations,
+                        dispatch_generation,
+                        ..EngramSessionState::default()
+                    };
                 }
             }
             for instance in &mut inner.orchestrator_instances {
