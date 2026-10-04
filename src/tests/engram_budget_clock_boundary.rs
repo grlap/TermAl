@@ -7,6 +7,12 @@
 // boot-recovery target tests) or the clock's scripted waits. New file.
 use super::*;
 
+#[path = "engram_budget_unchosen_readers.rs"]
+mod unchosen_readers;
+
+#[path = "engram_budget_reader_controls.rs"]
+mod reader_controls;
+
 fn snapshots(state: &AppState) -> usize {
     state
         .inner

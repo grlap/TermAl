@@ -3750,6 +3750,12 @@ impl AppState {
     /// its result arrives after the coordinator stops waiting; only targets
     /// that have not finished remain readiness-fenced for a lazy retry.
     fn recover_prepared_engram_sessions_after_boot(&self, plan: EngramBootRecoveryPlan) {
+        // With no target there is no work to time: no budget clock, worker,
+        // channel or overall line. A non-empty plan starts its budget here,
+        // before any of its work, as it always has.
+        if plan.targets.is_empty() {
+            return;
+        }
         let clock = self.engram_budget_clock();
         let started_at = clock.now();
         let deadline = started_at + plan.budget;
@@ -7579,7 +7585,6 @@ impl AppState {
     }
 
     fn record_engram_transport_failure(&self, session_id: &str, error: &EngramTransportError) {
-        let clock = self.engram_budget_clock();
         // Local binding integrity is not evidence about the transport's health.
         if error.kind == EngramTransportErrorKind::LocalState {
             return;
@@ -7594,6 +7599,12 @@ impl AppState {
             if !runtime_enabled {
                 return;
             }
+            // Only a counting failure times a bind retry, so only it takes the
+            // budget clock: here, under the lock already held, before the
+            // record's mutable borrow. The disabling branch below returns
+            // first, so this is exactly the counting branch.
+            let retry_clock = (!error.disables_session() && error.counts_for_circuit_breaker())
+                .then(|| inner.engram_budget_clock_snapshot());
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
@@ -7609,7 +7620,7 @@ impl AppState {
                 record.engram.drop_pending_source_root_lines();
                 return;
             }
-            if error.counts_for_circuit_breaker() {
+            if let Some(clock) = retry_clock {
                 record.engram.consecutive_transport_failures = record
                     .engram
                     .consecutive_transport_failures
@@ -7631,7 +7642,6 @@ impl AppState {
         error: &EngramTransportError,
         owner: Option<&EngramQueuedAdmissionOwner>,
     ) {
-        let clock = self.engram_budget_clock();
         // A late reply belongs to the captured queue head. It must not poison
         // a successor's circuit/backoff state after cancellation supersedes
         // that owner.
@@ -7653,6 +7663,10 @@ impl AppState {
         if !runtime_enabled {
             return;
         }
+        // As in record_engram_transport_failure: only a counting failure
+        // takes the budget clock, under this lock, before the record borrow.
+        let retry_clock = (!error.disables_session() && error.counts_for_circuit_breaker())
+            .then(|| inner.engram_budget_clock_snapshot());
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -7668,7 +7682,7 @@ impl AppState {
             record.engram.drop_pending_source_root_lines();
             return;
         }
-        if error.counts_for_circuit_breaker() {
+        if let Some(clock) = retry_clock {
             record.engram.consecutive_transport_failures = record
                 .engram
                 .consecutive_transport_failures

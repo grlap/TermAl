@@ -1396,7 +1396,6 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
-        let budget_clock = self.engram_budget_clock();
         // An explicit Send/Resume bypass is permission for the queue head
         // that existed when this drain began, not for a successor exposed by
         // cancellation while its authorization was off-lock. A retried
@@ -1593,11 +1592,14 @@ impl AppState {
                     .ok()
                     .flatten()
                     .map(|target| engram_abort_authority(&target));
+                    // The budget clock is read only where a bind retry is
+                    // actually due-checked, so a drain that never reaches this
+                    // check takes no clock.
                     if !engram_bind_retry_releases(&inner.sessions[index], authority.as_deref())
                         || inner.sessions[index]
                             .engram
                             .next_bind_retry_at
-                            .is_some_and(|at| at > budget_clock.now())
+                            .is_some_and(|at| at > inner.engram_budget_clock_snapshot().now())
                     {
                         return Ok(None);
                     }

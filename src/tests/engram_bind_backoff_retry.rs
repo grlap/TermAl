@@ -4,6 +4,9 @@
 
 use super::*;
 
+#[path = "engram_bind_retry_due_control.rs"]
+mod due_control;
+
 #[test]
 fn bind_real_settings_reset_settles_the_actual_caller_after_card_save() {
     bind_real_settings_reset_case(false, None, false);
