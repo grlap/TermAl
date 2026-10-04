@@ -35,7 +35,7 @@ export function testRunStatusLine(run: TestRunCardSnapshot) {
 }
 
 export function testRunUnknownText(run: TestRunCardSnapshot) {
-  return `${testRunUnknownLabel(run.unknownReason)}.${run.unknownReason === "processGone" || run.unknownReason === "noPid"
+  return `${testRunUnknownLabel(run.unknownReason)}.${run.unknownReason === "processGone"
     ? " Use the launcher's recover command to inspect whether this run can be settled."
     : " This is not a passing result."}`;
 }
@@ -57,7 +57,8 @@ export function testRunSearchText(run: TestRunCardSnapshot) {
 export function testRunUnknownLabel(reason: TestRunCardSnapshot["unknownReason"]) {
   switch (reason) {
     case "processGone": return "responsible process is gone";
-    case "noPid": return "no responsible process recorded";
+    case "noPid": return "executor not published; liveness uncertain";
+    case "heartbeatStale": return "heartbeat stale; executor not published, liveness uncertain";
     case "resultsUnreadable": return "results unreadable";
     case "notIndexed": return "run no longer indexed";
     default: return "terminal evidence is unknown";

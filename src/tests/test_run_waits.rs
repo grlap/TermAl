@@ -10,6 +10,9 @@
 
 use super::*;
 
+mod run_wait_evidence;
+mod heartbeat_evidence;
+
 struct WaitFixture {
     state: AppState,
     root: PathBuf,
