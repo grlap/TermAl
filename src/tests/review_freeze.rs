@@ -32,6 +32,46 @@ fn freeze_fixture_router(state: AppState, runner: FixtureFreezeRunner) -> Router
         .with_state(state)
 }
 
+/// A `child-temp` directory inside `state`'s own test temp root, for the
+/// fixture that is killed at once (src/tests/test_child_temp.rs).
+pub(super) fn freeze_fixture_child_temp(state: &AppState) -> PathBuf {
+    let child_temp = state
+        .test_temp_root
+        .as_ref()
+        .expect("test state should own a temp root")
+        .path()
+        .join("child-temp");
+    fs::create_dir_all(&child_temp).expect("the fixture's child temp should be created");
+    child_temp
+}
+
+/// The fixture the expired-deadline case runs: a process that would sleep a
+/// minute and is killed at once. PowerShell writes its startup policy probe
+/// to TEMP and deletes it moments later, so a kill in between leaves the
+/// probe behind; TEMP and TMP are therefore `child_temp`, inside the test's
+/// own temp root, never the shared run root.
+pub(super) fn freeze_deadline_fixture_command(child_temp: &FsPath) -> Command {
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep -Seconds 60",
+        ]);
+        command
+    };
+    #[cfg(unix)]
+    let mut command = {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 60"]);
+        command
+    };
+    command.env("TEMP", child_temp).env("TMP", child_temp);
+    command
+}
+
 fn freeze_fixture_output(expected: &str, exit: i32) -> Result<std::process::Output> {
     // A real bounded fixture process supplies status and distinct stdout/stderr.
     // It does NOT claim to be the compiled checker, covered by tests/review_freeze_cli.rs.
@@ -416,29 +456,14 @@ async fn review_freeze_http_transport_failures_are_not_observed_verifications() 
         let parent = test_session_id(&state, Agent::Codex);
         let (_, child) =
             super::delegation_support::install_required_review_delegation(&state, &parent);
+        let child_temp = freeze_fixture_child_temp(&state);
         let runner = Arc::new(move |_: &mut Command| {
             if failure == "output limit" {
                 // Exercise the production observer's 4096-byte bound with a
                 // real fixture process, not a fabricated transport error.
                 return freeze_fixture_output(&"a".repeat(4097), 0);
             }
-            #[cfg(windows)]
-            let mut command = {
-                let mut command = Command::new("powershell.exe");
-                command.args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    "Start-Sleep -Seconds 60",
-                ]);
-                command
-            };
-            #[cfg(unix)]
-            let mut command = {
-                let mut command = Command::new("sh");
-                command.args(["-c", "sleep 60"]);
-                command
-            };
+            let mut command = freeze_deadline_fixture_command(&child_temp);
             // Already expired: no timing race or long test sleep. The owned
             // child/group is killed by the same observer used in production.
             run_bounded_read_process(&mut command, std::time::Instant::now(), 4096, true)

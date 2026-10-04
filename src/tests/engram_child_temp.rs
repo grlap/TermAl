@@ -131,7 +131,7 @@ fn the_connection_environment_keeps_a_test_child_temp_inside_its_engram_home() {
 
 /// Makes `link` a directory link (a junction on Windows, a symlink elsewhere)
 /// to `target`.
-fn link_directory(link: &FsPath, target: &FsPath) {
+pub(super) fn link_directory(link: &FsPath, target: &FsPath) {
     #[cfg(windows)]
     {
         // A junction needs no symlink privilege; std has no API for one.

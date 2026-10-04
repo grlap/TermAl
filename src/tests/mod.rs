@@ -128,6 +128,7 @@ mod telegram_relay_lifecycle;
 mod telegram_settings;
 mod telegram_support;
 mod terminal;
+mod test_child_temp;
 mod test_run_cards;
 mod test_run_waits;
 mod test_runs;

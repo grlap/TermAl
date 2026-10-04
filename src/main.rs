@@ -769,6 +769,8 @@ include!("engram_readiness.rs");
 include!("engram_readiness_test_seam.rs");
 #[cfg(test)]
 include!("engram_test_child_temp.rs");
+#[cfg(test)]
+include!("terminal_test_child_temp.rs");
 include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
