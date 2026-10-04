@@ -1037,6 +1037,7 @@ impl TermalDelegationMcpBridge {
         if let Some(evidence) = arguments.get("criterionEvidence") {
             body.insert("criterionEvidence".to_owned(), evidence.clone());
         }
+        insert_optional_string(&mut body, "reuseDelegationId", arguments.get("reuseDelegationId"));
         let path = format!(
             "/api/sessions/{}/acceptance-evaluations",
             self.serving_session_id

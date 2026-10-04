@@ -554,6 +554,8 @@ fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
                 .expect("state mutex poisoned")
                 .engram_work_source_roots = current.clone();
             let target = DelegationAcceptanceEvaluation {
+                attempt_history: None,
+                selected_evidence: Vec::new(),
                 work_ref: "w-a".to_owned(),
                 mode: AcceptanceEvaluationMode::IndependentSession,
                 acceptance_basis: 1,

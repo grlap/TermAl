@@ -1090,6 +1090,8 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
     };
     let seed =
         |source_root: Option<AcceptanceEvaluationSourceRoot>| AcceptanceEvaluationTargetSeed {
+            reuse_identity: None,
+            selected_evidence: Vec::new(),
             work_ref: "w-task".to_owned(),
             mode: AcceptanceEvaluationMode::IndependentSession,
             acceptance_basis: 1,
@@ -1496,6 +1498,8 @@ fn acceptance_old_workdir_claim_is_refused_after_a_new_claim_names_and_clears() 
         );
         let target = &authority.target;
         let seed = AcceptanceEvaluationTargetSeed {
+            reuse_identity: None,
+            selected_evidence: Vec::new(),
             work_ref: target.work_ref.clone(),
             work_id: Some("01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned()),
             mode: target.mode,

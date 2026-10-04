@@ -12,6 +12,9 @@ mod selection_confirmation;
 #[path = "engram_named_root_sighting_live.rs"]
 mod sighting_live;
 
+#[path = "acceptance_evaluation_refresh_live.rs"]
+mod acceptance_refresh_live;
+
 struct CompletionFixture {
     live: LiveRootFixture,
     root: PathBuf,
