@@ -21,6 +21,11 @@ mod credit_outcomes {
     include!("engram_carried_credit_outcomes.rs");
 }
 
+// What overlaps a launch and how its refusal names it, a child module so
+// this file does not grow further.
+#[path = "engram_overlap_cause.rs"]
+mod overlap_cause;
+
 #[test]
 fn a_full_gate_launch_is_carried_dropped_or_ordinary_by_its_line_and_result() {
     use EngramLaunchDisposition::{Carry, Drop, Ordinary};

@@ -380,6 +380,23 @@ enum EngramWriterAct<'a> {
     Edit,
 }
 
+impl EngramWriterAct<'_> {
+    /// What the writer did, as the line about an overlapped check tells it.
+    /// A command's line is not told: it can carry a secret.
+    fn describe(&self) -> &'static str {
+        match self {
+            EngramWriterAct::Presence => {
+                "was in a turn (it started one, its named root became known or a command ended)"
+            }
+            EngramWriterAct::Command { .. } => "reported a command",
+            EngramWriterAct::UnreportedCommand => {
+                "ended a command whose start TermAl was not told"
+            }
+            EngramWriterAct::Edit => "reported an edit",
+        }
+    }
+}
+
 /// Fences the carried checks of every session but the one at `writer` for
 /// what that session did (`act`), where it may have written under them:
 /// - a command fences the carried checks in the worktrees it may write in
@@ -1386,8 +1403,9 @@ fn engram_carry_refusal(record: &SessionRecord, launched: &EngramTurnCheck) -> O
         return Some(format!(
             "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a background full gate (check {fingerprint}) will \
              earn no credit: another command or another writable session was active in its \
-             worktree when it launched. Launch it again on its own, two minutes or more after \
-             this launch."
+             worktree when it launched{}. Launch it again on its own, two minutes or more after \
+             this launch.",
+            engram_overlap_cause_suffix(launched.overlap_cause.as_deref())
         ));
     }
     None
