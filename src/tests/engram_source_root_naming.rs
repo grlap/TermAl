@@ -161,7 +161,11 @@ fn source_root_review_round_six_partial_sweeps_ignore_filtered_reads() {
 
 fn partial_root_reader_keeps_progress(interleave_filtered: bool) {
     let label = "partial-lifecycle-read";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    // Real time on purpose: the removed-root reads below take their deadline
+    // from TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK, a deterministic sample
+    // sequence that the reader consults only on the real clock (a scripted
+    // clock would bypass it and the deadline would never pass).
+    let mut claimed = ClaimedRoot::new_real(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     name_root(
         &claimed,
@@ -1569,7 +1573,7 @@ fn source_root_review_begin_readback_unknown(fail_read: bool) {
 #[test]
 fn source_root_waits_for_the_real_writer_before_transport_and_before_success() {
     let label = "binding-writer-fences";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     let (tx, rx) = std::sync::mpsc::channel();
@@ -1709,7 +1713,7 @@ fn receive_naming_authority_fence<T>(
 #[test]
 fn source_root_writer_failure_keeps_the_intent_and_sends_no_binding() {
     let label = "binding-writer-failure";
-    let mut claimed = ClaimedRoot::new(label, Vec::new());
+    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
     prepare_claimed_root_naming(&claimed, label);
     let (tx, rx) = std::sync::mpsc::channel();
