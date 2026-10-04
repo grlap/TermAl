@@ -109,6 +109,10 @@ index reads (see [test runs](features/test-runs.md)); `results.json` records
 actual process exits, explicit unrun stages, timestamps,
 and full log paths. Terminal JSON replacement is atomic for concurrent readers
 on the same filesystem; it is not a claim of power-loss or crash durability.
+On Windows a replacement cannot happen while a reader holds the file open, so
+it waits for the reader within a 2 s budget, retrying only the rename of the
+complete temporary file, and fails with the original error once the budget is
+spent.
 Diagnostic extraction is bounded and does not decide success. A missing
 terminal result is `UNKNOWN`, never a pass. Source/index drift before or during
 execution invalidates the run, and `execution.lock` prevents rerunning the same
@@ -329,6 +333,26 @@ tests](#which-stages-count-as-tests)), its input
 fingerprints before and after are present and agree, its terminal record is
 the one TermAl first read as terminal, the worktree's source is unchanged,
 and no write TermAl can observe reached the worktree before the run ended.
+A terminal carried run at a checkpoint whose binding names a different
+claim is refused immediately (`its claim is no longer the one this session
+holds`), even if its old root entry remains. An existing fence or changed
+root generation takes precedence. With no binding, or while the run is
+nonterminal, no claim mismatch is invented; existing fence, generation,
+conflict and six-hour expiry rules still apply. Credit requires the exact
+same claim.
+An enabled Current full-gate start without a binding or active grant retains
+only bounded diagnostic correlation. A matching detached/background result
+reports `it began without a binding to claimed work, so it was not carried`
+or `the turn has no active grant at its start, so it was not carried`, never
+verification. A known, unambiguous Git-worktree location and original start
+time protect a subsequent gate from borrowing that run; unknown locations
+produce only the line. Correlation uses the key, runtime and turn, so fresh
+identities can start independently. Diagnostic loss is reported once with
+the original fingerprint/time: `the pending-command tracking limit dropped
+that command's diagnostic tracking`, `its runtime or turn ended before its
+launch result; diagnostic tracking dropped`, or `its command at completion
+did not match its start`. These lines claim no launch outcome; disabled or
+non-Current observations gain no loss-reporting or cleanup authority.
 A failed run with a complete record is recorded as failed; a run that was
 stopped or interrupted, or whose launcher died without a result, is
 neither, and TermAl records nothing for it. While it runs, a command the

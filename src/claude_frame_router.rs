@@ -84,6 +84,11 @@ enum ClaudeControlStep {
     Request(ClaudeControlOrigin),
     /// A cancellation of an earlier request.
     Cancel(ClaudeControlOrigin),
+    /// A hook callback, answered by the runtime's hook responder
+    /// (`claude_compact_hook.rs`). It belongs to the process, not a turn.
+    HookCallback,
+    /// A cancellation of a hook callback this router routed.
+    HookCallbackCancel,
 }
 
 /// What a frame does to the replay prompt.
@@ -192,11 +197,15 @@ fn claude_frame_scope(message: &Value) -> ClaudeFrameScope {
 /// safety inside an open attempt: there the root parser decides, and it
 /// treats background-task frames as barriers (`handle_claude_event`), since a
 /// task notification can carry context into the running prompt.
-fn claude_frame_is_bookkeeping(message: &Value, echo_of_waiting: bool) -> bool {
+fn claude_frame_is_bookkeeping(
+    message: &Value,
+    echo_of_waiting: bool,
+    before_process_init: bool,
+) -> bool {
     match message.get("type").and_then(Value::as_str) {
         Some("command_lifecycle" | "rate_limit_event") => true,
         Some("system") => {
-            claude_system_event_is_effect_free(message)
+            claude_system_event_is_effect_free(message, before_process_init)
                 || matches!(
                     message.get("subtype").and_then(Value::as_str),
                     Some(
@@ -227,6 +236,14 @@ struct ClaudeFrameRouter {
     /// The prompt (its replay generation) whose automatic retries so far are
     /// counted, and their count.
     retries: Option<(String, u32)>,
+    /// The runtime reported its first `init`. A process's startup hooks come
+    /// before it; a SessionStart hook frame after it (a compaction's, or one
+    /// TermAl cannot place) is no startup bookkeeping. A later `init`, such
+    /// as the one a compaction repeats, does not reset it.
+    saw_process_init: bool,
+    /// Hook callback requests routed and not yet cancelled or echoed, so their
+    /// cancellation and the runtime's echo of their answer route as theirs.
+    hook_requests: HashSet<String>,
 }
 
 impl ClaudeFrameRouter {
@@ -242,6 +259,8 @@ impl ClaudeFrameRouter {
             parser_attempt: None,
             barrier_between_turns: false,
             retries: None,
+            saw_process_init: false,
+            hook_requests: HashSet::new(),
         }
     }
 
@@ -249,7 +268,31 @@ impl ClaudeFrameRouter {
     /// parser has seen no barrier since it opened for the current attempt.
     fn route(&mut self, message: &Value, parser_replay_safe: bool) -> ClaudeFramePlan {
         let frame_type = message.get("type").and_then(Value::as_str);
+        let request_id = message.get("request_id").and_then(Value::as_str);
         match frame_type {
+            Some("control_request") if claude_message_is_hook_callback(message) => {
+                return self.route_hook_callback(request_id);
+            }
+            Some("control_cancel_request")
+                if request_id.is_some_and(|id| self.hook_requests.contains(id)) =>
+            {
+                return self.route_hook_settled(request_id, true);
+            }
+            Some("control_response")
+                if message
+                    .pointer("/response/request_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| self.hook_requests.contains(id)) =>
+            {
+                // The runtime's echo of the host's own answer: it did nothing
+                // new.
+                return self.route_hook_settled(
+                    message
+                        .pointer("/response/request_id")
+                        .and_then(Value::as_str),
+                    false,
+                );
+            }
             Some("control_request") => return self.route_control(message, true),
             Some("control_cancel_request") => return self.route_control(message, false),
             _ => {}
@@ -301,8 +344,15 @@ impl ClaudeFrameRouter {
             );
         }
 
-        if between_turns && !claude_frame_is_bookkeeping(message, echo_of_waiting) {
+        if between_turns
+            && !claude_frame_is_bookkeeping(message, echo_of_waiting, !self.saw_process_init)
+        {
             self.barrier_between_turns = true;
+        }
+        if frame_type == Some("system")
+            && message.get("subtype").and_then(Value::as_str) == Some("init")
+        {
+            self.saw_process_init = true;
         }
         let lifecycle = frame_type == Some("command_lifecycle");
         let parser = match (self.prepare_opening(&observed), lifecycle) {
@@ -352,6 +402,56 @@ impl ClaudeFrameRouter {
             | ClaudeFrameOwnership::BecameUnresolved
             | ClaudeFrameOwnership::Unchanged => None,
         }
+    }
+
+    /// A hook callback: the process's, answered by the hook responder. It
+    /// observes no turn, so it opens and closes none, and it is never parsed.
+    /// It bars the attempt it reaches from replay, as every control request
+    /// does: its answer changes what the continuing model sees, and another
+    /// hook may do anything. Arriving while a written prompt waits outside
+    /// every turn, it bars that prompt's next attempt.
+    fn route_hook_callback(&mut self, request_id: Option<&str>) -> ClaudeFramePlan {
+        let ownership = lock_claude_turn_ownership(&self.ownership);
+        let between_turns = !ownership.turn_is_open() && ownership.prompt_is_waiting();
+        drop(ownership);
+        if between_turns {
+            self.barrier_between_turns = true;
+        }
+        if let Some(request_id) = request_id {
+            // At most a few are ever pending; bound what a runtime that never
+            // settles them can leave behind.
+            if self.hook_requests.len() >= CLAUDE_CONTROL_ORIGIN_LIMIT {
+                self.hook_requests.clear();
+            }
+            self.hook_requests.insert(request_id.to_owned());
+        }
+        let mut plan = ClaudeFramePlan::new(
+            ClaudeFrameScope::Process,
+            ClaudeFrameOwnership::Unchanged,
+            ClaudeParserStep::Skip,
+            ClaudeReplayStep::Block,
+        );
+        plan.control = Some(ClaudeControlStep::HookCallback);
+        plan
+    }
+
+    /// A hook callback's cancellation (`cancel`) or the runtime's echo of its
+    /// answer. Neither does anything new: no turn is observed, nothing is
+    /// parsed, and no barrier is set or cleared.
+    fn route_hook_settled(&mut self, request_id: Option<&str>, cancel: bool) -> ClaudeFramePlan {
+        if let Some(request_id) = request_id {
+            self.hook_requests.remove(request_id);
+        }
+        let mut plan = ClaudeFramePlan::new(
+            ClaudeFrameScope::Process,
+            ClaudeFrameOwnership::Unchanged,
+            ClaudeParserStep::Skip,
+            ClaudeReplayStep::Retain,
+        );
+        if cancel {
+            plan.control = Some(ClaudeControlStep::HookCallbackCancel);
+        }
+        plan
     }
 
     /// A control request (`request`) or cancellation: its origin is resolved

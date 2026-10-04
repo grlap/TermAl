@@ -410,6 +410,9 @@ fn restart_replays_cached_defer_then_resume_uses_a_fresh_evaluate_identity() {
     release_tx.send(()).unwrap();
     worker.join().unwrap().unwrap();
     *state.inner.lock().unwrap() = loaded;
+    // The restarted state starts on its default clock; it runs on a
+    // scripted one again, chosen before any target exists.
+    state.select_test_scripted_engram_budget_clock();
     state.install_control_test_transport(transport.clone());
     assert!(AppState::engram_session_requires_dispatch_card_locked(
         &state.inner.lock().unwrap(),
@@ -1515,6 +1518,9 @@ fn writer_backed_trimmed_unpromoted_admission_replays_after_restart() {
         release_tx.send(()).unwrap();
         worker.join().unwrap().unwrap();
         *state.inner.lock().unwrap() = loaded;
+        // The restarted state starts on its default clock; it runs on a
+        // scripted one again, chosen before any target exists.
+        state.select_test_scripted_engram_budget_clock();
         state.install_control_test_transport(blocking_transport);
 
         state.resume_session_queue(&session).unwrap();
@@ -1771,6 +1777,9 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
             &loaded, &session
         ));
         *state.inner.lock().unwrap() = loaded;
+        // The restarted state starts on its default clock; it runs on a
+        // scripted one again, chosen before any target exists.
+        state.select_test_scripted_engram_budget_clock();
         state.install_control_test_transport(transport.clone());
 
         state.resume_session_queue(&session).unwrap();
@@ -1898,6 +1907,9 @@ fn writer_backed_initial_explorer_admission_is_barriered_before_boot_settlement(
     }
 
     *state.inner.lock().unwrap() = loaded;
+    // The restarted state starts on its default clock; it runs on a
+    // scripted one again, chosen before any target exists.
+    state.select_test_scripted_engram_budget_clock();
     let retry_transport = ScriptedEngramControlTransport::new([
         status_reply("ready"),
         grant_reply("recovered-child-grant"),
@@ -1974,6 +1986,9 @@ fn writer_backed_begun_prehandoff_restart_never_resends_provider_prompt() {
         assert!(record.queued_prompts[0].promoted_message_index.is_some());
     }
     *state.inner.lock().unwrap() = loaded;
+    // The restarted state starts on its default clock; it runs on a
+    // scripted one again, chosen before any target exists.
+    state.select_test_scripted_engram_budget_clock();
     let recovery_transport = ScriptedEngramControlTransport::new([status_reply("ready")]);
     state.install_control_test_transport(recovery_transport.clone());
     state.resume_session_queue(&session).unwrap();

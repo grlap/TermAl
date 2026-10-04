@@ -129,11 +129,11 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
       <label>Default evaluator mode
         <ThemedCombobox id={`${controlId}-mode`} aria-label="Default evaluator mode" value={value.defaultMode ?? ""}
           disabled={busy || saving || !!attempt}
-          onChange={next => { const mode = modes.find(([mode]) => mode === next)?.[0]; if (mode !== "sub_agent") onChange({ ...value, defaultMode: mode }); }}
+          onChange={next => { const mode = modes.find(([mode]) => mode === next)?.[0]; onChange({ ...value, defaultMode: mode }); }}
           options={[{ value: "", label: "Auto — strongest admitted mode" }, ...modes.map(([mode, name]) => ({
             value: mode,
-            disabled: mode === "sub_agent" || (!!store && !store.modes.includes(mode)),
-            label: `${name}${mode === "sub_agent" ? " — not produced by this host yet" : store && !store.modes.includes(mode) ? " — not admitted by policy" : ""}`,
+            disabled: !!store && !store.modes.includes(mode),
+            label: `${name}${store && !store.modes.includes(mode) ? " — not admitted by policy" : ""}`,
           }))]} />
       </label>
       <label>Evaluator agent
@@ -165,7 +165,7 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
           onChange={basis => { if (basis === "asserted" || basis === "observed") setDraft({ ...draft, mechanicalBasis: basis }); }}
           options={[{ value: "asserted", label: "Asserted" }, { value: "observed", label: "Observed" }]} /></label>
         <label><input type="checkbox" checked={draft.requireSourceFreshness} onChange={e => setDraft({ ...draft, requireSourceFreshness: e.target.checked })} />Require source freshness</label>
-        <p>Sub-agent evaluations, observed build evidence and source fingerprints are not yet produced by this host. Requiring them can block completion until another capable host supplies them.</p>
+        <p>Observed build evidence and source fingerprints are not yet produced by this host. Requiring them can block completion until another capable host supplies them.</p>
       </fieldset>
       <button type="button" className="primary-button" disabled={busy || saving || !enabled || recoveryBlocked || (!attempt && !base)} onClick={() => void savePolicy()}>
         {saving ? "Saving policy…" : attempt ? "Retry identical policy change" : "Confirm policy change"}

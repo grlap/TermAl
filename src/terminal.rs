@@ -475,6 +475,12 @@ fn run_terminal_shell_command_with_timeout_and_stream(
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<TerminalCommandResponse, ApiError> {
     let (shell_label, mut child_command) = build_terminal_shell_command(command);
+    // Test-only: the shell's temporary files stay in its test root
+    // (src/terminal_test_child_temp.rs).
+    #[cfg(test)]
+    for (name, value) in terminal_test_child_temp_env(workdir) {
+        child_command.env(name, value);
+    }
     let started_at = std::time::Instant::now();
     #[cfg(windows)]
     let (process, process_tree) = {

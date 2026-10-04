@@ -280,6 +280,7 @@ mod visible_session_hydration_error_tests {
             message_count: 0,
             markers: Vec::new(),
             queue_paused: false,
+            source_tracking_recovery: false,
             queue_projection_hash: Some("remote-queue-projection".to_owned()),
             session_mutation_stamp: Some(7),
             parent_delegation_id: None,
@@ -660,6 +661,9 @@ impl AppState {
         // derives the projection from it so no code path can publish a
         // stale `queuePaused`, whichever site last flipped the latch.
         session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        session.source_tracking_recovery = if record.is_local_session() {
+            record.engram.source_observation_delete_requested
+        } else { record.session.source_tracking_recovery };
         session.queue_projection_hash = if record.is_local_session() {
             Some(Self::queue_projection_hash(record))
         } else {
@@ -775,6 +779,9 @@ impl AppState {
             // card even before targeted detail hydrates the prompt bodies.
             // Derived from record authority, like the full projection.
             queue_paused: record.orchestrator_auto_dispatch_blocked,
+            source_tracking_recovery: if record.is_local_session() {
+                record.engram.source_observation_delete_requested
+            } else { session.source_tracking_recovery },
             queue_projection_hash: if record.is_local_session() {
                 Some(Self::queue_projection_hash(record))
             } else {

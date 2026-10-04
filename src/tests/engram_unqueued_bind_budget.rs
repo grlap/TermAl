@@ -73,6 +73,9 @@ fn an_unqueued_rebind_spends_only_the_phases_its_worst_case_counts() {
     // is given, is one `engram_unqueued_bind_worst_case` counts.
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-unqueued-bind-worst-case");
+    // The timeouts below are budgets taken on the scripted clock, which no
+    // scheduling delay can shrink: each is compared with its bound as given.
+    select_scripted_engram_budget_clock_before_enable(&state);
     let root = state
         .test_temp_root
         .as_ref()

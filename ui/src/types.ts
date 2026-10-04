@@ -431,6 +431,8 @@ export type Session = {
    * Stop leaves behind; nothing starts until the user resumes the queue or
    * sends a new prompt. */
   queuePaused?: boolean;
+  /** Delete retained the original session; Resume recovers tracking only. */
+  sourceTrackingRecovery?: boolean;
   /** Opaque identity/disposition fingerprint for the authoritative queue. */
   queueProjectionHash?: string | null;
   sessionMutationStamp?: number | null;
@@ -550,6 +552,9 @@ export type AcceptanceEvaluationSubmission =
 export type DelegationAcceptanceEvaluation = {
   workRef: string;
   mode: AcceptanceEvaluationMode;
+  /** Immutable sub-agent identity pair; host bookkeeping, not read by the UI. */
+  parentSession?: string;
+  executionIdentity?: string;
   acceptanceBasis: number;
   evidenceBasis: number;
   criteriaCount: number;

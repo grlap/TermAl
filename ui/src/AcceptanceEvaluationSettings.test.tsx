@@ -46,6 +46,23 @@ it("does not read a disabled store and does not report unavailable policy as off
   expect(getAcceptancePolicy).not.toHaveBeenCalled();
 });
 
+it("reports admitted sub-agent capability and saves it as an evaluator default", async () => {
+  vi.mocked(getAcceptancePolicy).mockResolvedValue({ ...policy,
+    acceptanceEvaluation: { ...policy.acceptanceEvaluation, modes: ["sub_agent", "same_session"] },
+  });
+  setup();
+  await screen.findByText(/Required · Sub-agent, Same session/);
+  fireEvent.click(screen.getByRole("combobox", { name: "Default evaluator mode" }));
+  const option = screen.getByRole("option", { name: "Sub-agent" });
+  expect(option).toBeEnabled();
+  fireEvent.click(option);
+  fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
+  await waitFor(() => expect(saveEvaluatorDefaults).toHaveBeenCalledWith("project", { defaultMode: "sub_agent" }));
+  fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
+  expect(screen.queryByText(/Sub-agent evaluations.*not yet produced/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Observed build evidence and source fingerprints are not yet produced/)).toBeInTheDocument();
+});
+
 it("shows unknown policy and disables editing for an older binary", async () => {
   vi.mocked(getAcceptancePolicy).mockResolvedValue({ available: false, readerKey: "reader", error: "unsupported command" });
   setup();
@@ -214,8 +231,8 @@ it("binds model defaults to a concrete agent and enforces the UTF-8 byte limit",
   await screen.findByText("Off — completion is self-asserted.");
   expect(screen.getByLabelText("Evaluator model override")).toBeDisabled();
   fireEvent.click(screen.getByRole("combobox", { name: "Default evaluator mode" }));
-  expect(screen.getByRole("option", { name: /Sub-agent — not produced/ })).toBeDisabled();
-  fireEvent.click(screen.getByRole("option", { name: /Sub-agent — not produced/ }));
+  expect(screen.getByRole("option", { name: /Sub-agent — not admitted/ })).toBeDisabled();
+  fireEvent.click(screen.getByRole("option", { name: /Sub-agent — not admitted/ }));
   expect(screen.getByLabelText("Default evaluator mode")).toHaveTextContent("Auto — strongest admitted mode");
   fireEvent.keyDown(window, { key: "Escape" });
   fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));

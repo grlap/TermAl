@@ -220,6 +220,9 @@ fn write_claude_runtime_command(
         ClaudeRuntimeCommand::PermissionResponse(decision) => {
             write_claude_permission_response(writer, &decision)
         }
+        ClaudeRuntimeCommand::HookResponse(response) => {
+            write_claude_message(writer, &claude_hook_response_message(&response))
+        }
         ClaudeRuntimeCommand::SetModel(model) => write_claude_set_model(writer, &model),
         ClaudeRuntimeCommand::SetPermissionMode(mode) => {
             write_claude_set_permission_mode(writer, &mode)
@@ -306,9 +309,28 @@ fn apply_claude_writer_command(
             return true;
         }
     }
-    if let Err(err) =
-        write_claude_runtime_command(writer, &context.replay_prompt, &context.ownership, command)
-    {
+    // A hook answer is checked at the write boundary: a cancelled request is
+    // not written, and stale context is not either. Its context is delivered
+    // once it is written, and only then (`claude_compact_hook.rs`).
+    let command = match command {
+        ClaudeRuntimeCommand::HookResponse(response) => {
+            match claude_hook_response_to_write(context, response) {
+                Some(response) => ClaudeRuntimeCommand::HookResponse(response),
+                None => return true,
+            }
+        }
+        command => command,
+    };
+    let hook_write = match &command {
+        ClaudeRuntimeCommand::HookResponse(response) => Some(response.write_record()),
+        _ => None,
+    };
+    let result =
+        write_claude_runtime_command(writer, &context.replay_prompt, &context.ownership, command);
+    if let Some(hook_write) = hook_write {
+        finish_claude_hook_write(context, hook_write, result.is_ok());
+    }
+    if let Err(err) = result {
         let _ = context.state.handle_runtime_exit_if_matches(
             &context.session_id,
             &context.token,
@@ -594,6 +616,13 @@ fn spawn_claude_runtime(
 
     let (input_tx, input_rx) = mpsc::channel::<ClaudeRuntimeCommand>();
 
+    // Decided once, before initialize advertises it, from the Engram MCP
+    // configuration the caller resolved under its state lock (this function
+    // runs under that lock and takes none): the reader answers the hook the
+    // writer registers, and a later settings change does not add or remove it
+    // for this runtime (`claude_compact_hook.rs`).
+    let compact_hook = claude_compact_hook_for_runtime(engram_mcp, &runtime_id).map(Arc::new);
+
     let replay_prompt = Arc::new(Mutex::new(None));
     // Which turn each stdout frame belongs to, shared by the writer (which
     // reserves a prompt's owner before writing it) and the reader.
@@ -611,12 +640,17 @@ fn spawn_claude_runtime(
         let writer_replay_prompt = replay_prompt.clone();
         let writer_turn_ownership = turn_ownership.clone();
         let writer_cwd = cwd.clone();
+        let writer_compact_hook = compact_hook.clone();
         // The writer owns no sender of the command channel it receives on,
         // so its loop ends once the runtime handle and the reader are gone.
         std::thread::spawn(move || {
             let mut stdin = stdin;
-            if let Err(err) = write_claude_initialize(&mut stdin, &writer_state, &writer_session_id)
-            {
+            if let Err(err) = write_claude_initialize(
+                &mut stdin,
+                &writer_state,
+                &writer_session_id,
+                writer_compact_hook.as_deref(),
+            ) {
                 let _ = writer_state.handle_runtime_exit_if_matches(
                     &writer_session_id,
                     &writer_runtime_token,
@@ -632,7 +666,8 @@ fn spawn_claude_runtime(
                 writer_turn_ownership,
                 writer_replay_prompt,
                 writer_cwd,
-            );
+            )
+            .with_compact_hook(writer_compact_hook);
             run_claude_writer(&writer_context, &mut stdin, input_rx);
         });
     }
@@ -650,6 +685,7 @@ fn spawn_claude_runtime(
         // permission checker compares `cd` targets against it so a same-folder `cd`
         // (a no-op) does not trip the cd+git exec-sink guard.
         let reader_cwd = cwd.clone();
+        let reader_compact_hook = compact_hook.clone();
         // The private MCP configuration file is owned by the stdout reader: it
         // is released on the first valid line Claude prints (startup and
         // configuration parsing are complete by then) and, as the fallback,
@@ -665,7 +701,8 @@ fn spawn_claude_runtime(
                 reader_turn_ownership.clone(),
                 reader_replay_prompt.clone(),
                 reader_cwd.clone(),
-            );
+            )
+            .with_compact_hook(reader_compact_hook);
             let mut frames =
                 ClaudeReaderFrames::new(&context, reader_input_tx.clone(), model_options_tx);
             let mut recorder =
@@ -812,11 +849,21 @@ fn claude_event_marks_engram_context_nudge(message: &Value) -> bool {
         && message.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
 }
 
-/// Writes Claude initialize.
+/// Claude Code 2.1.288 reports `status: compacting` when a compaction starts,
+/// before its SessionStart compact hook and its compact_boundary.
+fn claude_event_starts_compaction(message: &Value) -> bool {
+    message.get("type").and_then(Value::as_str) == Some("system")
+        && message.get("subtype").and_then(Value::as_str) == Some("status")
+        && message.get("status").and_then(Value::as_str) == Some("compacting")
+}
+
+/// Writes Claude initialize, with the runtime's SessionStart compact hook
+/// when it registers one.
 fn write_claude_initialize(
     writer: &mut impl Write,
     state: &AppState,
     session_id: &str,
+    compact_hook: Option<&ClaudeCompactHook>,
 ) -> Result<()> {
     let guidance = termal_root_mailbox_guidance(state, session_id).unwrap_or_default();
     write_claude_message(
@@ -826,7 +873,7 @@ fn write_claude_initialize(
             "type": "control_request",
             "request": {
                 "subtype": "initialize",
-                "hooks": {},
+                "hooks": claude_initialize_hooks(compact_hook),
                 "systemPrompt": "",
                 "appendSystemPrompt": guidance,
             }

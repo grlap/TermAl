@@ -258,6 +258,9 @@ fn validate_delegation_followup_child_locked(
         ApiError::conflict("delegation child session no longer exists and cannot be resumed")
     })?;
     let record = &inner.sessions[index];
+    if record.engram.source_observation_delete_requested {
+        return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
+    }
     if record.engram_boot_recovery_pending {
         return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
     }
@@ -497,6 +500,9 @@ impl AppState {
                 .find_visible_session_index(&parent_session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let parent_record = &inner.sessions[parent_index];
+            if parent_record.engram.source_observation_delete_requested {
+                return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
+            }
             let parent = &parent_record.session;
             let parent_remote_identity = parent_record.remote_proxy_identity().map_err(|err| {
                 ApiError::internal(format!("invalid parent session proxy: {err:#}"))
@@ -633,9 +639,12 @@ impl AppState {
         let _ = self.agent_readiness_snapshot();
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        inner
+        let parent_index = inner
             .find_visible_session_index(&parent_session_id)
             .ok_or_else(ApiError::local_session_missing)?;
+        if inner.sessions[parent_index].engram.source_observation_delete_requested {
+            return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
+        }
         if active_delegation_count_for_parent(&inner, &parent_session_id)
             >= MAX_RUNNING_DELEGATIONS_PER_PARENT
         {
@@ -653,7 +662,9 @@ impl AppState {
         if let Some(seed) = evaluation.as_ref() {
             acceptance_evaluation_spawn_admission_locked(&inner, &parent_session_id, seed)?;
         }
-        let prompt = evaluation.as_ref().filter(|s| s.reuse_identity.is_some()).map(|seed| {
+        let prompt = evaluation.as_ref().filter(|s| {
+            s.mode == AcceptanceEvaluationMode::IndependentSession && s.reuse_identity.is_some()
+        }).map(|seed| {
             acceptance_evaluation_attempt_prompt(prompt, &acceptance_evaluation_ordinal_key(&delegation_id, 1), 1, None, seed)
         }).unwrap_or_else(|| prompt.to_owned());
         if prompt.len() > MAX_DELEGATION_PROMPT_BYTES {
@@ -684,13 +695,16 @@ impl AppState {
             &self.server_instance_id,
             &inner.sessions[child_index],
         );
-        let evaluation = evaluation.map(|seed| {
-            let identity = seed.reuse_identity.clone();
+        // Identity is captured under the same lock that creates the actual
+        // child and its delegation. It is not part of the request seed.
+        let acceptance_evaluation = evaluation.map(|seed| {
+            let identity = (seed.mode == AcceptanceEvaluationMode::IndependentSession)
+                .then(|| seed.reuse_identity.clone()).flatten();
             let mut target = seed.into_target(if identity.is_some() {
                 acceptance_evaluation_ordinal_key(&delegation_id, 1)
             } else {
                 delegation_id.clone()
-            });
+            }, &parent_session_id);
             target.attempt_history = identity.map(|identity| AcceptanceEvaluationAttemptHistory {
                 schema_version: 1,
                 parent_session_id: parent_session_id.clone(),
@@ -733,7 +747,7 @@ impl AppState {
             } else {
                 0
             },
-            acceptance_evaluation: evaluation,
+            acceptance_evaluation,
             attempt: DelegationAttemptState::default(),
         };
         let delegation_index = inner.delegations.len();
@@ -2325,6 +2339,19 @@ impl AppState {
         {
             return TurnDispatchDeliveryOutcome::Rejected(error);
         }
+        // A test can hold the child here, after its best-effort bind and
+        // before its admission, as a late-scheduled thread would be.
+        #[cfg(test)]
+        {
+            let stall = self
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .test_delegation_child_admission_stall;
+            if let Some(stall) = stall {
+                std::thread::sleep(stall);
+            }
+        }
         // The initial delegation prompt is host-authored. Requester messages
         // still enter through dispatch_turn and its evaluator-taint guard.
         let dispatch = match self.dispatch_turn_with_followup(
@@ -3683,6 +3710,11 @@ fn reconcile_delegations_for_removed_session_locked(
     inner: &mut StateInner,
     removed_session_id: &str,
 ) -> RemovedSessionDelegationReconciliation {
+    if inner.defer_source_observation_removal(removed_session_id) {
+        return RemovedSessionDelegationReconciliation {
+            lifecycle_deltas: Vec::new(), runtimes_to_kill: Vec::new(), codex_thread_ids_to_ignore: Vec::new(),
+        };
+    }
     let mut child_session_ids_to_remove = Vec::<String>::new();
     let mut pending_parent_session_ids = vec![removed_session_id.to_owned()];
     while let Some(parent_session_id) = pending_parent_session_ids.pop() {
@@ -3929,6 +3961,9 @@ fn remove_delegation_child_session_locked(
     inner: &mut StateInner,
     child_session_id: &str,
 ) -> RemovedDelegationChildSession {
+    if inner.defer_source_observation_removal(child_session_id) {
+        return RemovedDelegationChildSession::default();
+    }
     let Some(child_index) = inner.find_session_index(child_session_id) else {
         return RemovedDelegationChildSession::default();
     };

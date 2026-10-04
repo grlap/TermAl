@@ -1,6 +1,7 @@
 // Registered run waits, independent of run ownership and notification targets.
 // Pure projection only: no polling, transcript entries, or inferred waits.
 import type { TestRunSummary } from "./test-runs";
+import { testRunUnknownLabel } from "./test-run-card";
 
 export interface TestRunWaitRecord {
   id: string;
@@ -39,7 +40,10 @@ export function testRunWaitPrompt(waits: readonly TestRunWaitRecord[], runs: rea
       // Omit duration for stable announcements and when the live entry is absent.
       const end = now === undefined || !live ? NaN : live.endedAt ? Date.parse(live.endedAt) : now;
       const seconds = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.floor((end - start) / 1000)) : null;
-      return `${id} (${live?.preset ?? saved?.preset ?? "run"}${live ? `, ${live.state}${live.currentStage ? `, stage ${live.currentStage}` : ""}` : ", not indexed"}${seconds === null ? "" : `, ${Math.floor(seconds / 60)}m${seconds % 60}s`})`;
+      const uncertainty = live?.state === "unknown"
+        ? `, ${testRunUnknownLabel(live.unknownReason)}${live.unknownReason === "noPid" || live.unknownReason === "heartbeatStale" ? ", wait remains pending" : ""}`
+        : "";
+      return `${id} (${live?.preset ?? saved?.preset ?? "run"}${live ? `, ${live.state}${uncertainty}${live.currentStage ? `, stage ${live.currentStage}` : ""}` : ", not indexed"}${seconds === null ? "" : `, ${Math.floor(seconds / 60)}m${seconds % 60}s`})`;
     });
     return `Waiting for ${wait.mode === "all" ? "all test runs" : "any test run"}: ${labels.join(", ")}${wait.title ? ` — ${wait.title}` : ""}`;
   }).join("; ");

@@ -263,7 +263,8 @@ MCP; host orientation does not replace that read.
 This protects the delivery cursor, not the completeness of recovery: the host
 prepares the nudge at the next TermAl prompt dispatch, not synchronously at the
 compaction boundary. It does not guarantee an Engram block before the model's
-first action in an automatically continued post-compaction turn.
+first action in an automatically continued post-compaction turn. For Claude,
+the SessionStart compact hook below closes that gap where it can.
 
 The command receives the same `ENGRAM_*` environment values as the MCP child,
 and its actor/context flags are byte-identical to that environment. Its trimmed
@@ -292,6 +293,76 @@ bytes each; missing, oversized, or evicted ids may signal again. Deduplication i
 best effort and is not the mechanism that protects ordinary delivery. Configuration
 changes retain their separate invalidation behavior. These rules preserve host
 handoff; they do not prove that a model read or obeyed the delivered context.
+
+### Claude: the SessionStart compact hook
+
+Claude Code runs SessionStart hooks with source `compact` while it compacts,
+and attaches a hook's `additionalContext` to the first continuation after the
+compaction. TermAl registers one such hook as a control-channel callback in the
+initialize request of a Claude runtime whose session is Engram-configured at
+spawn, exactly when the runtime also gets the Engram MCP server: base-enabled,
+local, declared, with a binary and a home (`src/claude_compact_hook.rs`). Before this, initialize sent `hooks: {}`
+and the host left any `hook_callback` control request unanswered; the earlier
+note that the host already handled hook control events was wrong for callbacks.
+
+- **Snapshot.** Registration is decided once, before initialize is written,
+  and the runtime's responder is installed with it. Enabling Engram later adds
+  no hook to a running runtime: no second initialize, no restart. That session
+  keeps the next-prompt nudge until its runtime is next created.
+- **Answer.** Live Claude Code 2.1.288 sends the callback during status
+  `compacting`, before `compact_boundary`, and compaction waits for the answer.
+  A callback naming this runtime's callback id, SessionStart and source
+  `compact` asks for a fresh context for this compaction. The same bounded
+  `work next --peek` read as the nudge then runs on a worker, off the state lock
+  and off the stdout reader. The answer goes through the runtime's one writer:
+  the fenced context as `hookSpecificOutput.additionalContext`, or an empty
+  answer when there is none (not applicable, a failed read, a settings change
+  meanwhile, or no context ready within the answer budget). The budget is the
+  context command's timeout plus four seconds. The hook is registered with a
+  timeout 20 seconds longer, so the host's empty answer comes before Claude Code
+  would cancel. A page fetched before the compaction and not yet sent is dropped,
+  and the answer is read afresh under the compaction's new generation.
+- **Correlation.** When the callback arrives the host records the compaction's
+  refresh request and takes a ticket: the generation the compaction's own read
+  claims and the session's Engram settings identity (project, its settings,
+  the actor). The answer is only the page the hook's own read fetched for that
+  generation. The hook does not wait for another read or reuse a page it did not
+  fetch, and it does not read again when the generation moves on during its read.
+  Each of those cases, and a changed settings identity, gives the empty answer;
+  any page fetched meanwhile stays for the next prompt. The answer budget runs
+  from the callback's arrival to the end of the write: context still queued
+  past it is written as the empty answer, and context whose write ends after it
+  is not delivered.
+- **One answer.** One pending owner per request takes the answer: the worker's
+  result, the budget's empty answer, or Claude Code's `control_cancel_request`,
+  after which nothing is written. A cancel that lands while the answer is being
+  written lets the write finish but delivers nothing. An answer for a runtime
+  that is no longer the session's is dropped. A duplicate callback is answered
+  once. Any other
+  well-formed callback gets an empty hook answer, never a permission decision;
+  one with no callback id or input gets an error answer. The runtime's echo of
+  the host's answer on stdout is not a new frame.
+- **Delivery and fallback.** The page counts as delivered only once the writer
+  has finished writing the answer, in time and uncancelled, for that
+  still-current runtime, generation and settings identity; then the next
+  prompt carries no second block. Otherwise the page, or the request for one,
+  stays pending and the next prompt carries it as before. A registered
+  callback always asks for a fresh context itself, even after a compaction
+  that ended without its boundary. The `compact_boundary` that follows it does
+  not ask again; a boundary with no callback before it asks as before.
+- **Replay.** The callback is a replay barrier for the attempt it reaches. If
+  it arrives while a written prompt waits between turns, that prompt's next
+  attempt inherits the barrier. It observes no turn, so it opens and closes
+  none. SessionStart hook frames (`hook_started`, `hook_progress`,
+  `hook_response`) are startup bookkeeping only before the runtime's first
+  `init`. After it, including after the `init` a compaction repeats, they are
+  barriers like any other hook (Claude replay safety in
+  [architecture](../architecture.md)).
+
+A written answer is local delivery to the runtime; it is not proof that the
+model used the context. That is judged on a live compaction by the
+`hook_additional_context` attachment on the post-compaction transcript chain,
+not by the model's own report.
 
 For a **new Codex thread** with Engram enabled, TermAl also reads the effective
 configuration through the same app-server's `config/read`, using the thread's
@@ -972,7 +1043,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
   that claim, so a new claim on the same work does not inherit an old tree;
   the claim's fence is recorded but not matched, so a renewal keeps the
   root. At most 64 entries are kept, and a full list refuses a new name,
-  naming the entries, rather than evict one.
+  naming retained entries and whether a bounded reclamation pass was scheduled,
+  rather than evicting one or promising a slot or successful retry.
 - **When it takes effect.** At the session's next admission: the turn
   running when the name is given keeps the root it began with, and its tests
   and basis are not moved.
@@ -1194,28 +1266,59 @@ happens elsewhere. The agent therefore names the item's worktree once with
   discovering its store later cannot upgrade that turn. Unbound sessions
   remain valid without claimed source provenance.
 - **Freeing a local slot.** TermAl retains at most 64 named source-root
-  selections. A holder can explicitly clear its claim's name; removing the
-  session that named an entry also removes that local selection while retaining
-  unresolved remote history. Fresh authoritative readback of the same claim removes an obsolete
-  selection. Changing focus does not reclaim an active selection; the bounded
-  reader handles retained claims whose naming session was removed. A full list names
-  the retained entries and these supported actions; it never infers release
-  from the absence of a holder. Removing a local selection does not itself
-  confirm a pending binding or cleanup event. When no supported read can
-  establish an old claim's lifecycle, its state remains unknown for reclamation;
-  the host refuses a new allocation before sending any binding event. The
-  host consumes `named_root_read` for known retired claim/run identities within
-  a bounded maintenance or admission budget. A same-store live connection can
-  resolve a removed naming session without focusing its historical claim.
-  A covering, consistent completed/ended or released response removes the
-  local-removal guard; a still-bound root, unsupported reader, failed or stale
-  read, and uncertain persistence retain it. Exact local state and connection
-  are revalidated after transport. Each store's sweep resumes after the last
-  claim actually attempted, even if that read consumes the deadline; a
-  requested-claim read does not change the sweep cursor. Pending attempts and orphan reconciliation
-  remain protected independently. The reader does not fabricate an end or a
-  receipt, and does not infer release from a missing held-claims row. Broader
-  reclamation of the 64-selection list remains a separate integration.
+  selections globally, across stores. A holder can explicitly clear its live
+  claim's name through the existing `ended` producer event. Without a live
+  claim, only the original naming session may omit `path` to synchronously
+  retire its exact obsolete entry. That host-side retirement creates no
+  producer event: another same-store reader supplies read authority, never
+  ownership. A live, unknown or concurrently replaced entry is refused and
+  retained; no holder is invented from a missing held-claims row.
+  Removing a naming session retains unresolved remote history under the
+  existing orphan-recovery path. Directory deletion is never proof that an
+  old claim ended and reclamation never deletes a directory or its contents.
+  The current-binding missing-directory path still queues `root_invalid` and
+  settles it through its existing acknowledged producer-event owner.
+  Failed flushes keep the exact intent for retry, not a second reclamation owner.
+
+  The unconditional host test-run tick schedules off-lock reclamation without
+  an agent prompt or provider dispatch. One flight runs at a time, with at most
+  eight canonical reads and a shared two-second budget. It rotates stores,
+  picks oldest eligible entries per store, and cools retained or failed entries
+  for thirty seconds so an unknown oldest entry cannot starve later work.
+  Idle current bindings use their existing recovery owner; active owners are
+  left alone. A matching local binding is a current owner only while its
+  session has a routing token for the exact store. A stale tokenless or
+  wrong-store binding does not block another eligible reader; it is not itself
+  lifecycle-end proof. The same owner check runs after the read, so authority
+  restored during an unfocused read retains the entry for its current owner.
+  A full-table new-name request does not synchronously sweep the
+  table: it promptly reports actual scheduling and retained reasons, without
+  promising capacity or retry success. A later naming request must observe
+  capacity that has actually been released.
+
+  A retained journal's exact original run/claim association supplies the
+  `named_root_read` identity even after the naming session changes focus. Its
+  still-authorized same-store connection is preferred; another currently bound
+  same-store reader can read without adopting that focus. Only classified,
+  canonically validated authority can retire an entry: completed/cancelled run,
+  definitive unbound/release, or a Bound root whose remote generation is at least
+  the local one and whose workspace, generation or naming instant differs.
+  Older or mismatched proof, missing association/reader, disabled or unreachable
+  stores and unknown states retain it. Handoff, recovery, lease loss or a passed
+  evaluation on a not-yet-completed run are not lifecycle-end proof.
+
+  Exact selection, journal, reader authority and current-owner route are
+  revalidated around the read. Pending Bound, Ended and RootInvalid intents stay
+  with their existing owner. The existing complete-image publication boundary
+  commits retirement and its informational notice together; an unacknowledged
+  image still reserves capacity, and restart retries that same obligation.
+  Required receipts and naming history survive compaction. The notice names
+  store, work, root, generation, canonical reason and read cut and is logged
+  only after publication. It remains visible to the naming session after focus
+  changes and restart, is consumed once after an accepted provider handoff, and
+  neither asks it to re-name nor forces a control or provider wake. This is
+  distinct from current-claim SelectionLoss instructions, whose existing
+  suppression and acknowledgement rules remain unchanged.
 - **Sighting provenance.** Source bases carry `source_root_generation` and
   `source_root_state` together (`named` or `ended`), including sightings in the
   ordinary workdir after an end. A capture retains its workspace identity;
@@ -1764,6 +1867,33 @@ its launch (`src/engram_carried_checks.rs`).
   watcher sees in the worktree while a full gate is being launched fences it
   once it is carried. A session carries at most four; a fifth drops the
   oldest, whose holder is told.
+- **Missing launch authority.** An enabled session's Current observation of
+  a recognised full-gate start without a work binding or active grant retains
+  only a bounded, memory-only diagnostic, not a check, source snapshot or
+  verification. A matching background or successful detached completion says
+  `it began without a binding to claimed work, so it was not carried` or
+  `the turn has no active grant at its start, so it was not carried`.
+  A failed or compound launch keeps its actual drop reason. The diagnostic
+  observes the one-call directory, or all reported/presumed directories,
+  independently of credit eligibility. Only known directories agreeing on
+  one exact Git worktree keep a root; unknown, network, outside-Git or
+  disagreeing locations keep none. A known root and the original start time
+  protect later launches from borrowing the unmatched run, including in a
+  linked worktree; an unknown root produces the line only. These observations
+  never create claim or source authority.
+  Starts and completions correlate by key, runtime token and turn generation.
+  A duplicate with that full identity refreshes nothing, even if authority
+  later returns. An enabled Current start/finish scan retires stale identities
+  once, reporting `its runtime or turn ended before its launch result;
+  diagnostic tracking dropped`. An eligible matched completion with a
+  different parsed command reports `its command at completion did not match
+  its start`. At the bounded pending-command cap, oldest-first eviction says
+  `the pending-command tracking limit dropped that command's diagnostic
+  tracking`. These loss lines name the original command fingerprint and
+  start time, not a fabricated launch outcome. Disabled or non-Current
+  observations cannot emit these loss notices or gain cleanup authority;
+  an exact disabled completion remains silent. Diagnostics are not persisted
+  across restarts.
 - **The fence.** From its launch until the host reads its run as ended,
   whatever the host sees that may have written in its worktree refuses it,
   and the refusal names what that was: a command another writable session
@@ -1900,10 +2030,15 @@ its launch (`src/engram_carried_checks.rs`).
   record lacks an input fingerprint from before or after its stages (one
   that ended before the launcher measured its input), a launch whose run was
   not found within ten minutes, one whose claim was released or whose root
-  was renamed or cleared, and one six hours after its launch whose run has
-  not ended, or has ended but was never settled because the holder's
-  checkpoints since were on another claim or source root; the holder is told
-  which. Every line about a check's credit is logged as it is set. Those
+  was renamed or cleared. A terminal carry at a checkpoint with a present
+  different claim is refused then: `its claim is no longer the one this
+  session holds`, even when the old root entry remains. Existing fences and
+  root-generation changes take precedence over that reason. An absent
+  binding or nonterminal run does not invent a claim mismatch: it stays
+  subject to the existing fence, generation, conflict and expiry rules.
+  A carry still unsettled six hours after its launch is refused by expiry.
+  Credit always requires the exact same claim. The holder is told which
+  reason applies. Every line about a check's credit is logged as it is set. Those
   that wait for the same prompt are merged into one, so they seldom push out
   a line about the session's source root; past 1,600 bytes the merge keeps
   the newest and cuts the front, saying so. A line a prompt in flight
@@ -2225,7 +2360,11 @@ for want of evaluator authority.
    or unknown, else the host's next preference among the admitted modes,
    `sub_agent` then `same_session`. The order is the host's, not the order in
    which the policy lists them. A pin the policy does not admit is refused
-   naming both.
+   naming both. For an unpinned task whose known policy admits `sub_agent` but
+   not `independent_session`, a saved `same_session` preference is ignored:
+   the request selects `sub_agent`, never silently falls back to same-session.
+   An explicitly admitted task pin still wins, including `same_session`;
+   other admitted sets retain their default-selection behavior.
 
 **Evidence by criterion.** A requester can supply explicit associations such as
 `"criterionEvidence": [{"criterion": 1, "locators": ["FULL_RECORD_ID"]}]`.
@@ -2248,6 +2387,14 @@ basis again, then inspects the canonical identity again. Both must agree with
 the opening bracket, even if a replacement run has the same numeric evidence
 cut. Supplied identity fields are checked; omitted projection IDs are supported.
 The existing store and control connection/token are also revalidated locally.
+
+For `sub_agent`, the requester must be the run's holder or executor. Preflight
+uses the requester's held-claim read and the executor from that same validated
+closing `work core inspect`, not the opening read or a local executor mirror.
+A requester known to be neither is refused with `409` before a child is
+spawned. An absent or null executor is unknown and leaves the final standing
+decision to Engram; malformed executor data or a failed read is an error,
+not permission to proceed.
 
 Receipts are decoded by the operation that requested them. An ordinary notes
 continuation carries `work.short_ref` and its notes window, without the initial
@@ -2300,17 +2447,28 @@ index detail can shrink before complete criteria are refused; each clipped or
 omitted body remains in `evidenceOmissions`. Captured notes-window omission
 counts still describe that window and can overlap separately selected records.
 
-`independent_session` spawns an evaluator delegation and returns the ordinary
-creation response plus `mode` and `workRef`; the parent waits with
+`independent_session` and `sub_agent` spawn an evaluator delegation and return
+the ordinary creation response plus `mode` and `workRef`; the parent waits with
 `termal_resume_after_delegations`. `same_session` spawns nothing and returns
 `{ mode, workRef, acceptanceBasis, evidenceBasis, sourceFingerprint?, brief }`,
 where the brief tells the caller to record the evaluation with its own tracker
 tool, including the `source_fingerprint` when there is one.
-`sub_agent` returns `501`.
 
-**Declared source fingerprint.** After the reads, and only for the two modes
-that use it (never for `sub_agent`), the host takes the
-[content revision](#content-revision) of the worktree the evaluator reads:
+A `sub_agent` target captures immutable `parentSession` and `executionIdentity`
+under the child-creation lock, from the actual parent session and delegation
+identity. The distinct read-only child submits under its own session id;
+the CLI receives the stored pair as `--parent-session` and
+`--execution-identity`, never the caller's assertions. Submit authority and
+the tool capability both refuse a legacy target without the pair, a pair
+that mismatches its parent/delegation, or stray sub-agent metadata on another
+mode. The pair survives persistence and is never reconstructed from the
+current parent. A definitive producer refusal is final for that send, not
+an unknown outcome or a reason to try same-session; an uncertain send keeps
+the original argument list for identical replay.
+
+**Declared source fingerprint.** After the reads, for all three modes,
+the host takes the [content revision](#content-revision) of the worktree the
+evaluator reads:
 the work's named [source root](#source-root) when the requesting session is
 holding the claim that named it (the evaluator child then runs there), else
 the parent's worktree (it runs in the parent's workdir). The host resolves
@@ -2847,8 +3005,10 @@ an unavailable or older binary is **unknown**, not off. Evaluator defaults are
 stored separately in `engram.acceptanceEvaluation`: `defaultMode`, `evaluatorAgent`
 (Claude or Codex), and `evaluatorModel`. Saving defaults does not audit the store,
 reset sessions, or change policy. Task pins win; a default mode is used only when
-the current policy explicitly admits it. Unsupported `sub_agent` defaults are
-rejected server-side; defaults require an existing Engram configuration and do
+the current policy explicitly admits it, except that an unpinned sub-agent-only
+or sub-agent-plus-same-session policy cannot use a saved same-session preference
+to bypass the child producer. `sub_agent` is produced and can be saved as a
+default. Defaults require an existing Engram configuration and do
 not turn an unconfigured project into an operator veto. Explicit request agent/model win over
 project defaults. With no agent preference, choose the other Claude/Codex vendor
 when its readiness check is ready. A request-provided `model` requires an explicit
@@ -2872,7 +3032,9 @@ unlock a newer project's in-flight operation.
 
 The project picker and acceptance-setting dropdowns use the shared themed
 combobox, matching the session-list menus on Windows as well as other platforms.
-Unsupported evaluator modes remain visible but disabled.
+Modes not admitted by the current policy remain visible but disabled;
+an admitted `sub_agent` option is enabled. Settings and readiness report it
+as produced, without the former unsupported-mode warning.
 
 Changing store policy is a separate operator action, submitted with the
 "Confirm policy change" button; no additional confirmation checkbox is required.
@@ -2940,8 +3102,8 @@ count independently of the child transcript. Completion without a submission
 is not a pass; pending/unconfirmed writes remain unknown. A recorded value still
 waiting on its persistence acknowledgement is shown as submission in progress.
 
-Not delivered yet: `sub_agent` mode with a host-attested parent and execution
-identity; a source fingerprint at evaluation and completion; observed build
+Not delivered yet: supplying the evaluated source fingerprint at completion
+for `require_source_freshness`; observed build
 evidence through the control checkpoint; and Work-panel evaluation actions.
 
 ## Premium boot recovery and lazy retry

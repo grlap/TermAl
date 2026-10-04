@@ -26,10 +26,13 @@ struct BindingRoot {
 type ScriptedBindingRead =
     std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError>;
 
-/// A root session with Engram enabled and no transport installed yet.
+/// A root session with Engram enabled and no transport installed yet, on the
+/// shared scripted budget clock, chosen before Engram is enabled: these tests
+/// assert bindings and refusals, never a budget's expiry.
 fn binding_root_state(label: &str) -> (AppState, String, mpsc::Receiver<CodexRuntimeCommand>) {
     let (state, receiver) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-binding-refresh-{label}"));
+    select_scripted_engram_budget_clock_before_enable(&state);
     let root = state
         .test_temp_root
         .as_ref()

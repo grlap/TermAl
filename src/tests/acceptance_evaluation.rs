@@ -31,6 +31,9 @@ mod authority_budget;
 #[path = "acceptance_evaluation_refresh.rs"]
 mod refresh;
 
+#[path = "acceptance_evaluation_sub_agent.rs"]
+mod sub_agent;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 /// These request/submission fixtures begin after a canonical no-event read
@@ -99,6 +102,8 @@ fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAc
         selected_evidence: Vec::new(),
         work_ref: "w-task".to_owned(),
         mode: AcceptanceEvaluationMode::IndependentSession,
+        parent_session: None,
+        execution_identity: None,
         acceptance_basis: 7,
         evidence_basis: 42,
         criteria_count,
@@ -2339,7 +2344,7 @@ fn acceptance_project_defaults_are_used_only_when_admitted_and_never_override_ta
         serde_json::to_value(response).unwrap()["mode"],
         "same_session"
     );
-    // A pinned unsupported mode is refused, never silently changed to the default.
+    // A pinned unadmitted mode is refused, never changed to the default.
     let error = state
         .request_acceptance_evaluation_with_runner(
             &parent,
@@ -2347,12 +2352,12 @@ fn acceptance_project_defaults_are_used_only_when_admitted_and_never_override_ta
             fixture_reader(
                 Arc::default(),
                 show_receipt(Some("sub_agent")),
-                Ok(policy_receipt(Some(&["same_session", "sub_agent"]))),
+                Ok(policy_receipt(Some(&["same_session"]))),
             ),
         )
         .err()
-        .expect("pinned unsupported mode must fail");
-    assert_eq!(error.status, StatusCode::NOT_IMPLEMENTED);
+        .expect("pinned unadmitted mode must fail");
+    assert_eq!(error.status, StatusCode::CONFLICT);
     state
         .update_acceptance_defaults(
             &project,
@@ -2524,7 +2529,7 @@ fn acceptance_request_applies_request_defaults_and_real_provider_precedence() {
                 .as_mut()
                 .unwrap()
                 .acceptance_evaluation = Some(AcceptanceEvaluatorDefaults {
-                // Old persisted unsupported defaults are ignored.
+                // A persisted admitted sub-agent preference selects a child.
                 default_mode: Some(AcceptanceEvaluationMode::SubAgent),
                 evaluator_agent: default_agent,
                 evaluator_model: default_model.map(str::to_owned),
@@ -2554,9 +2559,12 @@ fn acceptance_request_applies_request_defaults_and_real_provider_precedence() {
                 ),
             )
             .unwrap();
-        let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
+        let AcceptanceEvaluationRequestResponse::Spawned {
+            delegation, mode, ..
+        } = response else {
             panic!("must spawn")
         };
+        assert_eq!(mode, AcceptanceEvaluationMode::SubAgent);
         assert_eq!(delegation.delegation.agent, expected);
         let expected_model = expected_model.map(str::to_owned).unwrap_or_else(|| {
             state
@@ -2744,8 +2752,11 @@ fn acceptance_request_refuses_without_spawning() {
     );
 
     install_store(&state, &project, &root);
-    let sub_agent = request(show_receipt(Some("sub_agent")), Ok(policy_receipt(None)));
-    assert_eq!(sub_agent.status, StatusCode::NOT_IMPLEMENTED);
+    let sub_agent = request(
+        show_receipt(Some("sub_agent")),
+        Ok(policy_receipt(Some(&["same_session"]))),
+    );
+    assert_eq!(sub_agent.status, StatusCode::CONFLICT);
     let unadmitted = request(
         show_receipt(Some("independent_session")),
         Ok(policy_receipt(Some(&["same_session"]))),

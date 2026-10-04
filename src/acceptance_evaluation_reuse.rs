@@ -231,7 +231,7 @@ impl AppState {
                 &seed,
                 Some(&previous.id),
             )?;
-            let mut target = seed.into_target(key);
+            let mut target = seed.into_target(key, &previous.parent_session_id);
             target.attempt_history = Some(history);
             inner.delegations[index].acceptance_evaluation = Some(target);
             inner.mark_delegation_mutated(index);

@@ -352,6 +352,20 @@ fn acceptance_evaluation_submit_authority_locked(
         .acceptance_evaluation
         .as_ref()
         .ok_or_else(|| ApiError::conflict("this evaluator delegation has no evaluation target"))?;
+    if target.mode == AcceptanceEvaluationMode::SubAgent {
+        if target.parent_session.as_deref() != Some(delegation.parent_session_id.as_str())
+            || target.execution_identity.as_deref() != Some(delegation.id.as_str())
+            || delegation.parent_session_id == child
+        {
+            return Err(ApiError::conflict(
+                "this sub_agent target lacks matching host-attested parent and execution identity; request a new evaluation",
+            ));
+        }
+    } else if target.parent_session.is_some() || target.execution_identity.is_some() {
+        return Err(ApiError::conflict(
+            "this evaluation mode cannot carry sub_agent identity metadata; request a new evaluation",
+        ));
+    }
     // An open write still admits the child. Recorded in memory is not final
     // while its submit call holds the guard: let the narrowly scoped tool
     // reach execution's retryable in-progress response, never an agent prompt.
@@ -1144,6 +1158,9 @@ impl AppState {
             body_deadline,
             &now,
         )?;
+        // Request-local standing from the same closing canonical read, not a
+        // separate executor mirror. Missing/null is unknown, not ineligibility.
+        let mut closing_executor = None;
         if let Some(identity) = &discovery.identity {
             // W1 precedes I1: a same-number cut on a replacement run must not
             // attach to the opening run merely because the scalar cut agrees.
@@ -1175,6 +1192,16 @@ impl AppState {
                     "the task's canonical work/run identity changed during discovery; request a new evaluation",
                 ));
             }
+            closing_executor = match closing["run"].get("executor") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(executor))
+                    if !executor.trim().is_empty()
+                        && executor.len() <= 512
+                        && !executor.chars().any(char::is_control) => Some(executor.clone()),
+                Some(_) => return Err(ApiError::bad_gateway(
+                    "engram work core inspect returned an invalid run executor identity",
+                )),
+            };
         }
         if canonical_deadline.is_some() || !request.criterion_evidence.is_empty() {
             acceptance_criterion_evidence_read_timeout(evidence_deadline, &now)?;
@@ -1211,8 +1238,18 @@ impl AppState {
             .carried_failure
             .as_ref()
             .is_some_and(|carried| carried.supersedes_required);
+        // A saved same-session preference must not silently bypass the child
+        // producer when sub_agent is the strongest admitted mode. Task pins
+        // remain authoritative and other admitted sets retain their defaults.
+        let require_sub_agent = task.pinned_mode.is_none()
+            && admitted.as_ref().is_some_and(|modes| {
+                modes.iter().any(|word| AcceptanceEvaluationMode::parse(word)
+                    == Some(AcceptanceEvaluationMode::SubAgent))
+                    && !modes.iter().any(|word| AcceptanceEvaluationMode::parse(word)
+                        == Some(AcceptanceEvaluationMode::IndependentSession))
+            });
         let preferred_mode = defaults.default_mode.filter(|mode| {
-            *mode != AcceptanceEvaluationMode::SubAgent
+            !(require_sub_agent && *mode == AcceptanceEvaluationMode::SameSession)
                 && !(acknowledgement_required && *mode == AcceptanceEvaluationMode::SameSession)
                 && admitted.as_ref().is_some_and(|modes| {
                     modes
@@ -1227,6 +1264,14 @@ impl AppState {
             admitted.as_deref(),
         )
         .map_err(ApiError::conflict)?;
+        if mode == AcceptanceEvaluationMode::SubAgent
+            && requested_claim.is_none()
+            && closing_executor.as_deref().is_some_and(|executor| executor != parent_session_id)
+        {
+            return Err(ApiError::conflict(
+                "sub_agent evaluation requires its parent to be the work's holder or executor; this requester is neither holder nor executor",
+            ));
+        }
         // The declared fingerprint is taken only by the modes that use it,
         // after the reads, on the worktree the evaluator reads: the work's
         // named source root when the requesting session holds its claim
@@ -1305,8 +1350,10 @@ impl AppState {
         };
 
         match mode {
-            AcceptanceEvaluationMode::IndependentSession => {
-                let reuse_agent = reuse.as_ref().map(|r| r.previous.agent);
+            AcceptanceEvaluationMode::IndependentSession | AcceptanceEvaluationMode::SubAgent => {
+                let reuse_agent = reuse.as_ref()
+                    .filter(|_| mode == AcceptanceEvaluationMode::IndependentSession)
+                    .map(|r| r.previous.agent);
                 let default_agent = defaults
                     .evaluator_agent
                     .filter(|agent| matches!(agent, Agent::Claude | Agent::Codex));
@@ -1332,8 +1379,14 @@ impl AppState {
                 // evidence context, so complete criteria still fit in the final
                 // prompt. Fresh delegation IDs have this UUID-shaped length.
                 let fresh_key = acceptance_evaluation_ordinal_key(&format!("delegation-{}", Uuid::nil()), 1);
-                let mut header_bytes = acceptance_evaluation_attempt_prompt("", &fresh_key, 1, None, &seed).len();
-                if let Some(previous) = reuse.as_ref().map(|r| &r.previous) {
+                let mut header_bytes = if mode == AcceptanceEvaluationMode::IndependentSession {
+                    acceptance_evaluation_attempt_prompt("", &fresh_key, 1, None, &seed).len()
+                } else {
+                    0
+                };
+                if let Some(previous) = reuse.as_ref()
+                    .filter(|_| mode == AcceptanceEvaluationMode::IndependentSession)
+                    .map(|r| &r.previous) {
                     if let Some(old) = previous.acceptance_evaluation.as_ref() {
                         let ordinal = old.attempt_history.as_ref().map_or(1, |h| h.ordinal.saturating_add(1));
                         header_bytes = header_bytes.max(acceptance_evaluation_attempt_prompt("",
@@ -1475,10 +1528,6 @@ impl AppState {
                     work_ref: task.work_ref,
                 })
             }
-            AcceptanceEvaluationMode::SubAgent => Err(ApiError::from_status(
-                StatusCode::NOT_IMPLEMENTED,
-                "the task or its policy requires a sub_agent evaluation, which this host does not produce yet",
-            )),
         }
     }
 

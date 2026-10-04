@@ -44,6 +44,9 @@ struct ClaudeRuntimeContext {
     /// The session's own working directory, pre-normalized, for the
     /// read-only permission checker.
     cwd: String,
+    /// The SessionStart compact hook this runtime registered at initialize,
+    /// if any (`claude_compact_hook.rs`).
+    compact_hook: Option<Arc<ClaudeCompactHook>>,
 }
 
 /// The control requests this runtime sent, by request id, with the origin
@@ -92,6 +95,13 @@ struct ClaudeReaderFrames {
     /// The reader's sender of the runtime's command channel: permission
     /// responses and delayed retries go to the writer through it.
     input_tx: Sender<ClaudeRuntimeCommand>,
+    /// The compaction under way already asked for a fresh Engram context
+    /// through its hook callback, so its compact_boundary does not ask again.
+    /// A registered callback always asks itself, whatever this flag says, so
+    /// a flag left by a compaction that ended without its boundary costs no
+    /// later compaction its request. Reset when a compaction starts and when
+    /// its boundary ends it.
+    compaction_refresh_requested: bool,
 }
 
 impl ClaudeReaderFrames {
@@ -114,6 +124,7 @@ impl ClaudeReaderFrames {
             control_origins: ClaudeControlOrigins::default(),
             initialize_model_options_tx,
             input_tx,
+            compaction_refresh_requested: false,
         }
     }
 }
@@ -145,7 +156,14 @@ impl ClaudeRuntimeContext {
             ownership,
             replay_prompt,
             cwd,
+            compact_hook: None,
         }
+    }
+
+    /// This runtime's SessionStart compact hook, decided before initialize.
+    fn with_compact_hook(mut self, compact_hook: Option<Arc<ClaudeCompactHook>>) -> Self {
+        self.compact_hook = compact_hook;
+        self
     }
 
     /// Records a turn failure for this runtime and tells the reader to stop.
@@ -334,10 +352,17 @@ fn apply_claude_frame_plan(
         clear_claude_replay_prompt_if_matches(&context.replay_prompt, replay_generation);
     }
 
+    // One compaction asks once for a fresh context: its hook callback may
+    // already have asked, before this boundary.
+    if claude_event_starts_compaction(message) {
+        frames.compaction_refresh_requested = false;
+    }
     if claude_event_marks_engram_context_nudge(message) {
-        context
-            .state
-            .mark_engram_context_nudge_pending(&context.session_id);
+        if !std::mem::take(&mut frames.compaction_refresh_requested) {
+            context
+                .state
+                .mark_engram_context_nudge_pending(&context.session_id);
+        }
     }
 
     // A subagent's frame may record cards, diffs and error lines; none of
@@ -432,6 +457,23 @@ fn apply_claude_control(
 ) -> ClaudeFrameApplied {
     let request_id = message.get("request_id").and_then(Value::as_str);
     match control {
+        ClaudeControlStep::HookCallback => {
+            // A process-scoped callback: answered by the runtime's hook
+            // responder, never with a permission decision, and it opens or
+            // closes no turn.
+            if answer_claude_hook_callback(context, &frames.input_tx, message)
+                == ClaudeHookCallbackApplied::Compaction
+            {
+                frames.compaction_refresh_requested = true;
+            }
+            ClaudeFrameApplied::Continue
+        }
+        ClaudeControlStep::HookCallbackCancel => {
+            if let Some(request_id) = request_id {
+                cancel_claude_hook_callback(context, request_id);
+            }
+            ClaudeFrameApplied::Continue
+        }
         ClaudeControlStep::Request(ClaudeControlOrigin::Unresolved) => {
             // Nobody's request may borrow the root turn's authority, and an
             // unanswered request would hang the runtime: refuse it.

@@ -15,6 +15,12 @@ mod sighting_live;
 #[path = "acceptance_evaluation_refresh_live.rs"]
 mod acceptance_refresh_live;
 
+#[path = "engram_acceptance_sub_agent_live.rs"]
+mod sub_agent_live;
+
+#[path = "engram_source_observation_live.rs"]
+mod source_observation;
+
 struct CompletionFixture {
     live: LiveRootFixture,
     root: PathBuf,
@@ -602,6 +608,23 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
             "--json",
         ],
     );
+    // An accepted evaluation is not lifecycle end. The real producer still
+    // reports this active Bound run, and a reclamation read must retain it.
+    let evaluated_read = fixture.canonical_read(&second_session, &recovered);
+    assert_eq!(evaluated_read.run.state, "active");
+    assert!(matches!(evaluated_read.named_root, EngramNamedRootState::Bound { .. }));
+    let retained = fixture.live.state.inner.lock().unwrap().engram_work_source_roots
+        .iter().find(|root| root.claim_id == recovered.claim_id).unwrap().clone();
+    let plan = {
+        let now = fixture.live.state.engram_budget_clock().now();
+        engram_root_reclamation_plan_locked(&fixture.live.state.inner.lock().unwrap(), now)
+    };
+    assert!(plan.iter().any(|task| task.root == retained));
+    let reads_before = fixture.live.transport.root_reads.lock().unwrap().len();
+    fixture.live.state.run_engram_root_reclamation_pass(plan);
+    assert!(fixture.live.transport.root_reads.lock().unwrap().len() > reads_before);
+    assert!(fixture.live.state.inner.lock().unwrap().engram_work_source_roots.contains(&retained));
+    assert_eq!(content_revision(&worktree).unwrap().1, before);
     let done = fixture.work(
         &second_session,
         &[
@@ -648,4 +671,72 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
             &recovered,
         )
         .unwrap();
+
+    // Move focus through a real work claim before rebinding. The rebind's
+    // existing current-selection cleanup would otherwise consume this entry
+    // before the background reclamation path can observe it.
+    // The old run's retained journal, not focus or a directory deletion,
+    // supplies the canonical identity to the background reclamation path.
+    let later = fixture.work(&second_session, &["add", "Continue after named completion", "--json"]);
+    let later_ref = later["work"]["short_ref"].as_str()
+        .or_else(|| later["short_ref"].as_str()).unwrap();
+    fixture.work(&second_session, &["claim", later_ref, "--json"]);
+    // Only skip the cooldown's wall-clock wait: the real planner must choose
+    // the reconciliation route. The former holder still has a local view of
+    // this recovered run, so moving the naming session on does not imply that
+    // the entry is Unfocused. No clock, deadline or durable state is changed.
+    let plan = {
+        let now = fixture.live.state.engram_budget_clock().now();
+        let inner = fixture.live.state.inner.lock().unwrap();
+        eprintln!("historical retirement table before pass: {:#?}", inner.engram_work_source_roots);
+        assert!(inner.engram_work_source_roots.contains(&retained));
+        engram_root_reclamation_plan_locked(&inner, now + ENGRAM_ROOT_RECLAMATION_COOLDOWN)
+    };
+    eprintln!("historical retirement actual plan: {plan:#?}");
+    assert!(plan.iter().any(|task| task.root == retained
+        && task.route == EngramRootReclamationRoute::Current(first_session.clone())),
+        "the existing former holder is the planner's reconciliation owner");
+    let reads_before = fixture.live.transport.root_reads.lock().unwrap().len();
+    fixture.live.state.run_engram_root_reclamation_pass(plan);
+    let reads = fixture.live.transport.root_reads.lock().unwrap();
+    eprintln!("historical retirement reads during pass: {:#?}", &reads[reads_before..]);
+    assert!(reads[reads_before..].iter().any(|read|
+        read.run_id == recovered.run_id && read.run.state == "completed"));
+    drop(reads);
+    let inner = fixture.live.state.inner.lock().unwrap();
+    eprintln!("historical retirement table after pass: {:#?}", inner.engram_work_source_roots);
+    assert!(!inner.engram_work_source_roots.contains(&retained));
+    let notice = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+        .find(|notice| notice.selection == retained).expect("real canonical proof published a retirement");
+    assert!(notice.published);
+    assert_eq!(notice.binding, recovered);
+    assert_eq!(notice.read.run.state, "completed");
+    assert!(notice.line.contains("its run completed"));
+    let notice_id = notice.id.clone();
+    assert_eq!(inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+        .filter(|notice| notice.selection == retained).count(), 1);
+    drop(inner);
+    assert!(worktree.join(".git").is_file(), "host retirement never deletes the worktree");
+    assert_eq!(content_revision(&worktree).unwrap().1, before);
+
+    // The real rebind now follows acknowledged reclamation. It must neither
+    // remove a second selection nor create a duplicate retirement notice.
+    {
+        let mut inner = fixture.live.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&second_session).unwrap();
+        inner.sessions[index].engram.rebind_required = true;
+    }
+    fixture.live.state.ensure_engram_session_bound_off_lock(&second_session).unwrap().unwrap();
+    assert_ne!(fixture.record(&second_session, |record| record.engram.work_binding.clone().unwrap()).claim_id,
+        recovered.claim_id);
+    let inner = fixture.live.state.inner.lock().unwrap();
+    assert!(!inner.engram_work_source_roots.contains(&retained));
+    let notices = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+        .filter(|notice| notice.selection == retained).collect::<Vec<_>>();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].id, notice_id);
+    assert!(notices[0].published);
+    drop(inner);
+    assert!(worktree.join(".git").is_file());
+    assert_eq!(content_revision(&worktree).unwrap().1, before);
 }

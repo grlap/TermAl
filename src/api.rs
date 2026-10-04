@@ -251,6 +251,14 @@ fn deliver_prepared_turn_dispatch_now(
             .prepare_engram_turn_delivery_off_lock(dispatch.session_id(), dispatch_generation)
         {
             EngramTurnDeliveryPreparation::Ready => {}
+            EngramTurnDeliveryPreparation::ObservationRecovery => {
+                return TurnDispatchDeliveryOutcome::Held { error: None };
+            }
+            EngramTurnDeliveryPreparation::ObservationPending => {
+                return if state.park_source_observation_dispatch(dispatch) {
+                    TurnDispatchDeliveryOutcome::Held { error: None }
+                } else { TurnDispatchDeliveryOutcome::Superseded };
+            }
             EngramTurnDeliveryPreparation::Superseded => {
                 return TurnDispatchDeliveryOutcome::Superseded;
             }
@@ -417,6 +425,7 @@ fn handoff_prepared_turn_dispatch(
                     || engram_generation.is_some_and(|generation| {
                         record.engram.dispatch_generation != generation
                             || record.engram.active_grant_id.is_none()
+                            || !engram_source_observation_can_deliver(record)
                     })
                 {
                     return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
@@ -481,6 +490,7 @@ fn handoff_prepared_turn_dispatch(
             || engram_generation.is_some_and(|generation| {
                 record.engram.dispatch_generation != generation
                     || record.engram.active_grant_id.is_none()
+                    || !engram_source_observation_can_deliver(record)
             })
         {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
@@ -574,6 +584,8 @@ fn handoff_prepared_turn_dispatch(
     }
     if !source_root_notice_delivery.is_empty() {
         let index = index.expect("current notice handoff owns session");
+        let session_id = inner.sessions[index].session.id.clone();
+        acknowledge_engram_root_retirements_locked(&mut inner, &session_id, &source_root_notice_delivery);
         acknowledge_engram_source_root_notices_locked(
             &mut inner.sessions[index],
             &source_root_notice_delivery,
@@ -581,6 +593,7 @@ fn handoff_prepared_turn_dispatch(
     }
     if engram_generation.is_some() {
         let index = index.expect("guarded handoff owns session");
+        finish_source_observation_handoff_locked(&mut inner, index);
         if inner.sessions[index]
             .queued_prompts
             .front()

@@ -167,10 +167,13 @@ struct AcceptanceEvaluationTargetSeed {
 }
 
 impl AcceptanceEvaluationTargetSeed {
-    fn into_target(self, attempt_key: String) -> DelegationAcceptanceEvaluation {
+    fn into_target(self, attempt_key: String, parent_session: &str) -> DelegationAcceptanceEvaluation {
+        let sub_agent = self.mode == AcceptanceEvaluationMode::SubAgent;
         DelegationAcceptanceEvaluation {
             work_ref: self.work_ref,
             mode: self.mode,
+            parent_session: sub_agent.then(|| parent_session.to_owned()),
+            execution_identity: sub_agent.then(|| attempt_key.clone()),
             acceptance_basis: self.acceptance_basis,
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria_count,
@@ -2214,6 +2217,19 @@ fn acceptance_evaluation_cli_args(
         "--evidence-basis".to_owned(),
         target.evidence_basis.to_string(),
     ]);
+    if target.mode == AcceptanceEvaluationMode::SubAgent {
+        let (Some(parent), Some(execution)) =
+            (&target.parent_session, &target.execution_identity)
+        else {
+            return Err(ApiError::conflict(
+                "this sub_agent target has no host-attested parent and execution identity; request a new evaluation",
+            ));
+        };
+        args.extend([
+            "--parent-session".to_owned(), parent.clone(),
+            "--execution-identity".to_owned(), execution.clone(),
+        ]);
+    }
     let mut recorded_request = request.clone();
     if let Some(history) = target.attempt_history.as_ref().filter(|h| h.schema_version == 1) {
         for verdict in &mut recorded_request.verdicts {

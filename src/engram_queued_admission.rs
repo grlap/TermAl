@@ -9,7 +9,8 @@ fn engram_admission_persisted_content(record: &PersistedSessionRecord) -> Value 
         "routing": record.engram_routing_token, "grant": record.engram_open_grant_id,
         "queue": record.queued_prompts.front(),
         "abortRetry": record.engram_abort_retry,
-        "bindRetry": record.engram_bind_retry })
+        "bindRetry": record.engram_bind_retry,
+        "sourceObservation": record.engram_source_observation_gate })
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -486,6 +487,9 @@ impl AppState {
         {
             return Ok(false);
         }
+        // Fence a begun observation phase before invalidating the queue owner.
+        retire_source_observation_locked(&mut inner, index);
+        let record = inner.session_mut_by_index(index).expect("checked session index");
         record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
         detach_engram_pending_dispatch_keeping_uncertain_begin(record);
         record.engram.rebind_required = true;

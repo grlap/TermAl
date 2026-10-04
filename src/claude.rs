@@ -1647,18 +1647,25 @@ fn reset_claude_turn_state<R: TurnRecorder + ?Sized>(
 }
 
 /// Returns whether a system envelope is proven not to represent prompt work.
-fn claude_system_event_is_effect_free(message: &Value) -> bool {
+/// `before_process_init` says the runtime has not yet reported its first
+/// `init`.
+fn claude_system_event_is_effect_free(message: &Value, before_process_init: bool) -> bool {
     match message.get("subtype").and_then(Value::as_str) {
         Some("init") => true,
         // Live Claude Code 2.1.220 stream capture emits this status immediately
         // before the replayed user prompt. It describes request admission and
         // does not itself run the prompt.
         Some("status") => message.get("status").and_then(Value::as_str) == Some("requesting"),
-        // SessionStart hooks run once for the persistent child process. Replaying
-        // a prompt inside that same process cannot run them again. Prompt hooks
-        // such as UserPromptSubmit are intentionally not exempt.
+        // A process's startup SessionStart hooks run before its first `init`
+        // (live 2.1.220 capture), so replaying a prompt cannot run them again.
+        // SessionStart also runs mid-process, on every compaction (source
+        // compact, live 2.1.288 capture), and the name alone does not say
+        // which: only a frame before the first `init` is startup bookkeeping.
+        // The `init` a compaction repeats is no such evidence. Prompt hooks
+        // such as UserPromptSubmit are never exempt.
         Some("hook_started" | "hook_progress" | "hook_response") => {
-            message.get("hook_event").and_then(Value::as_str) == Some("SessionStart")
+            before_process_init
+                && message.get("hook_event").and_then(Value::as_str) == Some("SessionStart")
         }
         _ => false,
     }
@@ -1701,7 +1708,7 @@ fn handle_claude_event(
                     *session_id = Some(found_session_id.to_owned());
                     recorder.note_external_session(found_session_id)?;
                 }
-            } else if !claude_system_event_is_effect_free(message) {
+            } else if !claude_system_event_is_effect_free(message, session_id.is_none()) {
                 // Prompt hooks and future system events may represent effects
                 // TermAl does not understand. Fail closed unless the exact
                 // envelope is proven process-local or request-admission-only.

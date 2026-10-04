@@ -106,14 +106,14 @@ enum TestRunWaitVerdict {
 }
 
 /// Whether a run is settled for a wait, and how. Passed and failed are; so is
-/// unknown with `processGone` or `noPid`, and a run no longer indexed whose
+/// unknown with `processGone`, and a run no longer indexed whose
 /// directory is `gone` (it was indexed at registration, so it left the index
 /// after). A run missing from the index whose directory is still there is
 /// not settled: a rescan that was in flight at registration may have dropped
 /// it before the wait's retention exemption applied, and the next scan
-/// indexes it again. Running, unknown with `resultsUnreadable` or with no
-/// reason are not settled either: the run may still finish, and the index
-/// retries.
+/// indexes it again. Running, unknown with `noPid`, `heartbeatStale`,
+/// `resultsUnreadable` or with no reason are not settled either: the run may
+/// still finish, and the index retries.
 fn test_run_wait_verdict(summary: Option<&TestRunSummary>, gone: bool) -> Option<TestRunWaitVerdict> {
     let Some(summary) = summary else {
         return gone.then_some(TestRunWaitVerdict::Unknown(
@@ -123,7 +123,7 @@ fn test_run_wait_verdict(summary: Option<&TestRunSummary>, gone: bool) -> Option
     match (summary.state, summary.unknown_reason) {
         (TestRunState::Passed, _) => Some(TestRunWaitVerdict::Pass),
         (TestRunState::Failed, _) => Some(TestRunWaitVerdict::Fail),
-        (TestRunState::Unknown, Some(reason @ (TestRunUnknownReason::ProcessGone | TestRunUnknownReason::NoPid))) => {
+        (TestRunState::Unknown, Some(reason @ TestRunUnknownReason::ProcessGone)) => {
             Some(TestRunWaitVerdict::Unknown(reason.into()))
         }
         _ => None,
@@ -180,6 +180,7 @@ fn test_run_wait_verdict_label(verdict: Option<TestRunWaitVerdict>) -> String {
                 TestRunCardUnknownReason::ProcessGone => "process gone",
                 TestRunCardUnknownReason::ResultsUnreadable => "results unreadable",
                 TestRunCardUnknownReason::NoPid => "no pid recorded",
+                TestRunCardUnknownReason::HeartbeatStale => "heartbeat stale; executor not published",
                 TestRunCardUnknownReason::NotIndexed => "not indexed",
             }
         ),

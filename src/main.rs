@@ -751,6 +751,12 @@ include!("engram_budget.rs");
 include!("engram_host_adapter.rs");
 include!("engram_turn_observations.rs");
 include!("engram_turn_continuity.rs");
+include!("engram_source_sightings.rs");
+include!("engram_source_observation_protocol.rs");
+include!("engram_source_observation_recovery.rs");
+include!("engram_source_observation_finalization.rs");
+include!("engram_source_observation_removal.rs");
+include!("engram_source_observation_runtime.rs");
 include!("engram_evaluation_refusal.rs");
 include!("engram_work_binding_refresh.rs");
 include!("engram_held_claims.rs");
@@ -769,6 +775,8 @@ include!("engram_readiness.rs");
 include!("engram_readiness_test_seam.rs");
 #[cfg(test)]
 include!("engram_test_child_temp.rs");
+#[cfg(test)]
+include!("terminal_test_child_temp.rs");
 include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
@@ -780,6 +788,7 @@ include!("content_revision.rs");
 include!("engram_source_roots.rs");
 include!("engram_named_root_binding.rs");
 include!("engram_root_authority.rs");
+include!("engram_named_root_reclamation.rs");
 #[cfg(test)]
 include!("engram_named_root_test_transport.rs");
 include!("bounded_read_process.rs");
@@ -831,6 +840,7 @@ include!("claude_spawn.rs");
 include!("claude_turn_ownership.rs");
 include!("claude_frame_router.rs");
 include!("claude_frame_application.rs");
+include!("claude_compact_hook.rs");
 include!("claude_runtime_turns.rs");
 include!("claude_outstanding_work.rs");
 include!("codex_home.rs");

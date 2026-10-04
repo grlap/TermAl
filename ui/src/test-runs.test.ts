@@ -3,7 +3,7 @@ import { applyTestRunDelta, reconcileTestRunSnapshot, sortTestRuns, testRunSessi
 import { makeTestRun, makeTestRunDetail } from "./test-runs-fixtures";
 
 describe("test run presentation", () => {
-  it.each(["processGone", "resultsUnreadable", "noPid"] as const)("adopts unknown reason %s without inferring a missing reason", unknownReason => {
+  it.each(["processGone", "resultsUnreadable", "noPid", "heartbeatStale"] as const)("adopts unknown reason %s without inferring a missing reason", unknownReason => {
     const run = makeTestRun({ state: "unknown" });
     expect(run.unknownReason).toBeUndefined();
     const incoming = { ...run, unknownReason };

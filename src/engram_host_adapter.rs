@@ -523,6 +523,14 @@ fn run_engram_diagnostic_args_until(
 #[derive(Clone, Deserialize)]
 struct EngramDoctorControl {
     required_assurance: String,
+    #[serde(default)]
+    schema_version: Option<u16>,
+    #[serde(default)]
+    epoch: Option<i64>,
+    #[serde(default)]
+    policy: Option<String>,
+    #[serde(default)]
+    obligation_rules: Option<String>,
 }
 
 #[cfg(test)]
@@ -605,6 +613,11 @@ impl EngramNextIntent {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 enum EngramControlRequest {
+    ExecutionObserve {
+        routing_token: String,
+        #[serde(flatten)]
+        observation: EngramInterTurnObservation,
+    },
     SessionBind {
         external_ref: String,
         title: String,
@@ -748,6 +761,8 @@ struct EngramSessionBindingResponse {
 
 #[derive(Clone, Debug, Deserialize)]
 struct EngramSessionStatusResponse {
+    #[serde(default)]
+    session_id: Option<String>,
     phase: String,
     #[serde(default)]
     named_root: Option<EngramNamedRootState>,
@@ -998,6 +1013,17 @@ trait EngramControlTransport: Send + Sync {
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError>;
 
+    /// One bounded readiness read supplies the entire accounting policy tuple
+    /// and rechecks the selected store. It is a snapshot, never a policy lease.
+    fn read_observation_policy(
+        &self,
+        connection: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey,
+        timeout: Duration,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        read_engram_observation_policy(connection, store, timeout)
+    }
+
     /// The work binding the session should be bound with. `preference` names
     /// the binding it is bound with now, which the selection keeps while that
     /// claim is still bindable, and the one Engram refused as stale, which it
@@ -1205,6 +1231,20 @@ impl ScriptedEngramControlTransport {
 
 #[cfg(test)]
 impl EngramControlTransport for ScriptedEngramControlTransport {
+    fn read_observation_policy(
+        &self, _connection: &EngramConnectionConfig, expected_store: &EngramAuthorityStoreKey, _timeout: Duration,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        let mut roots = self.named_roots.lock().unwrap();
+        let roots = roots.as_mut().ok_or_else(|| EngramTransportError::protocol("no observation readiness model configured"))?;
+        if roots.project_id.as_deref().unwrap_or("github.com/example/source-root") != expected_store.project_id {
+            return Err(EngramTransportError::protocol("observation readiness model belongs to another project"));
+        }
+        roots.observation_status_pending = true;
+        Ok(EngramObservationPolicyBasis::AccountIfEligible {
+            project_policy_epoch: 1, policy: "a".repeat(32), obligation_rule_set: "b".repeat(32),
+        })
+    }
+
     fn request(
         &self,
         connection: &EngramConnectionConfig,
@@ -1251,8 +1291,13 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
                 )))
             });
         let ScriptedEngramControlResponse::Reply(mut reply) = response;
-        if let (Some(roots), Ok(value)) = (self.named_roots.lock().unwrap().as_ref(), &mut reply) {
+        if let (Some(roots), Ok(value)) = (self.named_roots.lock().unwrap().as_mut(), &mut reply) {
             roots.annotate(&connection.session_id, request, value);
+            if matches!(request, EngramControlRequest::TurnCheckpoint { .. })
+                && value["decision"] == "checkpointed"
+                && std::mem::take(&mut roots.lose_next_checkpoint_reply) {
+                return Err(EngramTransportError::transport("fixture lost reply after actual grant settlement"));
+            }
         }
         reply
     }
@@ -1479,6 +1524,10 @@ impl EngramControlTransport for StatefulEngramControlTransport {
         let session_id = connection.session_id.clone();
 
         match request {
+            EngramControlRequest::ExecutionObserve { .. } => Err(Self::remote_error(
+                "unsupported_test_operation",
+                "this grant-lifecycle fixture does not model source observations",
+            )),
             EngramControlRequest::NamedRootBind { .. }
             | EngramControlRequest::NamedRootRead { .. }
             | EngramControlRequest::NamedRootSightingRead { .. } => Err(Self::remote_error(
@@ -2404,6 +2453,7 @@ impl AppState {
 #[derive(Clone, Debug)]
 struct EngramSessionState {
     admission_in_progress: Option<Arc<std::sync::atomic::AtomicBool>>,
+    source_observation_preparations: usize,
     recovered_admission: bool,
     routing_token: Option<String>,
     /// The work binding the accepted bind for `routing_token` carried, if
@@ -2449,6 +2499,9 @@ struct EngramSessionState {
     /// command ran beside it, each with the directory its runtime reported,
     /// which a repeated start may leave out. In memory only.
     running_command_keys: BTreeMap<String, Option<String>>,
+    /// Correlated starts without verification authority. Diagnostic only;
+    /// bounded, memory-only, and never reconstructed after restart.
+    pending_launch_diagnostics: Vec<EngramLaunchDiagnostic>,
     /// The worktrees each running command of the session may write in, by
     /// its runtime key, `None` for one TermAl could not name
     /// (`engram_turn_checks.rs`): its reported directory's, or the ones its
@@ -2496,9 +2549,18 @@ struct EngramSessionState {
     /// delivered. Compared with the end-time basis, it decides whether the
     /// turn changed the workspace's content. In memory only.
     active_turn_start_basis: Option<EngramExecutionSourceBasis>,
+    active_turn_start_observed_at: Option<String>,
+    source_observation_gate: Option<EngramSourceObservationGate>,
+    source_observation_delete_requested: bool,
+    source_observation_continuation: Option<EngramSourceObservationContinuation>,
+    source_opening_disposition: EngramSourceOpeningDisposition,
+    source_observation_delivery_grant: Option<String>,
     /// Binding provenance survives a failed filesystem capture. A missing
     /// fingerprint does not make the admitted workspace unconfirmed.
     active_turn_root_capture: Option<EngramRootCapture>,
+    /// Canonical proof sealed with the opening, before off-lock measurement.
+    /// Later naming history cannot replace this grant's historical proof.
+    active_turn_observation_root_basis: Option<Value>,
     active_turn_naming_identity: Option<(EngramAuthorityStoreKey, String)>,
     /// The admitted association for current-status presentation, retained even
     /// when no named root or filesystem basis could be captured.
@@ -2639,6 +2701,7 @@ impl Default for EngramSessionState {
     fn default() -> Self {
         Self {
             admission_in_progress: None,
+            source_observation_preparations: 0,
             recovered_admission: false,
             routing_token: None,
             work_binding: None,
@@ -2650,6 +2713,7 @@ impl Default for EngramSessionState {
             carried_consumed_runs: Vec::new(),
             carried_unmatched_launches: Vec::new(),
             running_command_keys: BTreeMap::new(),
+            pending_launch_diagnostics: Vec::new(),
             running_command_worktrees: Vec::new(),
             workdir_worktree: None,
             capture_workers: Arc::default(),
@@ -2659,7 +2723,14 @@ impl Default for EngramSessionState {
             active_grant_id: None,
             active_turn_intent_fingerprint: None,
             active_turn_start_basis: None,
+            active_turn_start_observed_at: None,
+            source_observation_gate: None,
+            source_observation_delete_requested: false,
+            source_observation_continuation: None,
+            source_opening_disposition: EngramSourceOpeningDisposition::Pending,
+            source_observation_delivery_grant: None,
             active_turn_root_capture: None,
+            active_turn_observation_root_basis: None,
             active_turn_naming_identity: None,
             active_turn_source_binding: None,
             continuity_anchor: None,
@@ -2786,6 +2857,8 @@ struct EngramPendingDispatch {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum EngramTurnDeliveryPreparation {
     Ready,
+    ObservationPending,
+    ObservationRecovery,
     Superseded,
     Rejected,
     PersistenceUnknown,
@@ -4244,6 +4317,7 @@ impl AppState {
         // the three together, so the close that gates the next prompt waits
         // at most the freeze bound once: what is not ready by then is
         // withheld or goes unlabelled.
+        let mut end_basis_observed_at = None;
         let (end_basis, mut resolved_checks, mut settled_carried) = match capture {
             Some((place, sealed, checks, carried, workers)) => {
                 let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
@@ -4253,6 +4327,8 @@ impl AppState {
                     sealed.as_ref(),
                     deadline.saturating_duration_since(std::time::Instant::now()),
                 );
+                end_basis_observed_at = end_basis.as_ref().map(|_| chrono::Utc::now()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
                 let end_basis = if self.engram_turn_root_capture(session_id) == provenance {
                     provenance.stamp(end_basis)
                 } else {
@@ -4370,6 +4446,9 @@ impl AppState {
                     // A credited carried gate is never withheld (its outcome
                     // is passed or failed), so it still leads the checks.
                     engram_trim_turn_checks(&mut resolved_checks, carried_count);
+                    if let (Some(basis), Some(observed_at)) = (&end_basis, &end_basis_observed_at) {
+                        retain_engram_closing_sighting_locked(&mut inner, index, basis, observed_at);
+                    }
                     let (report, fallback) = engram_turn_report(
                         &inner.sessions[index],
                         session_id,
@@ -4590,6 +4669,12 @@ impl AppState {
             (revision, creates)
         };
         self.publish_message_created_delta_parts(&inner, revision, creates);
+        drop(inner);
+        if decision == EngramControlCardDecision::Grant {
+            if let Err(error) = self.finalize_delivered_source_observations(session_id) {
+                eprintln!("engram> session={session_id} source finalization remains recoverable: {error}");
+            }
+        }
     }
 
     fn checkpoint_successful_engram_turn_off_lock(
@@ -4625,12 +4710,16 @@ impl AppState {
         session_id: &str,
         dispatch_generation: u64,
     ) -> EngramTurnDeliveryPreparation {
+        let _source_preparation = self.reserve_source_observation_preparation(session_id);
         let snapshot = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return EngramTurnDeliveryPreparation::Superseded;
             };
             let record = &inner.sessions[index];
+            if record.engram.source_observation_delete_requested {
+                return EngramTurnDeliveryPreparation::ObservationRecovery;
+            }
             let Some(pending) = record.engram.pending_dispatch.clone() else {
                 return EngramTurnDeliveryPreparation::Superseded;
             };
@@ -5282,6 +5371,7 @@ impl AppState {
         // when it did: the one case whose closed grant lets the prompt be
         // admitted again (`engram_abort_retry.rs`).
         let mut abort_reason = None;
+        let mut source_capture_retained = false;
         let preparation = loop {
             match self.finish_engram_dispatch_record_with_defer_retry(
                 session_id,
@@ -5325,13 +5415,79 @@ impl AppState {
                         // The turn's begin-time source basis, before the
                         // prompt reaches the runtime; its closing checkpoint
                         // compares the end-time basis with it.
+                        let mut opening_snapshot = None;
                         if let Some(grant_id) = active_grant_id.as_deref() {
-                            self.record_engram_turn_start_basis_with_projection_off_lock(
+                            self.record_engram_turn_start_basis_and_snapshot_off_lock(
                                 session_id,
                                 grant_id,
                                 begin_root_projection_present,
                                 begin_root_uncertainty,
+                                |inner, index| {
+                                    if let (Some(target), Some(owner)) = (binding_target.as_ref(), admission_owner.as_ref()) {
+                                        opening_snapshot = engram_source_observation_opening_locked(inner, index, target, owner);
+                                    }
+                                },
                             );
+                        }
+                        if let (Some(target), Some(owner)) = (binding_target.as_ref(), admission_owner.as_ref()) {
+                            let observation = match self.capture_engram_source_observation(session_id, target, owner, opening_snapshot) {
+                                Ok(EngramSourceObservationCapture::Superseded) => break EngramTurnDeliveryPreparation::Superseded,
+                                Ok(EngramSourceObservationCapture::SupersededNoObservation) => {
+                                    // Keep the base final handoff arbitration and
+                                    // the lifecycle owner's close. Skip all
+                                    // delivered-head cleanup against a successor.
+                                    break EngramTurnDeliveryPreparation::Ready;
+                                }
+                                Ok(EngramSourceObservationCapture::SupersededRecovery { scope, observation_id }) => {
+                                    source_capture_retained = true;
+                                    if let Err(error) = self.close_retired_source_history(
+                                        &scope, &observation_id, target, target.dispatch_deadline(pending.started_at)) {
+                                        eprintln!("engram> session={session_id} superseded source capture retains recovery: {error}");
+                                    }
+                                    break EngramTurnDeliveryPreparation::Superseded;
+                                }
+                                Ok(EngramSourceObservationCapture::NoEvidence) => Ok(()),
+                                Ok(EngramSourceObservationCapture::Gate) => self.advance_engram_source_observation(
+                                    session_id, target, target.dispatch_deadline(pending.started_at)),
+                                Ok(EngramSourceObservationCapture::Invariant { reason }) => {
+                                    let reason = match self.confirm_source_capture_recovery_durable(
+                                        session_id, owner, target, target.dispatch_deadline(pending.started_at)) {
+                                        Ok(()) => reason,
+                                        Err(error) => format!("{reason} Its recovery persistence is unknown: {error}"),
+                                    };
+                                    self.hold_engram_source_observation(session_id, owner, &reason);
+                                    break EngramTurnDeliveryPreparation::ObservationRecovery;
+                                }
+                                Ok(EngramSourceObservationCapture::RetiredRecovery { reason }) => {
+                                    let reason = match self.close_retired_source_capture(
+                                        session_id, owner, target, target.dispatch_deadline(pending.started_at)) {
+                                        Ok(()) => reason,
+                                        Err(error) => format!("{reason} Captured recovery or settlement remains unknown: {error}"),
+                                    };
+                                    self.hold_engram_source_observation(session_id, owner, &reason);
+                                    break EngramTurnDeliveryPreparation::ObservationRecovery;
+                                }
+                                Err(error) => {
+                                    let owns_gate = {
+                                        let inner = self.inner.lock().expect("state mutex poisoned");
+                                        inner.find_session_index(session_id).is_some_and(|index|
+                                            inner.sessions[index].engram.source_observation_gate.as_ref()
+                                                .is_some_and(|gate| gate.owns(&inner.sessions[index])))
+                                    };
+                                    if !owns_gate {
+                                        self.hold_engram_source_observation(session_id, owner,
+                                            &format!("Source observation capture invariant failed: {error}"));
+                                        break EngramTurnDeliveryPreparation::ObservationRecovery;
+                                    }
+                                    Err(error)
+                                }
+                            };
+                            if let Err(error) = observation {
+                                self.hold_engram_source_observation(session_id, owner, &error.to_string());
+                                break EngramTurnDeliveryPreparation::ObservationPending;
+                            }
+                        } else {
+                            break EngramTurnDeliveryPreparation::Superseded;
                         }
                         // A retried prompt is admitted: nothing is held.
                         self.clear_engram_abort_retry_for_delivered_head(session_id);
@@ -5368,7 +5524,8 @@ impl AppState {
                 }
             }
         };
-        if preparation != EngramTurnDeliveryPreparation::Ready
+        if !source_capture_retained && !matches!(preparation, EngramTurnDeliveryPreparation::Ready | EngramTurnDeliveryPreparation::ObservationPending
+            | EngramTurnDeliveryPreparation::ObservationRecovery)
             && let (Some(grant_id), Some(target)) = (active_grant_id, binding_target)
             && let Some(routing_token) = target.routing_token.as_ref()
         {
@@ -5711,7 +5868,11 @@ impl AppState {
                 // checkpoint under the intent it was issued for.
                 record.engram.active_turn_intent_fingerprint = released_intent;
                 record.engram.active_turn_start_basis = None;
+                record.engram.active_turn_start_observed_at = None;
+                record.engram.source_opening_disposition = EngramSourceOpeningDisposition::Pending;
+                record.engram.source_observation_delivery_grant = None;
                 record.engram.active_turn_root_capture = None;
+                record.engram.active_turn_observation_root_basis = None;
                 record.engram.active_turn_naming_identity = None;
                 record.engram.active_turn_source_binding = None;
                 record.engram.active_turn_source_root = None;

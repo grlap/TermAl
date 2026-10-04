@@ -80,6 +80,11 @@ struct ControlOnlyEngramTransport {
 }
 
 impl EngramControlTransport for ControlOnlyEngramTransport {
+    fn read_observation_policy(
+        &self, connection: &EngramConnectionConfig, expected_store: &EngramAuthorityStoreKey, timeout: Duration,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, expected_store, timeout)
+    }
     fn request(
         &self,
         connection: &EngramConnectionConfig,
@@ -1517,6 +1522,25 @@ fn assert_engram_budget_clock_unread(state: &AppState) {
         0,
         "this settings test must not reach an Engram operation budget"
     );
+}
+
+/// A fixture's choice of the shared scripted Engram budget clock, made before
+/// Engram is enabled or any target or worker exists: nothing may have read
+/// the state's clock yet, so no operation runs on two clocks.
+pub(super) fn select_scripted_engram_budget_clock_before_enable(
+    state: &AppState,
+) -> EngramBudgetClock {
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_budget_clock_snapshots
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the Engram budget clock must be unread before the fixture chooses it"
+    );
+    state.select_test_scripted_engram_budget_clock()
 }
 
 #[test]
@@ -4317,12 +4341,23 @@ fn link_engram_mcp_test_descendant(
         .expect("test delegation should persist");
 }
 
+/// The Engram budget clock a runtime-family fixture chooses for its state,
+/// through the state's clock boundary, before the fixture enables Engram.
+#[derive(Clone, Copy)]
+enum FixtureBudgetClock {
+    /// No choice: the test reaches no Engram budget and asserts so at its end.
+    Unchosen,
+    /// The shared scripted clock.
+    Scripted,
+}
+
 fn engram_mcp_runtime_family_fixture(
+    clock: FixtureBudgetClock,
     suffix: &str,
     work_authority_grant: Option<&str>,
 ) -> (AppState, PathBuf, String, Vec<String>) {
     let (state, root, project_id, session_ids, _seam) =
-        engram_mcp_runtime_family_fixture_with_seam(suffix, work_authority_grant, None);
+        engram_mcp_runtime_family_fixture_with_seam(clock, suffix, work_authority_grant, None);
     (state, root, project_id, session_ids)
 }
 
@@ -4330,6 +4365,7 @@ fn engram_mcp_runtime_family_fixture(
 /// before the fixture's first settings Save. The returned guard keeps it
 /// registered for the caller's test.
 fn engram_mcp_runtime_family_fixture_with_seam(
+    clock: FixtureBudgetClock,
     suffix: &str,
     work_authority_grant: Option<&str>,
     seam: Option<fn(&[&FsPath]) -> TestEngramReadinessSeam>,
@@ -4341,6 +4377,12 @@ fn engram_mcp_runtime_family_fixture_with_seam(
     Option<TestEngramReadinessSeam>,
 ) {
     let state = test_app_state();
+    match clock {
+        FixtureBudgetClock::Unchosen => {}
+        FixtureBudgetClock::Scripted => {
+            state.select_test_scripted_engram_budget_clock();
+        }
+    }
     let root = state
         .test_temp_root
         .as_ref()
@@ -4377,8 +4419,11 @@ fn engram_mcp_runtime_family_fixture_with_seam(
 
 #[test]
 fn runtime_mcp_composition_records_the_exact_installed_engram_descriptor() {
-    let (state, root, _project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("installed-descriptor", Some("grant-installed"));
+    let (state, root, _project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Unchosen,
+        "installed-descriptor",
+        Some("grant-installed"),
+    );
     for session_id in &session_ids {
         let (agent, runtime_token) = {
             let inner = state.inner.lock().expect("state mutex poisoned");
@@ -4432,12 +4477,17 @@ fn runtime_mcp_composition_records_the_exact_installed_engram_descriptor() {
             Some("grant-installed")
         );
     }
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn engram_mcp_grant_rotation_marks_all_runtime_families_and_descendants_for_reset() {
-    let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("grant-rotation", Some("grant-old"));
+    let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "grant-rotation",
+        Some("grant-old"),
+    );
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let active_index = inner
@@ -4494,6 +4544,7 @@ fn assert_engram_mcp_quarantine_transition_is_replanned_before_commit(
 ) {
     let (state, root, project_id, session_ids, _readiness) =
         engram_mcp_runtime_family_fixture_with_seam(
+            FixtureBudgetClock::Scripted,
             label,
             Some("grant-old"),
             // Readiness is setup here, not the subject (see the seam file).
@@ -4566,7 +4617,7 @@ fn assert_engram_mcp_successful_rotation_releases_fences_atomically(
     rotate_home: bool,
 ) {
     let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture(label, Some("grant-old"));
+        engram_mcp_runtime_family_fixture(FixtureBudgetClock::Scripted, label, Some("grant-old"));
     let session_id = session_ids[0].clone();
     let runtime_token = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -4685,6 +4736,7 @@ fn engram_mcp_reset_required_rotation_releases_project_and_runtime_fences_atomic
 #[test]
 fn engram_mcp_committed_rotation_reports_project_fence_release_degradation_as_success() {
     let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Unchosen,
         "grant-rotation-project-fence-release-degraded",
         Some("grant-old"),
     );
@@ -4765,6 +4817,8 @@ fn engram_mcp_committed_rotation_reports_project_fence_release_degradation_as_su
             .engram_project_resets
             .release(&project_id, newer_generation)
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -4809,6 +4863,7 @@ fn engram_mcp_home_rotation_rejects_reuse_of_the_old_store_grant() {
         !new_home_revoke.exists(),
         "the current store must not be revoked"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -4872,6 +4927,8 @@ fn engram_mcp_home_alias_keeps_the_current_store_authority() {
         Message::Text { text, .. }
             if text.contains("TermAl is retiring this runtime's previous write authority")
     )));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -4942,6 +4999,7 @@ fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
                 "unexpected relative-home validation error: {}",
                 error.message
             );
+            assert_engram_budget_clock_unread(&state);
         },
     );
 }
@@ -4949,6 +5007,7 @@ fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
 #[test]
 fn engram_settings_normalize_binary_and_home_before_persisting_or_composing_runtime_argv() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -5077,6 +5136,8 @@ fn engram_grant_clear_cannot_smuggle_an_unvalidated_binary_change() {
         Some(&enabled)
     );
     assert!(inner.engram_retired_work_authority_grants.is_empty());
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -5127,6 +5188,7 @@ fn engram_disabled_settings_reject_relative_homes_and_unresolved_stores_never_al
         &unresolved,
         &different_identity,
     ));
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[cfg(windows)]
@@ -5238,8 +5300,11 @@ fn retired_engram_authority_unconfirmed_capacity_is_atomic_and_never_evicts_pend
 
 #[test]
 fn engram_mcp_rejects_reuse_of_a_revoked_grant_in_the_same_store() {
-    let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("rotate-back", Some("grant-a"));
+    let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "rotate-back",
+        Some("grant-a"),
+    );
     let session_id = &session_ids[0];
     let runtime_token = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -5340,6 +5405,7 @@ fn engram_mcp_rejects_a_retired_grant_across_projects_without_store_matching() {
     };
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("was retired by TermAl"));
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -5393,6 +5459,8 @@ fn engram_mcp_rejects_a_grant_that_is_active_on_another_project() {
             .and_then(|settings| settings.work_authority_grant.as_deref()),
         None
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -5472,6 +5540,8 @@ fn engram_mcp_rechecks_retired_grants_under_the_commit_lock_across_projects() {
         .expect("second project should remain");
     assert_eq!(second, &second_original);
     assert!(!inner.engram_project_resets.contains(&second_id));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -5569,11 +5639,14 @@ fn engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock() {
             .iter()
             .any(|entry| entry.grant_hash == "grant-active-race")
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn engram_mcp_binary_only_change_neither_revokes_authority_nor_emits_rotation_notice() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -5623,8 +5696,11 @@ fn engram_mcp_binary_only_change_neither_revokes_authority_nor_emits_rotation_no
 
 #[test]
 fn engram_mcp_grant_clear_checkpoints_open_child_grant_through_owned_project_fence() {
-    let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("grant-clear-open-checkpoint", Some("grant-old"));
+    let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "grant-clear-open-checkpoint",
+        Some("grant-old"),
+    );
     let child_session_id = session_ids
         .last()
         .expect("fixture should include a delegation child")
@@ -5674,8 +5750,11 @@ fn engram_mcp_grant_clear_checkpoints_open_child_grant_through_owned_project_fen
 // clean Idle stop.
 #[tokio::test]
 async fn asynchronous_stop_surfaces_engram_checkpoint_failure_on_the_session() {
-    let (state, _root, _project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("async-stop-checkpoint-failure", Some("grant-old"));
+    let (state, _root, _project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "async-stop-checkpoint-failure",
+        Some("grant-old"),
+    );
     // Checkpoint routing is delegation-scoped, so exercise the linked
     // descendant rather than one of the fixture's project-root sessions.
     let session_id = session_ids[3].clone();
@@ -5777,8 +5856,11 @@ async fn asynchronous_stop_surfaces_engram_checkpoint_failure_on_the_session() {
 
 #[test]
 fn engram_mcp_grant_clear_waits_for_a_lifecycle_checkpoint_before_teardown() {
-    let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("grant-clear-lifecycle-checkpoint", Some("grant-old"));
+    let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "grant-clear-lifecycle-checkpoint",
+        Some("grant-old"),
+    );
     let child_session_id = session_ids
         .last()
         .expect("fixture should include a delegation child")
@@ -5853,8 +5935,11 @@ fn engram_mcp_grant_clear_waits_for_a_lifecycle_checkpoint_before_teardown() {
 
 #[test]
 fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
-    let (state, _root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("checkpoint-owner", Some("grant-old"));
+    let (state, _root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "checkpoint-owner",
+        Some("grant-old"),
+    );
     let child_session_id = session_ids
         .last()
         .expect("fixture should include a delegation child")
@@ -5947,8 +6032,11 @@ fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
 
 #[test]
 fn project_reset_release_clears_its_owned_checkpoint() {
-    let (state, _root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("reset-checkpoint-owner", Some("grant-old"));
+    let (state, _root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "reset-checkpoint-owner",
+        Some("grant-old"),
+    );
     let session_id = session_ids[0].clone();
     let owner_generation = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -5985,8 +6073,11 @@ fn project_reset_release_clears_its_owned_checkpoint() {
 
 #[test]
 fn project_reset_checkpoint_claim_waits_for_a_lifecycle_owner_without_takeover() {
-    let (state, _root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("reset-checkpoint-wait", Some("grant-old"));
+    let (state, _root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "reset-checkpoint-wait",
+        Some("grant-old"),
+    );
     let session_id = session_ids[0].clone();
     let (candidate, owner_generation) = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -6066,8 +6157,11 @@ fn project_reset_checkpoint_claim_waits_for_a_lifecycle_owner_without_takeover()
 
 #[test]
 fn strict_project_reset_checkpoint_timeout_does_not_append_a_degraded_card() {
-    let (state, _root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("reset-checkpoint-timeout", Some("grant-old"));
+    let (state, _root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "reset-checkpoint-timeout",
+        Some("grant-old"),
+    );
     let session_id = session_ids[0].clone();
     let (candidate, owner_generation, message_count) = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -6130,8 +6224,11 @@ fn strict_project_reset_checkpoint_timeout_does_not_append_a_degraded_card() {
 
 #[test]
 fn project_reset_checkpoint_claim_drops_a_grantless_active_candidate_without_control_work() {
-    let (state, _root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("reset-checkpoint-idle", Some("grant-old"));
+    let (state, _root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "reset-checkpoint-idle",
+        Some("grant-old"),
+    );
     let session_id = session_ids[0].clone();
     let (candidate, owner_generation) = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -6177,8 +6274,11 @@ fn project_reset_checkpoint_claim_drops_a_grantless_active_candidate_without_con
 
 #[test]
 fn project_reset_checkpoint_claim_waits_for_bind_to_publish_its_grant() {
-    let (state, _root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("reset-checkpoint-bind", Some("grant-old"));
+    let (state, _root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "reset-checkpoint-bind",
+        Some("grant-old"),
+    );
     let session_id = session_ids[0].clone();
     let (candidate, owner_generation) = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -6245,8 +6345,11 @@ fn project_reset_checkpoint_claim_waits_for_bind_to_publish_its_grant() {
 
 #[test]
 fn project_reset_checkpoint_claim_times_out_a_stuck_bind_without_dropping_it() {
-    let (state, _root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("reset-checkpoint-stuck-bind", Some("grant-old"));
+    let (state, _root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "reset-checkpoint-stuck-bind",
+        Some("grant-old"),
+    );
     let session_id = session_ids[0].clone();
     let (candidate, owner_generation) = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -6290,8 +6393,11 @@ fn project_reset_checkpoint_claim_times_out_a_stuck_bind_without_dropping_it() {
 
 #[test]
 fn engram_mcp_grant_clear_immediately_tears_down_all_runtime_families_and_descendants() {
-    let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("grant-clear", Some("grant-old"));
+    let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        FixtureBudgetClock::Scripted,
+        "grant-clear",
+        Some("grant-old"),
+    );
     let settings = real_fixture_engram_settings(&root);
 
     state
@@ -6326,6 +6432,7 @@ fn engram_mcp_grant_clear_immediately_tears_down_all_runtime_families_and_descen
 #[test]
 fn engram_mcp_grant_clear_serializes_with_runtime_exit_waiter() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -6420,6 +6527,7 @@ fn engram_mcp_grant_clear_serializes_with_runtime_exit_waiter() {
 #[test]
 fn engram_mcp_grant_clear_gracefully_cancels_opencode_before_teardown() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -6487,6 +6595,7 @@ fn engram_mcp_grant_clear_gracefully_cancels_opencode_before_teardown() {
 #[test]
 fn engram_mcp_grant_clear_defers_behind_existing_stop_owner_without_waiting() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -6575,6 +6684,7 @@ fn engram_mcp_grant_clear_defers_behind_existing_stop_owner_without_waiting() {
 #[test]
 fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automatic_work() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -6693,6 +6803,7 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
 #[test]
 fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -6852,6 +6963,7 @@ fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() 
 #[test]
 fn engram_mcp_revocation_fence_queues_dispatch_and_token_mismatch_releases_cleanly() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let session_id = test_session_id(&state, Agent::Claude);
     let (old_runtime, _old_input_rx) = test_claude_runtime_handle("engram-revoke-old");
     {
@@ -7033,6 +7145,8 @@ fn stale_engram_mcp_revocation_cannot_release_a_newer_owner_fence() {
             active_turn_generation: record.active_turn_generation,
         }]
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -7103,6 +7217,8 @@ fn lost_project_reset_generation_still_releases_exact_runtime_revocation_fences(
     assert!(!record.runtime_stop_in_progress);
     assert!(record.runtime_stop_owner.is_none());
     assert!(record.engram.project_reset_in_progress);
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -7157,12 +7273,15 @@ fn engram_mcp_revocation_reclaims_an_unowned_fence_for_the_same_runtime() {
     assert!(!record.runtime_stop_in_progress);
     assert!(record.runtime_stop_owner.is_none());
     assert!(!record.engram_mcp_revocation_pending);
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn engram_mcp_grant_clear_dispatches_queued_prompt_with_fresh_runtime() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-mcp-revoke-queue");
+    state.select_test_scripted_engram_budget_clock();
     let transport = StatefulEngramControlTransport::new();
     state.install_control_test_transport(transport.clone());
     let root = state
@@ -7231,6 +7350,7 @@ fn engram_mcp_grant_clear_dispatches_queued_prompt_with_fresh_runtime() {
 fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-mcp-bind-before-resume");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -7328,6 +7448,7 @@ fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt()
 #[test]
 fn engram_mcp_grant_clear_surfaces_shutdown_failure_and_blocks_resume() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -7501,6 +7622,7 @@ fn engram_mcp_grant_clear_surfaces_shutdown_failure_and_blocks_resume() {
 #[test]
 fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let transport = StatefulEngramControlTransport::new();
     state.install_control_test_transport(transport.clone());
     let root = state
@@ -7627,6 +7749,7 @@ fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
 #[test]
 fn engram_mcp_mixed_cleanup_error_preserves_pending_session_observability() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -7741,6 +7864,7 @@ fn engram_mcp_mixed_cleanup_error_preserves_pending_session_observability() {
 #[test]
 fn engram_mcp_shared_codex_interrupt_failure_revokes_grant_and_surfaces_degradation() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -7943,6 +8067,8 @@ fn engram_mcp_buffered_runtime_exit_avoids_quarantining_a_dead_runtime() {
     assert!(!record.runtime_stop_in_progress);
     assert!(record.deferred_stop_callbacks.is_empty());
     assert_eq!(record.session.status, SessionStatus::Idle);
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -7998,6 +8124,8 @@ fn engram_mcp_grant_revoke_cli_failure_is_visible_after_durable_grant_clear() {
         None,
         "a failed irreversible revoke call must not roll back the durable settings change"
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8065,11 +8193,14 @@ fn engram_mcp_uses_persisted_project_identity_when_marker_disappears_and_retries
         .expect("pending tombstone should remain as a reuse blocker");
     assert!(tombstone.revoke_confirmed);
     assert!(tombstone.reason.contains("work-authority grant removed"));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn engram_mcp_rotation_revoke_failure_keeps_new_settings_and_reset_notice() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -8138,6 +8269,7 @@ fn engram_mcp_rotation_revoke_failure_keeps_new_settings_and_reset_notice() {
 #[test]
 fn engram_mcp_home_rotation_revoke_failure_tears_down_the_old_runtime() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -8279,6 +8411,8 @@ fn engram_mcp_rotation_persist_failure_rolls_back_notice_reset_and_tombstone() {
         "persist rollback should keep the pre-rotation runtime attached"
     );
     assert!(record.deferred_stop_callbacks.is_empty());
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8344,11 +8478,14 @@ fn unconfirmed_authority_revocation_retries_on_the_next_same_store_rotation() {
             "{grant} should be confirmed after the retry mutation"
         );
     }
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn failed_background_authority_retry_does_not_fail_an_unrelated_settings_edit() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -8466,6 +8603,7 @@ fn engram_cleanup_degradation_persists_for_a_project_without_sessions() {
             .iter()
             .all(|session| session.project_id.as_deref() != Some(&project_id))
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8539,6 +8677,7 @@ fn successful_authority_cleanup_clears_the_matching_project_warning_durably() {
                 entry.grant_hash == "grant-cleanup-warning-cleared" && entry.revoke_confirmed
             })
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8630,6 +8769,8 @@ fn unrelated_authority_success_keeps_warning_until_every_project_retirement_is_c
             .is_none(),
         "the warning should clear only after every project retirement is confirmed"
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8665,6 +8806,8 @@ fn successful_cleanup_without_remaining_tombstones_clears_only_its_warning_kind(
         warning,
         ENGRAM_PROJECT_FENCE_RELEASE_DEGRADED_NOTICE,
     ));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8734,6 +8877,7 @@ fn immediate_revocation_rejects_overlapping_project_engram_mutations() {
         .join()
         .expect("grant-clear thread should not panic")
         .expect("grant clear should finish after the gate releases");
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8789,6 +8933,8 @@ fn grant_rotation_fence_rejects_an_overlapping_rotation() {
         .and_then(|project| project.engram.as_ref())
         .expect("settings should remain");
     assert_eq!(settings.work_authority_grant.as_deref(), Some("grant-b"));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -8834,11 +8980,13 @@ fn a_fence_gated_update_that_returns_early_reports_its_own_error() {
             .is_err(),
         "enablement without a marker is refused"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -8924,7 +9072,7 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
 fn assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(delete_project: bool) {
     let suffix = if delete_project { "delete" } else { "disable" };
     let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture(suffix, Some("grant-old"));
+        engram_mcp_runtime_family_fixture(FixtureBudgetClock::Scripted, suffix, Some("grant-old"));
     if delete_project {
         state
             .delete_project(&project_id)
@@ -8984,6 +9132,7 @@ fn engram_mcp_project_delete_immediately_revokes_existing_runtimes() {
 
 fn assert_engram_mcp_quarantined_runtime_retried_by_followup(delete_project: bool) {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9139,6 +9288,8 @@ fn engram_mcp_enable_marks_runtime_but_deadline_only_patch_does_not() {
         .expect("test session should exist");
     assert!(!record.runtime_reset_required);
     assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -9176,6 +9327,8 @@ fn enablement_accepts_real_doctor_required_turn_gated_and_adopts_identity() {
             project_id: "fixture-doctor-turn-gated".to_owned(),
         })
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -9219,6 +9372,7 @@ fn enablement_rejects_real_doctor_requirements_other_than_turn_gated() {
             "refused settings must not be committed"
         );
     }
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -9255,6 +9409,8 @@ fn enablement_rejects_real_doctor_output_without_required_assurance() {
             .is_none(),
         "invalid doctor output must not enable the project"
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[derive(Clone, Copy)]
@@ -9269,6 +9425,7 @@ enum EngramTerminationCase {
 fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &str) {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-s8-{label}"));
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9379,6 +9536,7 @@ fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &st
 fn timed_out_wait_checkpoint_and_later_exit_use_distinct_idempotency_keys() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-checkpoint-intent-keys");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9495,6 +9653,7 @@ fn terminal_paths_checkpoint_begun_turns_once_with_resumable_intents() {
 #[test]
 fn stop_then_identical_followup_gets_a_fresh_grant_without_rebind() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-stop-followup");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9607,6 +9766,7 @@ fn stop_then_identical_followup_gets_a_fresh_grant_without_rebind() {
 #[test]
 fn remote_proxy_dispatch_never_enters_the_local_engram_adapter() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s9");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9682,6 +9842,7 @@ fn remote_proxy_dispatch_never_enters_the_local_engram_adapter() {
 #[test]
 fn approval_pause_keeps_the_open_grant_until_the_turn_really_finishes() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s10");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9776,6 +9937,7 @@ fn approval_pause_keeps_the_open_grant_until_the_turn_really_finishes() {
 #[test]
 fn disabling_after_begin_clears_state_and_blocks_every_later_control_call() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-disable");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -9875,6 +10037,7 @@ fn disabling_after_begin_clears_state_and_blocks_every_later_control_call() {
 fn disable_preserves_uncheckpointed_authority_and_reenable_repairs_the_same_session() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-disable-checkpoint-deadline");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10099,6 +10262,7 @@ fn disable_preserves_uncheckpointed_authority_and_reenable_repairs_the_same_sess
 fn reenable_with_a_different_home_checkpoints_disabled_recovery_in_the_old_store() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-disabled-recovery-home-change");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10253,6 +10417,7 @@ fn reenable_with_a_different_home_checkpoints_disabled_recovery_in_the_old_store
 fn project_reset_persist_failure_restores_old_connection_state_and_releases_fence() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-persist-failure");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10376,6 +10541,7 @@ fn project_reset_persist_failure_restores_old_connection_state_and_releases_fenc
 #[test]
 fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-reconfigure");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10487,6 +10653,7 @@ fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds
 fn project_reset_fence_keeps_a_new_delegation_off_the_old_connection() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-project-reset-fence");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10582,6 +10749,7 @@ fn project_reset_fence_keeps_a_new_delegation_off_the_old_connection() {
 fn no_reset_settings_patch_cannot_invalidate_a_checkpointing_reset() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-settings-patch-reset-race");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10686,6 +10854,7 @@ fn no_reset_settings_patch_cannot_invalidate_a_checkpointing_reset() {
 fn project_reset_wait_releases_a_generation_rejected_pending_dispatch() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-stale-dispatch");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10830,6 +10999,7 @@ fn project_reset_wait_releases_a_generation_rejected_pending_dispatch() {
 fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-stale-begin-successor");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -10989,6 +11159,7 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
 fn reset_fenced_begin_finishes_once_while_runtime_stop_is_still_gated() {
     let (state, _codex_runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-stop-begin-finish");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11292,12 +11463,15 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
         Message::Text { text, .. }
             if text.contains("Engram did not authorize this turn for runtime delivery")
     )));
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn nested_child_inherits_engram_project_through_an_isolated_parent_chain() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-effective-project");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11425,6 +11599,7 @@ fn nested_child_inherits_engram_project_through_an_isolated_parent_chain() {
 fn nested_delegation_parent_bind_uses_child_authority_shape() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-parent-shape");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11475,6 +11650,7 @@ fn nested_delegation_parent_bind_uses_child_authority_shape() {
 fn nested_delegation_parent_bind_fails_open_when_child_target_is_disabled() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-parent-disabled");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11516,6 +11692,7 @@ fn nested_delegation_parent_bind_fails_open_when_child_target_is_disabled() {
 fn marked_nested_parent_without_delegation_row_has_no_parent_shaped_target() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-nested-parent-missing-row");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11567,6 +11744,7 @@ fn marked_nested_parent_without_delegation_row_has_no_parent_shaped_target() {
 fn invalid_status_token_is_dropped_and_replaced_by_a_fresh_bind() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-invalid-status-token");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11658,6 +11836,7 @@ fn invalid_status_token_is_dropped_and_replaced_by_a_fresh_bind() {
 fn status_without_open_grant_clears_stale_local_grant_without_checkpointing_it() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-authoritative-status");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11730,6 +11909,7 @@ fn status_without_open_grant_clears_stale_local_grant_without_checkpointing_it()
 #[test]
 fn disabling_during_bind_rejects_the_late_token_and_reaps_the_process() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-bind-disable");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11824,6 +12004,7 @@ fn disabling_during_bind_rejects_the_late_token_and_reaps_the_process() {
 #[test]
 fn killing_a_parent_checkpoints_and_reaps_its_active_child_first() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-parent-kill");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -11883,6 +12064,7 @@ fn killing_a_parent_checkpoints_and_reaps_its_active_child_first() {
 fn shared_codex_restart_rebinds_each_bound_session_exactly_once() {
     let runtime_id = "engram-s11";
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(runtime_id);
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -12027,6 +12209,7 @@ fn runtime_loss_does_not_rebind_a_fatally_disabled_child_as_a_parent_target() {
         transport.requests().is_empty(),
         "a fatally disabled child must not fall back to a parent-shaped bind"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -12096,11 +12279,13 @@ fn runtime_loss_does_not_rebind_a_missing_delegation_child_as_a_parent_target() 
         transport.requests().is_empty(),
         "a marked delegation child must not fall back to a parent-shaped bind"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn terminal_transition_during_begin_never_delivers_and_closes_the_stale_grant() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-begin-race");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -12197,6 +12382,7 @@ fn assert_terminal_callback_abandons_blocked_begin(
 ) {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-terminal-tail-{label}"));
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -12822,6 +13008,7 @@ impl EngramControlTransport for BlockingBootRecoveryTransport {
 async fn background_boot_recovery_serves_state_and_gates_only_pending_sessions() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-background-boot-recovery");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -12989,6 +13176,9 @@ async fn background_boot_recovery_serves_state_and_gates_only_pending_sessions()
 fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-budgeted-boot-recovery");
+    // The eager-recovery budget is logical: only this test's advance below
+    // consumes it, so the blocked workers outlast it on every schedule.
+    let clock = state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -13072,6 +13262,17 @@ fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
     let coordinator_joiner = std::thread::spawn(move || {
         let _ = coordinator_tx.send(recovery_worker.join());
     });
+    // Positive control: the coordinator is parked on the budget clock. It is
+    // that clock's only waiter here, because the blocked workers wait on the
+    // transport's own gate, never in the scripted driver. With the clock
+    // unadvanced, nothing can end its wait, so it has not returned.
+    clock.wait_for_scripted_waiter();
+    assert!(
+        coordinator_rx.try_recv().is_err(),
+        "the coordinator must keep waiting while its budget is unconsumed"
+    );
+    // Consuming the budget, and only that, ends the wait.
+    clock.advance(Duration::from_millis(MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS));
     phase_sync::receive(
         &coordinator_rx,
         "budgeted coordinator returns before blocked targets release",
@@ -13149,6 +13350,7 @@ fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
 #[test]
 fn unstarted_boot_recovery_target_retries_lazily_on_first_use() {
     let state = test_app_state();
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -13411,6 +13613,9 @@ impl BoundedBootRecoveryFixture {
 
     fn new(label: &str) -> Self {
         let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(label);
+        // Each operation's 250 ms and the batch's configured budget are logical:
+        // they are charged only by explicit advancement, never by scheduling.
+        let clock = state.select_test_scripted_engram_budget_clock();
         let root = state
             .test_temp_root
             .as_ref()
@@ -13485,10 +13690,6 @@ impl BoundedBootRecoveryFixture {
         }
         let transport = BoundedBootRecoveryTransport::new();
         state.install_control_test_transport(transport.clone());
-        // Each operation's 250 ms and the batch's configured budget are logical:
-        // they are charged only by explicit advancement, never by scheduling.
-        let clock = EngramBudgetClock::scripted();
-        state.install_test_engram_budget_clock(clock.clone());
         let logical_start = clock.now();
 
         let recovery_state = state.clone();
@@ -13517,6 +13718,7 @@ impl BoundedBootRecoveryFixture {
 fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-issued-boot-recovery-before");
+    state.select_test_scripted_engram_budget_clock();
     let temp_root_guard = state
         .test_temp_root
         .as_ref()
@@ -13597,11 +13799,13 @@ fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
         child_id.clone(),
         issued_grant_id.clone(),
     );
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
+    // The restarted state chooses its clock before its boot recovery reads it.
+    let restarted = AppState::new_with_paths_engram_transport_and_clock_for_test(
         root.to_string_lossy().into_owned(),
         persistence_path,
         templates_path,
         recovery_transport.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should recover an issued grant through a fresh bind");
 
@@ -13650,6 +13854,7 @@ fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
 #[test]
 fn crash_restart_checkpoints_open_grant_rebinds_once_and_evaluates_next_turn() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s12-before");
+    state.select_test_scripted_engram_budget_clock();
     let temp_root_guard = state
         .test_temp_root
         .as_ref()
@@ -13699,11 +13904,13 @@ fn crash_restart_checkpoints_open_grant_rebinds_once_and_evaluates_next_turn() {
 
     let recovery_transport =
         RestartEngramControlTransport::new(child_id.clone(), "open-before-crash".to_owned());
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
+    // The restarted state chooses its clock before its boot recovery reads it.
+    let restarted = AppState::new_with_paths_engram_transport_and_clock_for_test(
         root.to_string_lossy().into_owned(),
         persistence_path,
         templates_path,
         recovery_transport.clone(),
+        EngramBudgetClock::scripted(),
     )
     .expect("state should recover through the scripted Engram transport");
 
@@ -13819,6 +14026,7 @@ impl EngramControlTransport for BlockingShutdownEngramTransport {
 fn missing_session_mid_bind_reaps_off_lock_even_when_shutdown_blocks() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-missing-mid-bind");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -13884,6 +14092,7 @@ fn missing_session_mid_bind_reaps_off_lock_even_when_shutdown_blocks() {
 #[test]
 fn defer_card_records_that_turn_gating_withheld_the_prompt() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-card-defer");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -13962,6 +14171,7 @@ fn defer_card_records_that_turn_gating_withheld_the_prompt() {
 fn fatal_bind_error_disables_transport_and_records_a_withheld_card() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-fatal-bind-card");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -14109,6 +14319,7 @@ fn state_snapshot_and_persistence_omit_removed_work_authority_grant() {
             .get("workAuthorityGrant")
             .is_none()
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 fn set_test_project_engram_mcp_settings(
@@ -14322,6 +14533,7 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
         .and_then(|project| project.get("engram"))
         .expect("client project should retain public Engram settings");
     assert!(client_engram.get("workAuthorityGrant").is_none());
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14358,6 +14570,7 @@ fn engram_actor_context_collapses_controls_and_omits_oversized_fields() {
         Some("agent=claude;reasoning=high"),
         "an oversized model field must be omitted at a field boundary"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14477,6 +14690,7 @@ fn engram_mcp_and_agent_process_identity_match_for_every_agent_kind() {
             "{agent:?} process shell and MCP child must receive byte-identical Engram variables"
         );
     }
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14650,12 +14864,14 @@ fn acp_session_setup_uses_the_engram_snapshot_that_spawned_its_process() {
         ]),
         "MCP setup must use the descriptor that also configured the ACP process environment"
     );
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn base_only_engram_injects_mcp_and_refreshes_start_and_compaction_context() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-base-context-nudge");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -14912,6 +15128,8 @@ fn settings_reset_supersedes_an_inflight_engram_context_refresh() {
     assert!(!record.engram.context_nudge_pending);
     assert!(!record.engram.context_nudge_in_progress);
     assert!(record.engram.pending_context_nudge.is_some());
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14969,6 +15187,8 @@ fn claude_mcp_snapshot_composition_is_state_lock_safe() {
             .len(),
         1
     );
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -14989,6 +15209,8 @@ fn cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config() {
     let missing_workdir = root.join("missing-runtime-workdir");
     let (result_tx, result_rx) = mpsc::sync_channel(1);
 
+    // The worker takes the state; this handle reads its budget clock after.
+    let budget_state = state.clone();
     std::thread::spawn(move || {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -15028,6 +15250,7 @@ fn cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config() {
         error.starts_with("failed to start persistent Claude session:"),
         "unexpected cold Claude startup error: {error}"
     );
+    assert_engram_budget_clock_unread(&budget_state);
 }
 
 #[test]
@@ -15119,6 +15342,7 @@ fn claude_private_mcp_config_file_carries_only_non_secret_engram_context() {
         })
     );
     assert!(!grantless_json.contains("operator-secret-grant"));
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -15178,6 +15402,7 @@ fn per_session_engram_mcp_uses_base_context_and_preserves_ineligible_baselines()
         record.remote_session_id = Some("remote-session".to_owned());
     }
     assert_delegation_mcp_baseline_is_unchanged(&state, &enabled_session);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -15219,11 +15444,13 @@ fn project_patch_round_trips_without_removed_work_authority_grant() {
         .and_then(|project| project.get("engram"))
         .expect("persisted project should retain Engram settings");
     assert!(persisted_engram.get("workAuthorityGrant").is_none());
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn project_deletion_checkpoints_active_engram_grants_and_reaps_sidecars() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-project-delete");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15349,6 +15576,7 @@ fn project_deletion_keeps_retired_authority_across_recreate_and_restart() {
                 .into_inner()
                 .expect("persisted host ledger should rehydrate")
         };
+        assert_engram_budget_clock_unread(&state);
         *state.inner.lock().expect("state mutex poisoned") = reloaded;
 
         let recreated_project_id =
@@ -15359,6 +15587,7 @@ fn project_deletion_keeps_retired_authority_across_recreate_and_restart() {
         };
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(error.message.contains("was retired by TermAl"));
+        assert_engram_budget_clock_unread(&state);
     }
 }
 
@@ -15414,12 +15643,15 @@ fn project_deletion_without_an_engram_binary_still_persists_the_unconfirmed_gran
         .expect("project deletion must not lose the unresolved credential");
     assert_eq!(tombstone.project_root, root.to_string_lossy());
     assert!(!tombstone.revoke_confirmed);
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
 fn project_deletion_fences_adapter_work_while_checkpoint_is_in_flight() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-project-delete-fence");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15506,6 +15738,7 @@ fn project_deletion_fences_adapter_work_while_checkpoint_is_in_flight() {
 fn project_deletion_persist_failure_restores_project_without_resurrecting_grant() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-project-delete-rollback");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15595,6 +15828,7 @@ fn project_deletion_persist_failure_restores_project_without_resurrecting_grant(
 fn concurrent_bind_attempts_share_one_in_flight_operation() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-bind-in-flight");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15667,6 +15901,7 @@ fn global_disable_values_and_bind_retry_schedule_are_explicit() {
 #[test]
 fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-failure-policy");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -15855,6 +16090,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
 fn dispatch_card_persist_failure_withholds_granted_delivery() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-dispatch-card-persist-failure");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16184,6 +16420,8 @@ fn global_kill_switch_does_not_suppress_authority_rotation_or_tombstones() {
         .find(|entry| entry.grant_hash == "grant-b")
         .expect("deletion authority must remain in the host ledger");
     assert!(tombstone.revoke_confirmed);
+    drop(inner);
+    assert_engram_budget_clock_unread(&state);
 }
 
 #[test]
@@ -16206,6 +16444,7 @@ fn runtime_kill_switch_does_not_strand_an_already_open_grant() {
 
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-runtime-kill-switch");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16278,6 +16517,7 @@ fn runtime_kill_switch_does_not_strand_an_already_open_grant() {
 fn stop_supersedes_an_in_flight_begin_without_overwriting_the_clean_stop() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-stop-during-begin");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16370,6 +16610,7 @@ fn stop_supersedes_an_in_flight_begin_without_overwriting_the_clean_stop() {
 fn failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery() {
     let (state, _codex_runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-failed-stop-during-begin");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16543,6 +16784,7 @@ fn failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery() {
 fn stale_begin_completion_does_not_clear_or_fail_a_live_successor() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-stale-begin-successor");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16666,6 +16908,7 @@ fn stale_begin_completion_does_not_clear_or_fail_a_live_successor() {
 fn start_turn_failure_arms_rebind_for_the_unowned_evaluated_grant() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-start-error-abandon");
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()

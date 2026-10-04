@@ -18,9 +18,12 @@ fn begin_refusal_reply(code: &str) -> ScriptedEngramControlResponse {
     ScriptedEngramControlResponse::Reply(Ok(json!({ "decision": "refuse", "code": code })))
 }
 
-/// A project with Engram control enabled and a parent session in it.
+/// A project with Engram control enabled and a parent session in it, on the
+/// shared scripted budget clock, chosen before Engram is enabled: no test
+/// here asserts a budget's expiry.
 fn engram_project(label: &str) -> (AppState, mpsc::Receiver<CodexRuntimeCommand>, String) {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(label);
+    select_scripted_engram_budget_clock_before_enable(&state);
     let root = state
         .test_temp_root
         .as_ref()

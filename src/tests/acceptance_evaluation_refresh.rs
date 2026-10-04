@@ -830,6 +830,61 @@ fn acceptance_refresh_changed_agent_selects_a_fresh_evaluator() {
 }
 
 #[test]
+fn acceptance_refresh_sub_agent_pin_selects_fresh_attested_child() {
+    let (state, _, parent, _, old_id) =
+        finished_evaluator_fixture("acceptance-sub-agent-refresh-runtime");
+    let old_child = state.get_delegation(&parent, &old_id).unwrap()
+        .delegation.child_session_id;
+    enable_attempt_history(&state, &old_id, &parent, &old_child);
+    let mut request = evaluation_request(Some(Agent::Codex));
+    request.reuse_delegation_id = Some(old_id.clone());
+    let response = state.request_acceptance_evaluation_with_runner(
+        &parent,
+        request,
+        fixture_reader(
+            Arc::default(),
+            show_receipt(Some("sub_agent")),
+            Ok(policy_receipt(Some(&["independent_session", "sub_agent"]))),
+        ),
+    ).unwrap();
+    let AcceptanceEvaluationRequestResponse::Spawned {
+        delegation, reused, notice, mode, ..
+    } = response else { panic!("sub_agent must create an evaluator"); };
+    assert_eq!(mode, AcceptanceEvaluationMode::SubAgent);
+    assert!(!reused);
+    let record = delegation.delegation;
+    assert_ne!(record.id, old_id);
+    assert_ne!(record.child_session_id, old_child);
+    assert!(notice.unwrap().contains("independent_session admission"));
+    let target = current_target(&state, &record.id);
+    assert_eq!(target.parent_session.as_deref(), Some(parent.as_str()));
+    assert_eq!(target.execution_identity.as_deref(), Some(record.id.as_str()));
+    assert_eq!(target.attempt_key, record.id);
+    assert!(target.attempt_history.is_none());
+    assert!(!record.prompt.contains("Host-authored acceptance attempt"));
+    assert_eq!(current_target(&state, &old_id).attempt_history.unwrap().ordinal, 1);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        // Exclude bind retries while exercising the acceptance submission.
+        inner.session_mut(&record.child_session_id).unwrap()
+            .engram.project_reset_in_progress = true;
+    }
+    let mut receipt: Value = serde_json::from_str(&evaluate_receipt(false)).unwrap();
+    receipt["evaluation"]["mode"] = json!("sub_agent");
+    state.submit_acceptance_evaluation_with_runner(
+        &record.child_session_id, two_verdicts(), |connection, args, _| {
+            let flag = |name| args.windows(2).find(|pair| pair[0] == name).unwrap()[1].clone();
+            assert_eq!(connection.session_id, record.child_session_id);
+            assert_eq!(flag("--mode"), "sub_agent");
+            assert_eq!(flag("--parent-session"), parent);
+            assert_eq!(flag("--execution-identity"), record.id);
+            assert_eq!(flag("--attempt"), record.id);
+            Ok(cli_output(true, &receipt.to_string(), ""))
+        },
+    ).unwrap();
+}
+
+#[test]
 fn acceptance_refresh_eligibility_uses_persisted_history_and_current_policy() {
     let (state, _, parent, root, id) = finished_evaluator_fixture("acceptance-eligibility-runtime");
     let child = state

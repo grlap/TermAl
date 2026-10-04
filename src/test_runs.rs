@@ -32,16 +32,15 @@ enum TestRunState {
     Unknown,
 }
 
-/// Why a run reads `unknown`, when that is known (slice 2). `processGone` and
-/// `noPid` come only from results read after the liveness check, so they are
-/// final for that process and settle a wait. `resultsUnreadable` may still
-/// resolve on a later read and never settles one.
+/// Why a run reads `unknown`. Only a proven-gone responsible process settles
+/// a wait; missing executor or heartbeat evidence is pending uncertainty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum TestRunUnknownReason {
     ProcessGone,
     ResultsUnreadable,
     NoPid,
+    HeartbeatStale,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -249,11 +248,17 @@ fn test_run_unknown_reason(
     disk: &TestRunDisk,
     state: TestRunState,
     read_after_check_failed: bool,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Option<TestRunUnknownReason> {
     if state != TestRunState::Unknown {
         return None;
     }
-    if disk.results.is_none() || read_after_check_failed {
+    // A grace copy may retain an already-confirmed reason, but a failed
+    // replacement read must never establish a new disappearance proof.
+    if disk.results.is_none()
+        || read_after_check_failed
+        || (disk.read_failures > 0 && disk.unknown_needs_read_after_check(state))
+    {
         return Some(TestRunUnknownReason::ResultsUnreadable);
     }
     if disk.unknown_needs_read_after_check(state) {
@@ -261,6 +266,7 @@ fn test_run_unknown_reason(
     }
     Some(match disk.responsible_pid() {
         Some(_) => TestRunUnknownReason::ProcessGone,
+        None if disk.heartbeat_fresh_at(now) == Some(false) => TestRunUnknownReason::HeartbeatStale,
         None => TestRunUnknownReason::NoPid,
     })
 }
@@ -423,6 +429,17 @@ impl AppState {
         writer_may_be_alive: &TestRunLiveness,
         publish: &dyn Fn(&StateInner, &DeltaEvent),
     ) -> bool {
+        self.refresh_test_runs_at_with(chrono::Utc::now(), writer_may_be_alive, publish)
+    }
+
+    /// One observation time for the scan, including cached parses and
+    /// post-liveness rereads. Tests inject time without a state-wide clock.
+    fn refresh_test_runs_at_with(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        writer_may_be_alive: &TestRunLiveness,
+        publish: &dyn Fn(&StateInner, &DeltaEvent),
+    ) -> bool {
         // One rescan at a time, from its first read to its last commit. A
         // rescan that panicked leaves nothing half-done behind the lock, so a
         // poisoned lock is still taken.
@@ -552,7 +569,13 @@ impl AppState {
                     continue;
                 }
                 let mut disk = disk;
-                let mut state = disk.state(writer_may_be_alive);
+                let mut state = disk.state_at(writer_may_be_alive, now);
+                // An earlier disappearance confirmation cannot settle a
+                // later observation after renewed heartbeat/PID liveness.
+                if state == TestRunState::Running && disk.confirmed_unknown.is_some() {
+                    Arc::make_mut(&mut disk).confirmed_unknown = None;
+                    parsed.insert(run_dir.clone(), disk.clone());
+                }
                 let mut read_after_check_failed = false;
                 // Unknown from results read before the check that found the
                 // process gone: the launcher may have written its terminal
@@ -574,8 +597,8 @@ impl AppState {
                         read_after_check_failed = true;
                         break;
                     };
-                    fresh.confirmed_unknown = Some(checked);
-                    state = fresh.state(writer_may_be_alive);
+                    state = fresh.state_at(writer_may_be_alive, now);
+                    fresh.confirmed_unknown = (state == TestRunState::Unknown).then_some(checked);
                     disk = Arc::new(fresh);
                     parsed.insert(run_dir.clone(), disk.clone());
                 }
@@ -589,7 +612,7 @@ impl AppState {
                 let project_id =
                     test_run_project_id(&test_run_path_key(&disk.worktree), &projects, common_key);
                 scanned.push(TestRunScanned {
-                    unknown_reason: test_run_unknown_reason(&disk, state, read_after_check_failed),
+                    unknown_reason: test_run_unknown_reason(&disk, state, read_after_check_failed, now),
                     disk,
                     state,
                     project_id,

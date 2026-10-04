@@ -6,6 +6,10 @@ mod budget {
     include!("engram_budget_authority.rs");
 }
 
+mod reclamation {
+    include!("engram_named_root_reclamation.rs");
+}
+
 struct FailingAdmissionRootReader {
     control: Arc<ScriptedEngramControlTransport>,
     fail_after: &'static str,
@@ -23,6 +27,10 @@ struct InterferingAdmissionRootReader {
 }
 
 impl EngramControlTransport for InterferingAdmissionRootReader {
+    fn read_observation_policy(&self, connection: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey, timeout: Duration) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, store, timeout)
+    }
     fn shutdown_session(&self, session: &str) {
         self.control.shutdown_session(session);
     }
@@ -215,6 +223,10 @@ fn source_root_authority_admission_separates_root_owner_from_routing_claim_and_q
 }
 
 impl EngramControlTransport for FailingAdmissionRootReader {
+    fn read_observation_policy(&self, connection: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey, timeout: Duration) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, store, timeout)
+    }
     fn shutdown_session(&self, session_id: &str) {
         self.control.shutdown_session(session_id);
     }
@@ -1660,9 +1672,11 @@ fn source_root_authority_review_admitted_retirement_waits_for_connected_ack() {
     let mut proof = covering_removed_root_read(&journal, false);
     proof["run"]["state"] = json!("open");
     proof["latest_event"]["kind"] = json!("ended");
-    proof["latest_event"]["event"] = json!("retirement-ended-event");
-    proof["latest_event"]["position"]["position"] = json!(2);
-    proof["read_cut"]["position"] = json!(2);
+    proof["latest_event"]["event"] = json!(sha256_hex(b"retirement-ended-event"));
+    let next_position = claimed.transport.named_roots.lock().unwrap().as_ref().unwrap()
+        .run_cuts[&journal.read_binding.as_ref().unwrap().run_id] + 1;
+    proof["latest_event"]["position"]["position"] = json!(next_position);
+    proof["read_cut"]["position"] = json!(next_position);
     claimed
         .transport
         .named_roots
@@ -2440,7 +2454,7 @@ fn source_root_authority_foreign_generation_cannot_hide_a_later_claim_name() {
         assert!(
             acceptance_evaluation_root_changed_locked(
                 &inner,
-                &seed.clone().into_target("old-request".to_owned())
+                &seed.clone().into_target("old-request".to_owned(), &claimed.session_id)
             ),
             "first submission keeps the original naming token"
         );
@@ -2611,6 +2625,10 @@ struct AuthorityTimeoutRecorder {
 }
 
 impl EngramControlTransport for AuthorityTimeoutRecorder {
+    fn read_observation_policy(&self, connection: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey, timeout: Duration) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, store, timeout)
+    }
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,

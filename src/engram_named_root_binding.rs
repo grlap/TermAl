@@ -444,6 +444,10 @@ struct EngramWorkNamingHistory {
     proofs: Vec<EngramAuthorityProof>,
     #[serde(default)]
     recovery_reason: Option<String>,
+    /// Unpublished retirements still reserve capacity. The exact authority
+    /// image owns their durable notice, independently of session focus.
+    #[serde(default)]
+    retirements: Vec<EngramNamedRootRetirementNotice>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -510,6 +514,7 @@ fn engram_record_naming_history(
                 transition: None,
                 unresolved_runs: Vec::new(),
                 proofs: Vec::new(),
+                retirements: Vec::new(),
                 recovery_reason: Some(
                     "legacy naming origin requires canonical recovery or explicit repair"
                         .to_owned(),
@@ -542,6 +547,13 @@ fn engram_work_naming_is_current(
 /// that basis can be inspected without waiting under the state lock.
 fn engram_compact_root_journal(inner: &mut StateInner) {
     let retained = inner.engram_named_root_journal.iter().filter(|journal| {
+        if inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+            // An unacknowledged publication still needs this journal for replay.
+            // Published notices carry their own proof and delivery identity.
+            .any(|notice| !notice.published && notice.selection.store == journal.store
+                && notice.selection.claim_id == journal.claim_id) {
+            return true;
+        }
         if journal.requires_reconciliation() {
             return true;
         }

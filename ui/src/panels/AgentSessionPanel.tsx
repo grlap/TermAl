@@ -23,6 +23,7 @@ import {
   PendingPromptCard,
   QueuePausedIndicator,
 } from "./session-activity-cards";
+import { SourceTrackingRecoveryIndicator } from "./source-tracking-recovery-card";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { type RenderMessageCard } from "./virtualized-conversation-types";
 import { usePendingUserInputSubmissions } from "./pending-user-input-submissions";
@@ -383,7 +384,8 @@ const SessionBody = memo(
         activeSession.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
       if (
         activeSession.messages.length === 0 &&
-        activePendingPrompts.length === 0
+        activePendingPrompts.length === 0 &&
+        !activeSession.sourceTrackingRecovery
       ) {
         return (
           <PanelEmptyState
@@ -1151,7 +1153,8 @@ const SessionConversationPage = memo(
 
     if (
       visibleMessages.length === 0 &&
-      visiblePendingPrompts.length === 0
+      visiblePendingPrompts.length === 0 &&
+      !session.sourceTrackingRecovery
     ) {
       return (
         <div
@@ -1221,6 +1224,7 @@ const SessionConversationPage = memo(
         prompt.isEngramRetained === true && prompt.engramInterrupted === true,
     );
     const queuePaused =
+      !session.sourceTrackingRecovery &&
       !isTurnActive &&
       Boolean(session.queuePaused) &&
       !hasInterruptedRetainedPrompt &&
@@ -1230,6 +1234,12 @@ const SessionConversationPage = memo(
         agent={session.agent}
         queuedCount={actionableQueuedCount}
         onResume={() => onResumeSessionQueue?.(session.id)}
+      />
+    ) : null;
+    const sourceTrackingRecoveryCard = session.sourceTrackingRecovery ? (
+      <SourceTrackingRecoveryIndicator
+        explanation={session.preview}
+        onRecover={() => onResumeSessionQueue?.(session.id)}
       />
     ) : null;
     const ordinaryPendingPromptIds = new Set(
@@ -1248,7 +1258,9 @@ const SessionConversationPage = memo(
             <article className="activity-card">
               <div className="activity-card-copy">
                 <div className="card-label">Prompt retained</div>
-                <p>{prompt.engramInterrupted
+                <p>{session.sourceTrackingRecovery
+                  ? "Prompt retained during source tracking recovery. Recovery does not send this prompt."
+                  : prompt.engramInterrupted
                   ? "Delivery is interrupted or unknown. Cancel this retained prompt or reconcile it before continuing."
                   : "Authorization is paused. Resume to retry, or cancel the retained prompt."}</p>
                 {!retainedBodyIsVisible ? (
@@ -1334,10 +1346,11 @@ const SessionConversationPage = memo(
           {pendingPromptCards}
         </div>
       ) : null;
-    const queuedTail = pendingPromptQueue ? (
+    const queuedTail = pendingPromptQueue || sourceTrackingRecoveryCard ? (
       <div className="conversation-queued-tail">
         {pendingPromptQueue}
         {pausedQueueCard}
+        {sourceTrackingRecoveryCard}
       </div>
     ) : null;
     const markerNavigation = isMarkerPanelVisible ? (

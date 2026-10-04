@@ -209,6 +209,7 @@ impl EngramHost<'_> {
         // whose grant is settled, is acknowledged and admitted again here
         // (`engram_abort_retry.rs`). Tests drive it with their own clock.
         self.state.engram_abort_retry_tick(chrono::Utc::now());
+        self.state.schedule_engram_root_reclamation(false);
     }
 
     /// The exit a Codex command item states.

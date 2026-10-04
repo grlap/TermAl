@@ -1188,6 +1188,123 @@ fn claude_live_frame_sequence_keeps_only_pre_effect_overloads_replayable() {
     assert_eq!(reader.feed(overloaded()).retry, None);
 }
 
+/// The hook callback Claude Code 2.1.288 sends during a compaction, for a
+/// runtime that registered `callback_id`.
+fn compact_callback(request_id: &str, callback_id: &str) -> Value {
+    json!({"type": "control_request", "request_id": request_id, "request": {
+        "subtype": "hook_callback", "callback_id": callback_id,
+        "input": {"hook_event_name": "SessionStart", "source": "compact"}}})
+}
+
+fn plain_init() -> Value {
+    json!({"type": "system", "subtype": "init", "session_id": "router"})
+}
+
+fn prompt_echo(prompt: &ClaudePromptCommand) -> Value {
+    json!({"type": "user", "message": {"role": "user", "content": claude_prompt_content(prompt)}})
+}
+
+#[test]
+fn a_compact_hook_callback_bars_the_waiting_prompts_next_attempt_and_opens_no_turn() {
+    // The callback's answer changes what the continuing model sees, so it is
+    // a replay barrier; arriving while a prompt waits outside every turn, it
+    // bars that prompt's next attempt. It belongs to the process: no turn is
+    // observed, opened or closed, and nothing is parsed.
+    let mut reader = Reader::new();
+    reader.feed(plain_init());
+    let waiting = prompt("Review this change.", 1, P);
+    reader.write(&waiting);
+    let plan = reader.feed(compact_callback("hook-1", "any-callback"));
+    assert_eq!(plan.scope, ClaudeFrameScope::Process);
+    assert_eq!(plan.ownership, ClaudeFrameOwnership::Unchanged);
+    assert_eq!(plan.parser, ClaudeParserStep::Skip);
+    assert_eq!(plan.replay, ClaudeReplayStep::Block);
+    assert_eq!(plan.control, Some(ClaudeControlStep::HookCallback));
+    assert_eq!(
+        reader.feed(prompt_echo(&waiting)).parser,
+        ClaudeParserStep::Root {
+            open: true,
+            carry_barrier: true
+        },
+        "the waiting prompt's attempt inherits the callback's barrier"
+    );
+}
+
+#[test]
+fn a_compact_hook_callback_inside_an_attempt_bars_it_and_its_echoed_answer_is_no_new_frame() {
+    let mut reader = Reader::new();
+    let running = prompt("Review this change.", 1, P);
+    reader.write(&running);
+    reader.feed(prompt_echo(&running));
+    assert!(!reader.frames.root.replay_became_unsafe);
+    assert_eq!(
+        reader
+            .feed(compact_callback("hook-2", "any-callback"))
+            .replay,
+        ClaudeReplayStep::Block
+    );
+    assert!(reader.frames.root.replay_became_unsafe);
+    // Claude Code 2.1.288 echoes the host's own answer on stdout: it did
+    // nothing new, so it is neither parsed nor a turn's frame.
+    let echoed = reader.feed(json!({"type": "control_response", "response": {
+        "subtype": "success", "request_id": "hook-2", "response": {}}}));
+    assert_eq!(echoed.scope, ClaudeFrameScope::Process);
+    assert_eq!(echoed.ownership, ClaudeFrameOwnership::Unchanged);
+    assert_eq!(echoed.parser, ClaudeParserStep::Skip);
+    assert_eq!(echoed.replay, ClaudeReplayStep::Retain);
+    assert_eq!(echoed.control, None);
+}
+
+#[test]
+fn a_session_start_hook_after_the_first_init_is_no_startup_bookkeeping() {
+    // A user-configured SessionStart(compact) hook runs mid-process, here with
+    // no compact_boundary before it: its frames bar the waiting prompt.
+    let mut reader = Reader::new();
+    reader.feed(plain_init());
+    let waiting = prompt("Review this change.", 1, P);
+    reader.write(&waiting);
+    reader.feed(json!({"type": "system", "subtype": "hook_started", "hook_event": "SessionStart"}));
+    assert_eq!(
+        reader.feed(prompt_echo(&waiting)).parser,
+        ClaudeParserStep::Root {
+            open: true,
+            carry_barrier: true
+        }
+    );
+}
+
+#[test]
+fn the_init_a_compaction_repeats_does_not_restore_the_startup_exemption() {
+    // Claude Code 2.1.288 reports `init` again after a compaction; that is no
+    // evidence that a following SessionStart hook is the process's startup.
+    let mut reader = Reader::new();
+    reader.feed(plain_init());
+    reader.feed(plain_init());
+    let waiting = prompt("Review this change.", 1, P);
+    reader.write(&waiting);
+    reader
+        .feed(json!({"type": "system", "subtype": "hook_response", "hook_event": "SessionStart"}));
+    assert_eq!(
+        reader.feed(prompt_echo(&waiting)).parser,
+        ClaudeParserStep::Root {
+            open: true,
+            carry_barrier: true
+        }
+    );
+}
+
+#[test]
+fn a_session_start_hook_inside_an_attempt_after_init_bars_it() {
+    let mut reader = Reader::new();
+    reader.feed(plain_init());
+    let running = prompt("Review this change.", 1, P);
+    reader.write(&running);
+    reader.feed(prompt_echo(&running));
+    assert!(!reader.frames.root.replay_became_unsafe);
+    reader.feed(json!({"type": "system", "subtype": "hook_started", "hook_event": "SessionStart"}));
+    assert!(reader.frames.root.replay_became_unsafe);
+}
+
 #[test]
 fn the_application_syncs_session_metadata_and_arms_the_compaction_nudge() {
     let mut reader = Reader::new();

@@ -24,6 +24,7 @@ mod agent_commands;
 mod agent_readiness;
 mod bounded_read_process;
 mod claude;
+mod claude_compact_hook;
 mod claude_frame_router;
 mod claude_permission_boundary;
 mod claude_turn_ownership;
@@ -127,6 +128,7 @@ mod telegram_relay_lifecycle;
 mod telegram_settings;
 mod telegram_support;
 mod terminal;
+mod test_child_temp;
 mod test_run_cards;
 mod test_run_waits;
 mod test_runs;
@@ -1282,6 +1284,7 @@ fn sample_remote_orchestrator_state(
                 markers: Vec::new(),
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                source_tracking_recovery: false,
                 queue_projection_hash: None,
                 session_mutation_stamp: None,
                 parent_delegation_id: None,
@@ -1410,6 +1413,7 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         message_count: session.message_count,
         markers: session.markers.clone(),
         queue_paused: session.queue_paused,
+        source_tracking_recovery: session.source_tracking_recovery,
         queue_projection_hash: session.queue_projection_hash.clone(),
         session_mutation_stamp: session.session_mutation_stamp,
         parent_delegation_id: session.parent_delegation_id.clone(),

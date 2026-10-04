@@ -272,6 +272,8 @@ enum ClaudeRuntimeCommand {
         retry_detail: String,
     },
     PermissionResponse(ClaudePermissionDecision),
+    /// The answer to a hook callback (`claude_compact_hook.rs`).
+    HookResponse(ClaudeHookResponse),
     SetModel(String),
     SetPermissionMode(String),
 }

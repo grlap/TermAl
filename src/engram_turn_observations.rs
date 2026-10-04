@@ -478,12 +478,23 @@ impl AppState {
         );
     }
 
+    #[cfg(test)]
     fn record_engram_turn_start_basis_with_projection_off_lock(
         &self,
         session_id: &str,
         grant_id: &str,
         begin_projection_present: bool,
         opening_uncertainty: Option<EngramOpeningRootReason>,
+    ) {
+        self.record_engram_turn_start_basis_and_snapshot_off_lock(
+            session_id, grant_id, begin_projection_present, opening_uncertainty, |_, _| {},
+        );
+    }
+
+    fn record_engram_turn_start_basis_and_snapshot_off_lock(
+        &self, session_id: &str, grant_id: &str, begin_projection_present: bool,
+        opening_uncertainty: Option<EngramOpeningRootReason>,
+        on_measured: impl FnOnce(&StateInner, usize),
     ) {
         let capture_deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
         // An absent registered tree is a lifecycle end, not permission to
@@ -598,6 +609,21 @@ impl AppState {
             } else {
                 Some(binding.clone())
             };
+            let opening_root_basis = if record.engram.active_turn_root_capture.is_some() {
+                record.engram.active_turn_observation_root_basis.clone()
+            } else {
+                naming_identity.as_ref().and_then(|(store, work_id)| {
+                    inner.engram_work_naming_history.iter()
+                        .find(|history| &history.store == store && &history.work_id == work_id)
+                        .and_then(|history| history.proofs.iter().find(|proof|
+                            source_binding.as_ref().is_some_and(|binding|
+                                engram_same_recovery_run(&proof.binding, binding))))
+                        .map(|proof| json!({ "capture_run_cut": proof.read.read_cut.position,
+                            "latest_event": proof.read.latest_event.as_ref().map(|event| &event.event),
+                            "state": proof.read.named_root }))
+                })
+            };
+            inner.sessions[index].engram.active_turn_observation_root_basis = opening_root_basis;
             inner.sessions[index].engram.active_turn_naming_identity = naming_identity;
             inner.sessions[index].engram.active_turn_source_binding = source_binding;
             inner.sessions[index].engram.active_turn_source_root = turn_root;
@@ -697,6 +723,8 @@ impl AppState {
             &place,
             capture_deadline.saturating_duration_since(std::time::Instant::now()),
         );
+        let observed_at = chrono::Utc::now()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id)
             && inner.sessions[index].engram.active_grant_id.as_deref() == Some(grant_id)
@@ -720,6 +748,7 @@ impl AppState {
                 None
             };
             let record = &mut inner.sessions[index];
+            record.engram.active_turn_start_observed_at = basis.as_ref().map(|_| observed_at);
             record.engram.active_turn_start_basis = basis;
             // The canonical transition may have become unresolved during
             // the off-lock capture. Its withheld opening needs a diagnostic
@@ -741,6 +770,7 @@ impl AppState {
             // Compared with where the last acknowledged checkpoint left the
             // workspace, apart from the begin basis (`engram_turn_continuity.rs`).
             record_engram_turn_continuity(record, session_id, grant_id);
+            on_measured(&inner, index);
         }
     }
 

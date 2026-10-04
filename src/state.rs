@@ -1463,6 +1463,11 @@ struct StateInner {
     engram_budget_clock_snapshots: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     test_engram_authority_ack_boundary: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// Real time a delegation child's first turn waits before its admission,
+    /// after the child's best-effort bind (`start_delegation_child_turn`): a
+    /// scheduler delay a test can apply on purpose.
+    #[cfg(test)]
+    test_delegation_child_admission_stall: Option<Duration>,
     /// Ordering fixtures use scheduling headroom without changing budget tests
     /// in other states or the production dispatch deadline.
     #[cfg(test)]
@@ -1507,8 +1512,10 @@ struct StateInner {
     engram_work_source_roots: Vec<EngramWorkSourceRoot>,
     engram_named_root_journal: Vec<EngramNamedRootJournal>,
     engram_work_naming_history: Vec<EngramWorkNamingHistory>,
+    engram_source_sightings: Vec<EngramSourceSightingOwner>,
     engram_root_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
     engram_authority_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
+    engram_root_reclamation: EngramRootReclamationSchedule,
     /// The generation the last new source-root name got; the next is one
     /// more, so no generation is given twice, even after a clear. Persisted
     /// (`PersistedState`), and on restore raised to the highest generation
@@ -1636,6 +1643,8 @@ impl StateInner {
             #[cfg(test)]
             test_engram_authority_ack_boundary: None,
             #[cfg(test)]
+            test_delegation_child_admission_stall: None,
+            #[cfg(test)]
             test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),
             engram_declaration_checked_project_ids: HashSet::new(),
@@ -1652,8 +1661,10 @@ impl StateInner {
             engram_work_source_roots: Vec::new(),
             engram_named_root_journal: Vec::new(),
             engram_work_naming_history: Vec::new(),
+            engram_source_sightings: Vec::new(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
+            engram_root_reclamation: EngramRootReclamationSchedule::default(),
             engram_source_root_generation: 0,
             pending_coordination_scope_deletions: BTreeSet::new(),
             pending_response_board_project_detachments: BTreeMap::new(),

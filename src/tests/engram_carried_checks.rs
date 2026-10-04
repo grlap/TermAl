@@ -16,6 +16,11 @@ use super::*;
 const GATE: &str = "node scripts/test-launcher.mjs full";
 const DETACHED_GATE: &str = "node scripts/test-launcher.mjs full --detach";
 
+mod credit_outcomes {
+    use super::*;
+    include!("engram_carried_credit_outcomes.rs");
+}
+
 #[test]
 fn a_full_gate_launch_is_carried_dropped_or_ordinary_by_its_line_and_result() {
     use EngramLaunchDisposition::{Carry, Drop, Ordinary};

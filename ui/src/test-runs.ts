@@ -1,7 +1,7 @@
 // Read-only launcher discovery contract and presentation rules. Does not own
 // execution, notification delivery, or agent lifecycle state.
 export type TestRunState = "running" | "passed" | "failed" | "unknown";
-export type TestRunUnknownReason = "processGone" | "resultsUnreadable" | "noPid";
+export type TestRunUnknownReason = "processGone" | "resultsUnreadable" | "noPid" | "heartbeatStale";
 export type TestRunStageState = "unrun" | "running" | "passed" | "failed";
 export interface TestRunStageSummary {
   name: string;
