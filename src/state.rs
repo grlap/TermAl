@@ -1512,6 +1512,7 @@ struct StateInner {
     engram_work_source_roots: Vec<EngramWorkSourceRoot>,
     engram_named_root_journal: Vec<EngramNamedRootJournal>,
     engram_work_naming_history: Vec<EngramWorkNamingHistory>,
+    engram_source_sightings: Vec<EngramSourceSightingOwner>,
     engram_root_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
     engram_authority_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
     /// The generation the last new source-root name got; the next is one
@@ -1659,6 +1660,7 @@ impl StateInner {
             engram_work_source_roots: Vec::new(),
             engram_named_root_journal: Vec::new(),
             engram_work_naming_history: Vec::new(),
+            engram_source_sightings: Vec::new(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_source_root_generation: 0,

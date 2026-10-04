@@ -868,6 +868,54 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(screen.getByRole("button", { name: "Cancel queued prompt" })).toBeInTheDocument();
   });
 
+  it.each(["active", "idle"] as const)("offers tracking-only recovery after refused Delete with %s status and no queue", (status) => {
+    const onResumeSessionQueue = vi.fn();
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status, queuePaused: true, sourceTrackingRecovery: true,
+        preview: "Session kept: source tracking has not finished.", pendingPrompts: [],
+      }),
+      onResumeSessionQueue,
+    });
+    expect(screen.getByText(/Session kept: source tracking has not finished/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Recover tracking" }));
+    expect(onResumeSessionQueue).toHaveBeenCalledWith("session-a");
+    expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
+  });
+
+  it.each(["active", "idle"] as const)("hides tracking recovery without the retained-delete marker in %s status", (status) => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status, queuePaused: true, sourceTrackingRecovery: false,
+        pendingPrompts: [],
+      }),
+    });
+    expect(screen.queryByRole("button", { name: "Recover tracking" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Source tracking recovery")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("keeps queued work paused during tracking recovery, retained=%s", (retained) => {
+    const onResumeSessionQueue = vi.fn();
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status: "idle", queuePaused: true, sourceTrackingRecovery: true,
+        preview: "Session kept: source tracking has not finished.",
+        pendingPrompts: [
+          { id: "recovery-head", timestamp: "12:00", text: "Original queued work", isEngramRetained: retained, engramInterrupted: retained },
+          { id: "recovery-tail", timestamp: "12:01", text: "Queued successor" },
+        ],
+      }),
+      onResumeSessionQueue,
+    });
+    expect(screen.getByRole("button", { name: "Recover tracking" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
+    if (retained) {
+      expect(screen.getByText("Prompt retained during source tracking recovery. Recovery does not send this prompt.")).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Recover tracking" }));
+    expect(onResumeSessionQueue).toHaveBeenCalledWith("session-a");
+  });
+
   it("shows the paused-queue card with a Resume action instead of the handoff spinner after Stop", () => {
     const onResumeSessionQueue = vi.fn();
     renderSessionPanelWithDefaults({

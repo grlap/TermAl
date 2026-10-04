@@ -1255,6 +1255,13 @@ impl AppState {
                 let Some(index) = inner.find_session_index(session_id) else {
                     return Ok(None);
                 };
+                if engram_source_observation_holds_admission(&inner, index) {
+                    if hold_source_observation_admission(&mut inner.sessions[index]) {
+                        inner.stamp_session_at_index(index);
+                        self.commit_locked(&mut inner)?;
+                    }
+                    return Ok(None);
+                }
                 let gated = Self::engram_session_requires_dispatch_card_locked(&inner, session_id);
                 let retained_without_gate = !gated
                     && (inner.sessions[index].engram.recovered_admission

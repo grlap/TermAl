@@ -206,6 +206,7 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
+        self.prepare_source_observation_delete(session_id, false)?;
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
             self.remote_registry.request_json_with_lease(
                 &target.remote,
@@ -220,6 +221,13 @@ impl AppState {
         let (snapshot, revision, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             self.ensure_remote_request_current_locked(&inner, &response_lease)?;
+            let sessions = source_observation_removal_set(&inner, session_id);
+            if let Some(blocker) = source_observation_removal_blocker(&inner, &sessions) {
+                retain_source_observation_removal_locked(&mut inner, &sessions);
+                self.commit_locked(&mut inner).map_err(|error|
+                    ApiError::internal(format!("Session retained; source tracking persistence is uncertain: {error:#}")))?;
+                return Err(ApiError::conflict(format!("{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}.")));
+            }
             self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
                 .map_err(|err| {
                     ApiError::internal(format!(
@@ -234,8 +242,7 @@ impl AppState {
                 RemoteSnapshotApplyMode::GateBySnapshotRevision,
             );
             let removed = if let Some(index) = inner.find_session_index(&target.local_session_id) {
-                inner.remove_session_at(index);
-                true
+                inner.remove_session_at(index).is_some()
             } else {
                 false
             };

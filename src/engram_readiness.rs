@@ -107,6 +107,16 @@ fn run_engram_readiness(
     home: &FsPath,
     root: &FsPath,
 ) -> Result<EngramReadinessReceipt, ApiError> {
+    run_engram_readiness_within(binary, marker, home, root, ENGRAM_READINESS_TIMEOUT)
+}
+
+fn run_engram_readiness_within(
+    binary: &FsPath,
+    marker: &FsPath,
+    home: &FsPath,
+    root: &FsPath,
+    timeout: Duration,
+) -> Result<EngramReadinessReceipt, ApiError> {
     let declaration = read_engram_diagnostic_declaration(marker)?;
     // Test seam: a registered home's readiness is answered without a process
     // (src/engram_readiness_test_seam.rs); every check below still runs.
@@ -122,7 +132,7 @@ fn run_engram_readiness(
             home,
             root,
             "readiness",
-            ENGRAM_READINESS_TIMEOUT,
+            timeout.min(ENGRAM_READINESS_TIMEOUT),
         )?,
     };
     if read_engram_diagnostic_declaration(marker).ok().as_ref() != Some(&declaration) {

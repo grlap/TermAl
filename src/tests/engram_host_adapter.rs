@@ -80,6 +80,11 @@ struct ControlOnlyEngramTransport {
 }
 
 impl EngramControlTransport for ControlOnlyEngramTransport {
+    fn read_observation_policy(
+        &self, connection: &EngramConnectionConfig, expected_store: &EngramAuthorityStoreKey, timeout: Duration,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, expected_store, timeout)
+    }
     fn request(
         &self,
         connection: &EngramConnectionConfig,

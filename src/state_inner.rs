@@ -242,6 +242,7 @@ impl StateInner {
                 markers: Vec::new(),
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                source_tracking_recovery: false,
                 queue_projection_hash: None,
                 session_mutation_stamp: None,
                 parent_delegation_id: None,
@@ -553,26 +554,40 @@ impl StateInner {
     /// `removed_session_ids` so the persist thread issues a `DELETE`
     /// on its next tick. Panics on out-of-bounds access like the
     /// underlying `Vec::remove` it wraps.
-    fn remove_session_at(&mut self, index: usize) -> SessionRecord {
+    /// Returns `None` when source tracking defers removal; the original session
+    /// and affected subtree remain visible for explicit tracking recovery.
+    fn remove_session_at(&mut self, index: usize) -> Option<SessionRecord> {
+        let session_id = self.sessions[index].session.id.clone();
+        if self.defer_source_observation_removal(&session_id) { return None; }
         let record = self.sessions.remove(index);
         // Its outstanding Claude work outlives it, in the same section.
         self.orphan_claude_work(&record.session.id, &record.claude_outstanding);
         EngramHost::reconcile_orphaned_claude_work(self, &record.session.id);
         let id = record.session.id.clone();
         self.record_removed_session(id);
-        record
+        Some(record)
     }
 
     /// `Vec::retain`-style filter that records every dropped session id
     /// as a tombstone. The predicate is called once per record.
+    /// Requested removals with unfinished source tracking keep their affected
+    /// subtree visible for recovery and create no tombstones for those rows.
     fn retain_sessions<F>(&mut self, mut keep: F)
     where
         F: FnMut(&SessionRecord) -> bool,
     {
+        let requested: Vec<_> = self.sessions.iter().filter_map(|record|
+            (!keep(record)).then(|| record.session.id.clone())).collect();
+        let mut deferred = Vec::new();
+        for session_id in &requested {
+            if self.defer_source_observation_removal(session_id) {
+                deferred.extend(source_observation_removal_set(self, session_id));
+            }
+        }
         let mut removed_ids: Vec<String> = Vec::new();
         let mut orphaned: Vec<(String, ClaudeOutstandingWork)> = Vec::new();
         self.sessions.retain(|record| {
-            let retained = keep(record);
+            let retained = !requested.contains(&record.session.id) || deferred.contains(&record.session.id);
             if !retained {
                 removed_ids.push(record.session.id.clone());
                 if record.claude_outstanding.any() {
@@ -614,6 +629,7 @@ impl StateInner {
     /// concurrent mutations are deferred rather than mixed across revisions.
     #[cfg_attr(test, allow(dead_code))]
     fn collect_persist_delta_plan(&mut self, watermark: u64) -> PersistDeltaPlan {
+        self.retain_hidden_source_observation_sessions();
         let mut changed_sessions = Vec::new();
         let retry_removed_ids = std::mem::take(&mut self.removed_session_ids);
         let retry_removed_delegation_ids = std::mem::take(&mut self.removed_delegation_ids);

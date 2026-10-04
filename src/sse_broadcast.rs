@@ -105,6 +105,7 @@ impl AppState {
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
+        inner.retain_hidden_source_observation_sessions();
         let (revision, dispatch) = self.bump_revision_and_persist_locked_with_dispatch(inner)?;
         // Dirty settings markers arise only when the disconnected-channel
         // synchronous fallback failed. If any later commit reaches the same

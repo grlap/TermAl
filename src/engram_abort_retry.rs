@@ -30,6 +30,8 @@ const ENGRAM_ABORT_SETTLEMENT_FENCE: Duration = Duration::from_secs(20);
 enum EngramAbortReason {
     /// The admission durability fence missed its deadline after the begin.
     AdmissionFence,
+    /// A captured opening was retired behind an earlier accounting obligation.
+    SourceObservation,
     /// The dispatch card of a granted admission could not be saved.
     DispatchCard,
     /// The dispatch card of a known Defer could not be saved.
@@ -149,7 +151,8 @@ fn engram_admission_live_content(record: &SessionRecord) -> Value {
         "routing": record.engram.routing_token, "grant": record.engram.active_grant_id,
         "queue": record.queued_prompts.front(),
         "abortRetry": record.engram.abort_retry,
-        "bindRetry": record.engram.bind_retry })
+        "bindRetry": record.engram.bind_retry,
+        "sourceObservation": record.engram.source_observation_gate })
 }
 
 /// Settles, on `record`, the delivery of its queue head that this host
@@ -470,6 +473,7 @@ impl AppState {
     /// starts the fresh admission of each prompt that is due. Driven by the
     /// test-run index thread's tick; tests call it with their own clock.
     fn engram_abort_retry_tick(&self, now: chrono::DateTime<chrono::Utc>) {
+        self.source_observation_retry_tick(now);
         let budget_now = self.engram_budget_clock().now();
         let mut due = Vec::new();
         // Sessions whose hold changed: a held delegation child reports it.
@@ -526,6 +530,14 @@ impl AppState {
                         held_changes.push(session_id);
                     }
                     EngramAbortRetryStep::Due => {
+                        if engram_source_observation_holds_admission(&inner, index) {
+                            if hold_source_observation_admission(&mut inner.sessions[index]) {
+                                inner.stamp_session_at_index(index);
+                                changed = true;
+                                held_changes.push(session_id);
+                            }
+                            continue;
+                        }
                         // The admission bypasses the paused queue only for
                         // the head it was due for, revalidated under the
                         // promotion lock; a Cancel, takeover or changed

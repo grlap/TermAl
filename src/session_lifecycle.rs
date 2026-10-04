@@ -160,23 +160,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
-        let engram_session_ids_to_terminate = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let mut collected = vec![session_id.to_owned()];
-            let mut cursor = 0;
-            while cursor < collected.len() {
-                let parent_session_id = collected[cursor].clone();
-                for delegation in &inner.delegations {
-                    if delegation.parent_session_id == parent_session_id
-                        && !collected.contains(&delegation.child_session_id)
-                    {
-                        collected.push(delegation.child_session_id.clone());
-                    }
-                }
-                cursor += 1;
-            }
-            collected
-        };
+        let engram_session_ids_to_terminate = self.prepare_source_observation_delete(session_id, true)?;
         for terminating_session_id in &engram_session_ids_to_terminate {
             self.checkpoint_engram_turn_off_lock(
                 terminating_session_id,
@@ -201,6 +185,15 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
+            // Recompute the subtree under the final lock: a concurrent child
+            // or capture must not turn a whole-set refusal into partial removal.
+            let sessions = source_observation_removal_set(&inner, session_id);
+            if let Some(blocker) = source_observation_removal_blocker(&inner, &sessions) {
+                retain_source_observation_removal_locked(&mut inner, &sessions);
+                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!(
+                    "Session retained; source tracking persistence is uncertain: {error:#}")))?;
+                return Err(ApiError::conflict(format!("{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}.")));
+            }
             let agent = inner.sessions[index].session.agent;
             let external_session_id = inner.sessions[index].external_session_id.clone();
             let record = inner
@@ -306,6 +299,10 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if inner.sessions[index].engram.source_observation_gate.as_ref()
+            .is_some_and(|gate| gate.prompt_id == prompt_id && !gate.retired) {
+            retire_source_observation_locked(&mut inner, index);
+        }
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -445,6 +442,37 @@ impl AppState {
         session_id: &str,
         owner: Option<EngramQueuedAdmissionOwner>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        if self.resume_source_observation_delete(session_id)? { return Ok(None); }
+        let retained_observation = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_visible_session_index(session_id).is_some_and(|index|
+                inner.sessions[index].engram.source_observation_gate.is_some())
+        };
+        if retained_observation {
+            let live_continuation = {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let index = inner.find_visible_session_index(session_id)
+                    .ok_or_else(|| ApiError::not_found("session not found"))?;
+                let record = &mut inner.sessions[index];
+                if owner.as_ref().is_some_and(|owner| !owner.matches(record)) {
+                    return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
+                }
+                let live = record.engram.source_observation_gate.as_ref().is_some_and(|gate| gate.owns(record))
+                    && record.engram.source_observation_continuation.is_some();
+                if live {
+                    if let Some(gate) = &mut record.engram.source_observation_gate {
+                        gate.retry_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                    }
+                }
+                live
+            };
+            if live_continuation {
+                self.source_observation_retry_tick(chrono::Utc::now());
+                return Ok(Some(TurnDispatchDeliveryOutcome::Held { error: None }));
+            }
+        }
+        self.reconcile_retired_source_observations(session_id).map_err(|error|
+            ApiError::conflict(format!("Engram source observation recovery remains withheld: {error}")))?;
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner

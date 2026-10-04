@@ -258,6 +258,9 @@ fn validate_delegation_followup_child_locked(
         ApiError::conflict("delegation child session no longer exists and cannot be resumed")
     })?;
     let record = &inner.sessions[index];
+    if record.engram.source_observation_delete_requested {
+        return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
+    }
     if record.engram_boot_recovery_pending {
         return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
     }
@@ -497,6 +500,9 @@ impl AppState {
                 .find_visible_session_index(&parent_session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let parent_record = &inner.sessions[parent_index];
+            if parent_record.engram.source_observation_delete_requested {
+                return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
+            }
             let parent = &parent_record.session;
             let parent_remote_identity = parent_record.remote_proxy_identity().map_err(|err| {
                 ApiError::internal(format!("invalid parent session proxy: {err:#}"))
@@ -633,9 +639,12 @@ impl AppState {
         let _ = self.agent_readiness_snapshot();
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        inner
+        let parent_index = inner
             .find_visible_session_index(&parent_session_id)
             .ok_or_else(ApiError::local_session_missing)?;
+        if inner.sessions[parent_index].engram.source_observation_delete_requested {
+            return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
+        }
         if active_delegation_count_for_parent(&inner, &parent_session_id)
             >= MAX_RUNNING_DELEGATIONS_PER_PARENT
         {
@@ -3654,6 +3663,11 @@ fn reconcile_delegations_for_removed_session_locked(
     inner: &mut StateInner,
     removed_session_id: &str,
 ) -> RemovedSessionDelegationReconciliation {
+    if inner.defer_source_observation_removal(removed_session_id) {
+        return RemovedSessionDelegationReconciliation {
+            lifecycle_deltas: Vec::new(), runtimes_to_kill: Vec::new(), codex_thread_ids_to_ignore: Vec::new(),
+        };
+    }
     let mut child_session_ids_to_remove = Vec::<String>::new();
     let mut pending_parent_session_ids = vec![removed_session_id.to_owned()];
     while let Some(parent_session_id) = pending_parent_session_ids.pop() {
@@ -3900,6 +3914,9 @@ fn remove_delegation_child_session_locked(
     inner: &mut StateInner,
     child_session_id: &str,
 ) -> RemovedDelegationChildSession {
+    if inner.defer_source_observation_removal(child_session_id) {
+        return RemovedDelegationChildSession::default();
+    }
     let Some(child_index) = inner.find_session_index(child_session_id) else {
         return RemovedDelegationChildSession::default();
     };
