@@ -1043,7 +1043,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
   that claim, so a new claim on the same work does not inherit an old tree;
   the claim's fence is recorded but not matched, so a renewal keeps the
   root. At most 64 entries are kept, and a full list refuses a new name,
-  naming the entries, rather than evict one.
+  naming retained entries and whether a bounded reclamation pass was scheduled,
+  rather than evicting one or promising a slot or successful retry.
 - **When it takes effect.** At the session's next admission: the turn
   running when the name is given keeps the root it began with, and its tests
   and basis are not moved.
@@ -1265,28 +1266,59 @@ happens elsewhere. The agent therefore names the item's worktree once with
   discovering its store later cannot upgrade that turn. Unbound sessions
   remain valid without claimed source provenance.
 - **Freeing a local slot.** TermAl retains at most 64 named source-root
-  selections. A holder can explicitly clear its claim's name; removing the
-  session that named an entry also removes that local selection while retaining
-  unresolved remote history. Fresh authoritative readback of the same claim removes an obsolete
-  selection. Changing focus does not reclaim an active selection; the bounded
-  reader handles retained claims whose naming session was removed. A full list names
-  the retained entries and these supported actions; it never infers release
-  from the absence of a holder. Removing a local selection does not itself
-  confirm a pending binding or cleanup event. When no supported read can
-  establish an old claim's lifecycle, its state remains unknown for reclamation;
-  the host refuses a new allocation before sending any binding event. The
-  host consumes `named_root_read` for known retired claim/run identities within
-  a bounded maintenance or admission budget. A same-store live connection can
-  resolve a removed naming session without focusing its historical claim.
-  A covering, consistent completed/ended or released response removes the
-  local-removal guard; a still-bound root, unsupported reader, failed or stale
-  read, and uncertain persistence retain it. Exact local state and connection
-  are revalidated after transport. Each store's sweep resumes after the last
-  claim actually attempted, even if that read consumes the deadline; a
-  requested-claim read does not change the sweep cursor. Pending attempts and orphan reconciliation
-  remain protected independently. The reader does not fabricate an end or a
-  receipt, and does not infer release from a missing held-claims row. Broader
-  reclamation of the 64-selection list remains a separate integration.
+  selections globally, across stores. A holder can explicitly clear its live
+  claim's name through the existing `ended` producer event. Without a live
+  claim, only the original naming session may omit `path` to synchronously
+  retire its exact obsolete entry. That host-side retirement creates no
+  producer event: another same-store reader supplies read authority, never
+  ownership. A live, unknown or concurrently replaced entry is refused and
+  retained; no holder is invented from a missing held-claims row.
+  Removing a naming session retains unresolved remote history under the
+  existing orphan-recovery path. Directory deletion is never proof that an
+  old claim ended and reclamation never deletes a directory or its contents.
+  The current-binding missing-directory path still queues `root_invalid` and
+  settles it through its existing acknowledged producer-event owner.
+  Failed flushes keep the exact intent for retry, not a second reclamation owner.
+
+  The unconditional host test-run tick schedules off-lock reclamation without
+  an agent prompt or provider dispatch. One flight runs at a time, with at most
+  eight canonical reads and a shared two-second budget. It rotates stores,
+  picks oldest eligible entries per store, and cools retained or failed entries
+  for thirty seconds so an unknown oldest entry cannot starve later work.
+  Idle current bindings use their existing recovery owner; active owners are
+  left alone. A matching local binding is a current owner only while its
+  session has a routing token for the exact store. A stale tokenless or
+  wrong-store binding does not block another eligible reader; it is not itself
+  lifecycle-end proof. The same owner check runs after the read, so authority
+  restored during an unfocused read retains the entry for its current owner.
+  A full-table new-name request does not synchronously sweep the
+  table: it promptly reports actual scheduling and retained reasons, without
+  promising capacity or retry success. A later naming request must observe
+  capacity that has actually been released.
+
+  A retained journal's exact original run/claim association supplies the
+  `named_root_read` identity even after the naming session changes focus. Its
+  still-authorized same-store connection is preferred; another currently bound
+  same-store reader can read without adopting that focus. Only classified,
+  canonically validated authority can retire an entry: completed/cancelled run,
+  definitive unbound/release, or a Bound root whose remote generation is at least
+  the local one and whose workspace, generation or naming instant differs.
+  Older or mismatched proof, missing association/reader, disabled or unreachable
+  stores and unknown states retain it. Handoff, recovery, lease loss or a passed
+  evaluation on a not-yet-completed run are not lifecycle-end proof.
+
+  Exact selection, journal, reader authority and current-owner route are
+  revalidated around the read. Pending Bound, Ended and RootInvalid intents stay
+  with their existing owner. The existing complete-image publication boundary
+  commits retirement and its informational notice together; an unacknowledged
+  image still reserves capacity, and restart retries that same obligation.
+  Required receipts and naming history survive compaction. The notice names
+  store, work, root, generation, canonical reason and read cut and is logged
+  only after publication. It remains visible to the naming session after focus
+  changes and restart, is consumed once after an accepted provider handoff, and
+  neither asks it to re-name nor forces a control or provider wake. This is
+  distinct from current-claim SelectionLoss instructions, whose existing
+  suppression and acknowledgement rules remain unchanged.
 - **Sighting provenance.** Source bases carry `source_root_generation` and
   `source_root_state` together (`named` or `ended`), including sightings in the
   ordinary workdir after an end. A capture retains its workspace identity;

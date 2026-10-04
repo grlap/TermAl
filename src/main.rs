@@ -780,6 +780,7 @@ include!("content_revision.rs");
 include!("engram_source_roots.rs");
 include!("engram_named_root_binding.rs");
 include!("engram_root_authority.rs");
+include!("engram_named_root_reclamation.rs");
 #[cfg(test)]
 include!("engram_named_root_test_transport.rs");
 include!("bounded_read_process.rs");

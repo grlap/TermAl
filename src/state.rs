@@ -1514,6 +1514,7 @@ struct StateInner {
     engram_work_naming_history: Vec<EngramWorkNamingHistory>,
     engram_root_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
     engram_authority_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
+    engram_root_reclamation: EngramRootReclamationSchedule,
     /// The generation the last new source-root name got; the next is one
     /// more, so no generation is given twice, even after a clear. Persisted
     /// (`PersistedState`), and on restore raised to the highest generation
@@ -1661,6 +1662,7 @@ impl StateInner {
             engram_work_naming_history: Vec::new(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
+            engram_root_reclamation: EngramRootReclamationSchedule::default(),
             engram_source_root_generation: 0,
             pending_coordination_scope_deletions: BTreeSet::new(),
             pending_response_board_project_detachments: BTreeMap::new(),
