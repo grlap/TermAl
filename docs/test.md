@@ -109,6 +109,10 @@ index reads (see [test runs](features/test-runs.md)); `results.json` records
 actual process exits, explicit unrun stages, timestamps,
 and full log paths. Terminal JSON replacement is atomic for concurrent readers
 on the same filesystem; it is not a claim of power-loss or crash durability.
+On Windows a replacement cannot happen while a reader holds the file open, so
+it waits for the reader within a 2 s budget, retrying only the rename of the
+complete temporary file, and fails with the original error once the budget is
+spent.
 Diagnostic extraction is bounded and does not decide success. A missing
 terminal result is `UNKNOWN`, never a pass. Source/index drift before or during
 execution invalidates the run, and `execution.lock` prevents rerunning the same
