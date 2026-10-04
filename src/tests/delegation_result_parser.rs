@@ -761,14 +761,10 @@ Findings:\n\
     )
     .expect("a contradictory packet should remain visibly non-clean");
 
-    assert_eq!(parsed.findings.len(), 1);
-    assert_eq!(parsed.findings[0].severity, "High");
-    assert!(parsed.findings[0].file.is_none());
-    assert!(
-        parsed.findings[0]
-            .message
-            .contains("omitted its structured details")
-    );
+    assert!(parsed.findings.is_empty());
+    assert_eq!(parsed.notes.len(), 1);
+    assert!(parsed.notes[0].contains("declared severity: High"));
+    assert!(parsed.notes[0].contains("Read the full output"));
 }
 
 #[test]
@@ -837,8 +833,9 @@ Findings:\n\
     )
     .expect("a contradictory packet should retain its declared finding severity");
 
-    assert_eq!(parsed.findings.len(), 1);
-    assert_eq!(parsed.findings[0].severity, "Low");
+    assert!(parsed.findings.is_empty());
+    assert_eq!(parsed.notes.len(), 1);
+    assert!(parsed.notes[0].contains("declared severity: Low"));
 }
 
 #[test]
@@ -916,3 +913,6 @@ fn delegation_result_packet_does_not_promote_path_like_prose() {
 
     assert!(parsed.findings.is_empty());
 }
+
+#[path = "delegation_result_summary_counts.rs"]
+mod summary_counts;
