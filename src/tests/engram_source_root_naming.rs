@@ -19,6 +19,9 @@ mod legacy_recovery;
 #[path = "engram_source_root_confirmation.rs"]
 mod confirmation;
 
+#[path = "engram_source_root_unknown_fields.rs"]
+mod unknown_fields;
+
 impl ClaimedRoot {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.
