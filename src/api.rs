@@ -584,6 +584,8 @@ fn handoff_prepared_turn_dispatch(
     }
     if !source_root_notice_delivery.is_empty() {
         let index = index.expect("current notice handoff owns session");
+        let session_id = inner.sessions[index].session.id.clone();
+        acknowledge_engram_root_retirements_locked(&mut inner, &session_id, &source_root_notice_delivery);
         acknowledge_engram_source_root_notices_locked(
             &mut inner.sessions[index],
             &source_root_notice_delivery,

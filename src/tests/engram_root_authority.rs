@@ -6,6 +6,10 @@ mod budget {
     include!("engram_budget_authority.rs");
 }
 
+mod reclamation {
+    include!("engram_named_root_reclamation.rs");
+}
+
 struct FailingAdmissionRootReader {
     control: Arc<ScriptedEngramControlTransport>,
     fail_after: &'static str,

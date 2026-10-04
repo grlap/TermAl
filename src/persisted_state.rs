@@ -222,6 +222,7 @@ impl PersistedState {
             engram_source_sightings: self.engram_source_sightings,
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
+            engram_root_reclamation: EngramRootReclamationSchedule::default(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions,
             pending_response_board_project_detachments: self

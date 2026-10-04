@@ -197,6 +197,10 @@ enum EngramSourceRootNoticeKind {
     SelectionLoss {
         selection: EngramWorkSourceRoot,
     },
+    Reclaimed {
+        selection: EngramWorkSourceRoot,
+        line: String,
+    },
 }
 
 impl EngramSourceRootNotice {
@@ -205,7 +209,8 @@ impl EngramSourceRootNotice {
             EngramSourceRootNoticeKind::AuthorityRecovery { store, work_id, .. } => {
                 (store, work_id, None)
             }
-            EngramSourceRootNoticeKind::SelectionLoss { selection } => (
+            EngramSourceRootNoticeKind::SelectionLoss { selection }
+            | EngramSourceRootNoticeKind::Reclaimed { selection, .. } => (
                 &selection.store,
                 &selection.work_id,
                 Some(&selection.claim_id),
@@ -215,7 +220,8 @@ impl EngramSourceRootNotice {
 
     fn line(&self) -> &str {
         match &self.kind {
-            EngramSourceRootNoticeKind::AuthorityRecovery { line, .. } => line,
+            EngramSourceRootNoticeKind::AuthorityRecovery { line, .. }
+            | EngramSourceRootNoticeKind::Reclaimed { line, .. } => line,
             EngramSourceRootNoticeKind::SelectionLoss { .. } => {
                 "[TermAl] Engram no longer confirms this claim's local source-root selection. Name its worktree again before editing or testing there."
             }
@@ -223,6 +229,10 @@ impl EngramSourceRootNotice {
     }
 
     fn retired(&self, inner: &StateInner) -> bool {
+        if matches!(self.kind, EngramSourceRootNoticeKind::Reclaimed { .. }) {
+            return !inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+                .any(|notice| notice.id == self.id && notice.published && !notice.delivered);
+        }
         let (store, work, _) = self.scope();
         if engram_authority_work_unresolved(inner, store, work) {
             return false;
@@ -271,6 +281,9 @@ impl EngramSourceRootNotice {
     }
 
     fn applies_to(&self, record: &SessionRecord) -> bool {
+        if let EngramSourceRootNoticeKind::Reclaimed { selection, .. } = &self.kind {
+            return selection.named_by_session == record.session.id;
+        }
         let (store, work, claim) = self.scope();
         record
             .engram
@@ -291,6 +304,21 @@ fn refresh_engram_source_root_notices_locked(
     inner: &mut StateInner,
     index: usize,
 ) -> Vec<EngramSourceRootNotice> {
+    let session_id = &inner.sessions[index].session.id;
+    let restored = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+        .filter(|notice| notice.published && !notice.delivered
+            && notice.selection.named_by_session == *session_id)
+        .map(|notice| EngramSourceRootNotice {
+            id: notice.id.clone(),
+            kind: EngramSourceRootNoticeKind::Reclaimed {
+                selection: notice.selection.clone(), line: notice.line.clone(),
+            },
+        }).collect::<Vec<_>>();
+    for notice in restored {
+        if !inner.sessions[index].engram.source_root_notices.contains(&notice) {
+            inner.sessions[index].engram.source_root_notices.push(notice);
+        }
+    }
     let pending = std::mem::take(&mut inner.sessions[index].engram.source_root_notices);
     // Scope mismatch only suppresses delivery. No producer is guaranteed to
     // recreate the notice when this session returns to the still-live claim.
@@ -1670,10 +1698,32 @@ impl AppState {
             }
             Some(Some(path)) => Some(path.to_owned()),
         };
-        engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
-            self.resolve_removed_engram_roots(session_id, None, budget);
-            Ok(())
-        })?;
+        let (unfocused_clear, clear_selection, full_new_name) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let store = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                .ok().flatten().and_then(|target| target.settings.authority_store_key);
+            let selection = inner.engram_work_source_roots.iter()
+                .chain(inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+                    .filter(|notice| !notice.published).map(|notice| &notice.selection))
+                .find(|root| Some(&root.store) == store.as_ref()
+                    && (root.work_id == work || root.short_ref == work)).cloned();
+            let unfocused = path.is_none() && selection.as_ref().is_some_and(|root|
+                inner.find_session_index(session_id).is_some_and(|index|
+                    inner.sessions[index].engram.work_binding.as_ref().is_none_or(|binding|
+                        binding.work_id != root.work_id || binding.claim_id != root.claim_id)));
+            let full = path.is_some() && selection.is_none()
+                && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT;
+            (unfocused, selection, full)
+        };
+        // An unfocused own-clear is itself the synchronous lifecycle owner.
+        // Do not let preparatory maintenance consume its entry first. Current
+        // binding/missing-directory reconciliation retains its existing path.
+        if !unfocused_clear && !full_new_name {
+            engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
+                self.resolve_removed_engram_roots(session_id, None, budget);
+                Ok(())
+            })?;
+        }
         // `known` fences concurrent selections while the held-claims and
         // lifecycle reads run off the lock.
         let (
@@ -1743,6 +1793,11 @@ impl AppState {
                  the session has bound",
             )
         })?;
+        if full_new_name {
+            // Refusal never spends the caller's naming budget on lifecycle
+            // reads. The unconditional host tick remains the retry driver.
+            return Err(self.engram_root_capacity_refusal());
+        }
         let held =
             engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
                 target
@@ -1760,6 +1815,15 @@ impl AppState {
             TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| hook.borrow_mut().take())
         {
             meanwhile();
+        }
+        if path.is_none() && !held.items.iter().any(|claim| claim.work_id == work || claim.short_ref == work) {
+            if let Some(root) = clear_selection.as_ref().filter(|root| root.store == store)
+            {
+                if root.named_by_session != session_id {
+                    return Err(ApiError::conflict("not the naming session; another reader cannot confer ownership of this retained name"));
+                }
+                return self.clear_obsolete_own_engram_root_until(session_id, root, deadline);
+            }
         }
         let claim = held
             .items
@@ -2146,6 +2210,11 @@ impl AppState {
             _ => None,
         });
         let transition = if let Some(event) = event {
+            if entry.is_some() && old.is_none()
+                && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT
+            {
+                return Err(ApiError::conflict("named source-root capacity is retained, including unacknowledged retirements; no capacity release is confirmed"));
+            }
             let mut trial = inner.engram_work_source_roots.clone();
             engram_set_work_source_root(&mut trial, &store, &claim.work_id, entry.clone())
                 .map_err(ApiError::conflict)?;
@@ -2249,6 +2318,11 @@ impl AppState {
             &workdir,
             engram_one_call_offered_up_front(inner.sessions[index].session.agent),
         );
+        if entry.is_some() && old.is_none()
+            && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT
+        {
+            return Err(ApiError::conflict("named source-root capacity remains retained; any producer intent is preserved for its existing owner"));
+        }
         if let Err(error) = engram_set_work_source_root(
             &mut inner.engram_work_source_roots,
             &store,
