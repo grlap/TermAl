@@ -71,6 +71,7 @@ fn spawn_child(
     let response = fixture.live.state.request_acceptance_evaluation(
         &fixture.live.session_id,
         RequestAcceptanceEvaluationRequest {
+            reuse_delegation_id: None,
             work_ref: work.to_owned(), agent: Some(Agent::Codex), model: None,
             criterion_evidence: vec![AcceptanceCriterionEvidenceRequest {
                 criterion: 1, locators: vec![evidence.to_owned()],
@@ -102,6 +103,7 @@ fn spawn_child(
 
 fn verdicts(evidence: &str) -> SubmitAcceptanceEvaluationRequest {
     SubmitAcceptanceEvaluationRequest {
+        attempt_key: None,
         schema_version: ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION,
         verdicts: vec![SubmitAcceptanceEvaluationVerdict {
             criterion: 1, verdict: "pass".to_owned(), basis: Some("judgment".to_owned()),

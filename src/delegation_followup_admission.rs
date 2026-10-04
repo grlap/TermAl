@@ -8,6 +8,7 @@
 // unarchive RPC execution, and ordinary turn lifecycle remain elsewhere.
 
 struct FollowupAdmissionReservation {
+    host_acceptance_attempt: bool,
     last_user_prompt_id: Option<String>,
     canceled: bool,
     admitted: Option<(u64, DelegationRecord)>,
@@ -83,6 +84,7 @@ fn annotate_queued_followup_start_failure(
 impl FollowupAdmissionReservation {
     fn new(last_user_prompt_id: Option<String>) -> Self {
         Self {
+            host_acceptance_attempt: false,
             last_user_prompt_id,
             canceled: false,
             admitted: None,

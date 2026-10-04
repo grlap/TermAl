@@ -2544,6 +2544,8 @@ fn source_root_review_stale_replay_retires_without_a_replacement_name() {
         claimed.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
     let prepared = engram_work_naming_token(&claimed.state.inner.lock().unwrap(), &store, &work);
     let seed = AcceptanceEvaluationTargetSeed {
+        reuse_identity: None,
+        selected_evidence: Vec::new(),
         work_ref: format!("w-{label}"),
         mode: AcceptanceEvaluationMode::IndependentSession,
         acceptance_basis: 1,

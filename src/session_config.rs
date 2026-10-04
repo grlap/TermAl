@@ -91,6 +91,19 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if request.model.is_some()
+            && inner.sessions[index].session.parent_delegation_id.as_deref().is_some_and(|id| {
+                inner.acceptance_evaluation_submissions_in_flight.contains(id)
+                    || inner.delegation_followup_admissions.contains_key(id)
+                    || inner.find_delegation_index(id).and_then(|i| inner.delegations[i].acceptance_evaluation.as_ref())
+                        .and_then(|target| target.attempt_history.as_ref())
+                        .is_some_and(|history| history.prepared_brief.is_some())
+            })
+        {
+            return Err(ApiError::conflict(
+                "the evaluator model is reserved by an evaluation submission or retained host brief",
+            ));
+        }
         let engram_developer_name = inner.preferences.engram.developer_name.clone();
         let record = &inner.sessions[index];
         let requested_model = request

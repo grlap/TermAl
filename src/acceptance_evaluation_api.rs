@@ -8,11 +8,11 @@
 // than that evaluate call.
 
 const TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME: &str = "termal_evaluate_acceptance";
-const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply the task's workRef; agent (Claude or Codex) and model override the project's evaluator defaults. Supplying model requires an explicit agent; otherwise the request is refused before any tracker read. Without an agent default, TermAl prefers the other ready Claude/Codex vendor, otherwise this session's agent. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. When the mode is same_session nothing is spawned and the returned brief tells you how to record the evaluation yourself.";
+const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply reuseDelegationId to explicitly prefer a previous eligible evaluator; omission preserves fresh spawning. Reuse permits at most three host-issued attempt keys and requires settled prior submission and brief delivery. Supply the task's workRef; agent (Claude or Codex) and model override the project's evaluator defaults. Supplying model requires an explicit agent; otherwise the request is refused before any tracker read. Without an agent default, TermAl prefers the other ready Claude/Codex vendor, otherwise this session's agent. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. When the mode is same_session nothing is spawned and the returned brief tells you how to record the evaluation yourself.";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME: &str = "termal_submit_acceptance_evaluation";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_acceptance_evaluation";
-const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A refusal names what to correct; correct it and submit again. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. If a refusal says the worktree changed while it was evaluated, do not submit again: finish and report it, because only the parent can request a new evaluation. Once an evaluation is recorded, further submissions are refused.";
+const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A definitive refusal ends that attempt. Only acceptance_evaluation_resubmit supplies a refreshed host brief: judge every criterion afresh and echo its new attemptKey. Other refusals must be reported to the parent. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. If a refusal says the worktree changed while it was evaluated, do not submit again: finish and report it, because only the parent can request a new evaluation. Once an evaluation is recorded, further submissions are refused.";
 
 const ACCEPTANCE_EVALUATION_READER_LABEL: &str = "acceptance-evaluation reader";
 const ACCEPTANCE_EVALUATION_SUBMIT_LABEL: &str = "acceptance-evaluation submission";
@@ -116,15 +116,22 @@ const ACCEPTANCE_EVALUATION_PERSIST_ACK_RECHECK: Duration = Duration::from_milli
 /// How many records one acknowledgement may ask about within its deadline.
 const ACCEPTANCE_EVALUATION_PERSIST_ACK_ATTEMPTS: usize = 3;
 
-/// Worst-case time of one submission beyond the ordinary request: the
-/// evaluate call and, when its outcome is unknown, the one identical resend,
-/// the two acknowledged states (`pending` before, the outcome after), and the
-/// second capture of the declared source fingerprint, bounded by the freeze
-/// budget.
+/// Sequential allowances beyond the ordinary request, derived from each
+/// branch. An unknown outcome permits one identical resend, with pending and
+/// outcome ACKs. A confirmed resubmit instead needs five distinct ACKs
+/// (pending, refusal, prior target, new target, offered brief) and canonical
+/// preparation. The branches share the source-capture allowance; they never
+/// run together. Each stage keeps its own existing deadline.
 fn acceptance_evaluation_submit_budget() -> Duration {
-    acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * 2
+    let call = acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT);
+    let ordinary = call * 2
         + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2
+        + REVIEW_FREEZE_TIMEOUT;
+    let refresh = call
+        + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 5
         + REVIEW_FREEZE_TIMEOUT
+        + acceptance_evaluation_request_tracker_budget();
+    ordinary.max(refresh)
 }
 
 fn acceptance_evaluation_request_tool_definition() -> Value {
@@ -142,6 +149,7 @@ fn acceptance_evaluation_request_tool_definition() -> Value {
                     "maxLength": MAX_ACCEPTANCE_EVALUATION_WORK_REF_CHARS,
                     "description": "The tracker's reference for the task whose acceptance criteria need an evaluation, for example its short ref."
                 },
+                "reuseDelegationId": { "type": "string", "minLength": 1, "description": "Explicit preference for a previous Evaluator of this parent and item. Busy or unsettled responsibility refuses replacement; settled ineligibility selects a fresh evaluator with a reason." },
                 "agent": {
                     "type": "string",
                     "enum": ["Codex", "Claude"],
@@ -181,6 +189,7 @@ fn acceptance_evaluation_submit_tool_definition() -> Value {
                     "type": "integer",
                     "const": ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION
                 },
+                "attemptKey": { "type": "string", "description": "Exact host-issued key from your current brief; required for newly spawned evaluators." },
                 "verdicts": {
                     "type": "array",
                     "minItems": 1,
@@ -234,6 +243,8 @@ static ACCEPTANCE_EVALUATION_SUBMIT_PERMITS: LazyLock<Arc<tokio::sync::Semaphore
 struct RequestAcceptanceEvaluationRequest {
     work_ref: String,
     #[serde(default)]
+    reuse_delegation_id: Option<String>,
+    #[serde(default)]
     agent: Option<Agent>,
     #[serde(default)]
     model: Option<String>,
@@ -255,6 +266,7 @@ enum AcceptanceEvaluationRequestResponse {
         notice: Option<String>,
         evidence_omissions: Value,
         criterion_evidence: Vec<AcceptanceCriterionEvidence>,
+        reused: bool,
     },
     SameSession {
         mode: AcceptanceEvaluationMode,
@@ -375,7 +387,7 @@ fn acceptance_evaluation_submit_authority_locked(
 }
 
 const ACCEPTANCE_EVALUATION_ALREADY_RECORDED_ERROR: &str =
-    "this evaluator already recorded its evaluation; an evaluator records exactly one";
+    "this evaluator already recorded its evaluation; each attempt records exactly one";
 
 /// The one submission an evaluator delegation may have in progress, from its
 /// admission through the tracker run to the last durability acknowledgement.
@@ -476,6 +488,15 @@ fn acceptance_evaluation_spawn_admission_locked(
     parent_session_id: &str,
     seed: &AcceptanceEvaluationTargetSeed,
 ) -> Result<(), ApiError> {
+    acceptance_evaluation_target_admission_locked(inner, parent_session_id, seed, None)
+}
+
+fn acceptance_evaluation_target_admission_locked(
+    inner: &StateInner,
+    parent_session_id: &str,
+    seed: &AcceptanceEvaluationTargetSeed,
+    except: Option<&str>,
+) -> Result<(), ApiError> {
     let current = acceptance_evaluation_host_target_locked(inner, parent_session_id)?;
     if current.store != seed.store {
         return Err(ApiError::conflict(
@@ -541,7 +562,7 @@ fn acceptance_evaluation_spawn_admission_locked(
             "the requested claim's named-root binding became unconfirmed while the evaluator was being requested",
         ));
     }
-    refuse_second_active_acceptance_evaluator_locked(inner, &seed.store, &seed.work_ref, None)
+    refuse_second_active_acceptance_evaluator_locked(inner, &seed.store, &seed.work_ref, except)
 }
 
 /// Each evaluator has its own attempt key, so the tracker cannot tell a second
@@ -583,6 +604,16 @@ fn acceptance_evaluation_followup_admission_locked(
     inner: &StateInner,
     delegation: &DelegationRecord,
 ) -> Result<(), ApiError> {
+    let host = inner.delegation_followup_admissions.get(&delegation.id)
+        .is_some_and(|r| r.host_acceptance_attempt);
+    acceptance_evaluation_followup_admission_with_origin_locked(inner, delegation, host)
+}
+
+fn acceptance_evaluation_followup_admission_with_origin_locked(
+    inner: &StateInner,
+    delegation: &DelegationRecord,
+    host: bool,
+) -> Result<(), ApiError> {
     if delegation.mode != DelegationMode::Evaluator {
         return Ok(());
     }
@@ -593,6 +624,9 @@ fn acceptance_evaluation_followup_admission_locked(
     else {
         return Ok(());
     };
+    if !host && target.attempt_history.as_ref().and_then(|h| h.prepared_brief.as_ref()).is_some() {
+        return Err(ApiError::conflict("a host-authored evaluator brief remains unsettled; requester follow-up cannot replace it"));
+    }
     refuse_second_active_acceptance_evaluator_locked(
         inner,
         store,
@@ -757,6 +791,34 @@ impl AppState {
         deadline: std::time::Instant,
         now: impl Fn() -> std::time::Instant,
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
+        self.prepare_acceptance_evaluation_attempt_until(parent_session_id, request, read, deadline, now, false)
+    }
+
+    fn prepare_acceptance_evaluation_attempt_until(
+        &self,
+        parent_session_id: &str,
+        request: RequestAcceptanceEvaluationRequest,
+        read: impl Fn(&EngramConnectionConfig, &[String], Duration) -> std::result::Result<Value, EngramTransportError>,
+        deadline: std::time::Instant,
+        now: impl Fn() -> std::time::Instant,
+        automatic: bool,
+    ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
+        let reuse = self.reserve_acceptance_evaluation_reuse(parent_session_id, &request, automatic)?;
+        if let Some(reservation) = reuse.as_ref() {
+            if let Some(brief) = reservation.previous.acceptance_evaluation.as_ref()
+                .and_then(|t| t.attempt_history.as_ref()).and_then(|h| h.prepared_brief.as_ref()) {
+                let authority = AcceptanceEvaluationSubmitAuthority { delegation_id: reservation.previous.id.clone(), target: reservation.previous.acceptance_evaluation.clone().unwrap() };
+                self.confirm_acceptance_evaluation_submission_durable(&authority, &reservation.previous)
+                    .map_err(|e| ApiError::internal(format!("retained host brief remains withheld until its exact target is durable: {e}")))?;
+                self.offer_acceptance_evaluation_brief(reservation, &brief.prompt)?;
+                return Ok(AcceptanceEvaluationRequestResponse::Spawned {
+                    delegation: self.delegation_response_from_state(&reservation.previous.id)?,
+                    mode: authority.target.mode, work_ref: authority.target.work_ref,
+                    notice: Some(format!("The retained attempt was recovered without a new key or cut.\n{}", brief.prompt)),
+                    evidence_omissions: serde_json::json!([]), criterion_evidence: Vec::new(), reused: true,
+                });
+            }
+        }
         let work_ref = request.work_ref.trim().to_owned();
         validate_acceptance_evaluation_work_ref(&work_ref)?;
         validate_acceptance_criterion_evidence_request(&request.criterion_evidence)?;
@@ -1069,15 +1131,26 @@ impl AppState {
         let evidence_deadline = canonical_deadline
             .unwrap_or_else(|| (now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
         let body_deadline = discovery_deadline.unwrap_or(evidence_deadline);
-        read_requested_acceptance_evidence(
+        let mut selection_disclosures = Vec::new();
+        let selections = if automatic {
+            let old = reuse.as_ref().expect("automatic refresh has a reservation")
+                .previous.acceptance_evaluation.as_ref().expect("evaluator target");
+            carry_acceptance_evidence_selection(&old.selected_evidence, &task, &mut selection_disclosures)?
+        } else { request.criterion_evidence.clone() };
+        read_acceptance_selected_evidence(
             &mut task,
-            &request.criterion_evidence,
+            &selections,
             connection,
             &show_args,
             &read,
             body_deadline,
             &now,
+            automatic.then_some(&mut selection_disclosures),
         )?;
+        // Mandatory host disclosure is reserved before optional evidence is
+        // shortened. A dropped hint must never look like it was still read.
+        let selection_notice = if selection_disclosures.is_empty() { String::new() }
+            else { format!("Host evidence-selection disclosure:\n{}\n\n", selection_disclosures.join("\n")) };
         self.read_acceptance_binding_evidence(
             &target.store,
             &mut task,
@@ -1278,10 +1351,13 @@ impl AppState {
 
         match mode {
             AcceptanceEvaluationMode::IndependentSession | AcceptanceEvaluationMode::SubAgent => {
+                let reuse_agent = reuse.as_ref()
+                    .filter(|_| mode == AcceptanceEvaluationMode::IndependentSession)
+                    .map(|r| r.previous.agent);
                 let default_agent = defaults
                     .evaluator_agent
                     .filter(|agent| matches!(agent, Agent::Claude | Agent::Codex));
-                let agent = request.agent.or(default_agent).unwrap_or_else(|| {
+                let agent = request.agent.or(reuse_agent).or(default_agent).unwrap_or_else(|| {
                     auto_acceptance_evaluator_agent(parent_agent, &self.agent_readiness_snapshot())
                 });
                 // Persisted legacy Auto/model pairs and explicit agent overrides
@@ -1292,15 +1368,60 @@ impl AppState {
                         .flatten()
                         .map(|model| model.trim().to_owned())
                 });
-                let AcceptanceEvaluatorBrief { prompt, cuts } =
-                    build_acceptance_evaluator_brief_for_agent(
-                        &task,
-                        &evaluator_dir,
-                        agent,
-                        MAX_ACCEPTANCE_BRIEF_BYTES,
-                    )?;
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
                 let unmeasured = unmeasured(&source_fingerprint);
+                let seed = AcceptanceEvaluationTargetSeed {
+                    naming_history: Some(naming_history.clone()),
+                    ..task.target_seed(mode, target.store.clone(), source_fingerprint,
+                        source_root.clone(), source_claim)
+                };
+                // Reserve the mandatory attempt header before shrinking optional
+                // evidence context, so complete criteria still fit in the final
+                // prompt. Fresh delegation IDs have this UUID-shaped length.
+                let fresh_key = acceptance_evaluation_ordinal_key(&format!("delegation-{}", Uuid::nil()), 1);
+                let mut header_bytes = if mode == AcceptanceEvaluationMode::IndependentSession {
+                    acceptance_evaluation_attempt_prompt("", &fresh_key, 1, None, &seed).len()
+                } else {
+                    0
+                };
+                if let Some(previous) = reuse.as_ref()
+                    .filter(|_| mode == AcceptanceEvaluationMode::IndependentSession)
+                    .map(|r| &r.previous) {
+                    if let Some(old) = previous.acceptance_evaluation.as_ref() {
+                        let ordinal = old.attempt_history.as_ref().map_or(1, |h| h.ordinal.saturating_add(1));
+                        header_bytes = header_bytes.max(acceptance_evaluation_attempt_prompt("",
+                            &acceptance_evaluation_ordinal_key(&previous.id, ordinal), ordinal, Some(old), &seed).len());
+                    }
+                }
+                let AcceptanceEvaluatorBrief { prompt, cuts } = build_acceptance_evaluator_brief_for_agent(
+                    &task, &evaluator_dir, agent, MAX_ACCEPTANCE_BRIEF_BYTES.saturating_sub(header_bytes + selection_notice.len()))?;
+                let prompt = format!("{selection_notice}{prompt}");
+                let mut reuse_notice = None;
+                if let Some(reservation) = reuse.as_ref() {
+                    let reason = self.acceptance_evaluation_reuse_reason(reservation, &seed,
+                        &evaluator_dir, admitted.is_some()).or_else(||
+                        (agent != reservation.previous.agent || model.as_ref().is_some_and(|m|
+                            reservation.previous.model.as_ref() != Some(m)))
+                            .then(|| "the requested evaluator agent or model changed".to_owned()));
+                    if let Some(reason) = reason {
+                        if automatic {
+                            return Err(ApiError::conflict(format!("the confirmed refusal remains settled; automatic reuse is unavailable ({reason}). Finish and report it; the parent may explicitly request a fresh evaluator")));
+                        }
+                        reuse_notice = Some(format!("A fresh evaluator was selected: {reason}."));
+                    } else {
+                        let brief = self.install_reused_acceptance_evaluation(reservation, seed, prompt)?;
+                        self.offer_acceptance_evaluation_brief(reservation, &brief)?;
+                        let delegation = self.delegation_response_from_state(&reservation.previous.id)?;
+                        return Ok(AcceptanceEvaluationRequestResponse::Spawned {
+                            delegation, mode, work_ref: task.work_ref,
+                            notice: Some(format!("The existing evaluator received a fresh host-authored attempt.\n{brief}")),
+                            evidence_omissions: acceptance_brief_omissions(&cuts),
+                            criterion_evidence: task.criterion_evidence, reused: true,
+                        });
+                    }
+                }
+                // Only settled, ineligible selections reach replacement admission.
+                drop(reuse);
                 let delegation = self.create_delegation_with_evaluation_target(
                     parent_session_id,
                     CreateDelegationRequest {
@@ -1314,16 +1435,7 @@ impl AppState {
                     },
                     // Creation re-resolves the store and refuses a second
                     // active evaluator of this task, under its own lock.
-                    Some(AcceptanceEvaluationTargetSeed {
-                        naming_history: Some(naming_history.clone()),
-                        ..task.target_seed(
-                            mode,
-                            target.store.clone(),
-                            source_fingerprint,
-                            source_root.clone(),
-                            source_claim,
-                        )
-                    }),
+                    Some(seed),
                 )?;
                 let notice = acceptance_evaluation_notices([
                     self.acceptance_evaluation_open_write_notice(
@@ -1332,6 +1444,7 @@ impl AppState {
                         Some(&delegation.delegation.id),
                     ),
                     root_notice,
+                    reuse_notice,
                     unmeasured,
                     // The requester learns which records its judge did not
                     // get whole while it can still record the proof elsewhere.
@@ -1348,6 +1461,7 @@ impl AppState {
                     notice,
                     evidence_omissions: acceptance_brief_omissions(&cuts),
                     criterion_evidence: task.criterion_evidence,
+                    reused: false,
                 })
             }
             AcceptanceEvaluationMode::SameSession => {
@@ -1456,6 +1570,14 @@ impl AppState {
             return Err(in_progress());
         }
         let authority = acceptance_evaluation_submit_authority_locked(&inner, child)?;
+        if authority.target.attempt_history.as_ref().is_some_and(|h| h.schema_version == 1)
+            && request.attempt_key.as_deref() != Some(authority.target.attempt_key.as_str())
+        {
+            return Err(ApiError::conflict("the submission must echo the exact attemptKey from its current host-authored brief; an earlier attempt cannot submit under this target"));
+        }
+        if let Some(refusal) = authority.target.attempt_history.as_ref().and_then(|h| h.refusal.as_ref()) {
+            return Err(ApiError::conflict(format!("this attempt was definitively refused: {}. Finish and report it; a fresh judgment requires a new host-authored brief", refusal.message)));
+        }
         request
             .validate_coverage(authority.target.criteria_count)
             .map_err(ApiError::bad_request)?;
@@ -1592,7 +1714,20 @@ impl AppState {
             Duration,
         ) -> std::result::Result<EngramCliOutput, EngramTransportError>,
     ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError> {
+        self.submit_acceptance_evaluation_with_io(child, request, run, run_acceptance_evaluation_read)
+    }
+
+    fn submit_acceptance_evaluation_with_io(
+        &self,
+        child: &str,
+        request: SubmitAcceptanceEvaluationRequest,
+        run: impl Fn(&EngramConnectionConfig, &[String], Duration) -> std::result::Result<EngramCliOutput, EngramTransportError>,
+        read: impl Fn(&EngramConnectionConfig, &[String], Duration) -> std::result::Result<Value, EngramTransportError>,
+    ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError> {
         request.validate_shape().map_err(ApiError::bad_request)?;
+        if let Some(brief) = self.recover_retained_acceptance_brief(child, &request)? {
+            return Err(ApiError::conflict(format!("The refused old attempt cannot submit again. Its retained refresh was recovered without a new key or cut; judge every criterion afresh under this brief:\n{brief}")));
+        }
         // Held to the end of this call, the last acknowledgement included.
         let (authority, target, model, _in_flight) =
             self.acceptance_evaluation_submit_context(child, &request)?;
@@ -1672,13 +1807,38 @@ impl AppState {
         let receipt = match (outcome, uncertain) {
             // Only a receipt ends uncertainty.
             (AcceptanceEvaluationRunOutcome::Receipt(receipt), _) => receipt,
-            // From `none`, a run that recorded nothing leaves nothing open:
-            // the evaluator may correct its verdicts.
-            (AcceptanceEvaluationRunOutcome::Refused(words), None) => {
-                self.withdraw_own_acceptance_evaluation_pending(&authority, &payload_digest);
-                // The tracker's own words: the evaluator corrects and resubmits.
+            // A confirmed refusal settles this key, never authorizes a changed
+            // judgment under the old cut. Only the typed resubmit asks for reads.
+            (AcceptanceEvaluationRunOutcome::Refused { code, message: words }, None) => {
+                self.record_acceptance_evaluation_refusal(&authority, code.as_deref(), &words, original)?;
+                if code.as_deref() == Some("acceptance_evaluation_resubmit")
+                    && authority.target.attempt_history.as_ref().is_some_and(|h| h.schema_version == 1)
+                {
+                    drop(_in_flight);
+                    let parent = {
+                        let inner = self.inner.lock().expect("state mutex poisoned");
+                        inner.find_delegation_index(&authority.delegation_id)
+                            .map(|i| inner.delegations[i].parent_session_id.clone())
+                            .ok_or_else(|| ApiError::conflict("the refused evaluator disappeared"))?
+                    };
+                    let refreshed = self.prepare_acceptance_evaluation_attempt_until(
+                        &parent,
+                        RequestAcceptanceEvaluationRequest {
+                            work_ref: authority.target.work_ref.clone(), reuse_delegation_id: Some(authority.delegation_id.clone()),
+                            agent: None, model: None, criterion_evidence: Vec::new(),
+                        }, read,
+                        std::time::Instant::now() + acceptance_evaluation_request_tracker_budget(),
+                        std::time::Instant::now, true,
+                    )?;
+                    return Err(ApiError::conflict(match refreshed {
+                        AcceptanceEvaluationRequestResponse::Spawned { notice, .. } =>
+                            format!("Nothing was recorded for the refused key. A fresh whole judgment is required; do not repeat the old verdicts.\n{}", notice.unwrap_or_default()),
+                        AcceptanceEvaluationRequestResponse::SameSession { .. } =>
+                            "Current policy no longer admits independent reuse; finish and report the refusal to the parent".to_owned(),
+                    }));
+                }
                 return Err(ApiError::conflict(format!(
-                    "Engram refused the evaluation; nothing was recorded: {words}"
+                    "Engram refused the evaluation; nothing was recorded: {words}. Finish and report the refusal; a fresh judgment requires a new host-authored brief"
                 )));
             }
             (AcceptanceEvaluationRunOutcome::Locked(detail), None) => {
@@ -1696,7 +1856,7 @@ impl AppState {
             // With an open write, nothing short of a receipt proves where it
             // stands, a refused resend included: see the run caveat in
             // docs/features/engram-host-adapter.md.
-            (AcceptanceEvaluationRunOutcome::Refused(words), Some(earlier)) => {
+            (AcceptanceEvaluationRunOutcome::Refused { message: words, .. }, Some(earlier)) => {
                 self.keep_acceptance_evaluation_unconfirmed(
                     &authority,
                     payload_digest,
@@ -1865,6 +2025,11 @@ impl AppState {
             };
             // An open write is left exactly as it is.
             let dispatch = if begun.uncertain_at_entry.is_none() {
+                if let Some(history) = target.attempt_history.as_mut() {
+                    // The evaluator echoed this key before acquiring admission.
+                    // Pending now owns the exact submission across restart.
+                    history.prepared_brief = None;
+                }
                 target.submission = AcceptanceEvaluationSubmission::Pending {
                     payload_digest: begun.payload_digest.clone(),
                     started_at: stamp_now(),
@@ -1924,10 +2089,9 @@ impl AppState {
         written: &DelegationRecord,
     ) -> std::result::Result<(), String> {
         let deadline = std::time::Instant::now() + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT;
-        let written_submission = written
+        let written_target = written
             .acceptance_evaluation
-            .as_ref()
-            .map(|target| &target.submission);
+            .as_ref();
         let mut expected = written.clone();
         let mut attempts = 1;
         loop {
@@ -1968,8 +2132,7 @@ impl AppState {
             if current
                 .acceptance_evaluation
                 .as_ref()
-                .map(|target| &target.submission)
-                != written_submission
+                != written_target
             {
                 return Err("the submission state changed before it was acknowledged".to_owned());
             }

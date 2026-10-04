@@ -1601,6 +1601,11 @@ struct DelegationAcceptanceEvaluation {
         skip_serializing_if = "AcceptanceEvaluationSubmission::is_none"
     )]
     submission: AcceptanceEvaluationSubmission,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attempt_history: Option<AcceptanceEvaluationAttemptHistory>,
+    /// Host-private requester discovery selections for automatic refresh.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    selected_evidence: Vec<AcceptanceSelectedEvidence>,
 }
 
 /// What the host knows about this evaluator's one tracker write. `pending` is
@@ -1658,6 +1663,7 @@ impl AcceptanceEvaluationSubmission {
         matches!(self, Self::None)
     }
 
+    #[cfg(test)]
     fn open_write(&self) -> Option<&AcceptanceEvaluationOpenWrite> {
         match self {
             Self::Pending { original, .. } | Self::Unconfirmed { original, .. } => Some(original),
@@ -1670,10 +1676,25 @@ impl DelegationAcceptanceEvaluation {
     /// What a client may see: everything but the host-private argument list.
     fn client_view(&self) -> Self {
         let mut view = self.clone();
+        view.selected_evidence.clear();
         if let AcceptanceEvaluationSubmission::Pending { original, .. }
         | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } = &mut view.submission
         {
             original.args.clear();
+        }
+        if let Some(history) = view.attempt_history.as_mut() {
+            if let Some(refusal) = history.refusal.as_mut() {
+                refusal.original.args.clear();
+            }
+            for previous in &mut history.previous {
+                if let Some(refusal) = previous.refusal.as_mut() {
+                    refusal.original.args.clear();
+                }
+                if let AcceptanceEvaluationSubmission::Pending { original, .. }
+                | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } = &mut previous.submission {
+                    original.args.clear();
+                }
+            }
         }
         view
     }
@@ -1742,6 +1763,10 @@ struct PersistedDelegationAcceptanceEvaluation {
     #[serde(default)]
     submission: AcceptanceEvaluationSubmission,
     #[serde(default)]
+    attempt_history: Option<AcceptanceEvaluationAttemptHistory>,
+    #[serde(default)]
+    selected_evidence: Vec<AcceptanceSelectedEvidence>,
+    #[serde(default)]
     outcome: Option<PersistedRawAcceptanceEvaluationOutcome>,
 }
 
@@ -1780,6 +1805,8 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             source_claim: persisted.source_claim,
             naming_history: persisted.naming_history,
             submission,
+            attempt_history: persisted.attempt_history,
+            selected_evidence: persisted.selected_evidence,
         }
     }
 }
@@ -2425,17 +2452,11 @@ where
         review_result_required: bool,
     }
 
-    // The record as persisted carries an open acceptance write's argument
-    // list, which is host-private; a client gets the record without it.
+    // Current and historical acceptance writes carry host-private argument
+    // lists. Strip both even when the current submission is already settled.
     let mut client_record = record
         .acceptance_evaluation
         .as_ref()
-        .filter(|target| {
-            target
-                .submission
-                .open_write()
-                .is_some_and(|original| !original.args.is_empty())
-        })
         .map(|target| DelegationRecord {
             acceptance_evaluation: Some(target.client_view()),
             ..record.clone()

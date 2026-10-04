@@ -1831,6 +1831,7 @@ impl AppState {
         session_id: &str,
         request: SendMessageRequest,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
+        let _acceptance_guard = self.reserve_direct_requester_acceptance_prompt(session_id, &request)?;
         self.dispatch_turn_with_followup(session_id, request, None)
     }
 

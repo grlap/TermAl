@@ -662,6 +662,14 @@ impl AppState {
         if let Some(seed) = evaluation.as_ref() {
             acceptance_evaluation_spawn_admission_locked(&inner, &parent_session_id, seed)?;
         }
+        let prompt = evaluation.as_ref().filter(|s| {
+            s.mode == AcceptanceEvaluationMode::IndependentSession && s.reuse_identity.is_some()
+        }).map(|seed| {
+            acceptance_evaluation_attempt_prompt(prompt, &acceptance_evaluation_ordinal_key(&delegation_id, 1), 1, None, seed)
+        }).unwrap_or_else(|| prompt.to_owned());
+        if prompt.len() > MAX_DELEGATION_PROMPT_BYTES {
+            return Err(ApiError::bad_request("host-authored evaluation brief is too large"));
+        }
         let now = stamp_now();
         let child_record = inner.create_session(
             agent,
@@ -689,8 +697,29 @@ impl AppState {
         );
         // Identity is captured under the same lock that creates the actual
         // child and its delegation. It is not part of the request seed.
-        let acceptance_evaluation = evaluation
-            .map(|seed| seed.into_target(delegation_id.clone(), &parent_session_id));
+        let acceptance_evaluation = evaluation.map(|seed| {
+            let identity = (seed.mode == AcceptanceEvaluationMode::IndependentSession)
+                .then(|| seed.reuse_identity.clone()).flatten();
+            let mut target = seed.into_target(if identity.is_some() {
+                acceptance_evaluation_ordinal_key(&delegation_id, 1)
+            } else {
+                delegation_id.clone()
+            }, &parent_session_id);
+            target.attempt_history = identity.map(|identity| AcceptanceEvaluationAttemptHistory {
+                schema_version: 1,
+                parent_session_id: parent_session_id.clone(),
+                child_session_id: child_session_id.clone(),
+                cwd: cwd.clone(),
+                identity,
+                ordinal: 1,
+                requester_text_tainted: false,
+                identity_refused: false,
+                previous: Vec::new(),
+                refusal: None,
+                prepared_brief: None,
+            });
+            target
+        });
         let record = DelegationRecord {
             id: delegation_id.clone(),
             parent_session_id,
@@ -698,7 +727,7 @@ impl AppState {
             mode,
             status: DelegationStatus::Running,
             title,
-            prompt: prompt.to_owned(),
+            prompt,
             cwd,
             agent: child_session.agent,
             model: Some(child_session.model.clone()),
@@ -760,6 +789,11 @@ impl AppState {
         // state mutex. It completes before the child's first synchronous turn
         // dispatch so that evaluate can use the persisted routing token.
         drop(inner);
+        if let Some(target) = record.acceptance_evaluation.as_ref().filter(|t| t.attempt_history.is_some()) {
+            self.confirm_acceptance_evaluation_submission_durable(
+                &AcceptanceEvaluationSubmitAuthority { delegation_id: record.id.clone(), target: target.clone() }, &record)
+                .map_err(|e| ApiError::internal(format!("evaluator retained but first brief withheld until durable acknowledgement; inspect delegation {}: {e}", record.id)))?;
+        }
         self.bind_engram_delegation_best_effort(&record);
 
         #[cfg(test)]
@@ -1377,6 +1411,17 @@ impl AppState {
         delegation_id: &str,
         request: SendMessageRequest,
     ) -> Result<DelegationStatusResponse, ApiError> {
+        let _acceptance_guard = self.reserve_requester_acceptance_followup(parent_session_id, delegation_id, &request)?;
+        self.followup_delegation_request_with_origin(parent_session_id, delegation_id, request, false)
+    }
+
+    fn followup_delegation_request_with_origin(
+        &self,
+        parent_session_id: &str,
+        delegation_id: &str,
+        request: SendMessageRequest,
+        host_acceptance_attempt: bool,
+    ) -> Result<DelegationStatusResponse, ApiError> {
         // Reject malformed payloads before recovery/re-arm can clear a review.
         parse_prompt_image_attachments(&request.attachments)?;
         if request.text.trim().is_empty() && request.attachments.is_empty() {
@@ -1462,7 +1507,7 @@ impl AppState {
             } else {
                 // Early answer only: prompt admission repeats this under the
                 // lock that rearms, where a concurrent request cannot pass it.
-                acceptance_evaluation_followup_admission_locked(&inner, &inner.delegations[index])
+                acceptance_evaluation_followup_admission_with_origin_locked(&inner, &inner.delegations[index], host_acceptance_attempt)
                     .err()
             };
 
@@ -1504,10 +1549,9 @@ impl AppState {
             let restore_candidate = inner
                 .find_session_index(&child_session_id)
                 .is_some_and(|index| codex_followup_may_restore_record(&inner.sessions[index]));
-            inner.delegation_followup_admissions.insert(
-                delegation_id.to_owned(),
-                FollowupAdmissionReservation::new(last_prompt),
-            );
+            let mut reservation = FollowupAdmissionReservation::new(last_prompt);
+            reservation.host_acceptance_attempt = host_acceptance_attempt;
+            inner.delegation_followup_admissions.insert(delegation_id.to_owned(), reservation);
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
             let revision = if refresh_delta.is_some()
                 || detached_child.did_mutate()
@@ -2308,7 +2352,9 @@ impl AppState {
                 std::thread::sleep(stall);
             }
         }
-        let dispatch = match self.dispatch_turn(
+        // The initial delegation prompt is host-authored. Requester messages
+        // still enter through dispatch_turn and its evaluator-taint guard.
+        let dispatch = match self.dispatch_turn_with_followup(
             child_session_id,
             SendMessageRequest {
                 text: runtime_prompt,
@@ -2317,6 +2363,7 @@ impl AppState {
                 source_session_id: None,
                 source_mailbox: None,
             },
+            None,
         ) {
             Ok(dispatch) => dispatch,
             Err(error)

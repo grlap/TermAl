@@ -12,6 +12,9 @@ mod selection_confirmation;
 #[path = "engram_named_root_sighting_live.rs"]
 mod sighting_live;
 
+#[path = "acceptance_evaluation_refresh_live.rs"]
+mod acceptance_refresh_live;
+
 #[path = "engram_acceptance_sub_agent_live.rs"]
 mod sub_agent_live;
 

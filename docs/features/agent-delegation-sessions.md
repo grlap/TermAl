@@ -610,7 +610,10 @@ selected and what is recorded, is described in the
 - **Creation.** Only the acceptance-evaluation request creates one:
   `termal_evaluate_acceptance`, or
   `POST /api/sessions/{id}/acceptance-evaluations` with
-  `{ "workRef", "agent"?, "model"? }`. A delegation create request with
+  `{ "workRef", "agent"?, "model"?, "reuseDelegationId"? }`. An explicit
+  reuse preference requests a fresh host-authored whole judgment, subject to
+  the [re-evaluation admission and attempt limit](engram-host-adapter.md#re-evaluation-in-an-independent-evaluator).
+  A delegation create request with
   `mode: evaluator` is refused, `termal_spawn_session` does not offer the mode,
   and agent-command delegation metadata may not declare it. The caller supplies
   no prompt: the session whose work is judged does not brief its judge.
@@ -641,7 +644,8 @@ selected and what is recorded, is described in the
   [Engram host adapter](./engram-host-adapter.md#acceptance-evaluation)),
   `supersedes` (the carried failing evaluation the submission acknowledges
   with `--supersedes`; absent when none was carried),
-  `attemptKey` (the delegation id), `store` (the tracker store the brief was
+  `attemptKey` (the persisted key of this judgment; newly admitted attempts
+  include the delegation id and ordinal), `store` (the tracker store the brief was
   read from), `sourceFingerprint` (the content revision of the evaluated
   worktree taken at the request; declared as `--source-fingerprint` only if
   the first submission finds the worktree still at it, see

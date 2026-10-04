@@ -10,7 +10,7 @@ const ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET: Duration = Duration::from_secs(
 // Each closing call funds its lock retry from the remaining share.
 const ACCEPTANCE_EVIDENCE_CLOSING_RESERVE: Duration = Duration::from_secs(20);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 struct AcceptanceEvidenceIdentity {
     work_id: String,
     work_ref: String,
@@ -311,11 +311,45 @@ fn acceptance_criterion_evidence_read_timeout(
     Ok(timeout.min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct AcceptanceCriterionEvidenceRequest {
     criterion: usize,
     locators: Vec<String>,
+}
+
+/// Private discovery hints, bound by their target's canonical work/run identity.
+/// Bodies are never retained here: every fresh preparation reads them again.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptanceSelectedEvidence {
+    criterion: usize,
+    criterion_text: String,
+    locators: Vec<String>,
+}
+
+fn carry_acceptance_evidence_selection(
+    old: &[AcceptanceSelectedEvidence],
+    task: &AcceptanceEvaluationTask,
+    disclosures: &mut Vec<String>,
+) -> Result<Vec<AcceptanceCriterionEvidenceRequest>, ApiError> {
+    let all = old.iter().map(|row| AcceptanceCriterionEvidenceRequest {
+        criterion: row.criterion, locators: row.locators.clone(),
+    }).collect::<Vec<_>>();
+    validate_acceptance_criterion_evidence_request(&all)?;
+    Ok(old.iter().filter_map(|row| {
+        if task.criteria.get(row.criterion - 1) == Some(&row.criterion_text) {
+            Some(AcceptanceCriterionEvidenceRequest {
+                criterion: row.criterion, locators: row.locators.clone(),
+            })
+        } else {
+            let reason = if row.criterion > task.criteria.len() {
+                "the criterion is no longer present"
+            } else { "its text changed since the selection" };
+            disclosures.push(format!("The requester's evidence selection for criterion {} was not carried: {reason}.", row.criterion));
+            None
+        }
+    }).collect())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -420,6 +454,7 @@ fn validate_acceptance_criterion_evidence_request(
     Ok(())
 }
 
+#[cfg(test)]
 fn read_requested_acceptance_evidence(
     task: &mut AcceptanceEvaluationTask,
     links: &[AcceptanceCriterionEvidenceRequest],
@@ -428,6 +463,19 @@ fn read_requested_acceptance_evidence(
     read: &impl Fn(&EngramConnectionConfig, &[String], Duration) -> Result<Value, EngramTransportError>,
     deadline: std::time::Instant,
     now: &impl Fn() -> std::time::Instant,
+) -> Result<(), ApiError> {
+    read_acceptance_selected_evidence(task, links, connection, show_args, read, deadline, now, None)
+}
+
+fn read_acceptance_selected_evidence(
+    task: &mut AcceptanceEvaluationTask,
+    links: &[AcceptanceCriterionEvidenceRequest],
+    connection: &EngramConnectionConfig,
+    show_args: &[String],
+    read: &impl Fn(&EngramConnectionConfig, &[String], Duration) -> Result<Value, EngramTransportError>,
+    deadline: std::time::Instant,
+    now: &impl Fn() -> std::time::Instant,
+    mut disclosed_drops: Option<&mut Vec<String>>,
 ) -> Result<(), ApiError> {
     if links.is_empty() {
         return Ok(());
@@ -441,6 +489,7 @@ fn read_requested_acceptance_evidence(
         ));
     }
     let mut fetched = BTreeSet::new();
+    let mut unusable = BTreeSet::new();
     for link in links {
         for locator in &link.locators {
             if !fetched.insert(locator.clone()) {
@@ -473,7 +522,6 @@ fn read_requested_acceptance_evidence(
                     ApiError::bad_gateway(format!("selected evidence: invalid record: {error}"))
                 })?;
             if note.locator != *locator
-                || note.non_holder
                 || note.body_omitted
                 || note.summary_truncated
             {
@@ -488,6 +536,16 @@ fn read_requested_acceptance_evidence(
                 return Err(ApiError::conflict(
                     "selected evidence body exceeds the brief read bound; supply a smaller proof record",
                 ));
+            }
+            // A validated whole exact receipt explicitly marked non-holder is a
+            // definitive non-citable record. Missing, malformed, partial or
+            // failed reads remain errors; none proves an unusable selection.
+            if note.non_holder && disclosed_drops.is_some() {
+                unusable.insert(locator.clone());
+                continue;
+            }
+            if note.non_holder {
+                return Err(ApiError::conflict("selected evidence was not returned whole as a citable record of this task"));
             }
             let is_verification = note.kind.as_str() == Some("verification");
             let evidence = AcceptanceEvaluationEvidence {
@@ -526,11 +584,19 @@ fn read_requested_acceptance_evidence(
             }
             task.indexed_evidence.push(evidence);
         }
-        task.criterion_evidence.push(AcceptanceCriterionEvidence {
-            criterion: link.criterion,
-            locators: link.locators.clone(),
-            association: "requester".to_owned(),
-        });
+        let locators = link.locators.iter().filter(|locator| !unusable.contains(*locator)).cloned().collect::<Vec<_>>();
+        if let Some(disclosures) = disclosed_drops.as_mut() {
+            for locator in link.locators.iter().filter(|locator| unusable.contains(*locator)) {
+                disclosures.push(format!("The requester's evidence selection for criterion {} was not carried for record {locator}: the exact record is non-holder and cannot be cited.", link.criterion));
+            }
+        }
+        if !locators.is_empty() {
+            task.criterion_evidence.push(AcceptanceCriterionEvidence {
+                criterion: link.criterion,
+                locators,
+                association: "requester".to_owned(),
+            });
+        }
     }
     // A targeted record read is not a snapshot of the run. Revalidate the
     // task's bases after all reads; never mix proof across a moving item.

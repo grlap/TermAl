@@ -28,6 +28,9 @@ mod evidence_selection;
 #[path = "acceptance_evaluation_authority.rs"]
 mod authority_budget;
 
+#[path = "acceptance_evaluation_refresh.rs"]
+mod refresh;
+
 #[path = "acceptance_evaluation_sub_agent.rs"]
 mod sub_agent;
 
@@ -95,6 +98,8 @@ fn modes(words: &[&str]) -> Vec<String> {
 
 fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAcceptanceEvaluation {
     DelegationAcceptanceEvaluation {
+        attempt_history: None,
+        selected_evidence: Vec::new(),
         work_ref: "w-task".to_owned(),
         mode: AcceptanceEvaluationMode::IndependentSession,
         parent_session: None,
@@ -226,6 +231,7 @@ fn submission(
     verdicts: Vec<SubmitAcceptanceEvaluationVerdict>,
 ) -> SubmitAcceptanceEvaluationRequest {
     SubmitAcceptanceEvaluationRequest {
+        attempt_key: None,
         schema_version: 1,
         verdicts,
     }
@@ -501,6 +507,7 @@ fn build_acceptance_evaluator_prompt(
 
 fn evaluation_request(agent: Option<Agent>) -> RequestAcceptanceEvaluationRequest {
     RequestAcceptanceEvaluationRequest {
+        reuse_delegation_id: None,
         work_ref: "w-task".to_owned(),
         agent,
         model: None,
@@ -1689,12 +1696,14 @@ fn acceptance_submit_relays_a_refusal_and_records_nothing_on_failure() {
         })
         .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.ends_with(refusal), "{}", error.message);
+    assert!(error.message.contains(refusal), "{}", error.message);
+    assert!(error.message.contains("Finish and report"), "{}", error.message);
     assert!(!error.message.contains("reminders"), "{}", error.message);
     assert!(outcome_of(&state, &delegation).is_none());
 
     // Text that is not the tracker's envelope passes through when it is the
     // argument parser's usage error, which exits 2 before any store is opened.
+    let (state, _, delegation, child) = evaluator_fixture();
     let usage = "error: unexpected argument '--bogus-flag' found";
     let error = state
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), |_, _, _| usage_error())
@@ -1707,6 +1716,9 @@ fn acceptance_submit_relays_a_refusal_and_records_nothing_on_failure() {
         AcceptanceEvaluationSubmission::None
     );
 
+    // Definitive refusal ended the preceding attempt; transport controls use
+    // another evaluator, while unknown sends on it preserve the same payload.
+    let (state, _, delegation, child) = evaluator_fixture();
     for (failure, expected) in [
         (
             EngramTransportError::deadline(
@@ -1745,7 +1757,7 @@ fn acceptance_submit_relays_a_refusal_and_records_nothing_on_failure() {
     assert_eq!(unreadable.status, StatusCode::BAD_GATEWAY);
     assert!(outcome_of(&state, &delegation).is_none());
 
-    // A refusal leaves the evaluator able to correct and resubmit.
+    // Only a receipt settles the earlier uncertain sends on this evaluator.
     state
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), |_, _, _| {
             Ok(cli_output(true, r#"{"passed":true}"#, ""))
@@ -2166,13 +2178,22 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
     assert_eq!(record.cwd, root.to_string_lossy());
     assert_eq!(record.title, "Acceptance evaluation: w-task");
     assert_eq!(record.review_result_submission_attempt, 0);
-    // The attempt key is the delegation id: one key per spawn. The target
+    let history = record.acceptance_evaluation.as_ref().unwrap().attempt_history.as_ref().unwrap();
+    assert!(!history.requester_text_tainted, "the first host-authored brief is not requester follow-up");
+    assert_eq!(history.ordinal, 1);
+    assert_eq!(history.parent_session_id, parent);
+    assert_eq!(history.child_session_id, record.child_session_id);
+    assert_eq!(history.cwd, record.cwd);
+    assert_eq!(history.identity, acceptance_core_identity(&evidence_selection::canonical_core_receipt()).unwrap().unwrap());
+    // The first whole judgment has its own ordinal-bearing key. The target
     // names the store the brief was read from.
     let store = established_store(&state, &project).expect("the fixture store");
     assert_eq!(
         record.acceptance_evaluation,
         Some(DelegationAcceptanceEvaluation {
             store: Some(store.clone()),
+            attempt_key: acceptance_evaluation_ordinal_key(&record.id, 1),
+            attempt_history: Some(history.clone()),
             ..evaluation_target(&record.id, 2)
         })
     );
@@ -3930,8 +3951,8 @@ fn acceptance_submit_refuses_a_second_submission_while_recorded_awaits_its_ackno
 
 #[test]
 fn acceptance_submit_releases_its_in_flight_marker_on_every_way_out() {
-    // After a refusal the corrected submission runs.
-    let (state, _, delegation, child) = evaluator_fixture();
+    // A definitive refusal ends the attempt and releases its reservation.
+    let (state, _, _, child) = evaluator_fixture();
     let (_, run) = scripted_runner(vec![revision_conflict()]);
     state
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
@@ -3948,6 +3969,7 @@ fn acceptance_submit_releases_its_in_flight_marker_on_every_way_out() {
 
     // After a panicking runner: the write it may have made stays open, and the
     // evaluator is not locked out of resolving it.
+    let (state, _, delegation, child) = evaluator_fixture();
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         state.submit_acceptance_evaluation_with_runner(&child, two_verdicts(), |_, _, _| {
             panic!("the tracker runner died")
@@ -4359,9 +4381,9 @@ fn acceptance_run_is_refused_only_by_the_expected_exit_code_with_the_known_shape
     // The two shapes the real CLI produces when nothing was recorded.
     assert_eq!(
         classify(EngramCliExit::Code(1), "", &envelope),
-        AcceptanceEvaluationRunOutcome::Refused(REVISION_CONFLICT.to_owned())
+        AcceptanceEvaluationRunOutcome::Refused { code: Some("work_revision_conflict".to_owned()), message: REVISION_CONFLICT.to_owned() }
     );
-    let AcceptanceEvaluationRunOutcome::Refused(words) =
+    let AcceptanceEvaluationRunOutcome::Refused { message: words, code: None } =
         classify(EngramCliExit::Code(2), "", CLAP_USAGE_ERROR)
     else {
         panic!("a usage error is raised before any store is opened");
@@ -5196,11 +5218,12 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
         acceptance_evaluation_paging_reserve(),
         call * 3 + policy + REVIEW_FREEZE_TIMEOUT + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET
     );
-    // Two sends, two acknowledged states (`pending` before, the outcome
-    // after) and the second source capture.
+    // Ordinary replay and confirmed refresh are different sequential chains.
     assert_eq!(
         acceptance_evaluation_submit_budget(),
-        call * 2 + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2 + REVIEW_FREEZE_TIMEOUT
+        (call * 2 + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2 + REVIEW_FREEZE_TIMEOUT)
+            .max(call + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 5
+                + REVIEW_FREEZE_TIMEOUT + acceptance_evaluation_request_tracker_budget())
     );
 
     // The arithmetic names exactly the reads a maximal request performs.
