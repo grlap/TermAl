@@ -857,7 +857,17 @@ impl CheckedTurn {
         use_toolchain_label(Some(FIXTURE_TOOLCHAIN));
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime(&format!("engram-turn-check-{label}"));
-        state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
+        assert_eq!(
+            state
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .engram_budget_clock_snapshots
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the Engram budget clock must be unread before the fixture chooses it"
+        );
+        state.select_test_scripted_engram_budget_clock();
         let root = state
             .test_temp_root
             .as_ref()
