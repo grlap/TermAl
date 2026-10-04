@@ -4,10 +4,12 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -29,10 +31,15 @@ import {
   helperTestFiles,
   liveStage,
   notifyRun,
+  RENAME_SHARING_BUDGET_MS,
+  RENAME_SHARING_FIRST_BACKOFF_MS,
+  RENAME_SHARING_MAX_BACKOFF_MS,
   recoverRun,
+  replaceAtomically,
   requiredFiles,
   requiredStages,
   runCommand,
+  save,
   startDetachedRun,
   summarize,
 } from "./test-launcher.mjs";
@@ -1642,4 +1649,135 @@ test("CI runs every maintained helper test suite on each platform", () => {
   assert.ok(run, "the workflow runs node --test");
   assert.deepEqual(run[1].trim().split(/\s+/u), [...helperTestFiles]);
   assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
+});
+
+// On Windows a rename that replaces a file fails with EPERM while any other
+// handle on that file is open, even one that shares delete; a handle this
+// process holds stands for another process's reader, such as the host's.
+const windowsSharing = process.platform === "win32" ? false : "Windows file-sharing semantics";
+
+test("save() replaces a results file another handle holds open once that handle closes", { skip: windowsSharing }, (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const target = join(directory, "results.json");
+  writeFileSync(target, `${JSON.stringify({ state: "running" })}\n`);
+  let held = openSync(target, "r");
+  const sleeps = [];
+  try {
+    save(target, { state: "passed" }, {
+      sleep: (milliseconds) => {
+        sleeps.push(milliseconds);
+        if (held !== null) {
+          // The first backoff releases this test's handle. A later one means
+          // another process (a scanner) briefly holds the new file too; it
+          // waits as the real sleep would.
+          closeSync(held);
+          held = null;
+        } else {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+        }
+      },
+    });
+  } finally {
+    if (held !== null) closeSync(held);
+  }
+  assert.deepEqual(json(target), { state: "passed" });
+  assert.equal(sleeps[0], RENAME_SHARING_FIRST_BACKOFF_MS, "the held target cost a backoff");
+  assert.deepEqual(readdirSync(directory), ["results.json"], "no temporary file is left behind");
+});
+
+test("save() starts no replace once its budget is spent, even when the holder lets go late", { skip: windowsSharing }, (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const target = join(directory, "results.json");
+  writeFileSync(target, `${JSON.stringify({ state: "running" })}\n`);
+  let held = openSync(target, "r");
+  let clock = 0;
+  const sleeps = [];
+  try {
+    assert.throws(
+      () => save(target, { state: "passed" }, {
+        now: () => clock,
+        sleep: (milliseconds) => {
+          // The thread wakes after the budget, and the holder has let go by then.
+          sleeps.push(milliseconds);
+          clock += RENAME_SHARING_BUDGET_MS + 1;
+          closeSync(held);
+          held = null;
+        },
+      }),
+      (error) => error.code === "EPERM" && error.syscall === "rename",
+    );
+  } finally {
+    if (held !== null) closeSync(held);
+  }
+  assert.equal(sleeps.length, 1);
+  assert.deepEqual(json(target), { state: "running" }, "no replace started after the deadline");
+  assert.deepEqual(readdirSync(directory), ["results.json"], "no temporary file is left behind");
+});
+
+test("save() keeps the previous results when the target stays held past its budget", { skip: windowsSharing }, (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const target = join(directory, "results.json");
+  writeFileSync(target, `${JSON.stringify({ state: "running" })}\n`);
+  const held = openSync(target, "r");
+  let clock = 0;
+  const sleeps = [];
+  try {
+    assert.throws(
+      () => save(target, { state: "passed" }, {
+        now: () => clock,
+        sleep: (milliseconds) => {
+          sleeps.push(milliseconds);
+          clock += milliseconds;
+        },
+      }),
+      (error) => error.code === "EPERM" && error.syscall === "rename",
+    );
+  } finally {
+    closeSync(held);
+  }
+  assert.deepEqual(json(target), { state: "running" }, "the previous complete file stays");
+  assert.deepEqual(readdirSync(directory), ["results.json"], "no temporary file is left behind");
+  assert.equal(sleeps.reduce((total, milliseconds) => total + milliseconds, 0), RENAME_SHARING_BUDGET_MS);
+  assert.equal(sleeps[0], RENAME_SHARING_FIRST_BACKOFF_MS);
+  assert.ok(sleeps.every((milliseconds) => milliseconds <= RENAME_SHARING_MAX_BACKOFF_MS));
+});
+
+test("the atomic replace throws any other error at once, without waiting", (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const sleeps = [];
+  assert.throws(
+    () => replaceAtomically(join(directory, "missing.tmp"), join(directory, "results.json"), {
+      platform: "win32",
+      sleep: (milliseconds) => sleeps.push(milliseconds),
+    }),
+    (error) => error.code === "ENOENT",
+  );
+  assert.deepEqual(sleeps, []);
+});
+
+test("the atomic replace waits for a held target only on Windows", { skip: windowsSharing }, (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const target = join(directory, "results.json");
+  writeFileSync(target, "{}\n");
+  const temporary = `${target}.tmp`;
+  writeFileSync(temporary, "{}\n");
+  const held = openSync(target, "r");
+  const sleeps = [];
+  try {
+    assert.throws(
+      () => replaceAtomically(temporary, target, {
+        platform: "linux",
+        sleep: (milliseconds) => sleeps.push(milliseconds),
+      }),
+      (error) => error.code === "EPERM",
+    );
+  } finally {
+    closeSync(held);
+  }
+  assert.deepEqual(sleeps, [], "another platform's error is not retried");
 });

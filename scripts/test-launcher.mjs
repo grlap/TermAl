@@ -64,11 +64,56 @@ const helperSupportFiles = Object.freeze([
   "scripts/vitest-resource-preflight.mjs",
 ]);
 
-function save(path, value) {
+// On Windows, renaming a file over another fails while any other handle on
+// the target is open, even one that shares delete: a host reading a run's
+// results.json at that moment is enough. The replace waits for such a reader
+// within a short budget, retrying only the rename of a temporary that is
+// already complete, so a reader always sees the previous whole file or the
+// new one. It never retries the run or any stage.
+export const RENAME_SHARING_BUDGET_MS = 2000;
+export const RENAME_SHARING_FIRST_BACKOFF_MS = 10;
+export const RENAME_SHARING_MAX_BACKOFF_MS = 200;
+const RENAME_SHARING_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+// Renames `temporary` over `path`. On Windows a sharing violation is retried
+// with doubling backoff while the budget lasts: no attempt starts once it is
+// spent, even when a holder lets go later, and then the first error is
+// thrown. Any other error, or any error elsewhere, is thrown at once.
+export function replaceAtomically(temporary, path, {
+  platform = process.platform,
+  now = () => performance.now(),
+  sleep = sleepSync,
+  budgetMs = RENAME_SHARING_BUDGET_MS,
+} = {}) {
+  const started = now();
+  let backoff = RENAME_SHARING_FIRST_BACKOFF_MS;
+  let firstError;
+  for (;;) {
+    try {
+      renameSync(temporary, path);
+      return;
+    } catch (error) {
+      if (platform !== "win32" || !RENAME_SHARING_ERRORS.has(error.code)) throw error;
+      firstError ??= error;
+      const remaining = budgetMs - (now() - started);
+      if (remaining <= 0) throw firstError;
+      sleep(Math.min(backoff, remaining));
+      backoff = Math.min(backoff * 2, RENAME_SHARING_MAX_BACKOFF_MS);
+      // A sleep may overrun the budget; the deadline holds regardless.
+      if (now() - started >= budgetMs) throw firstError;
+    }
+  }
+}
+
+export function save(path, value, replace = {}) {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
-    renameSync(temporary, path);
+    replaceAtomically(temporary, path, replace);
   } finally {
     try {
       unlinkSync(temporary);
