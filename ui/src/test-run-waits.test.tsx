@@ -11,6 +11,19 @@ import { isSessionDeltaEvent } from "./app-live-state-delta-events";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
+it.each(["noPid", "heartbeatStale"] as const)("shows %s uncertainty in a pending wait status", unknownReason => {
+  const wait = makeTestRunWait();
+  const run = makeTestRun({ state: "unknown", unknownReason });
+  const prompt = testRunWaitPrompt([wait], [run], wait.sessionId);
+  expect(prompt).toContain("executor not published");
+  expect(prompt).toContain("wait remains pending");
+  expect(prompt).not.toContain("recover");
+  render(<TestRunsProvider snapshotReady runs={[run]} waits={[wait]} open={vi.fn()}>
+    <TestRunWaitIndicator sessionId={wait.sessionId} status="idle" />
+  </TestRunsProvider>);
+  expect(screen.getByText(/executor not published/)).toBeInTheDocument();
+});
+
 it("uses wait identity, not run identity, and removes only the consumed wait", () => {
   const first = makeTestRunWait();
   const second = makeTestRunWait({ id: "wait-two" });

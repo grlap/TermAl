@@ -35,6 +35,7 @@ enum TestRunCardUnknownReason {
     ProcessGone,
     ResultsUnreadable,
     NoPid,
+    HeartbeatStale,
     /// The run left the index before a terminal result.
     NotIndexed,
 }
@@ -45,6 +46,7 @@ impl From<TestRunUnknownReason> for TestRunCardUnknownReason {
             TestRunUnknownReason::ProcessGone => Self::ProcessGone,
             TestRunUnknownReason::ResultsUnreadable => Self::ResultsUnreadable,
             TestRunUnknownReason::NoPid => Self::NoPid,
+            TestRunUnknownReason::HeartbeatStale => Self::HeartbeatStale,
         }
     }
 }

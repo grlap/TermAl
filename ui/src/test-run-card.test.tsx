@@ -26,6 +26,13 @@ const event = (message: TestRunCardMessage): TestRunCardUpdatedEvent => ({ type:
   preview: "run", run: message.run });
 
 describe("test-run cards", () => {
+  it.each(["noPid", "heartbeatStale"] as const)("shows pending uncertainty without recovery advice for %s", unknownReason => {
+    render(<MessageCard message={card({ state: "unknown", unknownReason })}
+      onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    expect(screen.getByText(/executor not published/)).toBeInTheDocument();
+    expect(screen.queryByText(/wait remains pending/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/recover command/)).not.toBeInTheDocument();
+  });
   it.each(["running", "passed", "failed", "unknown"] as const)("renders %s from the transcript rather than the live index", state => {
     const open = vi.fn();
     const message = card({ state });

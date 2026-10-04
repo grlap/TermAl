@@ -283,6 +283,7 @@ struct TestRunResultsExtract {
     /// say its error was cut (slice 2).
     error_truncated: bool,
     pid: Option<u32>,
+    heartbeat: Option<TestRunHeartbeat>,
     started: Option<String>,
 }
 
@@ -330,8 +331,37 @@ impl TestRunResultsExtract {
             error_truncated: test_run_str(results, "error")
                 .is_some_and(|error| error.len() > TEST_RUN_ERROR_MAX_BYTES),
             pid: test_run_pid(results, "pid"),
+            heartbeat: results.get("heartbeat").and_then(TestRunHeartbeat::parse),
             started: text("started"),
         }
+    }
+}
+
+/// Bounded producer evidence, not proof of an executor's identity or death.
+#[derive(Clone, Debug)]
+struct TestRunHeartbeat {
+    at: chrono::DateTime<chrono::Utc>,
+    every_ms: i64,
+}
+
+impl TestRunHeartbeat {
+    fn parse(value: &Value) -> Option<Self> {
+        let at = value.get("at")?.as_str()?;
+        if at.len() > TEST_RUN_TEXT_MAX_BYTES {
+            return None;
+        }
+        let at = chrono::DateTime::parse_from_rfc3339(at).ok()?.with_timezone(&chrono::Utc);
+        let every_ms = value.get("everyMs")?.as_i64()?;
+        (1000..=600_000).contains(&every_ms).then_some(Self { at, every_ms })
+    }
+
+    /// `None` for a timestamp beyond one interval into the future. A valid
+    /// old timestamp is stale, not malformed. Differences avoid overflowing
+    /// an instant near the timestamp range's endpoints.
+    fn fresh_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<bool> {
+        let age = now.signed_duration_since(self.at);
+        (age >= -chrono::TimeDelta::milliseconds(self.every_ms))
+            .then_some(age <= chrono::TimeDelta::milliseconds(3 * self.every_ms))
     }
 }
 
@@ -628,10 +658,19 @@ impl TestRunDisk {
     }
 
     /// The run's state. Passed and failed come only from a terminal
-    /// `results.json`; a non-terminal run is running while its responsible
-    /// process may still be the one that recorded its pid, and unknown
-    /// otherwise, including when no pid was recorded anywhere.
+    /// `results.json`; a non-terminal run is running with a fresh valid
+    /// heartbeat or while its responsible process may still be the one
+    /// that recorded its pid. Missing evidence alone never proves death.
+    #[cfg(test)]
     fn state(&self, writer_may_be_alive: &TestRunLiveness) -> TestRunState {
+        self.state_at(writer_may_be_alive, chrono::Utc::now())
+    }
+
+    fn state_at(
+        &self,
+        writer_may_be_alive: &TestRunLiveness,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> TestRunState {
         if let Some(terminal) = self
             .results
             .as_ref()
@@ -639,12 +678,19 @@ impl TestRunDisk {
         {
             return terminal;
         }
+        if self.heartbeat_fresh_at(now) == Some(true) {
+            return TestRunState::Running;
+        }
         match (self.results.as_ref(), self.responsible_pid()) {
             (Some(_), Some((pid, written))) if writer_may_be_alive(pid, written) => {
                 TestRunState::Running
             }
             _ => TestRunState::Unknown,
         }
+    }
+
+    fn heartbeat_fresh_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<bool> {
+        self.results.as_ref()?.heartbeat.as_ref()?.fresh_at(now)
     }
 
     fn stages(&self) -> Vec<TestRunStageSummary> {

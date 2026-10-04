@@ -108,8 +108,16 @@ Remote projects are not indexed in slice 1.
 - `passed` or `failed`: `results.json` is terminal. The value is copied from
   it. This includes runs settled by `recover`, which are `failed` with
   `interrupted: true`.
-- `running`: `results.json` is readable and not terminal, and a responsible
-  process may be alive. That process is `results.json`'s `pid` when present,
+- `running`: `results.json` is readable and not terminal, and a fresh valid
+  heartbeat or a responsible process that may be alive keeps it pending.
+  Heartbeats use RFC 3339 `at` and integer `everyMs` in 1000..=600000. At the
+  scan's observation time, at most one interval into the future is allowed;
+  age at most three intervals is fresh. Freshness is reevaluated even when
+  cached file bytes are unchanged. This is conservative pending evidence,
+  not proof of an executor's identity. The repository launcher currently
+  writes `creatorPid` and `pid`, not heartbeats; heartbeat support is reader-only.
+  Without fresh evidence, the process
+  check applies. That process is `results.json`'s `pid` when present,
   otherwise `request.json`'s `creatorPid`. "May be alive" is the launcher's
   `processMayBeAlive` rule: only proof of exit counts. A reused pid is also
   proof. The process that wrote a pid into a file existed when it wrote it. So
@@ -130,7 +138,11 @@ Remote projects are not indexed in slice 1.
   (tm-fa5e).
 - `unknown`: everything else that is not terminal. That covers an unreadable
   `results.json`, a responsible process proven gone, or no pid recorded
-  anywhere. A missing pid is never `running`. A launcher writes its terminal
+  anywhere without a fresh heartbeat. A missing pid never proves death.
+  A stale heartbeat without a pid reports `heartbeatStale`; absent or
+  malformed heartbeat evidence without a pid reports `noPid`. Both remain
+  pending uncertainty, visible on the card and in the wait status, with no
+  recover advice. A launcher writes its terminal
   results just before it exits, so a process found gone, or no pid found, is
   never judged from a `results.json` read made before that check. The index
   reads the results once more after the check and judges from that read. A
@@ -147,7 +159,9 @@ Remote projects are not indexed in slice 1.
     with `unknownReason: resultsUnreadable`, which never settles a wait.
 
 `interrupted: true` is copied from `results.json` and only ever appears with
-`failed`. An `unknown` run has not been settled; `recover` settles it. TermAl
+`failed`. An `unknown` run has not been settled. `recover` may settle a
+proven-gone executor but may refuse an unpublished or still-live executor;
+stale or missing evidence alone does not authorize recovery. TermAl
 never writes to a run directory in slice 1.
 
 ### Refresh
@@ -474,9 +488,10 @@ puts cards in front of a UI that cannot lay them out.
   - After it, the view says "Run not currently indexed". It does not claim the
     run was removed: discovery may still be in progress, and the wire has no
     flag for the first scan finishing.
-- A card never shows `passed` without a terminal `results.json`. A dead worker
-  shows `unknown` with its reason and names `recover` as the way to settle
-  it.
+- A card never shows `passed` without a terminal `results.json`. A proven-gone
+  responsible process shows `unknown` with `processGone` and names `recover`
+  as the way to inspect settlement. `noPid` and `heartbeatStale` instead name
+  the unpublished executor and pending uncertainty, without recovery advice.
 - There is no cancel control before slice 3.
 - The card shows in the transcript only. The pane's Commands view lists
   `command` messages and leaves test-run cards out; the Test Runs tab is the
@@ -531,7 +546,7 @@ interface TestRunCardFailure {
   truncated: boolean;
 }
 
-type TestRunUnknownReason = "processGone" | "resultsUnreadable" | "noPid";
+type TestRunUnknownReason = "processGone" | "resultsUnreadable" | "noPid" | "heartbeatStale";
 // notIndexed: the run left the index before a terminal result.
 type TestRunCardUnknownReason = TestRunUnknownReason | "notIndexed";
 ```
@@ -638,8 +653,10 @@ When the read after the check fails, the verdict is `unknown` with
 `resultsUnreadable`, not `processGone`. It is not settled, and the next rescan
 reads again. Results that cannot be read at all, are missing or exceed the
 read limit are `resultsUnreadable` too. The one-rescan grace for a failed read
-(see Refresh) keeps the last good results together with what was confirmed
-about them, so a known reason does not flicker over one failed read. When the bounded reads after checks
+(see Refresh) keeps the last good results and any previously confirmed reason,
+so that reason does not flicker. A failed read never establishes new proof of
+disappearance. Renewed heartbeat or PID liveness clears an earlier
+disappearance confirmation. When the bounded reads after checks
 run out on a run still handing over from process to process, the verdict
 rests on a read made before the last check, so it carries no reason.
 
@@ -721,7 +738,7 @@ of the reviewed `/review-changes` contract.
 ### Settled
 
 A run is settled for a wait when it is `passed` or `failed`, or `unknown` with
-`unknownReason` of `processGone` or `noPid`.
+`unknownReason` of `processGone`, confirmed by the post-liveness reread.
 
 A run that left the index after the wait was registered settles as `UNKNOWN
 (not indexed)` only when it cannot come back:
@@ -739,8 +756,10 @@ the wait's retention exemption, and may drop a terminal run past the
 per-project cap. The next scan indexes it again, and it settles with its real
 verdict.
 
-An `unknown` run with `resultsUnreadable`, or with no reason, is not settled:
-the run may still finish, and the index retries.
+An `unknown` run with `noPid`, `heartbeatStale`, `resultsUnreadable`, or with
+no reason is not settled: the run may still finish, and the index retries.
+The pending wait status uses the same uncertainty reason as the card; an
+unpublished executor is never described as proven gone.
 
 ### Wait lifecycle
 
