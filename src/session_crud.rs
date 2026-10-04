@@ -2964,7 +2964,10 @@ impl AppState {
                         "its project's Engram settings changed before it settled",
                     );
                     // Configuration reset cannot release deletion recovery or
-                    // the live guard that still owns an off-lock capture.
+                    // the live guard that still owns an off-lock capture. The
+                    // worktree its workdir resolved to stays, keyed by that
+                    // workdir: a session in a turn would otherwise count as a
+                    // writer in every worktree until it reports again.
                     record.engram = EngramSessionState {
                         source_observation_gate,
                         source_observation_delete_requested: record
@@ -2972,6 +2975,7 @@ impl AppState {
                             .source_observation_delete_requested,
                         source_observation_preparations: record.engram.source_observation_preparations,
                         dispatch_generation,
+                        workdir_worktree: record.engram.workdir_worktree.take(),
                         ..EngramSessionState::default()
                     };
                     for line in carried_lines {
@@ -4725,7 +4729,10 @@ impl AppState {
                         eprintln!("engram> session={} {line}", record.session.id);
                     }
                     // The original session still owns recovery and any capture
-                    // preparing its outbox after the project is detached.
+                    // preparing its outbox after the project is detached. The
+                    // worktree its workdir resolved to stays, keyed by that
+                    // workdir, so a session in a turn keeps counting only
+                    // where it works.
                     record.engram = EngramSessionState {
                         source_observation_gate,
                         source_observation_delete_requested: record
@@ -4733,6 +4740,7 @@ impl AppState {
                             .source_observation_delete_requested,
                         source_observation_preparations: record.engram.source_observation_preparations,
                         dispatch_generation,
+                        workdir_worktree: record.engram.workdir_worktree.take(),
                         ..EngramSessionState::default()
                     };
                 }

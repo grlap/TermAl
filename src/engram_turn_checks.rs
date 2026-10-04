@@ -356,6 +356,11 @@ struct EngramTurnCheck {
     /// content it did not test: its outcome is unknown. Set when the overlap
     /// happens, never reconstructed later.
     overlapped: bool,
+    /// What overlapped it first, as the holder is told
+    /// (`EngramTurnCheck::note_overlap`): its own command still running, a
+    /// session that may write where it ran and why that session matched, or
+    /// a write TermAl made there. `None` when nothing named it.
+    overlap_cause: Option<String>,
     /// Why Claude work with no verified completion fenced it, stored when it
     /// was fenced (`claude_outstanding_work.rs`): the reason a successful run
     /// of it earns no credit is told as that cause, not as an overlap to run
@@ -424,6 +429,8 @@ struct EngramWithheldCheck {
     reason: EngramWithheldReason,
     /// What restricted it, for `OutstandingClaudeWork`.
     cause: Option<ClaudeHazardCause>,
+    /// What overlapped it, for `Overlapped` (`EngramTurnCheck::overlap_cause`).
+    overlap_cause: Option<String>,
 }
 
 /// Takes out of `resolved` every check whose command ended successfully but
@@ -454,6 +461,7 @@ fn engram_withhold_unjudged_successes(
                 EngramWithheldReason::NoPassingTest
             },
             cause: kept.check.fenced_by_outstanding.clone(),
+            overlap_cause: kept.check.overlap_cause.clone(),
         });
         false
     });
@@ -479,10 +487,12 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
         );
     }
     let why = match withheld.reason {
-        EngramWithheldReason::Overlapped => {
-            "another command, an edit or another writable session reached its worktree while it ran"
-        }
-        EngramWithheldReason::NoPassingTest => "its output shows no passing test",
+        EngramWithheldReason::Overlapped => format!(
+            "another command, an edit or another writable session reached its worktree while it \
+             ran{}",
+            engram_overlap_cause_suffix(withheld.overlap_cause.as_deref())
+        ),
+        EngramWithheldReason::NoPassingTest => "its output shows no passing test".to_owned(),
         EngramWithheldReason::OutstandingClaudeWork => unreachable!("told above"),
     };
     format!(
@@ -490,6 +500,20 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
          credit and was not recorded: {why}. Run it again on its own to record it.",
         withheld.program, withheld.fingerprint
     )
+}
+
+/// The session's own command `key`, as a cause names it: by a digest of the
+/// key, never the key itself, since a runtime that gives no id keys a
+/// command by its whole line (`codex_app_requests.rs`), which can carry a
+/// secret.
+fn engram_own_command_label(key: &str) -> String {
+    format!("its own command (key {})", &sha256_hex(key.as_bytes())[..12])
+}
+
+/// What overlapped a check, as the parenthesis its holder's line ends its
+/// reason with, or nothing when nothing named it.
+fn engram_overlap_cause_suffix(cause: Option<&str>) -> String {
+    cause.map_or_else(String::new, |cause| format!(" ({cause})"))
 }
 
 /// The checks of `grant_id` that can be reported, with their snapshots
@@ -574,6 +598,9 @@ fn engram_merge_live_overlaps(live: &[EngramTurnCheck], resolved: &mut [EngramRe
         };
         if check.overlapped {
             resolved.check.overlapped = true;
+            if resolved.check.overlap_cause.is_none() {
+                resolved.check.overlap_cause = check.overlap_cause.clone();
+            }
             resolved.outcome = EngramExecutionOutcome::Unknown;
         }
         // A cause Claude work stored meanwhile goes with it, so the report
@@ -853,17 +880,133 @@ fn engram_worktrees_may_hold(worktrees: &[Option<String>], root: &str) -> bool {
 /// without the check's agent making them. Whatever such a session does later
 /// while the check is open marks the check itself
 /// (`engram_mark_checks_overlapped_by`). Runs under the state lock, on
-/// worktrees resolved before; one never resolved counts as the same.
-fn engram_other_writer_in(inner: &StateInner, index: usize, root: &str) -> bool {
-    inner.sessions.iter().enumerate().any(|(other, record)| {
-        other != index
-            && matches!(
-                record.session.status,
-                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-            )
-            && engram_session_may_write(inner, other)
-            && engram_worktrees_may_hold(&engram_writer_worktrees(inner, other), root)
+/// worktrees resolved before (`engram_unresolved_writers`); one not resolved
+/// yet counts as the same. Names the first such session and why it matched
+/// (`engram_writer_match`), for the line its holder is told.
+fn engram_other_writer_cause(inner: &StateInner, index: usize, root: &str) -> Option<String> {
+    inner.sessions.iter().enumerate().find_map(|(other, record)| {
+        (other != index
+            && engram_session_in_turn(record)
+            && engram_session_may_write(inner, other))
+        .then(|| engram_writer_match(inner, other, root))
+        .flatten()
     })
+}
+
+/// Whether the session in `record` is in a turn: running, awaiting approval
+/// or stopping.
+fn engram_session_in_turn(record: &SessionRecord) -> bool {
+    matches!(
+        record.session.status,
+        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+    )
+}
+
+/// Why the session at `other` may write in the worktree with key `root`,
+/// naming it, or `None` when it may not: the same places
+/// `engram_writer_worktrees` holds, as `engram_worktrees_may_hold` reads
+/// them, each told as the reason it matched.
+fn engram_writer_match(inner: &StateInner, other: usize, root: &str) -> Option<String> {
+    let record = &inner.sessions[other];
+    let why = match engram_session_worktree(record) {
+        // A proxy's workdir is the other host's path; TermAl never resolves
+        // it here (`engram_unresolved_writers`).
+        None if record.remote_id.is_some() => Some(
+            "has an UNRESOLVED workdir, which this count does not resolve, so it counts in \
+             every worktree"
+                .to_owned(),
+        ),
+        None => Some(
+            "has an UNRESOLVED worktree, not resolved yet, so it counts in every one".to_owned(),
+        ),
+        // A proxy keeps the key an earlier turn start resolved for it.
+        Some(worktree) if worktree == root && record.remote_id.is_some() => {
+            Some(format!("works in this worktree (its resolved key {worktree})"))
+        }
+        Some(worktree) if worktree == root => Some("works in this worktree".to_owned()),
+        Some(_) => None,
+    }
+    .or_else(|| {
+        (engram_turn_named_root_key(record).as_deref() == Some(root))
+            .then(|| "works in it as its claim's named source root".to_owned())
+    })
+    .or_else(|| {
+        let mut places = record
+            .engram
+            .running_command_worktrees
+            .iter()
+            .flat_map(|(_, worktrees)| worktrees.iter());
+        if places.clone().any(|place| place.as_deref() == Some(root)) {
+            Some("runs a command in it".to_owned())
+        } else if places.any(Option::is_none) {
+            Some("runs a command TermAl could not place, so it counts in every worktree".to_owned())
+        } else {
+            None
+        }
+    })?;
+    let who = match &record.remote_id {
+        Some(remote_id) => format!(
+            "session {} ({}), a remote proxy of remote {remote_id},",
+            record.session.id, record.session.name
+        ),
+        None => format!("session {} ({})", record.session.id, record.session.name),
+    };
+    Some(format!("{who} {why}"))
+}
+
+/// The other sessions in a turn that may write but whose worktree was not
+/// resolved for their workdir yet, by id and workdir: a session whose state
+/// was rebuilt in its turn, say. Read under the lock, resolved off it
+/// (`engram_resolve_writer_worktrees`) and kept under it again
+/// (`engram_note_writer_worktrees`) before writers are counted, so such a
+/// session counts where it works rather than in every worktree. A remote
+/// proxy session is left out: its workdir is the other host's path, which
+/// a local path of the same spelling would match only by coincidence. A
+/// turn start may have resolved it already (`EngramHost::turn_starting`);
+/// one not resolved keeps counting in every worktree until its next turn
+/// start, and the line names it as such (`engram_writer_match`).
+fn engram_unresolved_writers(inner: &StateInner, except: usize) -> Vec<(String, String)> {
+    inner
+        .sessions
+        .iter()
+        .enumerate()
+        .filter(|(other, record)| {
+            *other != except
+                && record.remote_id.is_none()
+                && engram_session_in_turn(record)
+                && engram_session_worktree(record).is_none()
+                && engram_session_may_write(inner, *other)
+        })
+        .map(|(_, record)| (record.session.id.clone(), record.session.workdir.clone()))
+        .collect()
+}
+
+/// Resolves on the file system, never under the state lock, the worktree of
+/// each workdir `engram_unresolved_writers` read.
+fn engram_resolve_writer_worktrees(writers: Vec<(String, String)>) -> Vec<(String, String, String)> {
+    writers
+        .into_iter()
+        .map(|(session_id, workdir)| {
+            let key = engram_worktree_root(FsPath::new(&workdir));
+            (session_id, workdir, key)
+        })
+        .collect()
+}
+
+/// Keeps under the lock each worktree `engram_resolve_writer_worktrees`
+/// resolved, on a session that still exists and still has that workdir.
+fn engram_note_writer_worktrees(inner: &mut StateInner, resolved: Vec<(String, String, String)>) {
+    for (session_id, workdir, key) in resolved {
+        if let Some(index) = inner.find_session_index(&session_id) {
+            engram_note_session_worktree(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                &workdir,
+                key,
+            );
+        }
+    }
 }
 
 /// Marks every check of another session that is still open to writes, in a
@@ -886,7 +1029,36 @@ fn engram_mark_checks_overlapped_by(
 ) {
     if engram_session_may_write(inner, writer) {
         let worktrees = engram_writer_worktrees(inner, writer);
-        engram_mark_open_turn_checks_in_worktrees(inner, &worktrees, Some(writer));
+        // Why the writer matched each worktree an open check runs in, named
+        // with the session (`engram_writer_match`), read before marking.
+        let mut reasons: Vec<(String, String)> = Vec::new();
+        for (other, record) in inner.sessions.iter().enumerate() {
+            if other == writer {
+                continue;
+            }
+            for check in &record.engram.active_turn_checks {
+                let root = engram_path_key(&check.target.root);
+                if check.open_to_writes()
+                    && engram_worktrees_may_hold(&worktrees, &root)
+                    && !reasons.iter().any(|(known, _)| *known == root)
+                {
+                    let reason = engram_writer_match(inner, writer, &root).unwrap_or_else(|| {
+                        let record = &inner.sessions[writer];
+                        format!("session {} ({})", record.session.id, record.session.name)
+                    });
+                    reasons.push((root, reason));
+                }
+            }
+        }
+        let did = act.describe();
+        let cause = |root: &str| {
+            let reason = reasons
+                .iter()
+                .find(|(known, _)| known == root)
+                .map_or("another session", |(_, reason)| reason.as_str());
+            format!("{reason}, and it {did}")
+        };
+        engram_mark_open_turn_checks_in_worktrees(inner, &worktrees, Some(writer), &cause);
         engram_fence_carried_for_other_session(inner, writer, &worktrees, act);
     }
 }
@@ -894,21 +1066,22 @@ fn engram_mark_checks_overlapped_by(
 /// Marks as overlapped every check of a turn still open to writes, but those
 /// of the session at `except`, that ran in one of `worktrees` (every one, for
 /// a worktree TermAl could not name). A check carries the worktree it ran
-/// in, so this touches no file system.
+/// in, so this touches no file system. `cause` names what overlapped a check
+/// in the worktree with the key it is given.
 fn engram_mark_open_turn_checks_in_worktrees(
     inner: &mut StateInner,
     worktrees: &[Option<String>],
     except: Option<usize>,
+    cause: &dyn Fn(&str) -> String,
 ) {
     for (other, record) in inner.sessions.iter_mut().enumerate() {
         if Some(other) == except {
             continue;
         }
         for check in &mut record.engram.active_turn_checks {
-            if check.open_to_writes()
-                && engram_worktrees_may_hold(worktrees, &engram_path_key(&check.target.root))
-            {
-                check.overlapped = true;
+            let root = engram_path_key(&check.target.root);
+            if check.open_to_writes() && engram_worktrees_may_hold(worktrees, &root) {
+                check.note_overlap(|| cause(&root));
             }
         }
     }
@@ -922,13 +1095,22 @@ fn engram_mark_open_checks_in_worktrees(
     worktrees: &[Option<String>],
     cause: &str,
 ) {
-    engram_mark_open_turn_checks_in_worktrees(inner, worktrees, None);
+    engram_mark_open_turn_checks_in_worktrees(inner, worktrees, None, &|_| cause.to_owned());
     for record in &mut inner.sessions {
         engram_fence_carried_checks(record, worktrees, cause);
     }
 }
 
 impl EngramTurnCheck {
+    /// Marks the check overlapped by what `cause` names, keeping the first
+    /// cause it was given: that one already made its outcome unknown.
+    fn note_overlap(&mut self, cause: impl FnOnce() -> String) {
+        self.overlapped = true;
+        if self.overlap_cause.is_none() {
+            self.overlap_cause = Some(cause());
+        }
+    }
+
     /// When the check's evidence interval closed, on the interference clock:
     /// the latest of its command's end and the completion of its start and
     /// end snapshots, since a write before any of them may be in what it
@@ -1027,6 +1209,7 @@ impl AppState {
             started,
             child,
             turn_generation,
+            unresolved_writers,
         ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -1073,6 +1256,13 @@ impl AppState {
                 }),
                 Self::engram_session_has_child_binding_shape_locked(&inner, session_id),
                 record.active_turn_generation,
+                // Only a recognised test can start a check that counts the
+                // other writers in a turn now (`engram_other_writer_cause`).
+                if recognised.is_some() {
+                    engram_unresolved_writers(&inner, index)
+                } else {
+                    Vec::new()
+                },
             )
         };
         // Where the command's `cd` leads, from where its shell is presumed to
@@ -1087,6 +1277,7 @@ impl AppState {
         // here off the lock, for overlap marking under it.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
         let worktrees = engram_command_worktrees(&workdir, &write_places, ran, loss.as_ref());
+        let resolved_writers = engram_resolve_writer_worktrees(unresolved_writers);
         let mediated = started.is_some();
         // This location is observation only, resolved without a claim's root
         // authority. It cannot create a source snapshot or verification.
@@ -1192,6 +1383,8 @@ impl AppState {
             }
         });
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        // Before any writer is counted below, in this same hold of the lock.
+        engram_note_writer_worktrees(&mut inner, resolved_writers);
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
@@ -1270,7 +1463,12 @@ impl AppState {
         if disposition != ClaudeObservationDisposition::Current {
             for check in &mut inner.sessions[index].engram.active_turn_checks {
                 if check.open_to_writes() {
-                    check.overlapped = true;
+                    check.note_overlap(|| {
+                        format!(
+                            "{}, which its grant does not take, started",
+                            engram_own_command_label(key)
+                        )
+                    });
                 }
             }
             claude_exclude_observation(
@@ -1313,8 +1511,8 @@ impl AppState {
         }
         let engram = &record.engram;
         let grant_id = engram.active_grant_id.clone().expect("authority checked above");
-        let other_writer = target.as_ref().is_some_and(|(_, _, target)| {
-            engram_other_writer_in(&inner, index, &engram_path_key(&target.root))
+        let other_writer = target.as_ref().and_then(|(_, _, target)| {
+            engram_other_writer_cause(&inner, index, &engram_path_key(&target.root))
         });
         let provenance = engram_turn_root_capture_locked(&inner, session_id);
         // Retained Claude work that may overlap the check from its start: the
@@ -1332,7 +1530,8 @@ impl AppState {
         let others_running = engram
             .running_command_keys
             .keys()
-            .any(|running| running != key);
+            .find(|running| running.as_str() != key)
+            .cloned();
         let fresh = engram
             .running_command_keys
             .insert(key.to_owned(), reported)
@@ -1342,7 +1541,7 @@ impl AppState {
             // write under every check still open.
             for check in &mut engram.active_turn_checks {
                 if check.open_to_writes() {
-                    check.overlapped = true;
+                    check.note_overlap(|| format!("{} started", engram_own_command_label(key)));
                 }
             }
             engram.withheld_command_keys.remove(key);
@@ -1421,6 +1620,15 @@ impl AppState {
             .active_codex_sandbox_mode
             .map(|mode| mode.as_cli_value().to_owned());
         let foreign_work = restricted_by.is_some();
+        // What overlapped it from its start, told in this order. Restricting
+        // Claude work is told as its own cause (`fenced_by_outstanding`).
+        let overlap_cause = others_running
+            .map(|running| format!("{} was still running", engram_own_command_label(&running)))
+            .or(other_writer)
+            .or_else(|| {
+                named_late.then(|| "its command was named a test only by a later start".to_owned())
+            });
+        let overlapped = overlap_cause.is_some() || foreign_work;
         let sequence = record.engram.next_turn_check_sequence;
         record.engram.next_turn_check_sequence += 1;
         record.engram.active_turn_checks.push(EngramTurnCheck {
@@ -1433,7 +1641,8 @@ impl AppState {
             started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             sandbox,
             start_basis,
-            overlapped: others_running || other_writer || named_late || foreign_work,
+            overlapped,
+            overlap_cause,
             fenced_by_outstanding: restricted_by,
             watcher_fence: None,
             end: None,
@@ -1643,23 +1852,32 @@ impl AppState {
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
-        let (checked, workdir) = {
+        let (checked, workdir, unresolved_writers) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
             let record = &inner.sessions[index];
+            let checked = record
+                .engram
+                .active_turn_checks
+                .iter()
+                .any(|check| check.key == key && check.end.is_none());
             (
-                record
-                    .engram
-                    .active_turn_checks
-                    .iter()
-                    .any(|check| check.key == key && check.end.is_none()),
+                checked,
                 record.session.workdir.clone(),
+                // Only an ending check counts the other writers in a turn now.
+                if checked {
+                    engram_unresolved_writers(&inner, index)
+                } else {
+                    Vec::new()
+                },
             )
         };
-        // The session's worktree, resolved off the lock for overlap marking.
+        // The session's worktree, resolved off the lock for overlap marking,
+        // and those of the writers not resolved yet.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
+        let resolved_writers = engram_resolve_writer_worktrees(unresolved_writers);
         // A launcher full gate's test stages are its own request record's,
         // read off the lock (`engram_launcher_output_test_stages`), for
         // whichever command the check's end is read as below.
@@ -1681,6 +1899,8 @@ impl AppState {
                 (finished, result_lines, showed_passing_tests)
             });
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        // Before any writer is counted below, in this same hold of the lock.
+        engram_note_writer_worktrees(&mut inner, resolved_writers);
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
@@ -1729,8 +1949,8 @@ impl AppState {
             .active_turn_checks
             .iter()
             .find(|check| running_check(check))
-            .is_some_and(|check| {
-                engram_other_writer_in(&inner, index, &engram_path_key(&check.target.root))
+            .and_then(|check| {
+                engram_other_writer_cause(&inner, index, &engram_path_key(&check.target.root))
             });
         // The check ends here and a background gate's is carried or refused
         // by what fenced it: reconciled first with every retained hazard
@@ -1791,7 +2011,9 @@ impl AppState {
             EngramLaunchDisposition::Ordinary => {}
             EngramLaunchDisposition::Carry => {
                 let mut launched = record.engram.active_turn_checks.remove(position);
-                launched.overlapped |= other_writer;
+                if let Some(cause) = other_writer {
+                    launched.note_overlap(|| cause);
+                }
                 if let Some(line) = engram_carry_check(record, launched) {
                     eprintln!("engram> session={session_id} {line}");
                     record.engram.set_pending_source_root_line(line);
@@ -1827,7 +2049,9 @@ impl AppState {
                 (result_lines, showed_passing_tests)
             }
         };
-        check.overlapped |= other_writer;
+        if let Some(cause) = other_writer {
+            check.note_overlap(|| cause);
+        }
         let end_basis = if exit == Some(EngramCommandExit::NotFinished) {
             // A background run's result marks its launch; it is never
             // reported, so it takes no closing snapshot.
@@ -1920,7 +2144,7 @@ impl AppState {
     /// Resolves off the state lock the worktree `session_id` works in and
     /// keeps it on its record (`workdir_worktree`), so the marks its turn
     /// start makes under the lock (`engram_note_turn_started`), and its count
-    /// as a writer while the turn runs (`engram_other_writer_in`), name its
+    /// as a writer while the turn runs (`engram_other_writer_cause`), name its
     /// own worktree rather than every one: a session that has reported no
     /// command or edit since TermAl started (a chat-only turn) would
     /// otherwise count as writing anywhere. Called before a turn starts.
@@ -1987,7 +2211,10 @@ impl AppState {
         engram_mark_checks_overlapped_by(&mut inner, index, EngramWriterAct::Edit);
         for check in &mut inner.sessions[index].engram.active_turn_checks {
             if check.open_to_writes() {
-                check.overlapped = true;
+                check.note_overlap(|| match target {
+                    Some(target) => format!("an edit of its own session to {target}"),
+                    None => "an edit of its own session".to_owned(),
+                });
             }
         }
         // An edit report is not placed, even when its tool named a file, so

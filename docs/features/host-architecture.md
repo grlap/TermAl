@@ -216,7 +216,8 @@ change twelve existing source files: the last two call sites above
 - A check is overlapped at its start when another command of the session
   runs, when another writable session is in a turn in the same worktree, or
   when the root was named after work began (`:1121`,
-  `engram_other_writer_in` at `:739`).
+  `engram_other_writer_cause`, which also names the session and why it
+  matched). The refusal or withheld line ends with that cause.
 - A worktree the host could not name counts as every worktree
   (`engram_worktrees_may_hold`, `:725`).
 - Marks that arrive while the checkpoint waits for snapshots off the lock are
