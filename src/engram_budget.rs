@@ -203,13 +203,6 @@ impl AppState {
         }
     }
 
-    #[cfg(test)]
-    fn install_test_engram_budget_clock(&self, clock: EngramBudgetClock) {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        inner.engram_budget_clock = clock;
-        inner.engram_budget_clock_selected = true;
-    }
-
     /// Chooses a shared scripted clock for this state's Engram operations,
     /// unless a clock was already chosen, and returns the clock in force: a
     /// fixture that enables Engram again keeps its clock.
