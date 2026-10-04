@@ -245,7 +245,7 @@ fn start_mediated_turn_with_script(
 ) -> RunningMediatedTurn {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-turn-observation-{label}"));
-    state.install_test_engram_budget_clock(EngramBudgetClock::scripted());
+    select_scripted_engram_budget_clock_before_enable(&state);
     let temp_root = state
         .test_temp_root
         .as_ref()

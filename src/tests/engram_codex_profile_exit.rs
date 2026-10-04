@@ -6,6 +6,8 @@ use super::*;
 #[test]
 fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
     let state = test_app_state();
+    // The rebinds run on the scripted budget clock; no budget expires here.
+    select_scripted_engram_budget_clock_before_enable(&state);
     let root = state
         .test_temp_root
         .as_ref()
