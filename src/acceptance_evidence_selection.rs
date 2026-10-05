@@ -3,6 +3,9 @@
 // canonical bound-criterion closure index. Does not judge freshness or grant
 // citation authority; Engram still decides whether a submitted record counts.
 
+// The whole obligation assessment of each indexed verification record.
+include!("acceptance_obligation_assessment.rs");
+
 const MAX_ACCEPTANCE_SELECTED_RECORDS: usize = 16;
 const MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES: usize = 16;
 const ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET: Duration = Duration::from_secs(60);
@@ -548,6 +551,20 @@ fn read_acceptance_selected_evidence(
                 return Err(ApiError::conflict("selected evidence was not returned whole as a citable record of this task"));
             }
             let is_verification = note.kind.as_str() == Some("verification");
+            // The exact read already returned the assessment's first page, or
+            // showed there is none (kept as null, so it is not read again).
+            // Any other value is kept as read: the assessment reader reports
+            // it as a malformed page, never as no assessment.
+            if is_verification {
+                let assessment = result
+                    .pointer("/note/assessment")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                task.assessment_first_pages
+                    .retain(|(read, _)| read != locator);
+                task.assessment_first_pages
+                    .push((locator.clone(), assessment));
+            }
             let evidence = AcceptanceEvaluationEvidence {
                 locator: note.locator,
                 kind: if is_verification {

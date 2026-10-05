@@ -985,7 +985,7 @@ fn criterion_evidence_request_refuses_wrong_or_partial_records_and_changed_basis
     }
 }
 
-struct BindingEvidenceTransport {
+pub(super) struct BindingEvidenceTransport {
     pages: Mutex<std::collections::VecDeque<Value>>,
     requests: Mutex<Vec<Value>>,
 }
@@ -1037,7 +1037,7 @@ impl EngramControlTransport for BindingEvidenceTransport {
     fn shutdown_session(&self, _: &str) {}
 }
 
-fn install_binding_evidence_transport(
+pub(super) fn install_binding_evidence_transport(
     state: &AppState,
     parent: &str,
     pages: Vec<Value>,
@@ -1075,7 +1075,7 @@ pub(super) fn canonical_core_receipt() -> Value {
         "control_binding":null})
 }
 
-fn canonical_binding_receipts() -> (Value, Value, Value) {
+pub(super) fn canonical_binding_receipts() -> (Value, Value, Value) {
     let mut show = show_receipt(Some("same_session"));
     let mut full = full_receipt();
     full["work"]["acceptance_bindings"] =
