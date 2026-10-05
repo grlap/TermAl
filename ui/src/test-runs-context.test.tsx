@@ -41,6 +41,17 @@ it("offers the Test Runs dock action separately from section navigation", () => 
   expect(open).toHaveBeenCalledWith();
   expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
 });
+it("draws the Test Runs dock action as an icon like the other rail actions", () => {
+  render(<TestRunsProvider snapshotReady runs={[]} open={vi.fn()}><ControlPanelSurface
+    gitStatusCount={0} isPreferencesOpen={false} onOpenPreferences={vi.fn()}
+    projectCount={0} sessionCount={0} renderSection={() => null} /></TestRunsProvider>);
+  const button = screen.getByRole("button", { name: "Open Test Runs" });
+  const preferences = screen.getByRole("button", { name: "Open preferences" });
+  // A text glyph rendered as an empty square in the rail; every action draws an SVG.
+  expect(button.querySelector("svg[viewBox='0 0 20 20']")).not.toBeNull();
+  expect(preferences.querySelector("svg[viewBox='0 0 20 20']")).not.toBeNull();
+  expect(button.textContent?.replace(/\s/g, "") ?? "").toBe("");
+});
 it("opens the owning session filter and disappears on terminal transition", () => {
   const open = vi.fn();
   const run = makeTestRun();

@@ -98,7 +98,7 @@ const WORK_ACTION: ControlPanelActionDefinition = {
 
 const TEST_RUNS_ACTION: ControlPanelActionDefinition = {
   label: "Open Test Runs",
-  icon: <span aria-hidden="true">✓</span>,
+  icon: <TestRunsIcon />,
 };
 
 export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
@@ -680,6 +680,23 @@ function WorkIcon() {
         strokeLinecap="round"
         strokeWidth="1.5"
       />
+    </svg>
+  );
+}
+
+function TestRunsIcon() {
+  // A laboratory flask for the Test Runs panel, with its liquid level.
+  return (
+    <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
+      <path
+        d="M7.5 3.25h5M8.5 3.25v4.6l-4.1 7.2a1.4 1.4 0 0 0 1.2 2.1h8.8a1.4 1.4 0 0 0 1.2-2.1l-4.1-7.2v-4.6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+      <path d="M6.2 12.25h7.6" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
     </svg>
   );
 }
