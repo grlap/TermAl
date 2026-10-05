@@ -922,6 +922,7 @@ describe("AgentSessionPanel conversation caching", () => {
       activeSession: makeSession("session-a", {
         status: "idle",
         queuePaused: true,
+        preview: "Turn stopped by user.",
         messages: [
           {
             id: "message-user",
@@ -1330,5 +1331,115 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBe(liveTail);
   });
 
+  describe("queue pause cause", () => {
+    const RETRY_DUE_AT = "2026-10-05T07:40:00Z";
+    const RETRY_PREVIEW = `Engram: waiting for admission; retrying automatically, attempt 2, next at ${RETRY_DUE_AT}.`;
+    const RETRY_LOCAL_TIME = new Date(RETRY_DUE_AT).toLocaleTimeString();
+    const HELD_PREVIEW = "Engram: Waiting/Unknown. Original prompt retained; resume to retry or cancel.";
 
+    function renderPausedQueue(preview: string, retained: boolean) {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("session-paused", {
+          status: "idle",
+          queuePaused: true,
+          preview,
+          pendingPrompts: [{
+            id: "paused-head",
+            timestamp: "10:00",
+            text: "Paused head prompt",
+            isEngramRetained: retained,
+          }],
+        }),
+        onResumeSessionQueue: vi.fn(),
+        onCancelQueuedPrompt: vi.fn(),
+      });
+    }
+
+    function pausedCardCopy() {
+      const card = screen.getByText("Queue paused").closest(".activity-card-queue-paused");
+      expect(card).not.toBeNull();
+      return card?.querySelector(".activity-card-copy")?.textContent ?? "";
+    }
+
+    it("says an automatic Engram re-admission is retrying, with its attempt and time, and asks for nothing", () => {
+      renderPausedQueue(RETRY_PREVIEW, false);
+
+      expect(screen.getByText("Waiting for Engram admission; retrying automatically")).toBeInTheDocument();
+      expect(screen.getByText(`Attempt 2, next at ${RETRY_LOCAL_TIME}. No action is needed.`)).toBeInTheDocument();
+      expect(screen.getByText("1 prompt waiting.")).toBeInTheDocument();
+      const copy = pausedCardCopy();
+      expect(copy).not.toMatch(/stopped/i);
+      expect(copy).not.toMatch(/resume/i);
+    });
+
+    it("shows an automatic retry preview it cannot parse as it is, still asking for nothing", () => {
+      const preview = "Engram: waiting for admission; retrying automatically soon.";
+      renderPausedQueue(preview, false);
+
+      expect(screen.getByText("Waiting for Engram admission; retrying automatically")).toBeInTheDocument();
+      expect(screen.getByText(`${preview} No action is needed.`)).toBeInTheDocument();
+      const copy = pausedCardCopy();
+      expect(copy).not.toMatch(/stopped/i);
+      expect(copy.replace(preview, "")).not.toMatch(/resume/i);
+    });
+
+    it("names an Engram hold by the backend's own words", () => {
+      renderPausedQueue(HELD_PREVIEW, false);
+
+      expect(screen.getByText("Engram is holding the queue")).toBeInTheDocument();
+      expect(screen.getByText(HELD_PREVIEW)).toBeInTheDocument();
+      expect(screen.getByText("1 prompt waiting.")).toBeInTheDocument();
+      expect(pausedCardCopy()).not.toMatch(/stopped/i);
+    });
+
+    it("says the agent was stopped only after a real Stop", () => {
+      renderPausedQueue("Turn stopped by user.", false);
+
+      expect(screen.getByText("Codex was stopped; the queue is paused")).toBeInTheDocument();
+      expect(
+        screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue."),
+      ).toBeInTheDocument();
+    });
+
+    it("names any other cause from the preview without saying the agent was stopped", () => {
+      const preview = "Codex reported an error: the provider is overloaded.";
+      renderPausedQueue(preview, false);
+
+      expect(screen.getByText("The queue is paused")).toBeInTheDocument();
+      expect(screen.getByText(preview)).toBeInTheDocument();
+      expect(
+        screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue."),
+      ).toBeInTheDocument();
+      expect(pausedCardCopy()).not.toMatch(/was stopped/i);
+    });
+
+    it("tells a retained prompt under automatic retry that Cancel drops it, without asking for Resume", () => {
+      renderPausedQueue(RETRY_PREVIEW, true);
+
+      expect(screen.getByText("Prompt retained")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `Engram admission is retrying automatically (attempt 2, next at ${RETRY_LOCAL_TIME}). Cancel drops the retained prompt.`,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Authorization is paused/)).not.toBeInTheDocument();
+    });
+
+    it("gives a retained prompt held by Engram the backend's own words", () => {
+      renderPausedQueue(HELD_PREVIEW, true);
+
+      expect(screen.getByText("Prompt retained")).toBeInTheDocument();
+      expect(screen.getAllByText(HELD_PREVIEW).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/Authorization is paused/)).not.toBeInTheDocument();
+    });
+
+    it("calls a retained prompt with no Engram cause held, not paused", () => {
+      renderPausedQueue("Turn stopped by user.", true);
+
+      expect(
+        screen.getByText("Authorization is held. Resume to retry, or cancel the retained prompt."),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Authorization is paused/)).not.toBeInTheDocument();
+    });
+  });
 });

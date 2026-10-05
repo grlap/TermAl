@@ -23,6 +23,7 @@ import {
   PendingPromptCard,
   QueuePausedIndicator,
 } from "./session-activity-cards";
+import { resolveQueuePauseCause, retainedPromptHoldText } from "./queue-pause-cause";
 import { SourceTrackingRecoveryIndicator } from "./source-tracking-recovery-card";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { type RenderMessageCard } from "./virtualized-conversation-types";
@@ -1232,6 +1233,7 @@ const SessionConversationPage = memo(
     const pausedQueueCard = queuePaused ? (
       <QueuePausedIndicator
         agent={session.agent}
+        preview={session.preview}
         queuedCount={actionableQueuedCount}
         onResume={() => onResumeSessionQueue?.(session.id)}
       />
@@ -1262,7 +1264,7 @@ const SessionConversationPage = memo(
                   ? "Prompt retained during source tracking recovery. Recovery does not send this prompt."
                   : prompt.engramInterrupted
                   ? "Delivery is interrupted or unknown. Cancel this retained prompt or reconcile it before continuing."
-                  : "Authorization is paused. Resume to retry, or cancel the retained prompt."}</p>
+                  : retainedPromptHoldText(resolveQueuePauseCause(session.preview))}</p>
                 {!retainedBodyIsVisible ? (
                   <PendingPromptCard
                     prompt={prompt}
