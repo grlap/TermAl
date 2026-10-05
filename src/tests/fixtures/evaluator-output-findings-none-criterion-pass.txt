@@ -1,0 +1,27 @@
+## Result
+Status: completed
+
+Summary:
+Both criteria pass on judgment, and the tracker recorded the verdicts at evaluated cut 24 (hash `2c2381bd981346ca92f66957ff2a9616`). I did not run any tests; the only test pass in evidence is the one the coder recorded.
+
+1. **Criterion 1: pass.** Both docs state the failure policy plainly (`docs/features/local-work-system.md:1138-1146` and `docs/features/cli-and-mcp.md:651-661`). If the stranded-child section fails unexpectedly, `next` shows no rows, count or navigation for it. Instead it sets `stranded_children_unavailable: true` and a fixed `stranded_children_error_class`. Empty results and size cuts are not treated as errors. Mutations and the other sections still refuse on their own failures. The code in `src/work_service/next.rs:503-515` matches this: it catches only the error from the stranded-child helper.
+2. **Criterion 2: pass.** The regression test is `stranded_advisory_canonical_failure_leaves_next_usable_without_partial_rows` (`src/verbs/tests/customer_workflow/stranded_children.rs:308-494`). It damages the second child after a valid first one, once in its stored event record and once in its claim record. In all four `next` modes (normal and `--peek`, compact and verbose) it checks that:
+   - the unavailable marker appears, with the matching error class;
+   - no partial rows, count or navigation appear;
+   - the independent ready section still lists the healthy item;
+   - `detach` and `show` on the damaged child still refuse.
+
+   The recorded gate (`0e5ca190…`) and the coder's notes report `cargo test -q --lib stranded` passing.
+
+Findings:
+- None
+
+Commands Run:
+- `git status --short && git log --oneline -3 && git diff --cached --stat`
+
+Files Inspected:
+- docs/features/local-work-system.md
+- docs/features/cli-and-mcp.md
+- src/work_service/next.rs
+- src/work_service/next/stranded.rs
+- src/verbs/tests/customer_workflow/stranded_children.rs

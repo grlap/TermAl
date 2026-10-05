@@ -1,0 +1,29 @@
+## Result
+Status: completed
+
+Summary:
+Both criteria pass. The tracker recorded the evaluation: hash 5bba52602aa94590a440d6f4dc74bac9, cut 120, source fingerprint content-v1:9abc124e…, 2 passed. Both verdicts use the judgment basis and cite `ae595e98dac84baf8e1f64cb48e2aa9a` and `5a797b98f2504573935886592dd63a7b`. Basis: my reading of the staged source plus the recorded full-gate pass. I did not run any tests myself.
+
+- **Criterion 1: pass.** In `lifecycle.rs`, `reject_required_child` now checks the parent's ancestors (`blocking_ancestor_on`) right after the parent revision check. A completed ancestor gets `work_reject_refused` with the reason "an ancestor is not open". The remedy names the ancestor's ref and lifecycle and suggests an independent root follow-up; `next` is `show CHILD`. The check runs before any cancel or waive call. The test `rejection_checks_intermediate_ancestor_before_any_disposal` (open root, completed intermediate ancestor) asserts that refusal, an unchanged full-row database snapshot, and an unchanged child.
+- **Criterion 2: pass.**
+  - **Regression:** the same Rust test has an all-open control that checks the child is cancelled and the waiver recorded.
+  - **Native test:** the new `mcp-dogfood.test.mjs` test covers the intermediate, root and all-open shapes on both CLI and MCP.
+  - **Help and docs:** `main.rs` `--reject` help, the `mcp.rs` update description, `cli-and-mcp.md` and `local-work-system.md` all state that ancestors must be open.
+
+Findings:
+- None
+
+Commands Run:
+- `git status --short && git log --oneline -3 && git diff --cached --stat`
+- `git diff --cached -- src/storage/work/completion/lifecycle.rs src/verbs/receipts.rs src/main.rs src/mcp.rs docs/`
+- `git diff --cached -- src/verbs/tests/customer_workflow/rejection.rs src/verbs/tests/customer_workflow/waiver.rs`
+- `git diff --cached -- scripts/mcp-dogfood.test.mjs`
+
+Files Inspected:
+- `src/storage/work/completion/lifecycle.rs`
+- `src/storage/work/completion/child_barriers.rs`
+- `src/storage/mod.rs` (`test_database_shape_snapshot`)
+- `src/verbs/receipts.rs`, `src/main.rs`, `src/mcp.rs` (diffs)
+- `src/verbs/tests/customer_workflow/rejection.rs`, `waiver.rs` (diffs)
+- `scripts/mcp-dogfood.test.mjs` (diff)
+- `docs/features/cli-and-mcp.md`, `docs/features/local-work-system.md` (diffs)
