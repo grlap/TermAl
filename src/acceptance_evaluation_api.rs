@@ -266,6 +266,9 @@ enum AcceptanceEvaluationRequestResponse {
         notice: Option<String>,
         evidence_omissions: Value,
         criterion_evidence: Vec<AcceptanceCriterionEvidence>,
+        /// The indexed verification records' obligation assessments, and
+        /// whether the brief carries each (`acceptance_obligation_assessment.rs`).
+        obligation_assessments: Vec<AcceptanceObligationAssessment>,
         reused: bool,
     },
     SameSession {
@@ -282,6 +285,7 @@ enum AcceptanceEvaluationRequestResponse {
         notice: Option<String>,
         evidence_omissions: Value,
         criterion_evidence: Vec<AcceptanceCriterionEvidence>,
+        obligation_assessments: Vec<AcceptanceObligationAssessment>,
     },
 }
 
@@ -815,7 +819,8 @@ impl AppState {
                     delegation: self.delegation_response_from_state(&reservation.previous.id)?,
                     mode: authority.target.mode, work_ref: authority.target.work_ref,
                     notice: Some(format!("The retained attempt was recovered without a new key or cut.\n{}", brief.prompt)),
-                    evidence_omissions: serde_json::json!([]), criterion_evidence: Vec::new(), reused: true,
+                    evidence_omissions: serde_json::json!([]), criterion_evidence: Vec::new(),
+                    obligation_assessments: Vec::new(), reused: true,
                 });
             }
         }
@@ -1158,6 +1163,19 @@ impl AppState {
             body_deadline,
             &now,
         )?;
+        // Whole assessments of the cited verification records, within the
+        // same discovery deadline as the record reads above: it already holds
+        // back the closing bracket's reserve, so it is not taken again. A
+        // failure leaves an incomplete summary, never a failed request.
+        read_acceptance_obligation_assessments(
+            &mut task,
+            connection,
+            &show_args,
+            &read,
+            body_deadline,
+            &now,
+        );
+        let mut obligation_assessments = std::mem::take(&mut task.obligation_assessments);
         // Request-local standing from the same closing canonical read, not a
         // separate executor mirror. Missing/null is unknown, not ineligibility.
         let mut closing_executor = None;
@@ -1393,8 +1411,15 @@ impl AppState {
                             &acceptance_evaluation_ordinal_key(&previous.id, ordinal), ordinal, Some(old), &seed).len());
                     }
                 }
-                let AcceptanceEvaluatorBrief { prompt, cuts } = build_acceptance_evaluator_brief_for_agent(
-                    &task, &evaluator_dir, agent, MAX_ACCEPTANCE_BRIEF_BYTES.saturating_sub(header_bytes + selection_notice.len()))?;
+                let brief_bytes = MAX_ACCEPTANCE_BRIEF_BYTES.saturating_sub(header_bytes + selection_notice.len());
+                let base = build_acceptance_evaluator_brief_for_agent(
+                    &task, &evaluator_dir, agent, brief_bytes)?;
+                // Assessments take only the room the finished brief leaves, or
+                // room that uncited evidence gives way for a names line.
+                let AcceptanceEvaluatorBrief { prompt, cuts, .. } =
+                    acceptance_independent_brief_with_obligations(&task, &evaluator_dir,
+                        acceptance_evaluator_command_form(agent), base,
+                        &mut obligation_assessments, brief_bytes);
                 let prompt = format!("{selection_notice}{prompt}");
                 let mut reuse_notice = None;
                 if let Some(reservation) = reuse.as_ref() {
@@ -1412,11 +1437,16 @@ impl AppState {
                         let brief = self.install_reused_acceptance_evaluation(reservation, seed, prompt)?;
                         self.offer_acceptance_evaluation_brief(reservation, &brief)?;
                         let delegation = self.delegation_response_from_state(&reservation.previous.id)?;
+                        let notice = acceptance_evaluation_notices([
+                            Some(format!("The existing evaluator received a fresh host-authored attempt.\n{brief}")),
+                            acceptance_obligation_assessment_notice(&obligation_assessments),
+                        ]);
                         return Ok(AcceptanceEvaluationRequestResponse::Spawned {
                             delegation, mode, work_ref: task.work_ref,
-                            notice: Some(format!("The existing evaluator received a fresh host-authored attempt.\n{brief}")),
+                            notice,
                             evidence_omissions: acceptance_brief_omissions(&cuts),
-                            criterion_evidence: task.criterion_evidence, reused: true,
+                            criterion_evidence: task.criterion_evidence,
+                            obligation_assessments, reused: true,
                         });
                     }
                 }
@@ -1449,6 +1479,7 @@ impl AppState {
                     // The requester learns which records its judge did not
                     // get whole while it can still record the proof elsewhere.
                     acceptance_brief_cut_notice(&task.work_ref, &cuts),
+                    acceptance_obligation_assessment_notice(&obligation_assessments),
                     // And why tests it ran under an evidence restriction
                     // earned no credit (`claude_outstanding_work.rs`); the
                     // judge's brief never carries the requester's state.
@@ -1461,6 +1492,7 @@ impl AppState {
                     notice,
                     evidence_omissions: acceptance_brief_omissions(&cuts),
                     criterion_evidence: task.criterion_evidence,
+                    obligation_assessments,
                     reused: false,
                 })
             }
@@ -1501,11 +1533,18 @@ impl AppState {
                     }
                 }
                 let unmeasured = unmeasured(&source_fingerprint);
-                let (brief, cuts) = build_same_session_acceptance_brief_and_cuts(
+                let base = build_same_session_acceptance_brief_with_plan(
                     &task,
                     source_fingerprint.as_deref(),
                     MAX_ACCEPTANCE_BRIEF_BYTES,
                 )?;
+                let (brief, cuts) = acceptance_same_session_brief_with_obligations(
+                    &task,
+                    source_fingerprint.as_deref(),
+                    base,
+                    &mut obligation_assessments,
+                    MAX_ACCEPTANCE_BRIEF_BYTES,
+                );
                 Ok(AcceptanceEvaluationRequestResponse::SameSession {
                     mode,
                     brief,
@@ -1521,10 +1560,12 @@ impl AppState {
                         root_notice,
                         unmeasured,
                         acceptance_same_session_cut_notice(&task.work_ref, &cuts),
+                        acceptance_obligation_assessment_notice(&obligation_assessments),
                         self.claude_evidence_restriction_notice(parent_session_id, &place),
                     ]),
                     evidence_omissions: acceptance_brief_omissions(&cuts),
                     criterion_evidence: task.criterion_evidence,
+                    obligation_assessments,
                     work_ref: task.work_ref,
                 })
             }

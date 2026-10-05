@@ -2842,6 +2842,130 @@ never skipped:
   which reads the same to the parent. `none` is not waited for: a restart that
   still finds `pending` errs on the safe side.
 
+### Obligation assessments in the brief
+
+A verification record carries an obligation assessment. It lists every
+obligation the record was matched against, one row each, at the record's
+position and a cut. The tracker gives it oldest first, eight rows a page, on
+`show --note` and its `--after` continuations. Most rows are closed by some
+other record, so the few that matter are often on the last page. The host reads
+the assessment whole and gives the evaluator a compact summary instead
+(`src/acceptance_obligation_assessment.rs`).
+
+*Which records.* Every verification record the brief's criterion evidence index
+cites: the requester's selected records and the original obligation closures,
+whether the brief has a record's body from an exact read, a closure projection
+or the newest-notes window. An exact selected read already returns the first
+page, or shows that there is none; the host follows the continuations from
+there and does not read the record again. Any other cited record gets its own
+`show --note` read. That receipt must be the requested record, a holder
+verification note, or the summary says `invalid_receipt`; a continuation
+receipt must name the record too.
+
+*What the summary says.* The summary gives:
+- the record and cut positions;
+- the row count, and whether every row was read;
+- one count per group of status, reason and `recorded`, with groups that need
+  attention first: obligations still open, mismatches, what this record
+  satisfied, the rest, and the rows another record closed last;
+- every row whose `recorded` end is anything but `satisfied_by_another_record`,
+  and every mismatch row whatever its end, in full: rule and version,
+  criterion, check kind, reason, `recorded`, trigger position;
+- the full history at the captured cut: page 1 by the cursorless
+  `show --note` command, then the first page's own continuation, verbatim.
+
+*Same-cut continuations.* Only the tracker's own cursors (the `--after`
+continuations it issues on each page) bind the captured cut. The tracker
+refuses them once the record's assessment moves on. The cursorless
+`show --note` command reads the assessment as it stands now, so it is never
+offered as a same-cut continuation. When no cursor exists, the summary and the
+notice say so: "No same-cut continuation exists". That happens when the first
+page names none that can be quoted, or reading stopped on the first page. A
+one-page assessment read whole has no cursor to give and needs none.
+
+A row's `status` says how this record met the obligation: `matches`,
+`mismatch`, or `left_out` (skipped before matching, for a reason such as
+`already_closed` or `not_yet_defined`). Whether the obligation is closed is the
+row's `recorded` end, so a left-out row whose end is `open` is listed in full.
+Rows recorded as `satisfied_by_another_record` are counted, never listed,
+except mismatch rows: a failed check is listed even once another record closed
+its obligation, because it is what a reader must see. A row
+field the host cannot show whole marks the summary incomplete rather than
+showing the row cut.
+
+*Incomplete reads.* The host reads within the same discovery deadline as the
+record reads before it. That deadline already holds back the closing bracket's
+reserve, so the closing basis and identity reads keep their whole share. An
+assessment that is present but not an object is a malformed page, never taken
+for no assessment. So is a page whose `total`, `earlier`, `record_position` or
+`cut_position` is not a present non-negative integer, or whose `rows` is not an
+array: those fields are what make a read whole at one cut. Once every row is
+read the read is whole, and a continuation the last page still carries is not
+followed. It reads at most 32 pages of one record, its first
+page included, and at most 96 pages for the request, not counting first pages
+that exact selected reads already returned. A page bound, a spent budget, a
+transport or frame failure, an invalid receipt, a missing continuation, or a
+page that does not continue the rows read (or carries a row it cannot show)
+stops the read. The summary then says `INCOMPLETE`, how many rows were read out
+of the total and the reason. It also gives the tracker's own continuation where
+reading stopped, verbatim:
+- after a failed read or at a bound, the continuation for the next page;
+- for a rejected page, the continuation that fetched it;
+- when a page read before the whole assessment names no next page, or names
+  one that cannot be quoted (not one bounded line of plain text, or another
+  record's), the cursor that fetched that page.
+In the last case the summary and notice say plainly that resuming re-reads that
+page, with its page number and rows, which are already counted. A continuation
+that cannot be quoted is never shown. The counts cover only the rows read, and
+the summary says an unread row may be open or a mismatch. A read failure here
+never fails the request.
+
+*Room.* Summaries never take room from what the brief would carry without them.
+The host builds the brief exactly as before, then places the summaries in the
+bytes the finished brief leaves under its bound, in index order. They go before
+the evidence list, or in a same-session brief before its omission line,
+matched as the last line that starts with it, so that record text quoted
+earlier cannot move the section. Each summary goes in whole or not at all.
+When it does not fit, a one-line note names the record, if that line fits.
+The note keeps the read's own state and its same-cut continuations: rows read
+of the total; for an incomplete read, the reason and the resume point; and the
+full history at the cut, or that no same-cut continuation exists.
+
+When the brief has no room even for that note, it still names the record, on
+one line: "Obligation assessments not carried in this brief (the requester
+notice has them): <locators>." To make room for it, the host renders the brief
+again from the settings it was built with (`AcceptanceBriefPlan`), giving way
+only on its omission detail and on uncited window entries written by a
+non-holder:
+- the independent brief lowers its omission detail and clips, then leaves out,
+  its window entries, oldest first;
+- the same-session brief lowers its omission detail.
+It never changes the criterion evidence index, the carried failure or the
+outcome. Every criterion-cited record and every holder note the brief carries
+is protected, cited or not: a holder's fail-first note looks like any other
+holder note, so the brief protects them all. The rebuild is kept only when it
+shows each protected entry exactly as before, byte for byte, whether whole or
+already clipped, never newly leaving one out, with the same criterion
+evidence index. A same-session brief, which lists no window bodies, is kept
+only when it also lists the same earlier checks. In the rebuilt brief the summaries are fitted again, so a one-line note or a whole
+summary may now fit, and the line names only the records still unnamed. When
+no rebuild keeps the protected content, the brief stays exactly as it was and
+the requester's notice alone names the record: the one exception that
+criterion allows.
+
+*The requester.* The request result carries `obligationAssessments`, one entry
+a record, with these fields:
+- the counts and the full rows;
+- `complete` and `incompleteReason`;
+- `resume`, and `resumeRereads` when resuming re-reads a page;
+- `historyContinuation`, the first page's own cursor;
+- `fullHistory`, the cursorless first-page command;
+- `carried`.
+The notice names every assessment that was not read whole or not carried, with
+the rows read, where to resume at the cut and the full history at the cut. The tracker's
+own `show --note` text, which holders read directly, is unchanged; its compact
+form is the tracker's to give.
+
 ### Re-evaluation in an independent evaluator
 
 A parent can request another whole judgment with `reuseDelegationId` on the

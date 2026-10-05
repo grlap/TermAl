@@ -648,6 +648,12 @@ struct AcceptanceEvaluationTask {
     active_run_id: Option<String>,
     /// Core identity is bracketed independently of the agent's safe projection.
     canonical_identity: Option<AcceptanceEvidenceIdentity>,
+    /// The first assessment page of each exact verification record read, by
+    /// locator, until the assessments are read whole.
+    assessment_first_pages: Vec<(String, Value)>,
+    /// The obligation assessments of the indexed verification records
+    /// (`acceptance_obligation_assessment.rs`).
+    obligation_assessments: Vec<AcceptanceObligationAssessment>,
 }
 
 fn parse_acceptance_evaluation_task(
@@ -754,6 +760,8 @@ fn parse_acceptance_evaluation_task(
         indexed_evidence: Vec::new(),
         active_run_id,
         canonical_identity: None,
+        assessment_first_pages: Vec::new(),
+        obligation_assessments: Vec::new(),
     })
 }
 
@@ -1220,7 +1228,7 @@ fn acceptance_brief_omissions(cuts: &AcceptanceBriefCuts) -> Value {
 
 /// Prompt-only detail levels. The captured inventory returned to the requester
 /// stays intact even when its prose gives way to the complete contract.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AcceptanceOmissionDetail {
     Full,
     Compact,
@@ -1296,6 +1304,23 @@ impl AcceptanceBriefCuts {
 struct AcceptanceEvaluatorBrief {
     prompt: String,
     cuts: AcceptanceBriefCuts,
+    /// The settings it was rendered with, so that a caller can render it
+    /// again giving way on chosen parts only
+    /// (`acceptance_obligation_assessment.rs`).
+    plan: AcceptanceBriefPlan,
+}
+
+/// The render settings of an independent evaluator's brief.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AcceptanceBriefPlan {
+    /// Window entries listed, newest last, and how many of the oldest of
+    /// them are clipped.
+    shown: usize,
+    clipped: usize,
+    outcome_bytes: usize,
+    detail: AcceptanceOmissionDetail,
+    carried: AcceptanceOmissionDetail,
+    index_detail: AcceptanceOmissionDetail,
 }
 
 fn acceptance_entry_count(count: usize) -> String {
@@ -1752,7 +1777,18 @@ of the result packet described below.",
         admission_rule = ACCEPTANCE_BRIEF_ADMISSION_RULE,
         carried = acceptance_brief_carried_failure(task, carried, false),
     );
-    AcceptanceEvaluatorBrief { prompt, cuts }
+    AcceptanceEvaluatorBrief {
+        prompt,
+        cuts,
+        plan: AcceptanceBriefPlan {
+            shown,
+            clipped,
+            outcome_bytes,
+            detail,
+            carried,
+            index_detail,
+        },
+    }
 }
 
 /// The one refusal both briefs give when the complete criteria do not fit
@@ -1768,6 +1804,16 @@ fn acceptance_contract_too_large(
         task.criteria.len(),
         acceptance_brief_criteria(task).len(),
     ))
+}
+
+/// The cuts of a same-session brief rendered at `index_detail`.
+fn acceptance_same_session_brief_cuts_at(
+    task: &AcceptanceEvaluationTask,
+    index_detail: AcceptanceOmissionDetail,
+) -> AcceptanceBriefCuts {
+    let mut cuts = acceptance_same_session_brief_cuts(task);
+    acceptance_criterion_evidence_cuts(task, &mut cuts, index_detail, &BTreeSet::new());
+    cuts
 }
 
 /// `same_session` spawns nothing: the caller judges its own work and records
@@ -1789,11 +1835,31 @@ fn build_same_session_acceptance_brief(
         .map(|(brief, _)| brief)
 }
 
+#[cfg(test)]
 fn build_same_session_acceptance_brief_and_cuts(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     max_bytes: usize,
 ) -> std::result::Result<(String, AcceptanceBriefCuts), ApiError> {
+    build_same_session_acceptance_brief_with_plan(task, source_fingerprint, max_bytes)
+        .map(|(brief, cuts, _, _)| (brief, cuts))
+}
+
+/// The same-session brief and its cuts, with the omission and index detail
+/// it was rendered at.
+fn build_same_session_acceptance_brief_with_plan(
+    task: &AcceptanceEvaluationTask,
+    source_fingerprint: Option<&str>,
+    max_bytes: usize,
+) -> std::result::Result<
+    (
+        String,
+        AcceptanceBriefCuts,
+        AcceptanceOmissionDetail,
+        AcceptanceOmissionDetail,
+    ),
+    ApiError,
+> {
     let mut floor = usize::MAX;
     for index_detail in [
         AcceptanceOmissionDetail::Full,
@@ -1807,9 +1873,8 @@ fn build_same_session_acceptance_brief_and_cuts(
             index_detail,
         );
         if brief.len() <= max_bytes {
-            let mut cuts = acceptance_same_session_brief_cuts(task);
-            acceptance_criterion_evidence_cuts(task, &mut cuts, index_detail, &BTreeSet::new());
-            return Ok((brief, cuts));
+            let cuts = acceptance_same_session_brief_cuts_at(task, index_detail);
+            return Ok((brief, cuts, AcceptanceOmissionDetail::Full, index_detail));
         }
     }
     for detail in [
@@ -1824,14 +1889,8 @@ fn build_same_session_acceptance_brief_and_cuts(
             AcceptanceOmissionDetail::Minimal,
         );
         if brief.len() <= max_bytes {
-            let mut cuts = acceptance_same_session_brief_cuts(task);
-            acceptance_criterion_evidence_cuts(
-                task,
-                &mut cuts,
-                AcceptanceOmissionDetail::Minimal,
-                &BTreeSet::new(),
-            );
-            return Ok((brief, cuts));
+            let cuts = acceptance_same_session_brief_cuts_at(task, AcceptanceOmissionDetail::Minimal);
+            return Ok((brief, cuts, detail, AcceptanceOmissionDetail::Minimal));
         }
         floor = floor.min(brief.len());
     }
@@ -2504,6 +2563,7 @@ fn compact_acceptance_evaluation_request_result(response: &Value) -> Value {
         "notice": response.get("notice"),
         "evidenceOmissions": response.get("evidenceOmissions"),
         "criterionEvidence": response.get("criterionEvidence"),
+        "obligationAssessments": response.get("obligationAssessments"),
         "reused": response.get("reused"),
         "next": "Wait with termal_resume_after_delegations for this delegationId; the fan-in says what the tracker recorded. Do not request another evaluation of the same task while this one runs.",
     })
