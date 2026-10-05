@@ -3034,6 +3034,58 @@ that cannot be quoted is never shown. The counts cover only the rows read, and
 the summary says an unread row may be open or a mismatch. A read failure here
 never fails the request.
 
+*The summary view.* A tracker may serve the assessment in its summary view
+instead (`view: "summary"`). That page carries:
+- the row count and the record and cut positions;
+- `counts`: one count per status and reason, covering every row (a status
+  that has no reason carries none);
+- the rows the tracker marks `must_show`, paged by `must_show_earlier`,
+  `must_show_remaining` and `continuation`, out of `must_show_total`;
+- a `history` command that pages the full listing at the cut.
+
+The host reads both shapes. A page without `view`, or with `view: "history"`,
+is the old shape, read as above. One record's read never mixes shapes. For a
+summary-view record the groups are the tracker's `counts`, and the rows listed
+in full are exactly its `must_show` rows; every other row is only counted. The
+tracker puts a row in `must_show` exactly when its status is `matches` or
+`mismatch`, or its obligation's recorded end is `open`: every row a reader must
+act on. That differs from the old-shape rule above (every row is listed except
+a row recorded as `satisfied_by_another_record` that is not a mismatch) in two
+ways:
+- a `matches` row recorded as `satisfied_by_another_record` is listed in the
+  summary view, and only counted in the old shape;
+- a `left_out` row whose recorded end is neither `open` nor
+  `satisfied_by_another_record` (for example waived or displaced) is only
+  counted in the summary view, and listed in the old shape.
+A row's status is always one of `matches`, `mismatch` and `left_out`, so these
+are the only differences. Every open, matches or mismatch row is listed in the
+summary view, so no open or mismatch row is hidden on either path. The host
+follows `continuation` until the must_show rows read
+reach `must_show_total`; the record is then read whole, and its full history at
+the cut is the `history` command and then each page's continuation.
+
+A summary-view page is malformed, and stops the read as `malformed_page`, when:
+- its `view` is unknown, or its shape differs from the first page's;
+- `total`, `record_position`, `cut_position`, `must_show_total`,
+  `must_show_earlier` or `must_show_remaining` is not a present non-negative
+  integer;
+- `counts` or `must_show` is not an array, or a counts entry lacks a status or
+  a non-negative count, or has a reason that is not a plain string, or two
+  entries share a status and reason;
+- its counts do not sum to `total`, `must_show_total` exceeds `total`, or its
+  must_show offsets and rows do not add up to `must_show_total`.
+A page whose counts (compared regardless of order), totals or positions differ
+from the first page's, or that does not start where the must_show rows read
+end, did not come from the same cut and stops the read as
+`assessment_changed`; a must_show row the host cannot show whole stops it as
+`malformed_row`. The host checks the whole page before it keeps anything of it,
+so a rejected page, the first included, leaves no count, total or row behind.
+An incomplete summary-view
+read says how many must_show rows were read of `must_show_total` and of all
+rows; its counts still cover every row, and it says an unread must_show row may
+be open or a mismatch. The incomplete, room and naming rules are otherwise
+the old shape's, unchanged.
+
 *Room.* Summaries never take room from what the brief would carry without them.
 The host builds the brief exactly as before, then places the summaries in the
 bytes the finished brief leaves under its bound, in index order. They go before
@@ -3070,9 +3122,12 @@ criterion allows.
 *The requester.* The request result carries `obligationAssessments`, one entry
 a record, with these fields:
 - the counts and the full rows;
+- `rowsRead`, which counts the must_show rows for a summary-view record, and
+  `mustShowTotal` for such a record;
 - `complete` and `incompleteReason`;
 - `resume`, and `resumeRereads` when resuming re-reads a page;
-- `historyContinuation`, the first page's own cursor;
+- `historyContinuation`, the first page's own cursor, or a summary-view
+  record's `history` command;
 - `fullHistory`, the cursorless first-page command;
 - `carried`.
 The notice names every assessment that was not read whole or not carried, with

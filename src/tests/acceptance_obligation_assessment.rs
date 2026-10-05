@@ -13,6 +13,9 @@
 
 use super::*;
 
+#[path = "acceptance_obligation_summary_view.rs"]
+mod summary_view;
+
 /// The obligation assessment of one real verification record, captured page by
 /// page from the tracker's `show --note --json` and its `--after`
 /// continuations: 7 pages, 49 rows, 47 of them left out as already closed by
