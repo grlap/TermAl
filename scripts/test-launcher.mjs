@@ -41,6 +41,7 @@ import {
   partialCheckLabel,
   resolveCategory,
 } from "./test-categories-plan.mjs";
+import { focusedCountSummaryLines, focusedTestCounts } from "./test-counts.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
@@ -58,6 +59,7 @@ const helperSupportFiles = Object.freeze([
   nodeDurationReporterFile,
   "scripts/review-freeze-fingerprint.mjs",
   "scripts/test-categories-plan.mjs",
+  "scripts/test-counts.mjs",
   "scripts/test-durations.mjs",
   "scripts/test-launcher.mjs",
   "scripts/test-temp-root.mjs",
@@ -755,6 +757,12 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
         state: outcome.code === 0 && !outcome.error ? "passed" : "failed",
       });
       if (report) entry.durations = readDurationReport(report, stage.cwd);
+      // A focused run's exit says nothing about how many tests ran; its
+      // wrapped runner's own result lines do (scripts/test-counts.mjs).
+      if (stage.name === "focused" && !request.full && existsSync(entry.log)) {
+        const counts = focusedTestCounts(readFileSync(entry.log, "utf8"));
+        if (counts) entry.tests = counts;
+      }
       if (stage.uiProjects !== undefined) {
         entry.accounting = await accountUiProjects(request.root, stage, report);
         // A project that failed, did not run, ran out of order or cannot be
@@ -838,6 +846,7 @@ export async function summarize(runDir) {
     if (stage.diagnostics?.truncated) lines.push("[diagnostics truncated; full output in log]");
   }
   lines.push(...accountingSummaryLines(result.stages));
+  lines.push(...focusedCountSummaryLines(result));
   lines.push(...durationSummaryLines(result.stages));
   if (result.limitations) lines.push(result.limitations);
   return `${lines.join("\n")}\n`;

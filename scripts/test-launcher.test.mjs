@@ -44,6 +44,7 @@ import {
   summarize,
 } from "./test-launcher.mjs";
 import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { focusedTestCounts } from "./test-counts.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 
 const fixtureEnv = {
@@ -161,6 +162,7 @@ test("full plan prerequisites cover every maintained helper and direct UI entryp
   for (const path of [...helperTestFiles,
     "scripts/node-test-duration-reporter.mjs",
     "scripts/review-freeze-fingerprint.mjs",
+    "scripts/test-counts.mjs",
     "scripts/test-durations.mjs",
     "scripts/test-launcher.mjs",
     "scripts/test-temp-root.mjs",
@@ -1277,7 +1279,7 @@ test("helper scripts run when started through a linked directory", async (t) => 
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const real = join(base, "real");
   mkdirSync(join(real, "scripts"), { recursive: true });
-  for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs"]) {
+  for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs", "test-counts.mjs"]) {
     copyFileSync(join(projectRoot, "scripts", name), join(real, "scripts", name));
   }
   const linked = join(base, "linked");
@@ -1310,7 +1312,7 @@ test("a foreground run prints its run receipt before any stage completes", async
     // from inside the fixture.
     const scripts = join(root, "scripts");
     mkdirSync(scripts);
-    for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs"]) {
+    for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs", "test-counts.mjs"]) {
       copyFileSync(join(projectRoot, "scripts", name), join(scripts, name));
     }
     const gate = mkdtempSync(join(testTempDirectory(), "launcher-receipt-"));
@@ -1780,4 +1782,83 @@ test("the atomic replace waits for a held target only on Windows", { skip: windo
     closeSync(held);
   }
   assert.deepEqual(sleeps, [], "another platform's error is not retried");
+});
+
+test("focused counts sum every libtest binary and ignore other output", () => {
+  const output = [
+    "   Compiling termal v0.1.0",
+    "running 39 tests",
+    "test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 3863 filtered out; finished in 0.00s",
+    "running 2 tests",
+    "test result: FAILED. 1 passed; 1 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+    "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+  ].join("\r\n");
+  assert.deepEqual(focusedTestCounts(output), {
+    runner: "cargo-libtest",
+    passed: 44,
+    failed: 1,
+    ignored: 2,
+  });
+  // A runner whose result lines are not recognised records no counts, so its
+  // focused run is never credited from them.
+  assert.equal(focusedTestCounts("# pass 3\n# fail 0\nTests  3 passed (3)\n"), undefined);
+  assert.equal(focusedTestCounts(""), undefined);
+});
+
+test("a focused run records its runner's counts and prints them with the input fingerprint", async (t) => {
+  await repository(t, async (root) => {
+    const output = [
+      "test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 3863 filtered out; finished in 0.00s",
+      "test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    ].join("\n");
+    const runDir = await createRun({
+      root,
+      stages: [stage("focused", `console.log(${JSON.stringify(output)})`)],
+    }, fixtureEnv);
+    const result = await executeRun(runDir, fixtureEnv);
+    assert.equal(result.state, "passed");
+    assert.deepEqual(json(join(runDir, "results.json")).stages[0].tests, {
+      runner: "cargo-libtest",
+      passed: 41,
+      failed: 0,
+      ignored: 1,
+    });
+    const summary = await summarize(runDir);
+    assert.match(summary, /^tests: passed=41 failed=0 ignored=1$/mu);
+    assert.match(summary, new RegExp(`^input fingerprint: ${result.after}$`, "mu"));
+  });
+});
+
+test("a focused run without recognisable counts records none, and other stages never count", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("focused", "console.log('all good')")],
+    }, fixtureEnv);
+    const result = await executeRun(runDir, fixtureEnv);
+    assert.equal(result.state, "passed");
+    assert.equal(json(join(runDir, "results.json")).stages[0].tests, undefined);
+    assert.doesNotMatch(await summarize(runDir), /^tests: /mu);
+  });
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("report", "console.log('test result: ok. 5 passed; 0 failed; 0 ignored;')")],
+    }, fixtureEnv);
+    await executeRun(runDir, fixtureEnv);
+    assert.equal(json(join(runDir, "results.json")).stages[0].tests, undefined);
+  });
+});
+
+test("focused counts read libtest lines a forced-colour runner wraps in terminal codes", () => {
+  const output = [
+    "test result: \u001b[32mok\u001b[0m. 39 passed; 0 failed; 0 ignored; 0 measured; 3863 filtered out; finished in 0.00s",
+    "test result: \u001b[31mFAILED\u001b[0m. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+  ].join("\n");
+  assert.deepEqual(focusedTestCounts(output), {
+    runner: "cargo-libtest",
+    passed: 40,
+    failed: 1,
+    ignored: 0,
+  });
 });

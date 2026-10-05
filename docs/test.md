@@ -416,7 +416,32 @@ foreground, the launcher names its run directory in its summary's
 `results.json`. A summary with no such line gets TermAl's two names. A
 failed full gate whose request record has no test stage is still recorded
 as failed, as every failed gate was before this rule: a failure can only add
-a block, never let an older pass stand. A focused run is outside this rule.
+a block, never let an older pass stand. A focused run is outside this rule
+and has its own, below; the stage name `focused` is reserved for it, so a
+full gate's stage of that name is never a test stage.
+
+A focused run, `node scripts/test-launcher.mjs focused -- COMMAND ARG...`,
+is a test check only when its wrapped command is itself one (a `cargo test`,
+not a build or a `--no-run`). Its exit status alone says nothing about how
+many tests ran, so the launcher reads the wrapped runner's own result lines,
+today cargo's `test result:` lines summed across test binaries, records them
+on the focused stage of `results.json` as `tests` (`passed`, `failed`,
+`ignored`), and prints them in its summary as `tests: passed=N failed=M
+ignored=K` beside `input fingerprint: …`. A runner it does not recognise gets
+no counts. The host credits a passing focused run only from that run's own
+`results.json`, found through the summary's `results:` line under the same
+checks as a full gate's request record: the summary's own verdict, its first
+`PASS RUN exit=0` line, names that same run; the run and its focused stage
+passed with exit 0; and the counts show at least one test passed and none
+failed. Counts printed in the summary but missing from the record earn
+nothing, and a `results:` line printed later in a stage's diagnostics cannot
+lend another run's counts. A failing focused run is recorded as failed, as
+before. A focused run started with `--detach` is no test check at all: only a
+full gate is carried. A credited focused run
+is recorded like the plain test command it wraps, never as a full gate. The
+host side takes effect once a host built with it is running, that is after
+the next TermAl restart; until then a passing focused run is still withheld
+("its output shows no passing test").
 
 ## Backend Testing Guidelines
 

@@ -1,0 +1,45 @@
+{
+  "runId": "test-f3f7e586-ec86-45f1-af3e-78afa04108cb",
+  "state": "passed",
+  "started": "2026-10-04T23:23:15.318Z",
+  "stages": [
+    {
+      "name": "focused",
+      "state": "passed",
+      "started": "2026-10-04T23:23:17.384Z",
+      "command": [
+        "C:\\Users\\grzeg\\.cargo\\bin\\cargo.exe",
+        "test",
+        "--bin",
+        "termal",
+        "-q",
+        "--",
+        "tests::delegation_result_parser"
+      ],
+      "cwd": "C:\\github\\Personal\\TermAl\\.tmp\\wt-focused-credit-9474",
+      "log": "C:\\github\\Personal\\TermAl\\.git\\worktrees\\wt-focused-credit-9474\\review-runs\\test-f3f7e586-ec86-45f1-af3e-78afa04108cb\\focused.log",
+      "code": 0,
+      "signal": null,
+      "ended": "2026-10-04T23:23:55.843Z",
+      "tests": {
+        "runner": "cargo-libtest",
+        "passed": 39,
+        "failed": 0,
+        "ignored": 0
+      },
+      "diagnostics": {
+        "text": "",
+        "truncated": false
+      }
+    }
+  ],
+  "pid": 90048,
+  "owner": "session-9474",
+  "preflight": [],
+  "expectedFingerprint": "9f18f402e3e3b91d7802118afe8903b98531a22611d12d12d11c2eabe6e44cc7",
+  "before": "9f18f402e3e3b91d7802118afe8903b98531a22611d12d12d11c2eabe6e44cc7",
+  "limitations": "Windows: untracked executable modes and filesystem symlink properties are unverified.",
+  "after": "9f18f402e3e3b91d7802118afe8903b98531a22611d12d12d11c2eabe6e44cc7",
+  "exitCode": 0,
+  "ended": "2026-10-04T23:23:56.814Z"
+}

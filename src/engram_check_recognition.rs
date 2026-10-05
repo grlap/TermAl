@@ -702,8 +702,10 @@ fn engram_passed_count(line: &str) -> Option<u64> {
 /// passed test stage of the mode that ran it: for a full gate, one of
 /// `launcher_test_stages`, the test stages its own request record names
 /// (`engram_launcher_output_test_stages`); for a live run, `engram-live`. A
-/// focused run's verdict says nothing about how many tests the wrapped
-/// command ran.
+/// focused run's verdict alone says nothing about how many tests the wrapped
+/// command ran, so its `focused` stage counts only when it is among
+/// `launcher_test_stages`, which holds it only when the run's own results
+/// record backs the pass with at least one passed test and none failed.
 fn engram_check_showed_passing_tests(
     check: &EngramCheckCommand,
     result_lines: &[String],
@@ -733,7 +735,14 @@ fn engram_check_showed_passing_tests(
                     .and_then(|words| words.get(2))
                     .map(String::as_str)
                 {
-                    Some("full") => launcher_test_stages,
+                    // Never a focused run's stage under a full gate's command.
+                    Some("full") if launcher_test_stages != ["focused"] => {
+                        launcher_test_stages
+                    }
+                    // Only a backed `focused` stage, never a full gate's stages.
+                    Some("focused") if launcher_test_stages == ["focused"] => {
+                        launcher_test_stages
+                    }
                     Some("live") => &live,
                     _ => &[],
                 };

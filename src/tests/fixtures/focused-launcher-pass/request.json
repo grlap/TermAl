@@ -1,0 +1,27 @@
+{
+  "runId": "test-f3f7e586-ec86-45f1-af3e-78afa04108cb",
+  "root": "C:\\github\\Personal\\TermAl\\.tmp\\wt-focused-credit-9474",
+  "stages": [
+    {
+      "name": "focused",
+      "command": "cargo",
+      "args": [
+        "test",
+        "--bin",
+        "termal",
+        "-q",
+        "--",
+        "tests::delegation_result_parser"
+      ]
+    }
+  ],
+  "requiredBinaryEnv": [],
+  "prerequisiteFiles": [],
+  "needsCargo": false,
+  "full": false,
+  "detached": false,
+  "creatorPid": 90048,
+  "owner": "session-9474",
+  "started": "2026-10-04T23:23:15.318Z",
+  "expectedFingerprint": "9f18f402e3e3b91d7802118afe8903b98531a22611d12d12d11c2eabe6e44cc7"
+}

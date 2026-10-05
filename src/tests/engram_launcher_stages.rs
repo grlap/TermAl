@@ -283,3 +283,6 @@ fn a_carried_full_gate_is_judged_by_the_same_rule() {
     );
     assert_eq!(read(&untested), Err(ENGRAM_CARRIED_RUN_NO_TEST_STAGE));
 }
+
+#[path = "engram_focused_launcher_credit.rs"]
+mod focused_credit;
