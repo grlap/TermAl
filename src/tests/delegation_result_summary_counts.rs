@@ -4,10 +4,12 @@
 // gains an actionable finding from its summary wording, whatever numbers or
 // finding words the summary contains; that a summary which appears to report
 // findings yields a visible, non-actionable inconsistency note instead; and
-// that a clean summary yields neither.
-// Does not own: the general packet parsing tests, including the recovery of
-// structured preamble findings, which stay in delegation_result_parser.rs,
-// from which this module is declared.
+// that a clean summary yields neither; that a count the integration review
+// set beside a colon, a parenthesis or a wrapped line still recovers the
+// structured preamble findings; and that the note caps the summary it repeats.
+// Does not own: the general packet parsing tests, including the other
+// preamble-recovery tests, which stay in delegation_result_parser.rs, from
+// which this module is declared.
 
 use super::*;
 
@@ -178,3 +180,62 @@ fn a_summary_that_counts_findings_yields_the_inconsistency_note() {
         }
     }
 }
+
+/// The integration review's examples: a summary that states its count apart
+/// from the finding word, by a colon, a parenthesis or a wrapped line, still
+/// contradicts an explicit None, so the structured findings the reviewer wrote
+/// in the preamble are recovered as before and the note names the
+/// contradiction. Never a clean packet.
+#[test]
+fn a_count_beside_a_colon_parenthesis_or_wrap_still_recovers_the_preamble_findings() {
+    let mut failures = Vec::new();
+    for summary in [
+        "Issues found: 2.",
+        "Findings: 2 Medium, 1 Low.",
+        "Found 2 (High severity).",
+        "Found two\nissues in the parser.",
+    ] {
+        let packet = format!(
+            "# Code Review\n\n\
+## Actionable\n\
+- **[Medium]** `src/parser.rs:7` \u{2014} A parser regression remains.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+{summary}\n\n\
+Findings:\n\
+- None"
+        );
+        let parsed = parse_delegation_result_packet(&packet).expect("the packet should parse");
+        let recovered = parsed.findings.len() == 1
+            && parsed.findings[0].severity == "Medium"
+            && parsed.findings[0].file.as_deref() == Some("src/parser.rs");
+        let noted = inconsistency_notes(&parsed).len() == 1;
+        if !(recovered && noted) {
+            failures.push(format!(
+                "{summary:?}: findings {:?}, notes {:?}",
+                parsed.findings, parsed.notes
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "clean packets:\n{}", failures.join("\n"));
+}
+
+/// The note repeats only the start of a long summary, ending in an ellipsis,
+/// and points to the full output for the rest.
+#[test]
+fn the_inconsistency_note_repeats_only_the_start_of_a_long_summary() {
+    let summary = format!("Found one High-severity issue. {}", "Context words. ".repeat(200));
+    let parsed = parse_delegation_result_packet(&packet_with_summary(&summary))
+        .expect("a contradictory packet should parse");
+
+    let notes = inconsistency_notes(&parsed);
+    assert_eq!(notes.len(), 1, "{:?}", parsed.notes);
+    let (_, excerpt) = notes[0]
+        .split_once("Summary: ")
+        .expect("the note should repeat the summary");
+    assert!(excerpt.starts_with("Found one High-severity issue."), "{excerpt}");
+    assert!(excerpt.ends_with('\u{2026}'), "{excerpt}");
+    assert_eq!(excerpt.chars().count(), 301, "{excerpt}");
+}
+

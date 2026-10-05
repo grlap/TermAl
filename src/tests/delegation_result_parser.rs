@@ -750,7 +750,7 @@ Findings:\n\n\
 }
 
 #[test]
-fn delegation_result_packet_never_reports_clean_when_declared_finding_details_are_missing() {
+fn delegation_result_packet_notes_a_declared_severity_against_findings_none_without_a_finding() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\n\
 Status: completed\n\n\
@@ -822,7 +822,7 @@ Findings:\n\
 }
 
 #[test]
-fn delegation_result_packet_attributes_fallback_to_the_declared_severity() {
+fn delegation_result_packet_note_names_the_first_declared_severity() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\n\
 Status: completed\n\n\

@@ -134,11 +134,15 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     // An explicit empty Findings section is authoritative: summary wording
     // alone never yields an actionable finding, because prose cannot reliably
     // tell a finding count from other numbers. When the summary appears to
-    // claim findings anyway, structured findings the reviewer wrote in the
-    // preamble are still recovered, and the contradiction is never hidden: a
-    // non-actionable note names it and directs the parent to the full output.
-    let contradictory_empty_findings =
-        findings_explicitly_empty && delegation_result_summary_reports_findings(&summary);
+    // claim findings anyway, the structured findings the reviewer wrote in the
+    // preamble are recovered exactly as before (the summary read as before),
+    // and the contradiction is never hidden: a non-actionable note names it
+    // and directs the parent to the full output (the summary read clause by
+    // clause, so a step label such as "Criterion 2: pass." raises no note).
+    let contradictory_empty_findings = findings_explicitly_empty
+        && delegation_result_summary_reports_findings(&summary, DelegationSummaryReading::AsBefore);
+    let contradiction_note = findings_explicitly_empty
+        && delegation_result_summary_reports_findings(&summary, DelegationSummaryReading::ForNote);
     if (!findings_explicitly_empty || contradictory_empty_findings)
         && (findings.is_empty() || findings_refer_to_prior_sections)
     {
@@ -156,7 +160,7 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         .iter()
         .filter_map(|line| parse_delegation_note_line(line))
         .collect::<Vec<_>>();
-    if contradictory_empty_findings {
+    if contradiction_note {
         notes.push(delegation_result_summary_contradiction_note(&summary));
     }
 
@@ -169,12 +173,29 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     })
 }
 
+/// How the summary heuristic reads a summary's counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DelegationSummaryReading {
+    /// As before the clause rule: one clause, any positive number near a
+    /// finding word counts. It decides whether preamble findings are recovered,
+    /// so their recovery is unchanged.
+    AsBefore,
+    /// Clause by clause, step labels excluded: it decides only whether the
+    /// non-actionable inconsistency note is added.
+    ForNote,
+}
+
 /// Splits a summary into lowercase ASCII-alphanumeric tokens, each tagged with
-/// the clause it belongs to. Clauses end at `, ; . : ! ? ( )` and newlines, so
+/// the clause it belongs to. Read `ForNote`, clauses end at `, ; . ! ?`, so
 /// "Criterion 2: pass. The regression test" puts the 2 and the noun in
 /// different clauses, and "3906 tests passed, 0 failures" keeps the tally
-/// apart from "failures". A hyphen joins words ("fail-open", "High-severity").
-fn delegation_result_summary_tokens(summary: &str) -> (Vec<String>, Vec<usize>) {
+/// apart from "failures", while "Issues found: 2", "Found 2 (High severity)"
+/// and a summary wrapped across lines keep their count. Read `AsBefore`, the
+/// whole summary is one clause. Any other character only separates tokens.
+fn delegation_result_summary_tokens(
+    summary: &str,
+    reading: DelegationSummaryReading,
+) -> (Vec<String>, Vec<usize>) {
     let mut tokens = Vec::new();
     let mut clauses = Vec::new();
     let mut clause = 0;
@@ -188,10 +209,9 @@ fn delegation_result_summary_tokens(summary: &str) -> (Vec<String>, Vec<usize>) 
             tokens.push(std::mem::take(&mut current));
             clauses.push(clause);
         }
-        if matches!(
-            character,
-            ',' | ';' | '.' | ':' | '!' | '?' | '(' | ')' | '\n'
-        ) {
+        if reading == DelegationSummaryReading::ForNote
+            && matches!(character, ',' | ';' | '.' | '!' | '?')
+        {
             clause += 1;
         }
     }
@@ -202,10 +222,13 @@ fn delegation_result_summary_tokens(summary: &str) -> (Vec<String>, Vec<usize>) 
     (tokens, clauses)
 }
 
-fn delegation_result_summary_reports_findings(summary: &str) -> bool {
-    let (owned_tokens, clauses) = delegation_result_summary_tokens(summary);
+fn delegation_result_summary_reports_findings(
+    summary: &str,
+    reading: DelegationSummaryReading,
+) -> bool {
+    let (owned_tokens, clauses) = delegation_result_summary_tokens(summary, reading);
     let tokens = owned_tokens.iter().map(String::as_str).collect::<Vec<_>>();
-    if delegation_result_summary_reported_severity(&tokens, &clauses).is_some() {
+    if delegation_result_summary_reported_severity(&tokens, &clauses, reading).is_some() {
         return true;
     }
 
@@ -259,7 +282,7 @@ fn delegation_result_summary_reports_findings(summary: &str) -> bool {
         (context_start..context_end)
             .filter(|position| *position != index)
             .any(|position| {
-                delegation_result_token_counts_findings(&tokens, &clauses, position, index)
+                delegation_result_token_counts_findings(&tokens, &clauses, position, index, reading)
             })
             || before.iter().any(|token| {
                 matches!(
@@ -273,6 +296,7 @@ fn delegation_result_summary_reports_findings(summary: &str) -> bool {
 fn delegation_result_summary_reported_severity(
     tokens: &[&str],
     clauses: &[usize],
+    reading: DelegationSummaryReading,
 ) -> Option<&'static str> {
     tokens
         .iter()
@@ -297,7 +321,13 @@ fn delegation_result_summary_reported_severity(
             let count_start = severity_index.saturating_sub(4);
             let count_end = (severity_index + 5).min(tokens.len());
             if !(count_start..count_end).any(|position| {
-                delegation_result_token_counts_findings(tokens, clauses, position, severity_index)
+                delegation_result_token_counts_findings(
+                    tokens,
+                    clauses,
+                    position,
+                    severity_index,
+                    reading,
+                )
             }) {
                 return None;
             }
@@ -396,40 +426,53 @@ fn delegation_result_token_is_finding_noun(token: &str) -> bool {
     )
 }
 
+/// The most characters of the summary the inconsistency note repeats.
+const DELEGATION_CONTRADICTION_NOTE_SUMMARY_CHARS: usize = 300;
+
 /// The non-actionable note for a packet whose Findings section says None while
 /// its summary appears to report findings. It names any severity the summary
-/// declares, but records no finding.
+/// declares and repeats the start of the summary, but records no finding.
 fn delegation_result_summary_contradiction_note(summary: &str) -> String {
-    let (owned_tokens, clauses) = delegation_result_summary_tokens(summary);
+    let reading = DelegationSummaryReading::ForNote;
+    let (owned_tokens, clauses) = delegation_result_summary_tokens(summary, reading);
     let tokens = owned_tokens.iter().map(String::as_str).collect::<Vec<_>>();
-    let declared = delegation_result_summary_reported_severity(&tokens, &clauses)
+    let declared = delegation_result_summary_reported_severity(&tokens, &clauses, reading)
         .map(|severity| format!(" (declared severity: {severity})"))
         .unwrap_or_default();
+    let compact = compact_delegation_result_summary(summary);
+    let excerpt = match compact.char_indices().nth(DELEGATION_CONTRADICTION_NOTE_SUMMARY_CHARS) {
+        Some((cut, _)) => format!("{}…", &compact[..cut]),
+        None => compact,
+    };
     format!(
-        "Inconsistent result packet: the summary appears to report findings{declared}, but the Findings section says None, so no finding was recorded from the summary. Read the full output. Summary: {}",
-        compact_delegation_result_summary(summary)
+        "Inconsistent result packet: the summary appears to report findings{declared}, but the Findings section says None, so no finding was recorded from the summary. Read the full output. Summary: {excerpt}"
     )
 }
 
 /// Whether the token at `position` is a positive number that counts the
-/// finding noun or severity word at `anchor`. The number must sit in the same
-/// clause as the anchor, so a result tally in its own clause ("3906 tests
-/// passed, 0 failures") or an evaluator's "Criterion 2: pass." before "The
-/// regression test" is not read as findings, while "one ignored security
-/// issue" and "one fail-open issue" still are. A number that labels a step
-/// ("Step 3", "line 308", including the second bound of "lines 10-20") counts
-/// something else.
+/// finding noun or severity word at `anchor`. Read `AsBefore`, any positive
+/// number does, as before the clause rule. Read `ForNote`, the number must sit
+/// in the same clause as the anchor, so a result tally in its own clause
+/// ("3906 tests passed, 0 failures") or an evaluator's "Criterion 2: pass."
+/// before "The regression test" is not read as findings, while "one ignored
+/// security issue" and "Issues found: 2" still are; and a number that labels a
+/// step ("Step 3", "line 308", including the second bound of "lines 10-20")
+/// counts something else.
 fn delegation_result_token_counts_findings(
     tokens: &[&str],
     clauses: &[usize],
     position: usize,
     anchor: usize,
+    reading: DelegationSummaryReading,
 ) -> bool {
     if !tokens
         .get(position)
         .is_some_and(|token| delegation_result_token_is_positive_count(token))
     {
         return false;
+    }
+    if reading == DelegationSummaryReading::AsBefore {
+        return true;
     }
     if clauses.get(position) != clauses.get(anchor) {
         return false;
