@@ -254,6 +254,7 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             let adopt = cause != ClaudeUnownedCause::Unassigned
+                && record.runtime_projection_allowed()
                 && !record.runtime_stop_in_progress
                 && matches!(
                     record.session.status,

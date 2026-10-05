@@ -1684,6 +1684,112 @@ fn a_silent_runtime_exit_reports_an_unknown_observation() {
     assert_eq!(observation["outcome"], "unknown");
 }
 
+#[cfg(windows)]
+#[test]
+fn delegation_process_cleanup_clean_root_failure_preserves_unknown_checkpoint() {
+    let mut turn = start_mediated_turn("dedicated-clean-root", ChildWorkspace::ReadOnly, ControlBinding::Claimed);
+    turn.state.agent_runtime_spawning_enabled = true;
+    let owner = super::delegation_process_cleanup::ProductionWorkerTree::spawn(
+        &turn.state, &turn.child_id, &turn.child_workdir, false);
+    owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+    owner.exit_root();
+    let (_, observation) = turn.observation();
+    assert_eq!(observation["outcome"], "unknown", "cleanup failure cannot invent provider failure");
+    assert_eq!(turn.checkpoints().len(), 1);
+    let token = {
+        let inner = turn.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&turn.child_id).unwrap()];
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        record.runtime.runtime_token().unwrap()
+    };
+    turn.state.handle_runtime_exit_if_matches(&turn.child_id, &token, Some("cleanup-only retry notice")).unwrap();
+    assert_eq!(turn.checkpoints().len(), 1, "a cleanup-only callback owns no new terminal event");
+    turn.state.stop_session(&turn.child_id).unwrap();
+    assert!(owner.tree.is_confirmed());
+    assert_eq!(turn.observation().1["outcome"], "unknown");
+}
+
+#[cfg(windows)]
+#[test]
+fn delegation_process_cleanup_writer_failure_preserves_failed_checkpoint() {
+    let mut turn = start_mediated_turn("dedicated-provider-failure", ChildWorkspace::ReadOnly, ControlBinding::Claimed);
+    turn.state.agent_runtime_spawning_enabled = true;
+    let owner = super::delegation_process_cleanup::ProductionWorkerTree::spawn(
+        &turn.state, &turn.child_id, &turn.child_workdir, true);
+    owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+    owner.fail_initialize();
+    assert_eq!(turn.observation().1["outcome"], "failed", "actual provider communication failure remains authoritative");
+    owner.exit_root();
+    assert_eq!(turn.observation().1["outcome"], "failed", "clean root/confirmed cleanup cannot rewrite failure");
+    assert_eq!(turn.checkpoints().len(), 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn delegation_process_cleanup_round2_provider_failure_claims_checkpoint_before_pipe_drain() {
+    let mut turn = start_mediated_turn("dedicated-provider-first-successful-cleanup", ChildWorkspace::ReadOnly, ControlBinding::Claimed);
+    turn.state.agent_runtime_spawning_enabled = true;
+    let owner = super::delegation_process_cleanup::ProductionWorkerTree::spawn(
+        &turn.state, &turn.child_id, &turn.child_workdir, true);
+    owner.fail_initialize();
+    owner.await_exit();
+    assert!(owner.tree.is_confirmed());
+    assert_eq!(turn.observation().1["outcome"], "failed",
+        "first actual provider failure must checkpoint before terminating the root wakes its waiter");
+    assert_eq!(turn.checkpoints().len(), 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn delegation_process_cleanup_completed_checkpoint_survives_cleanup_failure() {
+    let mut turn = start_mediated_turn("dedicated-completed-checkpoint", ChildWorkspace::ReadOnly, ControlBinding::Claimed);
+    turn.state.agent_runtime_spawning_enabled = true;
+    let owner = super::delegation_process_cleanup::ProductionWorkerTree::spawn(
+        &turn.state, &turn.child_id, &turn.child_workdir, false);
+    let token = {
+        let inner = turn.state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&turn.child_id).unwrap()].runtime.runtime_token().unwrap()
+    };
+    turn.state.checkpoint_engram_turn_off_lock(&turn.child_id, EngramCheckpointPurpose::TurnTerminal,
+        Some(&token), None, EngramNextIntent::Wait, Some(EngramExecutionOutcome::Succeeded), None);
+    assert_eq!(turn.observation().1["outcome"], "succeeded");
+    owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+    owner.exit_root();
+    assert_eq!(turn.checkpoints().len(), 1, "an already closed grant gets no second terminal event");
+    assert_eq!(turn.observation().1["outcome"], "succeeded");
+    turn.state.stop_session(&turn.child_id).unwrap();
+    assert!(owner.tree.is_confirmed());
+}
+
+#[cfg(windows)]
+#[test]
+fn delegation_process_cleanup_uncertain_checkpoint_survives_duplicate_exit() {
+    let mut turn = start_mediated_turn_with_wait_deadline(
+        "dedicated-uncertain-checkpoint", ChildWorkspace::ReadOnly, ControlBinding::Claimed);
+    turn.state.agent_runtime_spawning_enabled = true;
+    let owner = super::delegation_process_cleanup::ProductionWorkerTree::spawn(
+        &turn.state, &turn.child_id, &turn.child_workdir, false);
+    owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+    owner.exit_root();
+    let first = turn.checkpoints();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0]["observations"][0]["outcome"], "unknown");
+    let token = {
+        let inner = turn.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&turn.child_id).unwrap()];
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(turn.grant_id.as_str()));
+        record.runtime.runtime_token().unwrap()
+    };
+    turn.state.handle_runtime_exit_if_matches(&turn.child_id, &token, Some("cleanup-only notice")).unwrap();
+    assert_eq!(turn.checkpoints().len(), 1);
+    turn.state.stop_session(&turn.child_id).unwrap();
+    let retried = turn.checkpoints();
+    assert_eq!(retried.len(), 2, "Stop retries the original uncertain checkpoint owner");
+    assert_eq!(retried[1]["observations"], first[0]["observations"], "retry cannot substitute a new report");
+    assert!(owner.tree.is_confirmed());
+}
+
 #[test]
 fn a_turn_marked_in_error_reports_a_failed_observation() {
     let turn = start_mediated_turn(
@@ -1702,6 +1808,37 @@ fn a_turn_marked_in_error_reports_a_failed_observation() {
 
     let (_, observation) = turn.observation();
     assert_eq!(observation["outcome"], "failed");
+}
+
+#[cfg(windows)]
+#[test]
+fn delegation_process_cleanup_round2_acp_drain_preserves_root_checkpoint() {
+    let mut turn = start_mediated_turn("dedicated-root-checkpoint-race", ChildWorkspace::ReadOnly, ControlBinding::Claimed);
+    turn.state.agent_runtime_spawning_enabled = true;
+    let (claimed_tx, claimed_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    TEST_DEDICATED_EXIT_GATE.with(|slot| *slot.borrow_mut() = Some(TestStopFenceGate { claimed_tx, release_rx }));
+    let owner = super::delegation_process_cleanup::ProductionWorkerTree::spawn(
+        &turn.state, &turn.child_id, &turn.child_workdir, true);
+    // Hold the actual reader's pending-call drain until the exact job proof is
+    // Confirmed. The real initialize writer then competes with the root waiter.
+    let pending = owner.pending.as_ref().unwrap().lock().unwrap();
+    owner.release_root();
+    phase_sync::receive(&claimed_rx, "production root waiter paused before cleanup");
+    owner.tree.terminate_attempt("Kimi", |_| Ok(()), false).unwrap();
+    assert!(owner.tree.is_confirmed());
+    drop(pending);
+    owner.wait_for_writer();
+    let token_survived_drain = {
+        let inner = turn.state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&turn.child_id).unwrap()].runtime.runtime_token().is_some()
+    };
+    release_tx.send(()).unwrap();
+    owner.await_exit();
+    assert!(token_survived_drain, "cleanup-drained writer must not erase the root waiter's checkpoint token");
+    let checkpoints = turn.checkpoints();
+    assert_eq!(checkpoints.len(), 1, "the root exit owns exactly one terminal checkpoint");
+    assert_eq!(turn.observation().1["outcome"], "unknown", "a clean root exit cannot become a provider failure from pipe cleanup");
 }
 
 #[test]

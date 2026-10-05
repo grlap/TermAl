@@ -448,6 +448,12 @@ impl AppState {
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
         }
+        if record.dedicated_predecessor_pending() {
+            return Err(ApiError::conflict("previous runtime cleanup remains pending"));
+        }
+        if let Some(detail) = record.runtime.dedicated_cleanup_failure() {
+            return Err(ApiError::conflict(format!("{detail}; Stop or Delete must finish cleanup before a new turn")));
+        }
         if let Some(EngramPendingDispatch {
             evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
             ..
@@ -548,7 +554,7 @@ impl AppState {
             Agent::Claude => {
                 if record.runtime_reset_required {
                     if let SessionRuntime::Claude(handle) = &record.runtime {
-                        handle.kill().map_err(|err| {
+                        handle.kill_for_locked_reset().map_err(|err| {
                             ApiError::internal(format!(
                                 "failed to restart Claude session runtime: {err:#}"
                             ))
@@ -608,6 +614,7 @@ impl AppState {
                             ))
                         })?;
                         record.runtime = SessionRuntime::Claude(handle.clone());
+                        record.register_dedicated_runtime();
                         record.engram_mcp_installed = engram_mcp.map(|config| config.installed);
                         handle
                     }
@@ -725,7 +732,7 @@ impl AppState {
 
                 if record.runtime_reset_required {
                     if let SessionRuntime::Acp(handle) = &record.runtime {
-                        handle.kill().map_err(|err| {
+                        handle.kill_for_locked_reset().map_err(|err| {
                             ApiError::internal(format!(
                                 "failed to restart {} session runtime: {err:#}",
                                 agent.name()
@@ -776,6 +783,7 @@ impl AppState {
                                 ))
                             })?;
                         record.runtime = SessionRuntime::Acp(handle.clone());
+                        record.register_dedicated_runtime();
                         record.engram_mcp_installed =
                             engram_mcp.as_ref().map(|config| config.installed.clone());
                         handle
@@ -1396,6 +1404,7 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
+        self.prepare_dedicated_runtime_reset_off_lock(session_id, false)?;
         // An explicit Send/Resume bypass is permission for the queue head
         // that existed when this drain began, not for a successor exposed by
         // cancellation while its authorization was off-lock. A retried
@@ -1911,6 +1920,8 @@ impl AppState {
             }
         }
         self.prepare_codex_child_followup(session_id)?;
+        self.prepare_dedicated_runtime_reset_off_lock(session_id, false)
+            .map_err(|error| ApiError::conflict(format!("failed preparing dedicated runtime reset: {error:#}")))?;
         if request.source_mailbox.is_none() {
             if let Err(err) =
                 self.reconcile_never_woken_mailbox_notifications_for_session(session_id)

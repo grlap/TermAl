@@ -145,6 +145,7 @@ fn engram_bind_retry_head_matches(record: &SessionRecord, proof: &EngramBindRetr
 fn engram_bind_retry_releases(record: &SessionRecord, authority: Option<&str>) -> bool {
     record.engram.bind_retry.as_ref().is_some_and(|retry| {
         retry.acknowledged
+            && !record.dedicated_cleanup_holds_admission()
             && record.engram.abort_retry_acknowledged
             && authority == Some(retry.proof.authority.as_str())
             && engram_bind_retry_head_matches(record, &retry.proof)
@@ -576,6 +577,9 @@ fn engram_bind_retry_step(
     let Some(retry) = record.engram.bind_retry.clone() else {
         return EngramAbortRetryStep::Wait;
     };
+    if record.dedicated_cleanup_holds_admission() {
+        return EngramAbortRetryStep::Wait;
+    }
     if engram_retry_attempt_in_flight(record) {
         return EngramAbortRetryStep::Wait;
     }

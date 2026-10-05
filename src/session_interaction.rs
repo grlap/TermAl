@@ -494,6 +494,9 @@ fn codex_app_request_preview_text(agent_name: &str, state: InteractionRequestSta
 
 /// Syncs session interaction state.
 fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: String) {
+    if !record.runtime_projection_allowed() {
+        return;
+    }
     if let Some(preview) = latest_pending_interaction_preview(record) {
         record.session.status = SessionStatus::Approval;
         record.session.preview = preview;

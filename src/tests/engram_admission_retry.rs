@@ -9,6 +9,246 @@
 // dispatch tests whose fixtures it uses.
 use super::*;
 
+#[cfg(windows)]
+fn dedicated_parked_fixture(acp: bool) -> (AppState, String, Arc<ScriptedEngramControlTransport>, crate::tests::delegation_process_cleanup::ProductionWorkerTree) {
+    let (mut state, session, _receiver, transport) = root_fixture([bind_reply("retry-token"), deadline_reply()]);
+    state.agent_runtime_spawning_enabled = true;
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].session.agent = if acp { Agent::Kimi } else { Agent::Claude };
+        inner.sessions[index].session.model = inner.sessions[index].session.agent.default_model().to_owned();
+    }
+    let cwd = state.test_temp_root.as_ref().unwrap().path().join("dedicated-producer");
+    fs::create_dir_all(&cwd).unwrap();
+    let owner = crate::tests::delegation_process_cleanup::ProductionWorkerTree::spawn(&state, &session, &cwd, acp);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+    deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).expect("unknown evaluate parks before provider delivery");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].session.status = SessionStatus::Idle;
+        let authority = AppState::engram_binding_target_for_session_shape_locked(&inner, &session, true)
+            .unwrap().map(|target| engram_abort_authority(&target)).unwrap();
+        assert_eq!(inner.sessions[index].engram.admission_retry.as_ref().unwrap().authority, authority);
+    }
+    (state, session, transport, owner)
+}
+
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_model_reset_keeps_parked_retry() {
+    let (state, session, transport, owner) = dedicated_parked_fixture(false);
+    tick_at(&state, &session, chrono::Utc::now());
+    let before = admission_retry(&state, &session).unwrap();
+    let requests = transport.requests().len();
+    let (claimed_tx, claimed_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    *owner.tree.cleanup_gate.lock().unwrap() = Some(TestStopFenceGate { claimed_tx, release_rx });
+    let worker_state = state.clone();
+    let worker_session = session.clone();
+    let worker = std::thread::spawn(move || worker_state.prepare_dedicated_runtime_reset_off_lock(&worker_session, true));
+    crate::tests::phase_sync::receive(&claimed_rx, "model refresh owns its reset fence off lock");
+    assert!(state.inner.inner.try_lock().is_ok());
+    tick_at(&state, &session, due_time(&before) + chrono::Duration::milliseconds(1));
+    let during = admission_retry(&state, &session);
+    let during_preview = with_record(&state, &session, |record| record.session.preview.clone());
+    release_tx.send(()).unwrap();
+    let reset = worker.join().unwrap();
+    owner.await_exit();
+    let after = admission_retry(&state, &session);
+    assert!(owner.tree.is_confirmed());
+    drop(owner);
+    reset.unwrap();
+    assert_eq!(during, Some(before.clone()), "a temporary dedicated reset cannot drop or charge the parked retry");
+    assert_eq!(after, Some(before), "successful reset preserves the exact retry");
+    assert!(during_preview.starts_with(ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX));
+    assert_eq!(transport.requests().len(), requests, "no admission runs while reset owns cleanup");
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, PartialEq)]
+enum DedicatedStopCase { WaitingIntent, WaitingNoIntent, Ordinary, SavedBegin, ActiveGrant }
+
+#[cfg(windows)]
+fn dedicated_rework_stop_case(acp: bool, case: DedicatedStopCase) {
+    let (state, session, transport, owner) = dedicated_parked_fixture(acp);
+    let no_intent = matches!(case, DedicatedStopCase::WaitingNoIntent | DedicatedStopCase::Ordinary);
+    let retires = matches!(case, DedicatedStopCase::Ordinary | DedicatedStopCase::SavedBegin | DedicatedStopCase::ActiveGrant);
+    let parked_prompt_id = with_record(&state, &session, |record| record.queued_prompts.front().unwrap().pending_prompt.id.clone());
+    if case != DedicatedStopCase::Ordinary {
+        owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+        owner.exit_root();
+        assert!(with_record(&state, &session, |record| record.runtime.dedicated_cleanup_failure().is_some()));
+    }
+    assert!(admission_retry(&state, &session).is_some());
+    if no_intent {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let head = inner.sessions[index].queued_prompts.front_mut().unwrap();
+        assert!(head.promoted_message_index.is_some(), "the parked production head remains promoted");
+        head.engram_evaluate = None;
+        head.engram_bind = None;
+    }
+    if retires {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let record = &mut inner.sessions[index];
+        record.engram.admission_retry = None;
+        record.queued_prompts.front_mut().unwrap().engram_interrupted = true;
+        if case == DedicatedStopCase::Ordinary {
+            record.session.status = SessionStatus::Active;
+        } else {
+            // A saved begin receipt must still retire through the public Stop.
+            record.queued_prompts.front_mut().unwrap().engram_evaluate.as_mut().unwrap().begun_grant_id = Some("saved-begin".to_owned());
+            if case == DedicatedStopCase::ActiveGrant {
+                record.engram.active_grant_id = Some("saved-begin".to_owned());
+                transport.responses.lock().unwrap().push_back(checkpoint_reply("saved-begin"));
+            }
+        }
+    }
+    state.request_stop_session(&session).unwrap();
+    let had_claim = with_record(&state, &session, |record| record.runtime_stop_in_progress || matches!(record.runtime, SessionRuntime::None));
+    if had_claim {
+        let guard = crate::tests::phase_sync::PollGuard::new();
+        while !with_record(&state, &session, |record| matches!(record.runtime, SessionRuntime::None)) {
+            guard.wait("public Stop disposes exact dedicated cleanup owner");
+        }
+    }
+    let confirmed = owner.tree.is_confirmed();
+    let stopped = with_record(&state, &session, |record| record.clone());
+    // RED fallback is after every observation; it cannot supply Stop's success.
+    if !confirmed {
+        let (tree, process, label) = stopped.runtime.dedicated_tree_owner().unwrap();
+        tree.terminate(&process, label).unwrap();
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].clear_runtime();
+    }
+    drop(owner);
+    assert!(had_claim && confirmed, "canceling admission must also retry the unresolved current tree");
+    assert!(matches!(stopped.runtime, SessionRuntime::None));
+    if retires {
+        assert!(stopped.queued_prompts.is_empty(), "ordinary Stop and a saved begin keep their retirement policy");
+        if case == DedicatedStopCase::SavedBegin {
+            assert_eq!(stopped.engram.uncertain_grant_id.as_deref(), Some("saved-begin"));
+            assert!(stopped.engram.rebind_required, "a saved receipt without an active grant needs status reconciliation");
+            assert!(!transport.requests().iter().any(|request| request.request["operation"] == "turn_checkpoint"));
+        } else if case == DedicatedStopCase::ActiveGrant {
+            assert!(transport.requests().iter().any(|request| request.request["operation"] == "turn_checkpoint" && request.request["grant_id"] == "saved-begin"));
+            assert!(stopped.engram.active_grant_id.is_none(), "the active grant is retired by its checkpoint");
+        }
+    } else {
+        assert!(stopped.queued_prompts.front().is_some_and(|head| head.pending_prompt.id == parked_prompt_id), "Stop must retain the never-delivered promoted parked prompt");
+        if no_intent {
+            assert!(stopped.orchestrator_auto_dispatch_blocked && stopped.queued_prompts.front().is_some_and(|head| head.engram_waiting), "the resumable parked head keeps its explicit hold");
+        }
+        assert_eq!(stopped.queued_prompts.front().unwrap().engram_interrupted, !no_intent);
+    }
+    assert!(stopped.engram.admission_retry.is_none());
+}
+
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_stop_cleans_claude_with_parked_admission() { dedicated_rework_stop_case(false, DedicatedStopCase::WaitingIntent); }
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_stop_cleans_acp_with_parked_admission() { dedicated_rework_stop_case(true, DedicatedStopCase::WaitingIntent); }
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_stop_cleans_owner_with_no_wire_intent() { dedicated_rework_stop_case(false, DedicatedStopCase::WaitingNoIntent); }
+
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_ordinary_stop_still_retires_promoted_head() { dedicated_rework_stop_case(false, DedicatedStopCase::Ordinary); }
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_cleanup_stop_still_retires_saved_begin() { dedicated_rework_stop_case(false, DedicatedStopCase::SavedBegin); }
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_cleanup_stop_checkpoints_active_grant() { dedicated_rework_stop_case(false, DedicatedStopCase::ActiveGrant); }
+
+#[cfg(windows)]
+fn dedicated_rework_retry_cleanup_case(predecessor: bool) {
+        let (state, session, transport, owner) = dedicated_parked_fixture(false);
+        tick_at(&state, &session, chrono::Utc::now());
+        owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+        owner.exit_root();
+        let before = admission_retry(&state, &session).unwrap();
+        let requests = transport.requests().len();
+        let preview = with_record(&state, &session, |record| record.session.preview.clone());
+        let (admission_step, bind_step, mut bind_record) = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
+            if predecessor { record.runtime = SessionRuntime::None; }
+            let now = due_time(&before) + chrono::Duration::milliseconds(1);
+            assert!(!engram_admission_retry_releases(record, Some(&before.authority)), "cleanup cannot release an admission captured by an earlier tick");
+            let admission_step = engram_admission_retry_step(record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
+            let mut bind_record = record.clone();
+            bind_record.engram.admission_retry = None;
+            bind_record.queued_prompts.front_mut().unwrap().engram_evaluate = None;
+            let head = bind_record.queued_prompts.front().unwrap();
+            bind_record.engram.bind_retry_runtime = bind_record.runtime.runtime_token();
+            bind_record.engram.bind_retry = Some(EngramBindRetry {
+                proof: EngramBindRetryProof { prompt_id: before.prompt_id.clone(), fingerprint: before.fingerprint.clone(),
+                    authority: before.authority.clone(), dispatch_generation: record.engram.dispatch_generation,
+                    generation_before_promotion: record.engram.dispatch_generation, promoted_turn_generation: record.active_turn_generation,
+                    promotion_index: None, runtime_before_promotion: None, previous_attempts: 0, retry_eligible: true,
+                    phase: engram_bind_retry_phase(head) },
+                attempts: 1, due_at: before.due_at.clone(), acknowledged: true, held_since: None,
+            });
+            bind_record.engram.abort_retry_acknowledged = true;
+            let bind_step = engram_bind_retry_step(&mut bind_record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
+            (admission_step, bind_step, bind_record)
+        };
+        tick_at(&state, &session, due_time(&before) + chrono::Duration::milliseconds(1));
+        let after_tick = admission_retry(&state, &session);
+        if predecessor { owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst); }
+        let drain = state.dispatch_next_queued_turn(&session, false);
+        let held_requests = transport.requests().len();
+        let held_preview = with_record(&state, &session, |record| record.session.preview.clone());
+        // Always finish the native fixture before assertions, including RED.
+        let retained = with_record(&state, &session, |record| record.retained_dedicated_owners[0].clone());
+        retained.tree.terminate(&retained.process, retained.label).unwrap();
+        let mut confirmed_record = with_record(&state, &session, |record| record.clone());
+        let now = due_time(&before) + chrono::Duration::milliseconds(1);
+        let confirmed_admission = engram_admission_retry_step(&mut confirmed_record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
+        let confirmed_bind = engram_bind_retry_step(&mut bind_record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].clear_runtime();
+        }
+        drop(owner);
+        assert_eq!(after_tick, Some(before.clone()), "a due production tick retains the held retry");
+        if predecessor {
+            assert!(drain.is_err(), "the failed predecessor cleanup refuses the drain");
+        } else {
+            assert!(matches!(drain, Ok(None)), "the held current owner returns no dispatch");
+        }
+        assert_eq!(held_requests, requests, "tick and drain must issue no external admission");
+        assert_eq!(held_preview, preview, "tick and drain preserve the cleanup diagnosis");
+        assert_eq!(admission_step, EngramAbortRetryStep::Wait, "cleanup hold must prevent external replay, predecessor={predecessor}");
+        assert_eq!(bind_step, EngramAbortRetryStep::Wait, "bind retry must wait for cleanup, predecessor={predecessor}");
+        assert_eq!(confirmed_admission, EngramAbortRetryStep::Due, "confirmed cleanup releases the due admission");
+        if !predecessor { assert_eq!(confirmed_bind, EngramAbortRetryStep::Due, "confirmed current owner releases the due bind retry"); }
+        assert_eq!(admission_retry(&state, &session), Some(before));
+        assert_eq!(with_record(&state, &session, |record| record.session.preview.clone()), preview);
+        assert_eq!(transport.requests().len(), requests);
+}
+
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_retry_waits_for_current_cleanup() { dedicated_rework_retry_cleanup_case(false); }
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_retry_waits_for_predecessor_cleanup() { dedicated_rework_retry_cleanup_case(true); }
+
 fn deadline_reply() -> ScriptedEngramControlResponse {
     ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
         "evaluate missed its deadline",

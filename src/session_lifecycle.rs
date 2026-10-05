@@ -528,13 +528,17 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
-        if self.stop_waiting_engram_admission(session_id)? {
-            self.sync_delegation_attempt_for_child_session(session_id);
-            return Ok(self.snapshot());
-        }
+        self.retry_retained_dedicated_cleanup(session_id).map_err(|error| ApiError::conflict(format!("{error:#}")))?;
         // A prompt waiting for its automatic retry after a withheld delivery
         // (`engram_abort_retry.rs`): Stop cancels the retry and keeps it.
-        if self.stop_engram_abort_retry(session_id)? {
+        let admission_stopped = self.stop_waiting_engram_admission(session_id)?
+            || self.stop_engram_abort_retry(session_id)?;
+        let cleanup_pending = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).is_some_and(|index|
+                inner.sessions[index].runtime.dedicated_cleanup_failure().is_some())
+        };
+        if admission_stopped && !cleanup_pending {
             self.sync_delegation_attempt_for_child_session(session_id);
             return Ok(self.snapshot());
         }
@@ -592,12 +596,20 @@ impl AppState {
         if !matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
-        ) {
+        ) && !(inner.sessions[index].session.status == SessionStatus::Error
+            && inner.sessions[index].runtime.dedicated_cleanup_failure().is_some()) {
             return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
         }
 
         let original = inner.sessions[index].clone();
-        let admission_owner = EngramQueuedAdmissionOwner::capture_promoted(&original);
+        let admission_owner = EngramQueuedAdmissionOwner::capture_promoted(&original).filter(|_| {
+            // Only cleanup recovery preserves an unbegun parked admission.
+            original.session.status != SessionStatus::Error
+                || original.runtime.dedicated_cleanup_failure().is_none()
+                || original.queued_prompts.front().is_none_or(|head| !(head.engram_interrupted || head.engram_waiting)
+                || head.engram_evaluate.as_ref().is_some_and(|intent| intent.begun_grant_id.is_some()))
+                || original.engram.active_grant_id.is_some() || original.engram.uncertain_grant_id.is_some()
+        });
         let runtime_token = inner.sessions[index].runtime.runtime_token();
         let owner_generation = {
             let record = inner
@@ -833,7 +845,8 @@ impl AppState {
                 if !matches!(
                     record.session.status,
                     SessionStatus::Active | SessionStatus::Approval
-                ) {
+                ) && !(record.session.status == SessionStatus::Error
+                    && record.runtime.dedicated_cleanup_failure().is_some()) {
                     return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
                 }
             }

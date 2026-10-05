@@ -637,6 +637,8 @@ impl PersistedSessionRecord {
             runtime: SessionRuntime::None,
             engram_mcp_installed: None,
             runtime_reset_required: false,
+            #[cfg(windows)]
+            retained_dedicated_owners: Vec::new(),
             engram_mcp_runtime_quarantined: false,
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
             engram: EngramSessionState {

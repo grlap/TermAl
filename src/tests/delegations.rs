@@ -22,6 +22,8 @@ fn attach_parked_claude_runtime_to_delegation_child(
     child.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
         runtime_id: format!("test-delegation-child-runtime-{child_session_id}"),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: owner.process.clone(),
     });
     child.session.status = SessionStatus::Active;

@@ -78,13 +78,13 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                if let Some(next_preview) = message.preview_text() {
+                if let Some(next_preview) = message.preview_text().filter(|_| record.runtime_projection_allowed()) {
                     record.session.preview = next_preview;
                 }
                 // Only a request that is actually waiting parks the session
                 // in Approval; a card recorded already resolved (e.g. an
                 // unattended AskUserQuestion TermAl self-resolved) must not.
-                if message.is_pending_interaction_request() {
+                if message.is_pending_interaction_request() && record.runtime_projection_allowed() {
                     record.session.status = SessionStatus::Approval;
                 }
                 let message_index = push_message_on_record(record, message.clone());
@@ -283,6 +283,7 @@ impl AppState {
                     message_index_on_record(record, message_id).ok_or_else(|| {
                         anyhow!("session `{session_id}` message `{message_id}` not found")
                     })?;
+                let projection_allowed = record.runtime_projection_allowed();
                 let session = &mut record.session;
 
                 let Some(message) = session.messages.get_mut(message_index) else {
@@ -295,7 +296,7 @@ impl AppState {
                         let text_start_byte = text.len();
                         text.push_str(delta);
                         let trimmed = text.trim();
-                        if !trimmed.is_empty() {
+                        if !trimmed.is_empty() && projection_allowed {
                             preview = Some(make_preview(trimmed));
                         }
                         text_start_byte
@@ -442,6 +443,7 @@ impl AppState {
                     message_index_on_record(record, message_id).ok_or_else(|| {
                         anyhow!("session `{session_id}` message `{message_id}` not found")
                     })?;
+                let projection_allowed = record.runtime_projection_allowed();
                 let session = &mut record.session;
 
                 let Some(message) = session.messages.get_mut(message_index) else {
@@ -458,7 +460,7 @@ impl AppState {
                         current_text.clear();
                         current_text.push_str(text);
                         let trimmed = current_text.trim();
-                        if !trimmed.is_empty() {
+                        if !trimmed.is_empty() && projection_allowed {
                             preview = Some(make_preview(trimmed));
                         }
                     }
@@ -621,6 +623,7 @@ impl AppState {
                         }
                     }
                 };
+                let preview = record.runtime_preview(preview);
                 record.session.preview = preview.clone();
                 if record.session.status == SessionStatus::Active {
                     let activity =
@@ -784,7 +787,7 @@ impl AppState {
                     (message_index, Some(message))
                 };
 
-                let preview = parallel_agents_preview_text(&agents);
+                let preview = record.runtime_preview(parallel_agents_preview_text(&agents));
                 record.session.preview = preview.clone();
                 (
                     global_message_index(record, message_index),

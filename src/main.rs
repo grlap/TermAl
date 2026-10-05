@@ -818,6 +818,7 @@ include!("test_runs_api.rs");
 include!("test_run_cards.rs");
 include!("test_run_waits.rs");
 include!("session_runtime.rs");
+include!("runtime_process_tree.rs");
 include!("session_interaction.rs");
 include!("engram_queued_admission.rs");
 include!("engram_abort_retry.rs");

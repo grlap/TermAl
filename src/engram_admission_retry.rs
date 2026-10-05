@@ -237,6 +237,9 @@ fn engram_admission_retry_step(
     let Some(retry) = record.engram.admission_retry.clone() else {
         return EngramAbortRetryStep::Wait;
     };
+    if record.dedicated_cleanup_holds_admission() {
+        return EngramAbortRetryStep::Wait;
+    }
     // Its own replay, or another admission of the head, is running: whatever
     // that ends in decides (a park schedules the next attempt).
     if engram_retry_attempt_in_flight(record)
@@ -286,6 +289,7 @@ fn engram_admission_retry_step(
 fn engram_admission_retry_releases(record: &SessionRecord, authority: Option<&str>) -> bool {
     record.engram.admission_retry.as_ref().is_some_and(|retry| {
         retry.acknowledged
+            && !record.dedicated_cleanup_holds_admission()
             && record.engram.abort_retry_acknowledged
             && authority == Some(retry.authority.as_str())
             && !record.runtime_stop_in_progress
