@@ -2744,6 +2744,13 @@ struct EngramSessionState {
     /// durable; the runtime proof is deliberately not restored after restart.
     bind_retry: Option<EngramBindRetry>,
     bind_retry_runtime: Option<RuntimeToken>,
+    /// A parked head whose unknown admission is replayed automatically
+    /// (`engram_admission_retry.rs`). Saved with the session.
+    admission_retry: Option<EngramAdmissionRetry>,
+    /// A user Stop left the queue paused for an explicit Resume: an operator
+    /// queue pause, distinct from the pause a park sets. No automatic retry
+    /// passes it. Saved with the session; cleared when the pause is lifted.
+    operator_paused: bool,
     /// The abort record's settlement is durably acknowledged, by its fence or
     /// by being loaded from the store. In memory only.
     abort_retry_acknowledged: bool,
@@ -2833,6 +2840,8 @@ impl Default for EngramSessionState {
             abort_retry: None,
             bind_retry: None,
             bind_retry_runtime: None,
+            admission_retry: None,
+            operator_paused: false,
             abort_retry_acknowledged: false,
             abort_retry_saved: false,
             abort_retry_fence: None,
@@ -3658,11 +3667,25 @@ impl AppState {
     }
 
     fn rebind_engram_session_after_runtime_loss(&self, session_id: &str) {
-        let target = {
+        // A retry head is rebound only under the retry cap, or by its own
+        // attempt (`EngramRetryHeadPermit`); the permit lives until return.
+        let (target, _permit) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
-                .ok()
-                .flatten()
+            let permit = match self.engram_retry_head_permit_locked(&inner, session_id) {
+                EngramRetryHeadPermit::Deferred => {
+                    eprintln!(
+                        "engram> session={session_id} runtime-loss rebind deferred to the retry cap"
+                    );
+                    return;
+                }
+                permit => permit,
+            };
+            (
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    .ok()
+                    .flatten(),
+                permit,
+            )
         };
         let Some(target) = target else {
             return;
@@ -3763,6 +3786,11 @@ impl AppState {
     /// moves off-thread. This contains no Engram I/O, so the listener can begin
     /// serving immediately after the resulting state revision is queued.
     fn prepare_engram_sessions_for_boot_recovery(&self) -> Result<EngramBootRecoveryPlan> {
+        // Declared first, so dropped last: after the fences below are raised
+        // (and the lock released), on every exit, the automatic retries the
+        // boot held back may start; one due on a fenced session starts that
+        // session's recovery instead of admitting.
+        let _release_boot_hold = self.engram_retry_slots.release_boot_hold_on_drop();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let targets = Self::engram_boot_recovery_targets_locked(&inner);
         let budget = Duration::from_millis(inner.preferences.engram.boot_recovery_budget_ms);
@@ -3796,9 +3824,17 @@ impl AppState {
     #[cfg(test)]
     fn recover_engram_sessions_after_boot(&self) {
         let plan = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let targets = Self::engram_boot_recovery_targets_locked(&inner);
+            // As boot preparation leaves them: each target's readiness fence
+            // raised, which the eager claim requires. Other flags are kept.
+            for target in &targets {
+                if let Some(index) = inner.find_session_index(&target.connection.session_id) {
+                    inner.sessions[index].engram_boot_recovery_pending = true;
+                }
+            }
             EngramBootRecoveryPlan {
-                targets: Self::engram_boot_recovery_targets_locked(&inner),
+                targets,
                 budget: Duration::from_millis(inner.preferences.engram.boot_recovery_budget_ms),
             }
         };
@@ -3846,6 +3882,37 @@ impl AppState {
                     break;
                 };
                 let session_id = target.connection.session_id.clone();
+                // A head scheduled for its automatic retry
+                // (`engram_admission_retry.rs`) is reconciled only under the
+                // host-wide retry cap: its worker holds a retry slot until it
+                // finishes. With none free, the session stays fenced and its
+                // own due attempt starts the lazy recovery under the cap.
+                let retry_slot = if self.engram_session_holds_admission_retry(&session_id) {
+                    match self.engram_retry_slots.try_acquire() {
+                        Some(slot) => Some(slot),
+                        None => {
+                            eprintln!(
+                                "engram> boot-recovery session={session_id} command=target outcome=deferred_to_retry_cap in_flight={ENGRAM_RETRY_MAX_IN_FLIGHT}"
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
+                // One reconciliation per session: claim it under the lock the
+                // lazy recovery takes to mark itself in progress. A lazy
+                // recovery started since the fences were raised (a due retry
+                // attempt, a drain or a Resume) keeps it while it runs, and
+                // once it has finished the fence is down and nothing is owed;
+                // while this claim stands no lazy recovery starts. The claim
+                // is cleared with the fence when this recovery finishes.
+                if !self.claim_engram_boot_recovery_for_eager(&session_id) {
+                    eprintln!(
+                        "engram> boot-recovery session={session_id} command=target outcome=left_to_lazy_recovery"
+                    );
+                    continue;
+                }
                 let worker_session_id = session_id.clone();
                 let thread_name = format!("engram-recover-{session_id}");
                 let state = self.clone();
@@ -3857,6 +3924,9 @@ impl AppState {
                 match std::thread::Builder::new()
                     .name(thread_name)
                     .spawn(move || {
+                        // Released when this worker has finished, on either
+                        // completion path.
+                        let _retry_slot = retry_slot;
                         let target_started_at = std::time::Instant::now();
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             state.bind_engram_target_off_lock_traced(target)
@@ -3985,6 +4055,34 @@ impl AppState {
         }
     }
 
+    /// Claims `session_id`'s boot reconciliation for the eager recovery while
+    /// it is still owed: its readiness fence still raised and no lazy recovery
+    /// in progress. A lazy recovery that already finished lowered the fence,
+    /// so the plan's now stale target is skipped rather than bound again. Uses
+    /// the same flag the lazy recovery sets, so the two never bind the same
+    /// session at once.
+    fn claim_engram_boot_recovery_for_eager(&self, session_id: &str) -> bool {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return false;
+        };
+        let record = &mut inner.sessions[index];
+        if !record.engram_boot_recovery_pending || record.engram_boot_recovery_retry_in_progress {
+            return false;
+        }
+        record.engram_boot_recovery_retry_in_progress = true;
+        true
+    }
+
+    /// Whether `session_id` holds a parked-admission retry record, whose
+    /// boot reconciliation runs under the host-wide retry cap.
+    fn engram_session_holds_admission_retry(&self, session_id: &str) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .is_some_and(|index| inner.sessions[index].engram.admission_retry.is_some())
+    }
+
     fn finish_late_engram_restart_recovery(&self, completion: EngramBootRecoveryCompletion) {
         self.finish_engram_restart_recovery(
             &completion.session_id,
@@ -3998,6 +4096,21 @@ impl AppState {
     /// successful/degraded retry completion releases the readiness fence and
     /// re-kicks a queue activation recorded while it was raised.
     fn request_engram_boot_recovery_retry(&self, session_id: &str) {
+        self.request_engram_boot_recovery_retry_holding(session_id, None);
+    }
+
+    /// `request_engram_boot_recovery_retry` for an automatic retry attempt
+    /// (`engram_retry_schedule.rs`): the attempt's place under the host-wide
+    /// cap, `slot`, moves into the recovery it starts and is released when
+    /// that recovery finishes, so a restart's reconciliations run under the
+    /// cap too. When no recovery is started here (none is needed, or one is
+    /// already running), the slot is released on return.
+    fn request_engram_boot_recovery_retry_holding(
+        &self,
+        session_id: &str,
+        slot: Option<EngramRetrySlot>,
+    ) {
+        let mut slot = slot;
         let target = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -4013,6 +4126,21 @@ impl AppState {
                 return;
             }
             inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
+            // A head scheduled for its automatic retry
+            // (`engram_admission_retry.rs`) is reconciled only under the
+            // host-wide retry cap: a trigger holding no slot (an ordinary
+            // drain, a first use, a Resume) takes one if one is free and no
+            // deferred attempt waits for it, or leaves the recovery to that
+            // head's own due attempt, which starts it here holding its slot.
+            // Read under the same lock that would mark the recovery in
+            // progress.
+            if slot.is_none() {
+                match self.engram_retry_head_permit_locked(&inner, session_id) {
+                    EngramRetryHeadPermit::NoRecord => {}
+                    EngramRetryHeadPermit::Held(acquired) => slot = Some(acquired),
+                    EngramRetryHeadPermit::Deferred => return,
+                }
+            }
             if inner.sessions[index].engram.bind_in_progress
                 || inner.sessions[index].engram_boot_recovery_retry_in_progress
             {
@@ -4052,6 +4180,8 @@ impl AppState {
         if let Err(error) = std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
+                // Released when this recovery has finished, however it ends.
+                let _slot = slot;
                 let started_at = std::time::Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     state.bind_engram_target_off_lock_traced(target)
@@ -4062,6 +4192,8 @@ impl AppState {
                         "lazy restart recovery worker panicked",
                     ))
                 });
+                #[cfg(test)]
+                wait_at_bind_disposition_gate(&state, &retry_session_id, "lazy_boot_recovery");
                 state.finish_engram_restart_recovery(
                     &retry_session_id,
                     started_at.elapsed(),
@@ -4128,6 +4260,10 @@ impl AppState {
                 return;
             };
             if !inner.sessions[index].engram_boot_recovery_pending {
+                // The finishing recovery's claim ends with it even when the
+                // fence is already down (an eager target another recovery
+                // reconciled first); it is in memory only, so nothing to save.
+                inner.sessions[index].engram_boot_recovery_retry_in_progress = false;
                 return;
             }
             let record = inner
@@ -5876,15 +6012,16 @@ impl AppState {
                 // fenced by both status and generation and must be a no-op.
                 record.engram.dispatch_generation =
                     record.engram.dispatch_generation.saturating_add(1);
+                // A Defer returned by an automatic replay ends that schedule
+                // too (`engram_admission_retry.rs`): it is a known outcome.
+                clear_engram_admission_retry(record);
                 record.set_auto_dispatch_blocked(true);
                 record.session.status = SessionStatus::Idle;
                 if let Some(queued) = record.queued_prompts.front_mut() {
                     queued.engram_evaluate = None;
                     queued.engram_waiting = true;
                 }
-                record.session.preview =
-                    "Engram: Waiting/Unknown. Original prompt retained; resume to retry or cancel."
-                        .to_owned();
+                record.session.preview = ENGRAM_ADMISSION_HELD_PREVIEW.to_owned();
                 record.session.live_activity = None;
                 clear_active_turn_file_change_tracking(record);
                 sync_pending_prompts(record);
@@ -6400,6 +6537,19 @@ impl AppState {
                         continue;
                     }
                     let target_session_id = target.connection.session_id.clone();
+                    // A retry head is bound only under the retry cap, or by
+                    // its own attempt; deferring leaves the delegation as a
+                    // best-effort bind failure does.
+                    let _permit = match self.engram_retry_head_permit(&target_session_id) {
+                        EngramRetryHeadPermit::Deferred => {
+                            eprintln!(
+                                "engram> delegation={} session={target_session_id} bind deferred to the retry cap",
+                                delegation.id
+                            );
+                            continue;
+                        }
+                        permit => permit,
+                    };
                     if let Err(error) = self.bind_engram_target_off_lock(target) {
                         self.record_engram_transport_failure(&target_session_id, &error);
                         eprintln!(

@@ -613,6 +613,7 @@ impl AppState {
             record.session.preview = SESSION_STOPPING_MESSAGE.to_owned();
             if options.pause_automatic_resumes_on_success {
                 record.set_auto_dispatch_blocked(true);
+                record.engram.operator_paused = true;
                 // The promoted head may already have a durable Engram begin
                 // receipt while its provider callback is racing this Stop.
                 // Keep that exact owner until shutdown commits or rolls back;
@@ -1147,6 +1148,8 @@ impl AppState {
                 record.deferred_stop_callbacks.clear();
                 if suppress_automatic_resume {
                     record.set_auto_dispatch_blocked(true);
+                    // The operator's pause, marked where the latch is set.
+                    record.engram.operator_paused = true;
                     // A wait may already have completed and queued its fan-in
                     // before Stop acquired the state lock. Drop all automatic
                     // workflow continuations here; user and mailbox prompts

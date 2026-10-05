@@ -658,7 +658,12 @@ fn live_root_deadline_retains_cancelable_orchestrator_prompt() {
     let id = {
         let inner = fixture.state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
-        assert!(record.session.preview.contains("Waiting/Unknown"));
+        // Scheduled for its automatic replay (`engram_admission_retry.rs`);
+        // the prompt stays queued and cancelable.
+        assert!(record
+            .session
+            .preview
+            .starts_with("Engram: waiting for admission; retrying automatically, attempt 1"));
         let queued = record.queued_prompts.front().unwrap();
         assert_eq!(queued.pending_prompt.text, prompt);
         assert!(matches!(queued.source, QueuedPromptSource::Orchestrator));
@@ -887,6 +892,14 @@ fn live_root_lost_committed_replies_replay_exact_requests_once() {
                         .preview
                         .contains("bind deferred before delivery")
                 );
+            } else if operation == "turn_evaluate" {
+                // An unknown evaluate with nothing begun is scheduled for its
+                // automatic replay (`engram_admission_retry.rs`); an explicit
+                // Resume below may still run that replay now.
+                assert!(record.engram.bind_retry.is_none());
+                assert!(record.session.preview.starts_with(
+                    "Engram: waiting for admission; retrying automatically, attempt 1"
+                ));
             } else {
                 assert!(record.engram.bind_retry.is_none());
                 assert!(record.session.preview.contains("Waiting/Unknown"));

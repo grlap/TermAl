@@ -97,6 +97,11 @@ struct EngramBindRetry {
     attempts: u32,
     due_at: String,
     acknowledged: bool,
+    /// When the prompt was first held (RFC 3339); later attempts keep it. A
+    /// restart carries it into the parked-admission retry that replaces this
+    /// record (`engram_admission_retry.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    held_since: Option<String>,
 }
 
 fn engram_bind_retry_phase(head: &QueuedPromptRecord) -> EngramBindRetryPhase {
@@ -364,13 +369,22 @@ impl AppState {
         }
         let attempts = proof.previous_attempts.saturating_add(1);
         let now = chrono::Utc::now();
+        let held_since = record
+            .engram
+            .bind_retry
+            .as_ref()
+            .filter(|retry| retry.proof.prompt_id == proof.prompt_id)
+            .and_then(|retry| retry.held_since.clone())
+            .unwrap_or_else(|| now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
         record.engram.abort_retry = None;
+        clear_engram_admission_retry(record);
         record.engram.bind_retry = Some(EngramBindRetry {
             proof,
             attempts,
             due_at: (now + engram_abort_retry_delay(session_id, attempts))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             acknowledged: false,
+            held_since: Some(held_since),
         });
         record.engram.bind_retry_runtime = Some(runtime.clone());
         record.engram.abort_retry_acknowledged = false;
@@ -562,7 +576,7 @@ fn engram_bind_retry_step(
     let Some(retry) = record.engram.bind_retry.clone() else {
         return EngramAbortRetryStep::Wait;
     };
-    if record.engram.admission_in_progress.is_some() || record.engram.pending_dispatch.is_some() {
+    if engram_retry_attempt_in_flight(record) {
         return EngramAbortRetryStep::Wait;
     }
     // A card may finish after promotion but before its park. Only the same
@@ -612,37 +626,16 @@ fn engram_bind_retry_step(
         }
         return EngramAbortRetryStep::Dropped;
     }
-    if !record.engram.abort_retry_acknowledged {
-        let saved = if record.engram.abort_retry_saved {
-            Some(Ok(()))
-        } else {
-            record
-                .engram
-                .abort_retry_fence
-                .as_ref()
-                .map(|waiter| waiter.0.wait_until(std::time::Instant::now()))
-                .unwrap_or(Some(Err(PersistFenceError::Deadline)))
-        };
-        return match saved {
-            None => EngramAbortRetryStep::Wait,
-            Some(Err(_)) => EngramAbortRetryStep::Acknowledge,
-            Some(Ok(())) => {
-                record.engram.abort_retry_acknowledged = true;
-                record.engram.abort_retry_saved = false;
-                record.engram.abort_retry_fence = None;
-                record
-                    .engram
-                    .bind_retry
-                    .as_mut()
-                    .expect("retry exists")
-                    .acknowledged = true;
-                EngramAbortRetryStep::Acknowledged
-            }
-        };
+    if let Some(step) = engram_retry_acknowledgement_step(record, |record| {
+        record
+            .engram
+            .bind_retry
+            .as_mut()
+            .expect("retry exists")
+            .acknowledged = true;
+    }) {
+        return step;
     }
-    let due = chrono::DateTime::parse_from_rfc3339(&retry.due_at)
-        .map(|due| due.with_timezone(&chrono::Utc))
-        .unwrap_or(now);
     // Retained-bind restoration intentionally clears target backoff for
     // explicit reconciliation. The automatic scheduler must honour the live
     // bind/circuit backoff before it enters that canonical replay path.
@@ -650,7 +643,7 @@ fn engram_bind_retry_step(
         .engram
         .next_bind_retry_at
         .is_some_and(|at| at > budget_now);
-    if due > now
+    if !engram_retry_due_passed(&retry.due_at, now)
         || bind_backed_off
         || !matches!(
             record.session.status,

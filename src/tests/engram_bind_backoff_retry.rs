@@ -1348,9 +1348,16 @@ fn restarted_bind_journal_never_reconstructs_live_non_delivery_proof() {
         )
     };
     assert!(saved.engram_bind_retry.as_ref().unwrap().acknowledged);
+    let saved_attempts = saved.engram_bind_retry.as_ref().unwrap().attempts;
     let mut loaded = saved.into_record().unwrap();
     assert!(loaded.engram.bind_retry.is_none());
     assert!(loaded.engram.bind_retry_runtime.is_none());
+    // The acknowledged journal becomes the parked-admission retry of its
+    // head (`engram_admission_retry.rs`), which replays the exact retained
+    // bind through ordinary admission; no live non-delivery proof is made.
+    let rebuilt = loaded.engram.admission_retry.as_ref().expect("rebuilt retry");
+    assert!(rebuilt.acknowledged);
+    assert_eq!(rebuilt.attempts, saved_attempts);
     assert!(loaded.queued_prompts[0].engram_waiting);
     assert!(
         loaded.engram.recovered_admission,
@@ -1445,6 +1452,13 @@ fn an_unknown_evaluate_or_begin_never_becomes_a_bind_only_retry() {
         assert!(
             record.queued_prompts[0].engram_evaluate.is_some(),
             "unknown authority stays retained"
+        );
+        // A lost evaluate is the parked-admission retry's to replay with its
+        // key (`engram_admission_retry.rs`); a possibly begun grant is not.
+        assert_eq!(
+            record.engram.admission_retry.is_some(),
+            lost == "turn_evaluate",
+            "{lost}"
         );
     }
 }

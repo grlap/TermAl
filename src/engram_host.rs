@@ -205,10 +205,9 @@ impl EngramHost<'_> {
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn test_run_tick(&self) {
         self.state.poll_engram_carried_runs();
-        // A retained prompt whose delivery was withheld before handoff, and
-        // whose grant is settled, is acknowledged and admitted again here
-        // (`engram_abort_retry.rs`). Tests drive it with their own clock.
-        self.state.engram_abort_retry_tick(chrono::Utc::now());
+        // The automatic Engram retries have their own tick thread
+        // (`spawn_engram_retry_tick`), so a slow Engram never holds up
+        // carried-gate polling or the test-run index.
         self.state.schedule_engram_root_reclamation(false);
     }
 

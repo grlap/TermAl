@@ -103,7 +103,8 @@ impl AppState {
         true
     }
 
-    /// This is part of the existing host tick, not a new timer or queue drain.
+    /// This runs inside the automatic retry tick (`engram_abort_retry_tick`,
+    /// on its own thread), not on a timer or queue drain of its own.
     /// It retries accounting for the original begun grant and payload.
     fn source_observation_retry_tick(&self, now: chrono::DateTime<chrono::Utc>) {
         let (due, held_changes) = {

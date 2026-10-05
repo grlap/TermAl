@@ -54,6 +54,12 @@ fn delegation_child_hold(child: &SessionRecord) -> Option<DelegationChildHold> {
         retry.prompt_id == head.pending_prompt.id
             && retry.generation == child.engram.dispatch_generation
     });
+    // A parked head scheduled for its automatic replay
+    // (`engram_admission_retry.rs`) reports when and how often it retries.
+    let admission_for_head = child.engram.admission_retry.as_ref().filter(|retry| {
+        retry.prompt_id == head.pending_prompt.id
+            && retry.generation == child.engram.dispatch_generation
+    });
     use DelegationHoldAction::{Cancel, Resume};
     let (reason, retry_eligible, next_retry_at, actions) = if engram_abort_retry_holds_head(child)
     {
@@ -85,7 +91,7 @@ fn delegation_child_hold(child: &SessionRecord) -> Option<DelegationChildHold> {
         (
             DelegationHoldReason::AdmissionDeferred,
             true,
-            None,
+            admission_for_head.map(|retry| retry.due_at.clone()),
             vec![Resume, Cancel],
         )
     } else {
@@ -105,8 +111,13 @@ fn delegation_child_hold(child: &SessionRecord) -> Option<DelegationChildHold> {
         actions,
         detail: child.session.preview.clone(),
         prompt_id: head.pending_prompt.id.clone(),
-        attempts: abort_for_head.map_or(0, |retry| retry.attempts),
-        held_since: abort_for_head.map(|retry| retry.held_since.clone()),
+        attempts: abort_for_head
+            .map(|retry| retry.attempts)
+            .or_else(|| admission_for_head.map(|retry| retry.attempts))
+            .unwrap_or(0),
+        held_since: abort_for_head
+            .map(|retry| retry.held_since.clone())
+            .or_else(|| admission_for_head.map(|retry| retry.held_since.clone())),
     })
 }
 

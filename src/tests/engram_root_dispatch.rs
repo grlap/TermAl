@@ -19,6 +19,9 @@ mod abort_retry;
 #[path = "engram_bind_backoff_retry.rs"]
 mod bind_backoff_retry;
 
+#[path = "engram_admission_retry.rs"]
+mod admission_retry;
+
 #[path = "engram_acknowledged_mailbox_wake.rs"]
 mod acknowledged_mailbox_wake;
 
@@ -71,7 +74,12 @@ fn root_unknown_evaluate_retains_exact_prompt_and_replays_without_rebind() {
     let (prompt, generation) = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         let record = &inner.sessions[inner.find_session_index(&session).expect("root exists")];
-        assert!(record.session.preview.contains("Waiting/Unknown"));
+        // Scheduled for its automatic replay (`engram_admission_retry.rs`);
+        // an explicit Resume may still run that replay now.
+        assert!(record
+            .session
+            .preview
+            .starts_with("Engram: waiting for admission; retrying automatically, attempt 1"));
         assert!(record.orchestrator_auto_dispatch_blocked);
         assert!(
             record

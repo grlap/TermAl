@@ -10,6 +10,7 @@ fn engram_admission_persisted_content(record: &PersistedSessionRecord) -> Value 
         "queue": record.queued_prompts.front(),
         "abortRetry": record.engram_abort_retry,
         "bindRetry": record.engram_bind_retry,
+        "admissionRetry": record.engram_admission_retry,
         "sourceObservation": record.engram_source_observation_gate })
 }
 
@@ -72,13 +73,9 @@ fn engram_admission_disposition(card: &EngramControlCard) -> EngramAdmissionDisp
         EngramControlCardDecision::Grant => EngramAdmissionDisposition::Ready,
         EngramControlCardDecision::Degraded => match card.refusal_code.as_deref() {
             Some("control_disabled") => EngramAdmissionDisposition::Reject,
-            Some(
-                "deadline_exceeded"
-                | "control_unavailable"
-                | "control_circuit_open"
-                | "dispatch_budget_exhausted"
-                | "control_backoff",
-            ) => EngramAdmissionDisposition::Retry,
+            Some(code) if ENGRAM_ADMISSION_RETRY_CODES.contains(&code) => {
+                EngramAdmissionDisposition::Retry
+            }
             // Protocol/store faults and local persistence/ownership failures
             // do not establish non-delivery. Retain but never automatically
             // replay them; unknown future codes get the same safe disposition.
@@ -504,10 +501,12 @@ impl AppState {
         // automatic retry in the same write that holds the head again.
         record.engram.abort_retry = None;
         clear_engram_bind_retry(record);
+        clear_engram_admission_retry(record);
         record.engram.abort_retry_fence = None;
         record.engram.abort_retry_acknowledged = false;
         record.engram.abort_retry_saved = false;
         record.set_auto_dispatch_blocked(true);
+        record.engram.operator_paused = true;
         record.session.preview = "Engram authorization canceled. Prompt retained; remove it before starting a new operation.".to_owned();
         record.session.live_activity = None;
         sync_pending_prompts(record);
@@ -571,10 +570,16 @@ impl AppState {
         runtime_token: &RuntimeToken,
         active_turn_generation: u64,
     ) -> EngramAuthorizationParkOutcome {
+        let budget_now = self.engram_budget_clock().now();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return EngramAuthorizationParkOutcome::Superseded;
         };
+        let authority =
+            Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                .ok()
+                .flatten()
+                .map(|target| engram_abort_authority(&target));
         let park_is_current = {
             let record = &inner.sessions[index];
             record.runtime.matches_runtime_token(runtime_token)
@@ -601,6 +606,9 @@ impl AppState {
                 Message::EngramControl { card, .. } => Some((
                     engram_admission_disposition(card),
                     card.decision == EngramControlCardDecision::Defer,
+                    (card.decision == EngramControlCardDecision::Degraded)
+                        .then(|| card.refusal_code.clone())
+                        .flatten(),
                 )),
                 _ => None,
             });
@@ -608,19 +616,20 @@ impl AppState {
             .queued_prompts
             .front()
             .is_some_and(QueuedPromptRecord::is_engram_retained)
-            && decision.is_some_and(|(disposition, _)| {
-                disposition == EngramAdmissionDisposition::Reconcile
+            && decision.as_ref().is_some_and(|(disposition, _, _)| {
+                *disposition == EngramAdmissionDisposition::Reconcile
             });
         let waiting = record.engram.dispatch_generation == generation
             && !record.queued_prompts.is_empty()
             && (interrupted
-                || decision.is_some_and(|(disposition, _)| {
-                    disposition == EngramAdmissionDisposition::Retry
+                || decision.as_ref().is_some_and(|(disposition, _, _)| {
+                    *disposition == EngramAdmissionDisposition::Retry
                 }));
         if !waiting {
             return EngramAuthorizationParkOutcome::Superseded;
         }
-        if decision.is_some_and(|(_, defer)| defer) {
+        let defer = decision.as_ref().is_some_and(|(_, defer, _)| *defer);
+        if defer {
             record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
         }
         record.set_auto_dispatch_blocked(true);
@@ -633,14 +642,34 @@ impl AppState {
         }
         record.session.preview =
             (if interrupted { "Engram: Waiting/Unknown after interrupted authorization. Prompt retained; cancel or reconcile before continuing." }
-            else { "Engram: Waiting/Unknown. Original prompt retained; resume to retry or cancel." })
+            else { ENGRAM_ADMISSION_HELD_PREVIEW })
                 .to_owned();
+        // An unknown outcome with nothing begun is replayed automatically
+        // (`engram_admission_retry.rs`); a Defer, a Reconcile disposition or
+        // anything else holding the head keeps this explicit hold.
+        let scheduled = !interrupted
+            && !defer
+            && schedule_engram_admission_retry_locked(
+                record,
+                decision.as_ref().and_then(|(_, _, code)| code.as_deref()),
+                authority.as_deref(),
+                chrono::Utc::now(),
+                budget_now,
+            );
+        if !scheduled {
+            clear_engram_admission_retry(record);
+        }
         record.session.live_activity = None;
         // No provider handoff occurred. Do not run terminal failure refresh:
         // it would fail the delegation and delete the very intent being held.
         clear_active_turn_file_change_tracking(record);
         sync_pending_prompts(record);
-        if let Err(error) = self.commit_locked(&mut inner) {
+        let persisted = self.commit_locked(&mut inner);
+        if scheduled {
+            // Nothing is replayed before the record is durably acknowledged.
+            self.request_engram_abort_acknowledgement_locked(&mut inner, index);
+        }
+        if let Err(error) = persisted {
             eprintln!("engram> failed persisting waiting authorization: {error:#}");
             // The state transition may or may not have reached the durable
             // store. Keep the exact retained head blocked in memory and make

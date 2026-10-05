@@ -1403,11 +1403,14 @@ impl AppState {
         // the head its caller checked; never a fresh one.
         let releases_abort_retry = matches!(owner, Some(QueuedDrainOwner::AbortRetry(_)));
         let releases_bind_retry = matches!(owner, Some(QueuedDrainOwner::BindRetry(_)));
+        let releases_admission_retry =
+            matches!(owner, Some(QueuedDrainOwner::AdmissionRetry(_)));
         let bypass_owner = match owner {
             Some(
                 QueuedDrainOwner::AbortRetry(owner)
                 | QueuedDrainOwner::Resume(owner)
-                | QueuedDrainOwner::BindRetry(owner),
+                | QueuedDrainOwner::BindRetry(owner)
+                | QueuedDrainOwner::AdmissionRetry(owner),
             ) => Some(owner),
             None => allow_blocked_dispatch
                 .then(|| {
@@ -1600,6 +1603,24 @@ impl AppState {
                             .engram
                             .next_bind_retry_at
                             .is_some_and(|at| at > inner.engram_budget_clock_snapshot().now())
+                    {
+                        return Ok(None);
+                    }
+                }
+                if releases_admission_retry {
+                    let authority = Self::engram_binding_target_for_session_shape_locked(
+                        &inner, session_id, true,
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|target| engram_abort_authority(&target));
+                    if !engram_admission_retry_releases(
+                        &inner.sessions[index],
+                        authority.as_deref(),
+                    ) || inner.sessions[index]
+                        .engram
+                        .next_bind_retry_at
+                        .is_some_and(|at| at > inner.engram_budget_clock_snapshot().now())
                     {
                         return Ok(None);
                     }
@@ -2519,4 +2540,7 @@ enum QueuedDrainOwner {
     AbortRetry(EngramQueuedAdmissionOwner),
     /// An acknowledged bind-only journal with host-local phase proof.
     BindRetry(EngramQueuedAdmissionOwner),
+    /// A parked head's automatic replay of its retained intent; its
+    /// acknowledged parked-admission retry must still release it.
+    AdmissionRetry(EngramQueuedAdmissionOwner),
 }

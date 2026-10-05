@@ -1047,6 +1047,9 @@ struct AppState {
     /// terminal read made off the state lock is stored before another poll,
     /// or a checkpoint's settlement after it, can read the same run.
     engram_carried_poll_lock: Arc<Mutex<()>>,
+    /// The automatic Engram admission retries in flight host-wide, under
+    /// their cap (`engram_retry_schedule.rs`).
+    engram_retry_slots: EngramRetrySlots,
     /// Where published snapshots and deltas go: the ordered stream
     /// `/api/events` reads, plus per-kind observer channels in test builds.
     state_broadcast_senders: StateBroadcastSenders,
@@ -2114,6 +2117,10 @@ impl SessionRecord {
     fn set_auto_dispatch_blocked(&mut self, blocked: bool) {
         self.orchestrator_auto_dispatch_blocked = blocked;
         self.session.queue_paused = blocked;
+        if !blocked {
+            // Lifting the pause lifts an operator's pause with it.
+            self.engram.operator_paused = false;
+        }
     }
 
     fn clear_runtime_reset(&mut self) {

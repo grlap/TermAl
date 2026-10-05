@@ -438,9 +438,18 @@ struct PersistedSessionRecord {
     /// was durable, so loading rebuilds its retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_abort_retry: Option<EngramAbortRetry>,
-    /// Diagnostic journal only: live non-delivery proof never survives restart.
+    /// Live non-delivery proof never survives restart. Read back
+    /// acknowledged, it becomes the parked-admission retry of its head.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_bind_retry: Option<EngramBindRetry>,
+    /// A parked head whose unknown admission is replayed automatically
+    /// (`engram_admission_retry.rs`). Read back acknowledged, loading
+    /// rebuilds its retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_admission_retry: Option<EngramAdmissionRetry>,
+    /// An operator queue pause (`EngramSessionState::operator_paused`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    engram_operator_paused: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_source_observation_gate: Option<EngramSourceObservationGate>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -550,6 +559,8 @@ impl PersistedSessionRecord {
             engram_source_observation_gate: record.engram.source_observation_gate.clone(),
             engram_source_observation_delete_requested: record.engram.source_observation_delete_requested,
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
+            engram_admission_retry: record.engram.admission_retry.clone(),
+            engram_operator_paused: record.engram.operator_paused,
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
             session,
@@ -640,6 +651,8 @@ impl PersistedSessionRecord {
                 source_observation_gate: self.engram_source_observation_gate.clone(),
                 source_observation_delete_requested: self.engram_source_observation_delete_requested,
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
+                admission_retry: self.engram_admission_retry.clone(),
+                operator_paused: self.engram_operator_paused,
                 ..EngramSessionState::default()
             },
             engram_boot_recovery_pending: false,
@@ -745,6 +758,16 @@ impl PersistedSessionRecord {
         } else {
             record.engram.abort_retry = None;
         }
+        // An acknowledged parked-admission retry, or a bind retry left on the
+        // head it names, is rebuilt while the head is still exactly that
+        // park; anything else keeps the conservative hold.
+        let bind_for_head = self.engram_bind_retry.as_ref().filter(|retry| {
+            record
+                .queued_prompts
+                .front()
+                .is_some_and(|head| head.pending_prompt.id == retry.proof.prompt_id)
+        });
+        rebuild_engram_admission_retry_on_load(&mut record, bind_for_head);
         sync_codex_thread_state(&mut record);
         sync_pending_prompts(&mut record);
         Ok(record)
