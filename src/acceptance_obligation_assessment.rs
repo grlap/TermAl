@@ -2,10 +2,12 @@
 // brief and the evaluation request result.
 //
 // Owns: reading a verification record's whole obligation assessment through
-// the tracker's `show --note` and its `--after` continuations; the compact
-// summary of it (the record and cut positions, one count per status group,
-// every row another record did not close in full, and the command for the full
-// history at the same cut); fitting those summaries into the room a finished
+// the tracker's `show --note` and its `--after` continuations, in either shape
+// the tracker serves (the old row listing, which its history view keeps, or
+// its summary view of counts and must_show rows); the compact summary of it
+// (the record and cut positions, one count per status group, the rows to list
+// in full, and the command for the full history at the same cut); fitting
+// those summaries into the room a finished
 // brief leaves, whole or named as not carried; and the requester's notice of
 // any assessment that was not read whole or not carried.
 // Does not own: which records the brief carries or how they are read
@@ -74,7 +76,12 @@ struct AcceptanceObligationAssessment {
     locator: String,
     /// The tracker's row count, when a page was read.
     total: Option<u64>,
+    /// The rows read: every row of the old shape, or the must_show rows of
+    /// the summary view.
     rows_read: u64,
+    /// The summary view's must_show row count; absent for the old shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    must_show_total: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     record_position: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,7 +108,8 @@ struct AcceptanceObligationAssessment {
     full_history: String,
     /// One count per (status, reason, recorded) group of the rows read.
     groups: Vec<AcceptanceObligationGroup>,
-    /// Every row read that another record did not close, in full.
+    /// In full: every row read that another record did not close (old shape),
+    /// or every must_show row read (summary view).
     rows: Vec<AcceptanceObligationRow>,
     /// The evaluator's brief carries this summary.
     carried: bool,
@@ -231,10 +239,49 @@ fn acceptance_assessment_read_failure(error: &EngramTransportError) -> &'static 
     }
 }
 
+/// The shape a tracker serves an assessment page in. The history view keeps
+/// the old shape; the summary view carries counts and the must_show rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AcceptanceAssessmentShape {
+    Rows,
+    Summary,
+}
+
+fn acceptance_assessment_shape(page: &Value) -> Result<AcceptanceAssessmentShape, &'static str> {
+    match page.get("view") {
+        None => Ok(AcceptanceAssessmentShape::Rows),
+        Some(Value::String(view)) if view == "history" => Ok(AcceptanceAssessmentShape::Rows),
+        Some(Value::String(view)) if view == "summary" => Ok(AcceptanceAssessmentShape::Summary),
+        Some(_) => Err("malformed_page"),
+    }
+}
+
+/// One `counts` entry of the summary view: a status, a non-negative count,
+/// and a reason that is a plain string when present.
+fn acceptance_obligation_count(entry: &Value) -> Result<AcceptanceObligationGroup, ()> {
+    let status = acceptance_assessment_text(entry, "status")?.ok_or(())?;
+    let reason = match entry.get("reason") {
+        None => None,
+        Some(Value::String(_)) => acceptance_assessment_text(entry, "reason")?,
+        Some(_) => return Err(()),
+    };
+    let count = entry.get("count").and_then(Value::as_u64).ok_or(())?;
+    Ok(AcceptanceObligationGroup {
+        status,
+        reason,
+        recorded: None,
+        count,
+    })
+}
+
 /// Accumulates one record's assessment pages at one cut.
 struct AcceptanceAssessmentPages {
     assessment: AcceptanceObligationAssessment,
     counts: BTreeMap<(u8, String, Option<String>, Option<String>), u64>,
+    /// The shape of the first page; one record's read never mixes shapes.
+    shape: Option<AcceptanceAssessmentShape>,
+    /// The summary view's counts, the same on every page of one cut.
+    summary_groups: Option<Vec<AcceptanceObligationGroup>>,
     /// Pages accepted so far.
     pages_read: u64,
     /// The last page accepted.
@@ -248,6 +295,7 @@ impl AcceptanceAssessmentPages {
                 locator: locator.to_owned(),
                 total: None,
                 rows_read: 0,
+                must_show_total: None,
                 record_position: None,
                 cut_position: None,
                 complete: false,
@@ -261,32 +309,155 @@ impl AcceptanceAssessmentPages {
                 carried: false,
             },
             counts: BTreeMap::new(),
+            shape: None,
+            summary_groups: None,
             pages_read: 0,
             last_page: None,
         }
     }
 
-    /// Adds one page; `Err` names why the page cannot extend the rows read.
-    /// The count, the offset and both positions are what make a read whole
-    /// at one cut, so each must be a present non-negative integer, and the
-    /// rows an array; a page that does not say so is malformed.
+    /// Adds one page in either shape; `Err` names why the page cannot extend
+    /// the rows read. A page in another shape than the first is malformed.
     fn add(&mut self, page: &Value) -> Result<(), &'static str> {
+        let shape = acceptance_assessment_shape(page)?;
+        if *self.shape.get_or_insert(shape) != shape {
+            return Err("malformed_page");
+        }
+        match shape {
+            AcceptanceAssessmentShape::Rows => self.add_rows(page),
+            AcceptanceAssessmentShape::Summary => self.add_summary(page),
+        }
+    }
+
+    /// Holds every page to the first page's row count and positions: one cut.
+    fn same_cut(
+        &mut self,
+        total: u64,
+        record_position: Option<u64>,
+        cut_position: Option<u64>,
+    ) -> Result<(), &'static str> {
+        if self.assessment.total.is_none() {
+            self.assessment.total = Some(total);
+            self.assessment.record_position = record_position;
+            self.assessment.cut_position = cut_position;
+            Ok(())
+        } else if self.assessment.total != Some(total)
+            || self.assessment.record_position != record_position
+            || self.assessment.cut_position != cut_position
+        {
+            Err("assessment_changed")
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Records the page just accepted, and the first page's same-cut
+    /// continuation for the full history: the old shape's own continuation,
+    /// or the summary view's `history` command.
+    fn accepted(&mut self, page: &Value, earlier: u64, history_key: &str) {
+        self.pages_read += 1;
+        self.last_page = Some(AcceptanceAssessmentReread {
+            page: self.pages_read,
+            first_row: earlier + 1,
+            last_row: self.assessment.rows_read,
+        });
+        if self.pages_read == 1 {
+            self.assessment.history_continuation = page
+                .get(history_key)
+                .and_then(Value::as_str)
+                .filter(|continuation| {
+                    acceptance_assessment_continuation_token(continuation, &self.assessment.locator)
+                        .is_some()
+                })
+                .map(str::to_owned);
+        }
+    }
+
+    /// Adds one summary-view page. Its counts cover every row and are the
+    /// same on each page; its must_show rows are listed in full, page by page
+    /// from where the rows read end. Every number must be a present
+    /// non-negative integer, `counts` and `must_show` arrays with one count
+    /// per status and reason, the counts must sum to the total, the must_show
+    /// total may not exceed it, and the page's must_show offsets must add up
+    /// to the must_show total; a page that does not say so is malformed. The
+    /// whole page is checked before anything of it is kept, so a page rejected
+    /// for any reason leaves no count, total or row behind.
+    fn add_summary(&mut self, page: &Value) -> Result<(), &'static str> {
+        let number = |key: &str| page.get(key).and_then(Value::as_u64).ok_or("malformed_page");
+        let total = number("total")?;
+        let record_position = Some(number("record_position")?);
+        let cut_position = Some(number("cut_position")?);
+        let must_show_total = number("must_show_total")?;
+        let earlier = number("must_show_earlier")?;
+        let remaining = number("must_show_remaining")?;
+        let mut groups = page
+            .get("counts")
+            .and_then(Value::as_array)
+            .ok_or("malformed_page")?
+            .iter()
+            .map(acceptance_obligation_count)
+            .collect::<Result<Vec<_>, ()>>()
+            .map_err(|()| "malformed_page")?;
+        // One count per status and reason, compared as a set across pages.
+        groups.sort_by(|left, right| (&left.status, &left.reason).cmp(&(&right.status, &right.reason)));
+        if groups
+            .windows(2)
+            .any(|pair| (&pair[0].status, &pair[0].reason) == (&pair[1].status, &pair[1].reason))
+        {
+            return Err("malformed_page");
+        }
+        let rows = page.get("must_show").and_then(Value::as_array).ok_or("malformed_page")?;
+        let counted = groups
+            .iter()
+            .try_fold(0_u64, |sum, group| sum.checked_add(group.count))
+            .ok_or("malformed_page")?;
+        let shown = u64::try_from(rows.len()).map_err(|_| "malformed_page")?;
+        let paged = earlier
+            .checked_add(shown)
+            .and_then(|sum| sum.checked_add(remaining))
+            .ok_or("malformed_page")?;
+        if counted != total || must_show_total > total || paged != must_show_total {
+            return Err("malformed_page");
+        }
+        // The same cut as the pages already read: totals, positions, counts,
+        // and an offset that starts where the rows read end (no gap, no repeat).
+        let changed = self.assessment.total.is_some_and(|known| known != total)
+            || self.assessment.total.is_some()
+                && (self.assessment.record_position != record_position
+                    || self.assessment.cut_position != cut_position)
+            || self.assessment.must_show_total.is_some_and(|known| known != must_show_total)
+            || self.summary_groups.as_ref().is_some_and(|known| *known != groups)
+            || earlier != self.assessment.rows_read;
+        if changed {
+            return Err("assessment_changed");
+        }
+        let parsed = rows
+            .iter()
+            .map(acceptance_obligation_row)
+            .collect::<Result<Vec<_>, ()>>()
+            .map_err(|()| "malformed_row")?;
+        // Every check passed: only now is the page kept.
+        self.same_cut(total, record_position, cut_position)?;
+        self.assessment.must_show_total = Some(must_show_total);
+        self.summary_groups = Some(groups);
+        self.assessment.rows_read += shown;
+        self.assessment.rows.extend(parsed);
+        self.accepted(page, earlier, "history");
+        Ok(())
+    }
+
+    /// Adds one old-shape page. The count, the offset and both positions are
+    /// what make a read whole at one cut, so each must be a present
+    /// non-negative integer, and the rows an array; a page that does not say
+    /// so is malformed.
+    fn add_rows(&mut self, page: &Value) -> Result<(), &'static str> {
         let number = |key: &str| page.get(key).and_then(Value::as_u64).ok_or("malformed_page");
         let total = number("total")?;
         let earlier = number("earlier")?;
         let record_position = Some(number("record_position")?);
         let cut_position = Some(number("cut_position")?);
         let rows = page.get("rows").and_then(Value::as_array).ok_or("malformed_page")?;
-        if self.assessment.total.is_none() {
-            self.assessment.total = Some(total);
-            self.assessment.record_position = record_position;
-            self.assessment.cut_position = cut_position;
-        } else if self.assessment.total != Some(total)
-            || self.assessment.record_position != record_position
-            || self.assessment.cut_position != cut_position
-        {
-            return Err("assessment_changed");
-        }
+        self.same_cut(total, record_position, cut_position)?;
         // Each page must start where the rows read end: no gap, no repeat.
         if earlier != self.assessment.rows_read
             || self.assessment.rows_read + rows.len() as u64 > total
@@ -313,29 +484,18 @@ impl AcceptanceAssessmentPages {
                 self.assessment.rows.push(row);
             }
         }
-        self.pages_read += 1;
-        self.last_page = Some(AcceptanceAssessmentReread {
-            page: self.pages_read,
-            first_row: earlier + 1,
-            last_row: self.assessment.rows_read,
-        });
         // The first page's own continuation pages the rest at this cut.
-        if self.pages_read == 1 {
-            self.assessment.history_continuation = page
-                .get("continuation")
-                .and_then(Value::as_str)
-                .filter(|continuation| {
-                    acceptance_assessment_continuation_token(continuation, &self.assessment.locator)
-                        .is_some()
-                })
-                .map(str::to_owned);
-        }
+        self.accepted(page, earlier, "continuation");
         Ok(())
     }
 
-    /// Every row of the assessment has been read.
+    /// Every row to be read has been: every row of the old shape, or every
+    /// must_show row of the summary view.
     fn read_whole(&self) -> bool {
-        self.assessment.total == Some(self.assessment.rows_read)
+        match self.assessment.must_show_total {
+            Some(must_show) => self.assessment.rows_read == must_show,
+            None => self.assessment.total == Some(self.assessment.rows_read),
+        }
     }
 
     /// Finishes at `resume`, the cursor that fetched the last page accepted:
@@ -361,16 +521,29 @@ impl AcceptanceAssessmentPages {
         self.assessment.complete = reason.is_none();
         self.assessment.incomplete_reason = reason.map(str::to_owned);
         self.assessment.resume = reason.and(resume);
-        self.assessment.groups = self
-            .counts
-            .into_iter()
-            .map(|((_, status, reason, recorded), count)| AcceptanceObligationGroup {
-                status,
-                reason,
-                recorded,
-                count,
-            })
-            .collect();
+        self.assessment.groups = match self.summary_groups {
+            // The summary view's counts, in the same order of attention.
+            Some(mut groups) => {
+                groups.sort_by(|left, right| {
+                    let rank = |group: &AcceptanceObligationGroup| {
+                        acceptance_obligation_group_rank(&group.status, None)
+                    };
+                    (rank(left), &left.status, &left.reason)
+                        .cmp(&(rank(right), &right.status, &right.reason))
+                });
+                groups
+            }
+            None => self
+                .counts
+                .into_iter()
+                .map(|((_, status, reason, recorded), count)| AcceptanceObligationGroup {
+                    status,
+                    reason,
+                    recorded,
+                    count,
+                })
+                .collect(),
+        };
         self.assessment
     }
 }
@@ -582,16 +755,50 @@ fn acceptance_obligation_total(assessment: &AcceptanceObligationAssessment) -> S
         .map_or_else(|| "an unknown number of".to_owned(), |total| total.to_string())
 }
 
+/// How much of an incomplete read was read: rows of the total, or must_show
+/// rows of the must_show total in the summary view.
+fn acceptance_obligation_read_extent(assessment: &AcceptanceObligationAssessment) -> String {
+    match assessment.must_show_total {
+        Some(must_show) => format!(
+            "{} of {must_show} must_show rows read, of {} rows",
+            assessment.rows_read,
+            acceptance_obligation_total(assessment)
+        ),
+        None => format!(
+            "{} of {} rows read",
+            assessment.rows_read,
+            acceptance_obligation_total(assessment)
+        ),
+    }
+}
+
+/// The size of a record read whole.
+fn acceptance_obligation_whole_extent(assessment: &AcceptanceObligationAssessment) -> String {
+    match assessment.must_show_total {
+        Some(must_show) => format!(
+            "{} rows, {must_show} must_show",
+            acceptance_obligation_total(assessment)
+        ),
+        None => format!("{} rows", acceptance_obligation_total(assessment)),
+    }
+}
+
 /// What resuming at `resume` reads again, when it is the cursor that fetched
 /// the last page read.
 fn acceptance_obligation_reread_text(assessment: &AcceptanceObligationAssessment) -> String {
     assessment
         .resume_rereads
-        .map(|reread| {
-            format!(
+        .map(|reread| match assessment.must_show_total {
+            // The summary view's page offsets count its must_show rows,
+            // which are listed, not counted.
+            Some(_) => format!(
+                "; it re-reads page {} (must_show rows {}-{}), already listed",
+                reread.page, reread.first_row, reread.last_row
+            ),
+            None => format!(
                 "; it re-reads page {} (rows {}-{}), already counted",
                 reread.page, reread.first_row, reread.last_row
-            )
+            ),
         })
         .unwrap_or_default()
 }
@@ -601,6 +808,18 @@ fn acceptance_obligation_reread_text(assessment: &AcceptanceObligationAssessment
 /// reads the record's assessment as it stands now, so it is never offered as
 /// a same-cut continuation.
 fn acceptance_obligation_history_text(assessment: &AcceptanceObligationAssessment) -> String {
+    if assessment.must_show_total.is_some() {
+        // The summary view names its own history command at the cut.
+        return match &assessment.history_continuation {
+            Some(history) => format!(
+                "the full history at this cut, oldest first, is `{history}` and then each page's continuation; the tracker refuses these cursors once the record's assessment moves on"
+            ),
+            None => format!(
+                "No same-cut history command exists for this record; `{}` reads its current summary, not this cut",
+                assessment.full_history
+            ),
+        };
+    }
     match &assessment.history_continuation {
         Some(continuation) => format!(
             "the full history at this cut, oldest first, is page 1 by `{}` and then `{continuation}`; the tracker refuses these cursors once the record's assessment moves on",
@@ -624,15 +843,21 @@ fn render_acceptance_obligation_assessment(assessment: &AcceptanceObligationAsse
         (Some(record), None) => format!(" (record position {record})"),
         _ => String::new(),
     };
-    let state = if assessment.complete {
-        format!("{} rows, read whole.", acceptance_obligation_total(assessment))
-    } else {
-        format!(
-            "INCOMPLETE: {} of {} rows read ({}). The counts and rows below cover only the rows read; an unread row may be open or a mismatch.",
-            assessment.rows_read,
-            acceptance_obligation_total(assessment),
-            assessment.incomplete_reason.as_deref().unwrap_or("unknown")
-        )
+    let reason = assessment.incomplete_reason.as_deref().unwrap_or("unknown");
+    let state = match (assessment.complete, assessment.must_show_total) {
+        (true, None) => format!("{} rows, read whole.", acceptance_obligation_total(assessment)),
+        (true, Some(must_show)) => format!(
+            "{} rows, read whole: the {must_show} must_show rows are listed below, the rest only counted.",
+            acceptance_obligation_total(assessment)
+        ),
+        (false, None) => format!(
+            "INCOMPLETE: {} ({reason}). The counts and rows below cover only the rows read; an unread row may be open or a mismatch.",
+            acceptance_obligation_read_extent(assessment)
+        ),
+        (false, Some(_)) => format!(
+            "INCOMPLETE: {} ({reason}). The counts cover every row; an unread must_show row may be open or a mismatch.",
+            acceptance_obligation_read_extent(assessment)
+        ),
     };
     let groups = if assessment.groups.is_empty() {
         " No rows read.".to_owned()
@@ -658,12 +883,15 @@ fn render_acceptance_obligation_assessment(assessment: &AcceptanceObligationAsse
             acceptance_obligation_reread_text(assessment)
         ));
     }
-    lines.push(match &assessment.history_continuation {
-        Some(continuation) => format!(
+    lines.push(match (&assessment.history_continuation, assessment.must_show_total) {
+        (Some(continuation), None) => format!(
             "  Full history at this cut, oldest first: page 1 by `{}`, then `{continuation}`. The tracker refuses these cursors once the record's assessment moves on.",
             assessment.full_history
         ),
-        None => format!("  {}.", acceptance_obligation_history_text(assessment)),
+        (Some(history), Some(_)) => format!(
+            "  Full history at this cut, oldest first: `{history}`, then each page's continuation. The tracker refuses these cursors once the record's assessment moves on."
+        ),
+        (None, _) => format!("  {}.", acceptance_obligation_history_text(assessment)),
     });
     lines.join("\n")
 }
@@ -674,17 +902,17 @@ fn render_acceptance_obligation_assessment(assessment: &AcceptanceObligationAsse
 fn acceptance_obligation_not_carried_line(assessment: &AcceptanceObligationAssessment) -> String {
     let state = if assessment.complete {
         format!(
-            "{} rows, read whole, {} to be listed in full",
-            acceptance_obligation_total(assessment),
+            "{}, read whole, {} to be listed in full",
+            acceptance_obligation_whole_extent(assessment),
             assessment.rows.len()
         )
     } else {
         format!(
-            "INCOMPLETE, {} of {} rows read ({}), {} of them to be listed in full; an unread row may be open or a mismatch",
-            assessment.rows_read,
-            acceptance_obligation_total(assessment),
+            "INCOMPLETE, {} ({}), {} of them to be listed in full; an unread {} may be open or a mismatch",
+            acceptance_obligation_read_extent(assessment),
             assessment.incomplete_reason.as_deref().unwrap_or("unknown"),
-            assessment.rows.len()
+            assessment.rows.len(),
+            if assessment.must_show_total.is_some() { "must_show row" } else { "row" }
         )
     };
     let resume = assessment
@@ -712,7 +940,14 @@ fn acceptance_obligation_section(
     room: usize,
 ) -> String {
     const HEADER: &str = "Obligation assessments of the cited verification records (rows another record closed are counted, not listed, except mismatches, which are always listed; every other row is listed in full):\n";
-    let mut used = HEADER.len() + 1;
+    // The summary view decides which rows are listed: the tracker's must_show.
+    const SUMMARY_HEADER: &str = "Obligation assessments of the cited verification records (rows another record closed are counted, not listed, except mismatches, which are always listed; every other row is listed in full; for a record in the tracker's summary view, its must_show rows are listed in full and every other row is only counted):\n";
+    let header = if assessments.iter().any(|assessment| assessment.must_show_total.is_some()) {
+        SUMMARY_HEADER
+    } else {
+        HEADER
+    };
+    let mut used = header.len() + 1;
     let mut body = String::new();
     for assessment in assessments.iter_mut() {
         let whole = format!("{}\n", render_acceptance_obligation_assessment(assessment));
@@ -732,7 +967,7 @@ fn acceptance_obligation_section(
     if body.is_empty() {
         String::new()
     } else {
-        format!("{HEADER}{body}\n")
+        format!("{header}{body}\n")
     }
 }
 
@@ -1016,16 +1251,15 @@ fn acceptance_obligation_assessment_notice(
             let history = acceptance_obligation_history_text(assessment);
             if assessment.complete {
                 format!(
-                    "{}: read whole ({} rows) but not carried to fit the brief; {history}",
+                    "{}: read whole ({}) but not carried to fit the brief; {history}",
                     assessment.locator,
-                    acceptance_obligation_total(assessment),
+                    acceptance_obligation_whole_extent(assessment),
                 )
             } else {
                 format!(
-                    "{}: incomplete, {} of {} rows read ({}){carried}{}; {history}",
+                    "{}: incomplete, {} ({}){carried}{}; {history}",
                     assessment.locator,
-                    assessment.rows_read,
-                    acceptance_obligation_total(assessment),
+                    acceptance_obligation_read_extent(assessment),
                     assessment.incomplete_reason.as_deref().unwrap_or("unknown"),
                     assessment
                         .resume
