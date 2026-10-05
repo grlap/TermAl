@@ -820,6 +820,7 @@ fn test_app_state() -> AppState {
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
         engram_carried_poll_lock: Arc::new(Mutex::new(())),
+        engram_retry_slots: EngramRetrySlots::default(),
         state_broadcast_senders: StateBroadcastSenders {
             stream_events: broadcast::channel(16).0,
             state_events: broadcast::channel(16).0,

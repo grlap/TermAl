@@ -2094,10 +2094,18 @@ Ordinary gated admission uses one twenty-second remaining-time budget across the
 work-binding read, binding, evaluation, begin, and host persistence
 acknowledgements. Base
 context reads remain a separate operation. A timeout or unavailable transport
-does not mean policy denial: the session shows **Waiting/Unknown**, pauses its
-queue, and keeps the original prompt, attachments, source and identifier. Resume
-retries unknown authorization; Cancel and Stop remain available without waiting
-for the Engram call. An explicit Refuse still withholds delivery as a refusal.
+does not mean policy denial: the session pauses its queue and keeps the
+original prompt, attachments, source and identifier. An unknown outcome with no
+grant begun is replayed automatically on the common recovery schedule, and the
+session says so ("Engram: waiting for admission; retrying automatically,
+attempt n, next at T"; Automatic re-admission of a parked admission, below);
+any other hold shows **Waiting/Unknown** and waits for Resume. Resume retries
+unknown authorization at once in either case, except that after a restart a
+retry head whose readiness fence is still raised starts its recovery only
+when a retry slot is free and no deferred attempt waits for one, and otherwise
+leaves it to its own due attempt; Cancel and Stop remain available without
+waiting for the Engram call. An explicit Refuse still withholds
+delivery as a refusal.
 
 If a retained prompt already appears in the visible transcript, a paused queue
 shows an action-only recovery card without repeating the prompt body. When the
@@ -2148,7 +2156,8 @@ store and local persistence faults, remain interrupted and cancelable; they are
 not silently retried or allowed to terminalize a waiting child. The one
 exception is a delivery the host itself withheld before provider handoff whose
 grant is then closed (Retained prompt recovery, below). Transient transport
-failures and Defer remain explicitly retryable.
+failures with no grant begun are replayed automatically (Automatic re-admission
+of a parked admission, below); a known Defer remains explicitly retryable.
 
 Queue records persist their original promoted transcript position. Trimming the
 resident transcript cannot cause a retry to append the same prompt or composer
@@ -2177,7 +2186,8 @@ withholds the delivery and closes the begun grant with a stale-begin
 checkpoint (`next_intent: exit`). When that checkpoint returns a receipt for
 the same grant, this host knows the prompt never reached the provider and
 that its grant is closed, so the prompt is not left interrupted for good
-(`src/engram_abort_retry.rs`):
+(`src/engram_abort_retry.rs`; the schedule, the durable acknowledgement and the
+tick are shared with every automatic retry, `src/engram_retry_schedule.rs`):
 
 1. Under the same lock, the head loses the evaluation and bind it was admitted
    with, the session forgets the closed grant and moves to a new dispatch
@@ -2200,10 +2210,10 @@ that its grant is closed, so the prompt is not left interrupted for good
    seconds after each aborted attempt, plus up to 20% jitter spread by session
    and attempt. A known Defer whose card could not be saved is settled the
    same way (no grant to close) and is due no earlier than its `retry_after`.
-4. When due, the test-run index tick (every two seconds) admits the same
-   prompt again as a fresh operation: a new evaluation key, the same prompt,
-   attachments and transcript identity. It needs no Resume, new message or
-   restart. The queue stays paused: the admission bypasses the pause only for
+4. When due, the automatic retry tick (its own thread, every two seconds)
+   admits the same prompt again as a fresh operation: a new evaluation key,
+   the same prompt, attachments and transcript identity. It needs no Resume,
+   new message or restart. The queue stays paused: the admission bypasses the pause only for
    the exact head (prompt, dispatch and turn generation) it was due for, and
    only while, under the promotion lock, its acknowledged abort record still
    names that head under the same authority. A head cancelled in between, a
@@ -2235,6 +2245,110 @@ holds the head, `persistenceUnknown` before the acknowledgement, `stopped` after
 public Stop, `deliveryUnknown` for any other interruption, and
 `admissionDeferred` for a parked admission. Its parent's waits wake on that hold
 ([agent delegation sessions](agent-delegation-sessions.md#held-attempts)).
+
+### Automatic re-admission of a parked admission
+
+An admission whose outcome is unknown before any grant was begun parks its
+retained prompt (Authorization timeout and retained prompts, above): an
+evaluate that missed its deadline or lost its transport after the request was
+saved (`deadline_exceeded`, `control_unavailable`), an open circuit
+(`control_circuit_open`), a bind backoff (`control_backoff`) or an exhausted
+admission budget (`dispatch_budget_exhausted`). Such a park is re-admitted
+automatically, without Resume, a new message or a restart
+(`src/engram_admission_retry.rs`):
+
+1. The park writes a retry record with the head: its prompt and intent
+   fingerprint, the card code, the attempt index, when the prompt was first
+   held, when the next attempt is due, the authority (project, connection and
+   admission settings) and the dispatch generation of the retained intent.
+   The session shows "Engram: waiting for admission; retrying automatically,
+   attempt n, next at T". Nothing is replayed until the persistence writer
+   has acknowledged that record against the stored session.
+2. Attempts are due 2, 5, 10, 20 and 30 seconds after each park and then
+   every 60 seconds, each with up to 20% jitter spread by session and attempt,
+   and never earlier than the session's circuit deadline or bind backoff.
+   When due, the automatic retry tick replays the exact retained intent
+   through ordinary admission: a retained evaluate goes out again with its
+   original idempotency key (Engram returns the recorded decision if the
+   first request landed, or evaluates once if not), and a retained bind is
+   sent again byte for byte. No new key is minted while the outcome is
+   unresolved. The queue stays paused: the attempt bypasses the pause only
+   for the exact head (prompt, dispatch and turn generation) it was due for,
+   and only while, under the promotion lock, the acknowledged record still
+   names that parked head under the same authority.
+3. A replay that times out again parks as the next attempt with the original
+   first-held time; a Grant is delivered once and clears the record; a Defer
+   ends that evaluation and parks as a Defer does (a new generation and the
+   explicit Resume-or-Cancel hold). An attempt that fails before admission
+   counts as an attempt and moves to the next delay; one the drain declines
+   (another admission holds the head, or something now holds it that the
+   next tick reads) is not charged.
+4. One attempt runs per head: while any admission of the head is running (an
+   explicit Resume included), a due tick starts nothing. Host-wide, at most
+   four are in flight at once, counting the automatic attempts of every retry
+   (this one, the abort retry and the bind retry) and each parked admission's
+   boot reconciliation (step 5); an abort retry's boot recovery after a
+   restart keeps its existing path outside the cap. Due attempts start in
+   due-time order; an attempt the cap defers is logged and keeps its attempt
+   index and first-held time, and a later tick starts it. A slot is released when its
+   attempt completes, however it ends; a delivery that moves to the Codex
+   Fast discovery worker takes the slot with it and keeps it until that
+   worker finishes. The tick runs every two seconds on a thread of its own,
+   apart from carried-gate polling and the test-run index, so a slow Engram
+   delays only the retries. An attempt whose thread cannot be created runs
+   on the tick's thread instead, and an attempt that panics, on any thread,
+   is logged and kept for a later tick.
+5. The record is saved with the session. A restart after its acknowledgement
+   was saved rebuilds it while the head is still exactly that park; the
+   first attempt after the restart is the one reconciliation (recovery reads
+   the original control session, then replays), and the cadence continues
+   from the saved attempt index without a new wake. No automatic retry of
+   any kind starts before boot has raised the restarted sessions' readiness
+   fences, although the tick runs from construction. The eager boot recovery
+   and a lazy one never reconcile the same session at once: whichever starts
+   first claims it, and the other leaves it to that recovery and its fence
+   stays raised until it finishes; the eager pass also skips a session whose
+   fence a finished lazy recovery has already lowered. When the restart's eager
+   boot recovery left the session's readiness fence raised, the due attempt
+   starts the session's one lazy boot recovery instead of admitting, hands it
+   its slot under the cap until that recovery finishes, and is not charged;
+   once that recovery has lowered the fence, the next due tick replays. The
+   eager boot recovery itself reconciles such a session only under the same
+   cap: its worker holds a retry slot until it finishes, and with none free
+   the session is left fenced for its own due attempt. The same rule holds
+   for every automatic Engram reconciliation or bind of a session that holds
+   a retry record: a lazy recovery requested outside an attempt (an ordinary
+   drain, a first use or an explicit Resume), the rebind after a runtime
+   loss, the best-effort bind of a delegation's parent or child, and the
+   bind after a settings change each take a free retry slot and hold it
+   until they return, or, with none free, leave the session to its own due
+   attempt (a deferred rebind keeps the session marked for rebinding; a
+   deferred delegation bind leaves the delegation as a failed best-effort
+   bind does). Such a call takes no slot while the tick has a due attempt
+   waiting for one, so it never runs ahead of an attempt the cap deferred.
+   Once its retry record is dropped, any trigger recovers or binds the
+   session as before. Every other session is unchanged. A head that still
+   holds its saved wire intent is never freshly bound by these calls; only
+   its own admission replays it. A restart before
+   the acknowledgement keeps the hold. A bind retry left on a retained head has
+   no live runtime proof after a restart; once acknowledged it becomes the
+   same record and its retained bind is replayed the same way.
+
+Nothing else enters the schedule, and each of these keeps its hold and its
+preview: a Reconcile disposition, including a begin whose reply was lost (the
+grant possibly begun); a refusal; control disabled, or a fatal disabled
+reason; a Stop or a cancellation; a committed change of the project,
+connection or admission settings; an operator queue pause; and a superseded
+owner (another head, changed content or a moved generation). An operator queue
+pause is the pause a public Stop leaves for an explicit Resume. It carries its
+own marker, saved with the session and distinct from the pause a park sets, and
+no automatic retry passes it. A Stop of a head waiting for its automatic
+retry ends that retry behind this pause and leaves the head as it was before
+the retry: a head still holding its saved wire intent is held as a Stop of a
+waiting admission holds it, and one without (after a restart) stays queued,
+uninterrupted and resumable, with the held preview; an explicit Resume admits
+it afresh. A known Defer's `retry_after` and wake condition are not part of
+this schedule.
 
 Opt-in tests in `src/tests/engram_root_recovery_live.rs` use a caller-identified
 Engram binary (`TERMAL_TEST_LIVE_ENGRAM_BINARY` and its SHA-256 in

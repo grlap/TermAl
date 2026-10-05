@@ -763,6 +763,7 @@ impl AppState {
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
             engram_carried_poll_lock: Arc::new(Mutex::new(())),
+            engram_retry_slots: EngramRetrySlots::default(),
             state_broadcast_senders,
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),
@@ -829,10 +830,16 @@ impl AppState {
             }
         }
         state.restore_remote_event_bridges();
+        // The retry tick's thread starts below, before post-listen boot
+        // prepares the Engram readiness fences: hold automatic retries until
+        // then (`prepare_engram_sessions_for_boot_recovery` releases them).
+        state.engram_retry_slots.hold_until_boot_preparation();
         #[cfg(not(test))]
         state.spawn_workspace_file_watcher();
         #[cfg(not(test))]
         state.spawn_test_run_index();
+        #[cfg(not(test))]
+        state.spawn_engram_retry_tick();
         // Runtime-resuming boot work is deferred to `run_post_listen_boot`, invoked by
         // `run_server` only AFTER the HTTP listener is bound and the base URL is published.
         // Resuming a Codex session launches the shared app-server, which bakes a TermAl MCP

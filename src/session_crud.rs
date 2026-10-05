@@ -3150,6 +3150,17 @@ impl AppState {
         };
         for target in fresh_targets {
             let session_id = target.connection.session_id.clone();
+            // A retry head is bound only under the retry cap, or by its own
+            // attempt (`EngramRetryHeadPermit`).
+            let _permit = match self.engram_retry_head_permit(&session_id) {
+                EngramRetryHeadPermit::Deferred => {
+                    eprintln!(
+                        "engram> session={session_id} post-reconfigure bind deferred to the retry cap"
+                    );
+                    continue;
+                }
+                permit => permit,
+            };
             if let Err(error) = self.bind_engram_target_off_lock(target) {
                 self.record_engram_transport_failure(&session_id, &error);
                 eprintln!("engram> session={session_id} post-reconfigure bind degraded: {error}");

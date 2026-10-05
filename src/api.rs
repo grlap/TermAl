@@ -171,6 +171,18 @@ fn engram_persistence_unknown_error() -> ApiError {
 
 /// Keeps transport readers free to route replies needed by Fast discovery.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispatchDeliveryOutcome {
+    deliver_turn_dispatch_holding(state, dispatch, None)
+}
+
+/// `deliver_turn_dispatch` for an automatic retry attempt: `held`, the
+/// attempt's place under the host-wide retry cap, stays taken until the
+/// delivery's Engram admission settles, on the Fast discovery worker when
+/// delivery moves there, so no later attempt takes it while this one runs.
+fn deliver_turn_dispatch_holding(
+    state: &AppState,
+    dispatch: TurnDispatch,
+    held: Option<EngramRetrySlot>,
+) -> TurnDispatchDeliveryOutcome {
     if matches!(
         &dispatch,
         TurnDispatch::PersistentCodex {
@@ -190,6 +202,7 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispat
         if let Err(err) = std::thread::Builder::new()
             .name("codex-fast-dispatch".to_owned())
             .spawn(move || {
+                let _held = held;
                 match deliver_turn_dispatch_now(&worker_state, dispatch) {
                     TurnDispatchDeliveryOutcome::Held { error: Some(error) } => {
                         eprintln!("Codex Fast dispatch held> {}", error.message);
@@ -223,7 +236,9 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispat
         }
         return TurnDispatchDeliveryOutcome::Scheduled;
     }
-    deliver_turn_dispatch_now(state, dispatch)
+    let outcome = deliver_turn_dispatch_now(state, dispatch);
+    drop(held);
+    outcome
 }
 
 /// Performs delivery on the caller for ready commands, or on the Fast worker.

@@ -721,7 +721,10 @@ client projection (status, list, spawn and follow-up responses,
 
 - `reason`:
   - `admissionDeferred`: Engram deferred the admission, or its outcome was
-    parked before any handoff; resuming retries it;
+    parked before any handoff; resuming retries it. An unknown outcome with
+    no grant begun is also replayed automatically at `nextRetryAt`
+    (`engram-host-adapter.md`, "Automatic re-admission of a parked
+    admission");
   - `persistenceUnknown`: a delivery was withheld and proven unsent, but the
     host has not yet confirmed its own record of that; or a prepared
     authorization's promotion was not confirmed durable;

@@ -1,28 +1,17 @@
 // Automatic recovery of a retained Engram prompt whose delivery this host
 // aborted before provider handoff. Owns the durable abort record
 // (`EngramAbortRetry`), its settlement on the dispatch path that withheld the
-// delivery (`settle_engram_abort_before_handoff_locked`), the backoff of the
-// fresh admission that follows (`engram_abort_retry_delay`), and the tick that
-// acknowledges the settlement durably and starts that admission when it is
-// due (`engram_abort_retry_tick`). Does not own the dispatch itself
-// (`prepare_engram_turn_delivery_off_lock` in `engram_host_adapter.rs`, which
-// decides that a delivery was withheld and closes its grant), the retained
-// prompt states it sits beside (`engram_queued_admission.rs`), or the
-// conservative hold every other uncertain outcome keeps. New module: before
-// it, a delivery withheld for a slow local save left its prompt interrupted
-// until someone cancelled it, even after its grant was closed.
-
-/// The delay before the fresh admission of a proven-unsent prompt, by the
-/// number of aborted attempts so far; the last value repeats.
-const ENGRAM_ABORT_RETRY_DELAYS_SECONDS: [u64; 6] = [2, 5, 10, 20, 30, 60];
-
-/// The largest positive jitter added to a retry delay, in percent.
-const ENGRAM_ABORT_RETRY_MAX_JITTER_PERCENT: u64 = 20;
-
-/// How long one acknowledgement of the local settlement may take before the
-/// tick asks again. A later request has its own deadline; the original
-/// admission's dispatch budget is never stretched.
-const ENGRAM_ABORT_SETTLEMENT_FENCE: Duration = Duration::from_secs(20);
+// delivery (`settle_engram_abort_before_handoff_locked`), and its step, release
+// check and postponement. The delays, the durable acknowledgement, the
+// one-attempt-per-head guard and the tick that starts the fresh admission
+// when it is due are the shared retry schedule (`engram_retry_schedule.rs`).
+// Does not own the dispatch itself (`prepare_engram_turn_delivery_off_lock`
+// in `engram_host_adapter.rs`, which decides that a delivery was withheld and
+// closes its grant), the retained prompt states it sits beside
+// (`engram_queued_admission.rs`), or the conservative hold every other
+// uncertain outcome keeps. New module: before it, a delivery withheld for a
+// slow local save left its prompt interrupted until someone cancelled it,
+// even after its grant was closed.
 
 /// Why a retained prompt's delivery was aborted before provider handoff.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -105,32 +94,6 @@ fn engram_queue_head_refused_as_interrupted(record: &SessionRecord) -> bool {
         && !engram_abort_retry_holds_head(record)
 }
 
-/// The pending durable acknowledgement of a settlement, kept on the session
-/// for the tick to look at without blocking.
-#[derive(Clone)]
-struct EngramAbortAckWaiter(Arc<PersistFenceWaiter>);
-
-impl std::fmt::Debug for EngramAbortAckWaiter {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("EngramAbortAckWaiter")
-    }
-}
-
-/// The delay before attempt `attempts + 1`: the schedule's value plus up to
-/// `ENGRAM_ABORT_RETRY_MAX_JITTER_PERCENT`, spread by session and attempt so
-/// sessions held together do not retry together.
-fn engram_abort_retry_delay(session_id: &str, attempts: u32) -> chrono::Duration {
-    let index = usize::try_from(attempts.saturating_sub(1))
-        .unwrap_or(usize::MAX)
-        .min(ENGRAM_ABORT_RETRY_DELAYS_SECONDS.len() - 1);
-    let base_ms = ENGRAM_ABORT_RETRY_DELAYS_SECONDS[index] * 1000;
-    let digest = sha256_hex(format!("{session_id}:{attempts}").as_bytes());
-    let spread = u64::from_str_radix(&digest[..8], 16).unwrap_or(0)
-        % (ENGRAM_ABORT_RETRY_MAX_JITTER_PERCENT + 1);
-    let jittered = base_ms * (100 + spread) / 100;
-    chrono::Duration::milliseconds(i64::try_from(jittered).unwrap_or(i64::MAX))
-}
-
 /// The authority an admission ran under: its project, connection and the
 /// settings that decide admission (`same_admission_settings`).
 fn engram_abort_authority(target: &EngramBindingTarget) -> String {
@@ -152,6 +115,7 @@ fn engram_admission_live_content(record: &SessionRecord) -> Value {
         "queue": record.queued_prompts.front(),
         "abortRetry": record.engram.abort_retry,
         "bindRetry": record.engram.bind_retry,
+        "admissionRetry": record.engram.admission_retry,
         "sourceObservation": record.engram.source_observation_gate })
 }
 
@@ -219,6 +183,9 @@ fn settle_engram_abort_before_handoff_locked(
     record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
     record.engram.rebind_required = true;
     record.engram.recovered_admission = false;
+    // An automatic replay of a parked admission may be the admission whose
+    // delivery was withheld: the abort record takes over from it.
+    clear_engram_admission_retry(record);
     record.engram.abort_retry = Some(EngramAbortRetry {
         prompt_id,
         reason,
@@ -242,23 +209,6 @@ fn settle_engram_abort_before_handoff_locked(
         .to_owned();
     sync_pending_prompts(record);
     true
-}
-
-/// What one tick does with a session's abort record.
-#[derive(Debug, PartialEq, Eq)]
-enum EngramAbortRetryStep {
-    /// Nothing yet: the acknowledgement is pending or the retry not due.
-    Wait,
-    /// The record no longer applies and was dropped; the hold stays.
-    Dropped,
-    /// The settlement needs a (new) durable acknowledgement.
-    Acknowledge,
-    /// The settlement was acknowledged just now; the prompt waits for its
-    /// retry.
-    Acknowledged,
-    /// The fresh admission is due. The hold stays: the admission bypasses it
-    /// only for this exact head (`dispatch_next_queued_turn_for_abort_retry`).
-    Due,
 }
 
 /// One tick's step for `record`'s abort record at `now`, given the authority
@@ -285,8 +235,7 @@ fn engram_abort_retry_step(
     // settlement reads it). Intent left with no admission running is an
     // outcome that did not settle, which another path now holds.
     let has_intent = head.is_some_and(QueuedPromptRecord::has_engram_intent);
-    let admission_running = record.engram.admission_in_progress.is_some()
-        || record.engram.pending_dispatch.is_some()
+    let admission_running = engram_retry_attempt_in_flight(record)
         || matches!(
             record.session.status,
             SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
@@ -319,48 +268,25 @@ fn engram_abort_retry_step(
         sync_pending_prompts(record);
         return EngramAbortRetryStep::Dropped;
     }
-    if !record.engram.abort_retry_acknowledged {
-        let saved = if record.engram.abort_retry_saved {
-            Some(Ok(()))
-        } else {
-            record
-                .engram
-                .abort_retry_fence
-                .as_ref()
-                .map(|waiter| waiter.0.wait_until(std::time::Instant::now()))
-                .unwrap_or(Some(Err(PersistFenceError::Deadline)))
-        };
-        return match saved {
-            // Still being written: look again next tick.
-            None => EngramAbortRetryStep::Wait,
-            // Never asked, or the worker gave up: ask again.
-            Some(Err(_)) => EngramAbortRetryStep::Acknowledge,
-            Some(Ok(())) => {
-                record.engram.abort_retry_acknowledged = true;
-                record.engram.abort_retry_saved = false;
-                record.engram.abort_retry_fence = None;
-                if let Some(saved) = record.engram.abort_retry.as_mut() {
-                    saved.acknowledged = true;
-                }
-                // The head stays interrupted, and so retained: only the
-                // retried admission or an explicit Resume passes it now.
-                record.session.preview = format!(
-                    "Engram: delivery not attempted; retrying automatically at {}.",
-                    retry.due_at
-                );
-                sync_pending_prompts(record);
-                EngramAbortRetryStep::Acknowledged
-            }
-        };
+    if let Some(step) = engram_retry_acknowledgement_step(record, |record| {
+        if let Some(saved) = record.engram.abort_retry.as_mut() {
+            saved.acknowledged = true;
+        }
+        // The head stays interrupted, and so retained: only the retried
+        // admission or an explicit Resume passes it now.
+        record.session.preview = format!(
+            "Engram: delivery not attempted; retrying automatically at {}.",
+            retry.due_at
+        );
+        sync_pending_prompts(record);
+    }) {
+        return step;
     }
-    let due = chrono::DateTime::parse_from_rfc3339(&retry.due_at)
-        .map(|due| due.with_timezone(&chrono::Utc))
-        .unwrap_or(now);
     let idle = matches!(
         record.session.status,
         SessionStatus::Idle | SessionStatus::Error
     );
-    if due > now
+    if !engram_retry_due_passed(&retry.due_at, now)
         || !idle
         || record.runtime_stop_in_progress
         || record.engram.admission_in_progress.is_some()
@@ -432,170 +358,6 @@ impl AppState {
         settled
     }
 
-    /// Asks the persistence worker to acknowledge, against the saved record,
-    /// the admission content `index`'s session holds now, abort record
-    /// included, and keeps the waiter for the tick.
-    fn request_engram_abort_acknowledgement_locked(&self, inner: &mut StateInner, index: usize) {
-        let record = &mut inner.sessions[index];
-        let (fence, waiter) = PersistFence::new(
-            PersistFenceTarget::EngramAdmission {
-                session_id: record.session.id.clone(),
-                content: engram_admission_live_content(record),
-            },
-            std::time::Instant::now() + ENGRAM_ABORT_SETTLEMENT_FENCE,
-        );
-        if self
-            .persist_tx
-            .send(PersistRequest::Fence(Box::new(fence)))
-            .is_ok()
-        {
-            record.engram.abort_retry_fence = Some(EngramAbortAckWaiter(Arc::new(waiter)));
-            return;
-        }
-        // Shutdown or a test without a worker: a synchronous save of the same
-        // content is the acknowledgement, as the admission fence falls back
-        // to it.
-        record.engram.abort_retry_fence = None;
-        let saved = self.persist_internal_locked(inner);
-        let record = &mut inner.sessions[index];
-        match saved {
-            Ok(()) => record.engram.abort_retry_saved = true,
-            Err(error) => eprintln!(
-                "engram> session={} failed saving the aborted delivery's settlement: {error:#}",
-                record.session.id
-            ),
-        }
-    }
-
-    /// One pass over every session with an abort record at `now`: drops a
-    /// record that no longer applies, asks for a missing or failed durable
-    /// acknowledgement, releases an acknowledged prompt for its retry, and
-    /// starts the fresh admission of each prompt that is due. Driven by the
-    /// test-run index thread's tick; tests call it with their own clock.
-    fn engram_abort_retry_tick(&self, now: chrono::DateTime<chrono::Utc>) {
-        self.source_observation_retry_tick(now);
-        let budget_now = self.engram_budget_clock().now();
-        let mut due = Vec::new();
-        // Sessions whose hold changed: a held delegation child reports it.
-        let mut held_changes = Vec::new();
-        {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let session_ids = inner
-                .sessions
-                .iter()
-                .filter(|record| {
-                    record.engram.abort_retry.is_some() || record.engram.bind_retry.is_some()
-                })
-                .map(|record| record.session.id.clone())
-                .collect::<Vec<_>>();
-            let mut changed = false;
-            for session_id in session_ids {
-                let Some(index) = inner.find_session_index(&session_id) else {
-                    continue;
-                };
-                // A settings transaction holds the project's fence while it
-                // validates off the lock, and may still roll back: the
-                // binding target reads as unavailable meanwhile. Wait for
-                // the committed authority rather than read that as a change.
-                let fenced = inner.sessions[index].engram.project_reset_in_progress
-                    || engram_project_for_session_locked(&inner, &session_id)
-                        .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
-                if fenced {
-                    continue;
-                }
-                let authority =
-                    Self::engram_binding_target_for_session_shape_locked(&inner, &session_id, true)
-                        .ok()
-                        .flatten()
-                        .map(|target| engram_abort_authority(&target));
-                let bind_retry = inner.sessions[index].engram.bind_retry.is_some();
-                let step = if bind_retry {
-                    engram_bind_retry_step(
-                        &mut inner.sessions[index],
-                        authority.as_deref(),
-                        now,
-                        budget_now,
-                    )
-                } else {
-                    engram_abort_retry_step(&mut inner.sessions[index], authority.as_deref(), now)
-                };
-                match step {
-                    EngramAbortRetryStep::Wait => {}
-                    EngramAbortRetryStep::Acknowledge => {
-                        self.request_engram_abort_acknowledgement_locked(&mut inner, index);
-                    }
-                    EngramAbortRetryStep::Dropped | EngramAbortRetryStep::Acknowledged => {
-                        inner.stamp_session_at_index(index);
-                        changed = true;
-                        held_changes.push(session_id);
-                    }
-                    EngramAbortRetryStep::Due => {
-                        if engram_source_observation_holds_admission(&inner, index) {
-                            if hold_source_observation_admission(&mut inner.sessions[index]) {
-                                inner.stamp_session_at_index(index);
-                                changed = true;
-                                held_changes.push(session_id);
-                            }
-                            continue;
-                        }
-                        // The admission bypasses the paused queue only for
-                        // the head it was due for, revalidated under the
-                        // promotion lock; a Cancel, takeover or changed
-                        // authority in between starts nothing.
-                        if let Some(owner) =
-                            EngramQueuedAdmissionOwner::capture(&inner.sessions[index])
-                        {
-                            due.push((session_id, owner, bind_retry));
-                        }
-                    }
-                }
-            }
-            if changed && let Err(error) = self.commit_locked(&mut inner) {
-                eprintln!("engram> failed persisting the abort retry tick: {error:#}");
-            }
-        }
-        for session_id in held_changes {
-            self.sync_delegation_attempt_for_child_session(&session_id);
-        }
-        for (session_id, owner, bind_retry) in due {
-            let prompt_id = owner.prompt_id.clone();
-            let retry_owner = owner.clone();
-            let dispatch = if bind_retry {
-                self.dispatch_next_queued_turn_for_bind_retry(&session_id, owner)
-            } else {
-                self.dispatch_next_queued_turn_for_abort_retry(&session_id, owner)
-            };
-            let started = match dispatch {
-                Ok(Some(dispatch)) => {
-                    if let Err(error) = deliver_turn_dispatch(self, dispatch)
-                        .into_background_result("engram abort retry")
-                    {
-                        eprintln!(
-                            "engram> session={session_id} failed delivering the retried prompt: {}",
-                            error.message
-                        );
-                    }
-                    true
-                }
-                Ok(None) => false,
-                Err(error) => {
-                    eprintln!(
-                        "engram> session={session_id} failed preparing the retried prompt: \
-                         {error:#}"
-                    );
-                    false
-                }
-            };
-            if !started {
-                if bind_retry {
-                    self.postpone_engram_bind_retry(&session_id, &retry_owner, now);
-                } else {
-                    self.postpone_engram_abort_retry(&session_id, &prompt_id, now);
-                }
-            }
-        }
-    }
-
     /// The retried admission of `prompt_id` did not start (the drain found
     /// nothing it may promote, or failed before admission): count it as an
     /// attempt and move its due time along the backoff, so the tick does not
@@ -644,15 +406,51 @@ impl AppState {
     }
 
     /// A public Stop of a session whose prompt waits for its automatic retry:
-    /// the retry is cancelled and the prompt kept, held for explicit
-    /// cancellation as a Stop of a waiting admission keeps it. Returns
-    /// whether there was such a retry to stop.
+    /// the retry is cancelled and the prompt kept. A withheld delivery's or a
+    /// retained bind's prompt is held for explicit cancellation, as a Stop of
+    /// a waiting admission holds it; a parked admission with no wire intent
+    /// keeps its resumable explicit hold. Returns whether there was such a
+    /// retry to stop.
     fn stop_engram_abort_retry(&self, session_id: &str) -> std::result::Result<bool, ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_visible_session_index(session_id) else {
             return Ok(false);
         };
         let record = &mut inner.sessions[index];
+        // A parked head waiting for its automatic replay with no wire intent
+        // (a retained evaluate or bind is the Stop of a waiting admission's):
+        // the retry ends behind the operator's pause, and the head keeps the
+        // explicit hold it had before the retry existed: queued, not
+        // interrupted, resumable, with the held preview.
+        if record.engram.admission_retry.is_some() {
+            let waiting = record.engram.admission_retry.as_ref().is_some_and(|retry| {
+                record
+                    .queued_prompts
+                    .front()
+                    .is_some_and(|head| head.pending_prompt.id == retry.prompt_id)
+            }) && matches!(
+                record.session.status,
+                SessionStatus::Idle | SessionStatus::Error
+            ) && !engram_retry_attempt_in_flight(record);
+            // A preview still announcing the retry shows the held preview.
+            drop_engram_admission_retry(record);
+            if !waiting {
+                inner.stamp_session_at_index(index);
+                self.commit_locked(&mut inner).map_err(|error| {
+                    ApiError::internal(format!(
+                        "Failed to persist stale admission retry cleanup: {error:#}"
+                    ))
+                })?;
+                return Ok(false);
+            }
+            record.set_auto_dispatch_blocked(true);
+            record.engram.operator_paused = true;
+            inner.stamp_session_at_index(index);
+            self.commit_locked(&mut inner).map_err(|error| {
+                ApiError::internal(format!("Failed to persist the stopped retry: {error:#}"))
+            })?;
+            return Ok(true);
+        }
         let bind_names_head = record.engram.bind_retry.as_ref().is_some_and(|retry| {
             record
                 .queued_prompts
@@ -684,6 +482,7 @@ impl AppState {
                 .map(|head| head.pending_prompt.id.clone());
             record.session.live_activity = None;
             record.set_auto_dispatch_blocked(true);
+            record.engram.operator_paused = true;
             record.session.preview = "Engram: automatic bind retry stopped. Prompt retained; remove it before starting a new operation.".to_owned();
             sync_pending_prompts(record);
             inner.stamp_session_at_index(index);
@@ -740,6 +539,7 @@ impl AppState {
             .front()
             .map(|queued| queued.pending_prompt.id.clone());
         record.set_auto_dispatch_blocked(true);
+        record.engram.operator_paused = true;
         record.session.preview = "Engram: automatic retry stopped. Prompt retained; remove it \
             before starting a new operation."
             .to_owned();
@@ -773,6 +573,14 @@ impl AppState {
                 record.engram.abort_retry = None;
                 record.engram.abort_retry_fence = None;
                 record.engram.abort_retry_acknowledged = false;
+            }
+            if record
+                .engram
+                .admission_retry
+                .as_ref()
+                .is_some_and(|retry| Some(&retry.prompt_id) == head.as_ref())
+            {
+                clear_engram_admission_retry(record);
             }
         }
     }
