@@ -167,6 +167,7 @@ export const UNIT_TEST_FILES: readonly string[] = [
   "src/panels/OrchestratorTemplatesPanel.geometry.test.ts",
   "src/panels/agent-session-panel-helpers.test.ts",
   "src/panels/git-status-tree.test.ts",
+  "src/panels/queue-pause-cause.test.ts",
   "src/panels/session-agent-command-submission.test.ts",
   "src/panels/session-slash-palette.test.ts",
   "src/panels/session-tab-status-tooltip.test.ts",

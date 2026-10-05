@@ -25,6 +25,7 @@ import {
   resolveSessionActivity,
   type SessionActivityOptions,
 } from "./AgentSessionPanel.waiting-indicator";
+import { queuePausedCardText, resolveQueuePauseCause } from "./queue-pause-cause";
 import {
   MessageAttachmentList,
   MessageMeta,
@@ -67,17 +68,23 @@ export function SessionActivityStrip(options: SessionActivityOptions) {
 
 // A paused queue is actionable transcript content, not transient activity.
 // Keep Resume beside the queued prompts until the backend releases its latch.
+// The text names why the queue is paused, from the session preview.
 export function QueuePausedIndicator({
   agent,
+  preview,
   queuedCount,
   onResume,
 }: {
   agent: Session["agent"];
+  preview: string;
   queuedCount: number;
   onResume?: () => void;
 }) {
-  const waitingLabel =
-    queuedCount === 1 ? "1 prompt waiting" : `${queuedCount} prompts waiting`;
+  const { heading, detail, waiting } = queuePausedCardText(
+    resolveQueuePauseCause(preview),
+    agent,
+    queuedCount,
+  );
 
   return (
     <article
@@ -90,10 +97,9 @@ export function QueuePausedIndicator({
         <div className="activity-card-heading">
           <div className="card-label">Queue paused</div>
         </div>
-        <h3>{agent} was stopped; the queue is paused</h3>
-        <p>
-          {waitingLabel}. Send a new prompt or resume the queue to continue.
-        </p>
+        <h3>{heading}</h3>
+        {detail ? <p>{detail}</p> : null}
+        <p>{waiting}</p>
       </div>
       {onResume ? (
         <button
