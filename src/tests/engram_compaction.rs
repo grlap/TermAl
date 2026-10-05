@@ -484,6 +484,16 @@ fn context_generation_restored_session_never_reuses_a_previous_host_token() {
     let restored = test_app_state();
     assert_ne!(restored.server_instance_id, state.server_instance_id);
     *restored.inner.lock().expect("state mutex") = loaded;
+    // A production restart installs its runtime-private launch policy after
+    // loading StateInner. This fixture bypasses boot, so mirror that step.
+    let transport = restored
+        .inner
+        .lock()
+        .expect("state mutex")
+        .engram_host_adapter
+        .transport
+        .clone();
+    restored.install_test_engram_transport(transport);
     assert_eq!(
         restored.prepare_engram_context_nudge_off_lock(&id),
         EngramContextNudgePreparation::Ready

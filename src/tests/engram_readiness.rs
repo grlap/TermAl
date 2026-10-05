@@ -282,7 +282,7 @@ fn diagnostic_declaration_invalid_preflight_never_launches_readiness_or_audit() 
                 .unwrap();
         }
         let binary = super::engram_host_adapter::real_engram_control_fixture_path();
-        assert!(run_engram_readiness(&binary, &marker, &root, &root).is_err());
+        assert!(run_engram_readiness(&binary, &marker, &root, &root, &root,).is_err());
         let draft = || UpdateProjectEngramSettingsRequest {
             enabled: true,
             turn_gated_control: true,
@@ -348,7 +348,7 @@ fn diagnostic_declaration_growth_during_process_fails_closed() {
                 .expect("audit refuses changed marker")
         } else {
             let binary = super::engram_host_adapter::real_engram_control_fixture_path();
-            run_engram_readiness(&binary, &marker, &root, &root)
+            run_engram_readiness(&binary, &marker, &root, &root, &root)
                 .err()
                 .expect("readiness refuses changed marker")
         };
@@ -548,6 +548,7 @@ fn readiness_transport_timeout_is_a_refusal() {
         root.path(),
         "readiness",
         Duration::ZERO,
+        root.path(),
     );
     assert!(
         result

@@ -500,7 +500,7 @@ impl AppState {
                 EngramSourceObservationPhase::Invariant { reason } => return Err(
                     EngramTransportError::local_state(reason.clone())),
                 EngramSourceObservationPhase::Captured => {
-                    let policy = target.adapter.transport.read_observation_policy(
+                    let policy = target.adapter.read_observation_policy(
                         &intent.connection, &gate.scope.store, target.rpc_timeout_until(deadline)?)?;
                     let status = target.adapter.request(&intent.connection,
                         &EngramControlRequest::SessionStatus { routing_token: intent.routing_token.clone() },

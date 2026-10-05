@@ -870,10 +870,14 @@ fn native_windows_launch_wait_distinguishes_final_259_from_still_active() {
 
 #[test]
 fn native_windows_work_spec_matches_adapter_interpreter_and_environment() {
-    for binary in ["C:/fixture/engram.exe", "C:/fixture/engram.ps1"] {
+    for binary in [
+        std::env::current_exe().unwrap(),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src/tests/fixtures/engram-control-fixture.ps1"),
+    ] {
         for context in [None, Some("reviewer context".to_owned())] {
             let connection = crate::EngramConnectionConfig {
-                binary_path: binary.into(),
+                binary_path: binary.clone(),
                 project_file: "C:/fixture/.engram-project".into(),
                 home: "C:/fixture/store".into(),
                 project_root: "C:/fixture".into(),
@@ -881,10 +885,19 @@ fn native_windows_work_spec_matches_adapter_interpreter_and_environment() {
                 session_id: "fixture session".into(),
                 actor_context: context,
             };
-            let mut expected = crate::engram_command(&connection.binary_path);
+            let mut expected = crate::engram_host_command(
+                &connection.binary_path,
+                &connection.project_root,
+                &connection.project_file,
+                &connection.home,
+                &std::env::current_dir().unwrap(),
+            )
+            .unwrap();
             crate::apply_engram_connection_environment(&mut expected, &connection);
-            expected.current_dir(&connection.project_root);
-            let actual = crate::work_read_launch_command(&connection);
+            expected.current_dir(std::env::current_dir().unwrap());
+            let actual =
+                crate::work_read_launch_command(&connection, &std::env::current_dir().unwrap())
+                    .unwrap();
             assert_eq!(actual.get_program(), expected.get_program());
             assert_eq!(
                 actual.get_args().collect::<Vec<_>>(),

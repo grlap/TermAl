@@ -50,6 +50,8 @@ mod delegation_lifecycle;
 mod delegation_metadata;
 mod delegation_outcome_recovery;
 mod delegation_persistence;
+#[cfg(windows)]
+mod delegation_process_cleanup;
 mod delegation_read_only;
 mod delegation_result_parser;
 mod delegation_review_results;
@@ -809,6 +811,13 @@ fn test_app_state() -> AppState {
     // store explicitly, exactly like mailbox tests.
     let coordination_board_store = Arc::new(CoordinationBoardStore::disabled_for_tests());
 
+    // This constructor bypasses AppState::new_with_paths. Mirror its private
+    // host launch policy before fixtures enable Engram or replay an intent.
+    let mut inner = StateInner::new();
+    inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(
+        engram_host_workdir(&persistence_path).expect("fixture persistence directory"),
+    ));
+
     AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         default_workdir: "/tmp".to_owned(),
@@ -862,7 +871,7 @@ fn test_app_state() -> AppState {
         )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
-        inner: Arc::new(StateMutex::new(StateInner::new())),
+        inner: Arc::new(StateMutex::new(inner)),
         test_temp_root: Some(test_temp_root),
     }
 }

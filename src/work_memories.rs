@@ -214,7 +214,11 @@ impl AppState {
             let _permit = admit()?;
             work_read_not_abandoned(cancelled)?;
             self.validate_work_read_still_current(project_id, &target)?;
-            let value = run_work_read_command(&target.connection, &query.arguments())?;
+            let value = run_work_read_command(
+                &target.connection,
+                &query.arguments(),
+                &self.engram_host_launch_workdir(),
+            )?;
             self.validate_work_read_still_current(project_id, &target)?;
             let mut response = normalize_work_memories(source, &query, value)?;
             response.reader_id = Some(target.reader_key);

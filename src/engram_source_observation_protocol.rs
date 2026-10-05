@@ -55,6 +55,7 @@ fn read_engram_observation_policy(
     connection: &EngramConnectionConfig,
     expected_store: &EngramAuthorityStoreKey,
     timeout: Duration,
+    host_workdir: &FsPath,
 ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
     if timeout.is_zero() {
         return Err(EngramTransportError::deadline("source observation policy budget expired"));
@@ -65,6 +66,7 @@ fn read_engram_observation_policy(
         &connection.home,
         &connection.project_root,
         timeout,
+        host_workdir,
     ).map_err(|error| EngramTransportError::transport(error.message))?;
     let store = validate_engram_readiness(
         &receipt, &connection.project_file, &connection.home, true,

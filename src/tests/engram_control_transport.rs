@@ -42,7 +42,7 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
         work_binding: None,
         idempotency_key: "fixture-bind".to_owned(),
     };
-    let transport = real_process_fixture_transport();
+    let transport = real_process_fixture_transport(temp_root.path());
 
     let first = transport
         .request(&connection, &request, DEADLOCK_GUARD)
@@ -119,7 +119,7 @@ fn real_process_timeout_kills_the_entire_control_process_tree() {
         work_binding: None,
         idempotency_key: "fixture-tree-bind".to_owned(),
     };
-    let transport = Arc::new(real_process_fixture_transport());
+    let transport = Arc::new(real_process_fixture_transport(temp_root.path()));
     transport
         .process_for(&connection)
         .expect("tree startup should complete before the request deadline");
@@ -146,7 +146,7 @@ fn real_process_eof_kills_the_entire_control_process_tree() {
     let (project_file, ready) =
         prepare_engram_control_process_tree_fixture(&temp_root, "fixture-tree-eof");
     let connection = engram_control_process_tree_connection(&temp_root, project_file, "eof");
-    let transport = Arc::new(real_process_fixture_transport());
+    let transport = Arc::new(real_process_fixture_transport(temp_root.path()));
     transport
         .process_for(&connection)
         .expect("tree startup should complete before EOF");
@@ -175,7 +175,7 @@ fn real_process_shutdown_kills_the_entire_control_process_tree() {
     let (project_file, ready) =
         prepare_engram_control_process_tree_fixture(&temp_root, "fixture-tree-reply");
     let connection = engram_control_process_tree_connection(&temp_root, project_file, "shutdown");
-    let transport = real_process_fixture_transport();
+    let transport = real_process_fixture_transport(temp_root.path());
 
     transport
         .request(
@@ -196,6 +196,7 @@ fn real_process_idle_reap_kills_the_entire_control_process_tree() {
         prepare_engram_control_process_tree_fixture(&temp_root, "fixture-tree-reply");
     let connection = engram_control_process_tree_connection(&temp_root, project_file, "idle");
     let transport = ProcessEngramControlTransport::with_startup_handshake_and_idle_timeout(
+        temp_root.path().to_path_buf(),
         "termal-engram-control-fixture-ready",
         DEADLOCK_GUARD,
         Duration::from_millis(250),
@@ -684,7 +685,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         actor_context: None,
         session_id: "engram-fixture-idempotency".to_owned(),
     };
-    let transport = real_process_fixture_transport();
+    let transport = real_process_fixture_transport(temp_root.path());
 
     let (routing_token, _) = process_fixture_bind(&transport, &connection, "durable-bind");
     assert_eq!(
@@ -892,7 +893,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
         actor_context: None,
         session_id: "engram-fixture-stale-begin".to_owned(),
     };
-    let transport = real_process_fixture_transport();
+    let transport = real_process_fixture_transport(temp_root.path());
 
     let (stale_token, stale_phase) =
         process_fixture_bind(&transport, &base_connection, "stale-bind");
@@ -1183,8 +1184,9 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
     transport.shutdown_session(&refusal_connection.session_id);
 }
 
-fn real_process_fixture_transport() -> ProcessEngramControlTransport {
+fn real_process_fixture_transport(host_workdir: &FsPath) -> ProcessEngramControlTransport {
     ProcessEngramControlTransport::with_startup_handshake(
+        host_workdir.to_path_buf(),
         "termal-engram-control-fixture-ready",
         DEADLOCK_GUARD,
     )

@@ -40,6 +40,7 @@ fn real_process_work_binding_reader_reads_the_held_claims() {
             EngramBindingPreference::default(),
             DEADLOCK_GUARD,
             false,
+            temp.path(),
         );
         assert!(
             !result
@@ -84,7 +85,7 @@ fn real_process_work_binding_reader_reads_the_held_claims() {
     // The full read a work's source root is named against decodes each row's
     // own claim fields, which naming depends on: with them missing, every
     // name would be refused.
-    let held = read_engram_held_claims_from_cli(&connection, DEADLOCK_GUARD, false)
+    let held = read_engram_held_claims_from_cli(&connection, DEADLOCK_GUARD, false, temp.path())
         .expect("the held claims should be read");
     assert_eq!(held.omitted, 0);
     assert_eq!(

@@ -44,14 +44,16 @@ struct EngramControlStartupHandshake {
 }
 
 struct ProcessEngramControlTransport {
+    host_workdir: PathBuf,
     processes: Mutex<HashMap<String, Arc<EngramControlProcess>>>,
     startup_handshake: Option<EngramControlStartupHandshake>,
     idle_timeout: Duration,
 }
 
-impl Default for ProcessEngramControlTransport {
-    fn default() -> Self {
+impl ProcessEngramControlTransport {
+    fn new(host_workdir: PathBuf) -> Self {
         Self {
+            host_workdir,
             processes: Mutex::new(HashMap::new()),
             startup_handshake: None,
             idle_timeout: ENGRAM_CONTROL_IDLE_TIMEOUT,
@@ -61,8 +63,13 @@ impl Default for ProcessEngramControlTransport {
 
 impl ProcessEngramControlTransport {
     #[cfg(test)]
-    fn with_startup_handshake(expected_line: &'static str, timeout: Duration) -> Self {
+    fn with_startup_handshake(
+        host_workdir: PathBuf,
+        expected_line: &'static str,
+        timeout: Duration,
+    ) -> Self {
         Self {
+            host_workdir,
             processes: Mutex::new(HashMap::new()),
             startup_handshake: Some(EngramControlStartupHandshake {
                 expected_line,
@@ -74,11 +81,13 @@ impl ProcessEngramControlTransport {
 
     #[cfg(test)]
     fn with_startup_handshake_and_idle_timeout(
+        host_workdir: PathBuf,
         expected_line: &'static str,
         startup_timeout: Duration,
         idle_timeout: Duration,
     ) -> Self {
         Self {
+            host_workdir,
             processes: Mutex::new(HashMap::new()),
             startup_handshake: Some(EngramControlStartupHandshake {
                 expected_line,
@@ -114,6 +123,7 @@ impl ProcessEngramControlTransport {
 
         let process = Arc::new(spawn_engram_control_process(
             connection,
+            &self.host_workdir,
             self.startup_handshake,
             self.idle_timeout,
         )?);
@@ -229,7 +239,13 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        read_engram_work_binding_from_cli(connection, preference, timeout, false)
+        read_engram_work_binding_from_cli(
+            connection,
+            preference,
+            timeout,
+            false,
+            &self.host_workdir,
+        )
     }
 
     fn read_work_binding_for_boot(
@@ -238,7 +254,7 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        read_engram_work_binding_from_cli(connection, preference, timeout, true)
+        read_engram_work_binding_from_cli(connection, preference, timeout, true, &self.host_workdir)
     }
 
     fn read_held_claims(
@@ -246,7 +262,7 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         connection: &EngramConnectionConfig,
         timeout: Duration,
     ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
-        read_engram_held_claims_from_cli(connection, timeout, false)
+        read_engram_held_claims_from_cli(connection, timeout, false, &self.host_workdir)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -263,10 +279,17 @@ impl EngramControlTransport for ProcessEngramControlTransport {
 
 fn spawn_engram_control_process(
     connection: &EngramConnectionConfig,
+    host_workdir: &FsPath,
     startup_handshake: Option<EngramControlStartupHandshake>,
     idle_timeout: Duration,
 ) -> std::result::Result<EngramControlProcess, EngramTransportError> {
-    let mut command = engram_command(&connection.binary_path);
+    let mut command = engram_host_command(
+        &connection.binary_path,
+        &connection.project_root,
+        &connection.project_file,
+        &connection.home,
+        host_workdir,
+    )?;
     configure_terminal_process_tree(&mut command);
     apply_engram_connection_environment(&mut command, connection);
     command
@@ -283,7 +306,6 @@ fn spawn_engram_control_process(
     let mut child = command
         .arg("--session-id")
         .arg(&connection.session_id)
-        .current_dir(&connection.project_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

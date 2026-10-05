@@ -82,8 +82,9 @@ struct ControlOnlyEngramTransport {
 impl EngramControlTransport for ControlOnlyEngramTransport {
     fn read_observation_policy(
         &self, connection: &EngramConnectionConfig, expected_store: &EngramAuthorityStoreKey, timeout: Duration,
+        host_workdir: &FsPath,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.control.read_observation_policy(connection, expected_store, timeout)
+        self.control.read_observation_policy(connection, expected_store, timeout, host_workdir)
     }
     fn request(
         &self,
@@ -15578,6 +15579,16 @@ fn project_deletion_keeps_retired_authority_across_recreate_and_restart() {
         };
         assert_engram_budget_clock_unread(&state);
         *state.inner.lock().expect("state mutex poisoned") = reloaded;
+        // This fixture loads StateInner directly, bypassing production boot's
+        // runtime-private host launch policy initialization.
+        let transport = state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_host_adapter
+            .transport
+            .clone();
+        state.install_test_engram_transport(transport);
 
         let recreated_project_id =
             create_test_project(&state, &root, "Recreated Engram delete ledger");
@@ -17031,6 +17042,7 @@ fn enablement_doctor_expiry_names_the_deadline_it_enforced() {
         &home,
         root.path(),
         Duration::ZERO,
+        &home,
     ) {
         Ok(_) => panic!("an already expired deadline must fail instead of awaiting the doctor"),
         Err(error) => error,
@@ -17066,6 +17078,7 @@ fn slow_doctor_fixture_payload_deserializes_when_the_deadline_is_generous() {
         &home,
         root.path(),
         DEADLOCK_GUARD,
+        &home,
     )
     .unwrap_or_else(|error| {
         panic!(
@@ -17130,6 +17143,7 @@ fn check_doctor_descendant_deadline(mode: &str) {
             &home,
             &home,
             Duration::from_secs(5),
+            &home,
         );
         let _ = sender.send(result.map(|report| report.healthy));
     });
@@ -17217,6 +17231,7 @@ fn doctor_transport_drains_a_report_larger_than_the_pipe_buffer() {
         &home,
         root.path(),
         DEADLOCK_GUARD,
+        &home,
     )
     .unwrap_or_else(|error| {
         panic!(

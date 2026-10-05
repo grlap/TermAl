@@ -232,7 +232,11 @@ impl AppState {
                 work_read_not_abandoned(cancelled)?;
                 // Waiting for admission may outlive the installed reader.
                 self.validate_work_read_still_current(project_id, &target)?;
-                let value = run_work_read_command(&target.connection, &query.arguments())?;
+                let value = run_work_read_command(
+                    &target.connection,
+                    &query.arguments(),
+                    &self.engram_host_launch_workdir(),
+                )?;
                 self.validate_work_read_still_current(project_id, &target)?;
                 let page = normalize_engram_work_page(value)?;
                 if query.after.is_none() && page.shown_before != 0 {

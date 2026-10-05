@@ -717,6 +717,7 @@ fn run_acceptance_evaluation_read(
     connection: &EngramConnectionConfig,
     args: &[String],
     timeout: Duration,
+    host_workdir: &FsPath,
 ) -> std::result::Result<Value, EngramTransportError> {
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     run_engram_json_command_with_lock_retry(
@@ -724,6 +725,7 @@ fn run_acceptance_evaluation_read(
         &args,
         timeout,
         ACCEPTANCE_EVALUATION_READER_LABEL,
+        host_workdir,
     )
 }
 
@@ -732,6 +734,7 @@ fn run_acceptance_evaluation_submit(
     connection: &EngramConnectionConfig,
     args: &[String],
     timeout: Duration,
+    host_workdir: &FsPath,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     run_engram_cli_command_with_lock_retry(
@@ -739,6 +742,7 @@ fn run_acceptance_evaluation_submit(
         &args,
         timeout,
         ACCEPTANCE_EVALUATION_SUBMIT_LABEL,
+        host_workdir,
     )
 }
 
@@ -748,10 +752,13 @@ impl AppState {
         parent_session_id: &str,
         request: RequestAcceptanceEvaluationRequest,
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
+        let host_workdir = self.engram_host_launch_workdir();
         self.request_acceptance_evaluation_with_runner(
             parent_session_id,
             request,
-            run_acceptance_evaluation_read,
+            |connection, args, timeout| {
+                run_acceptance_evaluation_read(connection, args, timeout, &host_workdir)
+            },
         )
     }
 
@@ -1690,10 +1697,13 @@ impl AppState {
         child: &str,
         request: SubmitAcceptanceEvaluationRequest,
     ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError> {
+        let host_workdir = self.engram_host_launch_workdir();
         let result = self.submit_acceptance_evaluation_with_runner(
             child,
             request,
-            run_acceptance_evaluation_submit,
+            |connection, args, timeout| {
+                run_acceptance_evaluation_submit(connection, args, timeout, &host_workdir)
+            },
         );
         // The single-flight guard has been released and the acknowledged
         // state (or conservative failure state) is now safe to show.
@@ -1714,7 +1724,15 @@ impl AppState {
             Duration,
         ) -> std::result::Result<EngramCliOutput, EngramTransportError>,
     ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError> {
-        self.submit_acceptance_evaluation_with_io(child, request, run, run_acceptance_evaluation_read)
+        let host_workdir = self.engram_host_launch_workdir();
+        self.submit_acceptance_evaluation_with_io(
+            child,
+            request,
+            run,
+            |connection, args, timeout| {
+                run_acceptance_evaluation_read(connection, args, timeout, &host_workdir)
+            },
+        )
     }
 
     fn submit_acceptance_evaluation_with_io(

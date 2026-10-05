@@ -1001,6 +1001,7 @@ fn revoke_project_engram_authority_off_lock(
     targets: &[EngramAuthorityRevocationTarget],
     reason: Option<&str>,
     unresolved_failure: Option<String>,
+    host_workdir: &FsPath,
 ) -> EngramAuthorityRevocationAttempts {
     let Some(reason) = reason else {
         return EngramAuthorityRevocationAttempts {
@@ -1011,7 +1012,7 @@ fn revoke_project_engram_authority_off_lock(
     let mut confirmed_targets = Vec::new();
     let mut failures = unresolved_failure.into_iter().collect::<Vec<_>>();
     for (index, target) in targets.iter().enumerate() {
-        match revoke_engram_project_work_authority(target, reason) {
+        match revoke_engram_project_work_authority(target, reason, host_workdir) {
             Ok(()) => confirmed_targets.push(target.clone()),
             Err(error) => failures.push(format!("revocation target {}: {error}", index + 1)),
         }
@@ -1785,7 +1786,9 @@ impl AppState {
         let project_root = PathBuf::from(&project.root_path);
         self.validate_engram_diagnostic_snapshot(&project, &host_settings)?;
         let started = std::time::Instant::now();
-        let readiness = run_engram_readiness(&binary_path, &project_file, &home, &project_root)?;
+        let readiness = run_engram_readiness(
+            &binary_path, &project_file, &home, &project_root, &self.engram_host_launch_workdir(),
+        )?;
         let mut errors = Vec::new();
         let store_key = match validate_engram_readiness(
             &readiness,
@@ -1955,6 +1958,7 @@ impl AppState {
             settings.authority_store_key = Some(validate_engram_project_enablement(
                 &project_snapshot,
                 &settings,
+                &self.engram_host_launch_workdir(),
             )?);
         } else {
             settings.authority_store_key = project_snapshot.engram.as_ref().and_then(|current| {
@@ -2438,6 +2442,7 @@ impl AppState {
                     &authority_revocation_targets,
                     authority_revocation_reason,
                     authority_unresolved_failure,
+                    &self.engram_host_launch_workdir(),
                 ),
             );
             let authority_revoke_succeeded = authority_revocation_failure.is_none();
@@ -3095,6 +3100,7 @@ impl AppState {
                 &authority_revocation_targets,
                 authority_revocation_reason,
                 authority_unresolved_failure,
+                &self.engram_host_launch_workdir(),
             ),
         );
         for session_id in &final_session_ids {
@@ -4836,6 +4842,7 @@ impl AppState {
                 &authority_revocation_targets,
                 authority_revocation_reason,
                 authority_unresolved_failure,
+                &self.engram_host_launch_workdir(),
             ),
         );
         for session_id in &final_session_ids {

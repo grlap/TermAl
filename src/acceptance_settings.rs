@@ -253,7 +253,10 @@ impl AppState {
         &self,
         project_id: &str,
     ) -> Result<AcceptancePolicySnapshot, ApiError> {
-        self.project_acceptance_policy_with_reader(project_id, run_acceptance_evaluation_read)
+        let host_workdir = self.engram_host_launch_workdir();
+        self.project_acceptance_policy_with_reader(project_id, |connection, args, timeout| {
+            run_acceptance_evaluation_read(connection, args, timeout, &host_workdir)
+        })
     }
 
     fn project_acceptance_policy_with_reader(
@@ -326,6 +329,7 @@ impl AppState {
         project_id: &str,
         request: UpdateAcceptancePolicyRequest,
     ) -> Result<AcceptancePolicySnapshot, ApiError> {
+        let host_workdir = self.engram_host_launch_workdir();
         self.update_acceptance_policy_with_runner(
             project_id,
             request,
@@ -337,9 +341,12 @@ impl AppState {
                     &refs,
                     ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT,
                     "operator acceptance policy",
+                    &host_workdir,
                 )
             },
-            run_acceptance_evaluation_read,
+            |connection, args, timeout| {
+                run_acceptance_evaluation_read(connection, args, timeout, &host_workdir)
+            },
         )
     }
 

@@ -181,7 +181,9 @@ fn live_sub_agent_parent_loses_both_routes_after_spawn_and_host_surfaces_final_r
     let error = fixture.live.state.submit_acceptance_evaluation_with_runner(
         &child.child_session_id, verdicts(&evidence), |connection, args, timeout| {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let result = run_acceptance_evaluation_submit(connection, args, timeout);
+            let result = run_acceptance_evaluation_submit(
+                connection, args, timeout, &fixture.live.state.engram_host_launch_workdir(),
+            );
             if let Ok(output) = &result {
                 *refusal.lock().unwrap() = serde_json::from_slice::<Value>(&output.stderr).ok();
             }

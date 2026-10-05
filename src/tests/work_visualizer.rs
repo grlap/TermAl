@@ -226,6 +226,7 @@ fn work_shims_are_unavailable_and_oversized_combined_arguments_are_client_errors
             format!("--search={}", "x".repeat(10_000)),
             format!("--label={}", "y".repeat(10_000)),
         ],
+        &state.engram_host_launch_workdir(),
     )
     .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);

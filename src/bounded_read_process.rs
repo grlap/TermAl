@@ -8,21 +8,6 @@ type BoundedReadCommand = Command;
 
 // This is constructed at the read caller, rather than copying opaque Command
 // state. The adapter keeps its separate transport during this migration.
-#[cfg(windows)]
-fn bounded_read_command(binary: &FsPath) -> BoundedReadCommand {
-    if binary
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("ps1"))
-    {
-        let mut command = BoundedReadCommand::new("powershell.exe");
-        command
-            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
-            .arg(binary);
-        command
-    } else {
-        BoundedReadCommand::new(binary)
-    }
-}
 #[cfg(not(windows))]
 fn bounded_read_command(binary: &FsPath) -> BoundedReadCommand {
     engram_command(binary)
