@@ -48,10 +48,24 @@ struct ClaudeRuntimeHandle {
     runtime_id: String,
     input_tx: Sender<ClaudeRuntimeCommand>,
     process: Arc<SharedChild>,
+    #[cfg(windows)]
+    process_tree: Option<Arc<RuntimeProcessTree>>,
 }
 
 impl ClaudeRuntimeHandle {
+    fn kill_for_locked_reset(&self) -> Result<()> {
+        #[cfg(windows)]
+        if let Some(tree) = &self.process_tree {
+            if tree.is_confirmed() { return Ok(()); }
+            bail!("dedicated runtime reset requires off-lock cleanup preparation");
+        }
+        self.kill()
+    }
     fn kill(&self) -> Result<()> {
+        #[cfg(windows)]
+        if let Some(tree) = &self.process_tree {
+            return tree.terminate(&self.process, "Claude");
+        }
         kill_child_process(&self.process, "Claude")
     }
 }
@@ -326,6 +340,8 @@ struct AcpRuntimeHandle {
     runtime_id: String,
     input_tx: Sender<AcpRuntimeCommand>,
     process: Arc<SharedChild>,
+    #[cfg(windows)]
+    process_tree: Option<Arc<RuntimeProcessTree>>,
     turn_lifecycle: AcpTurnLifecycle,
 }
 
@@ -337,7 +353,19 @@ struct TestAcpRuntimeOverride {
 }
 
 impl AcpRuntimeHandle {
+    fn kill_for_locked_reset(&self) -> Result<()> {
+        #[cfg(windows)]
+        if let Some(tree) = &self.process_tree {
+            if tree.is_confirmed() { return Ok(()); }
+            bail!("dedicated runtime reset requires off-lock cleanup preparation");
+        }
+        self.kill()
+    }
     fn kill(&self) -> Result<()> {
+        #[cfg(windows)]
+        if let Some(tree) = &self.process_tree {
+            return tree.terminate(&self.process, self.agent.label());
+        }
         kill_child_process(&self.process, self.agent.label())
     }
 
@@ -390,6 +418,16 @@ impl KillableRuntime {
     /// probe cannot prove exit, otherwise the stale MCP-bearing process loses
     /// its only retry handle.
     fn process_has_exited(&self) -> Result<bool> {
+        #[cfg(windows)]
+        match self {
+            Self::Claude(handle) if handle.process_tree.is_some() => {
+                return handle.process_tree.as_ref().unwrap().has_exited();
+            }
+            Self::Acp(handle) if handle.process_tree.is_some() => {
+                return handle.process_tree.as_ref().unwrap().has_exited();
+            }
+            _ => {}
+        }
         match self {
             Self::Claude(handle) => shared_child_has_exited(&handle.process, "Claude runtime"),
             Self::Codex(handle) => shared_child_has_exited(&handle.process, "Codex runtime"),
@@ -554,6 +592,24 @@ enum RuntimeToken {
 }
 
 impl SessionRuntime {
+    #[cfg(windows)]
+    fn dedicated_tree_owner(&self) -> Option<(Arc<RuntimeProcessTree>, Arc<SharedChild>, &'static str)> {
+        match self {
+            Self::Claude(handle) => handle.process_tree.as_ref().map(|tree| (tree.clone(), handle.process.clone(), "Claude")),
+            Self::Acp(handle) => handle.process_tree.as_ref().map(|tree| (tree.clone(), handle.process.clone(), handle.agent.label())),
+            _ => None,
+        }
+    }
+    fn dedicated_cleanup_failure(&self) -> Option<String> {
+        #[cfg(windows)]
+        match self {
+            Self::Claude(handle) => return handle.process_tree.as_ref().and_then(|tree| tree.cleanup_failure()),
+            Self::Acp(handle) => return handle.process_tree.as_ref().and_then(|tree| tree.cleanup_failure()),
+            _ => {},
+        }
+        None
+    }
+
     /// Returns a `RuntimeToken` identifying the current runtime, or
     /// `None` when `SessionRuntime::None`. Used by the
     /// `_if_runtime_matches` guard wrappers in `turn_lifecycle.rs`

@@ -768,6 +768,8 @@ fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
         agent: AcpAgent::Cursor,
         runtime_id: "cursor-stop-owner-original".to_owned(),
         input_tx: original_input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: original_process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
@@ -778,6 +780,8 @@ fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
         agent: AcpAgent::Cursor,
         runtime_id: "cursor-stop-owner-successor".to_owned(),
         input_tx: successor_input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: successor_process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
@@ -894,6 +898,8 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
         agent: AcpAgent::Cursor,
         runtime_id: "cursor-stop-persist-original".to_owned(),
         input_tx: original_input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: original_process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
@@ -904,6 +910,8 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
         agent: AcpAgent::Cursor,
         runtime_id: "cursor-stop-persist-successor".to_owned(),
         input_tx: successor_input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: successor_process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
@@ -1064,6 +1072,8 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
         agent: AcpAgent::Cursor,
         runtime_id: "cursor-stop-wait-persist-failure".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
@@ -1173,6 +1183,8 @@ fn stop_session_keeps_queued_prompt_idle_when_successor_start_fails() {
         agent: AcpAgent::Cursor,
         runtime_id: "cursor-stop-queued-successor-failure".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process,
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
@@ -1297,6 +1309,8 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-fail".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1383,6 +1397,8 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-concurrent-read".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1468,6 +1484,8 @@ fn stop_session_returns_conflict_when_already_stopping() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-conflict".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process,
     };
 

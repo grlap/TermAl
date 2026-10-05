@@ -900,10 +900,18 @@ impl AppState {
             return self.proxy_remote_refresh_session_model_options(session_id);
         }
         self.refresh_engram_project_declaration_for_session_off_lock(session_id);
+        self.prepare_dedicated_runtime_reset_off_lock(session_id, true)
+            .map_err(|error| ApiError::conflict(format!("failed preparing dedicated model refresh: {error:#}")))?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if let Some(detail) = inner.sessions[index].runtime.dedicated_cleanup_failure() {
+            return Err(ApiError::conflict(format!("{detail}; Stop or Delete must finish cleanup before model refresh")));
+        }
+        if inner.sessions[index].dedicated_predecessor_pending() {
+            return Err(ApiError::conflict("previous runtime cleanup remains pending"));
+        }
         if inner.sessions[index].runtime_stop_in_progress
             || matches!(
                 inner.sessions[index].session.status,
@@ -924,7 +932,7 @@ impl AppState {
         if agent == Agent::Claude {
             if record.runtime_reset_required {
                 if let SessionRuntime::Claude(handle) = &record.runtime {
-                    handle.kill().map_err(|err| {
+                    handle.kill_for_locked_reset().map_err(|err| {
                         ApiError::internal(format!(
                             "failed to restart Claude session runtime: {err:#}"
                         ))
@@ -948,7 +956,7 @@ impl AppState {
                     ));
                 }
                 SessionRuntime::Claude(handle) => {
-                    handle.kill().map_err(|err| {
+                    handle.kill_for_locked_reset().map_err(|err| {
                         ApiError::internal(format!(
                             "failed to restart Claude session runtime: {err:#}"
                         ))
@@ -997,6 +1005,7 @@ impl AppState {
                 ))
             })?;
             record.runtime = SessionRuntime::Claude(handle);
+            record.register_dedicated_runtime();
             record.engram_mcp_installed = engram_mcp.map(|config| config.installed);
             drop(inner);
 
@@ -1123,7 +1132,7 @@ impl AppState {
 
         if record.runtime_reset_required {
             if let SessionRuntime::Acp(handle) = &record.runtime {
-                handle.kill().map_err(|err| {
+                handle.kill_for_locked_reset().map_err(|err| {
                     ApiError::internal(format!(
                         "failed to restart {} session runtime: {err:#}",
                         agent.name()
@@ -1145,7 +1154,7 @@ impl AppState {
         if matches!(agent, Agent::OpenCode | Agent::Kimi) {
             match &record.runtime {
                 SessionRuntime::Acp(handle) if handle.agent == expected_acp_agent => {
-                    handle.kill().map_err(|err| {
+                    handle.kill_for_locked_reset().map_err(|err| {
                         ApiError::internal(format!(
                             "failed to restart {} session runtime for model refresh: {err:#}",
                             agent.name()
@@ -1204,6 +1213,7 @@ impl AppState {
                         ))
                     })?;
                 record.runtime = SessionRuntime::Acp(handle.clone());
+                record.register_dedicated_runtime();
                 record.engram_mcp_installed =
                     engram_mcp.as_ref().map(|config| config.installed.clone());
                 handle

@@ -1226,6 +1226,8 @@ struct StopSessionOptions {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RuntimeStopOwnerKind {
     UserStop,
+    #[cfg(windows)]
+    DedicatedReset,
     EngramMcpRevocation,
     LostRuntimeTerminalization,
 }
@@ -1926,6 +1928,8 @@ struct SessionRecord {
     remote_id: Option<String>,
     remote_session_id: Option<String>,
     runtime: SessionRuntime,
+    #[cfg(windows)]
+    retained_dedicated_owners: Vec<RetainedDedicatedOwner>,
     /// Descriptor actually installed into the currently attached local agent
     /// runtime/thread. This process-local capability record is deliberately
     /// omitted from persistence and wire snapshots; it exists so a later
@@ -2013,7 +2017,22 @@ struct QueuePromotionSnapshot {
 }
 
 impl SessionRecord {
+    // Transcript observations may continue while exact cleanup remains retryable.
+    fn runtime_projection_allowed(&self) -> bool {
+        self.runtime.dedicated_cleanup_failure().is_none()
+    }
+
+    fn runtime_preview(&self, preview: String) -> String {
+        if self.runtime_projection_allowed() {
+            preview
+        } else {
+            self.session.preview.clone()
+        }
+    }
+
     fn clear_runtime(&mut self) {
+        #[cfg(windows)]
+        self.retained_dedicated_owners.retain(|owner| !owner.tree.is_confirmed());
         self.runtime = SessionRuntime::None;
         self.engram_mcp_installed = None;
         // A runtime-started turn ends with its runtime.

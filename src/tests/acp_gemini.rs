@@ -684,6 +684,8 @@ fn acp_stop_preserves_continuity_after_cancelled_prompt_settles() {
         agent: AcpAgent::OpenCode,
         runtime_id: "acp-clean-cancel".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
         turn_lifecycle: turn_lifecycle.clone(),
     };
@@ -719,6 +721,8 @@ fn acp_stop_kills_after_cancel_grace_when_prompt_never_settles() {
         agent: AcpAgent::OpenCode,
         runtime_id: "acp-stuck-cancel".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
         turn_lifecycle,
     };
@@ -754,6 +758,8 @@ fn acp_stop_with_disconnected_writer_kills_but_preserves_continuity() {
         agent: AcpAgent::OpenCode,
         runtime_id: "acp-disconnected-cancel".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(true), Condvar::new())),
     };
@@ -772,6 +778,8 @@ fn cursor_deliberate_stop_keeps_immediate_termination_contract() {
         agent: AcpAgent::Cursor,
         runtime_id: "cursor-immediate-stop".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(true), Condvar::new())),
     };

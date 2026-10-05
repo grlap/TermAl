@@ -470,13 +470,21 @@ fn release_private_claude_mcp_config(slot: &mut Option<ClaudeMcpConfigFile>) {
 /// record the teardown failure directly without the waiter duplicating it.
 fn terminate_claude_runtime_after_control_failure(
     process: &Arc<SharedChild>,
+    #[cfg(windows)] process_tree: Option<&RuntimeProcessTree>,
     runtime_exit_error_override: &Arc<Mutex<Option<String>>>,
     detail: &str,
 ) -> Result<()> {
     *runtime_exit_error_override
         .lock()
         .expect("Claude runtime-exit override mutex poisoned") = Some(detail.to_owned());
-    if let Err(error) = kill_child_process(process, "Claude") {
+    #[cfg(windows)]
+    let termination = match process_tree {
+        Some(tree) => tree.terminate(process, "Claude"),
+        None => kill_child_process(process, "Claude"),
+    };
+    #[cfg(not(windows))]
+    let termination = kill_child_process(process, "Claude");
+    if let Err(error) = termination {
         runtime_exit_error_override
             .lock()
             .expect("Claude runtime-exit override mutex poisoned")
@@ -575,6 +583,7 @@ fn spawn_claude_runtime(
         &runtime_id,
         &delegation_mcp_config,
     )?;
+    let mut command = dedicated_provider_command(|| {
     let executable = resolve_claude_executable()
         .ok_or_else(|| anyhow!("a launchable Claude CLI was not found on PATH"))?;
     let mut command = Command::new(executable);
@@ -589,30 +598,26 @@ fn spawn_claude_runtime(
         &mcp_config_file.path,
         host_mcp_servers_only,
     ));
+    Ok(command)
+    })?;
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
 
-    let mut child = command
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to start Claude in `{cwd}`"))?;
-
-    let stdin = child
-        .stdin
-        .take()
-        .context("failed to capture Claude stdin")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("failed to capture Claude stdout")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("failed to capture Claude stderr")?;
-    let process = Arc::new(SharedChild::new(child).context("failed to share Claude child")?);
+        .stderr(Stdio::piped());
+    let DedicatedRuntimeChild {
+        process,
+        stdin,
+        stdout,
+        stderr,
+        #[cfg(windows)]
+        tree,
+        #[cfg(windows)]
+        mut launch_guard,
+    } = spawn_dedicated_runtime(&mut command, "Claude")?;
 
     let (input_tx, input_rx) = mpsc::channel::<ClaudeRuntimeCommand>();
 
@@ -680,6 +685,8 @@ fn spawn_claude_runtime(
         let reader_replay_prompt = replay_prompt.clone();
         let reader_turn_ownership = turn_ownership.clone();
         let reader_process = process.clone();
+        #[cfg(windows)]
+        let reader_tree = tree.clone();
         let reader_runtime_exit_error_override = runtime_exit_error_override.clone();
         // The reviewer child's own working directory, pre-normalized. The read-only
         // permission checker compares `cd` targets against it so a same-folder `cd`
@@ -691,6 +698,8 @@ fn spawn_claude_runtime(
         // configuration parsing are complete by then) and, as the fallback,
         // when this thread ends without ever seeing one.
         let mut reader_mcp_config_file = Some(mcp_config_file);
+        #[cfg(all(test, windows))]
+        let frame_completion = TEST_DEDICATED_READER_FRAMES.with(|slot| slot.borrow_mut().take());
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut raw_line = String::new();
@@ -750,12 +759,17 @@ fn spawn_claude_runtime(
                 // Every effect of the frame is applied by the one shared
                 // function (`claude_frame_application.rs`); only stopping the
                 // process, on its explicit outcome, happens here.
-                match apply_claude_frame(&context, &mut frames, &mut recorder, &message).next {
+                let applied = apply_claude_frame(&context, &mut frames, &mut recorder, &message).next;
+                #[cfg(all(test, windows))]
+                if let Some(sender) = &frame_completion { let _ = sender.send(()); }
+                match applied {
                     ClaudeFrameApplied::Continue => {}
                     ClaudeFrameApplied::Stop => break,
                     ClaudeFrameApplied::TerminateRuntime(detail) => {
                         if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
                             &reader_process,
+                            #[cfg(windows)]
+                            Some(&reader_tree),
                             &reader_runtime_exit_error_override,
                             &detail,
                         ) {
@@ -798,15 +812,32 @@ fn spawn_claude_runtime(
         let wait_process = process.clone();
         let wait_runtime_token = RuntimeToken::Claude(runtime_id.clone());
         let wait_runtime_exit_error_override = runtime_exit_error_override.clone();
+        #[cfg(windows)]
+        let wait_tree = tree.clone();
+        #[cfg(all(test, windows))]
+        let waiter_completion = DedicatedWaiterTestCompletion::capture();
         std::thread::spawn(move || {
+            #[cfg(all(test, windows))]
+            let mut _waiter_completion = waiter_completion;
             let wait_result = wait_process.wait();
+            #[cfg(all(test, windows))]
+            _waiter_completion.wait_before_cleanup();
+            #[cfg(windows)]
+            if let Err(error) = wait_tree.terminate(&wait_process, "Claude") {
+                // Do not join a pipe reader while a descendant still owns it.
+                // The runtime handle retains the lease for Stop/Delete retry.
+                eprintln!("Claude tree cleanup failed: {error:#}");
+                let _ = wait_state.handle_runtime_root_exit_if_matches(
+                    &wait_session_id, &wait_runtime_token, root_exit_provider_error(&wait_result, "Claude").as_deref());
+                return;
+            }
             let error_override = take_claude_runtime_exit_error_after_reader(
                 reader_thread,
                 &wait_runtime_exit_error_override,
             );
             match wait_result {
                 Ok(status) if status.success() => {
-                    let _ = wait_state.handle_runtime_exit_if_matches(
+                    let _ = wait_state.handle_runtime_root_exit_if_matches(
                         &wait_session_id,
                         &wait_runtime_token,
                         error_override.as_deref(),
@@ -815,7 +846,7 @@ fn spawn_claude_runtime(
                 Ok(status) => {
                     let detail = error_override
                         .unwrap_or_else(|| format!("Claude session exited with status {status}"));
-                    let _ = wait_state.handle_runtime_exit_if_matches(
+                    let _ = wait_state.handle_runtime_root_exit_if_matches(
                         &wait_session_id,
                         &wait_runtime_token,
                         Some(&detail),
@@ -824,7 +855,7 @@ fn spawn_claude_runtime(
                 Err(err) => {
                     let detail = error_override
                         .unwrap_or_else(|| format!("failed waiting for Claude session: {err}"));
-                    let _ = wait_state.handle_runtime_exit_if_matches(
+                    let _ = wait_state.handle_runtime_root_exit_if_matches(
                         &wait_session_id,
                         &wait_runtime_token,
                         Some(&detail),
@@ -834,10 +865,14 @@ fn spawn_claude_runtime(
         })
     };
 
+    #[cfg(windows)]
+    launch_guard.resume(&process, &tree)?;
     Ok(ClaudeRuntimeHandle {
         runtime_id,
         input_tx,
         process,
+        #[cfg(windows)]
+        process_tree: Some(tree),
     })
 }
 

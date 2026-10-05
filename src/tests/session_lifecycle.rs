@@ -361,7 +361,13 @@ fn claude_control_failure_terminates_the_child_and_preserves_the_waiter_reason()
     let error_override = Arc::new(Mutex::new(None));
     let detail = "failed to handle Claude control request: unattended question loop";
 
-    terminate_claude_runtime_after_control_failure(&process, &error_override, detail)
+    terminate_claude_runtime_after_control_failure(
+        &process,
+        #[cfg(windows)]
+        None,
+        &error_override,
+        detail,
+    )
         .expect("the reader failure should terminate the Claude child");
     process
         .wait()
@@ -777,6 +783,8 @@ async fn stop_session_route_returns_stopping_immediately_and_finishes_in_backgro
         record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
             runtime_id: "claude-async-stop-route".to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
         });
         record.session.status = SessionStatus::Active;
@@ -894,6 +902,8 @@ async fn asynchronous_stop_surfaces_runtime_interrupt_failure_on_the_session() {
         record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
             runtime_id: "claude-async-stop-failure".to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
         });
         record.session.status = SessionStatus::Active;

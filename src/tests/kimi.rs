@@ -1471,6 +1471,8 @@ fn kimi_user_stop_cancels_before_process_teardown() {
         agent: AcpAgent::Kimi,
         runtime_id: "kimi-stop".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
         turn_lifecycle: lifecycle.clone(),
     };

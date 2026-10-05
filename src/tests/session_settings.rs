@@ -2182,6 +2182,8 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-model-update".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: Arc::new(SharedChild::new(child).unwrap()),
     };
 
@@ -2822,6 +2824,8 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-default-model-update".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: Arc::new(SharedChild::new(child).unwrap()),
     };
 
@@ -2914,6 +2918,8 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-effort-update".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: Arc::new(SharedChild::new(child).unwrap()),
     };
 

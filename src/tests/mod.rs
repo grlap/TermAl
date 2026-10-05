@@ -1544,6 +1544,8 @@ fn test_claude_runtime_handle(
         ClaudeRuntimeHandle {
             runtime_id: runtime_id.to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: Arc::new(SharedChild::new(child).unwrap()),
         },
         input_rx,
@@ -1562,6 +1564,8 @@ fn test_acp_runtime_handle(
             agent,
             runtime_id: runtime_id.to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: Arc::new(SharedChild::new(child).unwrap()),
             turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
         },

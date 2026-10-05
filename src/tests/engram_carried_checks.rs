@@ -2323,6 +2323,8 @@ fn a_turn_a_stop_drains_from_the_queue_fences_a_carried_gate_of_its_own_worktree
             agent: AcpAgent::Cursor,
             runtime_id: format!("cursor-carried-{name}"),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: owner.process.clone(),
             turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
         };

@@ -538,8 +538,8 @@ impl AppState {
             // A dedicated runtime can exit in the narrow interval after the
             // off-lock exit probe reported it live and before finalization
             // retakes the state lock. Its waiter buffers RuntimeExited behind
-            // this fence. Treat that callback as confirmed cleanup instead of
-            // discarding it and quarantining an already-dead handle. Shared
+            // this fence. A Windows job-backed callback confirms cleanup only
+            // with that exact lease's job-zero proof. Shared
             // Codex exit callbacks can also be synthesized by the deliberate
             // whole-app-server escalation, so only dedicated handles provide
             // this confirmation.
@@ -551,8 +551,13 @@ impl AppState {
                 .deferred_stop_callbacks
                 .iter()
                 .any(|callback| matches!(callback, DeferredStopCallback::RuntimeExited { .. }));
-            let buffered_exit_confirms_cleanup =
-                retain_runtime_for_retry && !is_shared_codex_runtime && runtime_exit_was_buffered;
+            #[cfg(windows)]
+            let dedicated_tree_confirmed = inner.sessions[index].runtime.dedicated_tree_owner()
+                .is_none_or(|(tree, _, _)| tree.is_confirmed());
+            #[cfg(not(windows))]
+            let dedicated_tree_confirmed = true;
+            let buffered_exit_confirms_cleanup = retain_runtime_for_retry
+                && !is_shared_codex_runtime && runtime_exit_was_buffered && dedicated_tree_confirmed;
             let retain_runtime_for_retry =
                 retain_runtime_for_retry && !buffered_exit_confirms_cleanup;
             let shutdown_error = if buffered_exit_confirms_cleanup {
@@ -928,7 +933,7 @@ impl AppState {
             }
 
             record.session.status = SessionStatus::Error;
-            record.session.preview = make_preview(cleaned);
+            record.session.preview = record.runtime_preview(make_preview(cleaned));
             finish_active_turn_file_change_tracking(record);
             let has_queued_prompts = !record.queued_prompts.is_empty();
             match self.commit_locked(&mut inner) {
@@ -1729,7 +1734,7 @@ impl AppState {
             });
         }
 
-        record.session.preview = make_preview(cleaned);
+        record.session.preview = record.runtime_preview(make_preview(cleaned));
         self.commit_locked(&mut inner)?;
         Ok(true)
     }
@@ -1856,7 +1861,7 @@ impl AppState {
 
             record.session.status = SessionStatus::Error;
             if !cleaned.is_empty() {
-                record.session.preview = make_preview(cleaned);
+                record.session.preview = record.runtime_preview(make_preview(cleaned));
             }
             if let Some(message_id) = file_change_message_id {
                 push_active_turn_file_changes_on_record(record, message_id);
@@ -1933,6 +1938,26 @@ impl AppState {
         token: &RuntimeToken,
         expected_active_turn_generation: Option<u64>,
     ) -> Result<()> {
+        #[cfg(windows)]
+        {
+            let joining_owner = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.find_session_index(session_id).and_then(|index| {
+                    let record = &inner.sessions[index];
+                    (record.runtime.matches_runtime_token(token)
+                        && !record.runtime_stop_in_progress
+                        && expected_active_turn_generation.is_none_or(|generation|
+                            record.active_turn_generation == generation))
+                        .then(|| record.runtime.dedicated_tree_owner()).flatten()
+                        .filter(|(tree, _, _)| tree.is_in_progress())
+                })
+            };
+            if let Some((tree, _, label)) = joining_owner {
+                // Join this exact attempt off Inner; never start or retry cleanup.
+                // The locked finish below revalidates the owner and stop fence.
+                let _ = tree.terminate_attempt(label, |_| Ok(()), false);
+            }
+        }
         self.checkpoint_successful_engram_turn_off_lock(
             session_id,
             token,
@@ -1992,6 +2017,9 @@ impl AppState {
                     .push(DeferredStopCallback::TurnCompleted {
                         active_turn_generation: record.active_turn_generation,
                     });
+                return Ok(());
+            }
+            if !record.runtime_projection_allowed() {
                 return Ok(());
             }
             take_and_abandon_engram_pending_dispatch(record);
@@ -2080,7 +2108,12 @@ impl AppState {
         token: &RuntimeToken,
         error_message: Option<&str>,
     ) -> Result<()> {
-        self.handle_runtime_exit_if_matches_guarded(session_id, token, None, error_message)
+        self.handle_runtime_exit_if_matches_guarded(session_id, token, None, error_message, false)
+    }
+
+    fn handle_runtime_root_exit_if_matches(&self, session_id: &str, token: &RuntimeToken,
+        provider_error: Option<&str>) -> Result<()> {
+        self.handle_runtime_exit_if_matches_guarded(session_id, token, None, provider_error, true)
     }
 
     fn handle_runtime_exit_if_runtime_and_generation_match(
@@ -2095,6 +2128,7 @@ impl AppState {
             token,
             Some(active_turn_generation),
             error_message,
+            false,
         )
     }
 
@@ -2104,7 +2138,21 @@ impl AppState {
         token: &RuntimeToken,
         expected_active_turn_generation: Option<u64>,
         error_message: Option<&str>,
+        root_exit: bool,
     ) -> Result<()> {
+        #[cfg(windows)]
+        let dedicated_owner = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).and_then(|index| {
+                let record = &inner.sessions[index];
+                (record.runtime.matches_runtime_token(token)
+                    && expected_active_turn_generation.is_none_or(|generation| record.active_turn_generation == generation))
+                    .then(|| record.runtime.dedicated_tree_owner()).flatten()
+            })
+        };
+        let checkpoint_outcome = Some(if error_message.is_some() {
+            EngramExecutionOutcome::Failed
+        } else { EngramExecutionOutcome::Unknown });
         let is_quarantined_exit = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -2117,7 +2165,26 @@ impl AppState {
                         && record.engram_mcp_runtime_quarantined
                 })
         };
-        if !is_quarantined_exit {
+        #[cfg(windows)]
+        if let Some((tree, process, label)) = &dedicated_owner {
+            let mut claimed_callback = false;
+            let _ = tree.terminate_attempt_after_claim(label, |_| kill_child_process(process, label), false, || {
+                claimed_callback = true;
+                if !root_exit && !is_quarantined_exit {
+                    self.checkpoint_engram_turn_off_lock(session_id, EngramCheckpointPurpose::TurnTerminal,
+                        Some(token), expected_active_turn_generation, EngramNextIntent::Wait, checkpoint_outcome, None);
+                }
+            });
+            // Drained communication callbacks join the exact attempt; they
+            // never retire the token needed by the root waiter's checkpoint.
+            if !root_exit && !claimed_callback && tree.is_confirmed() { return Ok(()); }
+            if tree.is_in_progress() { return Ok(()); }
+        }
+        #[cfg(windows)]
+        let cleanup_only = dedicated_owner.is_some() && !root_exit;
+        #[cfg(not(windows))]
+        let cleanup_only = { let _ = root_exit; false };
+        if !cleanup_only && !is_quarantined_exit && let Some(checkpoint_outcome) = checkpoint_outcome {
             // An exit that reports an error failed the turn; a silent exit
             // leaves its outcome unknown.
             self.checkpoint_engram_turn_off_lock(
@@ -2126,11 +2193,7 @@ impl AppState {
                 Some(token),
                 expected_active_turn_generation,
                 EngramNextIntent::Wait,
-                Some(if error_message.is_some() {
-                    EngramExecutionOutcome::Failed
-                } else {
-                    EngramExecutionOutcome::Unknown
-                }),
+                Some(checkpoint_outcome),
                 None,
             );
         }
@@ -2155,6 +2218,12 @@ impl AppState {
             }) {
                 return Ok(());
             }
+            // A root exit is not tree cleanup. All provider callbacks (including
+            // an ACP writer awakened by a failed pending request) share this
+            // retained lease, so none may discard it while cleanup is uncertain.
+            let cleanup_failure = inner.sessions[index].runtime.dedicated_cleanup_failure();
+            let retain_cleanup_owner = cleanup_failure.is_some();
+            let cleaned = cleanup_failure.as_deref().unwrap_or(cleaned);
             if inner.sessions[index].runtime_stop_in_progress {
                 let active_turn_generation = inner.sessions[index].active_turn_generation;
                 inner
@@ -2163,21 +2232,30 @@ impl AppState {
                     .deferred_stop_callbacks
                     .push(DeferredStopCallback::RuntimeExited {
                         active_turn_generation,
-                        message: error_message.map(str::to_owned),
+                        message: cleanup_failure.clone().or_else(|| error_message.map(str::to_owned)),
                     });
+                return Ok(());
+            }
+            if retain_cleanup_owner && inner.sessions[index].session.status == SessionStatus::Error
+                && inner.sessions[index].session.preview == make_preview(cleaned) {
                 return Ok(());
             }
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
             );
+            #[cfg(windows)]
+            let preserve_dedicated_hold = dedicated_owner.is_some() && inner.sessions[index].orchestrator_auto_dispatch_blocked;
+            #[cfg(not(windows))]
+            let preserve_dedicated_hold = false;
+            let preserve_dedicated_reset = preserve_dedicated_hold && inner.sessions[index].runtime_reset_required;
             let preserve_automatic_resume_block = inner.sessions[index]
                 .engram_mcp_runtime_quarantined
-                && inner.sessions[index].orchestrator_auto_dispatch_blocked;
+                && inner.sessions[index].orchestrator_auto_dispatch_blocked || preserve_dedicated_hold;
             let quarantined_exit = inner.sessions[index].engram_mcp_runtime_quarantined;
-            let message_id = (!quarantined_exit && (was_busy || !cleaned.is_empty()))
+            let message_id = ((!quarantined_exit || retain_cleanup_owner) && (was_busy || !cleaned.is_empty()))
                 .then(|| inner.next_message_id());
-            let detail = if quarantined_exit {
+            let detail = if quarantined_exit && !retain_cleanup_owner {
                 None
             } else if !cleaned.is_empty() || was_busy {
                 Some(if !cleaned.is_empty() {
@@ -2214,16 +2292,20 @@ impl AppState {
                     .then(|| record.active_turn_mailbox_notification.take())
                     .flatten();
                 take_and_abandon_engram_pending_dispatch(record);
-                record.clear_runtime();
-                record.clear_runtime_reset();
+                if !retain_cleanup_owner {
+                    record.clear_runtime();
+                    if !preserve_dedicated_reset { record.clear_runtime_reset(); }
+                }
                 record.set_auto_dispatch_blocked(
-                    preserve_automatic_resume_block || exited_mailbox_notification.is_some(),
+                    retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some(),
                 );
                 record.clear_runtime_stop();
                 record.deferred_stop_callbacks.clear();
-                if quarantined_exit {
+                if quarantined_exit && !retain_cleanup_owner {
                     // This is the delayed success condition for a runtime that
-                    // earlier failed revocation teardown. Keep the explicit
+                    // earlier failed revocation teardown and now confirms
+                    // exact cleanup. An uncertain owner must stay retryable.
+                    // Keep the explicit
                     // automatic-resume latch, but do not turn the expected exit
                     // into a second failure message.
                     record.session.status = SessionStatus::Idle;
@@ -2306,7 +2388,15 @@ impl AppState {
         }
         let _revision = commit_result?;
 
-        if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+        // Failed cleanup remains available to Stop/Delete. Terminal delegation
+        // release must not immediately consume this owner's retry obligation.
+        let retains_cleanup = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).is_some_and(|index|
+                inner.sessions[index].runtime.matches_runtime_token(token)
+                && inner.sessions[index].runtime.dedicated_cleanup_failure().is_some())
+        };
+        if !retains_cleanup && let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");
         }
 

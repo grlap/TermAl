@@ -91,9 +91,9 @@ fn spawn_acp_runtime(
     }
     let runtime_id = Uuid::new_v4().to_string();
     let cwd = normalize_local_user_facing_path(&cwd);
-    let mut command = agent.command(AcpLaunchOptions {
+    let mut command = dedicated_provider_command(|| agent.command(AcpLaunchOptions {
         gemini_approval_mode,
-    })?;
+    }))?;
     if agent == AcpAgent::Gemini {
         if let Some(settings_path) = prepare_termal_gemini_system_settings(&cwd)? {
             command.env("GEMINI_CLI_SYSTEM_SETTINGS_PATH", settings_path);
@@ -112,27 +112,24 @@ fn spawn_acp_runtime(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start {} ACP runtime in `{cwd}`", agent.label()))?;
-    let stdin = child
-        .stdin
-        .take()
-        .with_context(|| format!("failed to capture {} ACP stdin", agent.label()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .with_context(|| format!("failed to capture {} ACP stdout", agent.label()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .with_context(|| format!("failed to capture {} ACP stderr", agent.label()))?;
-    let process = Arc::new(
-        SharedChild::new(child)
-            .with_context(|| format!("failed to share {} ACP runtime child", agent.label()))?,
-    );
+    let DedicatedRuntimeChild {
+        process,
+        stdin,
+        stdout,
+        stderr,
+        #[cfg(windows)]
+        tree,
+        #[cfg(windows)]
+        mut launch_guard,
+    } = spawn_dedicated_runtime(&mut command, agent.label())?;
     let (input_tx, input_rx) = mpsc::channel::<AcpRuntimeCommand>();
     let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    #[cfg(all(test, windows))]
+    TEST_DEDICATED_ACP_PENDING.with(|observer| {
+        if let Some(observer) = observer.borrow_mut().take() {
+            let _ = observer.send(pending_requests.clone());
+        }
+    });
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
     let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
     let runtime_engram_mcp = engram_mcp.cloned();
@@ -146,7 +143,11 @@ fn spawn_acp_runtime(
         let writer_runtime_token = RuntimeToken::Acp(runtime_id.clone());
         let writer_engram_mcp = runtime_engram_mcp.clone();
         let writer_cwd = cwd.clone();
+        #[cfg(all(test, windows))]
+        let writer_completion = DedicatedWaiterTestCompletion::capture_writer();
         std::thread::spawn(move || {
+            #[cfg(all(test, windows))]
+            let _writer_completion = writer_completion;
             let mut stdin = stdin;
             let initialize_result = send_acp_json_rpc_request(
                 &mut stdin,
@@ -378,47 +379,71 @@ fn spawn_acp_runtime(
         let wait_process = process.clone();
         let wait_pending_requests = pending_requests.clone();
         let wait_runtime_token = RuntimeToken::Acp(runtime_id.clone());
-        std::thread::spawn(move || match wait_process.wait() {
-            Ok(status) if status.success() => {
-                fail_pending_acp_requests(
-                    &wait_pending_requests,
-                    &format!(
-                        "{} ACP runtime exited while waiting for a pending response",
-                        agent.label()
-                    ),
-                );
-                let _ = wait_state.handle_runtime_exit_if_matches(
-                    &wait_session_id,
-                    &wait_runtime_token,
-                    None,
-                );
-            }
-            Ok(status) => {
-                let detail = format!("{} session exited with status {status}", agent.label());
+        #[cfg(windows)]
+        let wait_tree = tree.clone();
+        #[cfg(all(test, windows))]
+        let waiter_completion = DedicatedWaiterTestCompletion::capture();
+        std::thread::spawn(move || {
+            #[cfg(all(test, windows))]
+            let mut _waiter_completion = waiter_completion;
+            let wait_result = wait_process.wait();
+            #[cfg(all(test, windows))]
+            _waiter_completion.wait_before_cleanup();
+            #[cfg(windows)]
+            if let Err(error) = wait_tree.terminate(&wait_process, agent.label()) {
+                eprintln!("{} tree cleanup failed: {error:#}", agent.label());
+                let detail = format!("{} process tree cleanup failed: {error:#}", agent.label());
                 fail_pending_acp_requests(&wait_pending_requests, &detail);
-                let _ = wait_state.handle_runtime_exit_if_matches(
-                    &wait_session_id,
-                    &wait_runtime_token,
-                    Some(&detail),
-                );
+                let _ = wait_state.handle_runtime_root_exit_if_matches(
+                    &wait_session_id, &wait_runtime_token, root_exit_provider_error(&wait_result, agent.label()).as_deref());
+                return;
             }
-            Err(err) => {
-                let detail = format!("failed waiting for {} session: {err}", agent.label());
-                fail_pending_acp_requests(&wait_pending_requests, &detail);
-                let _ = wait_state.handle_runtime_exit_if_matches(
-                    &wait_session_id,
-                    &wait_runtime_token,
-                    Some(&detail),
-                );
+            match wait_result {
+                Ok(status) if status.success() => {
+                    fail_pending_acp_requests(
+                        &wait_pending_requests,
+                        &format!(
+                            "{} ACP runtime exited while waiting for a pending response",
+                            agent.label()
+                        ),
+                    );
+                    let _ = wait_state.handle_runtime_root_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        None,
+                    );
+                }
+                Ok(status) => {
+                    let detail = format!("{} session exited with status {status}", agent.label());
+                    fail_pending_acp_requests(&wait_pending_requests, &detail);
+                    let _ = wait_state.handle_runtime_root_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&detail),
+                    );
+                }
+                Err(err) => {
+                    let detail = format!("failed waiting for {} session: {err}", agent.label());
+                    fail_pending_acp_requests(&wait_pending_requests, &detail);
+                    let _ = wait_state.handle_runtime_root_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&detail),
+                    );
+                }
             }
         });
     }
 
+    #[cfg(windows)]
+    launch_guard.resume(&process, &tree)?;
     Ok(AcpRuntimeHandle {
         agent,
         runtime_id,
         input_tx,
         process,
+        #[cfg(windows)]
+        process_tree: Some(tree),
         turn_lifecycle,
     })
 }

@@ -528,6 +528,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
+        self.retry_retained_dedicated_cleanup(session_id).map_err(|error| ApiError::conflict(format!("{error:#}")))?;
         if self.stop_waiting_engram_admission(session_id)? {
             self.sync_delegation_attempt_for_child_session(session_id);
             return Ok(self.snapshot());
@@ -592,7 +593,8 @@ impl AppState {
         if !matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
-        ) {
+        ) && !(inner.sessions[index].session.status == SessionStatus::Error
+            && inner.sessions[index].runtime.dedicated_cleanup_failure().is_some()) {
             return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
         }
 
@@ -832,7 +834,8 @@ impl AppState {
                 if !matches!(
                     record.session.status,
                     SessionStatus::Active | SessionStatus::Approval
-                ) {
+                ) && !(record.session.status == SessionStatus::Error
+                    && record.runtime.dedicated_cleanup_failure().is_some()) {
                     return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
                 }
             }
