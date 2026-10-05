@@ -34,6 +34,7 @@ mod codex_delegation_release;
 mod codex_discovery;
 mod codex_home;
 mod codex_protocol;
+mod codex_read_guidance;
 mod codex_read_only_profile;
 mod codex_read_only_tracker;
 mod codex_profile_routing;

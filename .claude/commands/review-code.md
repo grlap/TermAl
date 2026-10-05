@@ -24,6 +24,10 @@ Also run `git diff --name-only` and `git diff --cached --name-only` to get the l
 For untracked files, include the `git ls-files --others --exclude-standard` list in the reviewer prompt because untracked files do not appear in `git diff`.
 Do NOT read full file contents upfront — reviewers will read files on-demand as needed. For untracked files, reviewers must inspect file contents directly on demand.
 
+On Windows, a read-only Codex reviewer reads source this way (TermAl also appends it to such a delegated child's prompt):
+
+Windows read-only Codex inspection: use the default shell; do not request bash or change sandbox, policy, or encoding settings. Read source through direct native Git or rg output, one inspection command per call, without piping that output through PowerShell cmdlets. For an index blob use git --no-pager -C <worktree> show :path; for a frozen blob use git --no-pager -C <worktree> show <tree-or-commit>:path. These show the selected Git object, not unstaged working-tree changes. For a current file use git --no-pager -C <worktree> diff --no-index --no-ext-diff --no-textconv --color=never -- NUL <absolute-file>, or rg --encoding utf-8 --line-number --context 12 -e <pattern> -- <absolute-file>. Quote paths and patterns for the default shell. A no-index diff normally exits 1 when it displays the file; rg exits 1 for no match. Inspect stderr and coverage instead of equating these statuses with a read failure. Do not use Get-Content (including -Encoding UTF8), Select-Object, Out-String or other PowerShell pipeline rendering to inspect source whose exact text matters. ConstrainedLanguage may refuse .NET constructors, static methods and Console.OutputEncoding assignments; nonterminating errors can still leave exit code 0, and a swallowed encoding error may be invisible. Re-read affected text with a native form. If exact text or complete coverage cannot be obtained, report inspection unavailable rather than a clean review.
+
 ## Step 2: Discover reviewers
 
 Run `find .claude/reviewers -name "*.md" 2>/dev/null` via Bash to find all available reviewer lens files.
