@@ -83,8 +83,10 @@ fn read_engram_work_binding_from_cli(
     preference: EngramBindingPreference<'_>,
     timeout: Duration,
     trace_boot_recovery: bool,
+    host_workdir: &FsPath,
 ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-    let held = read_engram_held_claims_from_cli(connection, timeout, trace_boot_recovery)?;
+    let held =
+        read_engram_held_claims_from_cli(connection, timeout, trace_boot_recovery, host_workdir)?;
     Ok(select_engram_held_binding(
         held.items,
         held.omitted,
@@ -102,6 +104,7 @@ fn read_engram_held_claims_from_cli(
     connection: &EngramConnectionConfig,
     timeout: Duration,
     trace_boot_recovery: bool,
+    host_workdir: &FsPath,
 ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
     let started_at = std::time::Instant::now();
     let mut args = vec![
@@ -120,6 +123,7 @@ fn read_engram_held_claims_from_cli(
         &args,
         timeout,
         ENGRAM_WORK_BINDING_READER_LABEL,
+        host_workdir,
     );
     if trace_boot_recovery {
         log_engram_boot_recovery_phase(

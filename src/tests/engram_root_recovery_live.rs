@@ -50,9 +50,9 @@ struct BoundaryFaultTransport {
 }
 
 impl BoundaryFaultTransport {
-    fn new(faults: impl IntoIterator<Item = BoundaryFault>) -> Arc<Self> {
+    fn new(host_workdir: PathBuf, faults: impl IntoIterator<Item = BoundaryFault>) -> Arc<Self> {
         Arc::new(Self {
-            inner: ProcessEngramControlTransport::default(),
+            inner: ProcessEngramControlTransport::new(host_workdir),
             faults: Mutex::new(faults.into_iter().collect()),
             observations: Mutex::new(Vec::new()),
             root_reads: Mutex::new(Vec::new()),
@@ -359,7 +359,7 @@ fn live_root_fixture(
             .expect("live root settings should persist");
     }
 
-    let transport = BoundaryFaultTransport::new(faults);
+    let transport = BoundaryFaultTransport::new(state.engram_host_launch_workdir(), faults);
     state.install_test_engram_transport(transport.clone());
     LiveRootFixture {
         cleanup: LiveRootCleanup {
@@ -994,7 +994,8 @@ fn live_root_restart_after_lost_evaluate_replays_issued_grant_without_rebinding(
     drop(fixture.state);
     drop(fixture.transport);
 
-    let recovery_transport = BoundaryFaultTransport::new([]);
+    let recovery_transport =
+        BoundaryFaultTransport::new(engram_host_workdir(&persistence_path).unwrap(), []);
     let restarted = AppState::new_with_paths_and_engram_transport_for_test(
         default_workdir,
         persistence_path,
@@ -1107,7 +1108,8 @@ fn live_root_restart_after_lost_begin_never_blindly_redelivers() {
     drop(fixture.state);
     drop(fixture.transport);
 
-    let recovery_transport = BoundaryFaultTransport::new([]);
+    let recovery_transport =
+        BoundaryFaultTransport::new(engram_host_workdir(&persistence_path).unwrap(), []);
     let restarted = AppState::new_with_paths_and_engram_transport_for_test(
         default_workdir,
         persistence_path,

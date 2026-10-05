@@ -175,6 +175,7 @@ enum EngramContextNudgePreparation {
 
 #[derive(Clone)]
 struct EngramContextNudgeTarget {
+    host_workdir: PathBuf,
     command: PathBuf,
     home: String,
     project_file: PathBuf,
@@ -441,6 +442,7 @@ impl AppState {
                     let advertise_context_generation =
                         !session_is_read_only_delegation_child_locked(&inner, session_id);
                     let target = EngramContextNudgeTarget {
+                        host_workdir: inner.engram_host_adapter.host_workdir.clone(),
                         command: PathBuf::from(command),
                         home: home.to_owned(),
                         project_file,
@@ -774,7 +776,14 @@ fn run_engram_context_nudge(
     // A fresh host UUID prevents reuse after restore or a crash before persistence.
     // Keep the existing counter for context boundaries within this host run.
     let context_generation = format!("termal-{}-{}", target.host_instance_id, target.generation);
-    let mut command = engram_command(&target.command);
+    let mut command = engram_host_command(
+        &target.command,
+        &target.project_root,
+        &target.project_file,
+        FsPath::new(&target.home),
+        &target.host_workdir,
+    )
+    .map_err(|error| error.message)?;
     configure_terminal_process_tree(&mut command);
     // Test-only: the child's temporary files stay in its Engram home
     // (src/engram_test_child_temp.rs).
@@ -813,7 +822,6 @@ fn run_engram_context_nudge(
         command.env_remove(ENGRAM_ACTOR_CONTEXT_ENV);
     }
     let mut child = command
-        .current_dir(&target.project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

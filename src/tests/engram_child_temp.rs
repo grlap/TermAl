@@ -21,6 +21,7 @@ fn fixture_child_temp(root: &FsPath, home: &FsPath) -> (String, String) {
         "readiness",
         // A hang guard, not a timing assertion: the fixture prints and exits.
         super::phase_sync::DEADLOCK_GUARD,
+        root,
     )
     .unwrap_or_else(|error| panic!("fixture readiness should run: {}", error.message));
     assert!(output.status.success(), "fixture readiness failed");

@@ -441,10 +441,15 @@ impl AppState {
         let (loaded_state, boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
         let mut inner =
             loaded_state.unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
+        let host_workdir = engram_host_workdir(&persistence_path)?;
+        inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(host_workdir.clone()));
         #[cfg(test)]
         TEST_ENGRAM_BOOT_TRANSPORT.with(|slot| {
             if let Some(transport) = slot.borrow().clone() {
-                inner.engram_host_adapter = Arc::new(EngramHostAdapter { transport });
+                inner.engram_host_adapter = Arc::new(EngramHostAdapter {
+                    host_workdir: host_workdir.clone(),
+                    transport,
+                });
             }
         });
         #[cfg(test)]

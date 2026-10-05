@@ -88,7 +88,7 @@ fn a_staged_home_is_answered_without_a_process() {
     let binary = super::engram_host_adapter::real_engram_control_fixture_path();
     let _seam = stage_test_engram_readiness_without_launch(&[root.path()]);
 
-    let receipt = run_engram_readiness(&binary, &marker, root.path(), root.path())
+    let receipt = run_engram_readiness(&binary, &marker, root.path(), root.path(), root.path())
         .unwrap_or_else(|error| panic!("staged readiness should succeed: {}", error.message));
 
     validate_engram_readiness(&receipt, &marker, root.path(), true)
@@ -164,7 +164,8 @@ fn an_expired_launch_fails_readiness_with_the_budget_it_enforced() {
     };
     let outside_root = FsPath::new(env!("CARGO_MANIFEST_DIR"));
 
-    let error = match run_engram_readiness(&binary, &marker, root.path(), outside_root) {
+    let error = match run_engram_readiness(&binary, &marker, root.path(), outside_root, root.path())
+    {
         Ok(_) => panic!("an expired launch must not produce a readiness receipt"),
         Err(error) => error,
     };

@@ -28,8 +28,8 @@ struct InterferingAdmissionRootReader {
 
 impl EngramControlTransport for InterferingAdmissionRootReader {
     fn read_observation_policy(&self, connection: &EngramConnectionConfig,
-        store: &EngramAuthorityStoreKey, timeout: Duration) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.control.read_observation_policy(connection, store, timeout)
+        store: &EngramAuthorityStoreKey, timeout: Duration, host_workdir: &FsPath) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, store, timeout, host_workdir)
     }
     fn shutdown_session(&self, session: &str) {
         self.control.shutdown_session(session);
@@ -224,8 +224,8 @@ fn source_root_authority_admission_separates_root_owner_from_routing_claim_and_q
 
 impl EngramControlTransport for FailingAdmissionRootReader {
     fn read_observation_policy(&self, connection: &EngramConnectionConfig,
-        store: &EngramAuthorityStoreKey, timeout: Duration) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.control.read_observation_policy(connection, store, timeout)
+        store: &EngramAuthorityStoreKey, timeout: Duration, host_workdir: &FsPath) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, store, timeout, host_workdir)
     }
     fn shutdown_session(&self, session_id: &str) {
         self.control.shutdown_session(session_id);
@@ -2625,8 +2625,8 @@ struct AuthorityTimeoutRecorder {
 
 impl EngramControlTransport for AuthorityTimeoutRecorder {
     fn read_observation_policy(&self, connection: &EngramConnectionConfig,
-        store: &EngramAuthorityStoreKey, timeout: Duration) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.control.read_observation_policy(connection, store, timeout)
+        store: &EngramAuthorityStoreKey, timeout: Duration, host_workdir: &FsPath) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control.read_observation_policy(connection, store, timeout, host_workdir)
     }
     fn read_work_binding(
         &self,

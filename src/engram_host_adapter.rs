@@ -234,11 +234,14 @@ fn engram_disable_env_value_is_truthy(value: &str) -> bool {
 fn validate_engram_project_enablement(
     project: &Project,
     settings: &EngramProjectSettings,
+    host_workdir: &FsPath,
 ) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
     let (binary_path, project_file, home) =
         validate_engram_project_connection_paths(project, settings)?;
     let project_root = FsPath::new(&project.root_path);
-    let result = run_engram_readiness(&binary_path, &project_file, &home, project_root)?;
+    let result = run_engram_readiness(
+        &binary_path, &project_file, &home, project_root, host_workdir,
+    )?;
     validate_engram_readiness(&result, &project_file, &home, settings.turn_gated_control)
 }
 
@@ -307,6 +310,7 @@ fn run_engram_doctor_result_within(
     home: &FsPath,
     project_root: &FsPath,
     doctor_timeout: Duration,
+    host_workdir: &FsPath,
 ) -> std::result::Result<EngramDoctorResult, ApiError> {
     let output = run_engram_diagnostic_within(
         binary_path,
@@ -315,6 +319,7 @@ fn run_engram_doctor_result_within(
         project_root,
         "doctor",
         doctor_timeout,
+        host_workdir,
     )?;
     if output.status.success() {
         let result: EngramDoctorResult =
@@ -339,6 +344,7 @@ fn run_engram_diagnostic_within(
     project_root: &FsPath,
     diagnostic: &str,
     doctor_timeout: Duration,
+    host_workdir: &FsPath,
 ) -> std::result::Result<std::process::Output, ApiError> {
     run_engram_diagnostic_args_within(
         binary_path,
@@ -348,6 +354,7 @@ fn run_engram_diagnostic_within(
         diagnostic,
         &[],
         doctor_timeout,
+        host_workdir,
     )
 }
 
@@ -359,6 +366,7 @@ fn run_engram_diagnostic_args_within(
     diagnostic: &str,
     args: &[&str],
     doctor_timeout: Duration,
+    host_workdir: &FsPath,
 ) -> std::result::Result<std::process::Output, ApiError> {
     run_engram_diagnostic_args_until(
         binary_path,
@@ -369,6 +377,7 @@ fn run_engram_diagnostic_args_within(
         args,
         std::time::Instant::now() + doctor_timeout,
         doctor_timeout,
+        host_workdir,
     )
 }
 
@@ -383,6 +392,7 @@ fn run_engram_diagnostic_args_until(
     args: &[&str],
     deadline: std::time::Instant,
     doctor_timeout: Duration,
+    host_workdir: &FsPath,
 ) -> std::result::Result<std::process::Output, ApiError> {
     if std::time::Instant::now() >= deadline {
         return Err(ApiError::bad_request(format!(
@@ -399,7 +409,23 @@ fn run_engram_diagnostic_args_until(
     // kill would reach only the direct child: engram_command deliberately wraps
     // `.cmd`/`.bat` and `.ps1` shims in an interpreter, leaving the real doctor
     // a grandchild that keeps auditing and holding the store after we returned.
-    let mut command = engram_command(binary_path);
+    #[cfg(windows)]
+    let resolved = {
+        validate_engram_host_launch_paths(project_file, home, host_workdir)
+            .map_err(|error| ApiError::bad_request(error.message))?;
+        let resolved = resolve_engram_host_program(binary_path, project_root)
+            .map_err(|error| ApiError::bad_request(error.message))?;
+        if diagnostic == "control-session-inspect" {
+            validate_engram_absence_executable(&resolved)?;
+        }
+        resolved
+    };
+    #[cfg(windows)]
+    let mut command = engram_host_command_for_program(&resolved, project_root, host_workdir)
+        .map_err(|error| ApiError::bad_request(error.message))?;
+    #[cfg(not(windows))]
+    let mut command = engram_host_command(binary_path, project_root, project_file, home, host_workdir)
+        .map_err(|error| ApiError::bad_request(error.message))?;
     command
         .arg("--project-file")
         .arg(project_file)
@@ -410,12 +436,13 @@ fn run_engram_diagnostic_args_until(
         .arg("--json");
     #[cfg(windows)]
     if diagnostic == "control-session-inspect"
-        && binary_path
+        && resolved
             .extension()
             .and_then(|e| e.to_str())
             .is_some_and(|e| e.eq_ignore_ascii_case("ps1"))
     {
-        command = engram_absence_powershell_command(binary_path, project_file, home, args)?;
+        command = engram_absence_powershell_command(&resolved, project_file, home, args)?;
+        command.current_dir(host_workdir);
     }
     // Test-only: the child's temporary files stay in its Engram home
     // (src/engram_test_child_temp.rs).
@@ -425,7 +452,6 @@ fn run_engram_diagnostic_args_until(
     }
     configure_terminal_process_tree(&mut command);
     let mut child = command
-        .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -541,6 +567,7 @@ struct EngramDoctorResult {
     project_id: String,
 }
 
+#[cfg(any(not(windows), test))]
 fn engram_command(binary_path: &FsPath) -> Command {
     let extension = binary_path
         .extension()
@@ -1020,8 +1047,9 @@ trait EngramControlTransport: Send + Sync {
         connection: &EngramConnectionConfig,
         store: &EngramAuthorityStoreKey,
         timeout: Duration,
+        host_workdir: &FsPath,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        read_engram_observation_policy(connection, store, timeout)
+        read_engram_observation_policy(connection, store, timeout, host_workdir)
     }
 
     /// The work binding the session should be bound with. `preference` names
@@ -1233,6 +1261,7 @@ impl ScriptedEngramControlTransport {
 impl EngramControlTransport for ScriptedEngramControlTransport {
     fn read_observation_policy(
         &self, _connection: &EngramConnectionConfig, expected_store: &EngramAuthorityStoreKey, _timeout: Duration,
+        _host_workdir: &FsPath,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
         let mut roots = self.named_roots.lock().unwrap();
         let roots = roots.as_mut().ok_or_else(|| EngramTransportError::protocol("no observation readiness model configured"))?;
@@ -1819,9 +1848,10 @@ fn run_engram_json_command_with_lock_retry(
     args: &[&str],
     timeout: Duration,
     label: &str,
+    host_workdir: &FsPath,
 ) -> std::result::Result<Value, EngramTransportError> {
     let started_at = std::time::Instant::now();
-    let first = run_engram_json_command(connection, args, timeout, label);
+    let first = run_engram_json_command(connection, args, timeout, label, host_workdir);
     match first {
         Err(error)
             if error.kind == EngramTransportErrorKind::Transport
@@ -1839,7 +1869,7 @@ fn run_engram_json_command_with_lock_retry(
                         "Work-binding budget exhausted during lock retry",
                     )
                 })?;
-            run_engram_json_command(connection, args, remaining, label)
+            run_engram_json_command(connection, args, remaining, label, host_workdir)
         }
         result => result,
     }
@@ -1921,9 +1951,10 @@ fn run_engram_cli_command_with_lock_retry(
     args: &[&str],
     timeout: Duration,
     label: &str,
+    host_workdir: &FsPath,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
     retry_engram_cli_command_on_locked_store(
-        || run_engram_cli_command(connection, args, timeout, label),
+        || run_engram_cli_command(connection, args, timeout, label, host_workdir),
         std::thread::sleep,
     )
 }
@@ -1951,6 +1982,7 @@ fn retry_engram_cli_command_on_locked_store(
 fn revoke_engram_project_work_authority(
     target: &EngramAuthorityRevocationTarget,
     reason: &str,
+    host_workdir: &FsPath,
 ) -> std::result::Result<(), EngramTransportError> {
     let binary_path = PathBuf::from(&target.binary_path);
     let home = PathBuf::from(&target.home);
@@ -1966,6 +1998,7 @@ fn revoke_engram_project_work_authority(
             &target.work_authority_grant,
             reason,
             ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+            host_workdir,
         )
     };
     let first = run();
@@ -1992,8 +2025,9 @@ fn run_engram_authority_revoke_command(
     grant: &str,
     reason: &str,
     timeout: Duration,
+    host_workdir: &FsPath,
 ) -> std::result::Result<(), EngramTransportError> {
-    let mut command = engram_command(binary_path);
+    let mut command = engram_host_command(binary_path, project_root, project_file, home, host_workdir)?;
     configure_terminal_process_tree(&mut command);
     // Test-only: the child's temporary files stay in its Engram home
     // (src/engram_test_child_temp.rs).
@@ -2016,7 +2050,6 @@ fn run_engram_authority_revoke_command(
             "--",
             grant,
         ])
-        .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2101,8 +2134,9 @@ fn run_engram_json_command(
     args: &[&str],
     timeout: Duration,
     label: &str,
+    host_workdir: &FsPath,
 ) -> std::result::Result<Value, EngramTransportError> {
-    let output = run_engram_cli_command(connection, args, timeout, label)?;
+    let output = run_engram_cli_command(connection, args, timeout, label, host_workdir)?;
     if !output.success {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(EngramTransportError::transport(if detail.is_empty() {
@@ -2121,8 +2155,15 @@ fn run_engram_cli_command(
     args: &[&str],
     timeout: Duration,
     label: &str,
+    host_workdir: &FsPath,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
-    let mut command = engram_command(&connection.binary_path);
+    let mut command = engram_host_command(
+        &connection.binary_path,
+        &connection.project_root,
+        &connection.project_file,
+        &connection.home,
+        host_workdir,
+    )?;
     configure_terminal_process_tree(&mut command);
     apply_engram_connection_environment(&mut command, connection);
     let mut child = command
@@ -2131,7 +2172,6 @@ fn run_engram_cli_command(
         .arg("--home")
         .arg(&connection.home)
         .args(args)
-        .current_dir(&connection.project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2328,18 +2368,36 @@ fn join_engram_cli_output(
 
 #[derive(Clone)]
 struct EngramHostAdapter {
+    host_workdir: PathBuf,
     transport: Arc<dyn EngramControlTransport>,
 }
 
 impl Default for EngramHostAdapter {
     fn default() -> Self {
+        Self::new(PathBuf::new())
+    }
+}
+
+impl EngramHostAdapter {
+    fn new(host_workdir: PathBuf) -> Self {
         Self {
-            transport: Arc::new(ProcessEngramControlTransport::default()),
+            transport: Arc::new(ProcessEngramControlTransport::new(host_workdir.clone())),
+            host_workdir,
         }
     }
 }
 
 impl EngramHostAdapter {
+    fn read_observation_policy(
+        &self,
+        connection: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey,
+        timeout: Duration,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.transport
+            .read_observation_policy(connection, store, timeout, &self.host_workdir)
+    }
+
     fn request(
         &self,
         connection: &EngramConnectionConfig,
@@ -2386,7 +2444,11 @@ impl EngramHostAdapter {
 impl AppState {
     fn install_test_engram_transport(&self, transport: Arc<dyn EngramControlTransport>) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        inner.engram_host_adapter = Arc::new(EngramHostAdapter { transport });
+        inner.engram_host_adapter = Arc::new(EngramHostAdapter {
+            host_workdir: engram_host_workdir(self.persistence_path.as_ref())
+                .expect("fixture persistence directory"),
+            transport,
+        });
     }
 
     fn new_with_paths_and_engram_transport_for_test(

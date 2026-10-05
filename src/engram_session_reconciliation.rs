@@ -99,7 +99,9 @@ if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }
         .encode_utf16()
         .flat_map(u16::to_le_bytes)
         .collect::<Vec<_>>();
-    let mut command = Command::new("powershell.exe");
+    let interpreter = resolve_engram_host_program(FsPath::new("powershell.exe"), FsPath::new(""))
+        .map_err(|error| ApiError::conflict(error.message))?;
+    let mut command = Command::new(interpreter);
     command
         .args([
             "-NoLogo",
@@ -318,6 +320,7 @@ impl AppState {
             &[&session_arg, &grant_arg],
             deadline,
             ENGRAM_READINESS_TIMEOUT,
+            &self.engram_host_launch_workdir(),
         )?;
         validate_engram_absence_deadline(deadline)?;
         if !output.status.success() {

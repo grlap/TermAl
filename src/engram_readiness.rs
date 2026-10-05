@@ -106,8 +106,16 @@ fn run_engram_readiness(
     marker: &FsPath,
     home: &FsPath,
     root: &FsPath,
+    host_workdir: &FsPath,
 ) -> Result<EngramReadinessReceipt, ApiError> {
-    run_engram_readiness_within(binary, marker, home, root, ENGRAM_READINESS_TIMEOUT)
+    run_engram_readiness_within(
+        binary,
+        marker,
+        home,
+        root,
+        ENGRAM_READINESS_TIMEOUT,
+        host_workdir,
+    )
 }
 
 fn run_engram_readiness_within(
@@ -116,6 +124,7 @@ fn run_engram_readiness_within(
     home: &FsPath,
     root: &FsPath,
     timeout: Duration,
+    host_workdir: &FsPath,
 ) -> Result<EngramReadinessReceipt, ApiError> {
     let declaration = read_engram_diagnostic_declaration(marker)?;
     // Test seam: a registered home's readiness is answered without a process
@@ -133,6 +142,7 @@ fn run_engram_readiness_within(
             root,
             "readiness",
             timeout.min(ENGRAM_READINESS_TIMEOUT),
+            host_workdir,
         )?,
     };
     if read_engram_diagnostic_declaration(marker).ok().as_ref() != Some(&declaration) {
@@ -316,6 +326,7 @@ impl AppState {
             FsPath::new(&project.root_path),
             "doctor",
             ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT,
+            &self.engram_host_launch_workdir(),
         )?;
         let report: serde_json::Value =
             serde_json::from_slice(&output.stdout).map_err(|error| {

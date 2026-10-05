@@ -467,7 +467,7 @@ fn resolve_program(spec: &LaunchSpec) -> io::Result<Vec<u16>> {
     }
     Ok(application)
 }
-fn resolve_program_path(spec: &LaunchSpec) -> io::Result<Vec<u16>> {
+pub(crate) fn resolve_program_path(spec: &LaunchSpec) -> io::Result<Vec<u16>> {
     let program = &spec.program;
     let text = program.to_string_lossy();
     if program.is_empty() || text.ends_with(['/', '\\']) {

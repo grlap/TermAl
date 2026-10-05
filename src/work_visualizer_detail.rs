@@ -137,7 +137,11 @@ impl AppState {
         }
         let _permit = admit()?;
         self.validate_work_read_still_current(project_id, &target)?;
-        let value = run_work_read_command(&target.connection, &args)?;
+        let value = run_work_read_command(
+            &target.connection,
+            &args,
+            &self.engram_host_launch_workdir(),
+        )?;
         self.validate_work_read_still_current(project_id, &target)?;
         normalize_engram_work_detail(value, query.after.is_some())
     }
