@@ -3588,6 +3588,15 @@ Standalone naming and cleanup retain their existing entry budgets and carry one
 absolute deadline through their phases. A stopped production writer withholds
 authority without entering synchronous SQLite under the state lock.
 
+## Dormant Begin contracts and exact ACK
+
+The unused recovery format retains the original Begin wire request and its
+authority. Its unused persistence fence reads session metadata and the complete
+ordered transcript from the same writer connection; metadata alone cannot prove
+a cancellation message durable. This prerequisite adds no live recovery fields
+or callers. Raw validation, cancellation proof, foundation ownership, automatic
+recovery and the begin-unknown incident remain open work.
+
 ## Related
 
 - [Declared Test Commands](declared-test-commands.md): planned declared-command checks judged from TRX/JUnit artifacts

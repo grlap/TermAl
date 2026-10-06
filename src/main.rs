@@ -749,6 +749,9 @@ include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_budget.rs");
 include!("engram_host_adapter.rs");
+#[allow(dead_code)]
+mod engram_recovery_format;
+use engram_recovery_format::*;
 include!("engram_host_launch.rs");
 include!("engram_turn_observations.rs");
 include!("engram_turn_continuity.rs");
