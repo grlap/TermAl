@@ -1,0 +1,235 @@
+[
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "title": "Bash",
+    "kind": "execute",
+    "status": "pending",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": ""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin term"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal live"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal live_proof"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal live_proof\""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal live_proof\",\"timeout\":"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal live_proof\",\"timeout\":300"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal live_proof\",\"timeout\":300}"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "title": "Running: cargo test --bin termal live_proof",
+    "kind": "execute",
+    "status": "in_progress",
+    "rawInput": {
+      "command": "cargo test --bin termal live_proof",
+      "timeout": 300
+    },
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo test --bin termal live_proof\",\"timeout\":300}"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_aL3tb2ErqTFzA2TxSq30Gq9N",
+    "status": "completed",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.46s\n     Running unittests src\\main.rs (target\\debug\\deps\\termal-d89d0d57b0dbf158.exe)\n\nrunning 1 test\ntest tests::live_proof::live_proof_passes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4040 filtered out; finished in 0.00s\n\n"
+        }
+      }
+    ],
+    "rawOutput": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.46s\n     Running unittests src\\main.rs (target\\debug\\deps\\termal-d89d0d57b0dbf158.exe)\n\nrunning 1 test\ntest tests::live_proof::live_proof_passes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4040 filtered out; finished in 0.00s\n\n"
+  }
+]

@@ -8,14 +8,26 @@
 //!
 //! The fixtures are the real `tool_call` / `tool_call_update` sequences
 //! captured from a live Kimi 2.1.1 ACP session over stdio, one passing and
-//! one failing `cargo` call. Owns the Kimi exit/output mapping and its
-//! controls against the other ACP adapters; does not own the generic ACP
-//! status normalization (`acp_tool_status.rs`).
+//! one failing `cargo` call, plus one completed, passing `cargo test` run.
+//! Owns the Kimi exit/output mapping and its controls against the other ACP
+//! adapters; does not own the generic ACP status normalization
+//! (`acp_tool_status.rs`).
 
 use super::*;
 
 const KIMI_ACP_BASH_PASS: &str = include_str!("fixtures/kimi-acp-bash-pass.json");
 const KIMI_ACP_BASH_FAIL: &str = include_str!("fixtures/kimi-acp-bash-fail.json");
+/// A completed, passing test command as Kimi sends it. Captured on 2026-10-06
+/// at about 05:33-05:35Z from a live Kimi 2.1.1 ACP session over stdio,
+/// driven by a capture harness that spawns `kimi acp`, answers one prompt's
+/// permission request and logs every frame. The session ran
+/// `cargo test --bin termal live_proof` in a TermAl worktree. All 16 frames of
+/// that one shell call are kept verbatim, in wire order: the pending create,
+/// 14 `in_progress` updates (13 argument-streaming updates, then the dispatch
+/// frame with `rawInput`), and the `completed` update. The command's output is in the
+/// terminal update's bare-string `rawOutput` and again in its first text
+/// content block; no frame carries an exit status field.
+const KIMI_ACP_BASH_TEST_PASS: &str = include_str!("fixtures/kimi-acp-bash-test-pass.json");
 
 /// The captured frames of one Kimi shell call, in wire order.
 fn kimi_acp_frames(fixture: &str) -> Vec<Value> {
@@ -27,9 +39,21 @@ fn kimi_acp_terminal(frames: &[Value]) -> &Value {
     frames.last().expect("a terminal frame")
 }
 
+/// Whether any object key anywhere in the frame names an exit status
+/// (`exitCode`, `exit_code`, `exitStatus`, ...).
+fn has_exit_like_key(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(key, nested)| {
+            key.to_ascii_lowercase().starts_with("exit") || has_exit_like_key(nested)
+        }),
+        Value::Array(items) => items.iter().any(has_exit_like_key),
+        _ => false,
+    }
+}
+
 #[test]
 fn kimi_acp_fixtures_carry_output_as_a_bare_string_and_no_exit_code() {
-    for fixture in [KIMI_ACP_BASH_PASS, KIMI_ACP_BASH_FAIL] {
+    for fixture in [KIMI_ACP_BASH_PASS, KIMI_ACP_BASH_FAIL, KIMI_ACP_BASH_TEST_PASS] {
         let frames = kimi_acp_frames(fixture);
         let terminal = kimi_acp_terminal(&frames);
         assert_eq!(terminal["sessionUpdate"], "tool_call_update");
@@ -95,7 +119,7 @@ fn a_kimi_shell_failure_reads_as_its_suffix_exit_code_with_its_output_text() {
 #[test]
 fn the_kimi_exit_and_output_reading_leaves_other_acp_agents_alone() {
     for agent in [AcpAgent::OpenCode, AcpAgent::Cursor] {
-        for fixture in [KIMI_ACP_BASH_PASS, KIMI_ACP_BASH_FAIL] {
+        for fixture in [KIMI_ACP_BASH_PASS, KIMI_ACP_BASH_FAIL, KIMI_ACP_BASH_TEST_PASS] {
             let frames = kimi_acp_frames(fixture);
             let terminal = kimi_acp_terminal(&frames);
             assert_eq!(
@@ -383,6 +407,70 @@ fn a_kimi_acp_shell_check_ends_with_the_exit_its_completion_states() {
     turn.wait_for_snapshots();
     let checkpoint = turn.finish();
     assert_eq!(observations(&checkpoint)[0]["outcome"], "succeeded");
+}
+
+#[test]
+fn a_captured_kimi_test_run_is_recorded_as_passed_with_its_result_line() {
+    let frames = kimi_acp_frames(KIMI_ACP_BASH_TEST_PASS);
+    let terminal = kimi_acp_terminal(&frames);
+    assert_eq!(terminal["sessionUpdate"], "tool_call_update");
+    assert_eq!(terminal["status"], "completed");
+    assert!(terminal["rawOutput"].is_string(), "{terminal}");
+    for frame in &frames {
+        assert!(
+            !has_exit_like_key(frame),
+            "no frame carries an exit status field: {frame}"
+        );
+    }
+    let output = summarize_acp_tool_output(terminal, AcpAgent::Kimi);
+    assert!(
+        output.contains("test result: ok. 1 passed;"),
+        "the runner's result line is the output text: {output}"
+    );
+
+    // The whole captured call through the host's ACP update path.
+    let turn = CheckedTurn::start("kimi-acp-test-capture", true);
+    let (input_tx, _input_rx) = std::sync::mpsc::channel();
+    let mut turn_state = AcpTurnState::default();
+    let mut recorder = turn.recorder();
+    for update in &frames {
+        handle_acp_session_update(
+            update,
+            &turn.state,
+            &turn.session_id,
+            &input_tx,
+            &mut turn_state,
+            &mut recorder,
+            AcpAgent::Kimi,
+        )
+        .expect("the update should apply");
+    }
+    assert_eq!(
+        turn.record(|record| {
+            record
+                .engram
+                .active_turn_checks
+                .iter()
+                .map(|check| (check.end.as_ref().map(|end| end.exit), check.overlapped))
+                .collect::<Vec<_>>()
+        }),
+        [(Some(EngramCommandExit::Code(0)), false)],
+        "one test check, ended by Kimi's `completed` report as exit 0"
+    );
+    turn.wait_for_snapshots();
+    let checkpoint = turn.finish();
+    assert_eq!(observations(&checkpoint)[0]["outcome"], "succeeded");
+    let evidence = &checkpoint["verification_evidence"][0];
+    assert_eq!(evidence["check_kind"], "test");
+    let summary = evidence["summary"].as_str().expect("a summary");
+    assert!(
+        summary.starts_with("`cargo test --bin termal live_proof` exited 0\n"),
+        "{summary}"
+    );
+    assert!(
+        summary.contains("test result: ok. 1 passed;"),
+        "the result line reaches the check summary: {summary}"
+    );
 }
 
 #[test]
