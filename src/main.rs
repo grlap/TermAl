@@ -867,6 +867,8 @@ include!("codex_rpc.rs");
 include!("codex_thread_actions.rs");
 include!("codex_delegation_release.rs");
 include!("codex_mcp.rs");
+include!("codex_reviewer_mcp.rs");
+include!("codex_reviewer_mcp_lifecycle.rs");
 include!("turn_lifecycle.rs");
 include!("session_lifecycle.rs");
 include!("session_messages.rs");

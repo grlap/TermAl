@@ -3416,6 +3416,7 @@ fn refresh_delegation_from_child_locked(
                     ));
                 }
                 let mut result = DelegationResult {
+                    reviewer_mcp_observations: Vec::new(),
                     delegation_id: delegation.id.clone(),
                     child_session_id: delegation.child_session_id.clone(),
                     status: DelegationStatus::Failed,
@@ -3466,6 +3467,7 @@ fn refresh_delegation_from_child_locked(
                 });
             }
             let mut result = DelegationResult {
+                reviewer_mcp_observations: Vec::new(),
                 delegation_id: delegation.id.clone(),
                 child_session_id: delegation.child_session_id.clone(),
                 status: DelegationStatus::Completed,
@@ -3554,6 +3556,7 @@ fn rearm_terminal_delegation_for_followup_locked(
         record.review_result_recovery_probe_attempt = None;
         record.review_result_recovery_error = None;
         record.review_result_schema_version = None;
+        record.attempt.reviewer_mcp_observations.clear();
         if record.mode == DelegationMode::Reviewer {
             record.review_result_submission_attempt = record
                 .review_result_submission_attempt
@@ -3847,6 +3850,7 @@ fn mark_delegation_failed_locked(
         })
         .unwrap_or_default();
     let mut result = DelegationResult {
+        reviewer_mcp_observations: Vec::new(),
         delegation_id: delegation.id.clone(),
         child_session_id: delegation.child_session_id.clone(),
         status: DelegationStatus::Failed,
@@ -3904,6 +3908,7 @@ fn mark_delegation_canceled_locked(
     let raw_summary = reason.as_deref().unwrap_or("Delegation canceled.");
     let public_summary = compact_delegation_public_summary(raw_summary);
     let mut result = DelegationResult {
+        reviewer_mcp_observations: Vec::new(),
         delegation_id: delegation.id.clone(),
         child_session_id: delegation.child_session_id.clone(),
         status: DelegationStatus::Canceled,
@@ -5008,6 +5013,7 @@ fn record_delegation_workspace_observations(
     delegation: &DelegationRecord,
     result: &mut DelegationResult,
 ) {
+    result.reviewer_mcp_observations = delegation.attempt.reviewer_mcp_observations.clone();
     if delegation.write_policy != DelegationWritePolicy::ReadOnly {
         return;
     }

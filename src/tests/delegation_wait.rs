@@ -577,6 +577,7 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
         delegation.status = DelegationStatus::Completed;
         delegation.completed_at = Some(stamp_now());
         delegation.result = Some(DelegationResult {
+            reviewer_mcp_observations: Vec::new(),
             delegation_id: created.delegation.id.clone(),
             child_session_id: created.delegation.child_session_id.clone(),
             status: DelegationStatus::Completed,

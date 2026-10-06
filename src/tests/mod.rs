@@ -38,6 +38,8 @@ mod codex_protocol;
 mod codex_read_guidance;
 mod codex_read_only_profile;
 mod codex_read_only_tracker;
+mod codex_reviewer_mcp_startup;
+pub(crate) use codex_reviewer_mcp_startup::run_settlement_gap_hook;
 mod codex_thread_recovery;
 mod codex_threads;
 mod content_revision;
@@ -577,6 +579,9 @@ fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
 fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_thread_id() {
     let (watchdog_cancel_tx, watchdog_cancel_rx) = mpsc::channel();
     let mut session_state = SharedCodexSessionState {
+        reviewer_mcp_setup_started: None,
+        reviewer_mcp_failure: None,
+        reviewer_mcp_gate: None,
         pending_thread_setup: Some(PendingCodexThreadSetup {
             request_id: "thread-start-1".to_owned(),
             command: CodexPromptCommand {

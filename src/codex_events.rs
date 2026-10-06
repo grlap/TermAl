@@ -337,6 +337,7 @@ fn handle_shared_codex_app_server_message(
 
         match method {
             "remoteControl/status/changed"
+            | "mcpServer/startupStatus/updated"
             | "thread/archived"
             | "thread/closed"
             | "thread/compacted"
@@ -427,6 +428,19 @@ fn handle_shared_codex_app_server_message(
         return Ok(());
     }
 
+    if method == "mcpServer/startupStatus/updated" {
+        if message.pointer("/params/name").and_then(Value::as_str) == Some(TERMAL_DELEGATION_MCP_SERVER_NAME)
+            && message.pointer("/params/status").and_then(Value::as_str) == Some("failed") {
+            let mut shared = sessions.lock().expect("shared Codex session mutex poisoned");
+            let s = shared.entry(session_id.clone()).or_default();
+            if s.thread_id.as_deref().is_none_or(|id| Some(id) == message_thread_id) {
+                s.reviewer_mcp_failure = Some(codex_reviewer_mcp_reason(message.pointer("/params/error").and_then(Value::as_str)
+                    .or_else(|| message.pointer("/params/failureReason").and_then(Value::as_str))));
+            }
+        }
+        return Ok(());
+    }
+
     let mut shared_sessions = sessions
         .lock()
         .expect("shared Codex session mutex poisoned");
@@ -447,6 +461,8 @@ fn handle_shared_codex_app_server_message(
         completed_turn_id,
         turn_started,
         turn_state,
+        reviewer_mcp_gate,
+        ..
     } = session_state;
     let turn_started_turn_id = (method == "turn/started")
         .then(|| message.pointer("/params/turn/id").and_then(Value::as_str))
@@ -576,6 +592,7 @@ fn handle_shared_codex_app_server_message(
         turn_state,
         thread_sessions,
         &mut recorder,
+        reviewer_mcp_gate,
     )
 }
 
@@ -605,6 +622,7 @@ fn handle_shared_codex_app_server_notification(
     turn_state: &mut CodexTurnState,
     thread_sessions: &SharedCodexThreadMap,
     recorder: &mut impl TurnRecorder,
+    reviewer_mcp_gate: &mut Option<String>,
 ) -> Result<()> {
     match method {
         "thread/started" => {
@@ -780,6 +798,10 @@ fn handle_shared_codex_app_server_notification(
                     );
                     clear_codex_turn_state(turn_state);
                     recorder.reset_turn_state()?;
+                    if defer_codex_reviewer_mcp_finish(state, sessions, session_id, runtime_token,
+                        session_thread_id.as_deref(), reviewer_mcp_gate, Some(summarize_error(error))) {
+                        return Ok(());
+                    }
                     state.fail_turn_if_runtime_matches(
                         session_id,
                         runtime_token,
@@ -816,7 +838,9 @@ fn handle_shared_codex_app_server_notification(
             // final must replace the existing bubble
             // in place rather than appending a second message. The cleanup worker
             // or the next turn/started event clears this recorder state.
-            state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
+            if !defer_codex_reviewer_mcp_finish(state, sessions, session_id, runtime_token, session_thread_id.as_deref(), reviewer_mcp_gate, None) {
+                state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
+            }
             if let Some(completed_turn_id) = completed_turn_id.as_deref() {
                 schedule_shared_codex_completed_turn_cleanup(
                     sessions,
@@ -999,6 +1023,10 @@ fn handle_shared_codex_app_server_notification(
                 );
                 clear_codex_turn_state(turn_state);
                 recorder.reset_turn_state()?;
+                if defer_codex_reviewer_mcp_finish(state, sessions, session_id, runtime_token,
+                    session_thread_id.as_deref(), reviewer_mcp_gate, Some(detail.clone())) {
+                    return Ok(());
+                }
                 state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
             }
         }
