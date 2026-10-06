@@ -2168,7 +2168,26 @@ fn handle_claude_bash_result(
         tool_use.run_in_background || moved_to_background,
         detail,
     );
-    recorder.command_completed_with_exit(tool_use_id, command, output.trim_end(), status, exit)
+    // Persisted metadata describes an omitted tail, not a passing verdict.
+    // Never open its path or include it in the check-credit diagnostic.
+    let runtime_output_cut = tool_use_result.is_some_and(|value| {
+        value
+            .get("persistedOutputPath")
+            .and_then(Value::as_str)
+            .is_some_and(|path| !path.trim().is_empty())
+            && value
+                .get("persistedOutputSize")
+                .and_then(Value::as_u64)
+                .is_some_and(|size| size > output.len() as u64)
+    });
+    recorder.command_completed_with_capture(
+        tool_use_id,
+        command,
+        output.trim_end(),
+        status,
+        exit,
+        runtime_output_cut,
+    )
 }
 
 /// Handles Claude file result.

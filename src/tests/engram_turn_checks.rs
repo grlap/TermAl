@@ -485,6 +485,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         overlap_cause: None,
         fenced_by_outstanding: None,
         watcher_fence: None,
+        runtime_output_cut: false,
         ended_at: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -1405,6 +1406,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         overlap_cause: None,
         fenced_by_outstanding: None,
         watcher_fence: None,
+        runtime_output_cut: false,
         ended_at: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -1465,6 +1467,7 @@ pub(super) fn finished_check(
         overlap_cause: None,
         fenced_by_outstanding: None,
         watcher_fence: None,
+        runtime_output_cut: false,
         ended_at: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -4152,3 +4155,6 @@ mod first_extraction;
 // frames, likewise a child module.
 #[path = "engram_kimi_acp_exit.rs"]
 mod kimi_acp_exit;
+
+#[path = "engram_claude_output_cut.rs"]
+mod claude_output_cut;

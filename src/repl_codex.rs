@@ -143,6 +143,20 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
             .command_completed_with_exit(key, command, output, status, exit)
     }
 
+    fn command_completed_with_capture(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+        runtime_output_cut: bool,
+    ) -> Result<()> {
+        self.inner.command_completed_with_capture(
+            key, command, output, status, exit, runtime_output_cut,
+        )
+    }
+
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
         self.inner.command_abandoned(key)
     }

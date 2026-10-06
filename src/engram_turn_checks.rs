@@ -371,6 +371,9 @@ struct EngramTurnCheck {
     /// fence of the carried check (`engram_carry_check`), since the run may
     /// have tested that change.
     watcher_fence: Option<String>,
+    /// The runtime supplied only part of the output. Diagnostic metadata,
+    /// never passing evidence; the persisted file path is not retained.
+    runtime_output_cut: bool,
     end: Option<EngramTurnCheckEnd>,
     /// When its command's end was recorded on the interference clock
     /// (`engram_claude_interference.rs`). Its evidence interval closes only
@@ -416,6 +419,8 @@ enum EngramWithheldReason {
     Overlapped,
     /// Its output showed no passing test.
     NoPassingTest,
+    /// The runtime omitted output and the supplied part showed no pass.
+    RuntimeOutputCut,
     /// Claude work with no verified completion restricted it.
     OutstandingClaudeWork,
 }
@@ -457,6 +462,8 @@ fn engram_withhold_unjudged_successes(
                 EngramWithheldReason::OutstandingClaudeWork
             } else if kept.check.overlapped {
                 EngramWithheldReason::Overlapped
+            } else if kept.check.runtime_output_cut {
+                EngramWithheldReason::RuntimeOutputCut
             } else {
                 EngramWithheldReason::NoPassingTest
             },
@@ -472,6 +479,15 @@ fn engram_withhold_unjudged_successes(
 /// naming the test by program and fingerprint as the log does: the command
 /// line itself can carry a secret.
 fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
+    if withheld.reason == EngramWithheldReason::RuntimeOutputCut {
+        return format!(
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned \
+             no credit and was not recorded: the runtime cut the output before any passing \
+             summary was available. For cargo tests, use cargo test -q to keep the output \
+             small enough to retain the summary.",
+            withheld.program, withheld.fingerprint
+        );
+    }
     if withheld.reason == EngramWithheldReason::OutstandingClaudeWork {
         let cause = withheld
             .cause
@@ -494,6 +510,7 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
         ),
         EngramWithheldReason::NoPassingTest => "its output shows no passing test".to_owned(),
         EngramWithheldReason::OutstandingClaudeWork => unreachable!("told above"),
+        EngramWithheldReason::RuntimeOutputCut => unreachable!("told above"),
     };
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned no \
@@ -1645,6 +1662,7 @@ impl AppState {
             overlap_cause,
             fenced_by_outstanding: restricted_by,
             watcher_fence: None,
+            runtime_output_cut: false,
             end: None,
             ended_at: None,
         });
@@ -1840,6 +1858,7 @@ impl AppState {
     /// own thread. `exit` is `None` from a runtime that says nothing usable.
     /// A background command's result marks its launch: it keeps counting as
     /// running for the rest of the turn, since TermAl never sees it end.
+    #[cfg(test)]
     fn note_engram_command_finished(
         &self,
         session_id: &str,
@@ -1848,6 +1867,21 @@ impl AppState {
         command: &str,
         output: &str,
         exit: Option<EngramCommandExit>,
+    ) {
+        self.note_engram_command_finished_with_capture(
+            session_id, provenance, key, command, output, exit, false,
+        );
+    }
+
+    fn note_engram_command_finished_with_capture(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        command: &str,
+        output: &str,
+        exit: Option<EngramCommandExit>,
+        runtime_output_cut: bool,
     ) {
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
@@ -1986,6 +2020,7 @@ impl AppState {
                 command,
                 output,
                 exit,
+                runtime_output_cut,
             },
         );
         if disposition.excludes_live_grant() {
@@ -2061,6 +2096,7 @@ impl AppState {
             engram_spawn_basis_capture(check.target.basis_place(), &workers, provenance)
         };
         check.ended_at = Some(engram_interference_tick());
+        check.runtime_output_cut = runtime_output_cut;
         check.end = Some(EngramTurnCheckEnd {
             completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             exit: exit.unwrap_or(EngramCommandExit::Unknown),

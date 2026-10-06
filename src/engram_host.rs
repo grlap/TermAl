@@ -57,6 +57,7 @@ pub(crate) enum EngramRecorderObservation<'a> {
         command: &'a str,
         output: &'a str,
         exit: Option<EngramCommandExit>,
+        runtime_output_cut: bool,
     },
     /// The command `key` will never report its end.
     CommandAbandoned { key: &'a str },
@@ -96,9 +97,16 @@ impl EngramHost<'_> {
                 command,
                 output,
                 exit,
+                runtime_output_cut,
             } => {
-                self.state.note_engram_command_finished(
-                    session_id, provenance, key, command, output, exit,
+                self.state.note_engram_command_finished_with_capture(
+                    session_id,
+                    provenance,
+                    key,
+                    command,
+                    output,
+                    exit,
+                    runtime_output_cut,
                 );
             }
             EngramRecorderObservation::CommandAbandoned { key } => {

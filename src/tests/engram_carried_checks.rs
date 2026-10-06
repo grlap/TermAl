@@ -3364,6 +3364,7 @@ fn launch_claude_background_gate(turn: &CheckedTurn, worktree: &FsPath, key: &st
             command: &line,
             output: "Command running in background with ID: b1.",
             exit: Some(EngramCommandExit::NotFinished),
+            runtime_output_cut: false,
         },
     );
 }
@@ -3504,6 +3505,7 @@ fn any_other_outstanding_work_still_refuses_a_claude_background_gate() {
             command: &line,
             output: "Command running in background with ID: b2.",
             exit: Some(EngramCommandExit::NotFinished),
+            runtime_output_cut: false,
         },
     );
     turn.record(|record| {

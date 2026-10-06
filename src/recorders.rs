@@ -155,6 +155,20 @@ trait TurnRecorder {
         let _ = exit;
         self.command_completed(key, command, output, status)
     }
+    /// Completion with the runtime's omitted-output metadata. It explains a
+    /// withheld check only; it never supplies a verdict or a file to read.
+    /// Forwarding recorders must forward this with the completion.
+    fn command_completed_with_capture(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+        _runtime_output_cut: bool,
+    ) -> Result<()> {
+        self.command_completed_with_exit(key, command, output, status, exit)
+    }
     /// A started command will never report its end (a denied tool call), so
     /// it no longer counts as running beside a mediated turn's test checks.
     /// The transcript is left as the caller leaves it.
@@ -889,6 +903,7 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     output: &str,
     status: CommandStatus,
     exit: Option<EngramCommandExit>,
+    runtime_output_cut: bool,
 ) -> Result<()> {
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
@@ -908,6 +923,7 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
             command,
             output,
             exit,
+            runtime_output_cut,
         });
     }
     Ok(())
@@ -1219,7 +1235,7 @@ impl TurnRecorder for SessionRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, None)
+        recorder_command_completed(self, key, command, output, status, None, false)
     }
 
     fn command_completed_with_exit(
@@ -1230,7 +1246,21 @@ impl TurnRecorder for SessionRecorder {
         status: CommandStatus,
         exit: EngramCommandExit,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, Some(exit))
+        recorder_command_completed(self, key, command, output, status, Some(exit), false)
+    }
+
+    fn command_completed_with_capture(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+        runtime_output_cut: bool,
+    ) -> Result<()> {
+        recorder_command_completed(
+            self, key, command, output, status, Some(exit), runtime_output_cut,
+        )
     }
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
@@ -1346,7 +1376,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, None)
+        recorder_command_completed(self, key, command, output, status, None, false)
     }
 
     fn command_completed_with_exit(
@@ -1357,7 +1387,21 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         status: CommandStatus,
         exit: EngramCommandExit,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, Some(exit))
+        recorder_command_completed(self, key, command, output, status, Some(exit), false)
+    }
+
+    fn command_completed_with_capture(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+        runtime_output_cut: bool,
+    ) -> Result<()> {
+        recorder_command_completed(
+            self, key, command, output, status, Some(exit), runtime_output_cut,
+        )
     }
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
