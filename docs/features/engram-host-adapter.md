@@ -541,8 +541,10 @@ observation.
 
 ### Continuity between turns
 
-A turn's own `source_changed` compares its measured begin with its close and
-nothing else: a change made between two mediated turns belongs to neither,
+A turn's own `source_changed` compares its measured begin (or, under a grant
+that mediates local mutation, the revision of the last check its report
+carries) with its close and nothing else: a change made between two mediated
+turns belongs to neither,
 so the next turn's begin is never replaced by the previous turn's close
 (`engram_turn_continuity.rs`). Such changes include another session's
 writes, a turn Claude Code started by itself, and the naming turn's edits.
@@ -574,6 +576,54 @@ accounted baseline (`engram_source_sightings.rs`); a difference is reported to
 Engram as an inter-turn observation with unknown causality before the prompt
 is delivered, and an equal opening reports nothing. Each claim keeps its own
 baseline, so a change accounted on one claim's run never moves another's.
+
+What each comparison measures, and what it does not:
+
+- **The turn's own flag.** A turn's `source_changed` compares the turn's
+  measured begin basis — or, under a grant that mediates local mutation, the
+  revision of the last check its report carries — with its close
+  (`engram_turn_observations.rs`); when a comparison basis is missing, the
+  watcher's tracked changes decide instead. Whoever made a write inside the
+  turn, the turn's close reports it. It says nothing about a change made
+  between turns.
+- **The inter-turn observation.** It compares the scope's accounted baseline
+  with the next measured opening of that scope — or, while the scope still
+  owes an unaccounted close, first with that close, then from the close to
+  the opening (How the baseline moves, below). A scope is one work, run and
+  claim on one naming of one root; renaming the root starts a new scope. Two
+  claims naming the same root are two scopes, even when one session holds
+  both: a turn reports its close to the scope its session is bound to, and
+  the other scope learns of the change only by its own measurement — at the
+  close of a turn of that scope that was open when the change landed, as
+  that turn's own change, or else at that scope's next measured opening, as
+  an inter-turn change whose cause is unknown.
+- **Neither compares with an evaluation.** No host observation compares a
+  revision with the one an acceptance evaluation declared; the evaluation's
+  first submission declares the revision taken at the request only if the
+  root still holds it, which is a request check, not an observation. An
+  opening equal to an evaluated revision is still reported as a change when
+  the scope's baseline differs from it.
+- **When the change is reported.** With no close owed, the reported interval
+  runs from the baseline's measured time to the opening sighting's; with a
+  close owed, the first interval ends at that close and the follow-up runs
+  from the close to the opening; without a compatible baseline the interval
+  is the sighting's own moment. None of these is the moment the change was
+  made: the host reports when the scope measures. So when a change made and
+  reported on another claim's run fell inside no measured turn of this scope
+  and no opening of this scope lay between it and an evaluation on this run
+  — as when the evaluation is requested from a session bound to the other
+  claim — the change reaches this run only at its next opening, after that
+  evaluation in the run's feed, and Engram's own rule treats an accounted
+  unadmitted change recorded after an evaluation's cut as new evidence
+  against it, whatever revision it reports. A change inside one of this
+  scope's own turns is instead reported at that turn's close as the turn's
+  own change, which Engram judges by revision. Reporting the change at the
+  earliest sighting of that revision the host holds for the workspace,
+  across scopes, is a planned change to what the host sends, not this
+  behaviour; how Engram judges it is
+  Engram's rule.
+
+How the baseline moves:
 
 - **The baseline advances only on an accounted change.** A close equal to the
   baseline accounts itself. Any other close becomes the baseline only when
