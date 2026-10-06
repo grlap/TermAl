@@ -282,8 +282,10 @@ fn acceptance_compact_notes_carrier(
         }
     }
     let window = acceptance_notes_window(page)?;
+    // Engram takes a fresh project read cut on every page, so the project
+    // position may advance between pages while other items are written. The
+    // selected index total and the page boundary are what stay fixed.
     if window.total != previous.total
-        || window.read_cut.project_position != previous.read_cut.project_position
         || previous.newer.checked_add(previous.shown) != Some(window.newer)
         || window.shown == 0
         || window

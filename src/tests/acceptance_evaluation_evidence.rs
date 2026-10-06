@@ -219,10 +219,12 @@ fn criterion_evidence_carrier_compact_pages_preserve_the_canonical_bracket() {
                 }
             },
         );
-        if change == "none" {
+        // Engram takes a fresh project read cut on every page, so a cut that
+        // advanced between pages is a faithful page too.
+        if matches!(change, "none" | "project_cut") {
             assert!(
                 result.is_ok(),
-                "faithful compact page must succeed: {:?}",
+                "{change}: faithful compact page must succeed: {:?}",
                 result.err()
             );
             let calls = calls.lock().unwrap();

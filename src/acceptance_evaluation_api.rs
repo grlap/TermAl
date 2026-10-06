@@ -103,6 +103,65 @@ fn acceptance_evaluation_paging_reserve() -> Duration {
         + REVIEW_FREEZE_TIMEOUT
 }
 
+/// The tracker reads after optional notes paging that decide the request and
+/// draw on the discovery share: the held-claims read, the complete task read,
+/// one exact read per distinct selected record and the revalidation after
+/// them, and every page of the binding index. Engram returns that index at
+/// most eight criteria a page (fewer when bound rows fill its 16 KiB bound),
+/// so a task of `criteria` criteria takes at least ceil(criteria / 8) binding
+/// pages, kept within one and the reader's page bound. An unknown criteria
+/// count reserves the whole page bound.
+fn acceptance_mandatory_reads_after_paging(
+    requested: &[AcceptanceCriterionEvidenceRequest],
+    carried: &[AcceptanceSelectedEvidence],
+    criteria: Option<usize>,
+) -> u32 {
+    let selected = requested
+        .iter()
+        .flat_map(|link| &link.locators)
+        .chain(carried.iter().flat_map(|row| &row.locators))
+        .collect::<BTreeSet<_>>()
+        .len() as u32;
+    let binding_pages = criteria.map_or(MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES, |criteria| {
+        criteria
+            .div_ceil(8)
+            .clamp(1, MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES)
+    }) as u32;
+    2 + selected + u32::from(selected > 0) + binding_pages
+}
+
+/// How many criteria the task has, from the windowed show: Engram fits that
+/// receipt into its response bound by dropping whole criteria from the end of
+/// the list and reporting how many as `acceptance_omitted`. `None` when the
+/// show lists none, since the count is then unknown.
+fn acceptance_windowed_criteria_count(show: &Value) -> Option<usize> {
+    let work = show.pointer("/status/work")?;
+    let listed = work.get("acceptance")?.as_array()?.len();
+    let omitted = work
+        .get("acceptance_omitted")
+        .and_then(Value::as_u64)
+        .map_or(0, |omitted| usize::try_from(omitted).unwrap_or(usize::MAX));
+    Some(listed.saturating_add(omitted))
+}
+
+/// Whether another optional notes page still fits in the discovery share.
+/// It and every mandatory read after it may take as long as the slowest read
+/// so far, and the last read is funded only half the time then left, so one
+/// more such share is kept. Two lock-retry delays are kept besides, for this
+/// page's and the last read's; a retry an earlier read actually waited out is
+/// already part of the slowest read measured. When it does not fit, paging
+/// stops with the evidence read so far, rather than let a page outrun its time
+/// or starve the reads that decide the request.
+fn acceptance_paging_affordable(
+    now: std::time::Instant,
+    discovery_deadline: std::time::Instant,
+    slowest_read: Duration,
+    mandatory_reads: u32,
+) -> bool {
+    let needed = slowest_read * (mandatory_reads + 2) + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY * 2;
+    now + needed <= discovery_deadline
+}
+
 /// How long a submission waits for the writer to acknowledge one state.
 #[cfg(not(test))]
 const ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -903,11 +962,17 @@ impl AppState {
             Some((now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
         let discovery_deadline =
             canonical_deadline.map(|limit| limit - ACCEPTANCE_EVIDENCE_CLOSING_RESERVE);
+        // The slowest tracker read seen so far in this request: how long the
+        // optional notes pages, and the mandatory reads after them, may take.
+        let mut slowest_read = Duration::ZERO;
+        let opening_started = now();
         let opening = read(
             connection,
             &core_args,
             acceptance_criterion_evidence_read_timeout(discovery_deadline.expect("identity budget"), &now)?,
-        ).map_err(|error| {
+        );
+        slowest_read = slowest_read.max(now().saturating_duration_since(opening_started));
+        let opening = opening.map_err(|error| {
             if acceptance_core_inspect_unsupported(&error) {
                 ApiError::conflict("canonical work identity and source authority are unavailable: Engram does not support core inspect")
             } else {
@@ -934,8 +999,11 @@ impl AppState {
                 acceptance_criterion_evidence_read_timeout(limit, &now)
             })
         };
-        let mut show = read(connection, &show_args, task_timeout()?)
-            .map_err(|e| acceptance_evaluation_transport_error("engram work show", e))?;
+        let show_started = now();
+        let show = read(connection, &show_args, task_timeout()?);
+        slowest_read = slowest_read.max(now().saturating_duration_since(show_started));
+        let mut show =
+            show.map_err(|e| acceptance_evaluation_transport_error("engram work show", e))?;
         if show.get("acceptance_basis").is_none() || show.get("evidence_basis").is_none() {
             return Err(ApiError::conflict(format!(
                 "`{work_ref}` reports no acceptance and evidence basis: the task has no active evaluated run or applicable acceptance contract"
@@ -963,6 +1031,16 @@ impl AppState {
         let mut notes_cursors = BTreeSet::new();
         // Ordinary legacy paging can shorten the brief. Once canonical
         // identity is acquired, contradictory carriers and page failures abort.
+        let mandatory_reads_after_paging = acceptance_mandatory_reads_after_paging(
+            &request.criterion_evidence,
+            automatic
+                .then(|| reuse.as_ref())
+                .flatten()
+                .and_then(|reservation| reservation.previous.acceptance_evaluation.as_ref())
+                .map(|target| target.selected_evidence.as_slice())
+                .unwrap_or_default(),
+            acceptance_windowed_criteria_count(&show),
+        );
 
         let mut older_pages = Vec::new();
         let mut collected = acceptance_evidence_page_len(&show);
@@ -991,7 +1069,17 @@ impl AppState {
                         / 4)
                     .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
                 });
-            if now() + acceptance_evaluation_paging_reserve() > deadline || page_timeout.is_zero() {
+            if now() + acceptance_evaluation_paging_reserve() > deadline
+                || page_timeout.is_zero()
+                || discovery_deadline.is_some_and(|limit| {
+                    !acceptance_paging_affordable(
+                        now(),
+                        limit,
+                        slowest_read,
+                        mandatory_reads_after_paging,
+                    )
+                })
+            {
                 paging_stop = Some("time_budget");
                 eprintln!(
                     "acceptance evaluation> the read budget for `{work_ref}` is spent; the brief lists the evidence read so far"
@@ -1002,7 +1090,10 @@ impl AppState {
             let json_flag = page_args.pop();
             page_args.extend(["--after".to_owned(), token]);
             page_args.extend(json_flag);
-            match read(connection, &page_args, page_timeout) {
+            let page_started = now();
+            let page = read(connection, &page_args, page_timeout);
+            slowest_read = slowest_read.max(now().saturating_duration_since(page_started));
+            match page {
                 Ok(page) => {
                     if canonical_window.is_some() {
                         let identity = discovery.identity.as_ref().expect("captured core identity");

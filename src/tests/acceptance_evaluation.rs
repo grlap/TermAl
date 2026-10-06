@@ -25,6 +25,9 @@ mod carried_failure;
 #[path = "acceptance_evaluation_evidence.rs"]
 mod evidence_selection;
 
+#[path = "acceptance_evaluation_notes_cut.rs"]
+mod notes_cut;
+
 #[path = "acceptance_evaluation_authority.rs"]
 mod authority_budget;
 
