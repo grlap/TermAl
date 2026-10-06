@@ -6467,6 +6467,8 @@ fn engram_mcp_grant_clear_serializes_with_runtime_exit_waiter() {
         record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
             runtime_id: runtime_id.clone(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
         });
         record.session.status = SessionStatus::Active;
@@ -6561,6 +6563,8 @@ fn engram_mcp_grant_clear_gracefully_cancels_opencode_before_teardown() {
             agent: AcpAgent::OpenCode,
             runtime_id: "engram-mcp-revoke-opencode-runtime".to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
             turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
         });
@@ -6628,6 +6632,8 @@ fn engram_mcp_grant_clear_defers_behind_existing_stop_owner_without_waiting() {
         record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
             runtime_id: "engram-mcp-revoke-stop-owner-runtime".to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
         });
         record.session.status = SessionStatus::Active;
@@ -6724,6 +6730,8 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
         record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
             runtime_id: "engram-mcp-stop-transfer-runtime".to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
         });
         record.session.status = SessionStatus::Active;
@@ -7482,6 +7490,8 @@ fn engram_mcp_grant_clear_surfaces_shutdown_failure_and_blocks_resume() {
         record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
             runtime_id: runtime_id.clone(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
         });
         record.session.status = SessionStatus::Active;
@@ -7659,6 +7669,8 @@ fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
             agent: AcpAgent::Cursor,
             runtime_id: old_runtime_id.clone(),
             input_tx: old_input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: old_process.clone(),
             turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
         });
@@ -7687,6 +7699,8 @@ fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
             agent: AcpAgent::Cursor,
             runtime_id: fresh_runtime_id.clone(),
             input_tx: fresh_input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: fresh_process.clone(),
             turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
         },
@@ -7800,6 +7814,8 @@ fn engram_mcp_mixed_cleanup_error_preserves_pending_session_observability() {
             record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
                 runtime_id: runtime_id.to_owned(),
                 input_tx,
+                #[cfg(windows)]
+                process_tree: None,
                 process,
             });
             record.session.status = SessionStatus::Active;
@@ -9165,6 +9181,8 @@ fn assert_engram_mcp_quarantined_runtime_retried_by_followup(delete_project: boo
         record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
             runtime_id: "engram-delete-quarantined-runtime".to_owned(),
             input_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: process.clone(),
         });
         state
@@ -11198,6 +11216,8 @@ fn reset_fenced_begin_finishes_once_while_runtime_stop_is_still_gated() {
             agent: AcpAgent::OpenCode,
             runtime_id: "engram-reset-stop-begin-finish-opencode".to_owned(),
             input_tx: runtime_tx,
+            #[cfg(windows)]
+            process_tree: None,
             process: runtime_process,
             turn_lifecycle: turn_lifecycle.clone(),
         },

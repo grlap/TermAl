@@ -485,6 +485,7 @@ impl AppState {
             return Ok(false);
         }
         // Fence a begun observation phase before invalidating the queue owner.
+        let cleanup_pending = record.runtime.dedicated_cleanup_failure().is_some();
         retire_source_observation_locked(&mut inner, index);
         let record = inner.session_mut_by_index(index).expect("checked session index");
         record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
@@ -507,7 +508,9 @@ impl AppState {
         record.engram.abort_retry_saved = false;
         record.set_auto_dispatch_blocked(true);
         record.engram.operator_paused = true;
-        record.session.preview = "Engram authorization canceled. Prompt retained; remove it before starting a new operation.".to_owned();
+        if !cleanup_pending {
+            record.session.preview = "Engram authorization canceled. Prompt retained; remove it before starting a new operation.".to_owned();
+        }
         record.session.live_activity = None;
         sync_pending_prompts(record);
         self.commit_locked(&mut inner).map_err(|error| {

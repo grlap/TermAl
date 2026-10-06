@@ -909,6 +909,8 @@ fn runtime_exit_publishes_message_updated_for_canceled_pending_interactions() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-runtime-exit-pending-update".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
     let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
@@ -949,6 +951,8 @@ fn runtime_exit_publishes_message_created_for_terminal_failure_after_pending_can
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-runtime-exit-terminal-created".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
     let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
@@ -1025,6 +1029,8 @@ fn runtime_exit_file_change_created_deltas_are_replayable_and_final_stamped() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-runtime-exit-file-change-created".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
     let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
@@ -1156,6 +1162,8 @@ fn successful_stop_discards_deferred_callbacks() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-discard-deferred".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1210,6 +1218,8 @@ fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-persist-active-turn-rollback".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
     let failing_persistence_path = test_temp_dir().join(format!(
@@ -1278,6 +1288,8 @@ fn stop_session_publishes_message_updated_for_canceled_pending_interactions() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-pending-update".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1316,6 +1328,8 @@ fn stop_session_publishes_message_created_for_terminal_stop_after_pending_cancel
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-terminal-created".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1390,6 +1404,8 @@ fn stop_session_batch_shares_one_revision_and_sequences_follow_enqueue_order() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-batch-order".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
     {
@@ -1468,6 +1484,8 @@ fn stop_session_file_change_created_deltas_are_replayable_and_final_stamped() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-file-change-created".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1608,6 +1626,8 @@ fn failed_dedicated_stop_replays_deferred_turn_completion() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1675,6 +1695,8 @@ fn failed_dedicated_stop_replays_deferred_runtime_exit() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-exit-replay".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1741,6 +1763,8 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     let expected_runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-order-expected".to_owned(),
         input_tx: expected_input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: expected_process.clone(),
     };
     let expected_token = RuntimeToken::Claude(expected_runtime.runtime_id.clone());
@@ -1808,6 +1832,8 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-order".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 
@@ -1885,6 +1911,8 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
     let expected_runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-reversed-expected".to_owned(),
         input_tx: expected_input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: expected_process.clone(),
     };
     let expected_token = RuntimeToken::Claude(expected_runtime.runtime_id.clone());
@@ -1952,6 +1980,8 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-reversed".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process.clone(),
     };
 

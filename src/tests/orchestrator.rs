@@ -514,6 +514,8 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
     let planner_runtime = ClaudeRuntimeHandle {
         runtime_id: "route-orchestrator-stop-fail".to_owned(),
         input_tx: planner_input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: failing_process.clone(),
     };
     let (reviewer_runtime, _reviewer_input_rx) =
@@ -3688,6 +3690,8 @@ fn stop_session_does_not_schedule_orchestrator_transitions() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "orchestrator-stop-transition".to_owned(),
         input_tx,
+        #[cfg(windows)]
+        process_tree: None,
         process: process_owner.process.clone(),
     };
 
