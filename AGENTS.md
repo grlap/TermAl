@@ -230,9 +230,24 @@ operations, so the rule holds only as long as every agent follows it:
 - Create, change, move and delete files only inside this repository's folder
   and its worktrees, including worktrees TermAl creates for delegated
   sessions. This covers every shell command and script an agent writes.
-  Scratch files, throwaway stores, test homes and logs go under `.tmp/`
-  (ignored by Git), never in the system temp folder, `C:\tmp`, the user
+  Scratch files, throwaway stores and test homes go under `.tmp/`; logs an
+  agent keeps go under `.logs/`, and raw evidence that must outlive a
+  worktree under `.evidence/`, both at the main checkout's root. Git ignores
+  all three. Nothing goes in the system temp folder, `C:\tmp`, the user
   profile or another project, even when a harness names a scratchpad there.
+- Greg's rule (2026-10-06, relayed by Engram::Advisor): 'use Git-ignored
+  .logs/ and .evidence/ at the root of each project repository. Remove
+  artifacts after the associated task closes, unless agents record a
+  concrete need for a different retention policy.' A file there is removed
+  once every task it serves has closed. The agent that closes the last such
+  task removes it, or the coordinator's regular sweep does, in either case
+  after the path check below, and records what it removed. To keep it
+  longer, an agent records on an open task the concrete need and when it
+  ends; the file goes when that need ends. Removal touches only `.logs/` and
+  `.evidence/`, never a live worktree's run files, which leave only when
+  that worktree is removed. Engram's notes, gates and seals stay the lasting
+  record: what a decision rests on is quoted there, never left only in a raw
+  file.
 - Outside the repository only tools write, as part of their own work: TermAl
   through its tools and test runs, Engram to its store home, Cargo and npm to
   their caches. Anything else there, such as installing, repairing or updating
