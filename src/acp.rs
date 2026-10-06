@@ -1659,13 +1659,22 @@ fn handle_acp_session_update(
         "tool_call" => {
             finish_acp_thinking(recorder, turn_state, agent)?;
             recorder.finish_streaming_text()?;
-            if let Some((key, command)) = acp_tool_identity(update) {
-                recorder.command_started_in(
-                    &key,
-                    &command,
-                    acp_tool_command(update),
-                    acp_tool_cwd(update),
-                )?;
+            // Kimi's pending create is the placeholder its provider streams
+            // the call's arguments into; the call is dispatched only by the
+            // later frame that carries its input, and a command registered
+            // from the placeholder would begin a check before its first
+            // snapshot (`named_late` in the turn's checks).
+            let starts_call = agent != AcpAgent::Kimi
+                || update.get("status").and_then(Value::as_str) != Some("pending");
+            if starts_call {
+                if let Some((key, command)) = acp_tool_identity(update) {
+                    recorder.command_started_in(
+                        &key,
+                        &command,
+                        acp_tool_command(update),
+                        acp_tool_cwd(update),
+                    )?;
+                }
             }
         }
         "tool_call_update" => {
@@ -1674,7 +1683,12 @@ fn handle_acp_session_update(
                 let (ran, cwd) = (acp_tool_command(update), acp_tool_cwd(update));
                 match update.get("status").and_then(Value::as_str) {
                     Some("pending") | Some("in_progress") => {
-                        recorder.command_started_in(&key, &command, ran, cwd)?;
+                        // Kimi streams the call's arguments as content-only
+                        // updates before dispatch; one carrying the call's
+                        // input is its start (or re-states it).
+                        if agent != AcpAgent::Kimi || update.get("rawInput").is_some() {
+                            recorder.command_started_in(&key, &command, ran, cwd)?;
+                        }
                     }
                     Some("completed") | Some("failed") | Some("error") => {
                         // What the call ran, or where, may be told only as
@@ -1683,9 +1697,9 @@ fn handle_acp_session_update(
                         recorder.command_completed_with_exit(
                             &key,
                             &command,
-                            &summarize_acp_tool_output(update),
+                            &summarize_acp_tool_output(update, agent),
                             acp_tool_status(update),
-                            EngramHost::acp_command_exit(update),
+                            EngramHost::acp_command_exit(agent, update),
                         )?;
                     }
                     // An update without a status may still say what the call
@@ -1804,8 +1818,29 @@ fn acp_tool_cwd(update: &Value) -> Option<&str> {
     update.pointer("/rawInput/cwd").and_then(Value::as_str)
 }
 
+/// The output text a Kimi terminal tool update carries. Kimi 2.1.1 sends
+/// `rawOutput` as the command's combined output in a bare string — with no
+/// stdout, stderr or exitCode fields — and the same text again as the update's
+/// first text content block; other ACP agents carry a `rawOutput` object.
+fn acp_kimi_tool_output_text(update: &Value) -> Option<String> {
+    if let Some(text) = update.get("rawOutput").and_then(Value::as_str) {
+        return Some(text.to_owned());
+    }
+    update
+        .get("content")
+        .and_then(Value::as_array)?
+        .iter()
+        .find_map(|entry| entry.pointer("/content/text").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
 /// Summarizes ACP tool output.
-fn summarize_acp_tool_output(update: &Value) -> String {
+fn summarize_acp_tool_output(update: &Value, agent: AcpAgent) -> String {
+    if agent == AcpAgent::Kimi {
+        if let Some(text) = acp_kimi_tool_output_text(update) {
+            return text;
+        }
+    }
     let Some(raw_output) = update.get("rawOutput") else {
         return String::new();
     };

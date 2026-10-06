@@ -491,12 +491,99 @@ fn engram_codex_command_exit(item: &Value) -> EngramCommandExit {
 }
 
 /// An ACP tool update carries a shell exit status only in `rawOutput`, and
-/// only for tools that report one.
-fn engram_acp_command_exit(update: &Value) -> EngramCommandExit {
-    update
-        .pointer("/rawOutput/exitCode")
-        .and_then(Value::as_i64)
-        .map_or(EngramCommandExit::Unknown, EngramCommandExit::Code)
+/// only for tools that report one. Kimi never sends one: its `rawOutput` is
+/// the output text as a bare string, so the exit is read from the update's
+/// own signals instead (`engram_kimi_acp_command_exit`).
+fn engram_acp_command_exit(agent: AcpAgent, update: &Value) -> EngramCommandExit {
+    if let Some(code) = update.pointer("/rawOutput/exitCode").and_then(Value::as_i64) {
+        return EngramCommandExit::Code(code);
+    }
+    if agent == AcpAgent::Kimi {
+        return engram_kimi_acp_command_exit(update);
+    }
+    EngramCommandExit::Unknown
+}
+
+/// The exit a Kimi ACP tool update states. Kimi's shell tool emits
+/// `completed` for a foreground call only when the command exited 0, and a
+/// non-zero exit as `failed` with "Command failed with exit code: N."
+/// appended to the output text; any other failure text (a timeout, an
+/// interruption) shows no exit status. A background start answers `completed`
+/// with a `task_id:` metadata block: the command's launch, not its end.
+fn engram_kimi_acp_command_exit(update: &Value) -> EngramCommandExit {
+    let output = acp_kimi_tool_output_text(update).unwrap_or_default();
+    match update.get("status").and_then(Value::as_str) {
+        // The tool answers a background start only `completed`; a failed
+        // call's text never is one, whatever the command printed.
+        Some("completed") if engram_kimi_output_is_background_start(&output) => EngramCommandExit::NotFinished,
+        Some("completed") => EngramCommandExit::Code(0),
+        Some("failed" | "error") => {
+            engram_kimi_failed_exit_code(&output).map_or(EngramCommandExit::Unknown, EngramCommandExit::Code)
+        }
+        _ => EngramCommandExit::Unknown,
+    }
+}
+
+/// The closing line of Kimi's per-line truncation pointer, appended right
+/// after the command's text when shortening long lines brought it under the
+/// limit (`renderAppendedSpillPointer`).
+const KIMI_PER_LINE_POINTER_END: &str =
+    "next_step: Use Read with output_path to page through the saved output, or Grep to search it.]";
+
+/// The exit code in a Kimi shell failure's own closing line, "Command failed
+/// with exit code: N.", which the tool appends after the command's output.
+/// Only the producer's own trailers may follow it, and only in its order:
+/// the per-line truncation pointer ("[Per-line truncation occurred; …",
+/// "output_path: …", the closing `next_step`), then, after a blank line, the
+/// spill reference of an output over 50,000 characters ("task_id: …",
+/// "output_size_bytes: …", an optional TaskOutput `next_step`). Any other
+/// text after the sentence means it is not the tool's report. A failure text
+/// that does not end with it carries no exit status, and a failed call never
+/// reads as exit 0.
+fn engram_kimi_failed_exit_code(output: &str) -> Option<i64> {
+    let mut lines: Vec<&str> = output.lines().map(str::trim_end).collect();
+    while lines.last().is_some_and(|line| {
+        line.is_empty()
+            || line.starts_with("task_id: ")
+            || line.starts_with("output_size_bytes: ")
+            || line.starts_with("next_step: Use TaskOutput(")
+    }) {
+        lines.pop();
+    }
+    if let [.., pointer, path, end] = lines.as_slice()
+        && *end == KIMI_PER_LINE_POINTER_END
+        && path.starts_with("output_path: ")
+        && pointer.starts_with("[Per-line truncation occurred;")
+    {
+        lines.truncate(lines.len() - 3);
+    }
+    let code: i64 = lines
+        .last()?
+        .strip_prefix("Command failed with exit code: ")?
+        .strip_suffix('.')?
+        .parse()
+        .ok()?;
+    (code != 0).then_some(code)
+}
+
+/// Whether a `completed` Kimi shell call's output text is the background-start
+/// metadata block the tool answers a `run_in_background` call, or a foreground
+/// call it moved to the background, with. The block always opens the text
+/// ("task_id: …\npid: …\n…"); over the output limit the whole text is wrapped
+/// ("Tool output exceeded …") and the original's first line is the one after
+/// the head preview's marker, whatever the elided middle hid. A foreground
+/// result's own spill reference only ever trails the text. The block reports
+/// the command's launch, so the call is never the command's end; a foreground
+/// command whose output starts with that line only withholds credit.
+fn engram_kimi_output_is_background_start(output: &str) -> bool {
+    let mut lines = output.lines().map(str::trim_end);
+    let first = if output.starts_with("Tool output exceeded ") {
+        lines.by_ref().find(|line| line.starts_with("[preview: chars [0, "));
+        lines.next()
+    } else {
+        lines.next()
+    };
+    first.is_some_and(|line| line.starts_with("task_id: "))
 }
 
 /// The outcome a finished check may claim, or `None` for a result that does

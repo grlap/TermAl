@@ -180,11 +180,11 @@ fn each_runtime_end_maps_to_an_honest_outcome() {
         assert_eq!(engram_codex_command_exit(&item), exit, "{item}");
     }
     assert_eq!(
-        engram_acp_command_exit(&json!({"rawOutput": {"exitCode": 2}})),
+        engram_acp_command_exit(AcpAgent::OpenCode, &json!({"rawOutput": {"exitCode": 2}})),
         Code(2)
     );
     assert_eq!(
-        engram_acp_command_exit(&json!({"rawOutput": {"stdout": "ok"}})),
+        engram_acp_command_exit(AcpAgent::OpenCode, &json!({"rawOutput": {"stdout": "ok"}})),
         Unknown
     );
 
@@ -4147,3 +4147,8 @@ mod launcher_stages;
 // module.
 #[path = "engram_first_extraction.rs"]
 mod first_extraction;
+
+// Kimi's ACP shell-call output and exit recognition against the captured
+// frames, likewise a child module.
+#[path = "engram_kimi_acp_exit.rs"]
+mod kimi_acp_exit;

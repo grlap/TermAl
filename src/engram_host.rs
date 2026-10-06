@@ -226,9 +226,9 @@ impl EngramHost<'_> {
         engram_claude_command_exit(is_error, interrupted, background, detail)
     }
 
-    /// The exit an ACP tool update states.
-    pub(crate) fn acp_command_exit(update: &Value) -> EngramCommandExit {
-        engram_acp_command_exit(update)
+    /// The exit an ACP tool update states for `agent`.
+    pub(crate) fn acp_command_exit(agent: AcpAgent, update: &Value) -> EngramCommandExit {
+        engram_acp_command_exit(agent, update)
     }
 
     /// The host line for a background gate that was running when the host

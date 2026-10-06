@@ -1,0 +1,136 @@
+[
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "title": "Bash",
+    "kind": "execute",
+    "status": "pending",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": ""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo --"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo --version"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo --version\""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo --version\"}"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "title": "Running: cargo --version",
+    "kind": "execute",
+    "status": "in_progress",
+    "rawInput": {
+      "command": "cargo --version"
+    },
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo --version\"}"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "0:tool_Dt3X3PWvoSCLBh4WAQ4ET958",
+    "status": "completed",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "cargo 1.98.1 (797e8a9bc 2026-08-05)\n"
+        }
+      }
+    ],
+    "rawOutput": "cargo 1.98.1 (797e8a9bc 2026-08-05)\n"
+  }
+]

@@ -1,0 +1,192 @@
+[
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "title": "Bash",
+    "kind": "execute",
+    "status": "pending",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": ""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --bogus"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --bogus-flag"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --bogus-flag-"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --bogus-flag-xyz"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --bogus-flag-xyz\""
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --bogus-flag-xyz\"}"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "title": "Running: cargo build --bogus-flag-xyz",
+    "kind": "execute",
+    "status": "in_progress",
+    "rawInput": {
+      "command": "cargo build --bogus-flag-xyz"
+    },
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "{\"command\":\"cargo build --bogus-flag-xyz\"}"
+        }
+      }
+    ]
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "1:tool_AFpw4tzLnFYfpUuJRdv70A8O",
+    "status": "failed",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "error: unexpected argument '--bogus-flag-xyz' found\n\nUsage: cargo.exe build [OPTIONS]\n\nFor more information, try '--help'.\nCommand failed with exit code: 1."
+        }
+      }
+    ],
+    "rawOutput": "error: unexpected argument '--bogus-flag-xyz' found\n\nUsage: cargo.exe build [OPTIONS]\n\nFor more information, try '--help'.\nCommand failed with exit code: 1."
+  }
+]
