@@ -33,11 +33,11 @@ mod codex_bin;
 mod codex_delegation_release;
 mod codex_discovery;
 mod codex_home;
+mod codex_profile_routing;
 mod codex_protocol;
 mod codex_read_guidance;
 mod codex_read_only_profile;
 mod codex_read_only_tracker;
-mod codex_profile_routing;
 mod codex_thread_recovery;
 mod codex_threads;
 mod content_revision;
@@ -67,6 +67,7 @@ mod engram_compaction;
 mod engram_host_adapter;
 mod engram_readiness;
 mod engram_readiness_test_seam;
+mod engram_recovery_format;
 // The source-root naming tests (engram_source_root_naming.rs) are mounted
 // under engram_host_adapter's turn_observations module, whose ClaimedRoot
 // fixture they share.
@@ -74,6 +75,7 @@ mod engram_source_roots;
 mod evaluator_tool_access;
 mod file_changes;
 mod git;
+mod home_fixture;
 mod http_routes;
 mod instruction_search;
 mod json_rpc;
@@ -88,7 +90,6 @@ mod opencode_config;
 mod orchestrator;
 mod ordered_publication;
 mod phase_sync;
-mod home_fixture;
 mod read_only_orientation;
 mod review_freeze;
 mod test_temp_paths;
@@ -934,7 +935,6 @@ impl ScopedEnvVar {
         }
         Self { key, original }
     }
-
 }
 
 impl Drop for ScopedEnvVar {

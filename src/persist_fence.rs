@@ -10,6 +10,7 @@ delegation admission, provider delivery, SQL schema, or HTTP response policy.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone)]
 enum PersistFenceTarget {
+    EngramRecovery { session_id: String, content: Value },
     EngramWorkAuthority(Box<EngramAuthorityImage>),
     EngramAdmission {
         session_id: String,
@@ -44,7 +45,7 @@ impl PersistFenceTarget {
             Self::EngramWorkAuthority(image) => image.matches_metadata(&delta.metadata),
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
-            Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
+            Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
                 | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
                 | Self::EngramSourceRemoval { .. } => false,
             Self::Delegation(expected) => delta
@@ -70,6 +71,24 @@ impl PersistFenceTarget {
     /// not open another connection or treat row existence as proof.
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         match self {
+            Self::EngramRecovery { session_id, content } => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id], |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false); };
+                let actual: Value = serde_json::from_str(&stored)?;
+                let mut statement = connection.prepare(
+                    "SELECT value_json FROM messages WHERE session_id = ?1 ORDER BY position",
+                )?;
+                let encoded = statement
+                    .query_map([session_id], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let messages = encoded
+                    .iter()
+                    .map(|text| serde_json::from_str::<Value>(text))
+                    .collect::<serde_json::Result<Vec<_>>>()?;
+                Ok(engram_recovery_image_from_row(&actual, json!(messages)) == *content)
+            }
             Self::EngramSourceRemoval { owners, session_id, content } => {
                 for owner in owners {
                     if !Self::EngramSourceSightingHistory(Box::new(owner.clone())).is_already_durable(connection)? {
