@@ -752,6 +752,10 @@ include!("engram_host_adapter.rs");
 #[allow(dead_code)]
 mod engram_recovery_format;
 use engram_recovery_format::*;
+#[allow(dead_code)]
+mod engram_recovery_validation;
+#[cfg(test)]
+use engram_recovery_validation::*;
 include!("engram_host_launch.rs");
 include!("engram_turn_observations.rs");
 include!("engram_turn_continuity.rs");

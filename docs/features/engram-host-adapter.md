@@ -3644,8 +3644,13 @@ The unused recovery format retains the original Begin wire request and its
 authority. Its unused persistence fence reads session metadata and the complete
 ordered transcript from the same writer connection; metadata alone cannot prove
 a cancellation message durable. This prerequisite adds no live recovery fields
-or callers. Raw validation, cancellation proof, foundation ownership, automatic
+or callers. Runtime validation, cancellation, foundation ownership, automatic
 recovery and the begin-unknown incident remain open work.
+
+The unused raw decoder preserves invalid evidence and binds immutable head inputs.
+Its local cancellation proof requires the complete persisted queue and a hydrated
+transcript or exact persisted message lookup; a resident tail cannot establish
+non-terminal durable truth. These helpers grant no replay or admission authority.
 
 ## Related
 
