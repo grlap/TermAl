@@ -60,7 +60,26 @@ impl AppState {
                 return Err(EngramTransportError::local_state("source finalization still has a live gate"));
             }
             if resolution.is_accounted() {
-                promote_engram_source_sighting(&mut inner.engram_source_sightings[owner_index], &intent.sighting);
+                let owner = &mut inner.engram_source_sightings[owner_index];
+                // A delivered observation settled the owed close when it was
+                // promoted under its live gate, before its prompt went out.
+                // This runs only after a later checkpoint, when that turn may
+                // owe a new close; only a retired one, never promoted, settles
+                // here, and only what it covers.
+                if intent.delivery_retired {
+                    settle_engram_pending_close_by_observation(owner, &intent.sighting, false);
+                }
+                promote_engram_source_sighting(owner, &intent.sighting);
+                // A recorded owed close whose follow-up never ran (its gate
+                // was retired, or the host restarted) still owes the change
+                // from that close to the opening: the next opening reports it.
+                // A close owed meanwhile keeps the slot only when it is the
+                // newer measurement; when it was retained is no proof.
+                if let Some(next) = intent.follow_up.as_ref().filter(|next| next.basis != intent.sighting.basis)
+                    && engram_owed_close(owner).is_none_or(|pending| engram_close_supersedes(next, &pending.sighting)) {
+                    owner.pending_close = Some(EngramPendingClose { sighting: next.clone(), reported_by: None });
+                    owner.version = owner.version.saturating_add(1);
+                }
             }
             if intent.delivery_retired {
                 // A successor's authority and slots are never borrowed.

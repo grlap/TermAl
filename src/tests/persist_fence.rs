@@ -109,7 +109,7 @@ fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restar
                 workspace_id: basis.workspace_id.clone(), source_root_generation: Some(1),
                 source_root_state: Some(EngramSourceRootState::Named),
             },
-            version: 1, latest: Some(sighting.clone()),
+            version: 1, latest: Some(sighting.clone()), pending_close: None,
             observations: vec![EngramSourceObservationIntent {
                 id: "original-observation".to_owned(), session_id: session_id.clone(),
                 prompt_id: "held-head".to_owned(), dispatch_generation: 42,
@@ -123,7 +123,7 @@ fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restar
                     home: fixture.root.path().join("engram-home"), project_root: fixture.root.path().to_owned(),
                     actor_id: "observer".to_owned(), actor_context: None, session_id: session_id.clone(),
                 },
-                baseline: None, sighting, root_basis: json!({"state": {"state": "none"}}),
+                baseline: None, sighting, follow_up: None, root_basis: json!({"state": {"state": "none"}}),
                 routing_token: "original-routing-token".to_owned(), observing_session: Some("producer-session".to_owned()),
                 call_timeout_ms: ENGRAM_DEFAULT_CALL_TIMEOUT_MS,
                 phase: EngramSourceObservationPhase::Prepared {

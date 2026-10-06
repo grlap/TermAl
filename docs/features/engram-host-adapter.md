@@ -567,6 +567,62 @@ The host keeps that change apart instead:
 - **Not yet reported to Engram.** Reporting the drift to the store waits on
   the producer representation agreed with Engram.
 
+### Accounted source baseline
+
+A measured opening of a claim's named root is compared with that claim's
+accounted baseline (`engram_source_sightings.rs`); a difference is reported to
+Engram as an inter-turn observation with unknown causality before the prompt
+is delivered, and an equal opening reports nothing. Each claim keeps its own
+baseline, so a change accounted on one claim's run never moves another's.
+
+- **The baseline advances only on an accounted change.** A close equal to the
+  baseline accounts itself. Any other close becomes the baseline only when
+  something accounts it: a granted checkpoint whose report carries the turn's
+  own observation (the turn's own close, or a later recovery checkpoint that
+  carries the report this process kept for that grant), or a recorded
+  inter-turn observation.
+- **An unaccounted close is kept and reported later.** When the report carries
+  no such observation (withheld for a grant without mutation or for mixed
+  attribution, refused, or dropped), the closing measurement is persisted as
+  owed. Before the checkpoint is sent the host waits, within the same call
+  bound as the checkpoint, until the owed close is confirmed stored. If that
+  cannot be confirmed (an uncertain acknowledgement, a failed write or
+  read-back, or a stopped writer that has no next tick) it logs and proceeds:
+  the close stays owed in memory until accounted and is left to the existing
+  persistence machinery, so a later successful write is conditional, not
+  assured. The owed close survives a crash only if its content committed, or
+  once Engram has accepted the accounting.
+- **The next measured opening reports it.** With a close owed, the opening is
+  never equal. It first reports the owed change itself, from the accounted
+  baseline to the owed close; once that is recorded, it reports any further
+  change from the owed close to the opening. So a change that was reverted
+  before the opening is still reported as two changes rather than lost.
+  Recording the first observation clears the owed close. When the second
+  cannot run (the opening's prompt is cancelled, or the host restarts, after
+  the first was recorded), recovery keeps the change from the owed close to
+  the opening as the new owed close, and the next opening reports it. A
+  delivered opening's observations are finalized only after a later
+  checkpoint, so their finalization never settles an owed close again: that
+  turn may owe a new close at the same revision.
+- **The newer measurement wins, by stamp.** A differing close is owed even
+  behind a baseline stamped later, and the owed interval then goes without a
+  baseline (assumed changed); a follow-up stamped before its owed close goes
+  without one too. With a close already owed, a newer close (one not stamped
+  strictly earlier, the same revision included) takes the slot with its own
+  grant, as the baseline keeps the newer measurement; an older one does not.
+  A recovered follow-up that never ran takes the slot on the same terms. A
+  close left owed at the baseline's own revision owes nothing and never holds
+  back a newer one. Accounting settles a duty even when a later measurement
+  keeps the accounted revision from becoming the baseline. Ordering by stamp
+  inherits the baseline's existing limits: a clock stepped back or two
+  revisions stamped in the same millisecond can still lose or hold a change,
+  as before this section existed.
+- **A duplicate, never a loss.** When the host cannot know that Engram accepted
+  a report (its reply was lost and the host restarted before the recovery
+  checkpoint, which then goes bare), the close stays owed and the next opening
+  reports the same change again, with unknown causality. Engram records a
+  repeat; nothing is lost.
+
 ### Turns Claude Code starts by itself
 
 Claude Code can start a turn TermAl never prompted, for example when a

@@ -25,8 +25,9 @@ fn engram_source_observation_opening_locked(
             reason: "Source observation invariant failed: a measured confirmed opening has no canonical proof.".to_owned(),
         }
     };
-    let baseline = inner.engram_source_sightings.iter().find(|owner| owner.scope == scope)
-        .and_then(|owner| owner.latest.clone());
+    let plan = engram_source_opening_plan(
+        inner.engram_source_sightings.iter().find(|owner| owner.scope == scope),
+        &EngramSourceSighting { basis, observed_at });
     Some((scope, EngramSourceObservationIntent {
         id: Uuid::new_v4().to_string(), session_id: record.session.id.clone(),
         prompt_id: admission_owner.prompt_id.clone(), dispatch_generation: admission_owner.generation,
@@ -34,7 +35,7 @@ fn engram_source_observation_opening_locked(
         grant_id: record.engram.active_grant_id.clone()?, binding,
         connection: target.connection.clone(), call_timeout_ms: duration_millis(target.settings.call_timeout()),
         routing_token: record.engram.routing_token.clone()?, observing_session: None,
-        baseline, sighting: EngramSourceSighting { basis, observed_at }, root_basis, phase,
+        baseline: plan.baseline, sighting: plan.sighting, follow_up: plan.follow_up, root_basis, phase,
         continuation_released: true, finalization_complete: false, delivery_retired: true,
         grant_settlement: None, grant_settlement_request: None,
     }))
@@ -238,7 +239,7 @@ impl AppState {
                     owner.observations.push(intent);
                 } else {
                     inner.engram_source_sightings.push(EngramSourceSightingOwner {
-                        scope: scope.clone(), version: 1, latest: None, observations: vec![intent],
+                        scope: scope.clone(), version: 1, latest: None, pending_close: None, observations: vec![intent],
                     });
                 }
                 self.commit_locked(&mut inner).map_err(|error| EngramTransportError::local_state(
@@ -314,7 +315,8 @@ impl AppState {
             EngramTransportError::local_state("source observation has no captured routing token"))?;
         let sighting = EngramSourceSighting { basis, observed_at };
         let owner_index = inner.engram_source_sightings.iter().position(|owner| owner.scope == scope);
-        let baseline = owner_index.and_then(|position| inner.engram_source_sightings[position].latest.clone());
+        let EngramSourceOpeningPlan { baseline, sighting, follow_up, equal } = engram_source_opening_plan(
+            owner_index.map(|position| &inner.engram_source_sightings[position]), &sighting);
         let predecessor_pending = owner_index.is_some_and(|position| inner.engram_source_sightings[position].observations.iter()
             .any(|intent| !matches!(intent.phase, EngramSourceObservationPhase::Recorded { .. } | EngramSourceObservationPhase::RefusedPolicy { .. })));
         let recovery_reason = invariant_reason.clone().or_else(||
@@ -322,7 +324,7 @@ impl AppState {
             .or_else(|| predecessor_pending.then(||
             "An earlier source observation is still unaccounted; this captured grant is retired for explicit Resume.".to_owned()));
         // Equal samples prove no observed difference, not absence of ABA writes.
-        if recovery_reason.is_none() && baseline.as_ref().is_some_and(|before| before.basis == sighting.basis) {
+        if recovery_reason.is_none() && equal {
             inner.sessions[index].engram.source_opening_disposition = EngramSourceOpeningDisposition::Equal;
             inner.sessions[index].engram.source_observation_delivery_grant = Some(grant_id);
             return Ok(EngramSourceObservationCapture::NoEvidence);
@@ -335,7 +337,7 @@ impl AppState {
             active_turn_generation: admission_owner.active_turn_generation,
             grant_id: grant_id.clone(), binding, connection: target.connection.clone(),
             call_timeout_ms: duration_millis(target.settings.call_timeout()),
-            routing_token, observing_session: None, baseline, sighting: sighting.clone(),
+            routing_token, observing_session: None, baseline, sighting, follow_up,
             root_basis, phase: invariant_reason.as_ref().map_or(EngramSourceObservationPhase::Captured,
                 |reason| EngramSourceObservationPhase::Invariant { reason: reason.clone() }),
             continuation_released: recovery_reason.is_some(),
@@ -350,7 +352,7 @@ impl AppState {
             owner.version
         } else {
             inner.engram_source_sightings.push(EngramSourceSightingOwner {
-                scope: scope.clone(), version: 1, latest: None, observations: vec![intent],
+                scope: scope.clone(), version: 1, latest: None, pending_close: None, observations: vec![intent],
             });
             1
         };
@@ -559,6 +561,13 @@ impl AppState {
                         && self.promote_accounted_source_observation(session_id, &gate, &owner, &intent)? {
                         continue;
                     }
+                    // An owed close was reported first; the change from it to
+                    // this opening is reported next, through the same gate.
+                    if resolution.is_accounted() && intent.follow_up.as_ref()
+                        .is_some_and(|next| next.basis != intent.sighting.basis) {
+                        self.chain_source_observation_follow_up(session_id, &gate, &owner, &intent)?;
+                        continue;
+                    }
                     // The preceding fence includes the exact receipt and queue
                     // owner. Time and ownership are rechecked at release too.
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -595,13 +604,59 @@ impl AppState {
         }
         let owner = inner.engram_source_sightings.iter_mut().find(|owner| *owner == expected)
             .ok_or_else(|| EngramTransportError::local_state("source promotion fact owner changed"))?;
-        if !promote_engram_source_sighting(owner, &intent.sighting) { return Ok(false); }
+        // What Engram recorded settles the duty it covers, whether or not a
+        // later measurement keeps it from becoming the baseline.
+        let settled = settle_engram_pending_close_by_observation(owner, &intent.sighting, true);
+        if !promote_engram_source_sighting(owner, &intent.sighting) && !settled { return Ok(false); }
         let version = owner.version;
         inner.sessions[index].engram.source_observation_gate.as_mut().expect("checked gate").owner_version = version;
         inner.stamp_session_at_index(index);
         self.commit_locked(&mut inner).map_err(|error|
             EngramTransportError::local_state(format!("source promotion persistence failed: {error:#}")))?;
         Ok(true)
+    }
+
+    /// Replaces the gate's recorded observation of an owed close with the
+    /// observation of the change from that close to the opening, as the
+    /// policy refresh below replaces a refused one.
+    fn chain_source_observation_follow_up(
+        &self, session_id: &str, gate: &EngramSourceObservationGate,
+        expected_owner: &EngramSourceSightingOwner, intent: &EngramSourceObservationIntent,
+    ) -> Result<(), EngramTransportError> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(session_id).ok_or_else(||
+            EngramTransportError::local_state("source observation session was removed"))?;
+        if !gate.owns(&inner.sessions[index]) || inner.sessions[index].engram.source_observation_gate.as_ref() != Some(gate) {
+            return Err(EngramTransportError::local_state("source follow-up owner changed"));
+        }
+        let owner = inner.engram_source_sightings.iter_mut().find(|owner| *owner == expected_owner)
+            .ok_or_else(|| EngramTransportError::local_state("source follow-up fact owner changed"))?;
+        let previous = owner.observations.iter_mut().find(|previous| previous.id == intent.id)
+            .ok_or_else(|| EngramTransportError::local_state("source follow-up intent was removed"))?;
+        let Some(follow_up) = previous.follow_up.take() else {
+            return Err(EngramTransportError::local_state("source follow-up has no next sighting"));
+        };
+        previous.continuation_released = true;
+        let mut next = intent.clone();
+        next.id = Uuid::new_v4().to_string();
+        next.observing_session = None;
+        next.phase = EngramSourceObservationPhase::Captured;
+        next.baseline = engram_follow_up_baseline(&intent.sighting, &follow_up);
+        next.sighting = follow_up;
+        next.follow_up = None;
+        let next_id = next.id.clone();
+        owner.observations.push(next);
+        owner.version = owner.version.saturating_add(1);
+        let version = owner.version;
+        let gate = inner.sessions[index].engram.source_observation_gate.as_mut().expect("checked gate");
+        gate.observation_id = next_id;
+        gate.owner_version = version;
+        // The follow-up is a new observation with its own one policy refresh.
+        gate.policy_refreshed = false;
+        inner.stamp_session_at_index(index);
+        self.commit_locked(&mut inner).map_err(|error| EngramTransportError::local_state(
+            format!("source follow-up persistence failed: {error:#}")))?;
+        Ok(())
     }
 
     fn refresh_refused_source_observation_policy(

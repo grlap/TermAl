@@ -62,6 +62,10 @@ struct EngramSourceObservationIntent {
     observing_session: Option<String>,
     baseline: Option<EngramSourceSighting>,
     sighting: EngramSourceSighting,
+    // The opening measured after an owed close this intent reports: once
+    // this one is recorded, the change from the close to it is reported next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    follow_up: Option<EngramSourceSighting>,
     root_basis: Value,
     phase: EngramSourceObservationPhase,
     continuation_released: bool,
@@ -129,8 +133,140 @@ struct EngramSourceSightingOwner {
     // actual latest sighting still decodes as Some without manufacturing one.
     #[serde(default)]
     latest: Option<EngramSourceSighting>,
+    // A closing measurement whose change nothing has accounted yet. It never
+    // becomes the baseline by itself; the next measured opening reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_close: Option<EngramPendingClose>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     observations: Vec<EngramSourceObservationIntent>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct EngramPendingClose {
+    sighting: EngramSourceSighting,
+    // The grant whose checkpoint report carried the turn's own observation of
+    // this close: that checkpoint, once granted, accounts it. None when no
+    // accepted report can account it any more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reported_by: Option<String>,
+}
+
+/// What a measured opening reports, in order. With a close still owed the
+/// opening is never Equal: it first reports the owed change itself, from
+/// the accounted baseline to that close, then (`follow_up`) any further
+/// change from the close to the opening, so a change that was reverted
+/// before the opening is still reported rather than lost. An owed close
+/// that equals the accounted baseline owes nothing.
+struct EngramSourceOpeningPlan {
+    baseline: Option<EngramSourceSighting>,
+    sighting: EngramSourceSighting,
+    follow_up: Option<EngramSourceSighting>,
+    equal: bool,
+}
+
+fn engram_source_opening_plan(
+    owner: Option<&EngramSourceSightingOwner>, opening: &EngramSourceSighting,
+) -> EngramSourceOpeningPlan {
+    let latest = owner.and_then(|owner| owner.latest.clone());
+    match owner.and_then(engram_owed_close) {
+        None => EngramSourceOpeningPlan {
+            equal: latest.as_ref().is_some_and(|latest| latest.basis == opening.basis),
+            baseline: latest, sighting: opening.clone(), follow_up: None,
+        },
+        Some(pending) => {
+            // Each interval this plan adds runs forward in measured time. A
+            // baseline stamped after the owed close cannot start it, so the
+            // owed close is reported as assumed changed. A differing opening
+            // always follows it, reported from the owed close unless its
+            // stamp is earlier (`chain_source_observation_follow_up`).
+            let closed = engram_sighting_time(&pending.sighting);
+            let baseline = latest.filter(|latest| engram_sighting_time(latest) <= closed);
+            let follow_up = (pending.sighting.basis != opening.basis).then(|| opening.clone());
+            EngramSourceOpeningPlan { baseline, sighting: pending.sighting.clone(), follow_up, equal: false }
+        }
+    }
+}
+
+fn engram_sighting_time(sighting: &EngramSourceSighting) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_rfc3339(&sighting.observed_at).ok()
+}
+
+/// Whether `incoming` takes an owed slot holding `owed`: by master's
+/// promotion convention, any measurement not stamped strictly earlier,
+/// including a later one at the same revision; an exact duplicate does not.
+/// It replaces the slot's sighting and the grant that would account it, so a
+/// late Grant for the older close can no longer settle the newer duty.
+fn engram_close_supersedes(incoming: &EngramSourceSighting, owed: &EngramSourceSighting) -> bool {
+    incoming != owed && match (engram_sighting_time(incoming), engram_sighting_time(owed)) {
+        (Some(incoming), Some(owed)) => incoming >= owed,
+        _ => false,
+    }
+}
+
+/// The close `owner` still owes: one at the accounted baseline's own
+/// revision owes nothing, and never stops a newer close from being owed.
+fn engram_owed_close(owner: &EngramSourceSightingOwner) -> Option<&EngramPendingClose> {
+    owner.pending_close.as_ref().filter(|pending|
+        owner.latest.as_ref().is_none_or(|latest| latest.basis != pending.sighting.basis))
+}
+
+/// The baseline a follow-up opening is reported from: the close it follows,
+/// unless the clocks put the opening before that close. Then none (assumed
+/// changed), so no reported interval runs backward in measured time.
+fn engram_follow_up_baseline(
+    close: &EngramSourceSighting, opening: &EngramSourceSighting,
+) -> Option<EngramSourceSighting> {
+    (engram_sighting_time(close) <= engram_sighting_time(opening)).then(|| close.clone())
+}
+
+/// A recorded observation accounts every change up to its sighting: the owed
+/// close it reports itself, or one measured no later than it. An opening's
+/// observation recorded under its live gate (`by_revision`) also accounts an
+/// owed close at the very revision it records, whatever the clock said in
+/// between, since that opening reports the change to that revision. A
+/// finalization after the fact cannot: by then a later turn may owe a new
+/// close at that same revision.
+fn settle_engram_pending_close_by_observation(
+    owner: &mut EngramSourceSightingOwner, sighting: &EngramSourceSighting, by_revision: bool,
+) -> bool {
+    let Ok(through) = chrono::DateTime::parse_from_rfc3339(&sighting.observed_at) else { return false; };
+    let covered = owner.pending_close.as_ref().is_some_and(|pending| pending.sighting == *sighting
+        || (by_revision && pending.sighting.basis == sighting.basis)
+        || chrono::DateTime::parse_from_rfc3339(&pending.sighting.observed_at).is_ok_and(|closed| closed <= through));
+    if covered {
+        owner.pending_close = None;
+        owner.version = owner.version.saturating_add(1);
+    }
+    covered
+}
+
+/// A granted checkpoint accounts its turn's close only when its report
+/// carried the turn's own observation; otherwise that close stays owed to
+/// the next opening. Keyed by the grant, so it holds wherever that
+/// checkpoint is granted: the turn's own close or a later recovery.
+fn settle_engram_pending_close_by_checkpoint_locked(inner: &mut StateInner, grant_id: &str, observed: bool) -> bool {
+    // An opening gate that is live on a scope fenced its owner's version; its
+    // own recorded observation will account the close, so leave that owner.
+    let live = inner.sessions.iter().filter_map(|record| record.engram.source_observation_gate.as_ref()
+        .filter(|gate| !gate.retired).map(|gate| gate.scope.clone())).collect::<Vec<_>>();
+    let mut settled = false;
+    for owner in &mut inner.engram_source_sightings {
+        if owner.pending_close.as_ref().and_then(|pending| pending.reported_by.as_deref()) != Some(grant_id)
+            || live.contains(&owner.scope) {
+            continue;
+        }
+        let pending = owner.pending_close.take().expect("checked pending close");
+        if observed {
+            // Engram accepted the change, so the duty is settled even when a
+            // later measurement keeps the close from becoming the baseline.
+            promote_engram_source_sighting(owner, &pending.sighting);
+        } else {
+            owner.pending_close = Some(EngramPendingClose { reported_by: None, ..pending });
+        }
+        owner.version = owner.version.saturating_add(1);
+        settled = true;
+    }
+    settled
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -320,25 +456,90 @@ fn engram_source_sighting_opening_scope_locked(
 
 /// A real closing measurement advances only its compatible scope. A receipt
 /// does not make a measurement, and retained outbox facts are never replaced.
+/// A close equal to the accounted baseline accounts itself; any other close
+/// is kept as owed (`reported_by` names the grant whose report carried the
+/// turn's own observation of it) until a granted checkpoint or a recorded
+/// observation accounts it.
+/// Returns the owner when the close became owed, so the caller can make it
+/// durable before the checkpoint that may or may not account it.
 fn retain_engram_closing_sighting_locked(
     inner: &mut StateInner,
     index: usize,
     basis: &EngramExecutionSourceBasis,
     observed_at: &str,
-) {
+    reported_by: Option<&str>,
+) -> Option<EngramSourceSightingOwner> {
     let record = &inner.sessions[index];
     if record.engram.active_turn_start_basis.is_none()
         || !record.engram.source_opening_disposition.measured() {
-        return;
+        return None;
     }
-    let Some(scope) = engram_source_sighting_scope_locked(inner, index, basis) else { return; };
+    let Some(scope) = engram_source_sighting_scope_locked(inner, index, basis) else { return None; };
     let sighting = EngramSourceSighting { basis: basis.clone(), observed_at: observed_at.to_owned() };
-    if let Some(owner) = inner.engram_source_sightings.iter_mut().find(|owner| owner.scope == scope) {
-        // A competing later measurement is not overwritten by a delayed close.
-        promote_engram_source_sighting(owner, &sighting);
-    } else {
-        inner.engram_source_sightings.push(EngramSourceSightingOwner {
-            scope, version: 1, latest: Some(sighting), observations: Vec::new(),
-        });
+    let position = match inner.engram_source_sightings.iter().position(|owner| owner.scope == scope) {
+        Some(position) => position,
+        None => {
+            inner.engram_source_sightings.push(EngramSourceSightingOwner {
+                scope, version: 1, latest: None, pending_close: None, observations: Vec::new(),
+            });
+            inner.engram_source_sightings.len() - 1
+        }
+    };
+    let owner = &mut inner.engram_source_sightings[position];
+    // A close left owed at the baseline's own revision owes nothing, so it
+    // never holds back the close measured now.
+    if owner.pending_close.is_some() && engram_owed_close(owner).is_none() {
+        owner.pending_close = None;
+        owner.version = owner.version.saturating_add(1);
+    }
+    if owner.latest.as_ref().is_some_and(|latest| latest.basis == sighting.basis) {
+        // While a close is owed the baseline keeps its time, so the owed
+        // interval still starts before it ends.
+        if owner.pending_close.is_none() {
+            promote_engram_source_sighting(owner, &sighting);
+        }
+        return None;
+    }
+    // A differing close is owed even behind a baseline stamped later: the
+    // close is never the baseline by itself, and the next opening reports it
+    // without that baseline. With a close already owed, the newer measurement
+    // keeps the slot, as master's promotion keeps the newer close.
+    if chrono::DateTime::parse_from_rfc3339(&sighting.observed_at).is_err()
+        || owner.pending_close.as_ref().is_some_and(|pending| !engram_close_supersedes(&sighting, &pending.sighting)) {
+        return None;
+    }
+    owner.pending_close = Some(EngramPendingClose { sighting, reported_by: reported_by.map(str::to_owned) });
+    owner.version = owner.version.saturating_add(1);
+    Some(owner.clone())
+}
+
+impl AppState {
+    /// Waits until `owner`, holding a newly owed close, is stored on the
+    /// writer connection, so a crash while the following checkpoint is in
+    /// flight still finds the owed close at restart.
+    fn confirm_engram_owed_close_durable(
+        &self, owner: &EngramSourceSightingOwner, timeout: Duration,
+    ) -> Result<(), String> {
+        let clock = self.engram_budget_clock();
+        let deadline = clock.now() + timeout;
+        let target = PersistFenceTarget::EngramSourceSightingHistory(Box::new(owner.clone()));
+        let (fence, waiter) = PersistFence::new_with_clock(target.clone(), deadline, clock.clone());
+        if self.persist_tx.send(PersistRequest::Fence(Box::new(fence))).is_ok() {
+            return waiter.wait().map_err(|error| format!("{error:?}"));
+        }
+        if !engram_authority_manual_writer_allowed() {
+            return Err("the persistence writer stopped".to_owned());
+        }
+        #[cfg(test)]
+        {
+            let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
+            let mut cache = SqlitePersistConnectionCache::new();
+            persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta)
+                .map_err(|error| format!("{error:#}"))?;
+            if !cache.connection.as_ref().is_some_and(|connection| target.is_already_durable(connection).unwrap_or(false)) {
+                return Err("the owed close was not committed".to_owned());
+            }
+        }
+        Ok(())
     }
 }
