@@ -2477,6 +2477,13 @@ impl AppState {
 }
 
 fn build_delegation_prompt(record: &DelegationRecord) -> String {
+    build_delegation_prompt_on(record, cfg!(windows))
+}
+
+/// [`build_delegation_prompt`] for a host that runs on Windows when `windows`
+/// is set. Only `build_delegation_prompt` passes the real platform, so tests
+/// reach both the Windows and the other branch on any host.
+fn build_delegation_prompt_on(record: &DelegationRecord, windows: bool) -> String {
     let write_policy = delegation_prompt_write_policy(&record.write_policy);
     // Keep the leading marker, `DelegationRecord::id`, and child-session line in
     // lockstep with startup repair in `state_inner.rs`.
@@ -2527,8 +2534,23 @@ Final answer requirements:\n\
             KIMI_READ_ONLY_EXPLORER_REFUSALS
         });
     }
+    if windows
+        && record.agent == Agent::Codex
+        && matches!(record.write_policy, DelegationWritePolicy::ReadOnly)
+    {
+        prompt.push_str("\n\n");
+        prompt.push_str(WINDOWS_CODEX_READ_ONLY_SOURCE_READS);
+    }
     prompt
 }
+
+/// Appended to a read-only Codex child's prompt on Windows. Its restricted
+/// default shell renders text through PowerShell, which can corrupt non-ASCII
+/// source while still exiting 0, so the child is told to read source through
+/// native Git or rg output instead. This is guidance, not enforcement: the
+/// child is told to report inspection unavailable when it cannot obtain the
+/// exact text or complete coverage.
+const WINDOWS_CODEX_READ_ONLY_SOURCE_READS: &str = "Windows read-only Codex inspection: use the default shell; do not request bash or change sandbox, policy, or encoding settings. Read source through direct native Git or rg output, one inspection command per call, without piping that output through PowerShell cmdlets. For an index blob use git --no-pager -C <worktree> show :path; for a frozen blob use git --no-pager -C <worktree> show <tree-or-commit>:path. These show the selected Git object, not unstaged working-tree changes. For a current file use git --no-pager -C <worktree> diff --no-index --no-ext-diff --no-textconv --color=never -- NUL <absolute-file>, or rg --encoding utf-8 --line-number --context 12 -e <pattern> -- <absolute-file>. Quote paths and patterns for the default shell. A no-index diff normally exits 1 when it displays the file; rg exits 1 for no match. Inspect stderr and coverage instead of equating these statuses with a read failure. Do not use Get-Content (including -Encoding UTF8), Select-Object, Out-String or other PowerShell pipeline rendering to inspect source whose exact text matters. ConstrainedLanguage may refuse .NET constructors, static methods and Console.OutputEncoding assignments; nonterminating errors can still leave exit code 0, and a swallowed encoding error may be invisible. Re-read affected text with a native form. If exact text or complete coverage cannot be obtained, report inspection unavailable rather than a clean review.";
 
 /// Appended to a read-only Kimi child's prompt: what the host's permission
 /// gate allows (kimi_read_only.rs), so the child does not spend its turn on
