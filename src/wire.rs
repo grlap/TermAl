@@ -1274,6 +1274,8 @@ fn is_zero_u32(value: &u32) -> bool {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationAttemptState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    reviewer_mcp_observations: Vec<CodexReviewerMcpObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hold: Option<DelegationHold>,
     /// The current attempt's prompt is admitting or queued behind a child
@@ -1395,6 +1397,8 @@ impl<'de> serde::Deserialize<'de> for DelegationWritePolicy {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    reviewer_mcp_observations: Vec<CodexReviewerMcpObservation>,
     delegation_id: String,
     child_session_id: String,
     status: DelegationStatus,

@@ -591,6 +591,7 @@ fn delegation_result_from_review_envelope(
             .map(|update| format!("Suggested tracker update: {update}")),
     );
     DelegationResult {
+        reviewer_mcp_observations: Vec::new(),
         delegation_id: envelope.delegation_id.clone(),
         child_session_id: envelope.child_session_id.clone(),
         status: envelope.status,

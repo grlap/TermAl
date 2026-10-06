@@ -327,6 +327,7 @@ fn termal_delegation_mcp_codex_config_with_command(
         base_url
     ));
     server["tool_timeout_sec"] = json!(termal_delegation_mcp_codex_tool_timeout_secs());
+    server["startup_timeout_sec"] = json!(60);
     let termal_env = termal_agent_process_env_with_command(command, parent_session_id, base_url);
     json!({
         "mcp_servers": {

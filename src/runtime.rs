@@ -70,6 +70,11 @@ enum CodexRuntimeCommand {
         thread_id: String,
         command: CodexPromptCommand,
     },
+    ReviewerMcpReady {
+        scope: CodexReviewerMcpScope,
+        command: CodexPromptCommand,
+        watchdog: Option<SharedCodexTurnStartedWatchdogConfig>,
+    },
     JsonRpcRequest {
         method: String,
         params: Value,
@@ -870,6 +875,9 @@ struct PendingCodexThreadSetup {
 /// Tracks shared Codex session state.
 #[derive(Default)]
 struct SharedCodexSessionState {
+    reviewer_mcp_setup_started: Option<std::time::Instant>,
+    reviewer_mcp_failure: Option<String>,
+    reviewer_mcp_gate: Option<String>,
     pending_thread_setup: Option<PendingCodexThreadSetup>,
     pending_turn_start_request_id: Option<String>,
     turn_started_watchdog_cancel_tx: Option<mpsc::Sender<()>>,
