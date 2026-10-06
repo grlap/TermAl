@@ -110,6 +110,8 @@ description: Work in the TermAl repository. Use when changing transcript virtual
   - `cd ui && npx vitest run src/source-renderers.test.ts`
   - plus the relevant SourcePanel/Monaco tests
 
+- Declared test commands (`termal-tests.toml`, TRX/JUnit artifacts): docs/features/declared-test-commands.md; requires a running build that implements them; UNKNOWN is not PASS.
+
 ## Editing Guidance
 
 - Prefer small helpers over adding more stateful branches to already-large UI

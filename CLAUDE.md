@@ -303,6 +303,14 @@ Beads itself was removed from the repository on 2026-10-03.
   turn or command there, a file change the host's watcher sees there, and a
   source change still there at that checkpoint. An evaluation requested
   before the record lands goes stale when it lands (docs/test.md).
+- A repository may declare its test commands in `termal-tests.toml` at its
+  root (docs/features/declared-test-commands.md). Run a declared command
+  exactly as declared, from its `cwd`, in the same one-call form; the host
+  judges it from the result artifact the command writes, never from output;
+  a passing result is eligible for verification, and UNKNOWN is not PASS: it
+  names what was observed. This needs a running TermAl build that implements
+  declared commands. Until the running host implements it, the declaration
+  adds no recognition and built-in commands behave as today.
 - Do not commit or push without explicit authority from the user or the
   current instructions. Where this file has a commit-and-push section, that
   section says what counts; until it has one, this sentence is the rule.

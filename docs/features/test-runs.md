@@ -9,6 +9,8 @@ The runner is `scripts/test-launcher.mjs` (see [Testing](../test.md)). Its run
 directories are the record of truth; TermAl mirrors them and never decides a
 verdict itself.
 
+Declared test commands (`termal-tests.toml`, TRX/JUnit artifacts) are a separate, planned feature: see [Declared Test Commands](declared-test-commands.md).
+
 **Status:**
 - **Slice 1:** shipped (7f3c32c, with the PID-reuse fix in b77f1fa).
 - **Slice 2:** approved by Greg (2026-09-25) and in implementation.

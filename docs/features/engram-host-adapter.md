@@ -3531,3 +3531,7 @@ remaining total. An expired admission cannot acquire a new standalone allowance.
 Standalone naming and cleanup retain their existing entry budgets and carry one
 absolute deadline through their phases. A stopped production writer withholds
 authority without entering synchronous SQLite under the state lock.
+
+## Related
+
+- [Declared Test Commands](declared-test-commands.md): planned declared-command checks judged from TRX/JUnit artifacts

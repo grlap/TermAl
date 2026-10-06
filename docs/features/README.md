@@ -48,4 +48,5 @@ design decisions, and future plans.
 - [WhatsApp Integration](./whatsapp-integration.md)
 - [Engram Host Adapter](./engram-host-adapter.md)
 - [Test Runs](./test-runs.md)
+- [Declared Test Commands](declared-test-commands.md): declare a repository's test commands and have TermAl judge them from TRX or JUnit result files (planned).
 - [Host Architecture](./host-architecture.md)
