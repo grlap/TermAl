@@ -373,6 +373,7 @@ mod source_sighting_protocol_tests {
             },
             routing_token: "original-routing".into(), observing_session: Some("producer-session".into()),
             call_timeout_ms: ENGRAM_DEFAULT_CALL_TIMEOUT_MS,
+            follow_up: None,
             baseline: Some(EngramSourceSighting {
                 basis: EngramExecutionSourceBasis { source_revision: "content-v1:old".into(), ..basis.clone() },
                 observed_at: "2026-10-03T00:00:00Z".into(),

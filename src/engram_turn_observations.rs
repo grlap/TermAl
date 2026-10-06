@@ -342,6 +342,13 @@ fn engram_turn_observation_id(session_id: &str, grant_id: &str) -> String {
     sha256_hex(format!("termal-turn-observation:{session_id}:{grant_id}").as_bytes())
 }
 
+/// Whether `report` carries the turn's own observation, the one that tells
+/// Engram how the turn left the source.
+fn engram_turn_report_observes_turn(report: &EngramTurnReport, session_id: &str, grant_id: &str) -> bool {
+    let id = engram_turn_observation_id(session_id, grant_id);
+    report.observations.iter().any(|observation| observation.observation_id == id)
+}
+
 /// The source identity of a workspace at one moment: the canonical worktree
 /// root the fingerprint was taken on, so two captures of the same root
 /// compare equal however the path was spelled, and the content revision

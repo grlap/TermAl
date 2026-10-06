@@ -1108,6 +1108,14 @@ thread_local! {
 }
 
 #[cfg(test)]
+thread_local! {
+    /// Runs once on the closing thread right before its turn-checkpoint
+    /// request is sent, where a crash would leave only what is durable.
+    static TEST_ENGRAM_BEFORE_TURN_CHECKPOINT_REQUEST: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
 #[derive(Clone, Debug)]
 enum ScriptedEngramControlResponse {
     Reply(std::result::Result<Value, EngramTransportError>),
@@ -4552,6 +4560,7 @@ impl AppState {
         // checkpoint of the same grant; it is claimed, and the report is built
         // before the terminal transition clears the turn's file-change
         // tracking.
+        let mut owed_close: Option<EngramSourceSightingOwner> = None;
         let snapshot = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some((index, grant_id, target, resolved)) = Self::engram_checkpoint_grant_locked(
@@ -4650,9 +4659,7 @@ impl AppState {
                     // A credited carried gate is never withheld (its outcome
                     // is passed or failed), so it still leads the checks.
                     engram_trim_turn_checks(&mut resolved_checks, carried_count);
-                    if let (Some(basis), Some(observed_at)) = (&end_basis, &end_basis_observed_at) {
-                        retain_engram_closing_sighting_locked(&mut inner, index, basis, observed_at);
-                    }
+                    let closing = end_basis.clone().zip(end_basis_observed_at.clone());
                     let (report, fallback) = engram_turn_report(
                         &inner.sessions[index],
                         session_id,
@@ -4662,6 +4669,20 @@ impl AppState {
                         end_basis,
                         resolved_checks,
                     );
+                    // The close becomes the baseline only once something
+                    // accounts it: this report's own observation, when its
+                    // checkpoint is granted, or the next opening's.
+                    if let Some((basis, observed_at)) = &closing {
+                        let reported = engram_turn_report_observes_turn(&report, session_id, &grant_id);
+                        owed_close = retain_engram_closing_sighting_locked(
+                            &mut inner, index, basis, observed_at,
+                            reported.then_some(grant_id.as_str()),
+                        );
+                        if owed_close.is_some()
+                            && let Err(error) = self.commit_locked(&mut inner) {
+                            eprintln!("engram> session={session_id} failed persisting an owed close: {error:#}");
+                        }
+                    }
                     let engram = &mut inner.sessions[index].engram;
                     engram.active_turn_report = Some((grant_id.clone(), report.clone()));
                     engram.active_turn_report_fallback =
@@ -4676,7 +4697,28 @@ impl AppState {
             (grant_id, target, report)
         };
         let (grant_id, target, report) = snapshot;
+        // The wait for an owed close and the checkpoint call share one call
+        // bound, so the checkpoint window teardown waits on stays one call
+        // long, and the card's latency includes the wait.
         let started_at = std::time::Instant::now();
+        let call_timeout = target.as_ref().map(|target| target.settings.call_timeout()).unwrap_or_default();
+        // A close that became owed is confirmed stored before the checkpoint
+        // that may account it, within at most half the bound. If that cannot
+        // be confirmed (an uncertain acknowledgement, a failed write or
+        // read-back, or a stopped writer with no next tick) it stays owed in
+        // memory until accounted and is left to the existing persistence
+        // machinery, so a later successful write is conditional, not assured.
+        // It survives a crash only if its content committed, or once Engram
+        // has accepted the accounting.
+        if let (Some(owner), Some(_)) = (&owed_close, &target)
+            && let Err(error) = self.confirm_engram_owed_close_durable(owner, call_timeout / 2) {
+            eprintln!("engram> session={session_id} an owed close's durability is unknown before its checkpoint: {error}");
+        }
+        #[cfg(test)]
+        if let Some(before) = TEST_ENGRAM_BEFORE_TURN_CHECKPOINT_REQUEST.with(|hook| hook.borrow_mut().take()) {
+            before();
+        }
+        let checkpoint_timeout = call_timeout.saturating_sub(started_at.elapsed());
         let outcome = match target {
             Some(target) => match target.routing_token.as_ref() {
                 Some(routing_token) => target
@@ -4698,7 +4740,7 @@ impl AppState {
                                 &report,
                             ),
                         },
-                        target.settings.call_timeout(),
+                        checkpoint_timeout,
                     )
                     .and_then(parse_engram_result::<EngramTurnCheckpointResponse>)
                     .and_then(|response| match response {
@@ -4780,6 +4822,7 @@ impl AppState {
             decision,
             card,
             project_reset_owner_generation,
+            engram_turn_report_observes_turn(&report, session_id, &grant_id),
         );
         match failure_detail {
             Some(detail) => EngramCheckpointOutcome::Failed(detail),
@@ -4822,6 +4865,7 @@ impl AppState {
         decision: EngramControlCardDecision,
         card: EngramControlCard,
         project_reset_owner_generation: Option<u64>,
+        report_observed_turn: bool,
     ) {
         let exited = matches!(card.next_intent, Some(EngramNextIntent::Exit));
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -4829,10 +4873,17 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
+            // What Engram accepted for this grant settles its owed close
+            // even when the session has meanwhile moved to another grant.
+            let settled = decision == EngramControlCardDecision::Grant
+                && settle_engram_pending_close_by_checkpoint_locked(&mut inner, grant_id, report_observed_turn);
             if inner.sessions[index].engram.active_grant_id.as_deref() != Some(grant_id) {
                 inner.sessions[index]
                     .engram
                     .clear_checkpoint_if_owned_by(project_reset_owner_generation);
+                if settled && let Err(error) = self.commit_locked(&mut inner) {
+                    eprintln!("engram> session={session_id} failed persisting a settled close: {error:#}");
+                }
                 return;
             }
             let message_id = inner.next_message_id();
@@ -6947,7 +6998,20 @@ impl AppState {
                                 if mirrored_uncertain {
                                     record.engram.uncertain_grant_id = None;
                                 }
-                                if mirrored_active || mirrored_uncertain {
+                                // The recovery carried the report this process
+                                // kept for the grant: an accepted turn
+                                // observation accounts the owed close, a bare
+                                // one leaves it owed.
+                                let settled = settle_engram_pending_close_by_checkpoint_locked(
+                                    &mut inner,
+                                    grant_id,
+                                    engram_turn_report_observes_turn(
+                                        &report,
+                                        &target.connection.session_id,
+                                        grant_id,
+                                    ),
+                                );
+                                if mirrored_active || mirrored_uncertain || settled {
                                     self.persist_internal_locked(&inner).map_err(
                                         |error| {
                                             EngramTransportError::transport(format!(

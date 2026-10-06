@@ -3285,6 +3285,7 @@ impl AppState {
                 source_root: None,
             },
             target.project_reset_owner_generation,
+            false,
         );
     }
 
