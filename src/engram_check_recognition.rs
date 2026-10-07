@@ -433,7 +433,8 @@ fn engram_is_test_command(program: &str, args: &[String]) -> bool {
                     .and_then(|separator| args.get(separator + 1..))
                     .filter(|focused| !focused.is_empty())
                     .is_some_and(|focused| {
-                        engram_is_test_command(&engram_program_name(&focused[0]), &focused[1..])
+                        engram_focused_node_words(program, args).is_some()
+                            || engram_is_test_command(&engram_program_name(&focused[0]), &focused[1..])
                     }),
                 _ => false,
             }

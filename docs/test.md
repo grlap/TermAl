@@ -437,10 +437,11 @@ and has its own, below; the stage name `focused` is reserved for it, so a
 full gate's stage of that name is never a test stage.
 
 A focused run, `node scripts/test-launcher.mjs focused -- COMMAND ARG...`,
-is a test check only when its wrapped command is itself one (a `cargo test`,
-not a build or a `--no-run`). Its exit status alone says nothing about how
+is a test check only when its wrapped command is itself one (a `cargo test`
+or a bounded native `node --test`, not a build or a `--no-run`). Its exit status alone says nothing about how
 many tests ran, so the launcher reads the wrapped runner's own result lines,
-today cargo's `test result:` lines summed across test binaries, records them
+cargo's `test result:` lines summed across test binaries or one complete,
+coherent native Node TAP/spec totals block, records them
 on the focused stage of `results.json` as `tests` (`passed`, `failed`,
 `ignored`), and prints them in its summary as `tests: passed=N failed=M
 ignored=K` beside `input fingerprint: …`. A runner it does not recognise gets
@@ -456,8 +457,22 @@ before. A focused run started with `--detach` is no test check at all: only a
 full gate is carried. A credited focused run
 is recorded like the plain test command it wraps, never as a full gate. The
 host side takes effect once a host built with it is running, that is after
-the next TermAl restart; until then a passing focused run is still withheld
-("its output shows no passing test").
+the next TermAl restart. Native Node recognition and unsupported-form feedback
+also require that updated running host; declarations alone cannot add them.
+
+Native Node focused checks additionally match owner, repository root, exact
+inner argv, execution interval, native terminal exit and unchanged input
+fingerprints through the same local artifact validator as focused Build.
+Missing, partial, duplicate or inconsistent totals do not earn passing credit;
+skipped/TODO tests are ignored rather than executed passes, and cancellation
+counts as failure. Valid matching failing evidence records a failed Test;
+missing or mismatched evidence remains unknown, never a summary-text rescue.
+The bounded Node grammar supports TAP/spec reporters, name/skip patterns,
+positive concurrency/timeout values and test files; watch, help, eval and
+arbitrary inner scripts are not native Test forms. An unsupported foreground
+focused command receives a command-identifying notice that no Test record will
+follow. Ordinary unrelated Node commands receive no launcher-specific notice;
+recognized Build commands retain their separate Build lifecycle.
 
 ## Backend Testing Guidelines
 

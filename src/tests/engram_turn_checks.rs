@@ -4168,3 +4168,6 @@ mod claude_output_cut;
 
 #[path = "engram_build_checks.rs"]
 mod build_checks;
+
+#[path = "engram_focused_node_checks.rs"]
+mod focused_node_checks;

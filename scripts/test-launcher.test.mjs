@@ -76,8 +76,8 @@ async function within(promise, label, milliseconds = 10_000) {
   }
 }
 
-async function repository(t, callback, sourceEnv = fixtureEnv) {
-  const root = mkdtempSync(join(testTempDirectory(), "launcher-fixture-"));
+async function repository(t, callback, sourceEnv = fixtureEnv, directory = testTempDirectory()) {
+  const root = mkdtempSync(join(directory, "launcher-fixture-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const env = isolatedGitEnvironment(sourceEnv);
   const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
@@ -1861,4 +1861,54 @@ test("focused counts read libtest lines a forced-colour runner wraps in terminal
     failed: 1,
     ignored: 0,
   });
+});
+
+test("focused native Node counts require one coherent complete TAP or spec footer", () => {
+  const footer = (prefix, passed = 1, failed = 0, skipped = 0, todo = 0) => [
+    `${prefix} tests ${passed + failed + skipped + todo}`,
+    `${prefix} suites 0`, `${prefix} pass ${passed}`, `${prefix} fail ${failed}`,
+    `${prefix} cancelled 0`, `${prefix} skipped ${skipped}`, `${prefix} todo ${todo}`,
+    `${prefix} duration_ms 1.5`,
+  ].join("\n");
+  for (const prefix of ["#", "ℹ"]) {
+    const good = footer(prefix);
+    assert.deepEqual(focusedTestCounts(good), { runner: "node-test", passed: 1, failed: 0, ignored: 0 });
+    assert.deepEqual(focusedTestCounts(`${footer(prefix, 0, 1)}\n✖ failing tests:\nstack detail`),
+      { runner: "node-test", passed: 0, failed: 1, ignored: 0 });
+    assert.deepEqual(focusedTestCounts(footer(prefix, 0, 0, 1, 1)),
+      { runner: "node-test", passed: 0, failed: 0, ignored: 2 });
+    for (const invalid of [
+      good.replace(`${prefix} tests 1`, `${prefix} tests 2`),
+      good.replace(`${prefix} pass 1`, `${prefix} pass -1`),
+      good.replace(`${prefix} pass 1`, `${prefix} pass 1.5`),
+      good.replace(`${prefix} suites 0\n`, ""),
+      good.replace(`${prefix} duration_ms 1.5`, ""),
+      good.replace(`${prefix} pass 1`, `${prefix} pass 9007199254740992`),
+      `${good}\n${good}`, `${good}\n${prefix} pass 1`,
+      `${good}\ntest result: ok. 1 passed; 0 failed; 0 ignored;`,
+    ]) assert.equal(focusedTestCounts(invalid), undefined, invalid);
+  }
+});
+
+test("focused native Node launcher writes real TAP/spec success and failure counts", async (t) => {
+  const directory = join(projectRoot, ".tmp");
+  mkdirSync(directory, { recursive: true });
+  for (const reporter of ["tap", "spec"]) {
+    for (const failed of [false, true]) {
+      await repository(t, async (root) => {
+        writeFileSync(join(root, "fixture.test.mjs"),
+          `import test from 'node:test'; test('selected case', () => {${failed ? "throw new Error('fixture failure');" : ""}});\n`);
+        const env = { ...fixtureEnv };
+        delete env.NODE_TEST_CONTEXT;
+        const runDir = await createRun({ root, stages: [{ name: "focused", command: process.execPath,
+          args: ["--test", `--test-reporter=${reporter}`, "--test-name-pattern", "selected case", "fixture.test.mjs"] }] }, env);
+        const result = await executeRun(runDir, env);
+        assert.equal(result.exitCode, failed ? 1 : 0);
+        assert.equal(result.state, failed ? "failed" : "passed");
+        assert.deepEqual(json(join(runDir, "results.json")).stages[0].tests,
+          { runner: "node-test", passed: failed ? 0 : 1, failed: failed ? 1 : 0, ignored: 0 });
+        assert.equal(result.before, result.after);
+      }, fixtureEnv, directory);
+    }
+  }
 });

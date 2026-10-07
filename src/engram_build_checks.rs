@@ -112,6 +112,20 @@ fn engram_focused_build_exit(
 ) -> Option<i64> {
     let words = engram_shell_words(&check.command.normalized)?;
     let build = engram_focused_build_words(&check.command.program, &words[1..])?;
+    engram_validated_focused_stage(check, session_id, output, exit, &build)
+        .map(|(native, _)| native)
+}
+
+/// Shared local launcher facts. Callers own the bounded inner-command grammar
+/// and interpretation of counts; owner, argv, interval and input policy stay
+/// here, unchanged for Build. Reads happen before the lifecycle lock recheck.
+fn engram_validated_focused_stage(
+    check: &EngramTurnCheck,
+    session_id: &str,
+    output: &str,
+    exit: EngramCommandExit,
+    build: &[String],
+) -> Option<(i64, Value)> {
     // The launcher resolves its root from its script location. This bounded
     // form is supported only from the credited repository root.
     if engram_exact_path_key(&check.target.directory) != engram_exact_path_key(&check.target.root) {
@@ -207,7 +221,7 @@ fn engram_focused_build_exit(
     }
     let argv = stage.get("command")?.as_array()?;
     let executable = argv.first()?.as_str()?;
-    if engram_program_name(executable) != "cargo"
+    if engram_program_name(executable) != engram_program_name(&build[0])
         || !FsPath::new(executable).is_absolute()
         || engram_network_path(executable)
         || argv[1..] != serde_json::json!(build[1..]).as_array()?.as_slice()[..]
@@ -264,5 +278,5 @@ fn engram_focused_build_exit(
     {
         return None;
     }
-    Some(native)
+    Some((native, stage.clone()))
 }

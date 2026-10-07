@@ -13,6 +13,40 @@ struct TestTempRoot {
     cleanup_observers: Mutex<Vec<mpsc::Sender<std::result::Result<(), String>>>>,
 }
 
+thread_local! {
+    static TEST_TEMP_ROOT_DIRECTORY: std::cell::RefCell<Option<PathBuf>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+/// Test-thread-only placement for repository-owned fixtures. It does not
+/// mutate process environment or follow worker threads; construct fixtures
+/// while this scope is held. Restoration also happens during unwinding.
+struct TestTempRootDirectoryScope {
+    previous: Option<PathBuf>,
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl TestTempRootDirectoryScope {
+    fn repository_local() -> Self {
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
+        ensure_plain_test_directory(&directory).expect("plain repository test directory");
+        let previous = TEST_TEMP_ROOT_DIRECTORY.with(|slot| slot.replace(Some(directory)));
+        Self {
+            previous,
+            _thread_bound: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for TestTempRootDirectoryScope {
+    fn drop(&mut self) {
+        TEST_TEMP_ROOT_DIRECTORY.with(|slot| {
+            slot.replace(self.previous.take());
+        });
+    }
+}
+
 // A fixture can hand out the guard itself where a path is expected, so the
 // directory lives exactly as long as the value the test holds.
 impl std::ops::Deref for TestTempRoot {
@@ -38,7 +72,9 @@ impl TestTempRoot {
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
             "test root prefix must be a simple name"
         );
-        let path = test_temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
+        let directory =
+            TEST_TEMP_ROOT_DIRECTORY.with(|slot| slot.borrow().clone()).unwrap_or_else(test_temp_dir);
+        let path = directory.join(format!("{prefix}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("test temp root should be created");
         // The guard exists before the marker is written, so a failed write
         // still removes the root.

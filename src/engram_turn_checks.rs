@@ -1218,6 +1218,10 @@ impl AppState {
         cwd: Option<&str>,
     ) {
         let recognised = ran.and_then(engram_check_command);
+        let unsupported_focused = recognised
+            .is_none()
+            .then(|| ran.and_then(engram_unsupported_focused_line))
+            .flatten();
         // A runtime that reports no directory may run its commands in one
         // shell, which keeps a `cd` for the commands after it.
         let shell_move = match (cwd, ran) {
@@ -1577,6 +1581,18 @@ impl AppState {
             }
             engram.withheld_command_keys.remove(key);
         }
+        // Reset belongs to a genuinely new command. Keep its notice marker
+        // afterward so repeated starts/descriptions cannot re-announce it.
+        if mediated
+            && diagnostics_enabled
+            && record.runtime.runtime_token() == runtime
+            && record.active_turn_generation == turn_generation
+            && record.session.workdir == workdir
+            && let Some(line) = unsupported_focused
+            && engram.withheld_command_keys.insert(key.to_owned())
+        {
+            engram.set_pending_source_root_line(line);
+        }
         let started = engram
             .active_turn_checks
             .iter()
@@ -1818,6 +1834,15 @@ impl AppState {
         {
             *remembered = Some(cwd.to_owned());
         }
+        if disposition == ClaudeObservationDisposition::Current
+            && record.engram.work_binding.is_some()
+            && record.engram.active_grant_id.is_some()
+            && record.engram.running_command_keys.contains_key(key)
+            && let Some(line) = ran.and_then(engram_unsupported_focused_line)
+            && record.engram.withheld_command_keys.insert(key.to_owned())
+        {
+            record.engram.set_pending_source_root_line(line);
+        }
         if let (Some((sequence, _, _, workdir, _, _)), Some(stands)) = (started, stands)
             && !(stands && workdir == record.session.workdir)
         {
@@ -1932,6 +1957,20 @@ impl AppState {
                 } else {
                     engram_build_completion(check, session_id, output,
                         exit.unwrap_or(EngramCommandExit::Unknown))
+                }
+            });
+        let node_completion = starting_check.as_ref()
+            .filter(|check| engram_is_focused_node_check(&check.command))
+            .map(|check| {
+                if engram_check_command(command).as_ref() != Some(&check.command) {
+                    (EngramCommandExit::Unknown, Vec::new(), false)
+                } else {
+                    engram_focused_node_completion(
+                        check,
+                        session_id,
+                        output,
+                        exit.unwrap_or(EngramCommandExit::Unknown),
+                    )
                 }
             });
         // The session's worktree, resolved off the lock for overlap marking,
@@ -2095,7 +2134,7 @@ impl AppState {
             }
         }
         let check = &mut record.engram.active_turn_checks[position];
-        let (mut result_lines, showed_passing_tests) = match parsed {
+        let (mut result_lines, mut showed_passing_tests) = match parsed {
             Some((finished, result_lines, showed_passing_tests)) if finished == check.command => {
                 (result_lines, showed_passing_tests)
             }
@@ -2111,7 +2150,23 @@ impl AppState {
                 (result_lines, showed_passing_tests)
             }
         };
-        let check_exit = if let Some((build_exit, build_lines)) = build_completion
+        let same_start = starting_check.as_ref().is_some_and(|start| {
+            start.grant_id == check.grant_id
+                && start.sequence == check.sequence
+                && start.command == check.command
+                && start.target == check.target
+        });
+        let check_exit = if let Some((node_exit, node_lines, node_passed)) =
+            node_completion.filter(|_| same_start)
+        {
+            result_lines = node_lines;
+            showed_passing_tests = node_passed;
+            node_exit
+        } else if engram_is_focused_node_check(&check.command) {
+            result_lines.clear();
+            showed_passing_tests = false;
+            EngramCommandExit::Unknown
+        } else if let Some((build_exit, build_lines)) = build_completion
             .filter(|_| starting_check.as_ref().is_some_and(|start|
                 start.grant_id == check.grant_id && start.sequence == check.sequence
                     && start.command == check.command && start.target == check.target))

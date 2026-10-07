@@ -7,9 +7,8 @@
 // these counts are what lets the TermAl host credit a passing focused run from
 // the run's own results.json (docs/test.md, "Which stages count as tests").
 // Does not own: running the stage, the run records, or the host's credit rule
-// (src/engram_launcher_stages.rs). Recognises cargo's libtest summary line
-// only; any other runner records no counts, and a run without counts is never
-// credited.
+// (src/engram_launcher_stages.rs). Recognises libtest and complete native Node
+// TAP/spec totals only; incomplete or ambiguous Node totals earn no counts.
 
 /** ANSI terminal control sequences, as the launcher's own diagnostics strip them. */
 // eslint-disable-next-line no-control-regex
@@ -24,8 +23,9 @@ const cargoResultLine =
  * binaries, or `undefined` when `text` has none.
  */
 export function focusedTestCounts(text) {
+  const lines = text.split(/\r?\n/u).map((raw) => raw.replace(terminalCodes, "").trim());
   let counts;
-  for (const raw of text.split(/\r?\n/u)) {
+  for (const raw of lines) {
     // A forced-colour runner wraps `ok` and `FAILED` in terminal codes.
     const match = cargoResultLine.exec(raw.replace(terminalCodes, "").trim());
     if (!match) continue;
@@ -34,7 +34,43 @@ export function focusedTestCounts(text) {
     counts.failed += Number(match[2]);
     counts.ignored += Number(match[3]);
   }
-  return counts;
+  const node = nativeNodeTestCounts(lines);
+  // Mixed runner summaries cannot name one focused runner's execution.
+  if (counts && node.seen) return undefined;
+  return counts ?? node.counts;
+}
+
+/** Exactly one complete native TAP/spec footer, with coherent safe totals.
+ * Failure diagnostics may follow the footer; they are not count evidence.
+ */
+function nativeNodeTestCounts(lines) {
+  const keys = ["tests", "suites", "pass", "fail", "cancelled", "skipped", "todo", "duration_ms"];
+  const candidates = [];
+  const countLine = /^(#|ℹ) (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)\b/u;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (countLine.test(lines[index])) candidates.push(index);
+  }
+  if (!candidates.length) return { seen: false };
+  if (candidates.length !== keys.length) return { seen: true };
+  const start = candidates[0];
+  const prefix = lines[start].startsWith("# ") ? "#" : "ℹ";
+  const values = {};
+  for (let offset = 0; offset < keys.length; offset += 1) {
+    if (candidates[offset] !== start + offset) return { seen: true };
+    const key = keys[offset];
+    const value = new RegExp(`^${prefix} ${key} (\\d+${key === "duration_ms" ? "(?:\\.\\d+)?" : ""})$`, "u")
+      .exec(lines[start + offset]);
+    if (!value) return { seen: true };
+    values[key] = Number(value[1]);
+    if (key === "duration_ms" ? !Number.isFinite(values[key]) : !Number.isSafeInteger(values[key])) {
+      return { seen: true };
+    }
+  }
+  const failed = values.fail + values.cancelled;
+  const ignored = values.skipped + values.todo;
+  const total = values.pass + failed + ignored;
+  if (!Number.isSafeInteger(total) || total !== values.tests) return { seen: true };
+  return { seen: true, counts: { runner: "node-test", passed: values.pass, failed, ignored } };
 }
 
 /** The summary lines that report a focused stage's counts and the run's input fingerprint. */
