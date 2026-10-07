@@ -510,7 +510,7 @@ export type EngramFullAudit = {
 
 /** The bounded part of the tracker's receipt the host keeps. */
 export type AcceptanceEvaluationReceiptExtract = {
-  evaluationHash?: string | null;
+  evaluationId?: string | null;
   mode?: string | null;
   passed?: number | null;
   verdictsTotal?: number | null;

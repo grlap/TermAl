@@ -1853,7 +1853,7 @@ describe("delegation command surface", () => {
       submission: {
         state: "recorded" as const,
         receipt: {
-          evaluationHash: "8ac55175f2ea4ecebc6d04de68517aa0",
+          evaluationId: "8ac55175f2ea4ecebc6d04de68517aa0",
           passed: 1,
           verdictsTotal: 2,
           blocking: { position: 2, verdict: "fail" },

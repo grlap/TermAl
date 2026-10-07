@@ -32,7 +32,7 @@ const MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS: usize = 600;
 // records can add to the brief's floor and to the response.
 const MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS: usize = 64;
 // Bounds of the stored receipt extract.
-const MAX_ACCEPTANCE_RECEIPT_HASH_CHARS: usize = 128;
+const MAX_ACCEPTANCE_RECEIPT_ID_CHARS: usize = 128;
 const MAX_ACCEPTANCE_RECEIPT_WORD_CHARS: usize = 64;
 // The evaluator is handed the raw receipt once, cut to this.
 const MAX_ACCEPTANCE_SUBMIT_RESPONSE_RECEIPT_BYTES: usize = 16 * 1024;
@@ -271,13 +271,45 @@ struct EngramShowFullWorkForEvaluation {
 /// carried one, it is the middle of the three contracts the next evaluator
 /// compares: its own criteria, verdicts and bindings.
 #[derive(Debug, Deserialize)]
+#[serde(try_from = "Value")]
 struct EngramShowEvaluationForEvaluation {
-    #[serde(default)]
-    hash: String,
-    #[serde(default)]
+    evaluation_id: String,
     verdicts: Vec<EngramShowEvaluationVerdictForEvaluation>,
-    #[serde(default)]
     carried_failure: Option<EngramCarriedFailureForEvaluation>,
+}
+
+/// Temporary live producer fallback during the additive ID rollout. Presence,
+/// not validity, selects the field: a malformed preferred value never falls
+/// back. This is separate from decoding older persisted host snapshots.
+fn acceptance_evaluation_id_value(evaluation: &Value) -> Option<&Value> {
+    evaluation.get("evaluation").or_else(|| evaluation.get("hash"))
+}
+
+impl TryFrom<Value> for EngramShowEvaluationForEvaluation {
+    type Error = serde_json::Error;
+
+    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+        #[derive(Deserialize)]
+        struct Details {
+            #[serde(default)]
+            verdicts: Vec<EngramShowEvaluationVerdictForEvaluation>,
+            #[serde(default)]
+            carried_failure: Option<EngramCarriedFailureForEvaluation>,
+        }
+
+        // Keep this reader's string decoding/refusal and subsequent record-ID
+        // validation; ignore the legacy field entirely when the new one exists.
+        let evaluation_id = match acceptance_evaluation_id_value(&value) {
+            Some(id) => serde_json::from_value::<String>(id.clone())?,
+            None => String::new(),
+        };
+        let details: Details = serde_json::from_value(value)?;
+        Ok(Self {
+            evaluation_id,
+            verdicts: details.verdicts,
+            carried_failure: details.carried_failure,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -407,8 +439,8 @@ fn acceptance_carried_failure(
     // The newest evaluation differs from the carried one only when a later
     // failing evaluation named it; Engram then shows its criteria, verdicts
     // and bindings as the middle of the three contracts.
-    let newest = (evaluation.hash != carried.evaluation
-        && is_acceptance_record_id(&evaluation.hash))
+    let newest = (evaluation.evaluation_id != carried.evaluation
+        && is_acceptance_record_id(&evaluation.evaluation_id))
     .then(|| {
         // Keyed by position: sorted, one verdict per position, and only the
         // run of positions 1, 2, … that has no gap, so a criterion text and the
@@ -437,7 +469,7 @@ fn acceptance_carried_failure(
             criteria.len(),
         );
         AcceptanceNewerFailure {
-            evaluation: evaluation.hash,
+            evaluation: evaluation.evaluation_id,
             criteria,
             blocking,
             bindings,
@@ -2647,7 +2679,9 @@ fn acceptance_evaluation_receipt_extract(receipt: &Value) -> AcceptanceEvaluatio
             .map(|value| bounded(value, max_chars))
     };
     AcceptanceEvaluationReceiptExtract {
-        evaluation_hash: word("hash", MAX_ACCEPTANCE_RECEIPT_HASH_CHARS),
+        evaluation_id: acceptance_evaluation_id_value(evaluation)
+            .and_then(Value::as_str)
+            .map(|value| bounded(value, MAX_ACCEPTANCE_RECEIPT_ID_CHARS)),
         mode: word("mode", MAX_ACCEPTANCE_RECEIPT_WORD_CHARS),
         passed: evaluation.get("passed").and_then(Value::as_u64),
         verdicts_total: evaluation.get("verdicts_total").and_then(Value::as_u64),

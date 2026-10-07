@@ -1709,8 +1709,14 @@ impl DelegationAcceptanceEvaluation {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AcceptanceEvaluationReceiptExtract {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    evaluation_hash: Option<String>,
+    // Older persisted host snapshots used evaluationHash. Always emit the ID
+    // name; this alias is not the live producer's temporary hash fallback.
+    #[serde(
+        default,
+        alias = "evaluationHash",
+        skip_serializing_if = "Option::is_none"
+    )]
+    evaluation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

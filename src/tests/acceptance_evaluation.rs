@@ -22,6 +22,9 @@ mod bindings;
 #[path = "acceptance_evaluation_carried_failure.rs"]
 mod carried_failure;
 
+#[path = "acceptance_evaluation_ids.rs"]
+mod evaluation_ids;
+
 #[path = "acceptance_evaluation_evidence.rs"]
 mod evidence_selection;
 
@@ -1603,7 +1606,7 @@ fn acceptance_submit_runs_engram_as_the_child_and_records_the_receipt_once() {
     assert_eq!(
         extract,
         AcceptanceEvaluationReceiptExtract {
-            evaluation_hash: Some("8ac55175f2ea4ecebc6d04de68517aa0".to_owned()),
+            evaluation_id: Some("8ac55175f2ea4ecebc6d04de68517aa0".to_owned()),
             mode: Some("independent_session".to_owned()),
             passed: Some(1),
             verdicts_total: Some(2),
@@ -4923,10 +4926,7 @@ fn acceptance_receipt_extract_is_bounded_and_the_raw_receipt_is_cut_for_the_chil
         "verdicts": (0..256).map(|_| json!({"rationale": "r".repeat(900)})).collect::<Vec<_>>()
     }});
     let extract = acceptance_evaluation_receipt_extract(&hostile);
-    assert_eq!(
-        extract.evaluation_hash.as_ref().unwrap().chars().count(),
-        128
-    );
+    assert_eq!(extract.evaluation_id.as_ref().unwrap().chars().count(), 128);
     let mode = extract.mode.as_ref().unwrap();
     assert!(
         mode.chars().count() == 64 && !mode.chars().any(char::is_control),
@@ -4999,7 +4999,7 @@ fn acceptance_target_persisted_with_a_raw_receipt_still_loads_as_its_extract() {
     };
     assert_eq!(recorded_at, "2026-09-18 10:10:00");
     assert_eq!(
-        receipt.evaluation_hash.as_deref(),
+        receipt.evaluation_id.as_deref(),
         Some("8ac55175f2ea4ecebc6d04de68517aa0")
     );
     assert_eq!((receipt.passed, receipt.verdicts_total), (Some(1), Some(2)));

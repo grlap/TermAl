@@ -3021,8 +3021,27 @@ silence:
 | --- | --- | --- |
 | absent (`none`) | nothing is recorded by this evaluator | initially; and, only for the request that itself entered from `none`, after a first send with positive evidence that it recorded nothing: a tracker refusal (below), a store that stayed locked, or a tracker process that never started |
 | `pending` | a write was started and its outcome is not yet known | set, with a digest of the exact argument list and that list itself, and acknowledged durable *before* the tracker runs |
-| `recorded` | the tracker holds the evaluation | a success receipt, acknowledged durable before the success answer. The record keeps a bounded extract (`evaluationHash`, `mode`, `passed`, `verdictsTotal`, `blocking`, `replayed`, `workRevision`, `evaluatedCut`), never the raw receipt, which can be a whole control frame; the child's answer carries the raw receipt, cut to 16 KiB on a character boundary with `receiptTruncated: true` when it is larger |
+| `recorded` | the tracker holds the evaluation | a success receipt, acknowledged durable before the success answer. The record keeps a bounded extract (`evaluationId`, `mode`, `passed`, `verdictsTotal`, `blocking`, `replayed`, `workRevision`, `evaluatedCut`), never the raw receipt, which can be a whole control frame; the child's answer carries the raw receipt, cut to 16 KiB on a character boundary with `receiptTruncated: true` when it is larger |
 | `unconfirmed` | the host could not learn whether the write landed | see below; its `reason` leads with the latest thing learned |
+
+*Evaluation-ID rollout.* The additive evaluation-ID producer emits `evaluation`
+alongside its temporary `hash` alias. TermAl reads the current record from
+`work.evaluation` in `show --full`, and submission receipts from their outer
+`evaluation` object. In both paths the inner `evaluation` field wins whenever
+present; `hash` is selected only when it is absent. A present invalid preferred
+field is refused or omitted by that path, never rescued by the alias. Carried
+and newer failure IDs, including `supersedes`, keep their original values.
+
+The host emits `evaluationId`. Decoding an older persisted host extract still
+accepts `evaluationHash`; the older raw `outcome.receipt` snapshot also keeps its
+existing conversion. These are snapshot readers, not authority to select a live
+legacy field over a present preferred field, and no stored record is migrated.
+The separate hash-fallback-removal follow-up waits for final producer removal.
+That removal must first have evidence that this reader both landed and runs
+after Greg's host restart, naming the landed commit and actual running-host
+build fingerprint. Landing or installing alone is not that evidence. This
+rollout grants no restart authority; task identities belong in the tracker
+handoff rather than this product documentation.
 
 *One submission at a time.* At most one submission per evaluator delegation is
 in progress, from its admission through the tracker run to its last durability
