@@ -3043,6 +3043,19 @@ build fingerprint. Landing or installing alone is not that evidence. This
 rollout grants no restart authority; task identities belong in the tracker
 handoff rather than this product documentation.
 
+*Typed Build observations.* A claimed command is classified once: supported
+Cargo builds produce Build verification, while test runners remain Test.
+The closing checkpoint links that kind to the host observation and captured
+source/environment; Engram derives the stored result from that observation,
+not an asserted gate result. Build success requires an owned native exit,
+or an invocation-matching foreground launcher's native Build stage. Test
+summaries and generic runtime success cannot manufacture Build success.
+Missing or inconsistent stage evidence is Unknown; help, planning and
+unsupported build runners are not classified. The existing source-root,
+grant, provenance, overlap and outstanding-work guards remain in force.
+Build-bound criteria cite passed host-minted Build evidence, never a passed
+Test merely because that test compiled code.
+
 *One submission at a time.* At most one submission per evaluator delegation is
 in progress, from its admission through the tracker run to its last durability
 acknowledgement. The marker is taken under the state lock in the critical

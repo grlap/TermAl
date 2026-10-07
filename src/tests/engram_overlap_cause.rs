@@ -287,6 +287,7 @@ fn a_later_writer_a_termal_write_and_a_late_name_are_each_told() {
 #[test]
 fn a_withheld_check_line_names_what_overlapped_it() {
     let withheld = |overlap_cause: Option<&str>| EngramWithheldCheck {
+        kind: EngramVerificationKind::Test,
         program: "cargo".to_owned(),
         fingerprint: "f".repeat(64),
         reason: EngramWithheldReason::Overlapped,

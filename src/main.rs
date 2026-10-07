@@ -772,6 +772,7 @@ include!("engram_turn_checks.rs");
 include!("engram_carried_checks.rs");
 include!("engram_claude_interference.rs");
 include!("engram_check_recognition.rs");
+include!("engram_build_checks.rs");
 include!("engram_launcher_stages.rs");
 include!("engram_one_call.rs");
 include!("engram_check_paths.rs");

@@ -118,6 +118,16 @@ fn engram_check_exit_is_the_tests(
     exit: EngramCommandExit,
     result_lines: &[String],
 ) -> bool {
+    if check.kind == EngramVerificationKind::Build {
+        return match exit {
+            // Only the completion parser generates this line, after validating
+            // the focused stage. Test summaries never prove build execution.
+            EngramCommandExit::Code(code) if check.program == "node" => result_lines
+                == [format!("focused build: native exit {code}")],
+            EngramCommandExit::Code(code) => code == 0 || check.directory.is_none(),
+            _ => false,
+        };
+    }
     match exit {
         EngramCommandExit::Code(code) if code != 0 && check.directory.is_some() => result_lines
             .iter()
@@ -134,6 +144,9 @@ fn engram_check_command_outcome(
     exit: EngramCommandExit,
     result_lines: &[String],
 ) -> Option<EngramExecutionOutcome> {
+    if exit == EngramCommandExit::NotFinished {
+        return None;
+    }
     let exit = if engram_check_exit_is_the_tests(check, exit, result_lines) {
         exit
     } else {
@@ -263,7 +276,7 @@ fn engram_one_call_template(check: &EngramCheckCommand, measured_in: &FsPath) ->
         if check.normalized.len() <= ENGRAM_ONE_CALL_REMEDY_TEST_MAX_BYTES {
             check.normalized.clone()
         } else {
-            "<test>".to_owned()
+            format!("<{}>", check.kind.label())
         }
     })
 }
@@ -313,7 +326,7 @@ fn engram_uncredited_test_line(
     let template = engram_one_call_template(check, &measured_in).or_else(|| {
         (form_but_for_one_part
             && engram_one_call_reads(&engram_source_root_display(&measured_text)))
-        .then(|| "<test>".to_owned())
+        .then(|| format!("<{}>", check.kind.label()))
     });
     let template = template.as_deref();
     let facts = EngramRemedyFacts {

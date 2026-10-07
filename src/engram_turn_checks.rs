@@ -66,6 +66,16 @@ enum EngramObservationReference {
 #[serde(rename_all = "snake_case")]
 enum EngramVerificationKind {
     Test,
+    Build,
+}
+
+impl EngramVerificationKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Test => "test",
+            Self::Build => "build",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -429,6 +439,7 @@ enum EngramWithheldReason {
 /// holder gets before the next prompt (`engram_withheld_check_line`).
 #[derive(Clone, Debug)]
 struct EngramWithheldCheck {
+    kind: EngramVerificationKind,
     program: String,
     fingerprint: String,
     reason: EngramWithheldReason,
@@ -456,13 +467,15 @@ fn engram_withhold_unjudged_successes(
             return true;
         }
         withheld.push(EngramWithheldCheck {
+            kind: kept.check.command.kind,
             program: kept.check.command.program.clone(),
             fingerprint: engram_check_fingerprint(&kept.check.command),
             reason: if kept.check.fenced_by_outstanding.is_some() {
                 EngramWithheldReason::OutstandingClaudeWork
             } else if kept.check.overlapped {
                 EngramWithheldReason::Overlapped
-            } else if kept.check.runtime_output_cut {
+            } else if kept.check.command.kind == EngramVerificationKind::Test
+                && kept.check.runtime_output_cut {
                 EngramWithheldReason::RuntimeOutputCut
             } else {
                 EngramWithheldReason::NoPassingTest
@@ -481,11 +494,11 @@ fn engram_withhold_unjudged_successes(
 fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
     if withheld.reason == EngramWithheldReason::RuntimeOutputCut {
         return format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned \
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned \
              no credit and was not recorded: the runtime cut the output before any passing \
              summary was available. For cargo tests, use cargo test -q to keep the output \
              small enough to retain the summary.",
-            withheld.program, withheld.fingerprint
+            withheld.program, withheld.kind.label(), withheld.fingerprint
         );
     }
     if withheld.reason == EngramWithheldReason::OutstandingClaudeWork {
@@ -495,11 +508,11 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
             .unwrap_or(&ClaudeHazardCause::OwnSession)
             .describe();
         return format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned \
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned \
              no credit and was not recorded: {cause}. Running it again there, stopping or \
              deleting a session, or starting a fresh one in the same workspace does not change \
              that; it can earn credit once Claude reports that work ended.",
-            withheld.program, withheld.fingerprint
+            withheld.program, withheld.kind.label(), withheld.fingerprint
         );
     }
     let why = match withheld.reason {
@@ -513,9 +526,9 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
         EngramWithheldReason::RuntimeOutputCut => unreachable!("told above"),
     };
     format!(
-        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned no \
+        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned no \
          credit and was not recorded: {why}. Run it again on its own to record it.",
-        withheld.program, withheld.fingerprint
+        withheld.program, withheld.kind.label(), withheld.fingerprint
     )
 }
 
@@ -579,7 +592,8 @@ fn engram_resolve_turn_checks(
         // overlapped check may have run on content no snapshot saw.
         let ran_successfully = outcome == EngramExecutionOutcome::Succeeded;
         let outcome = if check.overlapped
-            || (outcome == EngramExecutionOutcome::Succeeded && !end.showed_passing_tests)
+            || (check.command.kind == EngramVerificationKind::Test
+                && outcome == EngramExecutionOutcome::Succeeded && !end.showed_passing_tests)
         {
             EngramExecutionOutcome::Unknown
         } else {
@@ -1628,8 +1642,9 @@ impl AppState {
             engram_spawn_basis_capture(target.basis_place(), &workers, provenance);
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
-        let toolchain = if engram_cargo_toolchain_selector(&command).is_some() {
-            engram_spawn_toolchain_capture(command.clone(), target.directory.clone(), &workers)
+        let toolchain_command = engram_build_toolchain_command(&command);
+        let toolchain = if engram_cargo_toolchain_selector(&toolchain_command).is_some() {
+            engram_spawn_toolchain_capture(toolchain_command, target.directory.clone(), &workers)
         } else {
             EngramToolchainCapture::settled(None)
         };
@@ -1886,28 +1901,39 @@ impl AppState {
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
-        let (checked, workdir, unresolved_writers) = {
+        let (starting_check, workdir, unresolved_writers) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
             let record = &inner.sessions[index];
-            let checked = record
+            let starting_check = record
                 .engram
                 .active_turn_checks
                 .iter()
-                .any(|check| check.key == key && check.end.is_none());
+                .find(|check| check.key == key && check.end.is_none()).cloned();
             (
-                checked,
+                starting_check.clone(),
                 record.session.workdir.clone(),
                 // Only an ending check counts the other writers in a turn now.
-                if checked {
+                if starting_check.is_some() {
                     engram_unresolved_writers(&inner, index)
                 } else {
                     Vec::new()
                 },
             )
         };
+        let checked = starting_check.is_some();
+        let build_completion = starting_check.as_ref()
+            .filter(|check| check.command.kind == EngramVerificationKind::Build)
+            .map(|check| {
+                if engram_check_command(command).as_ref() != Some(&check.command) {
+                    (EngramCommandExit::Unknown, Vec::new())
+                } else {
+                    engram_build_completion(check, session_id, output,
+                        exit.unwrap_or(EngramCommandExit::Unknown))
+                }
+            });
         // The session's worktree, resolved off the lock for overlap marking,
         // and those of the writers not resolved yet.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
@@ -1915,7 +1941,8 @@ impl AppState {
         // A launcher full gate's test stages are its own request record's,
         // read off the lock (`engram_launcher_output_test_stages`), for
         // whichever command the check's end is read as below.
-        let launcher_test_stages = if checked {
+        let launcher_test_stages = if starting_check.as_ref()
+            .is_some_and(|check| check.command.kind == EngramVerificationKind::Test) {
             engram_launcher_output_test_stages(output)
         } else {
             Vec::new()
@@ -2068,7 +2095,7 @@ impl AppState {
             }
         }
         let check = &mut record.engram.active_turn_checks[position];
-        let (result_lines, showed_passing_tests) = match parsed {
+        let (mut result_lines, showed_passing_tests) = match parsed {
             Some((finished, result_lines, showed_passing_tests)) if finished == check.command => {
                 (result_lines, showed_passing_tests)
             }
@@ -2083,6 +2110,19 @@ impl AppState {
                 );
                 (result_lines, showed_passing_tests)
             }
+        };
+        let check_exit = if let Some((build_exit, build_lines)) = build_completion
+            .filter(|_| starting_check.as_ref().is_some_and(|start|
+                start.grant_id == check.grant_id && start.sequence == check.sequence
+                    && start.command == check.command && start.target == check.target))
+        {
+            result_lines = build_lines;
+            build_exit
+        } else if check.command.kind == EngramVerificationKind::Build {
+            result_lines.clear();
+            EngramCommandExit::Unknown
+        } else {
+            exit.unwrap_or(EngramCommandExit::Unknown)
         };
         if let Some(cause) = other_writer {
             check.note_overlap(|| cause);
@@ -2099,7 +2139,7 @@ impl AppState {
         check.runtime_output_cut = runtime_output_cut;
         check.end = Some(EngramTurnCheckEnd {
             completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            exit: exit.unwrap_or(EngramCommandExit::Unknown),
+            exit: check_exit,
             result_lines,
             showed_passing_tests,
             end_basis,
@@ -2404,7 +2444,7 @@ fn engram_turn_report(
                 producer_observation: EngramObservationReference::ObservationId {
                     observation_id: producer_id,
                 },
-                check_kind: EngramVerificationKind::Test,
+            check_kind: check.command.kind,
                 environment: environment.map(|index| EngramEnvironmentReference::Index { index }),
                 summary: Some(engram_check_summary(
                     &check.command,

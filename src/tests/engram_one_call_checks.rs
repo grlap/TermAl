@@ -229,6 +229,7 @@ fn the_one_call_form_is_recognised_as_its_test() {
     ] {
         let check = engram_check_command(&command)
             .unwrap_or_else(|| panic!("`{command}` is the one-call form"));
+        assert_eq!(check.kind, EngramVerificationKind::Test, "{command}");
         assert_eq!(check.directory.as_deref(), Some(directory), "{command}");
         assert_eq!(check.normalized, normalized, "{command}");
         assert_eq!(check.dialect, EngramShellDialect::Unknown, "{command}");
@@ -244,6 +245,12 @@ fn the_one_call_form_is_recognised_as_its_test() {
 #[test]
 fn every_other_shape_is_no_check() {
     let dir = grammar_dir();
+    let build = engram_check_command(&format!("pushd \"{dir}\" && cargo build"))
+        .expect("the one-call form also carries a genuine Build");
+    assert_eq!(build.kind, EngramVerificationKind::Build);
+    assert_eq!(build.normalized, "cargo build");
+    assert_eq!(build.directory.as_deref(), Some(dir));
+    assert!(build.simple);
     let bare = if cfg!(windows) { "C:/named" } else { "/named" };
     let mut not_checks = vec![
         // An operator glued to a closing quote belongs to the outer shell:
@@ -299,7 +306,6 @@ fn every_other_shape_is_no_check() {
         // One simple test after it, on its own.
         format!("pushd \"{dir}\" && cargo test | tail -3"),
         format!("pushd \"{dir}\" && cargo test && git clean -fdx"),
-        format!("pushd \"{dir}\" && cargo build"),
         format!("pushd \"{dir}\" &&"),
         format!("pushd \"{dir}\" && pushd \"{dir}\" && cargo test"),
         format!("pushd \"{dir}\" && bash -lc 'cargo test'"),

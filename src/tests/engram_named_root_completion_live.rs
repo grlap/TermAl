@@ -21,6 +21,9 @@ mod sub_agent_live;
 #[path = "engram_source_observation_live.rs"]
 mod source_observation;
 
+#[path = "engram_build_checks_live.rs"]
+mod build_checks;
+
 struct CompletionFixture {
     live: LiveRootFixture,
     root: PathBuf,

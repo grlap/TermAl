@@ -11,6 +11,8 @@
 /// A command TermAl recognises as a test run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EngramCheckCommand {
+    /// One command has one verification kind; output cannot relabel it.
+    kind: EngramVerificationKind,
     /// The command line with one shell wrapper removed and whitespace runs
     /// collapsed; its SHA-256 is the check fingerprint.
     normalized: String,
@@ -83,7 +85,15 @@ fn engram_plain_check_command(command: &str) -> Option<EngramCheckCommand> {
     // follows it can only mask its exit status, which `simple` records.
     let words = engram_shell_words(engram_first_command(&normalized))?;
     let program = engram_program_name(&words[0]);
-    engram_is_test_command(&program, &words[1..]).then_some(EngramCheckCommand {
+    let kind = if engram_is_test_command(&program, &words[1..]) {
+        EngramVerificationKind::Test
+    } else if simple && engram_is_build_command(&program, &words[1..]) {
+        EngramVerificationKind::Build
+    } else {
+        return None;
+    };
+    Some(EngramCheckCommand {
+        kind,
         normalized,
         simple,
         program,
@@ -880,8 +890,8 @@ fn engram_check_summary(
             if !engram_check_exit_is_the_tests(check, exit, result_lines) =>
         {
             format!(
-                "`{command}` exited {code}, which does not say whether its `pushd` or its test \
-                 failed"
+                "`{command}` exited {code}, which does not say whether its `pushd` or its {} \
+                 failed", check.kind.label()
             )
         }
         EngramCommandExit::Code(code) => format!("`{command}` exited {code}"),

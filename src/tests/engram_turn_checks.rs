@@ -57,6 +57,7 @@ fn a_test_command_is_recognised_through_one_shell_wrapper() {
         ),
     ] {
         let check = recognised(command);
+        assert_eq!(check.kind, EngramVerificationKind::Test, "{command}");
         assert_eq!(check.normalized, normalized, "{command}");
         assert!(check.simple, "{command}");
     }
@@ -90,8 +91,13 @@ fn a_test_command_is_recognised_through_one_shell_wrapper() {
         "a Windows extension is not part of the program's name"
     );
 
+    let build = engram_check_command("cargo build").expect("a genuine Build check");
+    assert_eq!(build.kind, EngramVerificationKind::Build);
+    assert_eq!(build.normalized, "cargo build");
+    assert_eq!(build.directory, None);
+    assert!(build.simple);
+
     for command in [
-        "cargo build",
         "cargo check --tests",
         "git status",
         "cd crate && cargo test",
@@ -2119,7 +2125,8 @@ fn a_background_run_and_a_non_test_command_are_not_reported() {
         Some(None),
         "a background run is never reported, so it takes no closing snapshot"
     );
-    turn.run("build", "cargo build", EngramCommandExit::Code(0), || {});
+    assert_eq!(engram_check_command("cargo check"), None);
+    turn.run("check", "cargo check", EngramCommandExit::Code(0), || {});
     let checkpoint = turn.finish();
 
     assert!(
@@ -4158,3 +4165,6 @@ mod kimi_acp_exit;
 
 #[path = "engram_claude_output_cut.rs"]
 mod claude_output_cut;
+
+#[path = "engram_build_checks.rs"]
+mod build_checks;

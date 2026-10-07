@@ -35,6 +35,22 @@ Type/build checks:
 - Frontend type check: `cd ui && npx tsc --noEmit`.
 - Frontend production build: `cd ui && npm run build`.
 
+Host verification distinguishes tests from builds. A simple `cargo build`
+(optionally one plain `+toolchain`) records Build, not Test, from an owned
+native exit; it needs no passing-test count. Help, planning, `cargo check`,
+`cargo test --no-run` and arbitrary npm builds are outside this recognition.
+A bare runtime success without a native exit is Unknown. In the one-call
+`pushd "DIR" && cargo build` form, zero proves both commands ran; a nonzero
+exit without owned inner execution is Unknown, even with test-summary text.
+
+The foreground `node scripts/test-launcher.mjs focused -- cargo build ...`
+form needs its local request, input and results artifacts to match the
+observed owner, root, argv, interval and terminal native stage. Stale,
+foreign, interrupted, unrun or inconsistent artifacts cannot supply a pass
+or a native-exit reference. Detached focused builds are not supported.
+Source, grant, overlap and outstanding-work fences apply to Build as to Test;
+this distinction does not change the maintained full gate's Test stages.
+
 ## Review Gate
 
 The maintained full gate is one launcher invocation:
