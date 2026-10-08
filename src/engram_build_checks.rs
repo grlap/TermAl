@@ -73,6 +73,74 @@ fn engram_build_toolchain_command(check: &EngramCheckCommand) -> EngramCheckComm
     toolchain
 }
 
+/// Bounded first-rejection categories; no artifact contents enter diagnostics.
+#[derive(Clone, Copy, Debug)]
+enum EngramBuildRejection {
+    Owner,
+    Root,
+    Path,
+    Argv,
+    Terminal,
+    Interval,
+    Input,
+    Association,
+}
+
+impl EngramBuildRejection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Root => "root",
+            Self::Path => "path",
+            Self::Argv => "argv",
+            Self::Terminal => "terminal",
+            Self::Interval => "interval",
+            Self::Input => "input",
+            Self::Association => "association",
+        }
+    }
+}
+
+/// Runtime ingress is diagnostic evidence, not an eligible stage exit. This
+/// stays separate from `EngramTurnCheckEnd.exit`, which controls credit/refs.
+#[derive(Clone, Debug)]
+struct EngramBuildDiagnostic {
+    observed_exit: Option<i64>,
+    rejection: EngramBuildRejection,
+}
+
+impl EngramBuildDiagnostic {
+    fn rejected(exit: EngramCommandExit, rejection: EngramBuildRejection) -> Self {
+        Self {
+            observed_exit: match exit {
+                EngramCommandExit::Code(code) => Some(code),
+                _ => None,
+            },
+            rejection,
+        }
+    }
+
+    fn summary(&self, command: &EngramCheckCommand) -> String {
+        let terminal = self.observed_exit.map_or_else(
+            || "no native terminal exit observed".to_owned(),
+            |code| format!("observed native exit {code}"),
+        );
+        // Put the discriminating facts before the untrusted command text so
+        // neither can be lost to the existing UTF-8 summary budget.
+        let prefix = format!(
+            "Build Unknown: {terminal}; {} validation rejected; command: ",
+            self.rejection.label()
+        );
+        format!(
+            "{prefix}{}",
+            engram_truncate_utf8(
+                &command.normalized,
+                ENGRAM_CHECK_SUMMARY_MAX_BYTES - prefix.len()
+            )
+        )
+    }
+}
+
 /// A plain Cargo exit belongs to Cargo. A launcher exit instead needs its
 /// invocation's native stage; absent or inconsistent artifacts yield Unknown.
 fn engram_build_completion(
@@ -80,23 +148,47 @@ fn engram_build_completion(
     session_id: &str,
     output: &str,
     exit: EngramCommandExit,
-) -> (EngramCommandExit, Vec<String>) {
-    if check.command.program != "node" {
-        return (
-            if exit == EngramCommandExit::ReportedSuccess {
-                EngramCommandExit::Unknown
-            } else {
-                exit
-            },
+) -> (
+    EngramCommandExit,
+    Vec<String>,
+    Option<EngramBuildDiagnostic>,
+) {
+    let rejected = |reason| {
+        (
+            EngramCommandExit::Unknown,
             Vec::new(),
-        );
+            Some(EngramBuildDiagnostic::rejected(exit, reason)),
+        )
+    };
+    if check.command.program != "node" {
+        return match exit {
+            EngramCommandExit::Code(_) => (exit, Vec::new(), None),
+            EngramCommandExit::NotFinished => (exit, Vec::new(), None),
+            _ => rejected(EngramBuildRejection::Terminal),
+        };
     }
-    let Some(code) = engram_focused_build_exit(check, session_id, output, exit) else {
-        return (EngramCommandExit::Unknown, Vec::new());
+    if matches!(
+        exit,
+        EngramCommandExit::Unknown | EngramCommandExit::NotFinished
+    ) {
+        return rejected(EngramBuildRejection::Terminal);
+    }
+    let words = engram_shell_words(&check.command.normalized);
+    let build = words
+        .as_ref()
+        .and_then(|words| engram_focused_build_words(&check.command.program, &words[1..]));
+    let Some(build) = build else {
+        return rejected(EngramBuildRejection::Argv);
+    };
+    let code = match engram_validated_focused_stage_result(check, session_id, output, exit, &build)
+    {
+        Ok((code, _)) => code,
+        Err(reason) => return rejected(reason),
     };
     (
         EngramCommandExit::Code(code),
         vec![format!("focused build: native exit {code}")],
+        None,
     )
 }
 
@@ -104,6 +196,7 @@ fn engram_build_completion(
 /// copied/replayed result from before this command cannot lend it an exit.
 /// This is a local launcher evidence seam, not cryptographic attestation of
 /// arbitrary files. Existing overlap and source checks still apply afterward.
+#[cfg(test)]
 fn engram_focused_build_exit(
     check: &EngramTurnCheck,
     session_id: &str,
@@ -126,128 +219,178 @@ fn engram_validated_focused_stage(
     exit: EngramCommandExit,
     build: &[String],
 ) -> Option<(i64, Value)> {
+    engram_validated_focused_stage_result(check, session_id, output, exit, build).ok()
+}
+
+/// Same validity policy for both callers. Node keeps its existing Option
+/// boundary; Build retains the first rejected guard for truthful diagnostics.
+fn engram_validated_focused_stage_result(
+    check: &EngramTurnCheck,
+    session_id: &str,
+    output: &str,
+    exit: EngramCommandExit,
+    build: &[String],
+) -> Result<(i64, Value), EngramBuildRejection> {
+    use EngramBuildRejection as Rejected;
     // The launcher resolves its root from its script location. This bounded
     // form is supported only from the credited repository root.
     if engram_exact_path_key(&check.target.directory) != engram_exact_path_key(&check.target.root) {
-        return None;
+        return Err(Rejected::Root);
     }
     let path = output
         .lines()
         .rev()
-        .find_map(|line| line.trim().strip_prefix("results: "))?;
+        .find_map(|line| line.trim().strip_prefix("results: "))
+        .ok_or(Rejected::Path)?;
     let results_path = FsPath::new(path.trim());
     if !results_path.is_absolute()
         || engram_network_path(path)
-        || results_path.file_name()?.to_str()? != "results.json"
+        || results_path.file_name().and_then(|name| name.to_str()) != Some("results.json")
     {
-        return None;
+        return Err(Rejected::Path);
     }
-    let directory = results_path.parent()?;
-    let run = directory.file_name()?.to_str()?;
-    let uuid = run.strip_prefix("test-")?;
-    let parsed = uuid::Uuid::parse_str(uuid).ok()?;
+    let directory = results_path.parent().ok_or(Rejected::Path)?;
+    let run = directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(Rejected::Path)?;
+    let uuid = run.strip_prefix("test-").ok_or(Rejected::Path)?;
+    let parsed = uuid::Uuid::parse_str(uuid).map_err(|_| Rejected::Path)?;
     if parsed.to_string() != uuid {
-        return None;
+        return Err(Rejected::Path);
     }
-    let expected = engram_git_run_directory(&check.target.root)?.join(run);
+    let expected = engram_git_run_directory(&check.target.root)
+        .ok_or(Rejected::Path)?
+        .join(run);
     if engram_exact_path_key(directory) != engram_exact_path_key(&expected) {
-        return None;
+        return Err(Rejected::Path);
     }
     // Reject links out of the local artifact directory as well as textual
     // foreign paths. No record contents or path are forwarded to Engram.
-    let canonical = fs::canonicalize(&expected).ok()?;
-    let read = |name: &str| -> Option<Value> {
+    let canonical = fs::canonicalize(&expected).map_err(|_| Rejected::Path)?;
+    let read = |name: &str| -> Result<Value, EngramBuildRejection> {
         let file = directory.join(name);
-        if fs::canonicalize(&file).ok()? != canonical.join(name) {
-            return None;
+        if fs::canonicalize(&file).map_err(|_| Rejected::Path)? != canonical.join(name) {
+            return Err(Rejected::Path);
         }
-        serde_json::from_slice(&engram_read_launcher_record(&file)?).ok()
+        serde_json::from_slice(&engram_read_launcher_record(&file).ok_or(Rejected::Input)?)
+            .map_err(|_| Rejected::Input)
     };
-    if canonical != fs::canonicalize(expected.parent()?).ok()?.join(run) {
-        return None;
+    if canonical
+        != fs::canonicalize(expected.parent().ok_or(Rejected::Path)?)
+            .map_err(|_| Rejected::Path)?
+            .join(run)
+    {
+        return Err(Rejected::Path);
     }
     let request = read("request.json")?;
     let results = read("results.json")?;
     let input = read("input.json")?;
     let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
     for record in [&request, &results] {
-        if text(record, "runId").as_deref() != Some(run)
-            || text(record, "owner").as_deref() != Some(session_id)
-        {
-            return None;
+        if text(record, "runId").as_deref() != Some(run) {
+            return Err(Rejected::Association);
+        }
+        if text(record, "owner").as_deref() != Some(session_id) {
+            return Err(Rejected::Owner);
         }
     }
-    let root = text(&request, "root")?;
+    let root = text(&request, "root").ok_or(Rejected::Root)?;
     if !FsPath::new(&root).is_absolute()
         || engram_network_path(&root)
         || engram_exact_path_key(FsPath::new(&root)) != engram_exact_path_key(&check.target.root)
         || request.get("detached").and_then(Value::as_bool) != Some(false)
         || !engram_launcher_is_focused_request(&request)
     {
-        return None;
+        return Err(Rejected::Root);
     }
-    let [requested] = request.get("stages")?.as_array()?.as_slice() else {
-        return None;
+    let [requested] = request
+        .get("stages")
+        .and_then(Value::as_array)
+        .ok_or(Rejected::Argv)?
+        .as_slice()
+    else {
+        return Err(Rejected::Argv);
     };
     if text(requested, "command").as_deref() != Some(build[0].as_str())
-        || requested.get("args")? != &serde_json::json!(build[1..])
+        || requested.get("args").ok_or(Rejected::Argv)? != &serde_json::json!(build[1..])
         || requested
             .get("cwd")
             .is_some_and(|cwd| cwd.as_str() != Some("."))
     {
-        return None;
+        return Err(Rejected::Argv);
     }
-    let [stage] = results.get("stages")?.as_array()?.as_slice() else {
-        return None;
+    let [stage] = results
+        .get("stages")
+        .and_then(Value::as_array)
+        .ok_or(Rejected::Terminal)?
+        .as_slice()
+    else {
+        return Err(Rejected::Terminal);
     };
-    let native = stage.get("code")?.as_i64()?;
+    let native = stage
+        .get("code")
+        .and_then(Value::as_i64)
+        .ok_or(Rejected::Terminal)?;
     let state = if native == 0 { "passed" } else { "failed" };
     if native < 0
-        || stage.get("name")?.as_str()? != "focused"
-        || stage.get("state")?.as_str()? != state
-        || results.get("state")?.as_str()? != state
-        || results.get("exitCode")?.as_i64()? != native
+        || stage.get("name").and_then(Value::as_str) != Some("focused")
+        || stage.get("state").and_then(Value::as_str) != Some(state)
+        || results.get("state").and_then(Value::as_str) != Some(state)
+        || results.get("exitCode").and_then(Value::as_i64) != Some(native)
         || [&results, stage].iter().any(|record| {
             record.get("error").is_some_and(|v| !v.is_null())
                 || record.get("signal").is_some_and(|v| !v.is_null())
         })
     {
-        return None;
+        return Err(Rejected::Terminal);
     }
     match exit {
         EngramCommandExit::Code(code) if code == native => {}
         EngramCommandExit::ReportedSuccess if native == 0 => {}
-        _ => return None,
+        _ => return Err(Rejected::Terminal),
     }
-    let argv = stage.get("command")?.as_array()?;
-    let executable = argv.first()?.as_str()?;
+    let argv = stage
+        .get("command")
+        .and_then(Value::as_array)
+        .ok_or(Rejected::Argv)?;
+    let executable = argv.first().and_then(Value::as_str).ok_or(Rejected::Argv)?;
     if engram_program_name(executable) != engram_program_name(&build[0])
         || !FsPath::new(executable).is_absolute()
         || engram_network_path(executable)
-        || argv[1..] != serde_json::json!(build[1..]).as_array()?.as_slice()[..]
+        || argv[1..]
+            != serde_json::json!(build[1..])
+                .as_array()
+                .ok_or(Rejected::Argv)?
+                .as_slice()[..]
     {
-        return None;
+        return Err(Rejected::Argv);
     }
     // An explicitly named executable must be the one the stage resolved.
     if FsPath::new(&build[0]).is_absolute()
         && engram_exact_path_key(FsPath::new(&build[0]))
             != engram_exact_path_key(FsPath::new(executable))
     {
-        return None;
+        return Err(Rejected::Argv);
     }
-    let cwd = text(stage, "cwd")?;
+    let cwd = text(stage, "cwd").ok_or(Rejected::Root)?;
     if !FsPath::new(&cwd).is_absolute()
         || engram_network_path(&cwd)
         || engram_exact_path_key(FsPath::new(&cwd))
             != engram_exact_path_key(&check.target.directory)
     {
-        return None;
+        return Err(Rejected::Root);
     }
-    let observed_start = engram_parse_time(&check.started_at)?;
-    let requested_start = engram_parse_time(&text(&request, "started")?)?;
-    let started = engram_parse_time(&text(stage, "started")?)?;
-    let ended = engram_parse_time(&text(stage, "ended")?)?;
-    let run_ended = engram_parse_time(&text(&results, "ended")?)?;
+    let time = |value: &Value, key: &str| {
+        text(value, key)
+            .and_then(|text| engram_parse_time(&text))
+            .ok_or(Rejected::Interval)
+    };
+    let observed_start = engram_parse_time(&check.started_at).ok_or(Rejected::Interval)?;
+    let requested_start = time(&request, "started")?;
+    let started = time(stage, "started")?;
+    let ended = time(stage, "ended")?;
+    let run_ended = time(&results, "ended")?;
     if observed_start > requested_start
         || requested_start > started
         || started > ended
@@ -255,9 +398,9 @@ fn engram_validated_focused_stage(
         || run_ended > chrono::Utc::now()
         || text(&request, "started") != text(&results, "started")
     {
-        return None;
+        return Err(Rejected::Interval);
     }
-    let fingerprint = text(&request, "expectedFingerprint")?;
+    let fingerprint = text(&request, "expectedFingerprint").ok_or(Rejected::Input)?;
     if fingerprint.len() != 64
         || !is_lowercase_hex(&fingerprint)
         || [
@@ -269,14 +412,15 @@ fn engram_validated_focused_stage(
         .iter()
         .any(|value| value.as_str() != Some(fingerprint.as_str()))
     {
-        return None;
+        return Err(Rejected::Input);
     }
-    let (verdict, verdict_run, verdict_exit) = engram_launcher_first_verdict(output)?;
+    let (verdict, verdict_run, verdict_exit) =
+        engram_launcher_first_verdict(output).ok_or(Rejected::Terminal)?;
     if verdict != (if native == 0 { "PASS" } else { "FAIL" })
         || verdict_run != run
         || verdict_exit != format!("exit={native}")
     {
-        return None;
+        return Err(Rejected::Terminal);
     }
-    Some((native, stage.clone()))
+    Ok((native, stage.clone()))
 }

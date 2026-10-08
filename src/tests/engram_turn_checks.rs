@@ -496,6 +496,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
+            build_diagnostic: None,
             result_lines: vec!["test result: ok. 0 passed; 0 failed".to_owned()],
             showed_passing_tests: false,
             end_basis: engram_ready_basis_capture(),
@@ -1417,6 +1418,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
+            build_diagnostic: None,
             result_lines: Vec::new(),
             showed_passing_tests: true,
             end_basis,
@@ -1478,6 +1480,7 @@ pub(super) fn finished_check(
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
+            build_diagnostic: None,
             result_lines: Vec::new(),
             showed_passing_tests: true,
             end_basis,

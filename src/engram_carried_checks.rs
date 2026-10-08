@@ -1051,6 +1051,7 @@ fn engram_settle_carried_check(
     let end = EngramTurnCheckEnd {
         completed_at: verdict.ended.clone(),
         exit: EngramCommandExit::Code(verdict.exit_code),
+        build_diagnostic: None,
         result_lines: engram_carried_result_lines(&verdict, directory),
         showed_passing_tests: verdict.passed,
         end_basis,

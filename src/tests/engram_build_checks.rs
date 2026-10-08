@@ -3,6 +3,9 @@
 // New child of engram_turn_checks.rs, reusing its actual recorder fixture.
 use super::*;
 
+#[path = "engram_build_outcomes.rs"]
+mod outcomes;
+
 fn complete_command(
     turn: &CheckedTurn,
     key: &str,
