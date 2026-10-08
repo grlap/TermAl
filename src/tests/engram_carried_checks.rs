@@ -4027,6 +4027,7 @@ fn each_settlement_candidate_is_judged_by_its_own_closure() {
         let end = EngramTurnCheckEnd {
             completed_at: carried.check.started_at.clone(),
             exit: EngramCommandExit::Code(0),
+            build_diagnostic: None,
             result_lines: Vec::new(),
             showed_passing_tests: true,
             end_basis,

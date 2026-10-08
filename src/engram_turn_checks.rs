@@ -18,6 +18,25 @@
 
 include!("engram_launch_diagnostics.rs");
 
+#[cfg(test)]
+thread_local! {
+    // This thread's deterministic clock and optional post-resolution step.
+    // Production never uses the fixture clock or bookkeeping hook.
+    static TEST_ENGRAM_COMMAND_START_TIMING: std::cell::RefCell<Option<(String, Option<String>)>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+fn engram_command_started_at() -> String {
+    #[cfg(test)]
+    if let Some(now) = TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {
+        slot.borrow().as_ref().map(|(now, _)| now.clone())
+    }) {
+        return now;
+    }
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 /// Everything one checkpoint reports about the turn it closes: the turn's
 /// observations in feed order, and the verification and environment evidence
 /// minted from them. Sent as the request's own three lists, each left out
@@ -395,6 +414,8 @@ struct EngramTurnCheck {
 struct EngramTurnCheckEnd {
     completed_at: String,
     exit: EngramCommandExit,
+    /// Build ingress/rejection facts, never used as eligible exit references.
+    build_diagnostic: Option<EngramBuildDiagnostic>,
     /// The runner's result lines (`engram_check_result_lines`).
     result_lines: Vec<String>,
     /// The result lines show at least one test passed
@@ -1217,6 +1238,9 @@ impl AppState {
         ran: Option<&str>,
         cwd: Option<&str>,
     ) {
+        // Observe this command's boundary before off-lock target/capture work.
+        // The launcher still must start at or after this correlated event.
+        let started_at = engram_command_started_at();
         let recognised = ran.and_then(engram_check_command);
         let unsupported_focused = recognised
             .is_none()
@@ -1337,6 +1361,14 @@ impl AppState {
                     .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str())),
             )?;
             Some((workdir.clone(), command, target))
+        });
+        #[cfg(test)]
+        TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {
+            if let Some((now, next)) = slot.borrow_mut().as_mut()
+                && let Some(next) = next.take()
+            {
+                *now = next;
+            }
         });
         // A recognised test of a mediated turn that gets no check is told
         // why, once, before the agent's next prompt
@@ -1686,7 +1718,7 @@ impl AppState {
             command,
             target,
             toolchain,
-            started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            started_at,
             sandbox,
             start_basis,
             overlapped,
@@ -1953,10 +1985,21 @@ impl AppState {
             .filter(|check| check.command.kind == EngramVerificationKind::Build)
             .map(|check| {
                 if engram_check_command(command).as_ref() != Some(&check.command) {
-                    (EngramCommandExit::Unknown, Vec::new())
+                    (
+                        EngramCommandExit::Unknown,
+                        Vec::new(),
+                        Some(EngramBuildDiagnostic::rejected(
+                            exit.unwrap_or(EngramCommandExit::Unknown),
+                            EngramBuildRejection::Association,
+                        )),
+                    )
                 } else {
-                    engram_build_completion(check, session_id, output,
-                        exit.unwrap_or(EngramCommandExit::Unknown))
+                    engram_build_completion(
+                        check,
+                        session_id,
+                        output,
+                        exit.unwrap_or(EngramCommandExit::Unknown),
+                    )
                 }
             });
         let node_completion = starting_check.as_ref()
@@ -2156,6 +2199,7 @@ impl AppState {
                 && start.command == check.command
                 && start.target == check.target
         });
+        let mut build_diagnostic = None;
         let check_exit = if let Some((node_exit, node_lines, node_passed)) =
             node_completion.filter(|_| same_start)
         {
@@ -2166,15 +2210,18 @@ impl AppState {
             result_lines.clear();
             showed_passing_tests = false;
             EngramCommandExit::Unknown
-        } else if let Some((build_exit, build_lines)) = build_completion
-            .filter(|_| starting_check.as_ref().is_some_and(|start|
-                start.grant_id == check.grant_id && start.sequence == check.sequence
-                    && start.command == check.command && start.target == check.target))
+        } else if let Some((build_exit, build_lines, diagnostic)) =
+            build_completion.filter(|_| same_start)
         {
             result_lines = build_lines;
+            build_diagnostic = diagnostic;
             build_exit
         } else if check.command.kind == EngramVerificationKind::Build {
             result_lines.clear();
+            build_diagnostic = Some(EngramBuildDiagnostic::rejected(
+                exit.unwrap_or(EngramCommandExit::Unknown),
+                EngramBuildRejection::Association,
+            ));
             EngramCommandExit::Unknown
         } else {
             exit.unwrap_or(EngramCommandExit::Unknown)
@@ -2195,6 +2242,7 @@ impl AppState {
         check.end = Some(EngramTurnCheckEnd {
             completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             exit: check_exit,
+            build_diagnostic,
             result_lines,
             showed_passing_tests,
             end_basis,
@@ -2501,10 +2549,9 @@ fn engram_turn_report(
                 },
             check_kind: check.command.kind,
                 environment: environment.map(|index| EngramEnvironmentReference::Index { index }),
-                summary: Some(engram_check_summary(
-                    &check.command,
-                    end.exit,
-                    &end.result_lines,
+                summary: Some(end.build_diagnostic.as_ref().map_or_else(
+                    || engram_check_summary(&check.command, end.exit, &end.result_lines),
+                    |diagnostic| diagnostic.summary(&check.command),
                 )),
                 refs: {
                     let mut refs = engram_check_refs(&check.command, end.exit, &end.result_lines);
