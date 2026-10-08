@@ -474,6 +474,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
 
     // At report time a succeeded run without that evidence is unknown.
     let check = EngramTurnCheck {
+        declared: None,
         grant_id: "grant".to_owned(),
         key: "check".to_owned(),
         sequence: 0,
@@ -494,6 +495,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         runtime_output_cut: false,
         ended_at: None,
         end: Some(EngramTurnCheckEnd {
+            declared: None,
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
             build_diagnostic: None,
@@ -1033,6 +1035,18 @@ impl CheckedTurn {
         for capture in captures {
             capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
         }
+        // A declared check's artifact read closes its interval as well.
+        let readings = self.record(|record| {
+            record
+                .engram
+                .active_turn_checks
+                .iter()
+                .filter_map(|check| check.end.as_ref()?.declared.clone())
+                .collect::<Vec<_>>()
+        });
+        for reading in readings {
+            reading.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+        }
     }
 
     fn change_readme(&self, content: &str) {
@@ -1396,6 +1410,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         capture
     };
     let check = |key: &str, end_basis: Arc<EngramBasisCapture>| EngramTurnCheck {
+        declared: None,
         grant_id: CHECK_GRANT.to_owned(),
         key: key.to_owned(),
         sequence: 0,
@@ -1416,6 +1431,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         runtime_output_cut: false,
         ended_at: None,
         end: Some(EngramTurnCheckEnd {
+            declared: None,
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
             build_diagnostic: None,
@@ -1458,6 +1474,7 @@ pub(super) fn finished_check(
     end_basis: Arc<EngramBasisCapture>,
 ) -> EngramTurnCheck {
     EngramTurnCheck {
+        declared: None,
         grant_id: CHECK_GRANT.to_owned(),
         key: format!("check-{sequence}"),
         sequence,
@@ -1478,6 +1495,7 @@ pub(super) fn finished_check(
         runtime_output_cut: false,
         ended_at: None,
         end: Some(EngramTurnCheckEnd {
+            declared: None,
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
             build_diagnostic: None,
@@ -4174,3 +4192,6 @@ mod build_checks;
 
 #[path = "engram_focused_node_checks.rs"]
 mod focused_node_checks;
+
+#[path = "engram_declared_checks.rs"]
+mod declared_checks;

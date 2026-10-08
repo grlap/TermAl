@@ -1,0 +1,69 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="55032fb2-f796-44d8-85c5-0e9c72a4748d" name="user@MACHINE 2026-10-06 01:48:13" runUser="MACHINE\user" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-06T01:48:13.0306499-07:00" queuing="2026-10-06T01:48:13.0306501-07:00" start="2026-10-06T01:48:12.6070413-07:00" finish="2026-10-06T01:48:13.0353085-07:00" />
+  <TestSettings name="default" id="2fd904ff-378c-4873-88b3-59d03e03d2d7">
+    <Deployment runDeploymentRoot="user_MACHINE_2026-10-06_01_48_13" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="2ed062f6-4557-4cda-af7b-7eb488e4f947" testId="36528f48-12f8-719a-bd7d-81781f50c40e" testName="Orders.Tests.OrderTests.Adds" computerName="MACHINE" duration="00:00:00.0033306" startTime="2026-10-06T01:48:12.9515099-07:00" endTime="2026-10-06T01:48:12.9586128-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2ed062f6-4557-4cda-af7b-7eb488e4f947" />
+    <UnitTestResult executionId="c67ca4b3-c78d-4ecd-8d20-7cab8c646264" testId="c02968ce-adf2-f9de-8435-9fc783151d01" testName="Orders.Tests.OrderTests.Subtracts" computerName="MACHINE" duration="00:00:00.0000458" startTime="2026-10-06T01:48:12.9643608-07:00" endTime="2026-10-06T01:48:12.9644050-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c67ca4b3-c78d-4ecd-8d20-7cab8c646264" />
+    <UnitTestResult executionId="9441f7df-39e6-4700-8bbc-ecd2a53cb05f" testId="e2203353-e96b-e483-8311-169422b1c8a8" testName="Orders.Tests.OrderTests.Fails" computerName="MACHINE" duration="00:00:00.0011456" startTime="2026-10-06T01:48:12.9647129-07:00" endTime="2026-10-06T01:48:12.9649779-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9441f7df-39e6-4700-8bbc-ecd2a53cb05f">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Equal() Failure: Values differ&#xD;
+Expected: 5&#xD;
+Actual:   4</Message>
+          <StackTrace>   at Orders.Tests.OrderTests.Fails() in C:\src\Orders.Tests\UnitTest1.cs:line 7&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Orders.Tests.OrderTests.Fails" storage="C:\src\orders.tests\bin\debug\net10.0\orders.tests.dll" id="e2203353-e96b-e483-8311-169422b1c8a8">
+      <Execution id="9441f7df-39e6-4700-8bbc-ecd2a53cb05f" />
+      <TestMethod codeBase="C:\src\Orders.Tests\bin\Debug\net10.0\Orders.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="Orders.Tests.OrderTests" name="Fails" />
+    </UnitTest>
+    <UnitTest name="Orders.Tests.OrderTests.Subtracts" storage="C:\src\orders.tests\bin\debug\net10.0\orders.tests.dll" id="c02968ce-adf2-f9de-8435-9fc783151d01">
+      <Execution id="c67ca4b3-c78d-4ecd-8d20-7cab8c646264" />
+      <TestMethod codeBase="C:\src\Orders.Tests\bin\Debug\net10.0\Orders.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="Orders.Tests.OrderTests" name="Subtracts" />
+    </UnitTest>
+    <UnitTest name="Orders.Tests.OrderTests.Adds" storage="C:\src\orders.tests\bin\debug\net10.0\orders.tests.dll" id="36528f48-12f8-719a-bd7d-81781f50c40e">
+      <Execution id="2ed062f6-4557-4cda-af7b-7eb488e4f947" />
+      <TestMethod codeBase="C:\src\Orders.Tests\bin\Debug\net10.0\Orders.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="Orders.Tests.OrderTests" name="Adds" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="36528f48-12f8-719a-bd7d-81781f50c40e" executionId="2ed062f6-4557-4cda-af7b-7eb488e4f947" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c02968ce-adf2-f9de-8435-9fc783151d01" executionId="c67ca4b3-c78d-4ecd-8d20-7cab8c646264" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e2203353-e96b-e483-8311-169422b1c8a8" executionId="9441f7df-39e6-4700-8bbc-ecd2a53cb05f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="3" executed="3" passed="2" failed="1" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.12)&#xD;
+[xUnit.net 00:00:00.04]   Discovering: Orders.Tests&#xD;
+[xUnit.net 00:00:00.07]   Discovered:  Orders.Tests&#xD;
+[xUnit.net 00:00:00.08]   Starting:    Orders.Tests&#xD;
+[xUnit.net 00:00:00.11]       Assert.Equal() Failure: Values differ&#xD;
+[xUnit.net 00:00:00.11]       Expected: 5&#xD;
+[xUnit.net 00:00:00.11]       Actual:   4&#xD;
+[xUnit.net 00:00:00.11]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.11]         C:\src\Orders.Tests\UnitTest1.cs(7,0): at Orders.Tests.OrderTests.Fails()&#xD;
+[xUnit.net 00:00:00.11]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.11]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.11]   Finished:    Orders.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="MACHINE" outcome="Error" timestamp="2026-10-06T01:48:12.9665589-07:00">
+        <Text>[xUnit.net 00:00:00.11]     Orders.Tests.OrderTests.Fails [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

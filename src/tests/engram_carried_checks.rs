@@ -4025,6 +4025,7 @@ fn each_settlement_candidate_is_judged_by_its_own_closure() {
     late.finish(None);
     let candidate = |carried: &EngramCarriedCheck, end_basis: Arc<EngramBasisCapture>| {
         let end = EngramTurnCheckEnd {
+            declared: None,
             completed_at: carried.check.started_at.clone(),
             exit: EngramCommandExit::Code(0),
             build_diagnostic: None,

@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="38dcb883-90d0-4d3f-8275-0738407b7a94" name="user@MACHINE 2026-10-06 01:48:11" runUser="MACHINE\user" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-06T01:48:11.2412824-07:00" queuing="2026-10-06T01:48:11.2412829-07:00" start="2026-10-06T01:48:10.6833836-07:00" finish="2026-10-06T01:48:11.2446101-07:00" />
+  <TestSettings name="default" id="856d2074-d712-4179-9141-2adde96bea92">
+    <Deployment runDeploymentRoot="user_MACHINE_2026-10-06_01_48_11" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="f3c87873-7e5e-4d80-aa89-459e68783313" testId="b69c3a15-3010-cb2b-cd80-b95eade9de6f" testName="Orders.Tests.OrderTests.Multiplies" computerName="MACHINE" duration="00:00:00.0000282" startTime="2026-10-06T01:48:11.1711885-07:00" endTime="2026-10-06T01:48:11.1712198-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f3c87873-7e5e-4d80-aa89-459e68783313" />
+    <UnitTestResult executionId="3f53cd54-a956-4d00-95d5-8f8acadc4d76" testId="c02968ce-adf2-f9de-8435-9fc783151d01" testName="Orders.Tests.OrderTests.Subtracts" computerName="MACHINE" duration="00:00:00.0000583" startTime="2026-10-06T01:48:11.1708457-07:00" endTime="2026-10-06T01:48:11.1708881-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3f53cd54-a956-4d00-95d5-8f8acadc4d76" />
+    <UnitTestResult executionId="2ddb3a24-3e09-47e0-adc3-f6a8e9c03350" testId="36528f48-12f8-719a-bd7d-81781f50c40e" testName="Orders.Tests.OrderTests.Adds" computerName="MACHINE" duration="00:00:00.0044405" startTime="2026-10-06T01:48:11.1560365-07:00" endTime="2026-10-06T01:48:11.1647947-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2ddb3a24-3e09-47e0-adc3-f6a8e9c03350" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Orders.Tests.OrderTests.Subtracts" storage="C:\src\orders.tests\bin\debug\net10.0\orders.tests.dll" id="c02968ce-adf2-f9de-8435-9fc783151d01">
+      <Execution id="3f53cd54-a956-4d00-95d5-8f8acadc4d76" />
+      <TestMethod codeBase="C:\src\Orders.Tests\bin\Debug\net10.0\Orders.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="Orders.Tests.OrderTests" name="Subtracts" />
+    </UnitTest>
+    <UnitTest name="Orders.Tests.OrderTests.Adds" storage="C:\src\orders.tests\bin\debug\net10.0\orders.tests.dll" id="36528f48-12f8-719a-bd7d-81781f50c40e">
+      <Execution id="2ddb3a24-3e09-47e0-adc3-f6a8e9c03350" />
+      <TestMethod codeBase="C:\src\Orders.Tests\bin\Debug\net10.0\Orders.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="Orders.Tests.OrderTests" name="Adds" />
+    </UnitTest>
+    <UnitTest name="Orders.Tests.OrderTests.Multiplies" storage="C:\src\orders.tests\bin\debug\net10.0\orders.tests.dll" id="b69c3a15-3010-cb2b-cd80-b95eade9de6f">
+      <Execution id="f3c87873-7e5e-4d80-aa89-459e68783313" />
+      <TestMethod codeBase="C:\src\Orders.Tests\bin\Debug\net10.0\Orders.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="Orders.Tests.OrderTests" name="Multiplies" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="b69c3a15-3010-cb2b-cd80-b95eade9de6f" executionId="f3c87873-7e5e-4d80-aa89-459e68783313" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c02968ce-adf2-f9de-8435-9fc783151d01" executionId="3f53cd54-a956-4d00-95d5-8f8acadc4d76" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="36528f48-12f8-719a-bd7d-81781f50c40e" executionId="2ddb3a24-3e09-47e0-adc3-f6a8e9c03350" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="3" executed="3" passed="3" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.12)&#xD;
+[xUnit.net 00:00:00.07]   Discovering: Orders.Tests&#xD;
+[xUnit.net 00:00:00.10]   Discovered:  Orders.Tests&#xD;
+[xUnit.net 00:00:00.11]   Starting:    Orders.Tests&#xD;
+[xUnit.net 00:00:00.15]   Finished:    Orders.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

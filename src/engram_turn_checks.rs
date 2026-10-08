@@ -366,6 +366,10 @@ struct EngramTurnCheck {
     /// even when a runtime reuses a key (Codex falls back to the command).
     sequence: usize,
     command: EngramCheckCommand,
+    /// For a declared test command (`engram_declared_tests.rs`): the entry it
+    /// matched, the declaration's hash and the artifact's start image, kept
+    /// from its start and verified again at its end. `None` for a built-in.
+    declared: Option<Box<EngramDeclaredBinding>>,
     /// Where the command ran and which worktree it is credited to; a repeated
     /// start that says otherwise drops the check.
     target: EngramCheckTarget,
@@ -423,6 +427,10 @@ struct EngramTurnCheckEnd {
     /// claim success.
     showed_passing_tests: bool,
     end_basis: Arc<EngramBasisCapture>,
+    /// A declared check's result, judged from its artifact on its own thread
+    /// as its command ended (`engram_declared_result`); it decides the
+    /// outcome in place of the exit and the result lines.
+    declared: Option<Arc<EngramCapture<EngramDeclaredResult>>>,
 }
 
 /// A finished check with its snapshots resolved, ready for the report.
@@ -437,7 +445,8 @@ struct EngramResolvedCheck {
     toolchain: Option<String>,
     /// The check's own command ended successfully, whatever `outcome` became
     /// after an overlap or missing passing-test evidence downgraded it
-    /// (`engram_withhold_unjudged_successes`).
+    /// (`engram_withhold_unjudged_successes`); also set for a declared check
+    /// whose result is UNKNOWN, which is withheld whatever its exit.
     ran_successfully: bool,
 }
 
@@ -454,6 +463,8 @@ enum EngramWithheldReason {
     RuntimeOutputCut,
     /// Claude work with no verified completion restricted it.
     OutstandingClaudeWork,
+    /// A declared check whose result is UNKNOWN, for its observed reason.
+    Declared,
 }
 
 /// A check the report leaves out, with why, for the log and for the line its
@@ -468,6 +479,36 @@ struct EngramWithheldCheck {
     cause: Option<ClaudeHazardCause>,
     /// What overlapped it, for `Overlapped` (`EngramTurnCheck::overlap_cause`).
     overlap_cause: Option<String>,
+    /// Why a declared check is UNKNOWN, for `Declared`.
+    declared_reason: Option<String>,
+}
+
+/// A declared check's result as its end captured it, or `None` for a
+/// built-in check. One still being read is UNKNOWN: resolution waits for it
+/// first (`engram_resolve_turn_checks`), so only one that missed that wait
+/// reads so.
+fn engram_declared_result_of(end: &EngramTurnCheckEnd) -> Option<EngramDeclaredResult> {
+    end.declared.as_ref().map(|capture| {
+        capture
+            .wait_until(std::time::Instant::now())
+            .unwrap_or_else(|| EngramDeclaredResult {
+                verdict: EngramTrxVerdict::Unknown(
+                    "the artifact was not read in time".to_owned(),
+                ),
+                artifact: None,
+                outcome: None,
+                counters: None,
+            })
+    })
+}
+
+/// Why a declared check ended UNKNOWN, or `None` for a built-in check or a
+/// declared one that passed or failed.
+fn engram_declared_unknown_reason(end: &EngramTurnCheckEnd) -> Option<String> {
+    match engram_declared_result_of(end).map(|result| result.verdict) {
+        Some(EngramTrxVerdict::Unknown(reason)) => Some(reason),
+        _ => None,
+    }
 }
 
 /// Takes out of `resolved` every check whose command ended successfully but
@@ -495,6 +536,8 @@ fn engram_withhold_unjudged_successes(
                 EngramWithheldReason::OutstandingClaudeWork
             } else if kept.check.overlapped {
                 EngramWithheldReason::Overlapped
+            } else if engram_declared_unknown_reason(&kept.end).is_some() {
+                EngramWithheldReason::Declared
             } else if kept.check.command.kind == EngramVerificationKind::Test
                 && kept.check.runtime_output_cut {
                 EngramWithheldReason::RuntimeOutputCut
@@ -503,6 +546,7 @@ fn engram_withhold_unjudged_successes(
             },
             cause: kept.check.fenced_by_outstanding.clone(),
             overlap_cause: kept.check.overlap_cause.clone(),
+            declared_reason: engram_declared_unknown_reason(&kept.end),
         });
         false
     });
@@ -536,6 +580,16 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
             withheld.program, withheld.kind.label(), withheld.fingerprint
         );
     }
+    if withheld.reason == EngramWithheldReason::Declared {
+        return format!(
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} Declared test command earned no credit and was \
+             not recorded: UNKNOWN, {}: a {} test (check {}). Check the declaration or the \
+             artifact and run it again.",
+            withheld.declared_reason.as_deref().unwrap_or("no result"),
+            withheld.program,
+            withheld.fingerprint
+        );
+    }
     let why = match withheld.reason {
         EngramWithheldReason::Overlapped => format!(
             "another command, an edit or another writable session reached its worktree while it \
@@ -545,6 +599,7 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
         EngramWithheldReason::NoPassingTest => "its output shows no passing test".to_owned(),
         EngramWithheldReason::OutstandingClaudeWork => unreachable!("told above"),
         EngramWithheldReason::RuntimeOutputCut => unreachable!("told above"),
+        EngramWithheldReason::Declared => unreachable!("told above"),
     };
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned no \
@@ -585,12 +640,20 @@ fn engram_resolve_turn_checks(
         if check.grant_id != grant_id {
             continue;
         }
-        let Some(end) = check.end.clone() else {
+        let Some(mut end) = check.end.clone() else {
             continue;
         };
-        let Some(outcome) =
-            engram_check_command_outcome(&check.command, end.exit, &end.result_lines)
-        else {
+        // A declared check is judged from its artifact
+        // (`engram_declared_result`), never from its output; its reading is
+        // waited for until `deadline`, as the snapshots are, and settled.
+        if let Some(capture) = &end.declared {
+            capture.wait_until(deadline);
+            end.declared = engram_declared_result_of(&end).map(EngramCapture::settled);
+        }
+        let Some(outcome) = (match engram_declared_result_of(&end) {
+            Some(result) => engram_declared_outcome(end.exit, &result),
+            None => engram_check_command_outcome(&check.command, end.exit, &end.result_lines),
+        }) else {
             continue;
         };
         let start = check.start_basis.wait_until(deadline);
@@ -610,11 +673,16 @@ fn engram_resolve_turn_checks(
             }
         };
         // Success needs positive evidence that tests ran and passed; an
-        // overlapped check may have run on content no snapshot saw.
-        let ran_successfully = outcome == EngramExecutionOutcome::Succeeded;
+        // overlapped check may have run on content no snapshot saw. A
+        // declared check's UNKNOWN is withheld with its reason whatever its
+        // exit, and its PASS rests on its artifact, not its output.
+        let ran_successfully = outcome == EngramExecutionOutcome::Succeeded
+            || engram_declared_unknown_reason(&end).is_some();
         let outcome = if check.overlapped
             || (check.command.kind == EngramVerificationKind::Test
-                && outcome == EngramExecutionOutcome::Succeeded && !end.showed_passing_tests)
+                && outcome == EngramExecutionOutcome::Succeeded
+                && end.declared.is_none()
+                && !end.showed_passing_tests)
         {
             EngramExecutionOutcome::Unknown
         } else {
@@ -1164,30 +1232,42 @@ impl EngramTurnCheck {
     }
 
     /// When the check's evidence interval closed, on the interference clock:
-    /// the latest of its command's end and the completion of its start and
-    /// end snapshots, since a write before any of them may be in what it
-    /// recorded. `None` while it is open to writes or any of those instants is
-    /// unknown, which counts as still open.
+    /// the latest of its command's end, the completion of its start and end
+    /// snapshots and, for a declared check, of its artifact's read, since a
+    /// write before any of them may be in what it recorded. `None` while it is
+    /// open to writes or any of those instants is unknown, which counts as
+    /// still open.
     fn interference_end(&self) -> Option<u64> {
         if self.open_to_writes() {
             return None;
         }
         let end = self.end.as_ref()?;
+        let declared_read = match &end.declared {
+            Some(reading) => reading.ready_tick()?,
+            None => 0,
+        };
         Some(
             self.ended_at?
                 .max(self.start_basis.ready_tick()?)
-                .max(end.end_basis.ready_tick()?),
+                .max(end.end_basis.ready_tick()?)
+                .max(declared_read),
         )
     }
 
     /// Whether a write now could still reach what the check's snapshots see:
-    /// the check is running, or one of its snapshots is still being taken.
+    /// the check is running, or one of its snapshots is still being taken,
+    /// or, for a declared check, its declaration and artifact are not read
+    /// yet. The artifact is git-ignored, so no snapshot can see it change:
+    /// this fence is all that keeps a later write out of its result.
     fn open_to_writes(&self) -> bool {
         !self.start_basis.is_ready()
-            || self
-                .end
-                .as_ref()
-                .is_none_or(|end| !end.end_basis.is_ready())
+            || self.end.as_ref().is_none_or(|end| {
+                !end.end_basis.is_ready()
+                    || end
+                        .declared
+                        .as_ref()
+                        .is_some_and(|reading| !reading.is_ready())
+            })
     }
 }
 
@@ -1345,7 +1425,28 @@ impl AppState {
             .and_then(|command| {
                 engram_launch_diagnostic_root(command, &workdir, places.as_deref())
             });
+        // A line no built-in recognises may be a declared test command of the
+        // worktree it runs in (`engram_declared_tests.rs`), bound here at its
+        // start, off the lock. Only a worktree holding a declaration is read
+        // further. The other writers in a turn are not resolved for it first:
+        // one left unresolved counts in every worktree, which can only make
+        // the check unknown.
+        let (declared, declaration_line) = if mediated && recognised.is_none() {
+            engram_declared_start(
+                ran,
+                FsPath::new(&workdir),
+                places.as_deref(),
+                credit_root
+                    .as_ref()
+                    .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str())),
+            )
+        } else {
+            (None, None)
+        };
         let target = started.and_then(|started| {
+            if let Some((command, target, _)) = &declared {
+                return Some((workdir.clone(), command.clone(), target.clone()));
+            }
             let command = match ran {
                 Some(_) => recognised.clone()?,
                 None => started?,
@@ -1506,6 +1607,16 @@ impl AppState {
         {
             record.engram.set_pending_source_root_line(line);
         }
+        // A disabled declaration is told once for each content it has.
+        if disposition == ClaudeObservationDisposition::Current
+            && let Some((sha256, line)) = declaration_line
+        {
+            let told = format!("{sha256}\n{line}");
+            if record.engram.declaration_disabled_told.as_deref() != Some(told.as_str()) {
+                record.engram.set_pending_source_root_line(line);
+                record.engram.declaration_disabled_told = Some(told);
+            }
+        }
         // Outstanding Claude work whose scope grew fences what it may overlap
         // first, so the checks it reaches keep its cause.
         if placed {
@@ -1648,7 +1759,7 @@ impl AppState {
                 return;
             }
             // A repeated start that names no test adds nothing.
-            None if !fresh && recognised.is_none() => return,
+            None if !fresh && recognised.is_none() && declared.is_none() => return,
             None if engram.withheld_command_keys.contains(key) => return,
             None => {}
         }
@@ -1716,6 +1827,7 @@ impl AppState {
             key: key.to_owned(),
             sequence,
             command,
+            declared: declared.map(|(_, _, binding)| Box::new(binding)),
             target,
             toolchain,
             started_at,
@@ -1789,6 +1901,7 @@ impl AppState {
                                 (
                                     check.sequence,
                                     check.command.clone(),
+                                    check.declared.is_some(),
                                     check.target.clone(),
                                     record.session.workdir.clone(),
                                     engram_command_directories(record, key, cwd),
@@ -1815,8 +1928,12 @@ impl AppState {
         });
         let stands = started
             .as_ref()
-            .map(|(_, command, target, workdir, directories, credit_root)| {
+            .map(|(_, command, declared, target, workdir, directories, credit_root)| {
+                // A declared check is named again by the declared route, the
+                // way it was recognised (`engram_declared_candidate`); it
+                // keeps the binding its start made.
                 let named = match ran {
+                    Some(ran) if *declared => engram_declared_candidate(ran).map(|(named, _)| named),
                     Some(ran) => engram_check_command(ran),
                     None => Some(command.clone()),
                 };
@@ -1875,7 +1992,7 @@ impl AppState {
         {
             record.engram.set_pending_source_root_line(line);
         }
-        if let (Some((sequence, _, _, workdir, _, _)), Some(stands)) = (started, stands)
+        if let (Some((sequence, _, _, _, workdir, _, _)), Some(stands)) = (started, stands)
             && !(stands && workdir == record.session.workdir)
         {
             // It names another test or another place now: the check no
@@ -2237,6 +2354,18 @@ impl AppState {
             // The worktree the check ran in, as its opening snapshot was.
             engram_spawn_basis_capture(check.target.basis_place(), &workers, provenance)
         };
+        // A declared check's declaration and artifact are read as its command
+        // ends, on their own thread, like its closing snapshot.
+        let declared = check
+            .declared
+            .as_deref()
+            .filter(|_| check_exit != EngramCommandExit::NotFinished)
+            .map(|binding| {
+                let binding = binding.clone();
+                EngramCapture::spawn(&workers, move || {
+                    engram_declared_result(&binding, check_exit)
+                })
+            });
         check.ended_at = Some(engram_interference_tick());
         check.runtime_output_cut = runtime_output_cut;
         check.end = Some(EngramTurnCheckEnd {
@@ -2246,6 +2375,7 @@ impl AppState {
             result_lines,
             showed_passing_tests,
             end_basis,
+            declared,
         });
     }
 
@@ -2549,12 +2679,28 @@ fn engram_turn_report(
                 },
             check_kind: check.command.kind,
                 environment: environment.map(|index| EngramEnvironmentReference::Index { index }),
-                summary: Some(end.build_diagnostic.as_ref().map_or_else(
-                    || engram_check_summary(&check.command, end.exit, &end.result_lines),
-                    |diagnostic| diagnostic.summary(&check.command),
-                )),
+                summary: Some(match engram_declared_result_of(&end) {
+                    Some(result) => engram_declared_summary(
+                        &check.command,
+                        check.declared.as_deref(),
+                        end.exit,
+                        &result,
+                    ),
+                    None => end.build_diagnostic.as_ref().map_or_else(
+                        || engram_check_summary(&check.command, end.exit, &end.result_lines),
+                        |diagnostic| diagnostic.summary(&check.command),
+                    ),
+                }),
                 refs: {
-                    let mut refs = engram_check_refs(&check.command, end.exit, &end.result_lines);
+                    let mut refs = match engram_declared_result_of(&end) {
+                        Some(result) => engram_declared_refs(
+                            &check.command,
+                            check.declared.as_deref(),
+                            end.exit,
+                            &result,
+                        ),
+                        None => engram_check_refs(&check.command, end.exit, &end.result_lines),
+                    };
                     // A gate carried from an earlier turn is recorded under
                     // this turn's grant; the grant it launched under is kept
                     // as provenance (`engram_carried_checks.rs`).

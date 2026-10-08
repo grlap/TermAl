@@ -2671,6 +2671,10 @@ struct EngramSessionState {
     /// exactly those lines leave the pending ones
     /// (`acknowledge_engram_source_root_line_delivery`).
     source_root_line_delivery: Option<(String, u64)>,
+    /// The disabled declaration last told to the agent, as its hash and line
+    /// (`engram_declared_tests.rs`), so one is told once per content. In
+    /// memory only.
+    declaration_disabled_told: Option<String>,
     /// Runtime-only presentation owned by the captured opening, not the next prompt.
     opening_diagnostic: Option<EngramOpeningDiagnostic>,
     /// Current scoped status, projected again at provider handoff. Unrelated
@@ -2818,6 +2822,7 @@ impl Default for EngramSessionState {
             named_root: None,
             pending_source_root_line: None,
             source_root_line_delivery: None,
+            declaration_disabled_told: None,
             opening_diagnostic: None,
             source_root_notices: Vec::new(),
             active_turn_report: None,
