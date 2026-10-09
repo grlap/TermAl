@@ -46,6 +46,7 @@ mod content_revision;
 mod conversation_markers;
 mod coordination_board_routes;
 mod coordination_instructions;
+mod crash_restart_drill;
 mod cursor;
 mod delegation_child_links;
 mod delegation_followup_admission;
