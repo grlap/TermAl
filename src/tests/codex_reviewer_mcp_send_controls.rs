@@ -69,7 +69,7 @@ fn codex_reviewer_mcp_blocked_approved_send_allows_status_and_watchdog_kill() {
         );
         let _ = writer_done_tx.send(result);
     });
-    entered_rx.recv_timeout(Duration::from_secs(3)).expect("approved send must reach actual watched I/O");
+    await_event(&entered_rx, "approved send must reach actual watched I/O");
     let shared_unlocked = fixture.runtime.sessions.try_lock().is_ok();
     let state = fixture.state.clone();
     let (status_tx, status_rx) = mpsc::channel();
@@ -78,7 +78,7 @@ fn codex_reviewer_mcp_blocked_approved_send_allows_status_and_watchdog_kill() {
     });
     // Capture before releasing the sink or starting cleanup; this is a
     // concurrent status operation, not evidence inferred from a later snapshot.
-    let status = status_rx.recv_timeout(Duration::from_secs(3));
+    let status = receive_before_cleanup(&status_rx, "status snapshot while I/O is blocked");
     let (stop_tx, stop_rx) = mpsc::channel();
     spawn_shared_codex_stdin_watchdog(
         &fixture.state, &fixture.runtime.runtime_id, parked.process.clone(), &activity,
@@ -94,7 +94,7 @@ fn codex_reviewer_mcp_blocked_approved_send_allows_status_and_watchdog_kill() {
     // Only the watchdog can kill the still-parked process before sink release.
     let exited_before_release = receive_before_cleanup(&exited_rx, "watchdog hard kill while I/O blocked");
     drop(release);
-    let writer_result = writer_done_rx.recv_timeout(Duration::from_secs(3)).expect("released writer must finish");
+    let writer_result = await_event(&writer_done_rx, "released writer must finish");
     writer_thread.join().unwrap();
     status_thread.join().unwrap();
     // Emergency reap keeps a failed control from stranding fixture threads;

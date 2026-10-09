@@ -138,7 +138,7 @@ fn codex_reviewer_mcp_failed_public_output_keeps_reviewer_prose() {
 pub(super) fn join_worker(worker: std::thread::JoinHandle<()>) {
     let (done_tx, done_rx) = mpsc::channel();
     std::thread::spawn(move || { let _ = done_tx.send(worker.join().is_ok()); });
-    assert!(done_rx.recv_timeout(Duration::from_secs(3)).expect("bounded observation worker must finish"));
+    assert!(await_event(&done_rx, "observation worker must finish"));
 }
 
 pub(super) fn worker_at_status_wait(fixture: &ReviewerFixture, startup: bool) -> std::thread::JoinHandle<()> {

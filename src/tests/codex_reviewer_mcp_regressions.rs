@@ -21,10 +21,11 @@ pub(super) fn read_notification(fixture: &ReviewerFixture, notification: Value) 
         );
         let _ = done_tx.send(result);
     });
-    done_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("the real reader must return without waiting for its own response")
-        .unwrap();
+    await_event(
+        &done_rx,
+        "the real reader must return without waiting for its own response",
+    )
+    .unwrap();
 }
 
 fn failed_page() -> Value {
@@ -203,11 +204,11 @@ fn codex_reviewer_mcp_initial_request_is_removed_on_every_early_worker_exit() {
                 resume_thread_id: None, sandbox_mode: CodexSandboxMode::ReadOnly,
             }, None)), None,
         );
-        // Join the actual worker, with a bounded receive instead of a polling
+        // Join the actual worker, awaiting its finish instead of a polling
         // snapshot that could precede its cleanup destructor.
         let (done_tx, done_rx) = mpsc::channel();
         std::thread::spawn(move || { let _ = done_tx.send(worker.join().is_ok()); });
-        assert!(done_rx.recv_timeout(Duration::from_secs(3)).unwrap());
+        assert!(await_event(&done_rx, "early-exit worker must finish"));
         assert!(fixture.pending.lock().unwrap().is_empty(),
             "the registered initial request must not survive {cause} worker exit");
         if cause == "expired" {
@@ -242,8 +243,10 @@ async fn observation_persistence_failure_finishes(phase: &str) {
         response_tx.send(Ok(ready_page())).unwrap();
     }
     // Block on the existing terminal-state publication channel, not sleeps or
-    // a busy spin. The bound limits a broken worker, not the product's budget.
-    let publication = tokio::time::timeout(Duration::from_secs(3), publications.recv()).await;
+    // a busy spin. The only bound is the fixtures' liveness guard
+    // (`await_event`): it limits a broken worker, not a slow host.
+    let publication =
+        tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, publications.recv()).await;
     let inner = fixture.state.inner.lock().unwrap();
     let delegation = &inner.delegations[inner.find_delegation_index(&fixture.delegation).unwrap()];
     assert_eq!(delegation.attempt.reviewer_mcp_observations.len(), 1,
@@ -258,7 +261,7 @@ async fn observation_persistence_failure_finishes(phase: &str) {
     publication
         .expect("terminal failure must be published even when storage is unavailable")
         .expect("the state channel must remain connected");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let deadline = tokio::time::Instant::now() + crate::TEST_PHASE_DEADLOCK_GUARD;
     loop {
         {
             let inner = fixture.state.inner.lock().unwrap();

@@ -24,11 +24,10 @@ pub(super) fn respond_start(fixture: &ReviewerFixture, written: &[u8], response:
     .unwrap();
 }
 
+/// The next command the worker under test sends, however long a loaded host
+/// takes to produce it (`await_event`).
 pub(super) fn next_command(fixture: &ReviewerFixture) -> CodexRuntimeCommand {
-    fixture
-        .input_rx
-        .recv_timeout(Duration::from_secs(3))
-        .expect("bounded worker continuation")
+    await_event(&fixture.input_rx, "worker continuation")
 }
 
 pub(super) fn drive_ready(fixture: &ReviewerFixture, command: CodexRuntimeCommand) -> Vec<u8> {

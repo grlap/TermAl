@@ -701,3 +701,50 @@ fn codex_reviewer_mcp_gap_submission_keeps_authoritative_result() {
 fn codex_reviewer_mcp_gap_attempt_keeps_queued_followup_inert() {
     handoff_gap("attempt");
 }
+
+/// A settling thread held well past the old three-second wait still reaches
+/// the archive: the test waits for the archive command itself, not for a
+/// wall-clock slice that a loaded host can overrun.
+#[test]
+fn codex_reviewer_mcp_archive_wait_outlasts_a_settlement_held_past_the_old_bound() {
+    const OLD_BOUND: Duration = Duration::from_secs(3);
+    let fixture = ReviewerFixture::new("held-settlement");
+    let scope = scope(&fixture);
+    let (held_tx, held_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    assert!(
+        gap_hooks()
+            .lock()
+            .unwrap()
+            .insert(
+                scope.gate.clone(),
+                Box::new(move || {
+                    let _ = held_tx.send(());
+                    let _ = release_rx.recv();
+                }),
+            )
+            .is_none()
+    );
+    let _cleanup = GapCleanup(scope.gate.clone());
+    let state = fixture.state.clone();
+    let settling = scope.clone();
+    let worker = std::thread::spawn(move || {
+        fail_codex_reviewer_mcp(&state, &settling, "settlement held past the old bound")
+    });
+    super::super::phase_sync::receive_before_cleanup(
+        &held_rx,
+        "settlement reaches the held handoff",
+    )
+    .expect("the settling thread must reach the held handoff");
+    // Hold the settlement, and so its archive, for twice the old bound.
+    let releaser = std::thread::spawn(move || {
+        std::thread::sleep(OLD_BOUND * 2);
+        let _ = release_tx.send(());
+    });
+    assert_eq!(
+        archive_and_result(&fixture).status,
+        DelegationStatus::Failed
+    );
+    releaser.join().unwrap();
+    join_worker(worker);
+}

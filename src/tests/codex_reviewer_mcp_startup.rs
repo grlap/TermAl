@@ -11,6 +11,18 @@ use super::*;
 const REVIEW_THREAD: &str = "reviewer-exact-thread";
 const REVIEW_TURN: &str = "reviewer-exact-turn";
 
+/// Waits for the event a step of these tests needs: the worker's next
+/// command, a handler's return, a thread's finish. The only bound is the
+/// fixtures' shared liveness guard (`TEST_PHASE_DEADLOCK_GUARD`), which turns a
+/// lost or never-sent event into a failure. It is not a synchronization
+/// point, and a merely slow host does not reach it.
+#[track_caller]
+fn await_event<T>(receiver: &mpsc::Receiver<T>, what: &str) -> T {
+    receiver
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
+        .unwrap_or_else(|error| panic!("{what}: no event within the liveness guard ({error})"))
+}
+
 struct ReviewerFixture {
     state: AppState,
     runtime: SharedCodexRuntime,
@@ -150,10 +162,11 @@ impl ReviewerFixture {
             );
             let _ = done_tx.send(result);
         });
-        done_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("the JSON-RPC reader must not await its own status response")
-            .unwrap();
+        await_event(
+            &done_rx,
+            "the JSON-RPC reader must not await its own status response",
+        )
+        .unwrap();
     }
 }
 
@@ -252,10 +265,10 @@ fn codex_reviewer_mcp_start_observes_exact_thread_before_model_work() {
 fn codex_reviewer_mcp_finish_without_submission_queries_before_archive() {
     let fixture = ReviewerFixture::new("reviewer-finish-status");
     fixture.complete();
-    let command = fixture
-        .input_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("missing structured submission must trigger a bounded status observation");
+    let command = await_event(
+        &fixture.input_rx,
+        "missing structured submission must trigger a bounded status observation",
+    );
     let CodexRuntimeCommand::JsonRpcRequest {
         method,
         params,
@@ -278,10 +291,10 @@ fn codex_reviewer_mcp_finish_without_submission_queries_before_archive() {
         "tools": {}, "resources": [], "resourceTemplates": []
     }], "nextCursor": null })))
         .unwrap();
-    let archive = fixture
-        .input_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("observed failure should finish and then archive the child");
+    let archive = await_event(
+        &fixture.input_rx,
+        "observed failure should finish and then archive the child",
+    );
     let CodexRuntimeCommand::JsonRpcRequest {
         method,
         response_tx,
@@ -346,10 +359,10 @@ fn codex_reviewer_mcp_authoritative_submission_keeps_precedence() {
         .submit_delegation_review_result(&fixture.child, structured_review_request())
         .unwrap();
     fixture.complete();
-    let command = fixture
-        .input_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("a durably submitted terminal review should archive normally");
+    let command = await_event(
+        &fixture.input_rx,
+        "a durably submitted terminal review should archive normally",
+    );
     let CodexRuntimeCommand::JsonRpcRequest {
         method,
         response_tx,
