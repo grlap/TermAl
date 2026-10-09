@@ -130,6 +130,11 @@ fn spawn_acp_runtime(
             let _ = observer.send(pending_requests.clone());
         }
     });
+    #[cfg(all(test, windows))]
+    let initialize_timeout = (!TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.replace(false)))
+        .then_some(ACP_INITIALIZE_TIMEOUT);
+    #[cfg(not(all(test, windows)))]
+    let initialize_timeout = Some(ACP_INITIALIZE_TIMEOUT);
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
     let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
     let runtime_engram_mcp = engram_mcp.cloned();
@@ -149,7 +154,7 @@ fn spawn_acp_runtime(
             #[cfg(all(test, windows))]
             let _writer_completion = writer_completion;
             let mut stdin = stdin;
-            let initialize_result = send_acp_json_rpc_request(
+            let initialize_result = send_acp_json_rpc_request_inner(
                 &mut stdin,
                 &writer_pending_requests,
                 "initialize",
@@ -161,7 +166,7 @@ fn spawn_acp_runtime(
                     },
                     "clientCapabilities": {},
                 }),
-                ACP_INITIALIZE_TIMEOUT,
+                initialize_timeout,
                 agent,
             )
             .and_then(|result| {

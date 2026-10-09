@@ -231,6 +231,10 @@ thread_local! {
     static TEST_DEDICATED_EXIT_GATE: std::cell::RefCell<Option<TestStopFenceGate>> = const { std::cell::RefCell::new(None) };
     static TEST_DEDICATED_WRITER: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
     static TEST_DEDICATED_ACP_PENDING: std::cell::RefCell<Option<Sender<AcpPendingRequestMap>>> = const { std::cell::RefCell::new(None) };
+    // Set only by a producer that ends initialize itself (an error reply, its
+    // root's exit or its teardown); the next ACP writer then waits for that
+    // end instead of the handshake's wall-clock deadline.
+    static TEST_DEDICATED_ACP_INITIALIZE_UNTIMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static TEST_DEDICATED_CLEANUP_JOIN: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
     static TEST_DEDICATED_READER_FRAMES: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
 }

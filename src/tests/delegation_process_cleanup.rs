@@ -1528,6 +1528,9 @@ impl ProductionWorkerTree {
         if acp { TEST_DEDICATED_WRITER.with(|slot| *slot.borrow_mut() = Some(writer_tx)); }
         let (pending_tx, pending_rx) = mpsc::channel();
         if acp { TEST_DEDICATED_ACP_PENDING.with(|slot| *slot.borrow_mut() = Some(pending_tx)); }
+        // The root never answers initialize; each test ends it explicitly, so
+        // no wall-clock handshake deadline can kill the tree first.
+        if acp { TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.set(true)); }
         let mut inner = state.inner.lock().unwrap();
         let runtime = if acp {
             SessionRuntime::Acp(spawn_acp_runtime(state.clone(), session_id.to_owned(),
@@ -1588,6 +1591,21 @@ impl ProductionWorkerTree {
         let root = self.peers.iter().find(|peer| peer.description["role"] == "runtime").unwrap();
         (&root.socket).write_all(&[2]).unwrap();
         self.wait_for_writer();
+    }
+
+    /// Applies exactly what the writer's expiring initialize deadline does
+    /// (`wait_for_acp_json_rpc_response`): the pending sender goes away, so
+    /// the writer fails initialize at once and runs its failure cleanup.
+    pub(super) fn expire_initialize(&self) {
+        let pending = self.pending.as_ref().expect("an ACP worker tree");
+        let expired = std::mem::take(&mut *pending.lock().unwrap());
+        assert_eq!(expired.len(), 1, "only the provider's initialize is pending");
+        drop(expired);
+        self.wait_for_writer();
+    }
+
+    pub(super) fn assert_peers_exited(&self) {
+        for peer in &self.peers { peer.assert_exited(); }
     }
 }
 

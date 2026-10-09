@@ -158,6 +158,20 @@ fn dedicated_rework_stop_cleans_claude_with_parked_admission() { dedicated_rewor
 #[cfg(windows)]
 #[test]
 fn dedicated_rework_stop_cleans_acp_with_parked_admission() { dedicated_rework_stop_case(true, DedicatedStopCase::WaitingIntent); }
+// An expired initialize deadline is the product's designed cleanup: the writer
+// kills the dedicated tree, root socket included. The fixture's root never
+// answers initialize, so the fixture keeps that deadline off the wall clock;
+// otherwise, under load, it could expire before the stop case first writes
+// to the root.
+#[cfg(windows)]
+#[test]
+fn dedicated_rework_acp_initialize_deadline_kills_fake_root() {
+    let (_state, _session, _transport, owner) = dedicated_parked_fixture(true);
+    owner.expire_initialize();
+    owner.await_exit();
+    assert!(owner.tree.is_confirmed(), "the failed handshake's cleanup confirms the exact tree");
+    owner.assert_peers_exited();
+}
 #[cfg(windows)]
 #[test]
 fn dedicated_rework_stop_cleans_owner_with_no_wire_intent() { dedicated_rework_stop_case(false, DedicatedStopCase::WaitingNoIntent); }
