@@ -294,8 +294,8 @@ fn engram_raw_first_word(line: &str) -> &str {
 }
 
 /// Whether `raw`, the program word of a line exactly as written, is one the
-/// declared route takes, the single rule for a bare declared line's program
-/// and a wrapper's shell alike: unquoted (PowerShell reads a quoted first
+/// declared route takes for a bare declared line's program or an unquoted
+/// wrapper's shell: unquoted (PowerShell reads a quoted first
 /// word as a string, not a command), only letters, digits and
 /// `. _ / : @ + -` (so no operator, redirection, substitution, escape or
 /// non-ASCII character can make a shell run something else under the
@@ -386,29 +386,54 @@ fn engram_declared_candidate(command: &str) -> Option<(EngramCheckCommand, Vec<S
 ///   absolute path (a relative one may be anything the agent wrote), and
 ///   does not end in `.cmd`, `.bat` or `.ps1` (a shim runs under cmd or
 ///   another PowerShell).
+/// - Codex's Windows executable envelope also permits one whole double-quoted
+///   drive-absolute path ending in `pwsh.exe`. Its path holds only the same
+///   literal characters plus spaces and backslashes, with a colon only after
+///   the drive letter; it cannot contain expansion or joined quoted pieces.
 /// - bash, sh and zsh take exactly one flag word, `-c` or `-lc`; pwsh takes
 ///   any of `-NoProfile`, `-NonInteractive` and `-NoLogo`, then `-Command`
 ///   or `-c`, each spelled exactly (case aside).
 /// - The script is the rest of the line: one single-quoted word with no `'`
 ///   inside, which every shell passes on literally.
 fn engram_declared_wrapper_script(line: &str) -> Option<&str> {
-    let shell = engram_raw_first_word(line);
-    let name = engram_program_name(shell);
-    let lower = shell.to_ascii_lowercase();
-    let absolute = shell.starts_with('/')
-        || (shell.len() > 2
-            && shell.as_bytes()[0].is_ascii_alphabetic()
-            && &shell[1..3] == ":/");
-    if !engram_declared_program_word(shell)
-        || !matches!(name.as_str(), "bash" | "sh" | "zsh" | "pwsh")
-        || [".cmd", ".bat", ".ps1"]
-            .iter()
-            .any(|ending| lower.ends_with(ending))
-        || (shell.contains('/') && !absolute)
-    {
-        return None;
-    }
-    let mut rest = &line[line.find(shell)? + shell.len()..];
+    let (name, mut rest) = if let Some(quoted) = line.strip_prefix('"') {
+        let (shell, rest) = quoted.split_once('"')?;
+        let bytes = shell.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || !matches!(bytes[2], b'/' | b'\\')
+            || !shell[2..].chars().all(|character| {
+                character.is_ascii_alphanumeric() || "._/\\@+- ".contains(character)
+            })
+            || !shell
+                .rsplit(['/', '\\'])
+                .next()?
+                .eq_ignore_ascii_case("pwsh.exe")
+            || !rest.starts_with([' ', '\t'])
+        {
+            return None;
+        }
+        ("pwsh".to_owned(), rest)
+    } else {
+        let shell = engram_raw_first_word(line);
+        let name = engram_program_name(shell);
+        let lower = shell.to_ascii_lowercase();
+        let absolute = shell.starts_with('/')
+            || (shell.len() > 2
+                && shell.as_bytes()[0].is_ascii_alphabetic()
+                && &shell[1..3] == ":/");
+        if !engram_declared_program_word(shell)
+            || !matches!(name.as_str(), "bash" | "sh" | "zsh" | "pwsh")
+            || [".cmd", ".bat", ".ps1"]
+                .iter()
+                .any(|ending| lower.ends_with(ending))
+            || (shell.contains('/') && !absolute)
+        {
+            return None;
+        }
+        (name, &line[line.find(shell)? + shell.len()..])
+    };
     let mut options = Vec::new();
     loop {
         rest = rest.trim_start_matches([' ', '\t']);

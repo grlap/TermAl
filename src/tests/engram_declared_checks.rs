@@ -1829,6 +1829,106 @@ fn a_wrapped_declared_line_runs_end_to_end() {
     assert!(refs(&checkpoint["verification_evidence"][0]).contains(&"kind:declared".to_owned()));
 }
 
+const CODEX_WINDOWS_PWSH: &str =
+    r#"C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe\pwsh.exe"#;
+
+#[test]
+fn codex_windows_pwsh_exact_wrapper_shapes_are_recognized() {
+    let declared = engram_declared_words(DECLARED_TEST).expect("readable declaration");
+    for options in [
+        "-Command",
+        "-c",
+        "-NoProfile -NonInteractive -NoLogo -Command",
+        "-noprofile -command",
+    ] {
+        let wrapped = format!("\"{CODEX_WINDOWS_PWSH}\" {options} '{DECLARED_TEST}'");
+        let (command, words) =
+            engram_declared_candidate(&wrapped).expect("Codex's Windows pwsh envelope");
+        assert_eq!(words, declared, "{wrapped}");
+        assert_eq!(command.program, "dotnet");
+        assert_eq!(command.dialect, EngramShellDialect::PowerShell);
+    }
+    for executable in [
+        r#"C:/Program Files/PowerShell/7/pwsh.exe"#,
+        r#"c:\tools\PWSH.EXE"#,
+    ] {
+        let wrapped = format!("\"{executable}\" -Command '{DECLARED_TEST}'");
+        let (_, words) = engram_declared_candidate(&wrapped).expect("literal Windows pwsh path");
+        assert_eq!(words, declared, "{wrapped}");
+    }
+}
+
+#[test]
+fn codex_windows_pwsh_records_a_declared_pass_end_to_end() {
+    let turn = CheckedTurn::start("declared-codex-windows-pwsh", true);
+    declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
+    let wrapped = format!("\"{CODEX_WINDOWS_PWSH}\" -Command '{DECLARED_TEST}'");
+    turn.run("check-1", &wrapped, EngramCommandExit::Code(0), || {
+        write_artifact(&turn, PASSING_TRX);
+    });
+    let checkpoint = turn.finish();
+
+    assert_eq!(producer_outcome(&checkpoint), "succeeded", "{checkpoint:#}");
+    assert!(refs(&checkpoint["verification_evidence"][0]).contains(&"kind:declared".to_owned()));
+}
+
+#[test]
+fn codex_windows_pwsh_refuses_other_or_ambiguous_wrappers() {
+    for executable in [
+        r#"C:\Program Files\PowerShell\powershell.exe"#,
+        r#"C:\Windows\System32\cmd.exe"#,
+        r#"C:\tools\bash.exe"#,
+        r#"tools\pwsh.exe"#,
+        r#"C:tools\pwsh.exe"#,
+        r#"C:\tools\pwsh.exe.cmd"#,
+        r#"C:\tools\notpwsh.exe"#,
+        r#"\\server\tools\pwsh.exe"#,
+        r#"%ProgramFiles%\PowerShell\7\pwsh.exe"#,
+        r#"C:\$env:TOOLS\pwsh.exe"#,
+        r#"C:\tools`\pwsh.exe"#,
+        r#"C:\tools;other\pwsh.exe"#,
+        r#"C:\tools:stream\pwsh.exe"#,
+    ] {
+        let wrapped = format!("\"{executable}\" -Command '{DECLARED_TEST}'");
+        assert!(engram_declared_candidate(&wrapped).is_none(), "{wrapped}");
+    }
+    for wrapped in [
+        format!("\"{CODEX_WINDOWS_PWSH}\" -ExecutionPolicy Bypass -Command '{DECLARED_TEST}'"),
+        format!("\"{CODEX_WINDOWS_PWSH}\" -File script.ps1 -Command '{DECLARED_TEST}'"),
+        format!("\"{CODEX_WINDOWS_PWSH}\" -Command -NoProfile '{DECLARED_TEST}'"),
+        format!("\"{CODEX_WINDOWS_PWSH}\" -Command '{DECLARED_TEST}' extra"),
+        format!("\"{CODEX_WINDOWS_PWSH}\" -Command \"{DECLARED_TEST}\""),
+        format!("\"{CODEX_WINDOWS_PWSH}\" -Command {DECLARED_TEST}"),
+        format!("\"{CODEX_WINDOWS_PWSH}\" '-Command' '{DECLARED_TEST}'"),
+        format!("\"{CODEX_WINDOWS_PWSH}\" -Com\"mand\" '{DECLARED_TEST}'"),
+        format!("\"{CODEX_WINDOWS_PWSH}\"suffix -Command '{DECLARED_TEST}'"),
+        format!("'C:\\tools\\pwsh.exe' -Command '{DECLARED_TEST}'"),
+        format!("\"C:\\tools\\\"pwsh.exe -Command '{DECLARED_TEST}'"),
+        format!("\"{CODEX_WINDOWS_PWSH}\" -Command 'dotnet 'test''"),
+    ] {
+        assert!(engram_declared_candidate(&wrapped).is_none(), "{wrapped}");
+    }
+}
+
+#[test]
+fn codex_windows_pwsh_preserves_direct_and_inner_line_rules() {
+    let (_, direct) = engram_declared_candidate(DECLARED_TEST).expect("direct declaration");
+    assert_eq!(direct, engram_declared_words(DECLARED_TEST).unwrap());
+    for line in [
+        "dotnet test && echo done",
+        "dotnet test; echo done",
+        "dotnet test $env:FILTER",
+        "\"dotnet\" test",
+        r#"dotnet test C:\src\orders"#,
+        "cmd /c dotnet test",
+        "powershell -Command dotnet test",
+    ] {
+        assert!(engram_declared_candidate(line).is_none(), "{line}");
+        let wrapped = format!("\"{CODEX_WINDOWS_PWSH}\" -Command '{line}'");
+        assert!(engram_declared_candidate(&wrapped).is_none(), "{wrapped}");
+    }
+}
+
 // Freeze-8 review findings (pair 7): each control below failed on freeze 8.
 
 #[test]
