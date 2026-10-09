@@ -118,6 +118,7 @@ mod remote_terminal;
 mod response_board;
 mod review;
 mod runtime_rpc;
+mod server_instance_lock;
 mod session_actions;
 mod session_body_sequence;
 mod session_history_snapshot;

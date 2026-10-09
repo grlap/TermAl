@@ -1,7 +1,7 @@
-// Boot-time `StateInner` helpers that run during `AppState::new` or
-// `AppState::new_with_paths` to bring persisted state into a healthy,
-// internally-consistent shape before the server begins serving
-// requests.
+// Boot-time `StateInner` helpers that run during `AppState::new_with_paths`
+// (reached in server mode through `AppState::new_server`) to bring persisted
+// state into a healthy, internally-consistent shape before the server begins
+// serving requests.
 //
 // These methods are intentionally grouped together because they all
 // run *before* the runtime is live — before any runtime is spawned,

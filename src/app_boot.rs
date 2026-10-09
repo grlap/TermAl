@@ -405,22 +405,6 @@ fn run_coordination_cleanup_worker(
 }
 
 impl AppState {
-    /// Convenience constructor: resolves the default persistence
-    /// paths from `default_workdir` and hands off to
-    /// [`Self::new_with_paths`]. Callers that need explicit paths
-    /// (tests, the remote-proxy bootstrap) use
-    /// [`Self::new_with_paths`] directly.
-    fn new(default_workdir: String) -> Result<Self> {
-        let default_workdir = normalize_local_user_facing_path(&default_workdir);
-        let persistence_path = resolve_persistence_path(&default_workdir);
-        let orchestrator_templates_path = resolve_orchestrator_templates_path(&default_workdir);
-        Self::new_with_paths(
-            default_workdir,
-            persistence_path,
-            orchestrator_templates_path,
-        )
-    }
-
     /// Builds a fully-initialized [`AppState`] from explicit paths.
     ///
     /// Heavy-lifting entry point — see the file-level comment above
@@ -430,7 +414,9 @@ impl AppState {
     /// AppState doesn't spawn background threads that outlive the
     /// test). Errors surface I/O / parse failures from the persisted
     /// state file; consistency failures from `state_boot.rs` helpers
-    /// also bubble up here.
+    /// also bubble up here. It takes no instance lock: the server
+    /// enters through `AppState::new_server` (`server_instance_lock.rs`),
+    /// which locks the data directory before calling it.
     fn new_with_paths(
         default_workdir: String,
         persistence_path: PathBuf,

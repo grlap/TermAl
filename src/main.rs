@@ -146,7 +146,9 @@ async fn run_server() -> Result<()> {
         .unwrap_or(8787);
     let address = SocketAddr::from(([127, 0, 0, 1], port));
 
-    let state = AppState::new(cwd.clone())?;
+    // The data directory's instance lock is taken before anything is loaded
+    // and held until the process exits, after every background writer.
+    let state = AppState::new_server(cwd.clone())?;
     let shutdown_state = state.clone();
     let app = app_router(state.clone()).fallback_service(
         ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
@@ -904,6 +906,7 @@ include!("delegation_followup_admission.rs");
 include!("delegation_result_parser.rs");
 include!("ids.rs");
 include!("app_boot.rs");
+include!("server_instance_lock.rs");
 include!("telegram_settings.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");

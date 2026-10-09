@@ -672,8 +672,21 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 |-- termal.sqlite          # primary store: app_state + sessions + delegations tables (+ WAL/-shm sidecars)
 |-- coordination.sqlite    # mailbox + coordination-board tables, isolated writer/WAL
 |-- orchestrators.json     # reusable orchestrator templates
+|-- termal-server.lock     # exclusive OS lock held by the one server using this directory
+|-- termal-server.owner    # the lock holder's pid, start time and workdir, for the refusal message only
 `-- telegram-bot.json      # optional Telegram runtime-only state; config in app preferences, token in OS credential store
 ```
+
+Only one server process uses a data directory at a time. Server mode takes an
+exclusive OS file lock on `termal-server.lock` before it loads, recovers or
+persists anything (`AppState::new_server`, `src/server_instance_lock.rs`), and
+holds it until the process exits, past every background writer; the port does
+not matter. A second server start on
+the same directory exits with a message naming the data directory, the lock
+file and the holder recorded in `termal-server.owner`. The OS releases the
+lock when its process exits or crashes, so there is no stale-lock cleanup; the
+owner file decides nothing. A filesystem that cannot lock files also refuses
+the start rather than run unprotected.
 
 Background persistence favors UI responsiveness over hard-kill durability. A
 normal shutdown drains the persist worker before exit, but SIGKILL, power loss,
@@ -1436,6 +1449,7 @@ termal/
 |   |-- state_accessors.rs   # snapshot / readiness cache / session-state readers
 |   |-- state_boot.rs        # boot-time: discovered Codex threads + recovery + normalize
 |   |-- app_boot.rs          # AppState::new_with_paths — the heavy startup wiring
+|   |-- server_instance_lock.rs # server mode: data-directory instance lock, then boot
 |   |-- sse_broadcast.rs     # commit_locked + persist-wake + state/delta/file broadcast
 |   |-- persist.rs           # SQLite schema + persist_delta_via_cache + connection cache
 |   |-- persisted_state.rs   # disk-projection types (PersistedState / PersistedSessionRecord)
