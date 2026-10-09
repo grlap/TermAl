@@ -831,6 +831,7 @@ fn pending_engram_grant(
     grant_id: impl Into<String>,
 ) -> EngramPendingDispatch {
     EngramPendingDispatch {
+        causal_failure: None,
         dispatch_generation,
         intent_fingerprint: format!("pending-grant-{dispatch_generation}"),
         evaluated: EngramDispatchEvaluation::Grant {
@@ -11426,6 +11427,7 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
         Some("api-rejection-stale-grant".to_owned()),
         None,
         EngramControlCard {
+            causal_failure: None,
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
             assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
@@ -16064,6 +16066,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
             .expect("child should be mutable");
         record.engram.active_grant_id = Some("preexisting-open-grant".to_owned());
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint: "degraded-card-preserves-grant".to_owned(),
             evaluated: EngramDispatchEvaluation::Degraded {
@@ -16084,6 +16087,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
         None,
         None,
         EngramControlCard {
+            causal_failure: None,
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
             assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
@@ -16207,6 +16211,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
         });
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint,
             evaluated: EngramDispatchEvaluation::Grant {
@@ -16242,6 +16247,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
         Some("persist-failure-grant".to_owned()),
         None,
         EngramControlCard {
+            causal_failure: None,
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
             assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),

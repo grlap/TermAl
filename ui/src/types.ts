@@ -915,6 +915,7 @@ export type EngramControlDecision =
   | "refuse"
   | "degraded";
 export type EngramControlDispatch =
+  | "withheld"
   | "sent_on_grant"
   | "sent_without_grant"
   | "queued";
@@ -926,6 +927,19 @@ export type EngramControlDirective = {
   satisfaction: string;
 };
 export type EngramControlMessage = BaseMessage & {
+  causalFailure?: {
+    operation: string;
+    failureClass: "local_state" | "deadline" | "transport" | "protocol" | "remote" | "backoff" | "producer_refusal";
+    originalCode?: string | null;
+    message: string;
+    boundary: string;
+    attemptId?: string | null;
+    remoteApplication: "unknown" | "not_started" | "refused";
+    continuationReason: string;
+    continuationId?: string | null;
+    turnGeneration?: number | null;
+    authorityFingerprint?: string | null;
+  } | null;
   type: "engramControl";
   schemaVersion: number;
   stage: EngramControlStage;

@@ -662,12 +662,36 @@ impl AppState {
         if !scheduled {
             clear_engram_admission_retry(record);
         }
+        let latest_card = record.session.messages.iter().rposition(|message| matches!(message, Message::EngramControl { .. }));
+        if let Some(cause) = latest_card.and_then(|index| match &mut record.session.messages[index] {
+            Message::EngramControl { card, .. } => card.causal_failure.as_mut(),
+            _ => None,
+        }) {
+            cause.publication_pending = true;
+            let disposition = if scheduled {
+                "Automatic retry scheduled by the existing admission scheduler, pending durable acknowledgement."
+            } else if interrupted {
+                "Automatic continuation withheld: retained authorization requires reconciliation."
+            } else if defer {
+                "Automatic continuation deferred by the producer."
+            } else {
+                "Automatic continuation withheld: existing scheduler did not admit a retry; prompt retained."
+            };
+            cause.continuation_reason = format!("{} {}", cause.continuation_reason, disposition);
+        }
         record.session.live_activity = None;
         // No provider handoff occurred. Do not run terminal failure refresh:
         // it would fail the delegation and delete the very intent being held.
         clear_active_turn_file_change_tracking(record);
         sync_pending_prompts(record);
-        let persisted = self.commit_locked(&mut inner);
+        let updates = message_updated_delta_parts_for_indices(record, latest_card.into_iter().collect());
+        let persisted = self.commit_locked_with_persist_dispatch(&mut inner);
+        let publication = if let Ok((revision, dispatch)) = &persisted {
+            self.publish_message_updated_delta_parts(&inner, *revision, updates);
+            latest_card.and_then(|message_index| self.prepare_engram_causal_publication_locked(
+                &inner, session_id, message_index, *dispatch,
+            ))
+        } else { None };
         if scheduled {
             // Nothing is replayed before the record is durably acknowledged.
             self.request_engram_abort_acknowledgement_locked(&mut inner, index);
@@ -680,6 +704,8 @@ impl AppState {
             self.publish_state_locked(&inner);
             return EngramAuthorizationParkOutcome::PersistenceUnknown;
         }
+        drop(inner);
+        self.finish_engram_causal_publication(publication);
         EngramAuthorizationParkOutcome::Parked
     }
 
@@ -761,16 +787,19 @@ impl AppState {
                 owner,
                 "Recovered session status",
             )?;
+            // A typed parse error keeps this exact request's attribution; the
+            // restore decisions below are unchanged.
+            let status_request = EngramControlRequest::SessionStatus {
+                routing_token: routing_token.clone(),
+            };
             let status = target
                 .adapter
-                .request(
-                    &target.connection,
-                    &EngramControlRequest::SessionStatus {
-                        routing_token: routing_token.clone(),
-                    },
-                    timeout,
-                )
-                .and_then(parse_engram_result::<EngramSessionStatusResponse>)?;
+                .request(&target.connection, &status_request, timeout)
+                .and_then(parse_engram_result::<EngramSessionStatusResponse>)
+                .map_err(|mut error| {
+                    error.causal_failure = Some(EngramCausalFailure::request(&error, &status_request));
+                    error
+                })?;
             self.require_queued_engram_owner(
                 &target.connection.session_id,
                 owner,
@@ -805,26 +834,28 @@ impl AppState {
                         owner,
                         "Recovered grant checkpoint",
                     )?;
+                    let checkpoint_request = EngramControlRequest::TurnCheckpoint {
+                        routing_token: routing_token.clone(),
+                        grant_id: grant_id.clone(),
+                        next_intent: EngramNextIntent::Wait,
+                        report: EngramTurnReport::default(),
+                        idempotency_key: engram_checkpoint_idempotency_key(
+                            format!(
+                                "termal-restart-checkpoint:{}:{grant_id}",
+                                target.connection.session_id
+                            ),
+                            &EngramTurnReport::default(),
+                        ),
+                    };
                     let response = target
                         .adapter
-                        .request(
-                            &target.connection,
-                            &EngramControlRequest::TurnCheckpoint {
-                                routing_token: routing_token.clone(),
-                                grant_id: grant_id.clone(),
-                                next_intent: EngramNextIntent::Wait,
-                                report: EngramTurnReport::default(),
-                                idempotency_key: engram_checkpoint_idempotency_key(
-                                    format!(
-                                        "termal-restart-checkpoint:{}:{grant_id}",
-                                        target.connection.session_id
-                                    ),
-                                    &EngramTurnReport::default(),
-                                ),
-                            },
-                            timeout,
-                        )
-                        .and_then(parse_engram_result::<EngramTurnCheckpointResponse>)?;
+                        .request(&target.connection, &checkpoint_request, timeout)
+                        .and_then(parse_engram_result::<EngramTurnCheckpointResponse>)
+                        .map_err(|mut error| {
+                            error.causal_failure =
+                                Some(EngramCausalFailure::request(&error, &checkpoint_request));
+                            error
+                        })?;
                     self.require_queued_engram_owner(
                         &target.connection.session_id,
                         owner,

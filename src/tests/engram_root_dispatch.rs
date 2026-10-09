@@ -4,6 +4,9 @@
 
 use super::*;
 
+#[path = "engram_root_causal_failure.rs"]
+mod causal_failure;
+
 #[path = "engram_root_recovery_corrections.rs"]
 mod recovery_corrections;
 

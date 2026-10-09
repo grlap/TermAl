@@ -1463,6 +1463,39 @@ fn an_unknown_evaluate_or_begin_never_becomes_a_bind_only_retry() {
     }
 }
 
+// The dispatch card's optional causal details are acknowledged by their own
+// fence, sent before this test's bind-retry fence. Write that card fence for
+// real here and return every other request, in order, for the test.
+fn deliver_serving_causal_card(
+    state: &AppState,
+    dispatch: TurnDispatch,
+    rx: &mpsc::Receiver<PersistRequest>,
+) -> std::collections::VecDeque<PersistRequest> {
+    deliver_turn_dispatch(state, dispatch).unwrap();
+    let mut held = std::collections::VecDeque::new();
+    let mut cache = SqlitePersistConnectionCache::new();
+    let mut batch = PersistFenceBatch::default();
+    while let Ok(request) = rx.try_recv() {
+        match request {
+            PersistRequest::Fence(fence)
+                if matches!(fence.target, PersistFenceTarget::EngramCausalCard { .. }) =>
+            {
+                batch.accept(PersistRequest::Fence(fence));
+                let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
+                persist_delta_with_fences(
+                    &mut cache,
+                    state.persistence_path.as_path(),
+                    &delta,
+                    &mut batch,
+                )
+                .unwrap();
+            }
+            request => held.push_back(request),
+        }
+    }
+    held
+}
+
 #[test]
 fn pending_and_failed_retry_acknowledgements_never_release_the_head() {
     let (mut state, session, receiver, transport) = root_fixture([
@@ -1475,9 +1508,14 @@ fn pending_and_failed_retry_acknowledgements_never_release_the_head() {
     state.shutdown_persist_blocking();
     let (tx, rx) = mpsc::channel();
     state.persist_tx = tx;
-    deliver_turn_dispatch(&state, dispatch).unwrap();
+    let held = deliver_serving_causal_card(&state, dispatch, &rx);
+    let held = std::cell::RefCell::new(held);
     let next_fence = || loop {
-        if let PersistRequest::Fence(fence) = receive(&rx, "bind retry acknowledgement") {
+        let request = held
+            .borrow_mut()
+            .pop_front()
+            .unwrap_or_else(|| receive(&rx, "bind retry acknowledgement"));
+        if let PersistRequest::Fence(fence) = request {
             break fence;
         }
     };

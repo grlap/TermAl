@@ -10,6 +10,7 @@ delegation admission, provider delivery, SQL schema, or HTTP response policy.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone)]
 enum PersistFenceTarget {
+    EngramCausalCard { session_id: String, message_id: String, content: Value },
     EngramRecovery { session_id: String, content: Value },
     EngramWorkAuthority(Box<EngramAuthorityImage>),
     EngramAdmission {
@@ -45,7 +46,7 @@ impl PersistFenceTarget {
             Self::EngramWorkAuthority(image) => image.matches_metadata(&delta.metadata),
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
-            Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
+            Self::EngramCausalCard { .. } | Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
                 | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
                 | Self::EngramSourceRemoval { .. } => false,
             Self::Delegation(expected) => delta
@@ -71,6 +72,14 @@ impl PersistFenceTarget {
     /// not open another connection or treat row existence as proof.
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         match self {
+            Self::EngramCausalCard { session_id, message_id, content } => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM messages WHERE session_id = ?1 AND message_id = ?2",
+                    rusqlite::params![session_id, message_id], |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false); };
+                Ok(serde_json::from_str::<Value>(&stored)? == *content)
+            }
             Self::EngramRecovery { session_id, content } => {
                 let stored: Option<String> = connection.query_row(
                     "SELECT value_json FROM sessions WHERE id = ?1", [session_id], |row| row.get(0),
@@ -206,16 +215,21 @@ struct PersistFenceCompletion {
 }
 
 impl PersistFenceCompletion {
-    fn resolve_at(&self, result: PersistFenceResult, now: std::time::Instant) {
+    /// True only when this call recorded a successful acknowledgement.
+    fn resolve_at(&self, result: PersistFenceResult, now: std::time::Instant) -> bool {
         let mut slot = self.result.lock().expect("persist fence mutex poisoned");
         if slot.is_none() {
-            *slot = Some(if now >= self.deadline {
+            let resolved = if now >= self.deadline {
                 Err(PersistFenceError::Deadline)
             } else {
                 result
-            });
+            };
+            let acknowledged = resolved.is_ok();
+            *slot = Some(resolved);
             self.changed.notify_all();
+            return acknowledged;
         }
+        false
     }
 
     fn poll_at(&self, now: std::time::Instant) -> Option<PersistFenceResult> {
@@ -228,9 +242,14 @@ impl PersistFenceCompletion {
     }
 }
 
+/// Runs once, on the thread that records this fence's successful ACK, after
+/// the completion mutex is released. Never on a failure, Deadline or Drop.
+type PersistFenceAcknowledgement = Box<dyn FnOnce() + Send>;
+
 struct PersistFence {
     target: PersistFenceTarget,
     completion: Arc<PersistFenceCompletion>,
+    on_acknowledged: Mutex<Option<PersistFenceAcknowledgement>>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -259,15 +278,37 @@ impl PersistFence {
             Self {
                 target,
                 completion: completion.clone(),
+                on_acknowledged: Mutex::new(None),
             },
             PersistFenceWaiter { completion },
         )
     }
 
+    /// A completion hook for a caller that does not wait. It adds no timer or
+    /// retry: the fence still resolves only by the writer, its deadline or
+    /// its drop, and the hook runs only for the writer's exact ACK.
+    fn on_acknowledged(self, hook: impl FnOnce() + Send + 'static) -> Self {
+        if let Ok(mut slot) = self.on_acknowledged.lock() {
+            *slot = Some(Box::new(hook));
+        }
+        self
+    }
+
     fn finish(&self, result: PersistFenceResult) {
-        self.completion
+        let acknowledged = self
+            .completion
             .resolve_at(result, self.completion.clock.now());
         self.completion.clock.notify();
+        if acknowledged {
+            let hook = self
+                .on_acknowledged
+                .lock()
+                .ok()
+                .and_then(|mut slot| slot.take());
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
     }
 }
 

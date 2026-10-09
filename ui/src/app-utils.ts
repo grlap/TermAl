@@ -278,7 +278,7 @@ export function messageChangeMarker(message: Message) {
         .map((file) => `${file.kind}:${file.path}`)
         .join("|")}`;
     case "engramControl":
-      return `${message.type}:${message.stage}:${message.decision}:${message.refusalCode ?? "none"}:${message.latencyMs.total}`;
+      return `${message.type}:${message.stage}:${message.decision}:${message.refusalCode ?? "none"}:${message.latencyMs.total}:${JSON.stringify(message.causalFailure ?? null)}`;
     case "subagentResult":
       return `${message.type}:${message.title.length}:${message.summary.length}`;
     case "approval":

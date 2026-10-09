@@ -479,7 +479,12 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
 }
 
 /// Pushes message on record.
-fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
+fn push_message_on_record(record: &mut SessionRecord, mut message: Message) -> usize {
+    if let Message::EngramControl { card, .. } = &mut message
+        && let Some(cause) = &mut card.causal_failure
+    {
+        cause.publication_pending = true;
+    }
     insert_message_on_record(record, record.session.messages.len(), message)
 }
 

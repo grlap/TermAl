@@ -3258,6 +3258,7 @@ impl AppState {
             grant_id,
             EngramControlCardDecision::Degraded,
             EngramControlCard {
+                causal_failure: None,
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                 stage: EngramControlStage::Checkpoint,
                 assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),

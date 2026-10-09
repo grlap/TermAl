@@ -523,6 +523,13 @@ impl PersistedSessionRecord {
     /// Builds the value from record.
     fn from_record(record: &SessionRecord) -> Self {
         let mut session = record.session.clone();
+        for message in &mut session.messages {
+            if let Message::EngramControl { card, .. } = message
+                && let Some(cause) = &mut card.causal_failure
+            {
+                cause.publication_pending = false;
+            }
+        }
         if record.is_local_session() {
             session.pending_prompts.clear();
         }

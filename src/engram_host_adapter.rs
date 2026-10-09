@@ -916,6 +916,7 @@ enum EngramTransportErrorKind {
 
 #[derive(Clone, Debug)]
 struct EngramTransportError {
+    causal_failure: Option<EngramCausalFailure>,
     kind: EngramTransportErrorKind,
     code: Option<String>,
     message: String,
@@ -929,6 +930,7 @@ impl EngramTransportError {
     fn local_state(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::LocalState,
+            causal_failure: None,
             code: Some("control_binding_unavailable".to_owned()),
             message: message.into(),
             process_never_started: true,
@@ -938,6 +940,7 @@ impl EngramTransportError {
     fn deadline(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Deadline,
+            causal_failure: None,
             code: Some("deadline_exceeded".to_owned()),
             message: message.into(),
             process_never_started: false,
@@ -947,6 +950,7 @@ impl EngramTransportError {
     fn transport(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Transport,
+            causal_failure: None,
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
             process_never_started: false,
@@ -964,6 +968,7 @@ impl EngramTransportError {
     fn protocol(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Protocol,
+            causal_failure: None,
             code: Some("unknown_control_schema".to_owned()),
             message: message.into(),
             process_never_started: false,
@@ -973,6 +978,7 @@ impl EngramTransportError {
     fn remote(error: EngramControlErrorBody) -> Self {
         Self {
             kind: EngramTransportErrorKind::Remote,
+            causal_failure: None,
             code: Some(error.code),
             message: error.message,
             process_never_started: false,
@@ -982,6 +988,7 @@ impl EngramTransportError {
     fn backoff(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Backoff,
+            causal_failure: None,
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
             process_never_started: false,
@@ -2153,9 +2160,7 @@ fn run_engram_json_command(
             format!("Engram {label} failed: {detail}")
         }));
     }
-    serde_json::from_slice(&output.stdout).map_err(|error| {
-        EngramTransportError::protocol(format!("invalid Engram {label} response: {error}"))
-    })
+    engram_decode_slice(&output.stdout, &format!("invalid Engram {label} response"))
 }
 
 fn run_engram_cli_command(
@@ -2412,7 +2417,10 @@ impl EngramHostAdapter {
         request: &EngramControlRequest,
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError> {
-        self.transport.request(connection, request, timeout)
+        self.transport.request(connection, request, timeout).map_err(|mut error| {
+            error.causal_failure = Some(EngramCausalFailure::request(&error, request));
+            error
+        })
     }
 
     fn read_work_binding(
@@ -2919,6 +2927,7 @@ impl EngramSessionState {
 
 #[derive(Clone, Debug)]
 struct EngramPendingDispatch {
+    causal_failure: Option<EngramCausalFailure>,
     dispatch_generation: u64,
     intent_fingerprint: String,
     evaluated: EngramDispatchEvaluation,
@@ -3209,6 +3218,8 @@ struct EngramControlLatencyCard {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramControlCard {
+    #[serde(default, skip_serializing_if = "engram_causal_unpublished")]
+    causal_failure: Option<EngramCausalFailure>,
     schema_version: u16,
     stage: EngramControlStage,
     assurance: String,
@@ -3239,9 +3250,60 @@ struct EngramControlCard {
 fn parse_engram_result<T: for<'de> Deserialize<'de>>(
     value: Value,
 ) -> std::result::Result<T, EngramTransportError> {
-    serde_json::from_value(value).map_err(|err| {
-        EngramTransportError::protocol(format!("invalid Engram result schema: {err}"))
+    engram_decode_value(value, "invalid Engram result schema")
+}
+
+// Every decode of received Engram bytes or values reports through this.
+// Serde's Display includes offending values (including capabilities), and
+// path map keys and enum labels may also be remote-controlled. The text keeps
+// only the constant label, the error category and a bounded index-only
+// location, never received text.
+fn engram_value_free_decode_error(
+    label: &str,
+    category: serde_json::error::Category,
+    path: Option<&serde_path_to_error::Path>,
+) -> EngramTransportError {
+    let mut location = "$".to_owned();
+    for (depth, segment) in path.into_iter().flat_map(|path| path.iter()).enumerate() {
+        if depth == 16 {
+            location.push_str("[...]");
+            break;
+        }
+        match segment {
+            serde_path_to_error::Segment::Seq { index } =>
+                location.push_str(&format!("[{index}]")),
+            serde_path_to_error::Segment::Map { .. } => location.push_str("[field]"),
+            serde_path_to_error::Segment::Enum { .. } => location.push_str("[variant]"),
+            serde_path_to_error::Segment::Unknown => location.push_str("[unknown]"),
+        }
+    }
+    EngramTransportError::protocol(format!(
+        "{label}: kind={category:?}; field path={location} (names withheld)"
+    ))
+}
+
+fn engram_decode_value<T: for<'de> Deserialize<'de>>(
+    value: Value,
+    label: &str,
+) -> std::result::Result<T, EngramTransportError> {
+    serde_path_to_error::deserialize(value).map_err(|err| {
+        engram_value_free_decode_error(label, err.inner().classify(), Some(err.path()))
     })
+}
+
+// As serde_json::from_slice, including its trailing-input check.
+fn engram_decode_slice<T: for<'de> Deserialize<'de>>(
+    bytes: &[u8],
+    label: &str,
+) -> std::result::Result<T, EngramTransportError> {
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let decoded = serde_path_to_error::deserialize(&mut deserializer).map_err(|err| {
+        engram_value_free_decode_error(label, err.inner().classify(), Some(err.path()))
+    })?;
+    deserializer
+        .end()
+        .map_err(|err| engram_value_free_decode_error(label, err.classify(), None))?;
+    Ok(decoded)
 }
 
 /// Builds the Engram principal for one hosted agent kind. Display names and
@@ -4339,6 +4401,7 @@ impl AppState {
             let card = EngramControlCard {
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                 stage: EngramControlStage::Restart,
+                causal_failure: None,
                 assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 decision,
                 dispatch: if inner.sessions[index].engram.active_grant_id.is_some() {
@@ -4699,9 +4762,16 @@ impl AppState {
                     report
                 }
             };
-            (grant_id, target, report)
+            (grant_id, target, report, EngramQueuedAdmissionOwner::capture(&inner.sessions[index]))
         };
-        let (grant_id, target, report) = snapshot;
+        let (grant_id, target, report, continuation_owner) = snapshot;
+        let checkpoint_authority = target.as_ref().map(engram_abort_authority);
+        let checkpoint_request = target.as_ref().and_then(|target| target.routing_token.as_ref())
+            .map(|routing_token| EngramControlRequest::TurnCheckpoint {
+                routing_token: routing_token.clone(), grant_id: grant_id.clone(), next_intent,
+                report: report.clone(),
+                idempotency_key: engram_checkpoint_idempotency_key(format!("termal-checkpoint:{}:{}:{}", session_id, grant_id, next_intent.as_idempotency_component()), &report),
+            });
         // The wait for an owed close and the checkpoint call share one call
         // bound, so the checkpoint window teardown waits on stays one call
         // long, and the card's latency includes the wait.
@@ -4724,27 +4794,14 @@ impl AppState {
             before();
         }
         let checkpoint_timeout = call_timeout.saturating_sub(started_at.elapsed());
+        let mut checkpoint_refused = None;
         let outcome = match target {
-            Some(target) => match target.routing_token.as_ref() {
-                Some(routing_token) => target
+            Some(target) => match checkpoint_request.as_ref() {
+                Some(request) => target
                     .adapter
                     .request(
                         &target.connection,
-                        &EngramControlRequest::TurnCheckpoint {
-                            routing_token: routing_token.clone(),
-                            grant_id: grant_id.clone(),
-                            next_intent,
-                            report: report.clone(),
-                            idempotency_key: engram_checkpoint_idempotency_key(
-                                format!(
-                                    "termal-checkpoint:{}:{}:{}",
-                                    session_id,
-                                    grant_id,
-                                    next_intent.as_idempotency_component()
-                                ),
-                                &report,
-                            ),
-                        },
+                        request,
                         checkpoint_timeout,
                     )
                     .and_then(parse_engram_result::<EngramTurnCheckpointResponse>)
@@ -4760,6 +4817,7 @@ impl AppState {
                             ))
                         }
                         EngramTurnCheckpointResponse::Refuse { code } => {
+                            checkpoint_refused = Some(code.clone());
                             Err(EngramTransportError::remote(EngramControlErrorBody {
                                 code,
                                 message: "Engram refused the turn checkpoint".to_owned(),
@@ -4774,6 +4832,27 @@ impl AppState {
                 "Engram checkpoint target is unavailable",
             )),
         };
+        let mut causal_failure = outcome.as_ref().err().map(|error| {
+            if let Some(request) = &checkpoint_request {
+                let mut cause = EngramCausalFailure::request(error, request);
+                if let Some(code) = &checkpoint_refused {
+                    cause = EngramCausalFailure::request_refusal(request, code);
+                }
+                cause
+            } else {
+                let mut cause = EngramCausalFailure::error(error, "turn_checkpoint", None, &[]);
+                cause.remote_application = EngramRemoteApplication::NotStarted;
+                cause
+            }
+        });
+        if let Some(cause) = &mut causal_failure {
+            cause.continuation_reason = "Closing checkpoint not settled; continuation cannot assume the prior grant closed.".to_owned();
+            cause.authority_fingerprint = checkpoint_authority;
+            if let Some(owner) = continuation_owner {
+                cause.continuation_id = Some(engram_causal_text(&owner.prompt_id, &[]));
+                cause.turn_generation = Some(owner.active_turn_generation);
+            }
+        }
         match &outcome {
             Ok(()) => self.record_engram_transport_success(session_id),
             Err(error) => self.record_engram_transport_failure(session_id, error),
@@ -4800,6 +4879,7 @@ impl AppState {
         let card = EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Checkpoint,
+            causal_failure,
             assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
             decision,
             // A checkpoint exists iff this turn was begun from a grant; the
@@ -4874,7 +4954,7 @@ impl AppState {
     ) {
         let exited = matches!(card.next_intent, Some(EngramNextIntent::Exit));
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let (revision, creates) = {
+        let (revision, creates, publication) = {
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
@@ -4917,8 +4997,8 @@ impl AppState {
                 },
             );
             let creates = message_created_delta_parts_for_indices(record, vec![message_index]);
-            let revision = match self.commit_persisted_delta_locked(&mut inner) {
-                Ok(revision) => revision,
+            let (revision, dispatch) = match self.bump_revision_and_persist_locked_with_dispatch(&mut inner) {
+                Ok(committed) => committed,
                 Err(error) => {
                     eprintln!(
                         "engram> session={session_id} failed persisting checkpoint card: {error:#}"
@@ -4926,10 +5006,14 @@ impl AppState {
                     return;
                 }
             };
-            (revision, creates)
+            let publication = self.prepare_engram_causal_publication_locked(
+                &inner, session_id, message_index, dispatch,
+            );
+            (revision, creates, publication)
         };
         self.publish_message_created_delta_parts(&inner, revision, creates);
         drop(inner);
+        self.finish_engram_causal_publication(publication);
         if decision == EngramControlCardDecision::Grant {
             if let Err(error) = self.finalize_delivered_source_observations(session_id) {
                 eprintln!("engram> session={session_id} source finalization remains recoverable: {error}");
@@ -4997,6 +5081,7 @@ impl AppState {
             target.admission_started_at = Some(pending.started_at);
         }
         let mut evaluation = pending.evaluated.clone();
+        let mut causal_failure = pending.causal_failure.clone();
         let retained_bind_proof = match &evaluation {
             EngramDispatchEvaluation::RetainedBindFailure { proof, .. } => Some(proof.clone()),
             _ => None,
@@ -5004,6 +5089,7 @@ impl AppState {
         let mut evaluate_latency_ms = pending.evaluate_latency_ms;
         let mut begin_latency_ms = None;
         let mut retry_used = false;
+        let mut healing_refusal = None;
         let dispatch_budget_started_at = pending.started_at;
         let mut active_grant_id = None;
         let mut begin_root_projection_present = false;
@@ -5086,39 +5172,47 @@ impl AppState {
                             .and_then(|index| inner.sessions[index].engram.work_binding.clone())
                     };
                     let mut begin_root_guard = None;
+                    let begin_request = EngramControlRequest::TurnBegin {
+                        routing_token: routing_token.clone(), grant_id: grant_id.clone(), delivery_tokens,
+                        idempotency_key: self.queued_engram_begin_key(session_id, pending.dispatch_generation, &grant_id),
+                    };
                     let begin = self
                         .guard_engram_root_read_until(
                             target,
                             begin_binding.as_ref(),
                             target.dispatch_deadline(dispatch_budget_started_at),
                         )
+                        .map_err(|mut error| {
+                            error.causal_failure = Some(EngramCausalFailure::unsent_request(&error, &begin_request, "named-root guard before Begin"));
+                            error
+                        })
                         .and_then(|guard| {
                             begin_root_guard = guard;
                             target
                                 .adapter
                                 .request(
                                     &target.connection,
-                                    &EngramControlRequest::TurnBegin {
-                                        routing_token: routing_token.clone(),
-                                        grant_id: grant_id.clone(),
-                                        delivery_tokens,
-                                        idempotency_key: self.queued_engram_begin_key(
-                                            session_id,
-                                            pending.dispatch_generation,
-                                            &grant_id,
-                                        ),
-                                    },
+                                    &begin_request,
                                     target.rpc_timeout_until(
                                         target.dispatch_deadline(dispatch_budget_started_at),
-                                    )?,
+                                    ).map_err(|mut error| {
+                                        error.causal_failure = Some(EngramCausalFailure::unsent_request(&error, &begin_request, "Begin budget before transmission"));
+                                        error
+                                    })?,
                                 )
                                 .and_then(parse_engram_result::<EngramTurnBeginResponse>)
                         });
                     begin_latency_ms = Some(duration_millis(begin_started.elapsed()));
+                    if let Err(error) = &begin {
+                        causal_failure = Some(EngramCausalFailure::request(error, &begin_request));
+                    }
                     if !admission_owner
                         .as_ref()
                         .is_some_and(|owner| self.queued_engram_owner_is_current(session_id, owner))
                     {
+                        if causal_failure.is_none() {
+                            causal_failure = Some(EngramCausalFailure::request(&EngramTransportError::local_state("Begin reply belonged to a superseded queue owner"), &begin_request));
+                        }
                         match &begin {
                             Ok(EngramTurnBeginResponse::Begin { receipt })
                                 if receipt.grant_id == grant_id =>
@@ -5155,6 +5249,7 @@ impl AppState {
                                 admission_owner.as_ref(),
                             );
                             if receipt.grant_id != grant_id {
+                                causal_failure = Some(EngramCausalFailure::request(&EngramTransportError::protocol("Engram Begin receipt grant id does not match"), &begin_request));
                                 uncertain_grant_id = Some(grant_id.clone());
                                 break (
                                     EngramControlCardDecision::Degraded,
@@ -5183,7 +5278,8 @@ impl AppState {
                                         Some(EngramOpeningRootReason::from_uncertainty(&reason));
                                 }
                                 Ok(_) => {}
-                                Err(_) => {
+                                Err(error) => {
+                                    causal_failure = Some(EngramCausalFailure::error(&error, "named_root_reconciliation", None, &[routing_token]));
                                     break (
                                         EngramControlCardDecision::Degraded,
                                         Some("named_root_reconciliation_failed".to_owned()),
@@ -5212,6 +5308,7 @@ impl AppState {
                                         ))) =>
                         {
                             retry_used = true;
+                            healing_refusal = Some(code.clone());
                             // Engram has definitively rejected this issued
                             // grant. Only a subsequent re-evaluate grant needs
                             // orphan recovery if begin cannot complete.
@@ -5230,13 +5327,13 @@ impl AppState {
                                     session_id,
                                     grant_binding.as_ref(),
                                 );
-                                if self
+                                if let Err(error) = self
                                     .retire_queued_engram_evaluation(
                                         session_id,
                                         admission_owner.as_ref(),
                                     )
-                                    .is_err()
                                 {
+                                    causal_failure = Some(EngramCausalFailure::local(&error, "retire_evaluation", "refusal-healing durable retirement"));
                                     break (
                                         EngramControlCardDecision::Degraded,
                                         Some("authorization_unknown".to_owned()),
@@ -5257,6 +5354,7 @@ impl AppState {
                                 ) {
                                     Ok(Some(refreshed)) => refreshed,
                                     Ok(None) => {
+                                        causal_failure = Some(EngramCausalFailure::local_hold("admission_binding", "binding_unavailable", "Engram binding disappeared during Begin refusal healing", "refusal-healing rebind"));
                                         break (
                                             EngramControlCardDecision::Degraded,
                                             Some("binding_unavailable".to_owned()),
@@ -5266,6 +5364,7 @@ impl AppState {
                                         );
                                     }
                                     Err(error) => {
+                                        causal_failure = Some(EngramCausalFailure::error(&error, "admission_binding", None, &[]));
                                         self.record_queued_engram_transport_failure(
                                             session_id,
                                             &error,
@@ -5296,6 +5395,7 @@ impl AppState {
                             let Some(_) = reevaluate_target
                                 .remaining_dispatch_timeout(dispatch_budget_started_at)
                             else {
+                                causal_failure = Some(EngramCausalFailure::local_hold("turn_evaluate", "dispatch_budget_exhausted", "Engram admission budget exhausted before refusal-healing re-evaluation", "re-evaluation budget before transmission"));
                                 break (
                                     EngramControlCardDecision::Degraded,
                                     Some("dispatch_budget_exhausted".to_owned()),
@@ -5331,6 +5431,8 @@ impl AppState {
                                     .unwrap_or_else(|| reevaluate_target.effects.clone())
                             };
                             let reevaluate_started = std::time::Instant::now();
+                            let mut reevaluate_request = None;
+                            let mut reevaluate_boundary = "refusal-healing durable retirement";
                             // The re-evaluation, and any grant it issues, go
                             // out under the binding the session has now.
                             grant_binding = self.engram_bound_work_binding(session_id);
@@ -5340,6 +5442,7 @@ impl AppState {
                                     admission_owner.as_ref(),
                                 )
                                 .and_then(|()| {
+                                    reevaluate_boundary = "re-evaluation durable preparation";
                                     self.queued_engram_evaluate_request(
                                         &reevaluate_target,
                                         &EngramTurnIntentSnapshot {
@@ -5366,6 +5469,8 @@ impl AppState {
                                     )
                                 })
                                 .and_then(|request| {
+                                    reevaluate_request = Some(request.clone());
+                                    reevaluate_boundary = "re-evaluation before transmission";
                                     self.require_queued_engram_owner(
                                         session_id,
                                         admission_owner.as_ref().ok_or_else(|| {
@@ -5383,24 +5488,30 @@ impl AppState {
                                                  before re-evaluation",
                                             )
                                         })?;
+                                    reevaluate_boundary = "re-evaluation control response";
                                     reevaluate_target.adapter.request(
                                         &reevaluate_target.connection,
                                         &request,
                                         timeout,
                                     )
                                 })
-                                .and_then(parse_engram_result::<EngramTurnDecisionResponse>);
+                                .and_then(|wire| {
+                                    reevaluate_boundary = "re-evaluation response parsing";
+                                    parse_engram_result::<EngramTurnDecisionResponse>(wire)
+                                });
                             if !admission_owner.as_ref().is_some_and(|owner| {
                                 self.queued_engram_owner_is_current(session_id, owner)
                             }) {
                                 reevaluated = Err(EngramTransportError::local_state(
                                     "Re-evaluation reply belonged to a superseded queue owner",
                                 ));
+                                reevaluate_boundary = "re-evaluation reply ownership";
                             }
                             evaluate_latency_ms = evaluate_latency_ms
                                 .saturating_add(duration_millis(reevaluate_started.elapsed()));
                             evaluation = match reevaluated {
                                 Ok(EngramTurnDecisionResponse::Grant { grant }) => {
+                                    causal_failure = None;
                                     let delivered_range = grant.delivery.as_ref().map(|delivery| {
                                         EngramDeliveredRange {
                                             from: delivery.page.from_cursor,
@@ -5424,6 +5535,7 @@ impl AppState {
                                     }
                                 }
                                 Ok(EngramTurnDecisionResponse::Refuse { directive }) => {
+                                    causal_failure = reevaluate_request.as_ref().map(|request| EngramCausalFailure::request_refusal(request, &directive.code));
                                     self.record_queued_engram_transport_success(
                                         session_id,
                                         admission_owner.as_ref(),
@@ -5451,6 +5563,7 @@ impl AppState {
                                     }
                                 }
                                 Ok(EngramTurnDecisionResponse::Defer { deferral }) => {
+                                    causal_failure = None;
                                     self.record_queued_engram_transport_success(
                                         session_id,
                                         admission_owner.as_ref(),
@@ -5468,6 +5581,17 @@ impl AppState {
                                         admission_owner.as_ref(),
                                     );
                                     let code = self.engram_failure_card_code(session_id, &error);
+                                    let mut cause = match reevaluate_request.as_ref() {
+                                        Some(request) => EngramCausalFailure::request(&error, request),
+                                        None => EngramCausalFailure::local(&error, if reevaluate_boundary == "refusal-healing durable retirement" { "retire_evaluation" } else { "turn_evaluate" }, reevaluate_boundary),
+                                    };
+                                    if error.causal_failure.is_none() {
+                                        cause.boundary = reevaluate_boundary.to_owned();
+                                        if reevaluate_boundary.ends_with("preparation") || reevaluate_boundary.ends_with("transmission") {
+                                            cause.remote_application = EngramRemoteApplication::NotStarted;
+                                        }
+                                    }
+                                    causal_failure = Some(cause);
                                     EngramDispatchEvaluation::Degraded {
                                         code,
                                         detail: error.message,
@@ -5476,6 +5600,7 @@ impl AppState {
                             };
                         }
                         Ok(EngramTurnBeginResponse::Refuse { code }) => {
+                            causal_failure = Some(EngramCausalFailure::request_refusal(&begin_request, &code));
                             self.record_queued_engram_transport_success(
                                 session_id,
                                 admission_owner.as_ref(),
@@ -5577,6 +5702,13 @@ impl AppState {
             }
         };
 
+        if causal_failure.is_none() && decision == EngramControlCardDecision::Degraded {
+            let code = refusal_code.as_deref().unwrap_or("authorization_unknown");
+            causal_failure = Some(EngramCausalFailure::local_hold("turn_begin", code, "Begin preparation withheld the current request before transmission", "Begin preparation"));
+        }
+        if let (Some(cause), Some(code)) = (&mut causal_failure, healing_refusal) {
+            cause.continuation_reason.push_str(&format!(" During healing of Begin refusal {}.", engram_causal_text(&code, &[])));
+        }
         let repair_armed = issued_unbegun_grant_id.is_some()
             || (decision == EngramControlCardDecision::Refuse
                 && refusal_code
@@ -5595,6 +5727,7 @@ impl AppState {
         let card = EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
+            causal_failure,
             assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
             decision,
             dispatch,
@@ -5979,7 +6112,7 @@ impl AppState {
         defer_not_before: Option<chrono::DateTime<chrono::Utc>>,
     ) -> EngramDispatchRecordFinish {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let (revision, creates) = {
+        let (revision, creates, publication) = {
             let Some(index) = inner.find_session_index(session_id) else {
                 return EngramDispatchRecordFinish::Superseded;
             };
@@ -6175,8 +6308,8 @@ impl AppState {
                     queue_projection_hash: Some(Self::queue_projection_hash(record)),
                 });
             }
-            let revision = match self.commit_persisted_delta_locked(&mut inner) {
-                Ok(revision) => revision,
+            let (revision, dispatch) = match self.bump_revision_and_persist_locked_with_dispatch(&mut inner) {
+                Ok(committed) => committed,
                 Err(error) => {
                     // An ambiguous durable write never grants permission to
                     // send. Keep the queued intent for reconciliation.
@@ -6248,9 +6381,14 @@ impl AppState {
                     return EngramDispatchRecordFinish::PersistenceUnknown;
                 }
             };
-            (revision, creates)
+            let publication = self.prepare_engram_causal_publication_locked(
+                &inner, session_id, message_index, dispatch,
+            );
+            (revision, creates, publication)
         };
         self.publish_message_created_delta_parts(&inner, revision, creates);
+        drop(inner);
+        self.finish_engram_causal_publication(publication);
         EngramDispatchRecordFinish::Ready
     }
 
@@ -6793,16 +6931,21 @@ impl AppState {
                     target.work_binding.as_ref(),
                     target.dispatch_deadline(recovery_started_at),
                 )?;
+                let status_request = EngramControlRequest::SessionStatus {
+                    routing_token: routing_token.clone(),
+                };
                 let status = target
                     .adapter
                     .request(
                         &target.connection,
-                        &EngramControlRequest::SessionStatus {
-                            routing_token: routing_token.clone(),
-                        },
+                        &status_request,
                         target.rpc_timeout_until(target.dispatch_deadline(recovery_started_at))?,
                     )
-                    .and_then(parse_engram_result::<EngramSessionStatusResponse>);
+                    .and_then(parse_engram_result::<EngramSessionStatusResponse>)
+                    .map_err(|mut error| {
+                        error.causal_failure = Some(EngramCausalFailure::request(&error, &status_request));
+                        error
+                    });
                 if let Some(owner) = owner {
                     self.require_queued_engram_owner(
                         &target.connection.session_id,
@@ -6882,26 +7025,31 @@ impl AppState {
                         // grant closes bare.
                         let report =
                             self.cached_engram_turn_report(&target.connection.session_id, grant_id);
+                        let checkpoint_request = EngramControlRequest::TurnCheckpoint {
+                            routing_token: routing_token.clone(),
+                            grant_id: grant_id.to_owned(),
+                            next_intent: EngramNextIntent::Wait,
+                            report: report.clone(),
+                            idempotency_key: engram_checkpoint_idempotency_key(
+                                format!(
+                                    "termal-restart-checkpoint:{}:{}",
+                                    target.connection.session_id, grant_id
+                                ),
+                                &report,
+                            ),
+                        };
                         let checkpoint = target
                             .adapter
                             .request(
                                 &target.connection,
-                                &EngramControlRequest::TurnCheckpoint {
-                                    routing_token: routing_token.clone(),
-                                    grant_id: grant_id.to_owned(),
-                                    next_intent: EngramNextIntent::Wait,
-                                    report: report.clone(),
-                                    idempotency_key: engram_checkpoint_idempotency_key(
-                                        format!(
-                                            "termal-restart-checkpoint:{}:{}",
-                                            target.connection.session_id, grant_id
-                                        ),
-                                        &report,
-                                    ),
-                                },
+                                &checkpoint_request,
                                 timeout,
                             )
-                            .and_then(parse_engram_result::<EngramTurnCheckpointResponse>);
+                            .and_then(parse_engram_result::<EngramTurnCheckpointResponse>)
+                            .map_err(|mut error| {
+                                error.causal_failure = Some(EngramCausalFailure::request(&error, &checkpoint_request));
+                                error
+                            });
                         // A refused report is dropped before anything else can
                         // end this attempt, a lost queue owner included, so
                         // no later recovery resends it.
@@ -6938,33 +7086,44 @@ impl AppState {
                             {
                                 Some(())
                             }
-                            Ok(EngramTurnCheckpointResponse::Checkpointed { receipt }) => {
+                            Ok(EngramTurnCheckpointResponse::Checkpointed { .. }) => {
                                 // A receipt for another grant settles nothing
                                 // about the one status reported open. The
                                 // local record keeps its grant, mirrored or
                                 // uncertain, and the next recovery or
                                 // admission asks again.
-                                return Err(EngramTransportError::remote(EngramControlErrorBody {
+                                // Both grant ids are received values: name only
+                                // the location, and keep the exact request.
+                                let mut error = EngramTransportError::remote(EngramControlErrorBody {
                                     code: "restart_checkpoint_receipt_mismatch".to_owned(),
-                                    message: format!(
-                                        "Engram restart checkpoint receipt names grant `{}` \
-                                         instead of `{grant_id}`",
-                                        receipt.grant_id
-                                    ),
-                                }));
+                                    message: "Engram restart checkpoint receipt names another \
+                                              grant than the open one: field path=$.receipt.grant_id \
+                                              (value withheld)"
+                                        .to_owned(),
+                                });
+                                error.causal_failure =
+                                    Some(EngramCausalFailure::request(&error, &checkpoint_request));
+                                return Err(error);
                             }
                             Ok(EngramTurnCheckpointResponse::Refuse { code })
                                 if engram_grant_code_was_issued_but_not_begun(&code) =>
                             {
                                 None
                             }
-                            Ok(EngramTurnCheckpointResponse::Refuse { .. }) => {
-                                return Err(EngramTransportError::remote(EngramControlErrorBody {
+                            Ok(EngramTurnCheckpointResponse::Refuse { code }) => {
+                                // The grant id came from the status reply; the
+                                // exact request, not the text, carries it. The
+                                // diagnostic keeps the producer's own refusal.
+                                let mut error = EngramTransportError::remote(EngramControlErrorBody {
                                     code: "restart_checkpoint_refused".to_owned(),
-                                    message: format!(
-                                        "Engram refused restart checkpoint for grant `{grant_id}`"
-                                    ),
-                                }));
+                                    message: "Engram refused the restart checkpoint for the open grant"
+                                        .to_owned(),
+                                });
+                                error.causal_failure = Some(EngramCausalFailure::request_refusal(
+                                    &checkpoint_request,
+                                    &code,
+                                ));
+                                return Err(error);
                             }
                         };
                         if checkpoint.is_none() {
@@ -7119,7 +7278,11 @@ impl AppState {
                     &request,
                     target.rpc_timeout_until(binding_deadline)?,
                 )
-                .and_then(parse_engram_result::<EngramSessionBindingResponse>);
+                .and_then(parse_engram_result::<EngramSessionBindingResponse>)
+                .map_err(|mut error| {
+                    error.causal_failure = Some(EngramCausalFailure::request(&error, &request));
+                    error
+                });
             if let Some(owner) = owner {
                 self.require_queued_engram_owner(
                     &target.connection.session_id,
@@ -7158,10 +7321,14 @@ impl AppState {
             }
         };
         if was_rebind && !engram_phase_holds_no_turn(&binding.status.phase) {
-            return Err(EngramTransportError::protocol(format!(
-                "Engram rebind returned phase `{}` instead of `ready` or `sync_required`",
-                binding.status.phase
-            )));
+            // The returned phase is a received value: name only its location,
+            // and keep the exact bind request that received it.
+            let mut error = EngramTransportError::protocol(
+                "Engram rebind returned a phase instead of `ready` or `sync_required`: \
+                 field path=$.status.phase (value withheld)",
+            );
+            error.causal_failure = Some(EngramCausalFailure::request(&error, &bound_request));
+            return Err(error);
         }
         let routing_token = binding.routing_token;
         {
@@ -7466,10 +7633,16 @@ impl AppState {
             if let Some(retry_at) = target.next_bind_retry_at
                 && let Some(remaining) = retry_at.checked_duration_since(target.budget_clock.now())
             {
-                return Err(EngramTransportError::backoff(format!(
+                let mut error = EngramTransportError::backoff(format!(
                     "Engram bind retry is backed off for {} ms",
                     remaining.as_millis()
-                )));
+                ));
+                if let Some(owner) = owner {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    error.causal_failure = inner.find_session_index(session_id)
+                        .and_then(|index| engram_checkpoint_cause_for_owner(&inner.sessions[index], &target, owner));
+                }
+                return Err(error);
             }
             let routing_token = if let Some(owner) = owner {
                 self.bind_queued_engram_target_off_lock(target.clone(), owner)?
@@ -7503,6 +7676,7 @@ impl AppState {
         };
         if let Some(code) = disabled_reason {
             return Some(EngramPendingDispatch {
+                causal_failure: Some(EngramCausalFailure::local_hold("admission_disabled", &code, "Engram control is disabled after a prior fatal error; original error details unavailable", "current admission disabled")),
                 dispatch_generation: intent.dispatch_generation,
                 intent_fingerprint: intent.intent_fingerprint.clone(),
                 evaluated: EngramDispatchEvaluation::Degraded {
@@ -7546,6 +7720,7 @@ impl AppState {
                     .flatten()
                 });
                 return Some(EngramPendingDispatch {
+                    causal_failure: Some(EngramCausalFailure::error(&error, "admission_binding", None, &[])),
                     dispatch_generation: intent.dispatch_generation,
                     intent_fingerprint: intent.intent_fingerprint.clone(),
                     evaluated: match bind_proof {
@@ -7576,6 +7751,7 @@ impl AppState {
         // grant was issued under rather than on one a rebind put in place
         // after the reply.
         let mut evaluated_work_binding = None;
+        let mut causal_failure = None;
         let evaluated = loop {
             let routing_token = target
                 .routing_token
@@ -7599,6 +7775,7 @@ impl AppState {
                 resource_intents: Vec::new(),
             };
             if target.remaining_dispatch_timeout(started_at).is_none() {
+                causal_failure = Some(EngramCausalFailure::local_hold("turn_evaluate", "dispatch_budget_exhausted", "Engram evaluate/begin dispatch budget was exhausted before evaluate", "Evaluate budget before preparation"));
                 break EngramDispatchEvaluation::Degraded {
                     code: "dispatch_budget_exhausted".to_owned(),
                     detail: "Engram evaluate/begin dispatch budget was exhausted before evaluate"
@@ -7622,6 +7799,7 @@ impl AppState {
             ) {
                 Ok(request) => request,
                 Err(error) => {
+                    causal_failure = Some(EngramCausalFailure::local(&error, "turn_evaluate", "Evaluate durable preparation"));
                     break EngramDispatchEvaluation::Degraded {
                         code: error
                             .code
@@ -7651,10 +7829,16 @@ impl AppState {
                 .adapter
                 .request(&target.connection, &request, timeout)
                 .and_then(parse_engram_result::<EngramTurnDecisionResponse>);
+            if let Err(error) = &response {
+                causal_failure = Some(EngramCausalFailure::request(error, &request));
+            }
             if !admission_owner
                 .as_ref()
                 .is_some_and(|owner| self.queued_engram_owner_is_current(&intent.session_id, owner))
             {
+                if causal_failure.is_none() {
+                    causal_failure = Some(EngramCausalFailure::request(&EngramTransportError::local_state("Evaluate reply belonged to a superseded queue owner"), &request));
+                }
                 break EngramDispatchEvaluation::Degraded {
                     code: "authorization_superseded".to_owned(),
                     detail: "Engram evaluation reply belonged to a superseded queue owner"
@@ -7701,6 +7885,7 @@ impl AppState {
                         &intent.session_id,
                         admission_owner.as_ref(),
                     ) {
+                        causal_failure = Some(EngramCausalFailure::local(&error, "retire_evaluation", "refusal-healing durable retirement"));
                         break EngramDispatchEvaluation::Degraded {
                             code: "authorization_unknown".to_owned(),
                             detail: error.message,
@@ -7725,6 +7910,7 @@ impl AppState {
                             stale_retry_used = true;
                         }
                         Ok(None) => {
+                            causal_failure = Some(EngramCausalFailure::local_hold("admission_binding", "binding_unavailable", "Engram binding disappeared during Evaluate refusal healing", "refusal-healing rebind"));
                             break EngramDispatchEvaluation::Degraded {
                                 code: "binding_unavailable".to_owned(),
                                 detail: "Engram binding disappeared during rebind recovery"
@@ -7732,6 +7918,7 @@ impl AppState {
                             };
                         }
                         Err(error) => {
+                            causal_failure = Some(EngramCausalFailure::error(&error, "admission_binding", None, &[]));
                             self.record_queued_engram_transport_failure(
                                 &intent.session_id,
                                 &error,
@@ -7746,6 +7933,7 @@ impl AppState {
                     }
                 }
                 Ok(EngramTurnDecisionResponse::Refuse { directive }) => {
+                    causal_failure = Some(EngramCausalFailure::request_refusal(&request, &directive.code));
                     self.record_queued_engram_transport_success(
                         &intent.session_id,
                         admission_owner.as_ref(),
@@ -7797,7 +7985,11 @@ impl AppState {
                 }
             }
         };
+        if causal_failure.is_none() && let EngramDispatchEvaluation::Degraded { code, detail } = &evaluated {
+            causal_failure = Some(EngramCausalFailure::local_hold("turn_evaluate", code, detail, "Evaluate preparation"));
+        }
         Some(EngramPendingDispatch {
+            causal_failure,
             dispatch_generation: intent.dispatch_generation,
             intent_fingerprint: intent.intent_fingerprint.clone(),
             evaluated,

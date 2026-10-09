@@ -474,8 +474,7 @@ fn exchange_engram_control_frame(
             "Engram response exceeds the maximum control frame",
         ));
     }
-    let envelope: EngramControlResponse = serde_json::from_slice(&response)
-        .map_err(|err| EngramTransportError::protocol(format!("invalid Engram response: {err}")))?;
+    let envelope: EngramControlResponse = engram_decode_slice(&response, "invalid Engram response")?;
     match envelope {
         EngramControlResponse::Ok { result } => Ok(result),
         EngramControlResponse::Error { error } => Err(EngramTransportError::remote(error)),

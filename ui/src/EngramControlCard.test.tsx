@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageCard } from "./message-cards";
+import { messageChangeMarker } from "./app-utils";
 import type { EngramControlMessage } from "./types";
 
 function renderEngramCard(message: EngramControlMessage) {
@@ -15,6 +16,68 @@ function renderEngramCard(message: EngramControlMessage) {
 }
 
 describe("EngramControlCard", () => {
+  const causalMessage: EngramControlMessage = {
+    id: "causal-card", type: "engramControl", author: "assistant", timestamp: "10:06",
+    schemaVersion: 1, stage: "dispatch", assurance: "turn_gated", decision: "degraded",
+    dispatch: "withheld", refusalCode: "control_circuit_open", latencyMs: { total: 2 }, failMode: "degraded",
+    causalFailure: {
+      operation: "turn_checkpoint", failureClass: "transport", originalCode: "control_unavailable",
+      message: "EOF; response frame missing [redacted]", boundary: "TermAl host → Engram control",
+      attemptId: "checkpoint-attempt-1", remoteApplication: "unknown",
+      continuationReason: "Admission held after this unsettled checkpoint; no new Evaluate was sent.",
+    },
+  };
+
+  it("shows the original operation and error separately from the downstream hold", () => {
+    renderEngramCard(causalMessage);
+    expect(screen.getByText(/Operation: turn_checkpoint/)).toHaveTextContent("Failure: transport");
+    expect(screen.getByText(/Original code: control_unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/EOF; response frame missing/)).toBeInTheDocument();
+    expect(screen.getByText(/Boundary: TermAl host/)).toHaveTextContent("Remote application: unknown");
+    expect(screen.getByText(/Attempt: checkpoint-attempt-1/)).toBeInTheDocument();
+    expect(screen.getByText(/no new Evaluate was sent/)).toBeInTheDocument();
+    expect(screen.queryByText(/Original failure details unavailable/)).not.toBeInTheDocument();
+  });
+
+  it("does not present an explicit refusal as proof of no prior application", () => {
+    renderEngramCard({ ...causalMessage, causalFailure: {
+      ...causalMessage.causalFailure!, failureClass: "producer_refusal", remoteApplication: "refused",
+    } });
+    expect(screen.getByText(/Remote application:/)).toHaveTextContent("request refused (prior application not determined)");
+  });
+
+  it("scopes never-started knowledge to this request and names an operator hold", () => {
+    renderEngramCard({ ...causalMessage, causalFailure: {
+      ...causalMessage.causalFailure!, remoteApplication: "not_started",
+      continuationReason: "Operator paused this continuation; automatic retry is not admitted.",
+    } });
+    expect(screen.getByText(/Remote application:/)).toHaveTextContent("this request did not start (prior application not determined)");
+    expect(screen.getByText(/Operator paused this continuation/)).toBeInTheDocument();
+  });
+
+  it("reports missing legacy cause and missing correlation honestly", () => {
+    const { unmount } = renderEngramCard({ ...causalMessage, causalFailure: undefined });
+    expect(screen.getByText(/Original failure details unavailable/)).toBeInTheDocument();
+    unmount();
+    renderEngramCard({ ...causalMessage, causalFailure: {
+      ...causalMessage.causalFailure!, attemptId: undefined, originalCode: undefined,
+    } });
+    expect(screen.getByText(/Attempt: unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/Original code: unavailable/)).toBeInTheDocument();
+  });
+
+  it("updates causal content even when ordinary card fields are unchanged", () => {
+    const changed: EngramControlMessage = { ...causalMessage, causalFailure: {
+      ...causalMessage.causalFailure!, continuationReason: "Automatic retry scheduled pending durable acknowledgement.",
+    } };
+    expect(messageChangeMarker(changed)).not.toBe(messageChangeMarker(causalMessage));
+    const { rerender, container } = renderEngramCard(causalMessage);
+    rerender(<MessageCard message={changed} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    expect(screen.getByText(/Automatic retry scheduled/)).toBeInTheDocument();
+    expect(container.textContent).not.toContain("routing-secret");
+    expect(container.textContent).not.toContain("delivery-secret");
+  });
+
   it("renders the Engram decision separately from the host dispatch outcome", () => {
     renderEngramCard({
       id: "engram-defer-1",

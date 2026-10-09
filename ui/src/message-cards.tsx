@@ -539,6 +539,8 @@ function EngramControlCard({ message }: { message: EngramControlMessage }) {
       ? "sent on grant"
       : message.dispatch === "sent_without_grant"
         ? "sent without grant"
+        : message.dispatch === "withheld"
+          ? "withheld"
         : "queued";
   const details = [
     message.refusalCode ? `Reason: ${message.refusalCode}` : null,
@@ -557,6 +559,20 @@ function EngramControlCard({ message }: { message: EngramControlMessage }) {
       <div className="card-label">Engram · {message.stage}</div>
       <h3>{title}</h3>
       <p className="support-copy">{details.join(" · ")}</p>
+      {message.causalFailure ? (
+        <div className="engram-causal-failure">
+          <p className="support-copy">
+            Operation: {message.causalFailure.operation} · Failure: {message.causalFailure.failureClass} · Original code: {message.causalFailure.originalCode ?? "unavailable"}
+          </p>
+          <p className="support-copy">{message.causalFailure.message}</p>
+          <p className="support-copy">
+            Boundary: {message.causalFailure.boundary} · Attempt: {message.causalFailure.attemptId ?? "unavailable"} · Remote application: {message.causalFailure.remoteApplication === "refused" ? "request refused (prior application not determined)" : message.causalFailure.remoteApplication === "not_started" ? "this request did not start (prior application not determined)" : "unknown"}
+          </p>
+          <p className="support-copy">{message.causalFailure.continuationReason}</p>
+        </div>
+      ) : message.decision === "degraded" ? (
+        <p className="support-copy">Original failure details unavailable; this card does not identify the failed operation or remote application.</p>
+      ) : null}
       {message.directives?.map((directive) => (
         <p className="support-copy" key={directive.directiveId}>
           {directive.kind} · {directive.audience} · {directive.satisfaction}

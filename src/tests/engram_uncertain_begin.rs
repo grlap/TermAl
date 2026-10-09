@@ -1370,6 +1370,7 @@ fn dropping_intent_beside_a_live_begin_yields_that_begin_exactly() {
         },
     });
     record.engram.pending_dispatch = Some(EngramPendingDispatch {
+        causal_failure: None,
         begin_requested: Some("live-grant".to_owned()),
         ..pending_engram_grant(record.engram.dispatch_generation, "live-grant")
     });
@@ -1451,6 +1452,7 @@ fn a_begin_whose_outcome_arrives_after_it_was_recorded_uncertain_settles_the_rec
         record.engram.routing_token = Some("late-outcome-token".to_owned());
         record.engram.uncertain_grant_id = Some("late-grant".to_owned());
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            causal_failure: None,
             begin_requested: Some("late-grant".to_owned()),
             ..pending_engram_grant(record.engram.dispatch_generation, "late-grant")
         });
@@ -1462,6 +1464,7 @@ fn a_begin_whose_outcome_arrives_after_it_was_recorded_uncertain_settles_the_rec
         Some("late-grant".to_owned()),
         None,
         EngramControlCard {
+            causal_failure: None,
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
             assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
@@ -1574,6 +1577,7 @@ fn abandoning_a_dispatch_retires_its_promoted_head_only_after_taking_over_its_in
             .expect("the project must have Engram enabled")
     };
     let degraded_dispatch = |generation: u64, fingerprint: String| EngramPendingDispatch {
+        causal_failure: None,
         intent_fingerprint: fingerprint,
         evaluated: EngramDispatchEvaluation::Degraded {
             code: "control_status_failed".to_owned(),
@@ -1634,6 +1638,7 @@ fn abandoning_a_dispatch_retires_its_promoted_head_only_after_taking_over_its_in
             .session_mut_by_index(index)
             .expect("session index should be valid");
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            causal_failure: None,
             intent_fingerprint: fingerprint,
             begin_requested: Some("exact-grant".to_owned()),
             ..pending_engram_grant(record.engram.dispatch_generation, "exact-grant")
@@ -1955,6 +1960,7 @@ fn an_intent_this_process_issued_records_nothing_when_its_marker_sent_no_begin()
     // Issued by this process: nothing was restored.
     record.engram.recovered_admission = false;
     record.engram.pending_dispatch = Some(EngramPendingDispatch {
+        causal_failure: None,
         intent_fingerprint: fingerprint.clone(),
         ..pending_engram_grant(record.engram.dispatch_generation, "fresh-grant")
     });
@@ -1996,6 +2002,7 @@ fn an_intent_this_process_issued_records_nothing_when_its_marker_sent_no_begin()
     // retires the head and leaves no recovery target behind.
     record.engram.recovered_admission = false;
     record.engram.pending_dispatch = Some(EngramPendingDispatch {
+        causal_failure: None,
         intent_fingerprint: fingerprint,
         ..pending_engram_grant(record.engram.dispatch_generation, "fresh-grant")
     });

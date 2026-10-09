@@ -148,9 +148,7 @@ fn read_engram_held_claims_from_cli(
         }
         error
     })?;
-    serde_json::from_value(held).map_err(|error| {
-        EngramTransportError::protocol(format!("invalid Engram work core held output: {error}"))
-    })
+    engram_decode_value(held, "invalid Engram work core held output")
 }
 
 /// The binding to bind from the claims a session holds. Only a claim with a

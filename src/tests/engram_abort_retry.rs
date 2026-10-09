@@ -681,6 +681,7 @@ fn a_defer_whose_card_cannot_be_saved_retries_no_earlier_than_retry_after() {
         record.engram.routing_token = Some("defer-abort-token".to_owned());
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint: fingerprint,
             evaluated: EngramDispatchEvaluation::Defer {
@@ -710,6 +711,7 @@ fn a_defer_whose_card_cannot_be_saved_retries_no_earlier_than_retry_after() {
             None,
             None,
             EngramControlCard {
+                causal_failure: None,
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                 stage: EngramControlStage::Dispatch,
                 assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),

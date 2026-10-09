@@ -687,6 +687,7 @@ fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
                 timestamp: stamp_now(),
                 author: Author::Assistant,
                 card: EngramControlCard {
+                    causal_failure: None,
                     schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                     stage: EngramControlStage::Dispatch,
                     assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
@@ -833,6 +834,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
         record.engram.routing_token = Some("defer-persist-token".to_owned());
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint: fingerprint,
             evaluated: EngramDispatchEvaluation::Defer {
@@ -867,6 +869,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
             None,
             None,
             EngramControlCard {
+                causal_failure: None,
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                 stage: EngramControlStage::Dispatch,
                 assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
