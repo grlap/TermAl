@@ -26,6 +26,118 @@ mod temp {
 }
 
 #[test]
+fn compiled_freeze_mode_resolves_relative_manifest_in_linked_worktree() {
+    use std::{io::Write, process::Stdio};
+
+    let fixture = temp::Fixture::new();
+    let main = fixture.0.join("main");
+    let linked = fixture.0.join("linked");
+    fs::create_dir(&main).unwrap();
+    let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let git = |args: &[&str], input: Option<&[u8]>| {
+        let mut command = Command::new("git");
+        for (name, _) in std::env::vars_os() {
+            if name
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+            {
+                command.env_remove(name);
+            }
+        }
+        command
+            .current_dir(&main)
+            .env("GIT_CONFIG_GLOBAL", null)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CEILING_DIRECTORIES", &fixture.0)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if input.is_some() {
+            command.stdin(Stdio::piped());
+        }
+        let mut child = command.spawn().unwrap();
+        if let Some(bytes) = input {
+            child.stdin.take().unwrap().write_all(bytes).unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    git(
+        &[
+            "-c",
+            &format!("init.templateDir={null}"),
+            "init",
+            "--object-format=sha1",
+        ],
+        None,
+    );
+    assert_eq!(
+        git(&["hash-object", "-t", "tree", "-w", "--stdin"], Some(b"")),
+        "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    );
+    // Fixed empty commit and independently framed schema-1 golden: neither is
+    // captured with the checker or a repository helper at test runtime.
+    let commit = b"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\nauthor Freeze Tester <freeze@example.test> 0 +0000\ncommitter Freeze Tester <freeze@example.test> 0 +0000\n\nempty fixture\n";
+    let head = git(
+        &["hash-object", "-t", "commit", "-w", "--stdin"],
+        Some(commit),
+    );
+    assert_eq!(head, "2a5874a2844dd641b7a9f9005b936d5d9df4acca");
+    git(&["update-ref", "HEAD", &head], None);
+    git(
+        &["worktree", "add", "--detach", &linked.to_string_lossy()],
+        None,
+    );
+    assert!(linked.join(".git").is_file());
+    let root = fs::canonicalize(&linked).unwrap();
+    let own_git_dir = git(
+        &[
+            "-C",
+            &linked.to_string_lossy(),
+            "rev-parse",
+            "--absolute-git-dir",
+        ],
+        None,
+    );
+    let manifest = std::path::Path::new(&own_git_dir).join("engram-review-freeze.json");
+    let fingerprint = "932b1020a412524292fd9f8a1868ab36cb84fc581025aa4d335b2330292edd8c";
+    fs::write(
+        &manifest,
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 1, "root": root, "fingerprint": fingerprint
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    for path in [
+        manifest.to_string_lossy().into_owned(),
+        ".git/engram-review-freeze.json".to_owned(),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_termal"))
+            .args([
+                "review-freeze-check",
+                &root.to_string_lossy(),
+                &path,
+                fingerprint,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{path}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, format!("{fingerprint}\n").as_bytes());
+    }
+}
+
+#[test]
 fn compiled_freeze_mode_reports_exact_stdout_and_fails_closed() {
     let fixture = temp::Fixture::new();
     let root = fs::canonicalize(&fixture.0).unwrap();

@@ -28,7 +28,9 @@ the admitted worktree, or inside that worktree's own Git directory
 configuration). That second place is where `git rev-parse --git-path
 engram-review-freeze.json` resolves: `<root>/.git` for a main worktree, which
 is already inside the root, and `<common>/worktrees/<name>` for a linked one,
-which is not. It keeps the manifest out of review input. For a linked
+which is not. The relative `.git/engram-review-freeze.json` form resolves under
+that own Git directory in both main and linked worktrees, including when `.git`
+is a pointer file. It keeps the manifest out of review input. For a linked
 worktree's review, the shared common Git directory and another worktree's Git
 directory are refused. For a main worktree's review they lie under the root
 and are accepted, as before. The Git directory is the one the worktree's

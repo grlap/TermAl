@@ -1030,6 +1030,33 @@ impl Drop for RemoveDirsOnDrop {
 }
 
 #[test]
+fn review_freeze_resolves_relative_manifest_in_linked_worktree() {
+    let (main_root, _) = fixture();
+    let linked = TestTempRoot::create("review-freeze-relative-linked");
+    run_git_test_command(
+        &main_root,
+        &["worktree", "add", "--detach", &linked.to_string_lossy()],
+    );
+    assert!(linked.join(".git").is_file());
+    let git = ReviewFreezeGit::new(&linked).unwrap();
+    let expected = capture_review_freeze(&git).unwrap();
+    let manifest = git.own_git_dir().unwrap().join("engram-review-freeze.json");
+    fs::write(
+        &manifest,
+        serde_json::to_vec(&json!({
+            "schemaVersion": 1, "root": fs::canonicalize(&linked).unwrap(), "fingerprint": expected
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let request = ReviewFreezeRequest {
+        manifest_path: ".git/engram-review-freeze.json".to_owned(),
+        expected_fingerprint: expected.clone(),
+    };
+    assert_eq!(check_review_freeze(&linked, &request).unwrap(), expected);
+}
+
+#[test]
 fn review_freeze_accepts_a_manifest_in_the_linked_worktrees_own_git_dir_only() {
     // The main repository's guard is declared first, so it drops last: the
     // linked worktrees below go before the repository that records them.

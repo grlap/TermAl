@@ -383,6 +383,9 @@ fn check_review_freeze(cwd: &FsPath, request: &ReviewFreezeRequest) -> Result<St
     }
     let manifest_path = if manifest_path.is_absolute() {
         manifest_path.to_path_buf()
+    } else if let Ok(git_relative) = manifest_path.strip_prefix(".git") {
+        // A linked worktree's .git is a pointer file, not a directory.
+        git.own_git_dir()?.join(git_relative)
     } else {
         git.root.join(manifest_path)
     };
