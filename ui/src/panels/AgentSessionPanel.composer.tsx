@@ -112,6 +112,7 @@ export const SessionComposer = memo(function SessionComposer({
   isSending,
   isStopping,
   isSessionBusy,
+  canStopWaitingSession = false,
   isUpdating,
   isRefreshingModelOptions,
   isEngramMcpRevocationPending,
@@ -1479,7 +1480,7 @@ export const SessionComposer = memo(function SessionComposer({
           rows={1}
         />
         <div className="composer-actions">
-          {session && (isSessionBusy || isStopping) ? (
+          {session && (isSessionBusy || isStopping || canStopWaitingSession) ? (
             <button
               className="ghost-button composer-stop-button"
               type="button"
@@ -1749,6 +1750,7 @@ export const SessionComposer = memo(function SessionComposer({
   previous.isSending === next.isSending &&
   previous.isStopping === next.isStopping &&
   previous.isSessionBusy === next.isSessionBusy &&
+  previous.canStopWaitingSession === next.canStopWaitingSession &&
   previous.isUpdating === next.isUpdating &&
   previous.isRefreshingModelOptions === next.isRefreshingModelOptions &&
   previous.isEngramMcpRevocationPending ===

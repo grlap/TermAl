@@ -5,7 +5,10 @@ import { useStableEvent } from "./panels/use-stable-event";
 import { testRunSessionMarker, type TestRunSummary } from "./test-runs";
 import type { TestRunCardTarget } from "./test-run-card";
 import type { TestRunWaitRecord, TestRunWaitFailures } from "./test-run-waits";
-import { EMPTY_TEST_RUN_WAITS, TestRunWaitsContext, TestRunWaitFailuresContext } from "./test-run-waits-context";
+import {
+  EMPTY_TEST_RUN_WAITS, NO_TEST_RUN_WAITING_SESSIONS, TestRunWaitingSessionsContext, TestRunWaitsContext,
+  TestRunWaitFailuresContext,
+} from "./test-run-waits-context";
 
 export type OpenTestRuns = (sessionId?: string | null, target?: TestRunCardTarget) => void;
 
@@ -31,12 +34,18 @@ export function TestRunsProvider({ runs, waits = NO_WAITS, failures = NO_FAILURE
   const stableOpen = useStableEvent(open);
   const value = useMemo(() => ({ runs, open: stableOpen, snapshotReady }), [runs, stableOpen, snapshotReady]);
   const waitValue = useMemo(() => waits.length ? { waits, runs } : EMPTY_TEST_RUN_WAITS, [waits, runs]);
+  const waitingSessions = useMemo(
+    () => waits.length ? new Set(waits.map(wait => wait.sessionId)) : NO_TEST_RUN_WAITING_SESSIONS,
+    [waits],
+  );
   const stableDismiss = useStableEvent(dismissFailure);
   const failureValue = useMemo(() => ({ failures, dismiss: stableDismiss }), [failures, stableDismiss]);
   return <TestRunsOpenContext.Provider value={stableOpen}>
     <TestRunWaitFailuresContext.Provider value={failureValue}>
     <TestRunWaitsContext.Provider value={waitValue}>
+    <TestRunWaitingSessionsContext.Provider value={waitingSessions}>
       <TestRunsContext.Provider value={value}>{children}</TestRunsContext.Provider>
+    </TestRunWaitingSessionsContext.Provider>
     </TestRunWaitsContext.Provider>
     </TestRunWaitFailuresContext.Provider>
   </TestRunsOpenContext.Provider>;

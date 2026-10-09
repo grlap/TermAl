@@ -248,6 +248,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   isSending,
   isStopping,
   isSessionBusy,
+  canStopWaitingSession = false,
   isUpdating,
   showNewResponseIndicator,
   newResponseIndicatorLabel,
@@ -282,6 +283,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
         isSending={isSending}
         isStopping={isStopping}
         isSessionBusy={isSessionBusy}
+        canStopWaitingSession={canStopWaitingSession}
         isUpdating={isUpdating}
         showNewResponseIndicator={showNewResponseIndicator}
         newResponseIndicatorLabel={newResponseIndicatorLabel}

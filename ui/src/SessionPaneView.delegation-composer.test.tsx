@@ -19,6 +19,7 @@ import {
 } from "./app-test-harness";
 import { SessionPaneView } from "./SessionPaneView";
 import { TestRunsProvider } from "./test-runs-context";
+import type { TestRunWaitRecord } from "./test-run-waits";
 import { makeTestRun } from "./test-runs-fixtures";
 import type { TestRunSummary } from "./test-runs";
 import {
@@ -29,6 +30,7 @@ import { addSessionHistoryPageDemandListener } from "./session-history-demand";
 import type {
   AgentCommand,
   DelegationSummary,
+  DelegationWaitRecord,
   Project,
   RemoteConfig,
   Session,
@@ -217,6 +219,8 @@ function renderSessionPaneView({
   isStopping = false,
   pane,
   testRuns = [],
+  delegationWaits = [],
+  testRunWaits = [],
 }: {
   session: Session;
   draft: string;
@@ -227,6 +231,8 @@ function renderSessionPaneView({
   isStopping?: boolean;
   pane?: WorkspacePane;
   testRuns?: TestRunSummary[];
+  delegationWaits?: DelegationWaitRecord[];
+  testRunWaits?: TestRunWaitRecord[];
 }) {
   syncComposerSessionsStore({
     sessions: [session],
@@ -241,7 +247,7 @@ function renderSessionPaneView({
     codexState: {},
     projectLookup: new Map(projects.map((project) => [project.id, project])),
     remoteLookup: new Map(remotes.map((remote) => [remote.id, remote])),
-    delegationWaits: [],
+    delegationWaits,
     sessionLookup: new Map([[session.id, session]]),
     isActive: true,
     isLoading: false,
@@ -321,7 +327,11 @@ function renderSessionPaneView({
   };
 
   const openTestRuns = vi.fn();
-  const view = (runs: TestRunSummary[]) => <TestRunsProvider snapshotReady runs={runs} open={openTestRuns}><SessionPaneView {...props} /></TestRunsProvider>;
+  const view = (runs: TestRunSummary[]) => (
+    <TestRunsProvider snapshotReady runs={runs} waits={testRunWaits} open={openTestRuns}>
+      <SessionPaneView {...props} />
+    </TestRunsProvider>
+  );
   const rendered = render(view(testRuns));
 
   return {
@@ -688,6 +698,120 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
 
     expect(onStopSession).toHaveBeenCalledWith("child-session-1");
+  });
+
+  it("offers Stop for an Idle delegated child waiting on its own delegation", async () => {
+    const session = makeSession({
+      id: "child-session-1",
+      name: "Delegated worker",
+      parentDelegationId: "delegation-1",
+      status: "idle",
+    });
+    const { onStopSession } = renderSessionPaneView({
+      session,
+      draft: "",
+      expectComposer: false,
+      delegationWaits: [
+        {
+          id: "wait-child",
+          parentSessionId: "child-session-1",
+          delegationIds: ["delegation-grandchild"],
+          mode: "all",
+          createdAt: "2026-10-09T01:00:00Z",
+        },
+      ],
+    });
+    await settleAsyncUi();
+
+    const footer = document.querySelector<HTMLElement>(".delegated-child-footer")!;
+    expect(footer).not.toBeNull();
+    act(() => {
+      within(footer).getByRole("button", { name: "Stop" }).click();
+    });
+
+    expect(onStopSession).toHaveBeenCalledWith("child-session-1");
+  });
+
+  it("offers Stop for an Idle parent with a pending delegation wait and stops it", async () => {
+    const session = makeSession({ id: "session-parent", status: "idle" });
+    const { onStopSession } = renderSessionPaneView({
+      session,
+      draft: "",
+      delegationWaits: [
+        {
+          id: "wait-1",
+          parentSessionId: "session-parent",
+          delegationIds: ["delegation-1"],
+          mode: "all",
+          createdAt: "2026-10-09T01:00:00Z",
+          title: "Review fan-in",
+        },
+      ],
+    });
+    await settleAsyncUi();
+
+    const stop = screen.getByRole("button", { name: "Stop" });
+    expect(stop).toBeEnabled();
+    act(() => {
+      stop.click();
+    });
+
+    expect(onStopSession).toHaveBeenCalledWith("session-parent");
+  });
+
+  it("offers Stop for an Idle session with a pending test-run wait and stops it", async () => {
+    const session = makeSession({ id: "session-parent", status: "idle" });
+    const { onStopSession } = renderSessionPaneView({
+      session,
+      draft: "",
+      testRunWaits: [
+        {
+          id: "run-wait-1",
+          sessionId: "session-parent",
+          runIds: ["test-1"],
+          mode: "all",
+          createdAt: "2026-10-09T01:00:00Z",
+          runs: [],
+        },
+      ],
+    });
+    await settleAsyncUi();
+
+    act(() => {
+      screen.getByRole("button", { name: "Stop" }).click();
+    });
+
+    expect(onStopSession).toHaveBeenCalledWith("session-parent");
+  });
+
+  it("offers no Stop for an Idle session without a pending wait of its own", async () => {
+    const session = makeSession({ id: "session-parent", status: "idle" });
+    renderSessionPaneView({
+      session,
+      draft: "",
+      delegationWaits: [
+        {
+          id: "wait-other",
+          parentSessionId: "session-other",
+          delegationIds: ["delegation-other"],
+          mode: "all",
+          createdAt: "2026-10-09T01:00:00Z",
+        },
+      ],
+      testRunWaits: [
+        {
+          id: "run-wait-other",
+          sessionId: "session-other",
+          runIds: ["test-other"],
+          mode: "all",
+          createdAt: "2026-10-09T01:00:00Z",
+          runs: [],
+        },
+      ],
+    });
+    await settleAsyncUi();
+
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
   it("places the test-run marker in the existing toolbar without changing strip adjacency", async () => {

@@ -539,8 +539,16 @@ impl AppState {
                 inner.sessions[index].runtime.dedicated_cleanup_failure().is_some())
         };
         if admission_stopped && !cleanup_pending {
+            // The same Stop also brakes the session's pending waits.
+            let waits_stopped = self.stop_pending_waits_after_admission_stop(session_id);
             self.sync_delegation_attempt_for_child_session(session_id);
+            waits_stopped?;
             return Ok(self.snapshot());
+        }
+        // An Idle session waiting for delegations or test runs has no turn
+        // to interrupt, but Stop still has to keep that work from resuming it.
+        if let Some(response) = self.stop_idle_waiting_session(session_id)? {
+            return Ok(response);
         }
 
         let options = StopSessionOptions::default();

@@ -56,7 +56,10 @@ import {
 } from "./panels/AgentSessionPanel";
 import { SessionActivityStrip } from "./panels/session-activity-cards";
 import { TestRunSessionMarker } from "./test-runs-context";
-import { TestRunWaitFailureNotice } from "./test-run-waits-context";
+import {
+  TestRunWaitFailureNotice,
+  useHasPendingTestRunWait,
+} from "./test-run-waits-context";
 import { TestRunsPanel } from "./panels/TestRunsPanel";
 import { TranscriptActivitySlot } from "./transcript-activity-slot";
 import { useSessionRecordSnapshot } from "./session-store";
@@ -509,6 +512,12 @@ export function SessionPaneView({
     !isSessionBusy &&
     !isSending &&
     activeDelegationWaits.length > 0;
+  const hasPendingTestRunWait = useHasPendingTestRunWait(activeSession?.id);
+  // An Idle session that a pending delegation or test-run wait would resume
+  // keeps Stop, the operator's brake on that resume.
+  const canStopWaitingSession =
+    activeSession?.status === "idle" &&
+    (activeDelegationWaits.length > 0 || hasPendingTestRunWait);
   // Busy state is independent of which transcript messages are resident.
   const showWaitingIndicator =
     isSessionTabActive &&
@@ -688,7 +697,10 @@ export function SessionPaneView({
     pane.viewMode === "session" &&
     Boolean(
       activeSession &&
-      (isSessionBusy || isStopping || effectiveShowNewResponseIndicator),
+      (isSessionBusy ||
+        isStopping ||
+        canStopWaitingSession ||
+        effectiveShowNewResponseIndicator),
     );
 
   function handleComposerPaste(
@@ -1993,7 +2005,7 @@ export function SessionPaneView({
                   : "Delegated session"}
             </span>
           </div>
-          {activeSession && (isSessionBusy || isStopping) ? (
+          {activeSession && (isSessionBusy || isStopping || canStopWaitingSession) ? (
             <button
               className="ghost-button delegated-child-stop-button"
               type="button"
@@ -2027,6 +2039,7 @@ export function SessionPaneView({
           isSending={isSending}
           isStopping={isStopping}
           isSessionBusy={isSessionBusy}
+          canStopWaitingSession={canStopWaitingSession}
           isUpdating={isUpdating}
           showNewResponseIndicator={effectiveShowNewResponseIndicator}
           newResponseIndicatorLabel={effectiveNewResponseIndicatorLabel}

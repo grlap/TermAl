@@ -221,6 +221,9 @@ export type AgentSessionPanelFooterProps = {
   isSending: boolean;
   isStopping: boolean;
   isSessionBusy: boolean;
+  // Idle, but a pending delegation or test-run wait would resume it: Stop
+  // stays offered so the operator can keep that work from resuming it.
+  canStopWaitingSession?: boolean;
   isUpdating: boolean;
   showNewResponseIndicator: boolean;
   newResponseIndicatorLabel: string;
@@ -262,6 +265,7 @@ export type SessionComposerProps = {
   isSending: boolean;
   isStopping: boolean;
   isSessionBusy: boolean;
+  canStopWaitingSession?: boolean;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
   isEngramMcpRevocationPending: boolean;

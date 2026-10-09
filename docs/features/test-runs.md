@@ -794,11 +794,15 @@ unpublished executor is never described as proven gone.
   - A Stop consumes them as part of its durable commit (reason
     `sessionStopped`) and restores them if that commit fails, as for
     delegation waits.
-  - Stop acts on a turn. A session that ended its turn to wait is idle, and
-    Stop answers 409 there, so its waits stay until they resume. They are
-    consumed by a Stop that ends a later turn, for example while the user
-    talks to the session. Cancelling a wait from an idle session is
-    tm-70lr (run and delegation waits).
+  - A session that ended its turn to wait is idle. Stop there has no turn
+    to interrupt, but it is still the brake on the resume: it consumes the
+    session's run waits (`sessionStopped`) and delegation waits
+    (`parentSessionStopped`) in one durable commit, sets the
+    explicit-resume latch, drops queued workflow continuations, keeps user
+    and mailbox prompts queued behind the latch, and records "Turn stopped
+    by user." A failed commit restores all of it. An idle session with no
+    pending wait still answers 409. An explicit Resume or a new user prompt
+    lifts the latch. The session view offers Stop in this state.
   - A session that became an archived Codex thread (`sessionUnavailable`) or
     was removed (`sessionRemoved`) has its waits consumed by the next
     refresh, within one rescan. A thread archived and unarchived again

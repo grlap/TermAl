@@ -883,6 +883,7 @@ include!("codex_reviewer_mcp.rs");
 include!("codex_reviewer_mcp_lifecycle.rs");
 include!("turn_lifecycle.rs");
 include!("session_lifecycle.rs");
+include!("session_stop_idle_wait.rs");
 include!("session_messages.rs");
 include!("codex_submissions.rs");
 include!("session_config.rs");

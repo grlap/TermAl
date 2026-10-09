@@ -125,6 +125,7 @@ mod session_history_snapshot;
 mod session_lifecycle;
 mod session_settings;
 mod session_stop;
+mod session_stop_idle_wait;
 mod session_stop_runtime;
 mod shared_codex;
 mod shared_codex_events;

@@ -4,7 +4,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { makeTestRun, makeTestRunWait } from "./test-runs-fixtures";
 import { applyTestRunWaitDelta, testRunWaitPrompt } from "./test-run-waits";
 import { TestRunsProvider } from "./test-runs-context";
-import { TestRunWaitIndicator, TestRunWaitFailureNotice, TestRunWaitsContext } from "./test-run-waits-context";
+import {
+  TestRunWaitIndicator, TestRunWaitFailureNotice, TestRunWaitsContext, useHasPendingTestRunWait,
+} from "./test-run-waits-context";
 import { useContext } from "react";
 import { SessionActivityStrip } from "./panels/session-activity-cards";
 import { isSessionDeltaEvent } from "./app-live-state-delta-events";
@@ -70,6 +72,24 @@ it("keeps consumers of an empty wait context stable across run updates", () => {
   const rendered = render(<TestRunsProvider snapshotReady runs={[]} open={vi.fn()}>{child}</TestRunsProvider>);
   rendered.rerender(<TestRunsProvider snapshotReady runs={[makeTestRun()]} waits={[]} open={vi.fn()}>{child}</TestRunsProvider>);
   expect(renders).toBe(1);
+});
+
+it("re-renders a waiting-session consumer on wait membership, not on run progress", () => {
+  const wait = makeTestRunWait();
+  const seen: boolean[] = [];
+  function Consumer({ sessionId }: { sessionId: string }) {
+    seen.push(useHasPendingTestRunWait(sessionId));
+    return null;
+  }
+  const child = <Consumer sessionId={wait.sessionId} />;
+  const waits = [wait];
+  const view = (runs: ReturnType<typeof makeTestRun>[], pending: typeof waits) =>
+    <TestRunsProvider snapshotReady runs={runs} waits={pending} open={vi.fn()}>{child}</TestRunsProvider>;
+  const rendered = render(view([makeTestRun()], waits));
+  rendered.rerender(view([makeTestRun({ currentStage: "ui-tests" })], waits));
+  expect(seen).toEqual([true]);
+  rendered.rerender(view([makeTestRun({ currentStage: "ui-tests" })], []));
+  expect(seen).toEqual([true, false]);
 });
 
 it("keeps the failure notice session-scoped and explicitly dismissible", () => {

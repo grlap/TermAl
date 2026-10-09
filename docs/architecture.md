@@ -438,7 +438,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/engram-source-root` | Root session `{id}` names (body `work`, `path`) or, with no `path`, clears the source root of an Engram work it holds a live claim on (`termal_name_source_root`). The path must be a registered worktree of the session's repository inside its project folder. Returns the root, its content revision now, its generation and the previous root, when sealed for the caller's running turn on that claim; it takes effect at the session's next turn. 400 invalid, blank, null, overlong (over 4096 characters), drive-relative or network-share path, or a `work` over 256 bytes (Git Bash's `/c/…` spelling is read as `C:/…` on Windows); 404 missing session; 409 a delegated caller, a session with no project or with Engram control not enabled for it or its project, no Engram store identity, no live claim on the work, a full list, a concurrent rename, or a project, folder or Engram store that changed while the name was checked; 422 unknown fields; 502 held-claims read failure, or an Engram build whose held list carries no claim id or no short reference; 409 also covers a conflicting pending intent, a full transition journal, changed naming authority, or `named_root_binding_refused`; 502 also covers uncertain binding transport, a mismatched receipt, or exhausted/late control allowance; 500 means persistence could not be confirmed. Retry the identical request after an uncertain outcome; do not choose a different root until settlement. A definitive binding refusal permits a repaired request. 503 covers pre-transport exhaustion of the 102 s budget ("naming took longer than its 102 s budget, so nothing was named; name it again") or too many path checks (nothing sent). See [source root and durability](features/engram-host-adapter.md#source-root). |
 | POST | `/api/sessions/{id}/test-run-waits` | Create a resume wait for root session `{id}` on 1 to 16 indexed test runs in its project (`termal_resume_after_test_runs`). Returns `201` with `TestRunWaitResponse`; runs already settled consume the wait and queue the resume at once. See [test runs](features/test-runs.md). |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
-| POST | `/api/sessions/{id}/stop` | Persist `Stopping` and return immediately; interrupt/checkpoint completes in background |
+| POST | `/api/sessions/{id}/stop` | Persist `Stopping` and return immediately; interrupt/checkpoint completes in background. For an idle session with a pending delegation or test-run wait, consume those waits and set the explicit-resume latch, returning the `Idle` snapshot; `409` for an idle session with no pending wait |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |
 | POST | `/api/sessions/{id}/approvals/{message_id}` | Submit approval decision |
 | POST | `/api/sessions/{id}/user-input/{message_id}` | Submit structured user-input answers (Codex `request_user_input`, Claude `AskUserQuestion`), or `declined: true` to skip a declinable Claude card — decline semantics in the Claude protocol notes below |
@@ -1422,6 +1422,10 @@ Stop (POST /api/sessions/{id}/stop)
   → Success: reject pending approvals and set Status = Idle
   → Failure: set Status = Error and append a transcript notice
   → A restart from persisted Stopping uses interrupted-session recovery
+  → Idle with a pending delegation or test-run wait: no runtime to interrupt;
+    in one commit consume the waits, set the explicit-resume latch, drop
+    queued workflow continuations, record "Turn stopped by user." and return
+    the Idle snapshot (Idle with no pending wait answers 409)
 
 Kill (POST /api/sessions/{id}/kill)
   → Kill runtime, remove session from list entirely
@@ -1466,6 +1470,7 @@ termal/
 |   |-- # Sessions + turns + messages
 |   |-- session_crud.rs       # create_session, create/delete_project, update_app_settings
 |   |-- session_lifecycle.rs  # kill/stop/cancel session
+|   |-- session_stop_idle_wait.rs # Stop of an idle session waiting for delegations or test runs
 |   |-- session_messages.rs   # push_message / append_text_delta / upsert_command_message
 |   |-- session_config.rs     # update_session_settings + refresh_session_model_options
 |   |-- session_identity.rs   # message IDs + external_session_id bindings + Codex thread state

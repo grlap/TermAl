@@ -10,6 +10,17 @@ export const EMPTY_TEST_RUN_WAITS: {
 } = { waits: [], runs: [] };
 export const TestRunWaitsContext = createContext(EMPTY_TEST_RUN_WAITS);
 
+// The ids of sessions with a pending run wait, memoized on the waits alone, so
+// a consumer that only asks "does this session wait?" does not re-render on
+// every run-progress update.
+export const NO_TEST_RUN_WAITING_SESSIONS: ReadonlySet<string> = new Set();
+export const TestRunWaitingSessionsContext = createContext(NO_TEST_RUN_WAITING_SESSIONS);
+
+export function useHasPendingTestRunWait(sessionId: string | undefined) {
+  const waitingSessions = useContext(TestRunWaitingSessionsContext);
+  return !!sessionId && waitingSessions.has(sessionId);
+}
+
 export const TestRunWaitFailuresContext = createContext<{
   failures: TestRunWaitFailures; dismiss: (sessionId: string) => void;
 }>({ failures: {}, dismiss: () => {} });

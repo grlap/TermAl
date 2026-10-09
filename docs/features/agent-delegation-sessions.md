@@ -837,6 +837,16 @@ shell or HTTP polling loop in that same turn keeps the queued resume prompt
 behind the active turn and can make the fan-in look stuck even though TermAl has
 already queued the result.
 
+A user Stop of the parent consumes its pending waits with
+`reason: "parentSessionStopped"` and queues no resume prompt. That holds while
+the parent runs a turn and also while it is idle, having ended its turn to
+wait: Stop then interrupts nothing, consumes the waits in one durable commit,
+drops queued workflow continuations, and leaves the parent behind the
+explicit-resume latch until an explicit Resume or a new user prompt. The
+session view offers Stop for an idle parent with a pending wait. Stop of an
+idle session with no pending wait still answers 409. Run waits follow the same
+rule ([Test Runs](./test-runs.md)).
+
 If the parent session is removed or becomes unavailable before a wait can
 resume it, TermAl consumes the parent's pending waits with
 `reason: "parentSessionRemoved"` or `reason: "parentSessionUnavailable"` and
