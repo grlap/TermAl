@@ -13,7 +13,6 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -28,6 +27,8 @@ import {
   diagnostics,
   ensureCargoTargetDirectory,
   executeRun,
+  HELPER_TEST_HANG_GUARD_MS,
+  helperTestArgs,
   helperTestFiles,
   liveStage,
   notifyRun,
@@ -45,6 +46,7 @@ import {
 } from "./test-launcher.mjs";
 import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
 import { focusedTestCounts } from "./test-counts.mjs";
+import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 
 const fixtureEnv = {
@@ -62,23 +64,50 @@ const stage = (name, source = "") => ({
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
 const logPath = (runDir, entry) => isAbsolute(entry.log) ? entry.log : join(runDir, entry.log);
 
-async function within(promise, label, milliseconds = 10_000) {
-  let timer;
+// The tests wait for their processes by events (exit, close, readiness, a
+// barrier file), never by a deadline: a slow host makes them slower, not
+// failed. A hang is the runner's to report (HELPER_TEST_HANG_GUARD_MS), and
+// the runner then exits the test process (--test-force-exit).
+// Fixture processes that wait on a barrier stop once their owner, this test
+// process, is gone, so a timed-out or interrupted run leaves none behind; that
+// is their only exit besides the barrier. The liveness rule (only ESRCH means
+// gone) is processMayBeAlive's in scripts/test-temp-root.mjs; keep the two in
+// step. `owner` is a JavaScript expression evaluated in the fixture process.
+const ownerAliveSource = (owner = String(process.pid)) => [
+  `const owner = ${owner};`,
+  "const ownerAlive = () => { try { process.kill(owner, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } };",
+];
+const untilFileExistsSource = (path, owner) => [
+  "const fs = require('node:fs');",
+  ...ownerAliveSource(owner),
+  `while (!fs.existsSync(${JSON.stringify(path)})) {`,
+  "  if (!ownerAlive()) process.exit(4);",
+  "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);",
+  "}",
+].join("\n");
+const processGone = (pid) => {
   try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} did not complete within ${milliseconds}ms`)), milliseconds);
-      }),
-    ]);
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+};
+// startDetachedRun unreferences its worker, as the product must, so a test
+// awaiting that worker's exit holds the event loop open itself meanwhile.
+// The interval does nothing and decides nothing.
+async function workerExit(detached) {
+  const open = setInterval(() => {}, 60_000);
+  try {
+    return await detached.completion;
   } finally {
-    clearTimeout(timer);
+    clearInterval(open);
   }
 }
 
 async function repository(t, callback, sourceEnv = fixtureEnv, directory = testTempDirectory()) {
   const root = mkdtempSync(join(directory, "launcher-fixture-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  removeFixtureOnPass(t, root);
   const env = isolatedGitEnvironment(sourceEnv);
   const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
   execFileSync("git", ["init", "--quiet", "--template="], { cwd: root, env });
@@ -108,9 +137,9 @@ async function isolatedDetachedRepository(t, callback) {
       "const marker = process.env.FIXTURE_NOTIFICATION_MARKER;",
       "const expected = Number(process.env.FIXTURE_NOTIFICATION_BARRIER || '1');",
       "fs.writeFileSync(path.join(path.dirname(marker), `notify-ready-${process.pid}`), 'ready');",
-      "const deadline = Date.now() + 5000;",
+      ...ownerAliveSource(),
       "while (fs.readdirSync(path.dirname(marker)).filter((name) => name.startsWith('notify-ready-')).length < expected) {",
-      "  if (Date.now() >= deadline) throw new Error('notification fixture barrier timed out');",
+      "  if (!ownerAlive()) throw new Error('notification fixture barrier: its test process is gone');",
       "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);",
       "}",
       "const args = process.argv.slice(2);",
@@ -138,7 +167,12 @@ test("required stages preserve the TermAl five-gate order and direct JavaScript 
     assert.deepEqual([stages[0].command, ...stages[0].args], ["cargo", "check"]);
     assert.deepEqual(stages[1].args, ["node_modules/typescript/bin/tsc", "--noEmit"]);
     assert.equal(stages[1].cwd, "ui");
-    assert.deepEqual(stages[2].args, ["--test", ...helperTestFiles]);
+    assert.deepEqual(stages[2].args, [
+      "--test",
+      "--test-force-exit",
+      `--test-timeout=${HELPER_TEST_HANG_GUARD_MS}`,
+      ...helperTestFiles,
+    ]);
     assert.match([stages[3].command, ...stages[3].args].join(" "), platform === "win32"
       ? /Git[\\/]bin[\\/]bash\.exe.*-c.*scripts\/test-rust\.sh/u
       : /^sh scripts\/test-rust\.sh$/u);
@@ -164,6 +198,7 @@ test("full plan prerequisites cover every maintained helper and direct UI entryp
     "scripts/review-freeze-fingerprint.mjs",
     "scripts/test-counts.mjs",
     "scripts/test-durations.mjs",
+    "scripts/test-fixture-cleanup.mjs",
     "scripts/test-launcher.mjs",
     "scripts/test-temp-root.mjs",
     "scripts/vitest-resource-preflight.mjs",
@@ -579,7 +614,7 @@ test("stage cwd controls the real child directory and relative file lookup", asy
 
 test("launcher fixtures and fingerprints ignore inherited Git config, hooks, and retargeting", async (t) => {
   const hostileRoot = mkdtempSync(join(testTempDirectory(), "launcher-hostile-git-"));
-  t.after(() => rmSync(hostileRoot, { recursive: true, force: true }));
+  removeFixtureOnPass(t, hostileRoot);
   const hooks = join(hostileRoot, "hooks");
   mkdirSync(hooks);
   const hook = join(hooks, "pre-commit");
@@ -958,10 +993,7 @@ test("separate notify-only processes publish an intact receipt without rerunning
       [launcherScript, "notify", runDir],
       { cwd: root, env: { ...env, FIXTURE_NOTIFICATION_BARRIER: "4" }, log },
     );
-    const outcomes = await within(
-      Promise.all(notificationLogs.map(invoke)),
-      "concurrent notify-only processes",
-    );
+    const outcomes = await Promise.all(notificationLogs.map(invoke));
     assert.deepEqual(
       outcomes,
       notificationLogs.map(() => ({ code: 0, signal: null })),
@@ -1040,9 +1072,9 @@ test("detached worker reaches readiness, runs once, and sends one notification",
       notifyTo: "  Termal::Codex  ",
     }, env);
     assert.equal(json(join(runDir, "request.json")).notifyTo, "Termal::Codex");
-    const detached = await within(startDetachedRun(runDir, env), "detached readiness");
+    const detached = await startDetachedRun(runDir, env);
     assert.ok(Number.isInteger(detached.pid));
-    assert.deepEqual(await within(detached.completion, "detached completion"), {
+    assert.deepEqual(await workerExit(detached), {
       code: 0,
       signal: null,
     });
@@ -1055,6 +1087,104 @@ test("detached worker reaches readiness, runs once, and sends one notification",
     assert.equal(args[args.indexOf("--idempotency-key") + 1], `termal-tests:${basename(runDir)}`);
     assert.equal(body, await summarize(runDir));
   });
+});
+
+test("a detached worker that completes correctly after more time has passed is judged by its outcome", async (t) => {
+  await isolatedDetachedRepository(t, async (root, env) => {
+    // The stage holds the worker until the test releases it; it waits idle,
+    // so no CPU load is involved. Mocked time stands in for a slow host: it
+    // passes the 10 s that a fixed deadline once allowed a worker, and the
+    // worker is still judged by its outcome.
+    const release = join(root, ".git", "release-held-stage");
+    const runDir = await createRun({
+      root,
+      stages: [stage("held", untilFileExistsSource(release))],
+      notifyTo: "Termal::Codex",
+    }, env);
+    const detached = await startDetachedRun(runDir, env);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let outcome;
+    try {
+      const waiting = workerExit(detached);
+      t.mock.timers.tick(10_000);
+      writeFileSync(release, "");
+      outcome = await waiting;
+    } finally {
+      t.mock.timers.reset();
+      writeFileSync(release, "");
+      await workerExit(detached);
+    }
+    assert.deepEqual(outcome, { code: 0, signal: null });
+    assert.equal(json(join(runDir, "results.json")).state, "passed");
+  });
+});
+
+test("a failed or hung test keeps its fixture directory and names it; a passing test removes it", async (t) => {
+  const base = mkdtempSync(join(testTempDirectory(), "launcher-keep-"));
+  removeFixtureOnPass(t, base);
+  const cleanup = new URL("./test-fixture-cleanup.mjs", import.meta.url).href;
+  const fixture = join(base, "fixture.test.mjs");
+  const directory = (name) => join(base, name);
+  // A barrier that is never released, held by the hung test: a fixture
+  // process like the launcher tests' own, whose owner is the test process
+  // that started it (its first argument).
+  const barrier = join(base, "barrier.cjs");
+  writeFileSync(barrier, untilFileExistsSource(directory("never-released"), "Number(process.argv[2])"));
+  const barrierPid = directory("barrier.pid");
+  writeFileSync(fixture, [
+    'import { spawn } from "node:child_process";',
+    'import { mkdirSync, writeFileSync } from "node:fs";',
+    'import test from "node:test";',
+    `import { removeFixtureOnPass } from ${JSON.stringify(cleanup)};`,
+    "const fixtureWith = (t, path) => {",
+    "  mkdirSync(path);",
+    "  writeFileSync(`${path}/worker.log`, 'worker output\\n');",
+    "  removeFixtureOnPass(t, path);",
+    "};",
+    // Both are synchronous, so they settle before the command-line bound
+    // below can fire, however slow the host.
+    `test("passes", (t) => { fixtureWith(t, ${JSON.stringify(directory("passed"))}); });`,
+    `test("fails", (t) => { fixtureWith(t, ${JSON.stringify(directory("failed"))}); throw new Error("fixture failure"); });`,
+    // It awaits a child that waits forever on its barrier, as a hung launcher
+    // test awaits its worker: the child's handle keeps this process alive, so
+    // only the runner's timeout stops the test, and only --test-force-exit
+    // then ends this process, which in turn ends the child.
+    `test("hangs", async (t) => {`,
+    `  fixtureWith(t, ${JSON.stringify(directory("hung"))});`,
+    `  const child = spawn(process.execPath, [${JSON.stringify(barrier)}, String(process.pid)], { stdio: "ignore", windowsHide: true });`,
+    `  writeFileSync(${JSON.stringify(barrierPid)}, String(child.pid));`,
+    "  await new Promise((resolveExit) => child.once('exit', resolveExit));",
+    "});",
+  ].join("\n"));
+  const env = { ...fixtureEnv };
+  delete env.NODE_TEST_CONTEXT;
+  // The guard's own shape, as the stage and CI pass it, with a short bound:
+  // the per-test timeout must stop the hung test with its after-hooks run
+  // (not a bound on the whole file, which starts earlier), and force-exit
+  // must then end the runner although the hung child is still referenced.
+  // spec output keeps Windows paths unescaped whether or not stdout is a TTY.
+  const shape = helperTestArgs.filter((arg) => !helperTestFiles.includes(arg) && !arg.startsWith("--test-timeout="));
+  assert.deepEqual(shape, ["--test", "--test-force-exit"]);
+  const child = spawn(process.execPath, [...shape, "--test-reporter=spec", "--test-timeout=500", fixture], {
+    cwd: base, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => { output += chunk; });
+  child.stderr.on("data", (chunk) => { output += chunk; });
+  const code = await new Promise((resolveExit) => child.once("close", resolveExit));
+  assert.equal(code, 1, output);
+  assert.equal(existsSync(directory("passed")), false, output);
+  for (const [verdict, test] of [["failed", "fails"], ["hung", "hangs"]]) {
+    assert.equal(readFileSync(join(directory(verdict), "worker.log"), "utf8"), "worker output\n", output);
+    assert.ok(
+      output.includes(`${verdict}: ${test}; fixture kept at ${directory(verdict)}`),
+      output,
+    );
+  }
+  // The hung test's own child ends once its owner is gone, without a
+  // release: nothing is left running. This waits on that event, not a clock.
+  const orphan = Number(readFileSync(barrierPid, "utf8"));
+  while (!processGone(orphan)) await new Promise((resolveTick) => setTimeout(resolveTick, 10));
 });
 
 test("a run records whether it is detached and which process created it", async (t) => {
@@ -1161,8 +1291,8 @@ test("an admitted worker that cannot save its terminal result sends one UNKNOWN 
       ].join(" "))],
       notifyTo: "Termal::Codex",
     }, env);
-    const detached = await within(startDetachedRun(runDir, env), "detached readiness");
-    assert.deepEqual(await within(detached.completion, "detached completion"), {
+    const detached = await startDetachedRun(runDir, env);
+    assert.deepEqual(await workerExit(detached), {
       code: 1,
       signal: null,
     });
@@ -1276,7 +1406,7 @@ test("helper scripts run when started through a linked directory", async (t) => 
   // The link targets a private copy of the scripts, so no cleanup can reach
   // the checkout through it.
   const base = mkdtempSync(join(testTempDirectory(), "launcher-link-"));
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  removeFixtureOnPass(t, base);
   const real = join(base, "real");
   mkdirSync(join(real, "scripts"), { recursive: true });
   for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs", "test-counts.mjs"]) {
@@ -1293,14 +1423,14 @@ test("helper scripts run when started through a linked directory", async (t) => 
     child.stderr.on("data", (chunk) => { output += chunk; });
     child.once("close", (code) => resolveRun({ code, output }));
   });
-  const launcher = await within(run("test-launcher.mjs"), "launcher through link");
+  const launcher = await run("test-launcher.mjs");
   assert.match(launcher.output, /FAIL launcher: usage:/u, launcher.output);
   assert.equal(launcher.code, 1);
-  const tempRoot = await within(run("test-temp-root.mjs"), "temp root through link");
+  const tempRoot = await run("test-temp-root.mjs");
   assert.match(tempRoot.output, /Usage: node scripts\/test-temp-root\.mjs/u, tempRoot.output);
   assert.equal(tempRoot.code, 2);
   await repository(t, async (root) => {
-    const fingerprint = await within(run("review-freeze-fingerprint.mjs", [], root), "fingerprint through link");
+    const fingerprint = await run("review-freeze-fingerprint.mjs", [], root);
     assert.match(fingerprint.output, /^headCommit=[0-9a-f]{40}$/mu, fingerprint.output);
     assert.equal(fingerprint.code, 0);
   });
@@ -1316,7 +1446,7 @@ test("a foreground run prints its run receipt before any stage completes", async
       copyFileSync(join(projectRoot, "scripts", name), join(scripts, name));
     }
     const gate = mkdtempSync(join(testTempDirectory(), "launcher-receipt-"));
-    t.after(() => rmSync(gate, { recursive: true, force: true }));
+    removeFixtureOnPass(t, gate);
     const release = join(gate, "release");
     const child = spawn(process.execPath, [
       join(scripts, "test-launcher.mjs"),
@@ -1324,21 +1454,14 @@ test("a foreground run prints its run receipt before any stage completes", async
       "--",
       process.execPath,
       "-e",
-      [
-        "const fs = require('node:fs');",
-        "const deadline = Date.now() + 10000;",
-        `while (!fs.existsSync(${JSON.stringify(release)})) {`,
-        "  if (Date.now() > deadline) process.exit(3);",
-        "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);",
-        "}",
-      ].join(" "),
+      untilFileExistsSource(release),
     ], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     const exited = new Promise((resolveExit) => child.once("close", (code) => resolveExit(code)));
     try {
-      const receipt = await within(new Promise((resolveReceipt, rejectReceipt) => {
+      const receipt = await new Promise((resolveReceipt, rejectReceipt) => {
         child.stdout.on("data", (chunk) => {
           stdout += chunk;
           if (stdout.includes("\n")) resolveReceipt(stdout.split("\n")[0].trim());
@@ -1346,7 +1469,7 @@ test("a foreground run prints its run receipt before any stage completes", async
         child.once("close", () => {
           rejectReceipt(new Error(`launcher exited before a receipt: ${stdout}${stderr}`));
         });
-      }), "foreground receipt");
+      });
       const match = /^RUN (.+)$/u.exec(receipt);
       assert.ok(match, receipt);
       const runDir = match[1];
@@ -1359,13 +1482,13 @@ test("a foreground run prints its run receipt before any stage completes", async
       assert.equal(request.detached, false);
       assert.equal(request.creatorPid, child.pid, "the foreground launcher runs its own stages");
       writeFileSync(release, "go\n");
-      assert.equal(await within(exited, "foreground completion"), 0, `${stdout}${stderr}`);
+      assert.equal(await exited, 0, `${stdout}${stderr}`);
       assert.match(stdout, new RegExp(`^RUN .+\\r?\\n(?:.*\\r?\\n)*PASS ${basename(runDir)} exit=0`, "u"));
     } finally {
       // Never leave the launcher running in the fixture directory, which the
       // fixture removes next: release its stage and wait for it to end.
       if (!existsSync(release)) writeFileSync(release, "go\n");
-      await within(exited, "launcher shutdown");
+      await exited;
     }
   });
 });
@@ -1549,10 +1672,7 @@ test("a worker refused admission never speaks for the run", async (t) => {
     const resultBytes = readFileSync(join(runDir, "results.json"), "utf8");
     writeFileSync(join(runDir, "execution.lock"), "owned\n");
     const log = join(root, ".git", "unadmitted-worker.log");
-    const outcome = await within(
-      runCommand(process.execPath, [launcherScript, "_run", runDir], { cwd: root, env, log }),
-      "unadmitted worker",
-    );
+    const outcome = await runCommand(process.execPath, [launcherScript, "_run", runDir], { cwd: root, env, log });
     assert.equal(outcome.code, 1);
     assert.match(readFileSync(log, "utf8"), /failed before admission/u);
     assert.equal(existsSync(notificationMarker), false);
@@ -1595,10 +1715,7 @@ test("an admitted worker that fails after a terminal result was saved sends that
     const log = join(root, ".git", "readiness-worker.log");
     let outcome;
     try {
-      outcome = await within(
-        runCommand(process.execPath, [launcherScript, "_run", runDir], { cwd: root, env, log }),
-        "worker whose readiness fails",
-      );
+      outcome = await runCommand(process.execPath, [launcherScript, "_run", runDir], { cwd: root, env, log });
     } finally {
       chmodSync(resultPath, 0o644);
     }
@@ -1626,14 +1743,11 @@ test("the recover command reports an already terminal run without changing it", 
     const resultPath = join(runDir, "results.json");
     const resultBytes = readFileSync(resultPath, "utf8");
     const log = join(root, ".git", "recover-command.log");
-    const outcome = await within(
-      runCommand(process.execPath, [launcherScript, "recover", runDir], {
-        cwd: root,
-        env: fixtureEnv,
-        log,
-      }),
-      "recover command",
-    );
+    const outcome = await runCommand(process.execPath, [launcherScript, "recover", runDir], {
+      cwd: root,
+      env: fixtureEnv,
+      log,
+    });
     const output = readFileSync(log, "utf8");
     assert.equal(outcome.code, 0, output);
     assert.match(output, /^PASS /mu);
@@ -1642,14 +1756,17 @@ test("the recover command reports an already terminal run without changing it", 
   });
 });
 
-test("CI runs every maintained helper test suite on each platform", () => {
+test("CI runs every maintained helper test suite on each platform, under the gate's hang guard", () => {
   const workflow = readFileSync(
     join(projectRoot, ".github", "workflows", "review-freeze.yml"),
     "utf8",
   );
-  const run = /run: node --test (.+)$/mu.exec(workflow);
+  const run = /run: node (--test .+)$/mu.exec(workflow);
   assert.ok(run, "the workflow runs node --test");
-  assert.deepEqual(run[1].trim().split(/\s+/u), [...helperTestFiles]);
+  assert.deepEqual(run[1].trim().split(/\s+/u), [...helperTestArgs]);
+  // The gate host's Node: the hang guard and the hung/failed verdicts rely on
+  // its test runner (see docs/test.md).
+  assert.match(workflow, /^\s*node-version-file: \.nvmrc\s*$/mu);
   assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
 });
 
@@ -1660,7 +1777,7 @@ const windowsSharing = process.platform === "win32" ? false : "Windows file-shar
 
 test("save() replaces a results file another handle holds open once that handle closes", { skip: windowsSharing }, (t) => {
   const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  removeFixtureOnPass(t, directory);
   const target = join(directory, "results.json");
   writeFileSync(target, `${JSON.stringify({ state: "running" })}\n`);
   let held = openSync(target, "r");
@@ -1690,7 +1807,7 @@ test("save() replaces a results file another handle holds open once that handle 
 
 test("save() starts no replace once its budget is spent, even when the holder lets go late", { skip: windowsSharing }, (t) => {
   const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  removeFixtureOnPass(t, directory);
   const target = join(directory, "results.json");
   writeFileSync(target, `${JSON.stringify({ state: "running" })}\n`);
   let held = openSync(target, "r");
@@ -1720,7 +1837,7 @@ test("save() starts no replace once its budget is spent, even when the holder le
 
 test("save() keeps the previous results when the target stays held past its budget", { skip: windowsSharing }, (t) => {
   const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  removeFixtureOnPass(t, directory);
   const target = join(directory, "results.json");
   writeFileSync(target, `${JSON.stringify({ state: "running" })}\n`);
   const held = openSync(target, "r");
@@ -1749,7 +1866,7 @@ test("save() keeps the previous results when the target stays held past its budg
 
 test("the atomic replace throws any other error at once, without waiting", (t) => {
   const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  removeFixtureOnPass(t, directory);
   const sleeps = [];
   assert.throws(
     () => replaceAtomically(join(directory, "missing.tmp"), join(directory, "results.json"), {
@@ -1763,7 +1880,7 @@ test("the atomic replace throws any other error at once, without waiting", (t) =
 
 test("the atomic replace waits for a held target only on Windows", { skip: windowsSharing }, (t) => {
   const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  removeFixtureOnPass(t, directory);
   const target = join(directory, "results.json");
   writeFileSync(target, "{}\n");
   const temporary = `${target}.tmp`;

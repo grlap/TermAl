@@ -278,8 +278,43 @@ product and run directory components must not be symlinks or junctions.
 The review-integrity helper tests run on Linux, macOS, and Windows in CI: the
 same five maintained suites as the full gate's `fingerprint-tests` stage
 (`helperTestFiles` in `scripts/test-launcher.mjs`), which a launcher test keeps
-in step with the workflow. The
-Vitest resource preflight itself uses three fixed CPU samples and the median,
+in step with the workflow.
+
+The launcher's own tests (`scripts/test-launcher.test.mjs`) wait for the
+processes they start by events: an exit or close, a readiness message, or a
+barrier file. No deadline decides whether one passed, so a slow host makes them
+slower, not failed. A hang in any helper test is surfaced by one liveness
+guard, the runner's per-test timeout (`--test-timeout`, set by
+`HELPER_TEST_HANG_GUARD_MS` in `scripts/test-launcher.mjs` for both the stage
+and CI). It is sized as a hang detector, not a performance bound: 600 s, over
+13 times the slowest helper test measured on a loaded gate host (about 45 s,
+2026-10-09). A timeout does not stop what the hung test started, so
+`--test-force-exit` ends each test process once its tests have finished; the
+fixture processes waiting on a barrier see their owner gone and exit too, and
+the stage ends with the failure instead of waiting on them. A product process
+stuck outside a barrier is not stopped and outlives the stage. Force-exit also
+means a passing test that leaks a handle no longer keeps its suite running, so
+leak detection needs its own check. CI runs these suites on the gate host's
+Node (`.nvmrc`), whose runner these rules were checked against.
+
+A launcher test the guard stops is reported as `hung: <test>`, and a failed one
+as `failed: <test>`. Either keeps its fixture directory, with its worker logs,
+and names its path on stderr, so a slow worker and a hung one can be told apart
+(`scripts/test-fixture-cleanup.mjs`); a passing test removes it. The other
+helper suites still remove their fixtures unconditionally. The
+`fingerprint-tests` stage runs `node` directly, without the Rust wrapper's run
+folder, so a kept directory lies in the product test folder itself
+(`termal/tests` under the user temp folder), gate or not; with
+`TERMAL_TEST_RUN_ROOT` set it lies in that `run-*` folder instead. It survives
+the current run, but not indefinitely: every launch of the wrapper (including
+the `rust-tests` stage of any later full gate) sweeps the product test folder,
+removing a direct entry once it is 48 hours old, and a marked `run-*` folder
+once it is that old and its recorded processes have exited, at most 64 entries
+per launch. Copy the logs elsewhere, for example to `.evidence/`, if they must
+outlive that. A Node older than `.nvmrc` may lack the test context's `error`,
+and then reports a hang as `failed`.
+
+The Vitest resource preflight itself uses three fixed CPU samples and the median,
 so one scheduler spike does not reject a gate while sustained starvation still
 fails before frontend tests start. Windows reports process CPU availability
 without presenting its unsupported load-average value as real system load.

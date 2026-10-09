@@ -55,12 +55,31 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-temp-root.test.mjs",
   "scripts/vitest-resource-preflight.test.mjs",
 ]);
+// The helper tests' one liveness guard: the runner's per-test timeout. The
+// tests wait for their processes by events (exit, close, readiness, a barrier
+// file), never by a deadline, so a slow host only makes them slower. A test
+// still running at this bound is hung, and its fixture directory is kept for
+// diagnosis (scripts/test-fixture-cleanup.mjs). It is sized as a hang
+// detector, not a performance bound: the slowest helper test measured about
+// 45 s on a loaded gate host (2026-10-09), and this is over 13 times that.
+// A timeout does not stop what the hung test started, so --test-force-exit
+// ends each test process once its tests have finished; fixture processes
+// waiting on a barrier then see their owner gone and exit too, and the stage
+// ends.
+export const HELPER_TEST_HANG_GUARD_MS = 600_000;
+export const helperTestArgs = Object.freeze([
+  "--test",
+  "--test-force-exit",
+  `--test-timeout=${HELPER_TEST_HANG_GUARD_MS}`,
+  ...helperTestFiles,
+]);
 const helperSupportFiles = Object.freeze([
   nodeDurationReporterFile,
   "scripts/review-freeze-fingerprint.mjs",
   "scripts/test-categories-plan.mjs",
   "scripts/test-counts.mjs",
   "scripts/test-durations.mjs",
+  "scripts/test-fixture-cleanup.mjs",
   "scripts/test-launcher.mjs",
   "scripts/test-temp-root.mjs",
   "scripts/vitest-resource-preflight.mjs",
@@ -168,7 +187,7 @@ export function requiredStages(platform = process.platform, env = process.env) {
     {
       name: "fingerprint-tests",
       command: process.execPath,
-      args: ["--test", ...helperTestFiles],
+      args: [...helperTestArgs],
       durationReport: "node-test-events",
     },
     {
