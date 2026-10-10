@@ -50,6 +50,9 @@ struct EngramPreparedBegin {
     /// Local time by which the grant had been issued: its expiry basis.
     issued_no_later_than: String,
     phase: EngramPreparedBeginPhase,
+    /// The delivery page the grant was issued with, for a replay's card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivered_range: Option<EngramDeliveredRange>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -426,13 +429,17 @@ impl AppState {
     /// Records the exact `begin` on the head's retained evaluate and waits
     /// for the durable writer to acknowledge it through the admission fence.
     /// Any other outcome, including an ambiguous one, means the begin is not
-    /// sent. A head without a retained evaluate has nowhere to keep it.
+    /// sent. A head without a retained evaluate has nowhere to keep it. A
+    /// replay re-acknowledges the record it replays and keeps its original
+    /// expiry basis; a failure never withdraws it, since that begin may have
+    /// been applied before.
     fn prepare_engram_begin_durable(
         &self,
         session_id: &str,
         started_at: std::time::Instant,
         owner: &EngramQueuedAdmissionOwner,
         begin: &EngramControlRequest,
+        delivered_range: Option<EngramDeliveredRange>,
     ) -> std::result::Result<(), EngramTransportError> {
         let EngramControlRequest::TurnBegin {
             grant_id,
@@ -445,7 +452,7 @@ impl AppState {
                 "Only a turn_begin is prepared for replay",
             ));
         };
-        {
+        let replay = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id).ok_or_else(|| {
                 EngramTransportError::local_state("Session removed before Begin preparation")
@@ -467,17 +474,29 @@ impl AppState {
                         "The queued prompt has no retained evaluate to carry its Begin",
                     )
                 })?;
+            let replayed = evaluate.prepared_begin.as_ref().filter(|prepared| {
+                prepared.grant_id == *grant_id && prepared.idempotency_key == *idempotency_key
+            });
+            let replay = replayed.is_some();
             evaluate.prepared_begin = Some(EngramPreparedBegin {
                 idempotency_key: idempotency_key.clone(),
                 grant_id: grant_id.clone(),
                 delivery_tokens: delivery_tokens.clone(),
-                issued_no_later_than: chrono::Utc::now()
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                issued_no_later_than: replayed.map_or_else(
+                    || chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                    |prepared| prepared.issued_no_later_than.clone(),
+                ),
                 phase: EngramPreparedBeginPhase::Prepared,
+                delivered_range,
             });
-        }
+            replay
+        };
         self.confirm_engram_admission_durable(session_id, started_at, owner)
-            .inspect_err(|_| self.withdraw_engram_prepared_begin(session_id, owner, grant_id))
+            .inspect_err(|_| {
+                if !replay {
+                    self.withdraw_engram_prepared_begin(session_id, owner, grant_id);
+                }
+            })
     }
 
     /// A begin that is not sent leaves no prepared record behind: once saved,
@@ -725,26 +744,57 @@ impl AppState {
                     (card.decision == EngramControlCardDecision::Degraded)
                         .then(|| card.refusal_code.clone())
                         .flatten(),
+                    card.decision == EngramControlCardDecision::Degraded
+                        && card
+                            .causal_failure
+                            .as_ref()
+                            .is_some_and(engram_cause_leaves_begin_unknown),
                 )),
                 _ => None,
             });
-        interrupted |= record
-            .queued_prompts
-            .front()
-            .is_some_and(QueuedPromptRecord::is_engram_retained)
-            && decision.as_ref().is_some_and(|(disposition, _, _)| {
+        // A begin answered that its routing token is no longer bound can be
+        // neither replayed under that token nor rebound without risking its
+        // grant: an explicit hold, whatever its card code.
+        let begin_binding_lost = record
+            .session
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::EngramControl { card, .. } => Some(
+                    card.causal_failure
+                        .as_ref()
+                        .is_some_and(engram_cause_lost_begin_binding),
+                ),
+                _ => None,
+            })
+            .unwrap_or(false);
+        interrupted |= begin_binding_lost;
+        // A begin whose outcome is unknown, whatever card code its failure
+        // carried, is the exact replay's to settle (`engram_begin_replay.rs`)
+        // while its durable prepared begin stands and control is not disabled.
+        let begin_unknown = decision.as_ref().is_some_and(|(_, _, _, unknown)| *unknown)
+            && record.engram.disabled_reason.is_none()
+            && engram_begin_replay_pending(record).is_some();
+        interrupted |= !begin_unknown
+            && record
+                .queued_prompts
+                .front()
+                .is_some_and(QueuedPromptRecord::is_engram_retained)
+            && decision.as_ref().is_some_and(|(disposition, _, _, _)| {
                 *disposition == EngramAdmissionDisposition::Reconcile
             });
         let waiting = record.engram.dispatch_generation == generation
             && !record.queued_prompts.is_empty()
             && (interrupted
-                || decision.as_ref().is_some_and(|(disposition, _, _)| {
+                || begin_unknown
+                || decision.as_ref().is_some_and(|(disposition, _, _, _)| {
                     *disposition == EngramAdmissionDisposition::Retry
                 }));
         if !waiting {
             return EngramAuthorizationParkOutcome::Superseded;
         }
-        let defer = decision.as_ref().is_some_and(|(_, defer, _)| *defer);
+        let defer = decision.as_ref().is_some_and(|(_, defer, _, _)| *defer);
         if defer {
             record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
         }
@@ -761,13 +811,18 @@ impl AppState {
             else { ENGRAM_ADMISSION_HELD_PREVIEW })
                 .to_owned();
         // An unknown outcome with nothing begun is replayed automatically
-        // (`engram_admission_retry.rs`); a Defer, a Reconcile disposition or
-        // anything else holding the head keeps this explicit hold.
+        // (`engram_admission_retry.rs`), and so is an unknown begin, by its
+        // exact replay; a Defer, a Reconcile disposition or anything else
+        // holding the head keeps this explicit hold.
         let scheduled = !interrupted
             && !defer
             && schedule_engram_admission_retry_locked(
                 record,
-                decision.as_ref().and_then(|(_, _, code)| code.as_deref()),
+                if begin_unknown {
+                    Some(ENGRAM_BEGIN_REPLAY_CODE)
+                } else {
+                    decision.as_ref().and_then(|(_, _, code, _)| code.as_deref())
+                },
                 authority.as_deref(),
                 chrono::Utc::now(),
                 budget_now,

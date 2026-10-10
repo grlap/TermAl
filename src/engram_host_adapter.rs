@@ -5133,7 +5133,13 @@ impl AppState {
                     delivery_tokens,
                     delivered_range,
                 } => {
-                    issued_unbegun_grant_id = Some(grant_id.clone());
+                    // A replay resends the stored begin: its exact key string,
+                    // never one recomputed (`engram_begin_replay.rs`). Its grant
+                    // is possibly begun, never an issued orphan to repair.
+                    let replaying = self
+                        .engram_begin_replay_for(session_id, admission_owner.as_ref())
+                        .filter(|prepared| prepared.grant_id == grant_id);
+                    issued_unbegun_grant_id = replaying.is_none().then(|| grant_id.clone());
                     let Some(target) = binding_target.as_ref() else {
                         break (
                             EngramControlCardDecision::Degraded,
@@ -5181,14 +5187,17 @@ impl AppState {
                     }
                     let begin_request = EngramControlRequest::TurnBegin {
                         routing_token: routing_token.clone(), grant_id: grant_id.clone(), delivery_tokens,
-                        idempotency_key: self.queued_engram_begin_key(session_id, pending.dispatch_generation, &grant_id),
+                        idempotency_key: replaying.as_ref().map_or_else(
+                            || self.queued_engram_begin_key(session_id, pending.dispatch_generation, &grant_id),
+                            |prepared| prepared.idempotency_key.clone(),
+                        ),
                     };
                     // Without a durable record of this exact begin, a lost
                     // reply could never be replayed: do not send it.
                     if let Err(error) = admission_owner
                         .as_ref()
                         .ok_or_else(|| EngramTransportError::local_state("Begin preparation owner disappeared"))
-                        .and_then(|owner| self.prepare_engram_begin_durable(session_id, dispatch_budget_started_at, owner, &begin_request))
+                        .and_then(|owner| self.prepare_engram_begin_durable(session_id, dispatch_budget_started_at, owner, &begin_request, delivered_range.clone()))
                     {
                         self.clear_engram_begin_requested_if_current(session_id, pending.dispatch_generation);
                         causal_failure = Some(EngramCausalFailure::local_hold("turn_begin", "begin_preparation_unacknowledged", &error.message, "prepared Begin durable acknowledgement"));
@@ -5208,7 +5217,7 @@ impl AppState {
                     };
                     let mut begin_root_guard = None;
                     let begin_started = std::time::Instant::now();
-                    let begin = self
+                    let mut begin = self
                         .guard_engram_root_read_until(
                             target,
                             begin_binding.as_ref(),
@@ -5225,7 +5234,7 @@ impl AppState {
                                 .request(
                                     &target.connection,
                                     &begin_request,
-                                    target.rpc_timeout_until(
+                                    target.begin_rpc_timeout_until(
                                         target.dispatch_deadline(dispatch_budget_started_at),
                                     ).map_err(|mut error| {
                                         error.causal_failure = Some(EngramCausalFailure::unsent_request(&error, &begin_request, "Begin budget before transmission"));
@@ -5252,8 +5261,13 @@ impl AppState {
                                 active_grant_id = Some(grant_id.clone());
                                 issued_unbegun_grant_id = None;
                             }
-                            // A definitive refusal begun nothing.
-                            Ok(EngramTurnBeginResponse::Refuse { .. }) => {
+                            // A definitive refusal of a first send begun
+                            // nothing; a replay's refusal proves that only
+                            // when Engram says the grant was never begun.
+                            Ok(EngramTurnBeginResponse::Refuse { code })
+                                if replaying.is_none()
+                                    || engram_begin_refusal_proves_never_begun(code) =>
+                            {
                                 self.clear_engram_begin_requested_if_current(
                                     session_id,
                                     pending.dispatch_generation,
@@ -5273,6 +5287,54 @@ impl AppState {
                             delivered_range,
                             EngramControlFailMode::Degraded,
                         );
+                    }
+                    // A replay's refusal proves nothing unless Engram says the
+                    // grant was never begun; a scope mismatch settles as
+                    // applied only when status names this grant open. Any
+                    // other refusal holds the head with its possibly begun
+                    // grant, and never sends a fresh evaluate.
+                    let mut replay_hold = false;
+                    // Engram can send stale_fence as an error reply; for a
+                    // replay it is the same never-begun proof as the refusal.
+                    if replaying.is_some()
+                        && begin.as_ref().is_err_and(engram_error_is_stale_fence)
+                    {
+                        begin = Ok(EngramTurnBeginResponse::Refuse {
+                            code: "stale_fence".to_owned(),
+                        });
+                    }
+                    if replaying.is_some()
+                        && let Ok(EngramTurnBeginResponse::Refuse { code }) = &begin
+                    {
+                        if engram_begin_refusal_proves_never_begun(code) {
+                            self.settle_engram_begin_never_begun(
+                                session_id,
+                                admission_owner.as_ref(),
+                                &grant_id,
+                            );
+                            // Never begun, but possibly still issued: the
+                            // orphan repair a first send's refusal arms
+                            // applies again (the healing route clears it).
+                            issued_unbegun_grant_id = Some(grant_id.clone());
+                        } else if code == "grant_scope_mismatch"
+                            && self.engram_status_shows_grant_begun(
+                                target,
+                                routing_token,
+                                &grant_id,
+                                target.dispatch_deadline(dispatch_budget_started_at),
+                                admission_owner.as_ref(),
+                            )
+                        {
+                            begin = Ok(EngramTurnBeginResponse::Begin {
+                                receipt: EngramTurnBeginReceipt {
+                                    grant_id: grant_id.clone(),
+                                    named_root: None,
+                                    _tentative_cursor: None,
+                                },
+                            });
+                        } else {
+                            replay_hold = true;
+                        }
                     }
                     match begin {
                         Ok(EngramTurnBeginResponse::Begin { receipt }) => {
@@ -5331,8 +5393,10 @@ impl AppState {
                         }
                         Ok(EngramTurnBeginResponse::Refuse { code })
                             if !retry_used
+                                && !replay_hold
                                 && (engram_begin_refusal_allows_reevaluation(&code)
-                                    || (code == "grant_scope_mismatch"
+                                    || (replaying.is_none()
+                                        && code == "grant_scope_mismatch"
                                         && self.engram_issued_grant_was_retired(
                                             target,
                                             dispatch_budget_started_at,
@@ -5655,6 +5719,21 @@ impl AppState {
                                 // but Engram has still expired that grant.
                                 issued_unbegun_grant_id = None;
                             }
+                            if replay_hold {
+                                // The replayed grant stays possibly begun: the
+                                // head is retained as an explicit hold naming
+                                // the refusal (a Reconcile disposition), never
+                                // rejected, retried, or expired by a rebind.
+                                uncertain_grant_id = Some(grant_id.clone());
+                                issued_unbegun_grant_id = None;
+                                break (
+                                    EngramControlCardDecision::Degraded,
+                                    Some(code),
+                                    Vec::new(),
+                                    delivered_range,
+                                    EngramControlFailMode::Degraded,
+                                );
+                            }
                             // Every other refusal leaves the grant issued in
                             // Engram. Keep the orphan marker so the next
                             // dispatch expires it through a fresh bind.
@@ -5677,9 +5756,12 @@ impl AppState {
                             // failure, so the grant is possibly begun. That
                             // holds for a structured error reply too: it does
                             // not say whether the begin was applied first, so
-                            // it is recorded deliberately and a session status
-                            // settles the ones that were not.
+                            // it is recorded deliberately. Its durable prepared
+                            // begin is replayed exactly until Engram answers
+                            // (`engram_begin_replay.rs`); no orphan rebind may
+                            // expire the grant before that answer.
                             uncertain_grant_id = Some(grant_id.clone());
+                            issued_unbegun_grant_id = None;
                             break (
                                 EngramControlCardDecision::Degraded,
                                 Some(code),
@@ -6938,6 +7020,16 @@ impl AppState {
                 remaining.as_millis()
             )));
         }
+        // A begin-unknown head is settled only by replaying its exact begin
+        // (`engram_begin_replay.rs`): no status read clears it, no restart
+        // checkpoint closes its grant and no rebind expires it first.
+        if let Some(routing_token) = target.routing_token.clone()
+            && self
+                .engram_begin_replay_for(&target.connection.session_id, owner)
+                .is_some()
+        {
+            return Ok(routing_token);
+        }
         let recovery_started_at = target.admission_started_at.unwrap_or_else(|| clock.now());
         // An uncertain grant can only be settled by a session status, so it
         // takes the rebind path even when nothing else asked for one.
@@ -7774,6 +7866,27 @@ impl AppState {
                 });
             }
         };
+        // A begin-unknown head sends no evaluate, retained or fresh: its grant
+        // goes straight to the replay of its exact prepared begin.
+        if let Some(prepared) =
+            self.engram_begin_replay_for(&intent.session_id, admission_owner.as_ref())
+        {
+            return Some(EngramPendingDispatch {
+                causal_failure: None,
+                dispatch_generation: intent.dispatch_generation,
+                intent_fingerprint: intent.intent_fingerprint.clone(),
+                evaluated: EngramDispatchEvaluation::Grant {
+                    grant_id: prepared.grant_id,
+                    delivery_tokens: prepared.delivery_tokens,
+                    delivered_range: prepared.delivered_range,
+                },
+                evaluate_latency_ms: 0,
+                started_at,
+                awaiting_runtime_stop_resolution: false,
+                begin_requested: None,
+                evaluated_work_binding: self.engram_bound_work_binding(&intent.session_id),
+            });
+        }
         // Binding, work-focus, evaluate and begin share one admission budget.
         // One rebind-and-re-evaluate per admission, whichever curable refusal
         // (engram_evaluation_refusal_heals_by_rebind) asked for it.
@@ -8306,16 +8419,20 @@ fn engram_error_is_stale_fence(error: &EngramTransportError) -> bool {
 
 fn engram_status_error_requires_fresh_bind(error: &EngramTransportError) -> bool {
     error.kind == EngramTransportErrorKind::Remote
-        && matches!(
-            error.code.as_deref(),
-            Some(
-                "control_session_token_mismatch"
-                    | "control_session_not_bound"
-                    | "control_connection_superseded"
-                    | "invalid_routing_token"
-                    | "unknown_routing_token"
-            )
-        )
+        && error.code.as_deref().is_some_and(engram_code_invalidates_routing_token)
+}
+
+/// The structured error codes saying the routing token no longer names a
+/// bound control session: only a fresh bind can continue.
+fn engram_code_invalidates_routing_token(code: &str) -> bool {
+    matches!(
+        code,
+        "control_session_token_mismatch"
+            | "control_session_not_bound"
+            | "control_connection_superseded"
+            | "invalid_routing_token"
+            | "unknown_routing_token"
+    )
 }
 
 fn engram_grant_was_issued_but_not_begun(error: &EngramTransportError) -> bool {

@@ -205,15 +205,16 @@ fn a_project_may_bound_an_engram_call_up_to_twenty_seconds() {
     );
 }
 
+/// Resuming a lost begin replays only that exact begin: no evaluate goes out
+/// again, retained or fresh, and no new generation is taken.
 #[test]
-fn root_lost_begin_replays_exact_evaluate_and_begin_without_new_generation() {
+fn root_lost_begin_resume_replays_only_the_exact_begin_without_new_generation() {
     let (state, session, receiver, transport) = root_fixture([
         bind_reply("root-token"),
         grant_reply("original-grant"),
         ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
             "begin reply lost",
         ))),
-        grant_reply("original-grant"),
         begin_reply("original-grant"),
     ]);
     let dispatch = root_dispatch(&state, &session, false);
@@ -226,9 +227,9 @@ fn root_lost_begin_replays_exact_evaluate_and_begin_without_new_generation() {
     ));
     assert!(receiver.try_recv().is_err());
     let requests = transport.requests();
-    assert_eq!(requests.len(), 5);
-    assert_eq!(requests[1].request, requests[3].request);
-    assert_eq!(requests[2].request, requests[4].request);
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[3].request["operation"], "turn_begin");
+    assert_eq!(requests[2].request, requests[3].request, "the exact begin");
 }
 
 #[test]

@@ -2441,8 +2441,7 @@ automatically, without Resume, a new message or a restart
    same record and its retained bind is replayed the same way.
 
 Nothing else enters the schedule, and each of these keeps its hold and its
-preview: a Reconcile disposition, including a begin whose reply was lost (the
-grant possibly begun); a refusal; control disabled, or a fatal disabled
+preview: a Reconcile disposition; a refusal; control disabled, or a fatal disabled
 reason; a Stop or a cancellation; a committed change of the project,
 connection or admission settings; an operator queue pause; and a superseded
 owner (another head, changed content or a moved generation). An operator queue
@@ -2497,8 +2496,83 @@ transport captured no process, both read `unavailable`; so do causes saved
 before this field existed. Nothing is inferred from latency. The Engram card
 shows both values.
 
-A begin whose reply was lost (possibly begun) still keeps its hold here, as
-listed above. Replay of the prepared begin is separate work.
+### Begin-unknown replay
+
+A begin whose outcome is unknown leaves its grant possibly begun: a reply lost
+after the send, a transport failure or deadline after it, or a structured
+error reply, whatever card code that failure carries. A producer refusal, a
+mismatched receipt or a local hold that never sent the begin is not unknown,
+and keeps its own hold. Such a begin is settled only by replaying it exactly
+(`src/engram_begin_replay.rs`). The head is begin-unknown while its retained
+evaluate's prepared begin names the session's uncertain grant and no grant is
+active.
+
+Any admission of a begin-unknown head resends the stored begin, whether the
+automatic retry or an explicit Resume admits it:
+
+- the stored key string, grant and delivery tokens, with the original expiry
+  basis kept;
+- never an evaluate, whether retained or fresh;
+- never a new grant, key or turn.
+
+The begin is acknowledged again through the admission fence before it is
+resent. A failed or ambiguous acknowledgement withholds the replay and keeps
+the prepared begin unchanged, since that begin may have been applied before.
+No session status read clears the uncertain grant, no rebind expires it first,
+and no orphan-grant rebind is armed after an unknown begin outcome. While the
+host runs, no restart checkpoint closes it either. After a restart, the cold
+recovery of a retained admission still closes a grant that status reports
+begun and holds the prompt; rebuilding the replay at boot instead is separate
+work.
+
+The park schedules the replay as its own retry kind, the admission retry code
+`begin_unknown`. It runs on the common schedule: 2, 5, 10, 20, 30, then every
+60 seconds, with up to 20% positive jitter, under circuit and bind not-before
+times, the one-attempt-per-head guard and the host-wide slot cap. A cap
+deferral charges neither the attempt index nor the first-held time. The
+original admission budget does not end the schedule: each replay has its own
+call bound, and a failed replay schedules the next one with the same key until
+Engram answers definitely. While a replay is scheduled, the preview reads
+"waiting for admission; retrying automatically (begin reconciliation:
+replaying the same begin), attempt N, next at T."
+
+Engram's answer to a replay decides the head:
+
+- **A receipt for the grant.** The begin is applied, so the head is handed to
+  the provider exactly once through the ordinary post-begin path.
+- **A refusal that proves the grant never began.** The codes are
+  `stale_fence` (also when it arrives as an error reply), `task_unbound`,
+  `task_access_denied`, `grant_expired`, `policy_epoch_changed` and
+  `task_admission_epoch_changed`. The uncertain grant is settled. Where the
+  existing refusal-healing route allows it, the retained evaluate is retired
+  and the head is admitted through a fresh ordinary evaluate under a new key.
+  Otherwise (`task_unbound`, `task_access_denied`) the refusal ends the head
+  and arms the orphan-grant repair for the possibly still issued grant, as a
+  first send's refusal does.
+- **`grant_scope_mismatch`.** This proves nothing. It settles as applied only
+  when producer status names this grant open in the begun state; then the head
+  is delivered once. Status names an issued grant open too, so an issued or
+  unknown state settles nothing. Otherwise the head stays held with its
+  possibly begun grant and the refusal as its cause, a Reconcile hold that
+  sends no fresh evaluate.
+- **Any other refusal.** It holds the head the same way, even one such as
+  `delta_required` that heals a first send through a fresh evaluate.
+- **A structured error saying the routing token no longer names a bound
+  session** (`control_session_token_mismatch`, `control_session_not_bound`,
+  `control_connection_superseded`, `invalid_routing_token`,
+  `unknown_routing_token`). That begin can never be answered under that token,
+  and a rebind to get another could expire its grant. So it is not an unknown
+  outcome to replay: on the first send or on a replay, whatever card code it
+  carries, the head ends in an explicit interrupted hold naming the error, with
+  its grant still possibly begun.
+
+A Stop, a Cancel or an operator pause ends the replay at once. A replay whose
+owner changed while it was in flight can neither deliver nor restart the
+schedule.
+
+A synchronous Begin's call bound is the configured control call bound
+(`deadline_ms`, 20,000 ms by default), but at least 10,000 ms. It is capped at
+the shared 20,000 ms limit and at the remaining admission deadline.
 
 ### Strict Save and absent control sessions
 

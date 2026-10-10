@@ -598,11 +598,12 @@ fn a_due_tick_starts_no_second_attempt_while_one_is_running() {
     assert_eq!(abort_retry::prompts_received(&receiver), 1);
 }
 
-/// Criterion 4: a begin whose reply was lost (the grant possibly begun) is a
-/// Reconcile hold, never scheduled.
+/// A begin whose reply was lost (the grant possibly begun) is never an
+/// ordinary admission retry: it is scheduled as the replay of its exact
+/// prepared begin (`engram_begin_replay.rs`), whose own tests cover the replay.
 #[test]
-fn a_begin_unknown_keeps_the_explicit_hold() {
-    let (state, session, receiver, transport) = root_fixture([
+fn a_begin_unknown_schedules_its_exact_begin_replay() {
+    let (state, session, receiver, _transport) = root_fixture([
         bind_reply("token"),
         grant_reply("grant"),
         ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
@@ -611,16 +612,12 @@ fn a_begin_unknown_keeps_the_explicit_hold() {
     ]);
     deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
     with_record(&state, &session, |record| {
-        assert!(record.engram.uncertain_grant_id.is_some(), "possibly begun");
-        assert!(record.engram.admission_retry.is_none());
-        assert!(!record
-            .session
-            .preview
-            .starts_with(ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX));
+        assert_eq!(record.engram.uncertain_grant_id.as_deref(), Some("grant"), "possibly begun");
+        let retry = record.engram.admission_retry.as_ref().expect("the replay is scheduled");
+        assert_eq!(retry.code, ENGRAM_BEGIN_REPLAY_CODE);
+        assert!(record.session.preview.starts_with(ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX));
+        assert!(record.session.preview.contains("begin reconciliation"));
     });
-    let sent = transport.requests().len();
-    tick_past_due(&state, &session);
-    assert_eq!(transport.requests().len(), sent);
     assert!(receiver.try_recv().is_err());
 }
 
@@ -2303,3 +2300,6 @@ fn the_test_run_index_tick_runs_no_automatic_retry() {
 
 #[path = "engram_begin_unknown_recovery.rs"]
 mod begin_unknown_recovery;
+
+#[path = "engram_begin_replay.rs"]
+mod begin_replay;

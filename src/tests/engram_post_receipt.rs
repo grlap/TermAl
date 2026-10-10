@@ -1523,7 +1523,11 @@ fn held_child_initial_and_followup_authorization_survive_polling_then_resume() {
             if failure == "bind" {
                 responses.push(rebind_reply("child"));
             }
-            responses.push(grant_reply("retry"));
+            // A lost begin is resumed by replaying that exact begin alone; any
+            // other loss is admitted again through its evaluate.
+            if failure != "begin" {
+                responses.push(grant_reply("retry"));
+            }
             responses.push(begin_reply("retry"));
             let (state, parent, receiver, transport) = root_fixture(responses);
             if failure == "bind" && !followup {

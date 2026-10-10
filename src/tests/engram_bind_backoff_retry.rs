@@ -1454,10 +1454,12 @@ fn an_unknown_evaluate_or_begin_never_becomes_a_bind_only_retry() {
             "unknown authority stays retained"
         );
         // A lost evaluate is the parked-admission retry's to replay with its
-        // key (`engram_admission_retry.rs`); a possibly begun grant is not.
+        // key (`engram_admission_retry.rs`); a possibly begun grant is that
+        // retry's exact begin replay (`engram_begin_replay.rs`).
+        let retry = record.engram.admission_retry.as_ref().expect(lost);
         assert_eq!(
-            record.engram.admission_retry.is_some(),
-            lost == "turn_evaluate",
+            retry.code == ENGRAM_BEGIN_REPLAY_CODE,
+            lost == "turn_begin",
             "{lost}"
         );
     }
