@@ -66,6 +66,21 @@ describe("EngramControlCard", () => {
     expect(screen.getByText(/Original code: unavailable/)).toBeInTheDocument();
   });
 
+  it("names the control process a failure was seen on, or says it is unavailable", () => {
+    const { unmount } = renderEngramCard({ ...causalMessage, causalFailure: {
+      ...causalMessage.causalFailure!,
+      controlProcess: { identity: "pid 4242", exitState: "exited: exit code: 0" },
+    } });
+    expect(screen.getByText(/Control process:/)).toHaveTextContent(
+      "Control process: pid 4242 · Exit state: exited: exit code: 0",
+    );
+    unmount();
+    renderEngramCard(causalMessage);
+    expect(screen.getByText(/Control process:/)).toHaveTextContent(
+      "Control process: unavailable · Exit state: unavailable",
+    );
+  });
+
   it("updates causal content even when ordinary card fields are unchanged", () => {
     const changed: EngramControlMessage = { ...causalMessage, causalFailure: {
       ...causalMessage.causalFailure!, continuationReason: "Automatic retry scheduled pending durable acknowledgement.",

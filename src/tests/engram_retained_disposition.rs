@@ -830,6 +830,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
                 idempotency_key: "defer-persist-old-key".to_owned(),
             },
             begun_grant_id: None,
+            prepared_begin: None,
         });
         record.engram.routing_token = Some("defer-persist-token".to_owned());
         record.session.status = SessionStatus::Active;

@@ -2300,3 +2300,6 @@ fn the_test_run_index_tick_runs_no_automatic_retry() {
     state.engram_abort_retry_tick(chrono::Utc::now());
     assert_eq!(abort_retry::prompts_received(&receiver), 1);
 }
+
+#[path = "engram_begin_unknown_recovery.rs"]
+mod begin_unknown_recovery;

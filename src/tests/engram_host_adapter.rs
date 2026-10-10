@@ -16208,6 +16208,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
                 idempotency_key: "persist-failure-old-evaluate-key".to_owned(),
             },
             begun_grant_id: Some("persist-failure-grant".to_owned()),
+            prepared_begin: None,
         });
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {

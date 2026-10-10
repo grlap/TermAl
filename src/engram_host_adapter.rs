@@ -924,9 +924,17 @@ struct EngramTransportError {
     /// written anything. Only a failed spawn says so: every later failure
     /// leaves a write's outcome open.
     process_never_started: bool,
+    /// The control sidecar this failure was observed on, when the transport
+    /// saw one (`engram_control_transport.rs`); `None` is never filled in.
+    control_process: Option<EngramControlProcessEvidence>,
 }
 
 impl EngramTransportError {
+    fn with_control_process(mut self, evidence: EngramControlProcessEvidence) -> Self {
+        self.control_process = Some(evidence);
+        self
+    }
+
     fn local_state(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::LocalState,
@@ -934,6 +942,7 @@ impl EngramTransportError {
             code: Some("control_binding_unavailable".to_owned()),
             message: message.into(),
             process_never_started: true,
+            control_process: None,
         }
     }
 
@@ -944,6 +953,7 @@ impl EngramTransportError {
             code: Some("deadline_exceeded".to_owned()),
             message: message.into(),
             process_never_started: false,
+            control_process: None,
         }
     }
 
@@ -954,6 +964,7 @@ impl EngramTransportError {
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
             process_never_started: false,
+            control_process: None,
         }
     }
 
@@ -961,6 +972,7 @@ impl EngramTransportError {
     fn spawn_failed(message: impl Into<String>) -> Self {
         Self {
             process_never_started: true,
+            control_process: None,
             ..Self::transport(message)
         }
     }
@@ -972,6 +984,7 @@ impl EngramTransportError {
             code: Some("unknown_control_schema".to_owned()),
             message: message.into(),
             process_never_started: false,
+            control_process: None,
         }
     }
 
@@ -982,6 +995,7 @@ impl EngramTransportError {
             code: Some(error.code),
             message: error.message,
             process_never_started: false,
+            control_process: None,
         }
     }
 
@@ -992,6 +1006,7 @@ impl EngramTransportError {
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
             process_never_started: false,
+            control_process: None,
         }
     }
 
@@ -5148,7 +5163,6 @@ impl AppState {
                             EngramControlFailMode::Degraded,
                         );
                     };
-                    let begin_started = std::time::Instant::now();
                     if !admission_owner.as_ref().is_some_and(|owner| {
                         self.mark_engram_begin_requested_if_current(
                             session_id,
@@ -5165,6 +5179,27 @@ impl AppState {
                             EngramControlFailMode::Degraded,
                         );
                     }
+                    let begin_request = EngramControlRequest::TurnBegin {
+                        routing_token: routing_token.clone(), grant_id: grant_id.clone(), delivery_tokens,
+                        idempotency_key: self.queued_engram_begin_key(session_id, pending.dispatch_generation, &grant_id),
+                    };
+                    // Without a durable record of this exact begin, a lost
+                    // reply could never be replayed: do not send it.
+                    if let Err(error) = admission_owner
+                        .as_ref()
+                        .ok_or_else(|| EngramTransportError::local_state("Begin preparation owner disappeared"))
+                        .and_then(|owner| self.prepare_engram_begin_durable(session_id, dispatch_budget_started_at, owner, &begin_request))
+                    {
+                        self.clear_engram_begin_requested_if_current(session_id, pending.dispatch_generation);
+                        causal_failure = Some(EngramCausalFailure::local_hold("turn_begin", "begin_preparation_unacknowledged", &error.message, "prepared Begin durable acknowledgement"));
+                        break (
+                            EngramControlCardDecision::Degraded,
+                            Some("begin_preparation_unacknowledged".to_owned()),
+                            Vec::new(),
+                            delivered_range,
+                            EngramControlFailMode::Degraded,
+                        );
+                    }
                     let begin_binding = {
                         let inner = self.inner.lock().expect("state mutex poisoned");
                         inner
@@ -5172,10 +5207,7 @@ impl AppState {
                             .and_then(|index| inner.sessions[index].engram.work_binding.clone())
                     };
                     let mut begin_root_guard = None;
-                    let begin_request = EngramControlRequest::TurnBegin {
-                        routing_token: routing_token.clone(), grant_id: grant_id.clone(), delivery_tokens,
-                        idempotency_key: self.queued_engram_begin_key(session_id, pending.dispatch_generation, &grant_id),
-                    };
+                    let begin_started = std::time::Instant::now();
                     let begin = self
                         .guard_engram_root_read_until(
                             target,

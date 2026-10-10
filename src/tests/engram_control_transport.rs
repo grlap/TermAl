@@ -95,6 +95,91 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
     transport.shutdown_session(&connection.session_id);
 }
 
+/// A control process that ends mid-request is named in the error by its pid,
+/// with the exit state observed when the failure was seen, never inferred.
+#[test]
+fn real_process_eof_reports_the_control_process_identity_and_exit_state() {
+    let temp_root = TestTempRoot::create("engram-control-fixture-evidence");
+    let project_file = temp_root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-eof\n").expect("EOF mode should write");
+    let connection = EngramConnectionConfig {
+        binary_path: real_engram_control_fixture_path(),
+        project_file,
+        home: temp_root.path().to_path_buf(),
+        project_root: temp_root.path().to_path_buf(),
+        actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
+        session_id: "engram-fixture-evidence".to_owned(),
+    };
+    let transport = real_process_fixture_transport(temp_root.path());
+    let pid = transport
+        .process_for(&connection)
+        .expect("the fixture should complete its startup handshake")
+        .process
+        .id();
+    let eof = transport
+        .request(
+            &connection,
+            &engram_control_process_tree_request("evidence"),
+            DEADLOCK_GUARD,
+        )
+        .expect_err("fixture EOF should be a transport error");
+    assert_eq!(eof.kind, EngramTransportErrorKind::Transport);
+    let cause =
+        serde_json::to_value(EngramCausalFailure::error(&eof, "session_bind", None, &[])).unwrap();
+    assert_eq!(cause["controlProcess"]["identity"], format!("pid {pid}"));
+    let exit = cause["controlProcess"]["exitState"]
+        .as_str()
+        .expect("an observed exit state");
+    assert!(
+        exit.starts_with("exited: ") || exit == "running when the failure was seen",
+        "the exit state is what was observed: {exit}"
+    );
+}
+
+/// A call that misses its deadline names the control process it waited on,
+/// seen still running before the host terminated it.
+#[test]
+fn real_process_deadline_reports_the_running_control_process() {
+    let temp_root = TestTempRoot::create("engram-control-fixture-deadline-evidence");
+    let project_file = temp_root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-hang\n").expect("hang mode should write");
+    let connection = EngramConnectionConfig {
+        binary_path: real_engram_control_fixture_path(),
+        project_file,
+        home: temp_root.path().to_path_buf(),
+        project_root: temp_root.path().to_path_buf(),
+        actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
+        session_id: "engram-fixture-deadline-evidence".to_owned(),
+    };
+    let transport = real_process_fixture_transport(temp_root.path());
+    let pid = transport
+        .process_for(&connection)
+        .expect("the fixture should complete its startup handshake")
+        .process
+        .id();
+    let timeout = transport
+        .request(
+            &connection,
+            &engram_control_process_tree_request("deadline-evidence"),
+            Duration::from_millis(100),
+        )
+        .expect_err("the hung fixture should hit the deadline");
+    assert_eq!(timeout.kind, EngramTransportErrorKind::Deadline);
+    let cause = serde_json::to_value(EngramCausalFailure::error(
+        &timeout,
+        "session_bind",
+        None,
+        &[],
+    ))
+    .unwrap();
+    assert_eq!(
+        cause["controlProcess"],
+        json!({"identity": format!("pid {pid}"), "exitState": "running when the failure was seen"})
+    );
+}
+
 #[test]
 fn real_process_timeout_kills_the_entire_control_process_tree() {
     let temp_root = TestTempRoot::create("engram-control-process-tree-timeout");

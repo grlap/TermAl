@@ -746,6 +746,7 @@ fn stale_begin_retirement_cannot_clear_replacement_evaluation() {
                 settings: target.settings,
                 operation_generation: None,
                 begun_grant_id: None,
+                prepared_begin: None,
                 request: EngramControlRequest::TurnEvaluate {
                     routing_token: "replacement-token".into(),
                     intent_fingerprint: "replacement".into(),
@@ -844,6 +845,32 @@ fn disabled_control_after_restart_surfaces_retained_authorization_until_cancel()
     ));
 }
 
+/// Commits, through the real writer, the prepared-Begin acknowledgement that
+/// precedes every begin send, so a test can then drive the writer through the
+/// pre-handoff receipt alone.
+fn commit_prepared_begin_fence(
+    state: &AppState,
+    persist_rx: &mpsc::Receiver<PersistRequest>,
+    cache: &mut SqlitePersistConnectionCache,
+) {
+    let mut batch = PersistFenceBatch::default();
+    loop {
+        let request = persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
+        let prepared = matches!(&request, PersistRequest::Fence(fence)
+            if matches!(&fence.target, PersistFenceTarget::EngramAdmission { content, .. }
+                if content["queue"]["engram_evaluate"]["prepared_begin"].is_object()));
+        let is_fence = matches!(&request, PersistRequest::Fence(_));
+        batch.accept(request);
+        if is_fence {
+            assert!(prepared, "the first fence acknowledges the prepared Begin");
+            break;
+        }
+    }
+    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
+    persist_delta_with_fences(cache, state.persistence_path.as_path(), &delta, &mut batch)
+        .unwrap();
+}
+
 #[test]
 fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
     let (state, session, receiver, transport) = root_fixture([
@@ -862,6 +889,7 @@ fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
     let mut cache = SqlitePersistConnectionCache::new();
     std::thread::scope(|scope| {
         let worker = scope.spawn(|| deliver_turn_dispatch(&state, dispatch));
+        commit_prepared_begin_fence(&state, &persist_rx, &mut cache);
         let mut batch = PersistFenceBatch::default();
         // Drive the real persistence writer through the pre-handoff receipt,
         // then deliberately stop it before the queue-removal delta can commit.
@@ -955,6 +983,7 @@ fn writer_backed_provider_handoff_stamps_and_persists_queue_removal_without_late
     let mut cache = SqlitePersistConnectionCache::new();
     let admission_watermark = std::thread::scope(|scope| {
         let worker = scope.spawn(|| deliver_turn_dispatch(&state, dispatch));
+        commit_prepared_begin_fence(&state, &persist_rx, &mut cache);
         let mut batch = PersistFenceBatch::default();
         loop {
             let request = persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
@@ -1421,6 +1450,7 @@ fn delegation_cancel_cleans_up_an_idle_child_with_retained_authorization() {
         record.engram.pending_dispatch = None;
         record.queued_prompts[0].engram_evaluate = Some(EngramQueuedEvaluate {
             begun_grant_id: None,
+            prepared_begin: None,
             connection: target.connection,
             settings: target.settings,
             operation_generation: None,

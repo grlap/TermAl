@@ -903,6 +903,7 @@ fn canceling_a_child_whose_restored_intent_may_own_a_lost_begin_records_an_unkno
             .expect("the retained prompt should be queued");
         queued.engram_evaluate = Some(EngramQueuedEvaluate {
             begun_grant_id: None,
+            prepared_begin: None,
             connection: target.connection,
             settings: target.settings,
             operation_generation: None,
@@ -1357,6 +1358,7 @@ fn dropping_intent_beside_a_live_begin_yields_that_begin_exactly() {
         .expect("the retained prompt should be queued")
         .engram_evaluate = Some(EngramQueuedEvaluate {
         begun_grant_id: None,
+        prepared_begin: None,
         connection: target.connection,
         settings: target.settings,
         operation_generation: None,
@@ -1527,6 +1529,7 @@ fn restore_engram_intent_at_head(
         .expect("the prompt should be queued");
     queued.engram_evaluate = Some(EngramQueuedEvaluate {
         begun_grant_id: None,
+        prepared_begin: None,
         connection: target.connection.clone(),
         settings: target.settings.clone(),
         operation_generation: None,

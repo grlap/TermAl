@@ -11,6 +11,26 @@
 
 const ENGRAM_CONTROL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// The control process a terminal failure was observed on: its pid and its
+/// exit state at that moment, as observed, never inferred afterwards.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramControlProcessEvidence {
+    pid: u32,
+    exit_state: String,
+}
+
+fn observe_engram_control_process(process: &SharedChild) -> EngramControlProcessEvidence {
+    let exit_state = match process.try_wait() {
+        Ok(Some(status)) => format!("exited: {status}"),
+        Ok(None) => "running when the failure was seen".to_owned(),
+        Err(_) => "unavailable".to_owned(),
+    };
+    EngramControlProcessEvidence {
+        pid: process.id(),
+        exit_state,
+    }
+}
+
 struct EngramProcessRequest {
     request: Vec<u8>,
     reply: mpsc::Sender<std::result::Result<Value, EngramTransportError>>,
@@ -199,10 +219,12 @@ impl EngramControlTransport for ProcessEngramControlTransport {
                 reply: reply_tx,
             })
             .map_err(|err| {
+                let evidence = observe_engram_control_process(&process.process);
                 self.discard_process(&connection.session_id, &process);
                 EngramTransportError::transport(format!(
                     "Engram control worker is unavailable: {err}"
                 ))
+                .with_control_process(evidence)
             })?;
 
         let remaining = timeout.saturating_sub(started_at.elapsed());
@@ -218,17 +240,21 @@ impl EngramControlTransport for ProcessEngramControlTransport {
                 Err(error)
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                let evidence = observe_engram_control_process(&process.process);
                 self.discard_process(&connection.session_id, &process);
                 Err(EngramTransportError::deadline(format!(
                     "Engram control call exceeded {} ms",
                     timeout.as_millis()
-                )))
+                ))
+                .with_control_process(evidence))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let evidence = observe_engram_control_process(&process.process);
                 self.discard_process(&connection.session_id, &process);
                 Err(EngramTransportError::transport(
                     "Engram control worker exited before replying",
-                ))
+                )
+                .with_control_process(evidence))
             }
         }
     }
@@ -355,7 +381,7 @@ fn spawn_engram_control_process(
             loop {
                 match request_rx.recv_timeout(idle_timeout) {
                     Ok(request) => {
-                        let result = exchange_engram_control_frame(
+                        let mut result = exchange_engram_control_frame(
                             &mut stdin,
                             &mut stdout,
                             &request.request,
@@ -368,6 +394,9 @@ fn spawn_engram_control_process(
                             .is_err_and(|error| !error.keeps_control_process_alive());
                         if is_terminal {
                             worker_finished_signal.store(true, Ordering::Release);
+                            // Observed before this worker terminates it.
+                            let evidence = observe_engram_control_process(&worker_process);
+                            result = result.map_err(|error| error.with_control_process(evidence));
                         }
                         let _ = request.reply.send(result);
                         if is_terminal {

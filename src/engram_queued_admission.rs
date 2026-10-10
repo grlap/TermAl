@@ -34,6 +34,30 @@ struct EngramQueuedEvaluate {
     // the remote grant closes. Never infer non-delivery from session_status.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     begun_grant_id: Option<String>,
+    // The exact turn_begin this evaluate's grant is handed to, durably
+    // acknowledged before it is sent. A reply that never arrives leaves it as
+    // the request a reconciliation replays: the stored key string, never a
+    // recomputed one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prepared_begin: Option<EngramPreparedBegin>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct EngramPreparedBegin {
+    idempotency_key: String,
+    grant_id: String,
+    delivery_tokens: Vec<String>,
+    /// Local time by which the grant had been issued: its expiry basis.
+    issued_no_later_than: String,
+    phase: EngramPreparedBeginPhase,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EngramPreparedBeginPhase {
+    /// Acknowledged before the send; whether the producer applied it is
+    /// settled only by the producer.
+    Prepared,
 }
 
 impl EngramProjectSettings {
@@ -399,6 +423,95 @@ impl AppState {
         }
         Ok(())
     }
+    /// Records the exact `begin` on the head's retained evaluate and waits
+    /// for the durable writer to acknowledge it through the admission fence.
+    /// Any other outcome, including an ambiguous one, means the begin is not
+    /// sent. A head without a retained evaluate has nowhere to keep it.
+    fn prepare_engram_begin_durable(
+        &self,
+        session_id: &str,
+        started_at: std::time::Instant,
+        owner: &EngramQueuedAdmissionOwner,
+        begin: &EngramControlRequest,
+    ) -> std::result::Result<(), EngramTransportError> {
+        let EngramControlRequest::TurnBegin {
+            grant_id,
+            delivery_tokens,
+            idempotency_key,
+            ..
+        } = begin
+        else {
+            return Err(EngramTransportError::local_state(
+                "Only a turn_begin is prepared for replay",
+            ));
+        };
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(session_id).ok_or_else(|| {
+                EngramTransportError::local_state("Session removed before Begin preparation")
+            })?;
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            if !owner.matches(record) {
+                return Err(EngramTransportError::local_state(
+                    "Begin preparation no longer owns the queued prompt",
+                ));
+            }
+            let evaluate = record
+                .queued_prompts
+                .front_mut()
+                .and_then(|queued| queued.engram_evaluate.as_mut())
+                .ok_or_else(|| {
+                    EngramTransportError::local_state(
+                        "The queued prompt has no retained evaluate to carry its Begin",
+                    )
+                })?;
+            evaluate.prepared_begin = Some(EngramPreparedBegin {
+                idempotency_key: idempotency_key.clone(),
+                grant_id: grant_id.clone(),
+                delivery_tokens: delivery_tokens.clone(),
+                issued_no_later_than: chrono::Utc::now()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                phase: EngramPreparedBeginPhase::Prepared,
+            });
+        }
+        self.confirm_engram_admission_durable(session_id, started_at, owner)
+            .inspect_err(|_| self.withdraw_engram_prepared_begin(session_id, owner, grant_id))
+    }
+
+    /// A begin that is not sent leaves no prepared record behind: once saved,
+    /// it would read as possibly sent. An ambiguous acknowledgement may still
+    /// have saved it before this, which only errs toward a needless replay.
+    fn withdraw_engram_prepared_begin(
+        &self,
+        session_id: &str,
+        owner: &EngramQueuedAdmissionOwner,
+        grant_id: &str,
+    ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        if !owner.matches(record) {
+            return;
+        }
+        if let Some(evaluate) = record
+            .queued_prompts
+            .front_mut()
+            .and_then(|queued| queued.engram_evaluate.as_mut())
+            && evaluate
+                .prepared_begin
+                .as_ref()
+                .is_some_and(|prepared| prepared.grant_id == grant_id)
+        {
+            evaluate.prepared_begin = None;
+        }
+    }
+
     fn retire_queued_engram_evaluation(
         &self,
         session_id: &str,
@@ -1225,6 +1338,7 @@ impl AppState {
             request: request.clone(),
             operation_generation: Some(intent.dispatch_generation),
             begun_grant_id: None,
+            prepared_begin: None,
         });
         if abort_retry_hold {
             queued.engram_interrupted = false;

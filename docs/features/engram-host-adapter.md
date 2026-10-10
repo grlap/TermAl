@@ -2462,6 +2462,44 @@ Engram binary (`TERMAL_TEST_LIVE_ENGRAM_BINARY` and its SHA-256 in
 receiver. They exercise real control replies, committed-reply loss, restart,
 deadline, explicit refusal and writer contention without touching live stores.
 
+### Prepared Begin and failure diagnostics
+
+Before the first `turn_begin` for a grant leaves the host, the exact begin is
+recorded on the queued head's retained evaluate (`prepared_begin`):
+
+- the idempotency key string that is sent;
+- the grant id and its delivery tokens;
+- `issued_no_later_than`, the local time by which the grant had been issued,
+  which is its expiry basis;
+- the phase `prepared`.
+
+The persistence writer acknowledges it through the same admission fence that
+covers the retained evaluate, and only then is the begin sent
+(`src/engram_queued_admission.rs`). A recovery that reads this record replays
+that stored key string, never a recomputed one.
+
+When the acknowledgement fails or is ambiguous (a write failure, a missed
+deadline or a stopped writer), the begin is not sent, and its prepared record is
+withdrawn, so it is never saved later as a possibly sent begin. (An ambiguous
+acknowledgement may already have saved it, which errs only toward a needless
+replay.) The card's code is
+`begin_preparation_unacknowledged`. Its cause is a `local_state` failure of
+`turn_begin` whose request did not start. The prompt stays retained as a
+local-persistence hold, which no automatic retry schedule picks up. The issued
+grant was never begun, so it keeps the issued-grant retirement path. A head
+without a retained evaluate has nowhere to keep the begin, so it is not sent
+either.
+
+Every causal failure names the control process it was observed on
+(`controlProcess`). Its identity is `pid N`, and its exit state is what was seen
+at the failure: `exited: …` or `running when the failure was seen`. When the
+transport captured no process, both read `unavailable`; so do causes saved
+before this field existed. Nothing is inferred from latency. The Engram card
+shows both values.
+
+A begin whose reply was lost (possibly begun) still keeps its hold here, as
+listed above. Replay of the prepared begin is separate work.
+
 ### Strict Save and absent control sessions
 
 A strict settings Save still refuses uncertain checkpoint failures. The only

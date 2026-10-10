@@ -677,6 +677,7 @@ fn a_defer_whose_card_cannot_be_saved_retries_no_earlier_than_retry_after() {
                 idempotency_key: "defer-abort-old-key".to_owned(),
             },
             begun_grant_id: None,
+            prepared_begin: None,
         });
         record.engram.routing_token = Some("defer-abort-token".to_owned());
         record.session.status = SessionStatus::Active;

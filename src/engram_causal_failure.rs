@@ -43,6 +43,35 @@ struct EngramCausalFailure {
     turn_generation: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     authority_fingerprint: Option<String>,
+    #[serde(default)]
+    control_process: EngramControlProcessObservation,
+}
+
+/// The control sidecar a failure was observed on. Explicitly unavailable when
+/// the transport captured none, including every record saved before this.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramControlProcessObservation {
+    identity: String,
+    exit_state: String,
+}
+
+impl Default for EngramControlProcessObservation {
+    fn default() -> Self {
+        Self {
+            identity: "unavailable".to_owned(),
+            exit_state: "unavailable".to_owned(),
+        }
+    }
+}
+
+impl From<&EngramControlProcessEvidence> for EngramControlProcessObservation {
+    fn from(evidence: &EngramControlProcessEvidence) -> Self {
+        Self {
+            identity: format!("pid {}", evidence.pid),
+            exit_state: evidence.exit_state.clone(),
+        }
+    }
 }
 
 // Redact before persistence, not just during rendering. Known request secrets
@@ -172,6 +201,11 @@ impl EngramCausalFailure {
             continuation_id: None,
             turn_generation: None,
             authority_fingerprint: None,
+            control_process: error
+                .control_process
+                .as_ref()
+                .map(EngramControlProcessObservation::from)
+                .unwrap_or_default(),
         }
     }
 

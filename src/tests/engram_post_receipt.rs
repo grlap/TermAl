@@ -3,9 +3,35 @@
 use super::*;
 use crate::tests::delegation_support::finish_delegation_child_with_assistant_text;
 
+/// Replaces the synchronous store with a directory when turn_begin is sent,
+/// so persistence that follows the begin is ambiguous.
+struct StoreLostAtBegin {
+    scripted: Arc<ScriptedEngramControlTransport>,
+    store: PathBuf,
+}
+
+impl EngramControlTransport for StoreLostAtBegin {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: Duration,
+    ) -> std::result::Result<Value, EngramTransportError> {
+        if matches!(request, EngramControlRequest::TurnBegin { .. }) {
+            fs::remove_file(&self.store).unwrap();
+            fs::create_dir_all(&self.store).unwrap();
+        }
+        self.scripted.request(connection, request, timeout)
+    }
+
+    fn shutdown_session(&self, session_id: &str) {
+        self.scripted.shutdown_session(session_id);
+    }
+}
+
 #[test]
 fn ambiguous_dispatch_card_commit_is_an_error_and_never_reaches_provider() {
-    let (mut state, session, receiver, _) = root_fixture([
+    let (mut state, session, receiver, scripted) = root_fixture([
         bind_reply("persistence-unknown-token"),
         grant_reply("persistence-unknown-grant"),
         begin_reply("persistence-unknown-grant"),
@@ -19,8 +45,14 @@ fn ambiguous_dispatch_card_commit_is_an_error_and_never_reaches_provider() {
         .unwrap()
         .path()
         .join("dispatch-card-caller-is-directory");
-    fs::create_dir_all(&failing_path).unwrap();
     state.persistence_path = Arc::new(failing_path.clone());
+    // The prepared Begin is acknowledged on a working store. The store
+    // becomes unusable as the begin is sent, so the dispatch card after it is
+    // what meets the ambiguous persistence.
+    state.install_control_test_transport(Arc::new(StoreLostAtBegin {
+        scripted,
+        store: failing_path.clone(),
+    }));
 
     let error = deliver_turn_dispatch_now(&state, dispatch)
         .expect_err("ambiguous dispatch-card persistence must reach the caller");
@@ -85,6 +117,12 @@ fn failed_grant_fence_and_interruption_commit_publish_one_fail_closed_owner() {
 
     let result = std::thread::scope(|scope| {
         let worker = scope.spawn(|| deliver_turn_dispatch_now(&state, dispatch));
+        let PersistRequest::Fence(prepared) =
+            persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap()
+        else {
+            panic!("the prepared Begin must request its fence before the send")
+        };
+        prepared.finish(Ok(()));
         assert!(matches!(
             persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap(),
             PersistRequest::Delta

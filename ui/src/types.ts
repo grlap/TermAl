@@ -939,6 +939,7 @@ export type EngramControlMessage = BaseMessage & {
     continuationId?: string | null;
     turnGeneration?: number | null;
     authorityFingerprint?: string | null;
+    controlProcess?: { identity: string; exitState: string } | null;
   } | null;
   type: "engramControl";
   schemaVersion: number;
