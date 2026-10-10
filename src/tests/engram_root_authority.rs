@@ -10,6 +10,10 @@ mod reclamation {
     include!("engram_named_root_reclamation.rs");
 }
 
+mod begin_reserve {
+    include!("engram_root_begin_reserve.rs");
+}
+
 struct FailingAdmissionRootReader {
     control: Arc<ScriptedEngramControlTransport>,
     fail_after: &'static str,

@@ -3507,6 +3507,17 @@ impl EngramBindingTarget {
         started_at + budget
     }
 
+    /// The deadline of the named-root guard right before Begin. It keeps
+    /// Begin's share of the shared admission budget, Begin's minimum call
+    /// bound or half the budget when that is smaller, so a slow authority
+    /// fence fails the guard with Begin still unsent instead of leaving
+    /// Begin no time to be transmitted.
+    fn begin_guard_deadline(&self, started_at: std::time::Instant) -> std::time::Instant {
+        let deadline = self.dispatch_deadline(started_at);
+        let budget = deadline.saturating_duration_since(started_at);
+        deadline - Duration::from_millis(ENGRAM_BEGIN_MIN_CALL_TIMEOUT_MS).min(budget / 2)
+    }
+
     fn root_operation_deadline(
         &self,
         standalone_started: std::time::Instant,
@@ -5221,7 +5232,7 @@ impl AppState {
                         .guard_engram_root_read_until(
                             target,
                             begin_binding.as_ref(),
-                            target.dispatch_deadline(dispatch_budget_started_at),
+                            target.begin_guard_deadline(dispatch_budget_started_at),
                         )
                         .map_err(|mut error| {
                             error.causal_failure = Some(EngramCausalFailure::unsent_request(&error, &begin_request, "named-root guard before Begin"));

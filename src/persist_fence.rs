@@ -609,6 +609,8 @@ impl PersistFenceBatch {
     }
 }
 
+/// Test-only: the production writer calls `persist_delta_with_fences_timed`.
+#[cfg(test)]
 fn persist_delta_with_fences(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,

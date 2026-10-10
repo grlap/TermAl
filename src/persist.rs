@@ -1380,6 +1380,9 @@ impl SqlitePersistConnectionCache {
 /// transaction calls would require splitting the inner helper
 /// into "pre-connection / transaction / post-connection" phases
 /// with extra plumbing; not worth it for this severity.
+///
+/// Test-only: production writes go through `persist_delta_via_cache_timed`.
+#[cfg(test)]
 fn persist_delta_via_cache(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
