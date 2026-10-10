@@ -14,6 +14,10 @@ mod begin_reserve {
     include!("engram_root_begin_reserve.rs");
 }
 
+mod begin_unsent {
+    include!("engram_root_begin_unsent.rs");
+}
+
 struct FailingAdmissionRootReader {
     control: Arc<ScriptedEngramControlTransport>,
     fail_after: &'static str,
