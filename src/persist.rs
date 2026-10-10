@@ -1385,7 +1385,17 @@ fn persist_delta_via_cache(
     path: &FsPath,
     delta: &PersistDelta,
 ) -> Result<Vec<String>> {
-    let result = persist_delta_via_cache_inner(cache, path, delta);
+    persist_delta_via_cache_timed(cache, path, delta, &mut PersistTickTimings::default())
+}
+
+/// `persist_delta_via_cache`, also recording how long each write phase took.
+fn persist_delta_via_cache_timed(
+    cache: &mut SqlitePersistConnectionCache,
+    path: &FsPath,
+    delta: &PersistDelta,
+    timings: &mut PersistTickTimings,
+) -> Result<Vec<String>> {
+    let result = persist_delta_via_cache_inner(cache, path, delta, timings);
     if result.is_err() {
         cache.invalidate();
     }
@@ -1396,39 +1406,101 @@ fn persist_delta_via_cache_inner(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
+    timings: &mut PersistTickTimings,
 ) -> Result<Vec<String>> {
-    let metadata_json = serde_json::to_string(&delta.metadata)
-        .context("failed to serialize persisted state metadata")?;
-    let serialized_sessions = serialize_persisted_sessions_with_isolation(&delta.changed_sessions);
+    // Every phase records its elapsed time before its result is checked, so a
+    // failed tick still accounts for the time it spent.
+    let serialize_started = std::time::Instant::now();
+    let serialized = (|| -> Result<_> {
+        let metadata_json = serde_json::to_string(&delta.metadata)
+            .context("failed to serialize persisted state metadata")?;
+        let serialized_sessions =
+            serialize_persisted_sessions_with_isolation(&delta.changed_sessions);
+        let serialized_delegations = delta
+            .changed_delegations
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|delegation| {
+                serde_json::to_string(delegation)
+                    .context("failed to serialize persisted delegation")
+                    .map(|json| (delegation.id.as_str(), json))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok((metadata_json, serialized_sessions, serialized_delegations))
+    })();
+    timings.serialize = serialize_started.elapsed();
+    let (metadata_json, serialized_sessions, serialized_delegations) = serialized?;
     let persisted_session_ids = serialized_sessions
         .iter()
         .map(|session| session.session_id.clone())
         .collect::<Vec<_>>();
-    let serialized_delegations = delta
-        .changed_delegations
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .map(|delegation| {
-            serde_json::to_string(delegation)
-                .context("failed to serialize persisted delegation")
-                .map(|json| (delegation.id.as_str(), json))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let connection = cache.connection_for(path)?;
-    // Keep state-path redirection failures fatal on cached writes too. Directory
-    // chmod hardening runs when the cached connection is opened; the hot path
-    // intentionally repeats only symlink/reparse checks before each transaction
-    // so path swaps are caught without chmoding the state directory every tick.
-    reject_existing_sqlite_state_path_redirection(path)?;
+    // Opening covers a reopen after an invalidated cache (schema setup and
+    // hardening, under the same writer lock) and the redirection check.
+    let open_started = std::time::Instant::now();
+    let opened = cache.connection_for(path).and_then(|connection| {
+        // Keep state-path redirection failures fatal on cached writes too.
+        // Directory chmod hardening runs when the cached connection is opened;
+        // the hot path intentionally repeats only symlink/reparse checks
+        // before each transaction so path swaps are caught without chmoding
+        // the state directory every tick.
+        reject_existing_sqlite_state_path_redirection(path).map(|()| connection)
+    });
+    timings.open = open_started.elapsed();
+    let connection = opened?;
     let write_lock = sqlite_state_write_lock(path);
+    let ticket_started = std::time::Instant::now();
     let write_guard = lock_sqlite_state_writer(&write_lock);
-    let tx = connection.transaction().with_context(|| {
-        format!(
-            "failed to start SQLite transaction for `{}`",
-            path.display()
-        )
-    })?;
+    timings.ticket_wait = ticket_started.elapsed();
+    let statements_started = std::time::Instant::now();
+    let written = connection
+        .transaction()
+        .with_context(|| {
+            format!(
+                "failed to start SQLite transaction for `{}`",
+                path.display()
+            )
+        })
+        .and_then(|tx| {
+            write_persist_delta_statements(
+                &tx,
+                path,
+                delta,
+                &metadata_json,
+                &serialized_sessions,
+                serialized_delegations,
+            )
+            .map(|()| tx)
+        });
+    timings.statements = statements_started.elapsed();
+    let tx = written?;
+    let commit_started = std::time::Instant::now();
+    let committed = tx
+        .commit()
+        .with_context(|| format!("failed to commit persisted state to `{}`", path.display()));
+    timings.commit = commit_started.elapsed();
+    committed?;
+    drop(write_guard);
+    // Keep post-commit redirection and owner-only permission verification
+    // fatal. The chmod helper itself honors
+    // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
+    // accepts insecure state-file modes.
+    let post_commit_started = std::time::Instant::now();
+    let verified = verify_persist_commit_integrity(path);
+    timings.post_commit = post_commit_started.elapsed();
+    verified?;
+    Ok(persisted_session_ids)
+}
+
+/// The statements of one delta write, inside its open transaction.
+fn write_persist_delta_statements(
+    tx: &rusqlite::Transaction<'_>,
+    path: &FsPath,
+    delta: &PersistDelta,
+    metadata_json: &str,
+    serialized_sessions: &[SerializedPersistedSession],
+    serialized_delegations: Vec<(&str, String)>,
+) -> Result<()> {
     tx.execute(
         "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
@@ -1448,8 +1520,8 @@ fn persist_delta_via_cache_inner(
             )
         })?;
     }
-    for session in &serialized_sessions {
-        write_serialized_persisted_session(&tx, session).with_context(|| {
+    for session in serialized_sessions {
+        write_serialized_persisted_session(tx, session).with_context(|| {
             format!(
                 "failed to write persisted session `{}` to `{}`",
                 session.session_id,
@@ -1484,15 +1556,7 @@ fn persist_delta_via_cache_inner(
             )
         })?;
     }
-    tx.commit()
-        .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
-    drop(write_guard);
-    // Keep post-commit redirection and owner-only permission verification
-    // fatal. The chmod helper itself honors
-    // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
-    // accepts insecure state-file modes.
-    verify_persist_commit_integrity(path)?;
-    Ok(persisted_session_ids)
+    Ok(())
 }
 
 /// Persists state from a pre-built `PersistedState` snapshot.

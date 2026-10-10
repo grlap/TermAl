@@ -290,6 +290,28 @@ impl<T> StateMutex<T> {
         }
     }
 
+    /// `lock` without waiting: `None` when another thread holds the state,
+    /// for a caller that must not extend its own deadline to look.
+    #[track_caller]
+    fn try_lock_now(&self) -> Option<StateMutexGuard<'_, T>> {
+        let requested_at = std::time::Instant::now();
+        let caller = std::panic::Location::caller();
+        let guard = match self.inner.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        Some(StateMutexGuard::new(
+            guard,
+            requested_at,
+            caller,
+            self.warn_after,
+            Arc::clone(&self.diagnostic_reporter),
+            #[cfg(test)]
+            &self.owner_thread,
+        ))
+    }
+
     #[cfg(test)]
     fn is_not_held_by_current_thread_for_test(&self) -> bool {
         let owner = self

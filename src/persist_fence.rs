@@ -66,6 +66,17 @@ impl PersistFenceTarget {
         }
     }
 
+    /// True when `delta` proves this fence can never be acknowledged: the
+    /// work's owner moved to a later version than the image's, and owner
+    /// versions only grow. Only an authority image is superseded this way;
+    /// every other target keeps waiting as before.
+    fn is_superseded_by(&self, delta: &PersistDelta) -> bool {
+        let Self::EngramWorkAuthority(image) = self else {
+            return false;
+        };
+        image.is_superseded_by_metadata(&delta.metadata)
+    }
+
     /// A request can arrive after the worker drained its channel but before
     /// that tick committed this content. Its next delta then omits the stable
     /// row. Verify the stored bytes on the SAME cached writer connection; do
@@ -203,18 +214,84 @@ enum PersistFenceError {
     WriteFailed(String),
     Shutdown,
     WorkerStopped,
+    /// The content was replaced by a later owner, so no write can match it.
+    Superseded,
 }
 
 type PersistFenceResult = std::result::Result<(), PersistFenceError>;
+
+/// How far the writer took a fence, so a caller whose deadline passes can
+/// say where the time went. It moves forward with the writer and back to
+/// `InTick` when a later tick takes the fence again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PersistFencePhase {
+    /// Sent, but still in the writer's channel behind whatever it is doing.
+    Queued,
+    /// Taken by the writer; its next tick has not started.
+    Accepted,
+    /// Inside a tick: collecting, serializing or committing.
+    InTick,
+    /// A tick committed without this fence's content.
+    WrittenUnmatched,
+}
+
+impl PersistFencePhase {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Queued => "queued for the writer",
+            Self::Accepted => "accepted, awaiting a writer tick",
+            Self::InTick => "in a writer tick",
+            Self::WrittenUnmatched => "written but unmatched",
+        }
+    }
+}
+
+/// What the writer last did with a fence. Diagnostic only: it never
+/// resolves a fence or decides what a caller may do.
+#[derive(Clone, Debug)]
+struct PersistFenceProgress {
+    phase: PersistFencePhase,
+    /// When the tick now holding the fence started, on the real clock.
+    tick_started: Option<std::time::Instant>,
+    /// Phase timings of the last tick that finished with the fence.
+    last_tick: Option<PersistTickTimings>,
+}
+
+impl PersistFenceProgress {
+    /// The phase and what the writer's time went to, for a deadline report.
+    /// The tick's age is real time, as the writer runs on it, even where the
+    /// fence's own deadline runs on a scripted budget clock.
+    fn describe(&self) -> String {
+        let mut text = self.phase.label().to_owned();
+        if let (PersistFencePhase::InTick, Some(started)) = (self.phase, self.tick_started) {
+            text.push_str(&format!(" for {} ms", started.elapsed().as_millis()));
+        }
+        if let Some(last) = &self.last_tick {
+            text.push_str(&format!(
+                "; last tick {} ms: {}",
+                last.total().as_millis(),
+                last.summary()
+            ));
+        }
+        text
+    }
+}
 
 struct PersistFenceCompletion {
     result: Mutex<Option<PersistFenceResult>>,
     changed: Condvar,
     deadline: std::time::Instant,
     clock: EngramBudgetClock,
+    progress: Mutex<PersistFenceProgress>,
 }
 
 impl PersistFenceCompletion {
+    fn progress(&self) -> std::sync::MutexGuard<'_, PersistFenceProgress> {
+        self.progress
+            .lock()
+            .expect("persist fence progress mutex poisoned")
+    }
+
     /// True only when this call recorded a successful acknowledgement.
     fn resolve_at(&self, result: PersistFenceResult, now: std::time::Instant) -> bool {
         let mut slot = self.result.lock().expect("persist fence mutex poisoned");
@@ -273,6 +350,11 @@ impl PersistFence {
             changed: Condvar::new(),
             deadline,
             clock,
+            progress: Mutex::new(PersistFenceProgress {
+                phase: PersistFencePhase::Queued,
+                tick_started: None,
+                last_tick: None,
+            }),
         });
         (
             Self {
@@ -398,6 +480,11 @@ impl PersistFenceWaiter {
         }
     }
 
+    /// What the writer last did with this fence, for a deadline report.
+    fn progress(&self) -> PersistFenceProgress {
+        self.completion.progress().clone()
+    }
+
     /// The content this fence names was superseded, so nobody waits for it
     /// any more: resolve it, and the worker stops retrying on its behalf.
     fn abandon(self) {
@@ -420,9 +507,32 @@ impl PersistFenceBatch {
             PersistRequest::Delta => PersistWorkerWaitOutcome::Process,
             PersistRequest::Shutdown => PersistWorkerWaitOutcome::Shutdown,
             PersistRequest::Fence(fence) => {
+                fence.completion.progress().phase = PersistFencePhase::Accepted;
                 self.pending.push(*fence);
                 PersistWorkerWaitOutcome::Process
             }
+        }
+    }
+
+    /// A tick starts: every pending fence now waits on it. Marking again
+    /// within the same tick keeps the first start, so collection counts.
+    fn mark_in_tick(&self) {
+        let started = std::time::Instant::now();
+        for fence in &self.pending {
+            let mut progress = fence.completion.progress();
+            if progress.phase != PersistFencePhase::InTick {
+                progress.phase = PersistFencePhase::InTick;
+                progress.tick_started = Some(started);
+            }
+        }
+    }
+
+    /// A tick finished: the fences it left pending keep its timings.
+    fn record_tick(&self, timings: &PersistTickTimings) {
+        for fence in &self.pending {
+            let mut progress = fence.completion.progress();
+            progress.tick_started = None;
+            progress.last_tick = Some(timings.clone());
         }
     }
 
@@ -479,7 +589,15 @@ impl PersistFenceBatch {
             };
             match proof {
                 Ok(true) => fence.finish(Ok(())),
-                Ok(false) => return true,
+                // The delta was collected after this fence was accepted, so a
+                // later owner in it means no future write can match.
+                Ok(false) if fence.target.is_superseded_by(delta) => {
+                    fence.finish(Err(PersistFenceError::Superseded));
+                }
+                Ok(false) => {
+                    fence.completion.progress().phase = PersistFencePhase::WrittenUnmatched;
+                    return true;
+                }
                 Err(error) => {
                     // The write itself committed; a read-back error fails this
                     // fence, not the worker's successful mutation watermark.
@@ -497,11 +615,34 @@ fn persist_delta_with_fences(
     delta: &PersistDelta,
     fences: &mut PersistFenceBatch,
 ) -> Result<Vec<String>> {
+    persist_delta_with_fences_timed(
+        cache,
+        path,
+        delta,
+        fences,
+        &mut PersistTickTimings::default(),
+    )
+}
+
+/// `persist_delta_with_fences`, recording each write phase into `timings`
+/// (whose `collect` the caller measured) and leaving them on the fences
+/// that are still pending afterwards.
+fn persist_delta_with_fences_timed(
+    cache: &mut SqlitePersistConnectionCache,
+    path: &FsPath,
+    delta: &PersistDelta,
+    fences: &mut PersistFenceBatch,
+    timings: &mut PersistTickTimings,
+) -> Result<Vec<String>> {
     fences.expire_resolved();
-    let result = persist_delta_via_cache(cache, path, delta);
+    fences.mark_in_tick();
+    let result = persist_delta_via_cache_timed(cache, path, delta, timings);
     // persist_delta_via_cache returns only after COMMIT and the existing
     // post-commit integrity checks. No StateInner guard is held here.
+    let acknowledge_started = std::time::Instant::now();
     fences.finish_write(delta, &result, cache.connection.as_ref());
+    timings.acknowledge = acknowledge_started.elapsed();
+    fences.record_tick(timings);
     result
 }
 

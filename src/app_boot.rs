@@ -566,13 +566,17 @@ impl AppState {
                     // browser refresh can lose the last streamed message".
                     should_exit_after_tick = fences.drain(&persist_rx, should_exit_after_tick);
 
+                    let mut timings = PersistTickTimings::default();
                     let result: Result<()> = (|| {
+                        fences.mark_in_tick();
+                        let collect_started = std::time::Instant::now();
                         let delta =
                             collect_persist_delta_from_shared_state_with_prompt_history_carry(
                                 &inner_for_persist,
                                 watermark,
                                 &prompt_history_carry,
                             );
+                        timings.collect = collect_started.elapsed();
                         let next_watermark = delta.watermark;
                         let next_prompt_history_carry = delta
                             .deferred_prompt_history_session_ids
@@ -598,11 +602,12 @@ impl AppState {
                         // `changed_sessions` + `removed_session_ids` is
                         // fine; the transaction just upserts one
                         // app_state row.
-                        let persisted_session_ids = match persist_delta_with_fences(
+                        let persisted_session_ids = match persist_delta_with_fences_timed(
                             &mut cache,
                             &persist_path_for_persist,
                             &delta,
                             &mut fences,
+                            &mut timings,
                         ) {
                             Ok(persisted_session_ids) => persisted_session_ids,
                             Err(err) => {
@@ -664,6 +669,7 @@ impl AppState {
                     if let Err(err) = &result {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
+                    timings.log_if_slow();
                     if retry_state.finish_fenced_tick(&result, should_exit_after_tick, &mut fences)
                     {
                         break;

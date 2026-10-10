@@ -285,6 +285,18 @@ impl EngramAuthorityImage {
             && metadata.engram_source_root_generation >= self.allocation_floor
     }
 
+    /// True when `metadata` holds a later owner of this work than the image,
+    /// so no write can ever match the image again: owner versions only grow.
+    /// A phase change at the same version is not one, and neither is an
+    /// absent history, which proves no later owner; that fence keeps waiting.
+    fn is_superseded_by_metadata(&self, metadata: &PersistedState) -> bool {
+        metadata
+            .engram_work_naming_history
+            .iter()
+            .find(|history| history.store == self.store && history.work_id == self.work_id)
+            .is_some_and(|current| current.owner_version > self.history.owner_version)
+    }
+
     fn still_owned(&self, inner: &StateInner) -> bool {
         Self::capture(inner, &self.store, &self.work_id).is_ok_and(|current| {
             current.history == self.history
@@ -1468,8 +1480,38 @@ impl AppState {
             .send(PersistRequest::Fence(Box::new(fence)))
             .is_ok()
         {
-            waiter.wait().map_err(|error| ApiError::internal(format!(
-                "named-root authority persistence is unconfirmed ({error:?}); recovery remains withheld")))?;
+            let outcome = waiter
+                .wait_until(deadline)
+                .unwrap_or(Err(PersistFenceError::Deadline));
+            match outcome {
+                Ok(()) => {}
+                Err(PersistFenceError::Superseded) => {
+                    return Err(ApiError::conflict(
+                        "named-root acknowledgement belongs to a superseded authority image",
+                    ));
+                }
+                Err(PersistFenceError::Deadline) => {
+                    // Say where the writer's time went and whether waiting
+                    // longer could have helped, instead of a bare Deadline.
+                    // The budget is spent: look at ownership only if the
+                    // state is free now, never by waiting for it.
+                    let ownership = match self.inner.try_lock_now() {
+                        Some(inner) if image.still_owned(&inner) => "still owned",
+                        Some(_) => "no longer current",
+                        None => "unknown (state busy)",
+                    };
+                    return Err(ApiError::internal(format!(
+                        "named-root authority persistence is unconfirmed (Deadline) while {}; \
+                         the authority image is {ownership}; recovery remains withheld",
+                        waiter.progress().describe(),
+                    )));
+                }
+                Err(error) => {
+                    return Err(ApiError::internal(format!(
+                        "named-root authority persistence is unconfirmed ({error:?}); recovery remains withheld"
+                    )));
+                }
+            }
         } else {
             // Production authority cannot settle through a stopped writer.
             // Manually constructed test states use the same SQLite delta

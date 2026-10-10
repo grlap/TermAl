@@ -847,6 +847,7 @@ include!("codex_validation.rs");
 include!("persisted_state.rs");
 include!("persist.rs");
 include!("persist_fence.rs");
+include!("persist_tick_timings.rs");
 include!("coordination_persist.rs");
 include!("mailboxes.rs");
 include!("mailbox_acknowledged_wake.rs");
