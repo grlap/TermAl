@@ -1593,9 +1593,10 @@ impl ProductionWorkerTree {
         self.wait_for_writer();
     }
 
-    /// Applies exactly what the writer's expiring initialize deadline does
-    /// (`wait_for_acp_json_rpc_response`): the pending sender goes away, so
-    /// the writer fails initialize at once and runs its failure cleanup.
+    /// Equivalent in effect to the writer's expiring initialize deadline, not
+    /// that deadline itself: the pending sender goes away, so the untimed
+    /// wait fails at once through its disconnect branch and the writer runs
+    /// the same initialize-failure cleanup an expired deadline would.
     pub(super) fn expire_initialize(&self) {
         let pending = self.pending.as_ref().expect("an ACP worker tree");
         let expired = std::mem::take(&mut *pending.lock().unwrap());
@@ -1607,6 +1608,20 @@ impl ProductionWorkerTree {
     pub(super) fn assert_peers_exited(&self) {
         for peer in &self.peers { peer.assert_exited(); }
     }
+}
+
+// The untimed-initialize seam is one-shot: a spawn that returns early must
+// still consume it, or a later ACP runtime on the same test thread would
+// silently lose its handshake deadline.
+#[test]
+fn delegation_process_cleanup_refused_acp_spawn_consumes_untimed_initialize() {
+    let state = test_app_state();
+    assert!(!state.agent_runtime_spawning_enabled, "the refusal is the early return under test");
+    TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.set(true));
+    let refused = spawn_acp_runtime(state, "refused-acp".to_owned(), ".".to_owned(), AcpAgent::Kimi, None, None);
+    assert!(refused.is_err(), "spawning is disabled for this state");
+    assert!(!TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.get()),
+        "an early return must not leave the seam armed");
 }
 
 impl Drop for ProductionWorkerTree {

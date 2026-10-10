@@ -246,6 +246,65 @@ fn codex_json_rpc_response_wait_timeout_clears_pending_request() {
     );
 }
 
+// pins the ACP mirror of the timed waiter's cleanup invariant, the branch the
+// initialize handshake deadline takes: an expired wait returns a transport
+// "timed out" error AND removes the pending entry. A zero deadline with the
+// sender still parked expires at once, so the test waits on no clock.
+#[test]
+fn acp_json_rpc_response_wait_timeout_clears_pending_request() {
+    let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = Vec::new();
+
+    let pending_request = start_acp_json_rpc_request(
+        &mut writer,
+        &pending_requests,
+        "initialize",
+        json!({ "protocolVersion": 1 }),
+        AcpAgent::Kimi,
+    )
+    .expect("ACP request should be queued");
+    assert_eq!(
+        pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned")
+            .len(),
+        1,
+        "the request's sender stays parked while it is awaited"
+    );
+
+    let err = wait_for_acp_json_rpc_response(
+        &pending_requests,
+        pending_request,
+        "initialize",
+        Some(Duration::ZERO),
+        AcpAgent::Kimi,
+    )
+    .expect_err("an unanswered request expires at its deadline");
+
+    assert!(acp_error_is_transport_failure(&err), "{err:#}");
+    let expected = format!(
+        "timed out waiting for {} ACP response to `initialize`",
+        AcpAgent::Kimi.label()
+    );
+    assert!(
+        matches!(
+            err.downcast_ref::<AcpResponseError>(),
+            Some(AcpResponseError::Transport(detail)) if detail.starts_with(&expected)
+        ),
+        "{err:#}"
+    );
+    assert!(String::from_utf8(writer)
+        .expect("request payload should be UTF-8")
+        .contains("\"method\":\"initialize\""));
+    assert!(
+        pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned")
+            .is_empty(),
+        "an expired wait must not leave its sender behind"
+    );
+}
+
 // pins writer-loop responsiveness: while a `session/prompt` request is
 // parked in the pending map, the runtime writer still drains and writes
 // subsequent queued messages (approval responses, notifications) rather

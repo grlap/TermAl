@@ -158,11 +158,14 @@ fn dedicated_rework_stop_cleans_claude_with_parked_admission() { dedicated_rewor
 #[cfg(windows)]
 #[test]
 fn dedicated_rework_stop_cleans_acp_with_parked_admission() { dedicated_rework_stop_case(true, DedicatedStopCase::WaitingIntent); }
-// An expired initialize deadline is the product's designed cleanup: the writer
-// kills the dedicated tree, root socket included. The fixture's root never
-// answers initialize, so the fixture keeps that deadline off the wall clock;
+// A failed initialize, whether its deadline expired or its wait failed
+// otherwise, gets the product's designed cleanup: the writer kills the
+// dedicated tree, root socket included. The fixture's root never answers
+// initialize, so the fixture keeps that deadline off the wall clock;
 // otherwise, under load, it could expire before the stop case first writes
-// to the root.
+// to the root. This test applies an effect equivalent to the deadline, not
+// the deadline itself (expire_initialize drops the pending sender); the
+// timed branch is pinned in runtime_rpc.
 #[cfg(windows)]
 #[test]
 fn dedicated_rework_acp_initialize_deadline_kills_fake_root() {

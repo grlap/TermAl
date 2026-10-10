@@ -86,6 +86,13 @@ fn spawn_acp_runtime(
     gemini_approval_mode: Option<GeminiApprovalMode>,
     engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
 ) -> Result<AcpRuntimeHandle> {
+    // Consumed before any early return, so a failed spawn cannot leave the
+    // one-shot test seam armed for a later runtime on the same thread.
+    #[cfg(all(test, windows))]
+    let initialize_timeout = (!TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.replace(false)))
+        .then_some(ACP_INITIALIZE_TIMEOUT);
+    #[cfg(not(all(test, windows)))]
+    let initialize_timeout = Some(ACP_INITIALIZE_TIMEOUT);
     if !state.agent_runtime_spawning_enabled {
         bail!("agent runtime spawning is disabled for this AppState");
     }
@@ -130,11 +137,6 @@ fn spawn_acp_runtime(
             let _ = observer.send(pending_requests.clone());
         }
     });
-    #[cfg(all(test, windows))]
-    let initialize_timeout = (!TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.replace(false)))
-        .then_some(ACP_INITIALIZE_TIMEOUT);
-    #[cfg(not(all(test, windows)))]
-    let initialize_timeout = Some(ACP_INITIALIZE_TIMEOUT);
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
     let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
     let runtime_engram_mcp = engram_mcp.cloned();
