@@ -105,6 +105,9 @@ enum ApiErrorKind {
     /// Callers must report the error without terminalizing delegated work.
     RetainedQueuedPromotionPersistenceUnknown,
     RemoteConnectionUnavailable,
+    /// A fresh evaluator's first brief was not acknowledged as durable, so its
+    /// delegation was retired before any turn and the request may be repeated.
+    AcceptanceEvaluationFirstBriefUnacknowledged,
 }
 
 #[derive(Debug)]

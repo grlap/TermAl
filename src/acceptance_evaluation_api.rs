@@ -2267,7 +2267,14 @@ impl AppState {
             let current = loop {
                 let recheck = std::time::Instant::now() + ACCEPTANCE_EVALUATION_PERSIST_ACK_RECHECK;
                 if let Some(result) = waiter.wait_until(recheck) {
-                    return result.map_err(|error| format!("{error:?}"));
+                    // A missed deadline names how far the writer took the
+                    // fence, so the refusal says which persist phase failed.
+                    return result.map_err(|error| match error {
+                        PersistFenceError::Deadline => {
+                            format!("Deadline: {}", waiter.progress().describe())
+                        }
+                        error => format!("{error:?}"),
+                    });
                 }
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 let Some(index) = acceptance_evaluation_attempt_index_locked(&inner, authority)
@@ -2294,6 +2301,96 @@ impl AppState {
             attempts += 1;
             expected = current;
         }
+    }
+
+    /// A fresh evaluator whose first brief was not acknowledged as durable
+    /// never starts: `spawned` is retired before any turn, so it neither runs
+    /// on a record not known to be durable nor stays Running to block every
+    /// later request for the task, and the request is refused as one the
+    /// caller may repeat. `reason` is the acknowledgement's own error, so the
+    /// refusal names the persist phase that failed.
+    ///
+    /// The acknowledgement was awaited off the state lock, so the evaluator is
+    /// retired only if it is still exactly as spawned: Running, its evaluation
+    /// untouched (a requester prompt marks it tainted under the lock before
+    /// any dispatch) and its child without a runtime, message or queued
+    /// prompt. One taken over meanwhile keeps running under its new owner and
+    /// the request is refused without retiring it. A retirement settles the
+    /// waits that already name the delegation, as a cancel does.
+    fn retire_unacknowledged_acceptance_evaluator(
+        &self,
+        spawned: &DelegationRecord,
+        reason: &str,
+    ) -> ApiError {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_delegation_index(&spawned.id)
+            .filter(|&index| !delegation_is_terminal(inner.delegations[index].status));
+        if let Some(index) = index {
+            let record = &inner.delegations[index];
+            let untouched = record.acceptance_evaluation == spawned.acceptance_evaluation
+                && !inner.acceptance_evaluation_submissions_in_flight.contains(&spawned.id)
+                && !inner.delegation_followup_admissions.contains_key(&spawned.id)
+                && inner
+                    .find_session_index(&record.child_session_id)
+                    .map(|child| &inner.sessions[child])
+                    .is_some_and(|child| {
+                        matches!(child.runtime, SessionRuntime::None)
+                            && child.session.messages.is_empty()
+                            && child.queued_prompts.is_empty()
+                    });
+            if !untouched {
+                return ApiError::conflict(format!(
+                    "the evaluator's first-brief durable acknowledgement failed ({reason}), but delegation `{}` was taken over before it could be retired and keeps running without the host brief; wait for it or cancel it before requesting another evaluation",
+                    spawned.id
+                ));
+            }
+            let summary = format!(
+                "Not started: the first-brief durable acknowledgement failed ({reason}); no evaluator turn ran."
+            );
+            if let Some(lifecycle_delta) = mark_delegation_canceled_locked(&mut inner, index, Some(summary)) {
+                let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
+                let wait_refresh = refresh_delegation_waits_locked(&mut inner);
+                // The waits were consumed and their resumes queued above, so the
+                // handoff runs whatever the save says: a failed commit has
+                // already bumped the revision and leaves memory authoritative,
+                // with the write retried by the next commit, and withholding the
+                // dispatch would strand a parent whose wait is gone. Should the
+                // stored Running record never be rewritten, boot repair fails it.
+                let revision = match self.commit_locked(&mut inner) {
+                    Ok(revision) => revision,
+                    Err(err) => {
+                        eprintln!(
+                            "acceptance evaluation> failed to persist the retirement of unacknowledged evaluator `{}`: {err:#}",
+                            spawned.id
+                        );
+                        inner.revision
+                    }
+                };
+                self.enqueue_delegation_refresh_locked(
+                    &inner,
+                    revision,
+                    Some(&lifecycle_delta),
+                    &detached_child,
+                    &wait_refresh,
+                );
+                drop(inner);
+                self.publish_delegation_refresh_side_effects(
+                    revision,
+                    Some(lifecycle_delta),
+                    detached_child,
+                    wait_refresh,
+                );
+            }
+        }
+        ApiError::from_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "the evaluator could not start: its first-brief durable acknowledgement failed ({reason}). Delegation `{}` was retired before any turn, so no evaluation ran; request the evaluation again",
+                spawned.id
+            ),
+        )
+        .with_kind(ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged)
     }
 
     /// Back to `none`, which only the request that entered from `none` may do,

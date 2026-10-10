@@ -790,9 +790,11 @@ impl AppState {
         // dispatch so that evaluate can use the persisted routing token.
         drop(inner);
         if let Some(target) = record.acceptance_evaluation.as_ref().filter(|t| t.attempt_history.is_some()) {
-            self.confirm_acceptance_evaluation_submission_durable(
+            if let Err(reason) = self.confirm_acceptance_evaluation_submission_durable(
                 &AcceptanceEvaluationSubmitAuthority { delegation_id: record.id.clone(), target: target.clone() }, &record)
-                .map_err(|e| ApiError::internal(format!("evaluator retained but first brief withheld until durable acknowledgement; inspect delegation {}: {e}", record.id)))?;
+            {
+                return Err(self.retire_unacknowledged_acceptance_evaluator(&record, &reason));
+            }
         }
         self.bind_engram_delegation_best_effort(&record);
 

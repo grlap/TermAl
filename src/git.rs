@@ -1032,7 +1032,8 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
         Some(
             ApiErrorKind::LocalSessionMissing
             | ApiErrorKind::RemoteConnectionUnavailable
-            | ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown,
+            | ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown
+            | ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged,
         ) => None,
         None if error.status.is_server_error() => {
             Some("Rendered Markdown is unavailable due to a read error.".to_owned())

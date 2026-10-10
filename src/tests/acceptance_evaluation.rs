@@ -43,6 +43,9 @@ mod sub_agent;
 #[path = "acceptance_obligation_assessment.rs"]
 mod obligation_assessment;
 
+#[path = "acceptance_evaluation_spawn_ack.rs"]
+mod spawn_ack;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 /// These request/submission fixtures begin after a canonical no-event read
