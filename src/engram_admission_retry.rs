@@ -19,7 +19,9 @@
 // Cancel, an operator queue pause, a changed authority or a superseded owner
 // keep the explicit Resume-or-Cancel hold. A begin whose outcome is unknown
 // enters this record as its own kind, `ENGRAM_BEGIN_REPLAY_CODE`, whose
-// attempt replays that exact begin (`engram_begin_replay.rs`).
+// attempt replays that exact begin (`engram_begin_replay.rs`); one an earlier
+// host left unknown without a prepared begin enters it as
+// `ENGRAM_BEGIN_RECONSTRUCT_CODE`, scheduled at boot (`engram_begin_boot.rs`).
 // New module: before it, such a park waited for Resume indefinitely.
 
 /// The Degraded card codes whose park enters the automatic schedule. With no
@@ -76,6 +78,9 @@ fn engram_admission_retry_preview(retry: &EngramAdmissionRetry) -> String {
     if retry.code == ENGRAM_BEGIN_REPLAY_CODE {
         return engram_begin_replay_preview(retry);
     }
+    if retry.code == ENGRAM_BEGIN_RECONSTRUCT_CODE {
+        return engram_begin_reconstruct_preview(retry);
+    }
     format!(
         "{ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX}, attempt {}, next at {}.",
         retry.attempts, retry.due_at
@@ -87,10 +92,14 @@ fn engram_admission_retry_preview(retry: &EngramAdmissionRetry) -> String {
 /// interrupted, with no grant begun or possibly begun, control not disabled
 /// and the queue not paused by an operator. A begin replay instead requires
 /// its possibly begun grant to be the one its prepared begin names
-/// (`engram_begin_replay.rs`); only it relaxes those two exclusions.
+/// (`engram_begin_replay.rs`), and a begin reconstruction requires it beside
+/// a retained evaluate with no prepared begin (`engram_begin_boot.rs`); only
+/// they relax those two exclusions.
 fn engram_admission_retry_head_matches(record: &SessionRecord, retry: &EngramAdmissionRetry) -> bool {
     let grants_settled = if retry.code == ENGRAM_BEGIN_REPLAY_CODE {
         engram_begin_replay_pending(record).is_some()
+    } else if retry.code == ENGRAM_BEGIN_RECONSTRUCT_CODE {
+        engram_begin_reconstruction_shape(record).is_some()
     } else {
         record.engram.active_grant_id.is_none() && record.engram.uncertain_grant_id.is_none()
     };
@@ -165,13 +174,29 @@ fn schedule_engram_admission_retry_locked(
     // An unknown begin outcome is reconciled by replaying that exact begin:
     // the park names it `ENGRAM_BEGIN_REPLAY_CODE` whatever its card code was,
     // and an ordinary retry code on a begin-unknown head is that replay too.
+    // A head an earlier host left begin unknown without a prepared begin is
+    // reconstructed under `ENGRAM_BEGIN_RECONSTRUCT_CODE`: when the boot pass
+    // asks for it, and again when an attempt of that reconstruction parks.
     let begin_replay = engram_begin_replay_pending(record).is_some();
+    let begin_reconstruct = !begin_replay
+        && engram_begin_reconstruction_shape(record).is_some()
+        && (code == Some(ENGRAM_BEGIN_RECONSTRUCT_CODE)
+            || engram_begin_reconstruction_pending(record).is_some());
     let (Some(code), Some(authority), Some(fingerprint), Some(prompt_id)) = (
         code.filter(|code| {
             ENGRAM_ADMISSION_RETRY_CODES.contains(code)
                 || (begin_replay && *code == ENGRAM_BEGIN_REPLAY_CODE)
+                || (begin_reconstruct && *code == ENGRAM_BEGIN_RECONSTRUCT_CODE)
         })
-        .map(|code| if begin_replay { ENGRAM_BEGIN_REPLAY_CODE } else { code }),
+        .map(|code| {
+            if begin_replay {
+                ENGRAM_BEGIN_REPLAY_CODE
+            } else if begin_reconstruct {
+                ENGRAM_BEGIN_RECONSTRUCT_CODE
+            } else {
+                code
+            }
+        }),
         authority,
         fingerprint,
         record

@@ -11,6 +11,9 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+#[path = "engram_begin_boot.rs"]
+mod boot;
+
 const LOST_REPLY: &str =
     "control worker reached EOF after applying turn_begin; reply frame missing";
 const UNAVAILABLE: &str = "control worker unavailable before the request reached Engram";
@@ -47,6 +50,12 @@ struct ReplayScript {
     replay_error: Mutex<Option<String>>,
     /// A producer refusal of a replay arrives shaped as a structured error.
     replay_refusal_as_error: AtomicBool,
+    /// A replayed evaluate (not the first) is answered with this grant id
+    /// instead of the stored result, as when Engram's retention lapsed.
+    replay_evaluate_grant: Mutex<Option<String>>,
+    /// A replayed evaluate (not the first) is answered with this reply, such
+    /// as a refusal or a Defer, instead of the stored result.
+    replay_evaluate_reply: Mutex<Option<Value>>,
     /// A begin takes this long on the budget clock before it replies.
     begin_delay: Mutex<Option<Duration>>,
     /// A replayed begin waits here, once, until the test releases it.
@@ -144,13 +153,21 @@ impl EngramControlTransport for ScriptedReplay {
         match request {
             EngramControlRequest::TurnBegin { .. } => self.begin(connection, request, timeout),
             EngramControlRequest::TurnEvaluate { .. } => {
-                self.script
-                    .sent_evaluates
-                    .lock()
-                    .unwrap()
-                    .push(serde_json::to_value(request).unwrap());
+                let replay = {
+                    let mut sent = self.script.sent_evaluates.lock().unwrap();
+                    sent.push(serde_json::to_value(request).unwrap());
+                    sent.len() > 1
+                };
                 if self.script.all_unavailable.load(Ordering::SeqCst) {
                     return Err(EngramTransportError::transport(UNAVAILABLE));
+                }
+                if replay
+                    && let Some(grant) = self.script.replay_evaluate_grant.lock().unwrap().take()
+                {
+                    return Ok(json!({ "decision": "grant", "grant": { "grant_id": grant } }));
+                }
+                if replay && let Some(reply) = self.script.replay_evaluate_reply.lock().unwrap().take() {
+                    return Ok(reply);
                 }
                 self.producer.request(connection, request, timeout)
             }

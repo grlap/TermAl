@@ -433,6 +433,8 @@ fn change_evaluator_defaults(state: &AppState, session: &str) {
         .unwrap();
 }
 
+/// A head whose begin is durably recorded begun: cold recovery persists the
+/// interruption before its restart checkpoint closes the remote begun grant.
 #[test]
 fn cold_recovery_persists_interruption_before_closing_remote_begun_grant() {
     let (state, session, receiver, _) = root_fixture([
@@ -442,6 +444,7 @@ fn cold_recovery_persists_interruption_before_closing_remote_begun_grant() {
     ]);
     let dispatch = root_dispatch(&state, &session, false);
     deliver_turn_dispatch(&state, dispatch).unwrap();
+    mark_retained_begin_begun(&state, &session, "grant");
     let transport = ScriptedEngramControlTransport::new([
         ScriptedEngramControlResponse::Reply(Ok(json!({
             "phase": "turn_open", "open_grant_id": "grant", "open_grant_state": "begun"

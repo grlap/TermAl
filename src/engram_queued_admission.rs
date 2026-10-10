@@ -884,7 +884,7 @@ impl AppState {
         target: &mut EngramBindingTarget,
         owner: &EngramQueuedAdmissionOwner,
     ) -> std::result::Result<bool, EngramTransportError> {
-        let (prepared, bind, cold) = {
+        let (prepared, bind, cold, begin_recovery) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(&target.connection.session_id) else {
                 return Ok(false);
@@ -903,7 +903,13 @@ impl AppState {
                 .queued_prompts
                 .front()
                 .and_then(|queued| queued.engram_bind.clone());
-            (prepared, bind, record.engram.recovered_admission)
+            // A begin-unknown head restored after a restart is settled by its
+            // exact recovery alone (`engram_begin_replay.rs`,
+            // `engram_begin_boot.rs`): no status read decides it and no
+            // restart checkpoint closes its possibly begun grant first.
+            let begin_recovery = engram_begin_replay_pending(record).is_some()
+                || engram_begin_reconstruction_pending(record).is_some();
+            (prepared, bind, record.engram.recovered_admission, begin_recovery)
         };
         if let Some(bind) = bind {
             if bind.connection != target.connection
@@ -941,6 +947,22 @@ impl AppState {
         target.rebind_required = false;
         target.circuit_open = false;
         target.next_bind_retry_at = None;
+        if cold && begin_recovery {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&target.connection.session_id)
+                .ok_or_else(|| EngramTransportError::local_state("Recovery session disappeared"))?;
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            if !owner.matches(record) {
+                return Err(EngramTransportError::local_state(
+                    "Recovery no longer owns the queued prompt",
+                ));
+            }
+            record.engram.recovered_admission = false;
+            return Ok(true);
+        }
         if cold {
             let started_at = target
                 .admission_started_at

@@ -2519,11 +2519,10 @@ The begin is acknowledged again through the admission fence before it is
 resent. A failed or ambiguous acknowledgement withholds the replay and keeps
 the prepared begin unchanged, since that begin may have been applied before.
 No session status read clears the uncertain grant, no rebind expires it first,
-and no orphan-grant rebind is armed after an unknown begin outcome. While the
-host runs, no restart checkpoint closes it either. After a restart, the cold
-recovery of a retained admission still closes a grant that status reports
-begun and holds the prompt; rebuilding the replay at boot instead is separate
-work.
+and no orphan-grant rebind is armed after an unknown begin outcome. No restart
+checkpoint closes it either, before or after a restart: the cold recovery of a
+restored admission leaves a begin-unknown head to its replay, without reading
+status first (see "Begin recovery after a restart" below).
 
 The park schedules the replay as its own retry kind, the admission retry code
 `begin_unknown`. It runs on the common schedule: 2, 5, 10, 20, 30, then every
@@ -2573,6 +2572,44 @@ schedule.
 A synchronous Begin's call bound is the configured control call bound
 (`deadline_ms`, 20,000 ms by default), but at least 10,000 ms. It is capped at
 the shared 20,000 ms limit and at the remaining admission deadline.
+
+### Begin recovery after a restart
+
+A begin left unknown when TermAl stops is recovered after the restart without
+Resume (`src/engram_begin_boot.rs`). Boot preparation reads every saved head
+before boot recovery picks its targets, so no cold or restart-checkpoint
+recovery takes the head first:
+
+- **A scheduled replay** saved with its acknowledgement is rebuilt on load with
+  its attempt index, first-held time, due time and owner, and runs on as it
+  would have.
+- **A prepared begin with nothing marking its grant possibly begun.** It was
+  durably acknowledged before its send, so the host may have sent it before it
+  stopped. Its grant becomes the session's uncertain grant and the exact replay
+  is scheduled, replacing an ordinary retry the head may still hold (that
+  retry's own attempt may have prepared the begin); the replacement is
+  acknowledged again before its attempt. A begin Engram had already refused
+  definitively is replayed once, and that answer settles it.
+- **A head saved by a host before the prepared begin** (a retained evaluate and
+  an uncertain grant, no prepared begin) is scheduled for reconstruction, the
+  admission retry code `begin_reconstruct`. Its preview reads "waiting for
+  admission; retrying automatically (begin reconciliation: replaying the
+  retained evaluate to recover the same begin), attempt N, next at T." Each
+  attempt replays the exact retained evaluate. When Engram answers with its
+  stored grant and that grant is the uncertain one, the begin is rebuilt under
+  the key derived from that evaluate, as the earlier host derived it, prepared
+  durably and replayed from then on like any other begin-unknown head. An
+  answer naming another grant, a refusal or a Defer begins nothing and proves
+  nothing about the earlier begin: the head ends in a Reconcile hold
+  (`begin_reconstruction_unverified`) with its retained evaluate and its
+  possibly begun grant, before any refusal healing, deferral or retirement
+  could drop them. No begin
+  is ever built from anything but the retained request and Engram's own answer
+  to it.
+
+A head that another hold owns keeps that hold: an interrupted one, a Stop, an
+operator pause, disabled control, or a head whose transcript position is
+unknown. So does an uncertain grant whose id was never learned.
 
 ### Strict Save and absent control sessions
 

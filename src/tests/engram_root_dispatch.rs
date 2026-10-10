@@ -232,6 +232,28 @@ fn root_lost_begin_resume_replays_only_the_exact_begin_without_new_generation() 
     assert_eq!(requests[2].request, requests[3].request, "the exact begin");
 }
 
+/// Shapes the head a host saves once its begin is durably recorded begun:
+/// the begun grant noted on the retained evaluate and no longer uncertain,
+/// with no retry record. A head whose begin outcome is unknown is not this
+/// head; its exact begin replay owns it after a restart
+/// (`engram_begin_boot.rs`).
+fn mark_retained_begin_begun(state: &AppState, session: &str, grant_id: &str) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner.find_session_index(session).unwrap();
+    let record = &mut inner.sessions[index];
+    record
+        .queued_prompts
+        .front_mut()
+        .and_then(|head| head.engram_evaluate.as_mut())
+        .expect("the retained evaluate")
+        .begun_grant_id = Some(grant_id.to_owned());
+    record.engram.uncertain_grant_id = None;
+    record.engram.admission_retry = None;
+}
+
+/// A head whose begin is durably recorded begun: after a restart, cold
+/// recovery reads producer status, closes the begun grant with a restart
+/// checkpoint, and never resends the retained prompt.
 #[test]
 fn root_cold_begun_recovery_checkpoints_but_never_resends_retained_prompt() {
     let (state, session, receiver, transport) = root_fixture([
@@ -247,6 +269,7 @@ fn root_cold_begun_recovery_checkpoints_but_never_resends_retained_prompt() {
     ]);
     let dispatch = root_dispatch(&state, &session, false);
     deliver_turn_dispatch(&state, dispatch).unwrap();
+    mark_retained_begin_begun(&state, &session, "original-grant");
     let encoded = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         serde_json::to_string(&PersistedSessionRecord::from_record(

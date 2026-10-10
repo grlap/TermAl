@@ -3893,13 +3893,16 @@ impl AppState {
         // session's recovery instead of admitting.
         let _release_boot_hold = self.engram_retry_slots.release_boot_hold_on_drop();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        // A saved begin-unknown head is read as begin unknown and its exact
+        // recovery scheduled (`engram_begin_boot.rs`) before any target is
+        // picked, so no cold or restart-checkpoint recovery takes it first.
+        let mut changed = self.reconstruct_engram_begin_recovery_on_boot_locked(&mut inner);
         let targets = Self::engram_boot_recovery_targets_locked(&inner);
         let budget = Duration::from_millis(inner.preferences.engram.boot_recovery_budget_ms);
         let target_ids = targets
             .iter()
             .map(|target| target.connection.session_id.clone())
             .collect::<HashSet<_>>();
-        let mut changed = false;
         for index in 0..inner.sessions.len() {
             let should_be_pending = target_ids.contains(&inner.sessions[index].session.id);
             if inner.sessions[index].engram_boot_recovery_pending == should_be_pending
@@ -5147,10 +5150,38 @@ impl AppState {
                     // A replay resends the stored begin: its exact key string,
                     // never one recomputed (`engram_begin_replay.rs`). Its grant
                     // is possibly begun, never an issued orphan to repair.
-                    let replaying = self
+                    let mut replaying = self
                         .engram_begin_replay_for(session_id, admission_owner.as_ref())
                         .filter(|prepared| prepared.grant_id == grant_id);
-                    issued_unbegun_grant_id = replaying.is_none().then(|| grant_id.clone());
+                    // A head an earlier host left begin unknown without a
+                    // prepared begin has replayed its retained evaluate
+                    // (`engram_begin_boot.rs`). Only the grant that host may
+                    // have begun is begun again, under the key derived from
+                    // that evaluate as it was then; another grant is never
+                    // begun beside a possibly begun one.
+                    let reconstructing = if replaying.is_none() {
+                        self.engram_begin_reconstruction_for(session_id, admission_owner.as_ref())
+                    } else {
+                        None
+                    };
+                    if reconstructing.as_deref().is_some_and(|uncertain| uncertain != grant_id) {
+                        causal_failure = Some(EngramCausalFailure::local_hold(
+                            "turn_evaluate",
+                            "begin_reconstruction_unverified",
+                            "Engram answered the retained evaluate with another grant than the one an earlier host may have begun",
+                            "begin reconstruction from the retained evaluate",
+                        ));
+                        break (
+                            EngramControlCardDecision::Degraded,
+                            Some("begin_reconstruction_unverified".to_owned()),
+                            Vec::new(),
+                            delivered_range,
+                            EngramControlFailMode::Degraded,
+                        );
+                    }
+                    let reconstructing = reconstructing.is_some();
+                    issued_unbegun_grant_id =
+                        (replaying.is_none() && !reconstructing).then(|| grant_id.clone());
                     let Some(target) = binding_target.as_ref() else {
                         break (
                             EngramControlCardDecision::Degraded,
@@ -5219,6 +5250,13 @@ impl AppState {
                             delivered_range,
                             EngramControlFailMode::Degraded,
                         );
+                    }
+                    // The reconstructed begin is now the prepared begin of the
+                    // uncertain grant: from here it is that begin's replay.
+                    if reconstructing {
+                        replaying = self
+                            .engram_begin_replay_for(session_id, admission_owner.as_ref())
+                            .filter(|prepared| prepared.grant_id == grant_id);
                     }
                     let begin_binding = {
                         let inner = self.inner.lock().expect("state mutex poisoned");
@@ -7032,12 +7070,17 @@ impl AppState {
             )));
         }
         // A begin-unknown head is settled only by replaying its exact begin
-        // (`engram_begin_replay.rs`): no status read clears it, no restart
-        // checkpoint closes its grant and no rebind expires it first.
+        // (`engram_begin_replay.rs`), or by reconstructing it from its
+        // retained evaluate (`engram_begin_boot.rs`): no status read clears
+        // it, no restart checkpoint closes its grant and no rebind expires it
+        // first.
         if let Some(routing_token) = target.routing_token.clone()
-            && self
+            && (self
                 .engram_begin_replay_for(&target.connection.session_id, owner)
                 .is_some()
+                || self
+                    .engram_begin_reconstruction_for(&target.connection.session_id, owner)
+                    .is_some())
         {
             return Ok(routing_token);
         }
@@ -7999,6 +8042,34 @@ impl AppState {
                     code: "authorization_superseded".to_owned(),
                     detail: "Engram evaluation reply belonged to a superseded queue owner"
                         .to_owned(),
+                };
+            }
+            // A reconstruction (`engram_begin_boot.rs`) settles only on the
+            // grant its retained evaluate is answered with. A refusal or a
+            // Defer proves nothing about the begin an earlier host may have
+            // sent: the head is held with its retained evaluate and possibly
+            // begun grant, before any healing, deferral or retirement here
+            // could drop them.
+            if matches!(
+                &response,
+                Ok(EngramTurnDecisionResponse::Refuse { .. } | EngramTurnDecisionResponse::Defer { .. })
+            ) && self
+                .engram_begin_reconstruction_for(&intent.session_id, admission_owner.as_ref())
+                .is_some()
+            {
+                self.record_queued_engram_transport_success(
+                    &intent.session_id,
+                    admission_owner.as_ref(),
+                );
+                causal_failure = Some(EngramCausalFailure::local_hold(
+                    "turn_evaluate",
+                    "begin_reconstruction_unverified",
+                    "Engram answered the retained evaluate without the grant an earlier host may have begun",
+                    "begin reconstruction from the retained evaluate",
+                ));
+                break EngramDispatchEvaluation::Degraded {
+                    code: "begin_reconstruction_unverified".to_owned(),
+                    detail: "Engram answered the retained evaluate without the grant an earlier host may have begun".to_owned(),
                 };
             }
             match response {
