@@ -1530,20 +1530,20 @@ export function useSessionPaneScrollState({
 
     const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
-    const landsAtPhysicalBottom = isMessageStackAtPhysicalBottom(
-      nextScrollTop,
-      node.scrollHeight,
-      node.clientHeight,
-    );
-    if (!landsAtPhysicalBottom) {
+    const reachesBottomFromDownwardInput = deltaY > 0 &&
+      isMessageStackAtPhysicalBottom(
+        nextScrollTop,
+        node.scrollHeight,
+        node.clientHeight,
+      );
+    if (!reachesBottomFromDownwardInput) {
       // This is the shared first-write path for app-owned Arrow/Page input and
       // native wheel/trackpad input. React's delegated wheel handler observes
       // the native listener only after it has called preventDefault(), so
       // transfer scroll authority here before the first write. All transcript
-      // content shares one coordinate system. A delta reaching bottom stays attached.
-      // Manual navigation is direction-independent and remains detached until
-      // the physical bottom; the shared sticky-bottom band only absorbs
-      // layout jitter while already attached.
+      // content shares one coordinate system. Upward input detaches even when
+      // it ends inside the physical-bottom tolerance. Only a downward arrival
+      // at the bottom may reattach; tolerance alone does not express that intent.
       markTailFollowDetachedByUser();
     }
     cancelPaneProgrammaticBottomFollow({ rejectLateFrame: deltaY < 0 });
@@ -1557,13 +1557,13 @@ export function useSessionPaneScrollState({
       scrollKind: options.scrollKind,
       scrollSource: "user",
     });
-    paneScrollPositions[scrollStateKey] = landsAtPhysicalBottom
+    paneScrollPositions[scrollStateKey] = reachesBottomFromDownwardInput
       ? recordPaneScrollGeometry(node, {
           top: node.scrollTop,
           shouldStick: true,
         })
       : captureRecordedDetachedPaneScrollPosition(node);
-    if (landsAtPhysicalBottom) {
+    if (reachesBottomFromDownwardInput) {
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
     }

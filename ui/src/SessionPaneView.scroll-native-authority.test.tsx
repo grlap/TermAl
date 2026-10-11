@@ -179,6 +179,7 @@ function renderNativeConversation(
       top = Math.min(top, Math.max(0, height - 200));
     },
     browserTop(next: number) { top = next; },
+    browserSlotTop(messageId: string, next: number) { slotTops.set(messageId, next); },
     nativeScroll() { act(() => node.dispatchEvent(new Event("scroll"))); },
     measure() {
       const slot = page.querySelector(".virtualized-message-slot");
@@ -205,6 +206,93 @@ function renderNativeConversation(
 }
 
 describe("native scroll attachment authority", () => {
+  const returnAfterUpwardScrollCases = [-1, -4, -5, -48, -71, -72, -73, -120].flatMap((deltaY) =>
+    [false, true].flatMap((inactiveOutput) =>
+      [false, true].map((deliverScrollBeforeSwitch) => ({ deltaY, inactiveOutput, deliverScrollBeforeSwitch })),
+    ),
+  );
+
+  it.each(returnAfterUpwardScrollCases)(
+    "preserves an upward step across return (delta=$deltaY, inactive output=$inactiveOutput, native delivery=$deliverScrollBeforeSwitch)",
+    async ({ deltaY, inactiveOutput, deliverScrollBeforeSwitch }) => {
+      const view = renderNativeConversation(false);
+      const expectedTop = view.node.scrollTop + deltaY;
+      fireEvent.wheel(view.node, { deltaY });
+      await act(async () => {});
+      expect.soft(view.node.scrollTop, "wheel applied the requested movement").toBe(expectedTop);
+      expect.soft(view.savedPosition.shouldStick, "upward input relinquishes FOLLOW immediately").toBe(false);
+      if (deliverScrollBeforeSwitch) view.nativeScroll();
+      act(() => view.state.captureDetachedMessageStackPosition());
+      expect.soft(view.savedPosition.shouldStick, "tab capture preserves STAY").toBe(false);
+      view.update({ visible: false });
+      if (inactiveOutput) view.output(1_100);
+      view.update({ visible: true });
+      expect.soft(view.node.scrollTop, "return before animation frames").toBe(expectedTop);
+      view.frames.drainAnimationFrames();
+      view.nativeScroll();
+      view.measure();
+      act(() => vi.advanceTimersByTime(150));
+      view.frames.drainAnimationFrames();
+      await act(async () => {});
+      expect.soft(view.node.scrollTop, "return after deferred measurements").toBe(expectedTop);
+      expect.soft(view.state.liveTailPinned, "return and output do not reattach").toBe(false);
+    },
+  );
+
+  it.each([false, true])("preserves attached return with inactive output=%s", (inactiveOutput) => {
+    const view = renderNativeConversation(false);
+    view.update({ visible: false });
+    if (inactiveOutput) view.output(1_100);
+    view.update({ visible: true });
+    view.frames.drainAnimationFrames();
+    view.nativeScroll();
+    expect(view.node.scrollTop).toBe(inactiveOutput ? 900 : 800);
+    expect(view.state.liveTailPinned).toBe(true);
+  });
+
+  it("reattaches after a deliberate downward return to the bottom", async () => {
+    const view = renderNativeConversation(false);
+    fireEvent.wheel(view.node, { deltaY: -48 });
+    await act(async () => {});
+    view.nativeScroll();
+    expect(view.state.liveTailPinned).toBe(false);
+    fireEvent.wheel(view.node, { deltaY: 48 });
+    await act(async () => {});
+    view.nativeScroll();
+    view.update({ visible: false });
+    view.output(1_100);
+    view.update({ visible: true });
+    view.frames.drainAnimationFrames();
+    expect(view.node.scrollTop).toBe(900);
+    expect(view.state.liveTailPinned).toBe(true);
+  });
+
+  it.each([0, 150])("keeps the returned reader's visible anchor through a height measurement delayed %s ms", async (delay) => {
+    const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
+    const view = renderNativeConversation(false, 400, { anchor, clampWrites: true });
+    view.hydrate([{
+      id: anchor.messageId, type: "text", author: "assistant", timestamp: "12:01", text: "Reader",
+    }], { [anchor.messageId]: 400 });
+    view.frames.drainAnimationFrames();
+    act(() => view.state.captureDetachedMessageStackPosition());
+    view.update({ visible: false });
+    view.update({ visible: true });
+    view.frames.drainAnimationFrames();
+    view.nativeScroll();
+    const slot = view.node.querySelector(`[data-message-id="${anchor.messageId}"]`)!;
+    expect(slot.getBoundingClientRect().top).toBe(anchor.viewportOffsetPx);
+    act(() => vi.advanceTimersByTime(delay));
+    view.frames.drainAnimationFrames();
+    expect(slot.getBoundingClientRect().top).toBe(anchor.viewportOffsetPx);
+    // Content above the reader finishes measuring after the first correct paint.
+    view.browserSlotTop(anchor.messageId, 413.5);
+    view.browserHeight(1_013.5);
+    view.measure();
+    await act(async () => {});
+    expect(slot.getBoundingClientRect().top).toBe(anchor.viewportOffsetPx);
+    expect(view.state.liveTailPinned).toBe(false);
+  });
+
   it("retains a returning reader while the remounted list initially clamps its offset", () => {
     const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
     const view = renderNativeConversation(false, 400, { anchor, clampWrites: true });
