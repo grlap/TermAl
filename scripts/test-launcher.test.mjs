@@ -13,6 +13,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -1119,6 +1120,23 @@ test("a detached worker that completes correctly after more time has passed is j
   });
 });
 
+// The fixture runner's spawn options, shared with the witness below. Its
+// working directory lies outside the fixture directory `base`: node --test
+// runs the file in a child that inherits it, and that child starts the
+// barrier, so all of them may still be exiting when the passing test's
+// after-hook removes `base`. On Windows a live process's working directory
+// pins that directory, and the removal would fail with EPERM until every such
+// process is gone. Every fixture path is absolute, so nothing depends on it.
+const fixtureRunnerOptions = (base, env) => {
+  const cwd = projectRoot;
+  const fromBase = relative(base, cwd);
+  assert.ok(
+    fromBase.startsWith("..") || isAbsolute(fromBase),
+    `the fixture runner's working directory ${cwd} must lie outside ${base}`,
+  );
+  return { cwd, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true };
+};
+
 test("a failed or hung test keeps its fixture directory and names it; a passing test removes it", async (t) => {
   const base = mkdtempSync(join(testTempDirectory(), "launcher-keep-"));
   removeFixtureOnPass(t, base);
@@ -1165,9 +1183,11 @@ test("a failed or hung test keeps its fixture directory and names it; a passing 
   // spec output keeps Windows paths unescaped whether or not stdout is a TTY.
   const shape = helperTestArgs.filter((arg) => !helperTestFiles.includes(arg) && !arg.startsWith("--test-timeout="));
   assert.deepEqual(shape, ["--test", "--test-force-exit"]);
-  const child = spawn(process.execPath, [...shape, "--test-reporter=spec", "--test-timeout=500", fixture], {
-    cwd: base, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
-  });
+  const child = spawn(
+    process.execPath,
+    [...shape, "--test-reporter=spec", "--test-timeout=500", fixture],
+    fixtureRunnerOptions(base, env),
+  );
   let output = "";
   child.stdout.on("data", (chunk) => { output += chunk; });
   child.stderr.on("data", (chunk) => { output += chunk; });
@@ -1185,6 +1205,76 @@ test("a failed or hung test keeps its fixture directory and names it; a passing 
   // release: nothing is left running. This waits on that event, not a clock.
   const orphan = Number(readFileSync(barrierPid, "utf8"));
   while (!processGone(orphan)) await new Promise((resolveTick) => setTimeout(resolveTick, 10));
+});
+
+test("a live process started with the fixture runner's options leaves the fixture directory removable", async () => {
+  // The fixture runner's own children (node --test's file subprocess, the
+  // barrier it starts) inherit its working directory and may still be exiting
+  // when the passing test's after-hook removes the fixture directory. This
+  // holds such a process alive on purpose, deterministically, and removes the
+  // directory under it: nothing waits on a clock or on load.
+  const base = mkdtempSync(join(testTempDirectory(), "launcher-runner-cwd-"));
+  // The runner's own environment: without the parent runner's test context,
+  // a node child would act as a test-runner child instead of running its code.
+  const env = { ...fixtureEnv };
+  delete env.NODE_TEST_CONTEXT;
+  const options = fixtureRunnerOptions(base, env);
+  // Holds a live process in `cwd` while `check` runs. The process reports it
+  // is running with a synchronous write, then waits on a release that never
+  // comes, and ends by itself once this test process is gone, so an
+  // interrupted test leaves nothing running. Ordinary cleanup kills it, and
+  // only a process that actually started is waited on.
+  const heldSource = [
+    "const fs = require('node:fs');",
+    ...ownerAliveSource(),
+    "fs.writeSync(1, 'ready\\n');",
+    `while (!fs.existsSync(${JSON.stringify(join(base, "never-released"))})) {`,
+    "  if (!ownerAlive()) process.exit(4);",
+    "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);",
+    "}",
+  ].join("\n");
+  const holdWhile = async (cwd, check) => {
+    const held = spawn(process.execPath, ["-e", heldSource], { ...options, cwd });
+    const closed = new Promise((resolveClose) => held.once("close", resolveClose));
+    let started = false;
+    try {
+      await new Promise((resolveReady, rejectReady) => {
+        let output = "";
+        held.once("spawn", () => { started = true; });
+        held.once("error", rejectReady);
+        held.once("exit", (code, signal) => rejectReady(new Error(`held process ended before ready: ${code ?? signal}`)));
+        held.stdout.on("data", (chunk) => {
+          output += chunk;
+          if (output.includes("ready\n")) resolveReady();
+        });
+      });
+      check();
+      // The removal above ran while the process was alive, not after it ended.
+      assert.equal(held.exitCode, null, "the held process must outlive the removal");
+    } finally {
+      if (started) {
+        held.kill();
+        await closed;
+      }
+    }
+  };
+  try {
+    if (process.platform === "win32") {
+      // The control: a live process whose working directory is the fixture
+      // directory pins it, so this witness can tell a runner that keeps its
+      // children out of `base` from one that does not.
+      await holdWhile(base, () => assert.throws(
+        () => rmSync(base, { recursive: true, force: true }),
+        { code: /^(?:EPERM|EBUSY)$/u },
+      ));
+    }
+    await holdWhile(options.cwd, () => {
+      rmSync(base, { recursive: true, force: true });
+      assert.equal(existsSync(base), false);
+    });
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test("a run records whether it is detached and which process created it", async (t) => {
