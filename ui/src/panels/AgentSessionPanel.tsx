@@ -147,6 +147,7 @@ export function AgentSessionPanel({
   viewMode,
   activeSessionId,
   liveTailPinned = true,
+  onOverviewNavigateStart,
   scrollStateKey = `${paneId}:${viewMode}:${activeSessionId ?? "empty"}`,
   isLoading,
   isUpdating,
@@ -201,6 +202,7 @@ export function AgentSessionPanel({
   );
   const stableOnOpenMailbox = useStableEvent(onOpenMailbox);
   const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
+  const stableOnOverviewNavigateStart = useStableEvent(() => onOverviewNavigateStart?.());
 
   return (
     <SessionBody
@@ -210,6 +212,7 @@ export function AgentSessionPanel({
       virtualizerHandleRef={virtualizerHandleRef}
       activeSessionId={activeSessionId}
       liveTailPinned={liveTailPinned}
+      onOverviewNavigateStart={stableOnOverviewNavigateStart}
       scrollStateKey={scrollStateKey}
       isLoading={isLoading}
       isUpdating={isUpdating}
@@ -328,6 +331,7 @@ const SessionBody = memo(
     virtualizerHandleRef,
     activeSessionId,
     liveTailPinned,
+    onOverviewNavigateStart,
     scrollStateKey,
     isLoading,
     isUpdating,
@@ -411,6 +415,7 @@ const SessionBody = memo(
             renderMessageCard={renderMessageCard}
             session={activeSession}
             liveTailPinned={liveTailPinned}
+            onOverviewNavigateStart={onOverviewNavigateStart}
             scrollStateKey={scrollStateKey}
             scrollContainerRef={scrollContainerRef}
             virtualizerHandleRef={virtualizerHandleRef}
@@ -497,6 +502,7 @@ const SessionBody = memo(
     previous.virtualizerHandleRef === next.virtualizerHandleRef &&
     previous.activeSessionId === next.activeSessionId &&
     previous.liveTailPinned === next.liveTailPinned &&
+    previous.onOverviewNavigateStart === next.onOverviewNavigateStart &&
     previous.scrollStateKey === next.scrollStateKey &&
     previous.isLoading === next.isLoading &&
     previous.isUpdating === next.isUpdating &&
@@ -543,6 +549,7 @@ const SessionConversationPage = memo(
     renderMessageCard,
     session,
     liveTailPinned,
+    onOverviewNavigateStart,
     scrollStateKey,
     scrollContainerRef,
     virtualizerHandleRef,
@@ -668,6 +675,7 @@ const SessionConversationPage = memo(
       sessionId: session.id,
       sessionMutationStamp: session.sessionMutationStamp ?? 0,
       tailFollowIntent: liveTailPinned,
+      onNavigateStart: onOverviewNavigateStart,
       virtualizerHandleRef,
     });
     const messageRevealUserScrollGeneration =
@@ -1420,6 +1428,7 @@ const SessionConversationPage = memo(
     previous.renderMessageCard === next.renderMessageCard &&
     previous.session === next.session &&
     previous.liveTailPinned === next.liveTailPinned &&
+    previous.onOverviewNavigateStart === next.onOverviewNavigateStart &&
     previous.scrollStateKey === next.scrollStateKey &&
     previous.scrollContainerRef === next.scrollContainerRef &&
     previous.virtualizerHandleRef === next.virtualizerHandleRef &&

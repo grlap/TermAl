@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionOverviewResponse } from "../api";
@@ -21,6 +21,117 @@ function overview(): SessionOverviewResponse {
 }
 
 describe("ConversationOverviewRail", () => {
+  it("keeps a portaled touch drag from cancelling itself through the transcript", async () => {
+    const frame = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    let complete!: (applied: boolean) => void;
+    const onNavigate = vi.fn(() => new Promise<boolean>((resolve) => { complete = resolve; }));
+    const transcriptTouch = vi.fn(() => complete?.(false));
+    const view = render(<section onTouchStart={transcriptTouch} onTouchMove={transcriptTouch}>
+      <ConversationOverviewRail heightPx={400} rightPx={0} topPx={0}
+        messageCount={100} overview={overview()} portalTarget={document.body}
+        onNavigate={onNavigate} viewport={{ startPosition: 0, endPosition: 10 }} />
+    </section>);
+    try {
+      const rail = screen.getByTestId("conversation-overview-rail");
+      rail.getBoundingClientRect = () => ({ top: 100, height: 400 }) as DOMRect;
+      fireEvent.pointerDown(rail, { button: 0, pointerId: 1, pointerType: "touch", clientY: 420 });
+      fireEvent.touchStart(rail, { touches: [{ clientY: 420 }] });
+      fireEvent.pointerMove(rail, { pointerId: 1, pointerType: "touch", clientY: 420 });
+      fireEvent.touchMove(rail, { touches: [{ clientY: 419 }] });
+      // Let a wrongly bubbled touch settle the request before release, while
+      // the pending pointer-move frame still has not run.
+      await act(async () => Promise.resolve());
+      fireEvent.pointerUp(rail, { pointerId: 1, pointerType: "touch", clientY: 420 });
+      expect(transcriptTouch).not.toHaveBeenCalled();
+      expect(onNavigate).toHaveBeenCalledOnce();
+      expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+        "--conversation-overview-viewport-center": "80%",
+      });
+      await act(async () => { complete(true); });
+    } finally {
+      view.unmount(); frame.mockRestore(); cancelFrame.mockRestore();
+    }
+  });
+
+  it("keeps the released target while its history is loading without restarting the request", async () => {
+    let complete!: (applied: boolean) => void;
+    const onNavigate = vi.fn(() => new Promise<boolean>((resolve) => { complete = resolve; }));
+    const props = {
+      heightPx: 400, rightPx: 0, topPx: 0, messageCount: 100,
+      overview: overview(), portalTarget: document.body, onNavigate,
+      viewport: { startPosition: 0, endPosition: 10 },
+    };
+    const { rerender } = render(<ConversationOverviewRail {...props} />);
+    const rail = screen.getByTestId("conversation-overview-rail");
+    rail.getBoundingClientRect = () => ({ top: 100, height: 400 }) as DOMRect;
+    fireEvent.pointerDown(rail, { button: 0, pointerId: 1, clientY: 420 });
+    fireEvent.pointerUp(rail, { pointerId: 1, clientY: 420 });
+    expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+      "--conversation-overview-viewport-center": "80%",
+    });
+    expect(onNavigate).toHaveBeenCalledOnce();
+    // The resident viewport can still be the old one until React commits the
+    // loaded page. Releasing the pointer must not restore that old indicator.
+    rerender(<ConversationOverviewRail {...props} viewport={{ startPosition: 10, endPosition: 20 }} />);
+    expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+      "--conversation-overview-viewport-center": "80%",
+    });
+    rerender(<ConversationOverviewRail {...props} viewport={{ startPosition: 75, endPosition: 85 }} />);
+    await act(async () => { complete(true); });
+    expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+      "--conversation-overview-viewport-center": "80%",
+    });
+  });
+
+  it("keeps the drag handle under the pointer while history changes and lands at release", () => {
+    const onNavigate = vi.fn();
+    const props = {
+      heightPx: 400, rightPx: 0, topPx: 0, messageCount: 100,
+      overview: overview(), portalTarget: document.body, onNavigate,
+      viewport: { startPosition: 0, endPosition: 10 },
+    };
+    const { rerender } = render(<ConversationOverviewRail {...props} />);
+    const rail = screen.getByTestId("conversation-overview-rail");
+    rail.getBoundingClientRect = () => ({ top: 100, height: 400 }) as DOMRect;
+    fireEvent.pointerDown(rail, { button: 0, pointerId: 1, clientY: 300 });
+    expect(onNavigate).toHaveBeenLastCalledWith(50);
+    rerender(<ConversationOverviewRail {...props} viewport={{ startPosition: 5, endPosition: 15 }} />);
+    expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+      "--conversation-overview-viewport-center": "50%",
+    });
+    fireEvent.pointerMove(rail, { pointerId: 1, clientY: 420 });
+    expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+      "--conversation-overview-viewport-center": "80%",
+    });
+    fireEvent.pointerUp(rail, { pointerId: 1, clientY: 460 });
+    expect(onNavigate).toHaveBeenLastCalledWith(90);
+  });
+
+  it("ignores an older completion and releases a failed current target", async () => {
+    const completions: ((applied: boolean) => void)[] = [];
+    const onNavigate = vi.fn(() => new Promise<boolean>((resolve) => { completions.push(resolve); }));
+    render(<ConversationOverviewRail
+      heightPx={400} rightPx={0} topPx={0} messageCount={100}
+      overview={overview()} portalTarget={document.body} onNavigate={onNavigate}
+      viewport={{ startPosition: 0, endPosition: 10 }}
+    />);
+    const rail = screen.getByTestId("conversation-overview-rail");
+    rail.getBoundingClientRect = () => ({ top: 100, height: 400 }) as DOMRect;
+    fireEvent.pointerDown(rail, { button: 0, pointerId: 1, clientY: 420 });
+    fireEvent.pointerUp(rail, { pointerId: 1, clientY: 420 });
+    fireEvent.pointerDown(rail, { button: 0, pointerId: 2, clientY: 300 });
+    fireEvent.pointerUp(rail, { pointerId: 2, clientY: 300 });
+    await act(async () => { completions[0]?.(false); });
+    expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+      "--conversation-overview-viewport-center": "50%",
+    });
+    await act(async () => { completions[1]?.(false); });
+    expect(screen.getByTestId("conversation-overview-viewport-handle")).toHaveStyle({
+      "--conversation-overview-viewport-center": "5%",
+    });
+  });
+
   it("waits for complete pane-local geometry before mounting a loading rail", () => {
     const { rerender } = render(
       <ConversationOverviewRail

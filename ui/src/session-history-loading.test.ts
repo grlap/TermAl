@@ -106,6 +106,73 @@ async function expectPreFetchDemandExit({
 }
 
 describe("session history loading", () => {
+  it("cancels the HTTP request when a minimap demand is superseded", async () => {
+    const context = makeContext();
+    vi.mocked(context.getSession).mockReturnValue(session([message(90)], { messageCount: 100 }));
+    const abort = new AbortController();
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("Superseded navigation", "AbortError")), { once: true });
+      }),
+    );
+    const load = loadBoundedSessionHistoryWindow({
+      context,
+      demand: { direction: "around", position: 20, sessionId: "session-1", requestId: 900, signal: abort.signal },
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/history?limit=64&around=20"),
+      expect.objectContaining({ signal: abort.signal }),
+    );
+    abort.abort();
+    await load;
+    expect(context.publishSession).not.toHaveBeenCalled();
+    expect(context.reportRequestError).not.toHaveBeenCalled();
+    expect(context.requestActionRecoveryResync).not.toHaveBeenCalled();
+    expectSingleDemandCompletion(900, false);
+  });
+
+  it("never publishes an aborted map page after a newer map page has landed", async () => {
+    const context = makeContext();
+    let current = session([message(90)], { messageCount: 100 });
+    vi.mocked(context.getSession).mockImplementation(() => current);
+    vi.mocked(context.publishSession).mockImplementation((next) => {
+      current = next;
+      return true;
+    });
+    const first = deferred<Awaited<ReturnType<typeof api.fetchSessionHistory>>>();
+    const page = (index: number) => ({
+      sessionId: current.id,
+      messages: [message(index)], messageCount: 100, messageStartIndex: index,
+      hasMore: true, hasNewer: true, nextBefore: `message-${index}`,
+      nextAfter: `message-${index}`, revision: 1, serverInstanceId: "server-a",
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionHistory").mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(page(80));
+    const loads: Promise<void>[] = [];
+    const remove = sessionHistoryDemand.addSessionHistoryPageDemandListener((demand) => {
+      loads.push(loadBoundedSessionHistoryWindow({ context, demand }));
+    });
+    try {
+      const abort = new AbortController();
+      const oldResult = sessionHistoryDemand.requestSessionHistoryAroundPage(
+        current.id, 20, { signal: abort.signal },
+      );
+      abort.abort();
+      const newResult = sessionHistoryDemand.requestSessionHistoryAroundPage(current.id, 80);
+      await loads[1];
+      first.resolve(page(20));
+      await loads[0];
+      await expect(oldResult).resolves.toBe(false);
+      await expect(newResult).resolves.toBe(true);
+      expect(context.publishSession).toHaveBeenCalledOnce();
+      expect(current.messages[0]?.id).toBe("message-80");
+    } finally {
+      remove();
+    }
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();

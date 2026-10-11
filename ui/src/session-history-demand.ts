@@ -78,11 +78,13 @@ export function requestSessionHistoryTailPage(
 export function requestSessionHistoryAroundPage(
   sessionId: string,
   position: number,
+  options?: { signal?: AbortSignal },
 ) {
   return requestCompletableSessionHistoryPage(
     sessionId,
     "around",
     Math.max(0, Math.floor(position)),
+    options,
   );
 }
 

@@ -22,6 +22,7 @@ import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   clearMessageStackVirtualizerPositionCorrection,
   markMessageStackVirtualizerPositionCorrection,
+  notifyMessageStackNavigationStart,
   requestMessageStackBottomRepin,
   writeMessageStackScrollTopImmediately,
 } from "../message-stack-scroll-sync";
@@ -1023,6 +1024,7 @@ export function VirtualizedConversationMessageList({
     userScrollGenerationRef.current += 1;
     const node = scrollContainerRef.current;
     if (node) {
+      notifyMessageStackNavigationStart(node);
       clearMessageStackVirtualizerPositionCorrection(node);
     }
   }, [scrollContainerRef]);

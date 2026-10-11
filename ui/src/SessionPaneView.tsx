@@ -636,6 +636,8 @@ export function SessionPaneView({
     paneMessageContentSignaturesRef.current[pane.id] ??
     (paneMessageContentSignaturesRef.current[pane.id] = {});
   const {
+    beginOverviewNavigation,
+    beginSearchNavigation,
     captureDetachedMessageStackPosition,
     handleConversationSearchItemMount,
     handleMessageStackFocusCapture,
@@ -816,6 +818,7 @@ export function SessionPaneView({
       return;
     }
 
+    beginSearchNavigation();
     setIsSessionFindOpen(true);
     focusSessionFindInput(selectAll);
   }
@@ -831,6 +834,7 @@ export function SessionPaneView({
       return;
     }
 
+    beginSearchNavigation();
     setSessionFindActiveIndex((current) => {
       const safeCurrent =
         current >= 0 && current < sessionSearchMatches.length ? current : 0;
@@ -1390,7 +1394,10 @@ export function SessionPaneView({
               activeIndex={activeSessionSearchMatchIndex}
               matches={sessionSearchMatches}
               isPartial={isSessionSearchPartial}
-              onChange={(nextValue) => setSessionFindQuery(nextValue)}
+              onChange={(nextValue) => {
+                beginSearchNavigation();
+                setSessionFindQuery(nextValue);
+              }}
               onNext={() => stepSessionFind(1)}
               onPrevious={() => stepSessionFind(-1)}
               onClose={() => {
@@ -1912,6 +1919,7 @@ export function SessionPaneView({
             paneId={pane.id}
             viewMode={pane.viewMode}
             liveTailPinned={liveTailPinned}
+            onOverviewNavigateStart={beginOverviewNavigation}
             scrollStateKey={scrollStateKey}
             scrollContainerRef={messageStackRef}
             virtualizerHandleRef={virtualizerHandleRef}

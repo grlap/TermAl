@@ -614,6 +614,7 @@ export function fetchSessionHistory(
     start?: number;
     from?: "start";
     limit: number;
+    signal?: AbortSignal;
   },
 ) {
   const query = new URLSearchParams({
@@ -636,6 +637,7 @@ export function fetchSessionHistory(
   }
   return requestJsonFirst<SessionHistoryResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/history?${query.toString()}`,
+    options.signal ? { signal: options.signal } : undefined,
   );
 }
 

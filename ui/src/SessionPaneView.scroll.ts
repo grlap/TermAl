@@ -54,6 +54,7 @@ import {
   markMessageStackWheelEventSuppressed,
   messageStackNativeScrollOwnershipMovesTowardBottom,
   notifyMessageStackScrollWrite,
+  notifyMessageStackNavigationStart,
   notifyMessageStackUserScrollIntent,
   observeMessageStackPointerOwnershipRelease,
   nativeScrollPreservesFollowAuthority,
@@ -486,6 +487,7 @@ export function useSessionPaneScrollState({
     messageStackNavigationGenerationRef.current += 1;
     const node = messageStackRef.current;
     if (node) {
+      notifyMessageStackNavigationStart(node);
       clearMessageStackVirtualizerPositionCorrection(node);
     }
     pendingStartHistoryDemandRef.current = null;
@@ -2212,6 +2214,19 @@ export function useSessionPaneScrollState({
     }
   }
 
+  function beginOverviewNavigation() {
+    beginMessageStackManualNavigation();
+    clearPendingKeyboardWheelGuard();
+    takeMessageStackUserScrollAuthority(messageStackRef.current, "up");
+  }
+
+  function beginSearchNavigation() {
+    // Only Find input owns navigation. The derived active match can also
+    // change when a minimap seek publishes a different history window.
+    beginMessageStackManualNavigation();
+    virtualizerHandleRef.current?.beginUserScrollNavigation();
+  }
+
   function takeMessageStackKeyboardPublicationAuthority(
     node: HTMLElement,
     publication: {
@@ -3478,6 +3493,8 @@ export function useSessionPaneScrollState({
   });
 
   return {
+    beginOverviewNavigation,
+    beginSearchNavigation,
     captureDetachedMessageStackPosition,
     handleConversationSearchItemMount,
     handleMessageStackFocusCapture,

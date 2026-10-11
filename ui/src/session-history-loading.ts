@@ -225,6 +225,7 @@ export async function loadBoundedSessionHistoryWindow({
     const historyPage = await fetchSessionHistory(sessionId, {
       ...historyRequest,
       limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
+      ...(demand.signal ? { signal: demand.signal } : {}),
     });
     if (!context.isMounted() || demand.signal?.aborted) {
       // Do not schedule recovery work owned by a hook that has already gone

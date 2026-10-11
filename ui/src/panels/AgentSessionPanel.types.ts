@@ -98,6 +98,7 @@ export type AgentSessionPanelProps = {
   viewMode: PaneViewMode;
   activeSessionId: string | null;
   liveTailPinned?: boolean;
+  onOverviewNavigateStart?: () => void;
   scrollStateKey?: string;
   isLoading: boolean;
   isUpdating: boolean;
@@ -159,6 +160,7 @@ export type SessionBodyProps = {
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   activeSessionId: string | null;
   liveTailPinned: boolean;
+  onOverviewNavigateStart?: () => void;
   scrollStateKey: string;
   isLoading: boolean;
   isUpdating: boolean;
@@ -302,6 +304,7 @@ export type SessionConversationPageProps = {
   renderMessageCard: RenderMessageCard;
   session: Session;
   liveTailPinned: boolean;
+  onOverviewNavigateStart?: () => void;
   scrollStateKey: string;
   scrollContainerRef: RefObject<HTMLElement | null>;
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;

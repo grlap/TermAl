@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
@@ -45,14 +46,38 @@ export function ConversationOverviewRail({
   topPx?: number | null;
   portalTarget: HTMLElement | null;
   minMessages?: number;
-  onNavigate: (position: number) => void;
+  onNavigate: (position: number) => void | Promise<boolean>;
 }) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
+  const [dragFraction, setDragFraction] = useState<number | null>(null);
   const pendingPositionRef = useRef<number | null>(null);
   const navigationFrameRef = useRef<number | null>(null);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const requestedNavigationRef = useRef<{
+    position: number;
+    pending: boolean;
+  } | null>(null);
+
+  const requestNavigation = useCallback((position: number) => {
+    const current = requestedNavigationRef.current;
+    if (current?.position === position && current.pending) return;
+    const request = { position, pending: true };
+    requestedNavigationRef.current = request;
+    const complete = () => {
+      request.pending = false;
+      if (requestedNavigationRef.current === request && dragPointerIdRef.current === null) {
+        setDragFraction(null);
+      }
+    };
+    const result = onNavigateRef.current(position);
+    if (result) {
+      void result.then(complete, complete);
+    } else {
+      complete();
+    }
+  }, []);
 
   const buckets = useMemo(
     () => (overview ? projectConversationOverviewBuckets(overview) : []),
@@ -82,7 +107,9 @@ export function ConversationOverviewRail({
       )
     : 0;
   const viewportCenterPercent =
-    viewportProjection.topPercent + viewportProjection.heightPercent / 2;
+    dragFraction === null
+      ? viewportProjection.topPercent + viewportProjection.heightPercent / 2
+      : dragFraction * 100;
 
   const cancelScheduledNavigation = useCallback(() => {
     if (navigationFrameRef.current !== null) {
@@ -92,16 +119,19 @@ export function ConversationOverviewRail({
     pendingPositionRef.current = null;
   }, []);
 
-  useEffect(() => cancelScheduledNavigation, [cancelScheduledNavigation]);
+  useEffect(() => () => {
+    cancelScheduledNavigation();
+    requestedNavigationRef.current = null;
+  }, [cancelScheduledNavigation]);
 
   const flushScheduledNavigation = useCallback(() => {
     navigationFrameRef.current = null;
     const position = pendingPositionRef.current;
     pendingPositionRef.current = null;
     if (position !== null) {
-      onNavigateRef.current(position);
+      requestNavigation(position);
     }
-  }, []);
+  }, [requestNavigation]);
 
   const scheduleNavigation = useCallback(
     (position: number) => {
@@ -114,7 +144,7 @@ export function ConversationOverviewRail({
     [flushScheduledNavigation],
   );
 
-  const positionFromClientY = useCallback(
+  const fractionFromClientY = useCallback(
     (clientY: number) => {
       if (boundedMessageCount <= 0 || !railRef.current) {
         return null;
@@ -123,7 +153,15 @@ export function ConversationOverviewRail({
       if (bounds.height <= 0) {
         return null;
       }
-      const fraction = (clientY - bounds.top) / bounds.height;
+      return Math.min(1, Math.max(0, (clientY - bounds.top) / bounds.height));
+    },
+    [boundedMessageCount],
+  );
+
+  const positionFromClientY = useCallback(
+    (clientY: number) => {
+      const fraction = fractionFromClientY(clientY);
+      if (fraction === null) return null;
       return overview
         ? conversationOverviewPositionAtFraction(overview, fraction)
         : Math.min(
@@ -131,7 +169,7 @@ export function ConversationOverviewRail({
             Math.max(0, Math.floor(fraction * boundedMessageCount)),
           );
     },
-    [boundedMessageCount, latestPosition, overview],
+    [boundedMessageCount, fractionFromClientY, latestPosition, overview],
   );
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -142,8 +180,9 @@ export function ConversationOverviewRail({
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const position = positionFromClientY(event.clientY);
     if (position !== null) {
+      setDragFraction(fractionFromClientY(event.clientY));
       cancelScheduledNavigation();
-      onNavigateRef.current(position);
+      requestNavigation(position);
     }
     event.preventDefault();
   };
@@ -154,6 +193,7 @@ export function ConversationOverviewRail({
     }
     const position = positionFromClientY(event.clientY);
     if (position !== null) {
+      setDragFraction(fractionFromClientY(event.clientY));
       scheduleNavigation(position);
     }
     event.preventDefault();
@@ -166,11 +206,18 @@ export function ConversationOverviewRail({
     dragPointerIdRef.current = null;
     if (event.type === "pointercancel") {
       cancelScheduledNavigation();
+      setDragFraction(null);
     } else {
       const position = positionFromClientY(event.clientY);
       cancelScheduledNavigation();
       if (position !== null) {
-        onNavigateRef.current(position);
+        setDragFraction(fractionFromClientY(event.clientY));
+        const requested = requestedNavigationRef.current;
+        if (requested?.position !== position) {
+          requestNavigation(position);
+        } else if (!requested.pending) {
+          setDragFraction(null);
+        }
       }
     }
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
@@ -234,11 +281,11 @@ export function ConversationOverviewRail({
     }
     event.preventDefault();
     if (boundaryPosition !== null) {
-      onNavigateRef.current(boundaryPosition);
+      requestNavigation(boundaryPosition);
       return;
     }
     if (!overview || bucketCount === 0) {
-      onNavigateRef.current(
+      requestNavigation(
         Math.min(latestPosition, Math.max(0, pendingPosition)),
       );
       return;
@@ -251,7 +298,7 @@ export function ConversationOverviewRail({
       (clampedBucketIndex * overview.messageCount) /
         overview.buckets.length,
     );
-    onNavigateRef.current(position);
+    requestNavigation(position);
   };
 
   if (boundedMessageCount < minMessages) {
@@ -291,6 +338,10 @@ export function ConversationOverviewRail({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishPointerDrag}
+      // React portal touch events still bubble to the transcript owner.
+      // This gesture belongs to the rail's pointer navigation instead.
+      onTouchStart={(event) => event.stopPropagation()}
+      onTouchMove={(event) => event.stopPropagation()}
       role="slider"
       style={{
         position: "absolute",

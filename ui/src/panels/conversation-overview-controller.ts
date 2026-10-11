@@ -21,6 +21,8 @@ import {
   type SessionOverviewResponse,
 } from "../api";
 import {
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+  MESSAGE_STACK_NAVIGATION_START_EVENT,
   notifyMessageStackScrollWrite,
   writeMessageStackScrollTopImmediately,
 } from "../message-stack-scroll-sync";
@@ -103,6 +105,7 @@ export function useConversationOverviewController({
   sessionId,
   sessionMutationStamp,
   tailFollowIntent,
+  onNavigateStart,
   virtualizerHandleRef: suppliedVirtualizerHandleRef,
 }: {
   isActive: boolean;
@@ -114,6 +117,7 @@ export function useConversationOverviewController({
   sessionId: string;
   sessionMutationStamp: number;
   tailFollowIntent: boolean;
+  onNavigateStart?: () => void;
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
 }) {
   const isOverviewEligible =
@@ -123,6 +127,8 @@ export function useConversationOverviewController({
   const virtualizerHandleRef =
     suppliedVirtualizerHandleRef ?? internalVirtualizerHandleRef;
   const navigationFrameIdsRef = useRef<Set<number>>(new Set());
+  const navigationAbortRef = useRef<AbortController | null>(null);
+  const navigationRetryRef = useRef<(() => void) | null>(null);
   const overviewRequestSessionIdRef = useRef<string | null>(null);
   const overviewRefreshBurstStartedAtRef = useRef<number | null>(null);
   const overviewRefreshTimerRef = useRef<number | null>(null);
@@ -132,6 +138,7 @@ export function useConversationOverviewController({
   const scrollStateKeyRef = useCommittedRef(scrollStateKey);
   const sessionIdRef = useCommittedRef(sessionId);
   const tailFollowIntentRef = useCommittedRef(tailFollowIntent);
+  const messageCountRef = useCommittedRef(messageCount);
   const messageStartIndexRef = useCommittedRef(messageStartIndex);
   const renderedMessageCountRef = useCommittedRef(renderedMessageCount);
   const [overview, setOverview] = useState<SessionOverviewResponse | null>(null);
@@ -209,10 +216,13 @@ export function useConversationOverviewController({
 
   const refreshViewport = useCallback(() => {
     const scrollNode = scrollContainerRef.current;
+    // A navigation started in another resident window can finish after this
+    // render. Its completion must publish the committed window, not the one
+    // captured when the history request began.
     const nextViewport = conversationOverviewViewportFromResidentWindow({
-      messageCount,
-      messageStartIndex,
-      renderedMessageCount,
+      messageCount: messageCountRef.current,
+      messageStartIndex: messageStartIndexRef.current,
+      renderedMessageCount: renderedMessageCountRef.current,
       scrollNode,
     });
     setViewport((current) =>
@@ -386,16 +396,37 @@ export function useConversationOverviewController({
   }, [hasReadyOverview, scrollContainerRef, scrollStateKey, sessionId]);
 
   const cancelNavigationFrames = useCallback(() => {
+    navigationAbortRef.current?.abort();
+    navigationAbortRef.current = null;
     for (const frameId of navigationFrameIdsRef.current) {
       window.cancelAnimationFrame(frameId);
     }
     navigationFrameIdsRef.current.clear();
   }, []);
 
-  useEffect(() => cancelNavigationFrames, [
+  useLayoutEffect(() => cancelNavigationFrames, [
     cancelNavigationFrames,
+    isActive,
+    scrollStateKey,
     sessionId,
   ]);
+
+  useEffect(() => {
+    const node = scrollContainerRef.current;
+    if (!isActive || !node) return;
+    // Ordinary reading supersedes an unfinished map seek too. Abort before a
+    // history response can publish a window selected by the abandoned drag.
+    node.addEventListener("wheel", cancelNavigationFrames, { passive: true });
+    node.addEventListener("touchstart", cancelNavigationFrames, { passive: true });
+    node.addEventListener(MESSAGE_STACK_USER_SCROLL_INTENT_EVENT, cancelNavigationFrames);
+    node.addEventListener(MESSAGE_STACK_NAVIGATION_START_EVENT, cancelNavigationFrames);
+    return () => {
+      node.removeEventListener("wheel", cancelNavigationFrames);
+      node.removeEventListener("touchstart", cancelNavigationFrames);
+      node.removeEventListener(MESSAGE_STACK_USER_SCROLL_INTENT_EVENT, cancelNavigationFrames);
+      node.removeEventListener(MESSAGE_STACK_NAVIGATION_START_EVENT, cancelNavigationFrames);
+    };
+  }, [cancelNavigationFrames, isActive, scrollContainerRef, sessionId]);
 
   const scheduleNavigationFrame = useCallback((callback: () => void) => {
     const expectedSessionId = sessionIdRef.current;
@@ -425,48 +456,110 @@ export function useConversationOverviewController({
       virtualizerHandleRef.current?.jumpToMessageIndex(localIndex, {
         align: "center",
         flush: true,
+        preserveDetachedAuthority: true,
       }) ?? false
     );
   }, []);
 
   const navigate = useCallback(
-    (position: number) => {
+    (position: number): Promise<boolean> => {
+      if (!isActive) return Promise.resolve(false);
+      cancelNavigationFrames();
+      // Transfer pane ownership before any history adoption or virtualizer
+      // flush can replay a saved position or a pending follow-latest write.
+      onNavigateStart?.();
+      const expectedSessionId = sessionIdRef.current;
+      const handle = virtualizerHandleRef.current;
+      const userScrollGeneration = handle?.beginUserScrollNavigation?.();
+      // Both ownership boundaries above revoke the preceding seek. Register
+      // this seek only afterwards so it does not cancel its own admission.
+      const abort = new AbortController();
+      navigationAbortRef.current = abort;
+      const isCurrent = () =>
+        !abort.signal.aborted &&
+        sessionIdRef.current === expectedSessionId &&
+        (userScrollGeneration === undefined ||
+          virtualizerHandleRef.current?.getUserScrollGeneration() === userScrollGeneration);
       const boundedPosition = Math.min(
         Math.max(0, Math.floor(position)),
         Math.max(0, messageCount - 1),
       );
-      if (jumpToResidentPosition(boundedPosition)) {
-        scheduleNavigationFrame(refreshViewport);
-        return;
-      }
-      const expectedSessionId = sessionIdRef.current;
-      void requestSessionHistoryAroundPage(
-        expectedSessionId,
-        boundedPosition,
-      ).then((applied) => {
-        if (!applied || sessionIdRef.current !== expectedSessionId) {
-          return;
-        }
-        const retryJump = () => {
-          if (jumpToResidentPosition(boundedPosition)) {
-            refreshViewport();
+      return new Promise<boolean>((resolve) => {
+        let phase: "waiting" | "positioning" | "done" = "waiting";
+        let waitingForHistory = false;
+        let unsubscribe: (() => void) | undefined;
+        const finish = (applied: boolean) => {
+          if (phase === "done") return;
+          phase = "done";
+          unsubscribe?.();
+          abort.signal.removeEventListener("abort", cancel);
+          if (navigationRetryRef.current === retryAfterCommit) {
+            navigationRetryRef.current = null;
+          }
+          resolve(applied);
+        };
+        const cancel = () => finish(false);
+        const attemptJump = () => {
+          if (phase !== "waiting" || waitingForHistory) return;
+          if (!isCurrent()) { finish(false); return; }
+          // A synchronous mount can publish another committed-layout callback.
+          // Keep it from starting a second seek while this one is measuring.
+          phase = "positioning";
+          if (!jumpToResidentPosition(boundedPosition)) {
+            phase = "waiting";
             return;
           }
           scheduleNavigationFrame(() => {
-            jumpToResidentPosition(boundedPosition);
+            if (!isCurrent()) { finish(false); return; }
+            // Resolve the same target against its newly mounted DOM before
+            // releasing the rail's requested-position indicator.
+            if (!jumpToResidentPosition(boundedPosition)) {
+              phase = "waiting";
+              return;
+            }
             refreshViewport();
+            finish(true);
           });
         };
-        scheduleNavigationFrame(retryJump);
+        const retryAfterCommit = () => {
+          if (phase === "waiting" && !waitingForHistory) {
+            scheduleNavigationFrame(attemptJump);
+          }
+        };
+        navigationRetryRef.current = retryAfterCommit;
+        abort.signal.addEventListener("abort", cancel, { once: true });
+        unsubscribe = handle?.subscribeToCommittedLayout?.(retryAfterCommit);
+        attemptJump();
+        if (phase !== "waiting") return;
+        waitingForHistory = true;
+        void requestSessionHistoryAroundPage(
+          expectedSessionId,
+          boundedPosition,
+          { signal: abort.signal },
+        ).then((applied) => {
+          waitingForHistory = false;
+          if (!applied || !isCurrent()) { finish(false); return; }
+          // History adoption can precede React's deferred transcript commit by
+          // more than two frames. Wait for that commit instead of giving up or
+          // restoring an indicator derived from the outgoing window.
+          retryAfterCommit();
+        }, () => finish(false));
       });
     },
     [
+      cancelNavigationFrames,
+      isActive,
       jumpToResidentPosition,
       messageCount,
+      onNavigateStart,
       refreshViewport,
       scheduleNavigationFrame,
     ],
   );
+
+  useLayoutEffect(() => {
+    navigationRetryRef.current?.();
+  }, [messageStartIndex, renderedMessageCount, sessionId]);
 
   return {
     isRailReady: hasReadyOverview,

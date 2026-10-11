@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionOverviewResponse } from "../api";
 import { MESSAGE_STACK_SCROLL_WRITE_EVENT } from "../message-stack-scroll-sync";
@@ -61,6 +61,7 @@ function controllerProps(
 }
 
 describe("useConversationOverviewController", () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     fetchSessionOverview.mockReset();
     requestSessionHistoryAroundPage.mockReset();
@@ -636,11 +637,12 @@ describe("useConversationOverviewController", () => {
       jumpToMessageIndex,
     } as unknown as VirtualizedConversationMessageListHandle;
 
-    act(() => result.current.navigate(80));
+    act(() => { void result.current.navigate(80); });
 
     expect(jumpToMessageIndex).toHaveBeenCalledWith(10, {
       align: "center",
       flush: true,
+      preserveDetachedAuthority: true,
     });
     expect(requestSessionHistoryAroundPage).not.toHaveBeenCalled();
   });
@@ -654,11 +656,155 @@ describe("useConversationOverviewController", () => {
       jumpToMessageIndex: vi.fn(() => false),
     } as unknown as VirtualizedConversationMessageListHandle;
 
-    act(() => result.current.navigate(20));
+    act(() => { void result.current.navigate(20); });
 
     expect(requestSessionHistoryAroundPage).toHaveBeenCalledWith(
       "session-overview",
       20,
+      { signal: expect.any(AbortSignal) },
     );
+  });
+
+  it("cancels an older history target even when the next target is already resident", async () => {
+    requestSessionHistoryAroundPage.mockReturnValue(new Promise(() => {}));
+    const { result } = renderHook(() => useConversationOverviewController(controllerProps()));
+    await waitFor(() => expect(result.current.overview).not.toBeNull());
+    result.current.virtualizerHandleRef.current = {
+      jumpToMessageIndex: vi.fn(() => true),
+    } as unknown as VirtualizedConversationMessageListHandle;
+    act(() => { void result.current.navigate(20); });
+    const signal = requestSessionHistoryAroundPage.mock.calls[0]?.[2]?.signal;
+    act(() => { void result.current.navigate(80); });
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal.aborted).toBe(true);
+    expect(requestSessionHistoryAroundPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes pane navigation ownership before requesting an unloaded target", async () => {
+    const onNavigateStart = vi.fn();
+    requestSessionHistoryAroundPage.mockImplementation(() => {
+      expect(onNavigateStart).toHaveBeenCalledOnce();
+      return Promise.resolve(false);
+    });
+    const { result } = renderHook(() => useConversationOverviewController(
+      controllerProps({ onNavigateStart }),
+    ));
+    await waitFor(() => expect(result.current.overview).not.toBeNull());
+    act(() => { void result.current.navigate(20); });
+    expect(requestSessionHistoryAroundPage).toHaveBeenCalledOnce();
+  });
+
+  it("does not apply a measured correction after newer user navigation", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    let generation = 0;
+    const jump = vi.fn(() => true);
+    const { result } = renderHook(() => useConversationOverviewController(controllerProps()));
+    await waitFor(() => expect(result.current.overview).not.toBeNull());
+    result.current.virtualizerHandleRef.current = {
+      beginUserScrollNavigation: () => ++generation,
+      getUserScrollGeneration: () => generation,
+      jumpToMessageIndex: jump,
+    } as unknown as VirtualizedConversationMessageListHandle;
+    act(() => { void result.current.navigate(80); });
+    expect(jump).toHaveBeenCalledOnce();
+    generation += 1;
+    act(() => frames.forEach((callback) => callback(0)));
+    expect(jump).toHaveBeenCalledOnce();
+  });
+
+  it("does not replay a queued correction after a newer drag target", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+    await waitFor(() => expect(result.current.overview).not.toBeNull());
+    const jump = vi.fn(() => true);
+    result.current.virtualizerHandleRef.current = {
+      jumpToMessageIndex: jump,
+    } as unknown as VirtualizedConversationMessageListHandle;
+    requestSessionHistoryAroundPage.mockResolvedValue(true);
+    act(() => { void result.current.navigate(20); });
+    await act(async () => Promise.resolve());
+    rerender(controllerProps({ messageStartIndex: 0, renderedMessageCount: 100 }));
+    const staleFrames = [...frames.values()];
+    act(() => { void result.current.navigate(80); });
+    jump.mockClear();
+    act(() => staleFrames.forEach((callback) => callback(0)));
+    expect(jump).not.toHaveBeenCalled();
+  });
+
+  it("aborts outstanding navigation when its pane deactivates", async () => {
+    requestSessionHistoryAroundPage.mockReturnValue(new Promise(() => {}));
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+    await waitFor(() => expect(result.current.overview).not.toBeNull());
+    act(() => { void result.current.navigate(20); });
+    const signal = requestSessionHistoryAroundPage.mock.calls[0]?.[2]?.signal;
+    rerender(controllerProps({ isActive: false }));
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("settles navigation only after a delayed transcript commit and measured correction", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    const paint = () => act(() => {
+      const pending = frames.splice(0);
+      pending.forEach((callback) => callback(0));
+    });
+    let committed = false;
+    let publishCommit: (() => void) | undefined;
+    const unsubscribe = vi.fn();
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+    await waitFor(() => expect(result.current.overview).not.toBeNull());
+    const jump = vi.fn(() => committed);
+    result.current.virtualizerHandleRef.current = {
+      jumpToMessageIndex: jump,
+      subscribeToCommittedLayout: (listener: () => void) => {
+        publishCommit = listener;
+        return unsubscribe;
+      },
+    } as unknown as VirtualizedConversationMessageListHandle;
+    requestSessionHistoryAroundPage.mockResolvedValue(true);
+    let completion!: Promise<boolean>;
+    act(() => { completion = result.current.navigate(20); });
+    const settled = vi.fn();
+    void completion.then(settled);
+    await act(async () => Promise.resolve());
+    rerender(controllerProps({ messageStartIndex: 0 }));
+    paint(); paint(); paint();
+    expect(settled).not.toHaveBeenCalled();
+    committed = true;
+    expect(result.current.viewport).toEqual({ startPosition: 0, endPosition: 30 });
+    act(() => publishCommit?.());
+    paint();
+    expect(settled).not.toHaveBeenCalled();
+    await act(async () => { paint(); await completion; });
+    expect(settled).toHaveBeenCalledWith(true);
+    // Completion belongs to the newly committed window too. Publishing the
+    // outgoing window here makes the released rail snap back until a scroll.
+    expect(result.current.viewport).toEqual({ startPosition: 0, endPosition: 30 });
+    expect(jump).toHaveBeenLastCalledWith(20, expect.objectContaining({ align: "center" }));
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 });

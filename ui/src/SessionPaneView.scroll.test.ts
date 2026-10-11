@@ -60,6 +60,41 @@ afterEach(() => {
 });
 
 describe("seen transcript tail without follow intent", () => {
+  it("releases follow before a minimap seek loads history and ignores subsequent live growth", () => {
+    const frames = installAnimationFrameHarness(1_000 / 60);
+    const node = document.createElement("section");
+    let height = 1_000;
+    Object.defineProperties(node, {
+      clientHeight: { value: 200 },
+      scrollHeight: { get: () => height },
+      scrollTop: { writable: true, value: 800 },
+      scrollTo: { value: (options: ScrollToOptions) => { node.scrollTop = options.top ?? 0; } },
+    });
+    const base = {
+      ...params(session(false)),
+      isSessionTabActive: true,
+      defaultScrollToBottom: true,
+    };
+    const hook = renderHook(({ revision }) => {
+      const state = useSessionPaneScrollState({
+        ...base,
+        visibleContentSignature: `content-${revision}`,
+        visibleMessageContentSignature: `message-${revision}`,
+      });
+      state.messageStackRef.current = node;
+      return state;
+    }, { initialProps: { revision: 0 } });
+    expect(hook.result.current.liveTailPinned).toBe(true);
+    act(() => hook.result.current.beginOverviewNavigation());
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    node.scrollTop = 300;
+    height = 1_400;
+    hook.rerender({ revision: 1 });
+    frames.drainAnimationFrames();
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(node.scrollTop).toBe(300);
+  });
+
   function renderDetachedTail(hasNewerHistory = false) {
     const frames = installAnimationFrameHarness(1_000 / 60);
     const node = document.createElement("section");

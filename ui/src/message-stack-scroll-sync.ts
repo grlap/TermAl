@@ -15,6 +15,14 @@ export const MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT =
   "termal:message-stack-bottom-repin-request";
 export const MESSAGE_STACK_USER_SCROLL_INTENT_EVENT =
   "termal:message-stack-user-scroll-intent";
+export const MESSAGE_STACK_NAVIGATION_START_EVENT =
+  "termal:message-stack-navigation-start";
+
+// Revoke asynchronous seeks before a new owner admits history or writes scroll.
+// This is authority invalidation, not a geometry change or a FOLLOW decision.
+export function notifyMessageStackNavigationStart(node: HTMLElement) {
+  node.dispatchEvent(new Event(MESSAGE_STACK_NAVIGATION_START_EVENT));
+}
 
 export const MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS = 1200;
 export const MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS =

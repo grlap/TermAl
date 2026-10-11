@@ -6,11 +6,14 @@ import { SessionPaneView } from "./SessionPaneView";
 import type { Session } from "./types";
 import type { WorkspacePane } from "./workspace-types";
 
+const { beginSearchNavigation } = vi.hoisted(() => ({ beginSearchNavigation: vi.fn() }));
+
 vi.mock("./SessionPaneView.scroll", async () => {
   const React = await import("react");
 
   return {
     useSessionPaneScrollState: () => ({
+      beginSearchNavigation,
       handleConversationSearchItemMount: vi.fn(),
       handleMessageStackScroll: vi.fn(),
       handleMessageStackTouchStart: vi.fn(),
@@ -198,6 +201,7 @@ describe("SessionPaneView find navigation", () => {
     const findButton = rendered!.getByRole("button", { name: "Find in session" });
     expect(findButton.closest(".pane-view-strip")).toBeNull();
     fireEvent.click(findButton);
+    expect(beginSearchNavigation).toHaveBeenCalledTimes(1);
     expect(findButton).toHaveAttribute("aria-expanded", "true");
     await waitFor(() => expect(rendered!.getByPlaceholderText("Find in session")).toHaveFocus());
     fireEvent.click(rendered!.getByRole("button", { name: "Close" }));
@@ -209,23 +213,33 @@ describe("SessionPaneView find navigation", () => {
     expect(overlay.closest(".pane-view-strip")).toBeNull();
     expect(overlay.closest(".message-stack")).toBeNull();
     const input = rendered!.getByPlaceholderText("Find in session");
+    beginSearchNavigation.mockClear();
     await act(async () => {
       fireEvent.change(input, { target: { value: "alpha" } });
       await Promise.resolve();
     });
     expect(rendered!.getByText("1 of 2")).toBeInTheDocument();
+    expect(beginSearchNavigation).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       fireEvent.click(rendered!.getByRole("button", { name: "Next" }));
       await Promise.resolve();
     });
     expect(rendered!.getByText("2 of 2")).toBeInTheDocument();
+    expect(beginSearchNavigation).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
       await Promise.resolve();
     });
     expect(rendered!.getByText("1 of 2")).toBeInTheDocument();
+    expect(beginSearchNavigation).toHaveBeenCalledTimes(3);
+
+    beginSearchNavigation.mockClear();
+    const adopted = makeSession({ messages: [{ ...session.messages[0], id: "history-match" }] });
+    rendered!.rerender(<SessionPaneView {...props} sessionLookup={new Map([[adopted.id, adopted]])} />);
+    expect(rendered!.getByText("1 of 1")).toBeInTheDocument();
+    expect(beginSearchNavigation).not.toHaveBeenCalled();
 
     fireEvent.keyDown(rendered!.getByRole("button", { name: "Next" }), { key: "Escape" });
     expect(rendered!.queryByRole("search", { name: "Find in session" })).not.toBeInTheDocument();

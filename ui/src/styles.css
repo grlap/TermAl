@@ -4969,6 +4969,8 @@ textarea {
 }
 
 .conversation-overview-rail {
+  touch-action: none;
+  user-select: none;
   --conversation-overview-rail-width: 2.35rem;
   --conversation-overview-lane-left: 0.45rem;
   --conversation-overview-lane-width: calc(100% - 0.9rem);
