@@ -841,6 +841,10 @@ impl AppState {
                 .unwrap_or_else(|| push_message_on_record(record, message.clone()));
             global_message_index(record, local_index)
         });
+        record.file_change_tracking = Some(Arc::new(FileChangeTrackingLifetime::new(Some((
+            message_id.clone(),
+            message_index,
+        )))));
         if let Some(queued) = record
             .queued_prompts
             .front_mut()

@@ -845,6 +845,7 @@ include!("engram_begin_boot.rs");
 include!("engram_retry_schedule.rs");
 include!("messages.rs");
 include!("workspace_watch.rs");
+include!("file_event_attribution.rs");
 include!("codex_discovery.rs");
 include!("codex_validation.rs");
 include!("persisted_state.rs");

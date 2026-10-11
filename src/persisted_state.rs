@@ -615,6 +615,7 @@ impl PersistedSessionRecord {
             active_turn_generation: 0,
             active_turn_mailbox_notification: None,
             active_turn_start_message_count: None,
+            file_change_tracking: None,
             active_turn_file_changes: BTreeMap::new(),
             active_turn_file_change_grace_deadline: None,
             unmediated_claude_turn: None,

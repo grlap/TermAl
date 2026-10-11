@@ -484,6 +484,12 @@ fn path_contains(root_path: &str, candidate_path: &FsPath) -> bool {
 
 /// Normalizes path best effort.
 fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
+    #[cfg(test)]
+    PATH_NORMALIZATION_TEST_HOOK.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook(path);
+        }
+    });
     let resolved = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -493,4 +499,14 @@ fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
     };
     let canonical = fs::canonicalize(&resolved).unwrap_or(resolved);
     normalize_user_facing_path(&canonical)
+}
+
+// Thread-local so a blocked watcher fixture cannot intercept another test's I/O.
+#[cfg(test)]
+type PathNormalizationTestHook = Box<dyn Fn(&FsPath)>;
+
+#[cfg(test)]
+thread_local! {
+    static PATH_NORMALIZATION_TEST_HOOK: std::cell::RefCell<Option<PathNormalizationTestHook>> =
+        const { std::cell::RefCell::new(None) };
 }

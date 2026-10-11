@@ -64,6 +64,8 @@ const STATE_MUTEX_DIAGNOSTIC_QUEUE_CAPACITY: usize = 64;
 
 /// Aggregate timings only: no workspace paths or transcript content. Path
 /// checks are a subset of the inclusive scan, not another additive stage.
+/// path_check_* measures the held-lock decision on a frozen match result;
+/// off-lock canonicalization and containment I/O belong to preparation.
 #[derive(Clone, Debug, Default)]
 struct FileChangeTrackingDiagnostic {
     preparation: Duration,
@@ -1892,6 +1894,8 @@ struct SessionRecord {
     /// turn so it never requeues a successor's delivery.
     active_turn_mailbox_notification: Option<MailboxNotificationDelivery>,
     active_turn_start_message_count: Option<usize>,
+    /// Process-local, non-reused ownership of watcher captures; rollback never restores it.
+    file_change_tracking: Option<Arc<FileChangeTrackingLifetime>>,
     active_turn_file_changes: BTreeMap<String, WorkspaceFileChangeKind>,
     active_turn_file_change_grace_deadline: Option<std::time::Instant>,
     /// Process-local: a Claude segment no prompt owns is open
@@ -2144,6 +2148,7 @@ impl SessionRecord {
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
         self.active_turn_generation = snapshot.active_turn_generation;
+        self.file_change_tracking = None;
         self.session.preview = snapshot.preview;
         self.session.live_activity = snapshot.live_activity;
         self.active_turn_mailbox_notification = snapshot.active_turn_mailbox_notification;

@@ -42,6 +42,735 @@
 
 use super::*;
 
+struct BlockedFileChangeCapture {
+    release: Option<mpsc::Sender<()>>,
+    worker: Option<std::thread::JoinHandle<usize>>,
+}
+
+impl BlockedFileChangeCapture {
+    fn finish(mut self) -> usize {
+        self.release.take().unwrap().send(()).unwrap();
+        self.worker.take().unwrap().join().unwrap()
+    }
+}
+
+impl Drop for BlockedFileChangeCapture {
+    fn drop(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn block_file_change_capture(
+    state: &Arc<AppState>,
+    events: Vec<WorkspaceFileChangeEvent>,
+) -> BlockedFileChangeCapture {
+    let state = Arc::clone(state);
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let dropped = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&dropped);
+        FILE_CHANGE_DELETED_OWNER_TEST_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |count| {
+                counter.store(count, std::sync::atomic::Ordering::SeqCst);
+            }));
+        });
+        let first = std::cell::Cell::new(true);
+        PATH_NORMALIZATION_TEST_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |_| {
+                if first.replace(false) {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                }
+            }));
+        });
+        state.record_active_turn_file_changes(&events);
+        PATH_NORMALIZATION_TEST_HOOK.with(|hook| *hook.borrow_mut() = None);
+        FILE_CHANGE_DELETED_OWNER_TEST_HOOK.with(|hook| *hook.borrow_mut() = None);
+        dropped.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let blocked = BlockedFileChangeCapture {
+        release: Some(release_tx),
+        worker: Some(worker),
+    };
+    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    blocked
+}
+
+fn file_change_capture_fixture() -> (Arc<AppState>, String, String) {
+    let state = Arc::new(test_app_state());
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let owner = {
+        let mut inner = state.inner.lock().unwrap();
+        let created = inner.create_session(
+            Agent::Codex,
+            None,
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let record = inner.sessions.last_mut().unwrap();
+        record.active_turn_generation = 1;
+        record.active_turn_start_message_count = Some(record.session.messages.len());
+        record.file_change_tracking = Some(Arc::new(FileChangeTrackingLifetime::new(Some((
+            "original-prompt".to_owned(),
+            global_message_index(record, record.session.messages.len()),
+        )))));
+        push_session_markdown_note_on_record(
+            record,
+            "original-prompt".to_owned(),
+            "Original prompt",
+            "fixture".to_owned(),
+        );
+        record.engram.active_turn_source_root = Some(EngramTurnSourceRoot {
+            root: root.join("sibling-root").to_string_lossy().into_owned(),
+            common_dir_key: "original-store".to_owned(),
+            short_ref: "original-work".to_owned(),
+            claim_id: "original-claim".to_owned(),
+            generation: 1,
+            sealed_revision: None,
+        });
+        record.engram.active_grant_id = Some("private-grant".to_owned());
+        record.engram.routing_token = Some("private-routing-token".to_owned());
+        record.engram.active_turn_naming_identity = Some((
+            EngramAuthorityStoreKey {
+                database_path: root.join("store"),
+                project_id: "original-project".to_owned(),
+            },
+            "original-work".to_owned(),
+        ));
+        created.session.id
+    };
+    let path = root.join("deleted.rs").to_string_lossy().into_owned();
+    (state, owner, path)
+}
+
+fn file_change_capture_event(
+    owner: &str,
+    path: &str,
+    kind: WorkspaceFileChangeKind,
+) -> WorkspaceFileChangeEvent {
+    WorkspaceFileChangeEvent {
+        path: path.to_owned(),
+        kind,
+        root_path: None,
+        session_id: Some(owner.to_owned()),
+        mtime_ms: None,
+        size_bytes: None,
+    }
+}
+
+#[test]
+fn file_change_capture_retains_original_evidence_across_owner_changes() {
+    for change in [
+        "stop",
+        "successor",
+        "workdir",
+        "root-claim",
+        "root-store",
+        "root-seal",
+        "naming",
+        "routing",
+        "grant",
+        "intent",
+        "dispatch",
+        "runtime",
+        "missing-anchor",
+    ] {
+        let (state, owner, path) = file_change_capture_fixture();
+        let _runtime_receiver = if change == "runtime" {
+            let (handle, receiver) = test_codex_runtime_handle("original-runtime");
+            state.inner.lock().unwrap().sessions[0].runtime = SessionRuntime::Codex(handle);
+            Some(receiver)
+        } else {
+            None
+        };
+        let original_preview = state.inner.lock().unwrap().sessions[0]
+            .session
+            .preview
+            .clone();
+        let capture = block_file_change_capture(
+            &state,
+            vec![file_change_capture_event(
+                &owner,
+                &path,
+                WorkspaceFileChangeKind::Deleted,
+            )],
+        );
+        {
+            let mut inner = state
+                .inner
+                .try_lock_now()
+                .expect("capture must release state before I/O");
+            let record = &mut inner.sessions[0];
+            match change {
+                "stop" => {
+                    record.set_auto_dispatch_blocked(true);
+                    record.runtime_stop_generation += 1;
+                    finish_active_turn_file_change_tracking(record);
+                }
+                "successor" => {
+                    clear_active_turn_file_change_tracking(record);
+                    record.active_turn_generation += 1;
+                    record.active_turn_start_message_count = Some(record.session.messages.len());
+                    record.file_change_tracking =
+                        Some(Arc::new(FileChangeTrackingLifetime::new(Some((
+                            "successor-prompt".to_owned(),
+                            global_message_index(record, record.session.messages.len()),
+                        )))));
+                }
+                "workdir" => record.session.workdir.push_str("/successor"),
+                // All keep the root generation and path unchanged. Neither is
+                // enough to identify the captured naming authority.
+                "root-claim" => {
+                    record
+                        .engram
+                        .active_turn_source_root
+                        .as_mut()
+                        .unwrap()
+                        .claim_id = "replacement-claim".to_owned()
+                }
+                "root-store" => {
+                    record
+                        .engram
+                        .active_turn_source_root
+                        .as_mut()
+                        .unwrap()
+                        .common_dir_key = "replacement-store".to_owned()
+                }
+                "root-seal" => {
+                    record
+                        .engram
+                        .active_turn_source_root
+                        .as_mut()
+                        .unwrap()
+                        .sealed_revision = Some("sealed".to_owned())
+                }
+                "naming" => {
+                    record
+                        .engram
+                        .active_turn_naming_identity
+                        .as_mut()
+                        .unwrap()
+                        .0
+                        .project_id = "replacement-project".to_owned()
+                }
+                "routing" => record.engram.routing_token = Some("replacement-routing".to_owned()),
+                "grant" => record.engram.active_grant_id = Some("replacement-grant".to_owned()),
+                "intent" => {
+                    record.engram.active_turn_intent_fingerprint =
+                        Some("replacement-intent".to_owned())
+                }
+                "dispatch" => record.engram.dispatch_generation += 1,
+                "runtime" => {
+                    let (handle, _receiver) = test_codex_runtime_handle("replacement-runtime");
+                    record.runtime = SessionRuntime::Codex(handle);
+                }
+                "missing-anchor" => record
+                    .session
+                    .messages
+                    .retain(|message| message.id() != "original-prompt"),
+                _ => unreachable!(),
+            }
+        }
+        capture.finish();
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[0];
+        assert!(
+            record.active_turn_file_changes.is_empty(),
+            "{change} must not borrow a successor accumulator"
+        );
+        let notes = record
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Markdown {
+                    title, markdown, ..
+                } if title == "Unresolved file changes" => Some(markdown),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(notes.len(), 1, "{change}");
+        let evidence: serde_json::Value = serde_json::from_str(
+            notes[0]
+                .split("```json\n")
+                .nth(1)
+                .unwrap()
+                .split("\n```")
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(evidence["turnGeneration"], 1, "{change}");
+        assert!(evidence.get("promptId").is_none());
+        assert!(evidence.get("trackingIncarnation").is_none());
+        assert_eq!(record.session.preview, original_preview, "{change}");
+        assert_eq!(evidence["files"][&path], "deleted", "{change}");
+        assert!(!notes[0].contains("private-routing-token"));
+        assert!(!notes[0].contains("private-grant"));
+        assert!(!notes[0].contains("successor-prompt"));
+        assert!(
+            !record
+                .session
+                .messages
+                .iter()
+                .any(|message| matches!(message, Message::FileChanges { .. })),
+            "{change} must not fabricate a completed summary"
+        );
+    }
+}
+
+#[test]
+fn file_change_capture_preserves_deleted_junction_and_case_handling() {
+    let (state, owner, _) = file_change_capture_fixture();
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let target = root.join("workspace");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("Existing.rs"), "fixture").unwrap();
+    let link = root.join("junction");
+    super::engram_child_temp::link_directory(&link, &target);
+    let mut cases = vec![
+        (target.clone(), target.join("missing.rs"), true),
+        (target.clone(), link.join("Existing.rs"), true),
+        (link.clone(), target.join("Existing.rs"), true),
+        (target.clone(), root.join("outside.rs"), false),
+    ];
+    #[cfg(windows)]
+    cases.push((
+        target.clone(),
+        PathBuf::from(target.join("Existing.rs").to_string_lossy().to_uppercase()),
+        true,
+    ));
+    // A deleted alias cannot be canonicalized. Keep the existing lexical
+    // fallback, even though an ancestor-based resolver could infer the target.
+    cases.push((target.clone(), link.join("missing.rs"), false));
+    for (workdir, candidate, expected) in cases {
+        let workdir = workdir.to_string_lossy().into_owned();
+        assert_eq!(path_contains(&workdir, &candidate), expected);
+        let path = candidate.to_string_lossy().into_owned();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.sessions[0].session.workdir = workdir;
+            inner.sessions[0].active_turn_file_changes.clear();
+        }
+        state.record_active_turn_file_changes(&[file_change_capture_event(
+            &owner,
+            &path,
+            WorkspaceFileChangeKind::Modified,
+        )]);
+        assert_eq!(
+            state.inner.lock().unwrap().sessions[0]
+                .active_turn_file_changes
+                .contains_key(&path),
+            expected
+        );
+    }
+    #[cfg(windows)]
+    fs::remove_dir(link).expect("the junction should be removed");
+    #[cfg(unix)]
+    fs::remove_file(link).expect("the symbolic link should be removed");
+}
+
+#[test]
+fn file_change_capture_rollback_cannot_reuse_turn_generation() {
+    let (state, owner, path) = file_change_capture_fixture();
+    let snapshot = state.inner.lock().unwrap().sessions[0].capture_queue_promotion_snapshot();
+    let capture = block_file_change_capture(
+        &state,
+        vec![file_change_capture_event(
+            &owner,
+            &path,
+            WorkspaceFileChangeKind::Modified,
+        )],
+    );
+    {
+        let mut inner = state.inner.try_lock_now().unwrap();
+        let record = &mut inner.sessions[0];
+        let queued = QueuedPromptRecord {
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: false,
+            source: QueuedPromptSource::User,
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
+                attachments: Vec::new(),
+                id: "retry-prompt".to_owned(),
+                timestamp: stamp_now(),
+                text: "retry".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        };
+        record.restore_queue_promotion(snapshot, queued, "rolled-back-prompt");
+        assert_eq!(record.active_turn_generation, 1);
+        assert!(record.active_turn_start_message_count.is_some());
+        assert!(
+            record.file_change_tracking.is_none(),
+            "rollback invalidates even an identical generation/count"
+        );
+        record.file_change_tracking = Some(Arc::new(FileChangeTrackingLifetime::new(Some((
+            "original-prompt".to_owned(),
+            global_message_index(record, 0),
+        )))));
+    }
+    capture.finish();
+    let inner = state.inner.lock().unwrap();
+    assert!(inner.sessions[0].active_turn_file_changes.is_empty());
+    assert!(
+        matches!(inner.sessions[0].session.messages.last(), Some(Message::Markdown { title, .. }) if title == "Unresolved file changes")
+    );
+}
+
+#[test]
+fn file_change_capture_completion_and_expired_grace_keep_original_events_once() {
+    for capture_in_grace in [false, true] {
+        let (state, owner, path) = file_change_capture_fixture();
+        if capture_in_grace {
+            finish_active_turn_file_change_tracking(&mut state.inner.lock().unwrap().sessions[0]);
+        }
+        let mut duplicate =
+            file_change_capture_event(&owner, &path, WorkspaceFileChangeKind::Created);
+        duplicate.session_id = None;
+        let first = block_file_change_capture(
+            &state,
+            vec![
+                file_change_capture_event(&owner, &path, WorkspaceFileChangeKind::Created),
+                duplicate,
+            ],
+        );
+        let second_path = path.replace("deleted.rs", "other.rs");
+        let second = block_file_change_capture(
+            &state,
+            vec![
+                file_change_capture_event(&owner, &path, WorkspaceFileChangeKind::Deleted),
+                file_change_capture_event(&owner, &second_path, WorkspaceFileChangeKind::Modified),
+            ],
+        );
+        {
+            let mut inner = state.inner.try_lock_now().unwrap();
+            let record = &mut inner.sessions[0];
+            if !capture_in_grace {
+                finish_active_turn_file_change_tracking(record);
+            }
+            // Advance the deadline rather than sleep: both captures were
+            // already eligible. A new capture must be rejected now.
+            record.active_turn_file_change_grace_deadline =
+                Some(std::time::Instant::now() - Duration::from_secs(1));
+        }
+        state.record_active_turn_file_changes(&[file_change_capture_event(
+            &owner,
+            &path.replace("deleted.rs", "too-late.rs"),
+            WorkspaceFileChangeKind::Created,
+        )]);
+        second.finish();
+        first.finish();
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[0];
+        let summaries = record
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::FileChanges { files, .. } => Some(files),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summaries.len(),
+            1,
+            "concurrent pre-expiry captures share one publication"
+        );
+        assert_eq!(summaries[0].len(), 2);
+        assert_eq!(
+            summaries[0]
+                .iter()
+                .find(|entry| entry.path == path)
+                .unwrap()
+                .kind,
+            WorkspaceFileChangeKind::Modified
+        );
+        assert!(record.active_turn_file_changes.is_empty());
+        assert!(!record.session.messages.iter().any(|message| matches!(message, Message::Markdown { title, .. } if title == "Unresolved file changes")));
+    }
+}
+
+#[test]
+fn file_change_capture_tail_trim_preserves_late_summary() {
+    for capture_in_grace in [false, true] {
+        let (state, owner, path) = file_change_capture_fixture();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let record = &mut inner.sessions[0];
+            for index in 0..SESSION_IN_MEMORY_MESSAGE_LIMIT {
+                push_session_markdown_note_on_record(
+                    record,
+                    format!("turn-output-{index}"),
+                    "Turn output",
+                    "fixture".to_owned(),
+                );
+            }
+            if capture_in_grace {
+                finish_active_turn_file_change_tracking(record);
+            }
+        }
+        let first = block_file_change_capture(
+            &state,
+            vec![file_change_capture_event(
+                &owner,
+                &path,
+                WorkspaceFileChangeKind::Created,
+            )],
+        );
+        let second_path = path.replace("deleted.rs", "other.rs");
+        let second = block_file_change_capture(
+            &state,
+            vec![file_change_capture_event(
+                &owner,
+                &second_path,
+                WorkspaceFileChangeKind::Modified,
+            )],
+        );
+        {
+            let mut inner = state.inner.try_lock_now().unwrap();
+            if !capture_in_grace {
+                finish_active_turn_file_change_tracking(&mut inner.sessions[0]);
+            }
+            inner.sessions[0].session.status = SessionStatus::Idle;
+            // This fixture has no persist worker: the disconnected channel
+            // commits the complete transcript to SQLite synchronously.
+            let (_, dispatch) = state
+                .commit_locked_with_persist_dispatch(&mut inner)
+                .unwrap();
+            assert_eq!(dispatch, PersistDispatch::Synchronous);
+            let watermark = inner.last_mutation_stamp;
+            // Use the persist worker's real trimming path after completion,
+            // while both already-eligible captures are still resolving.
+            inner.trim_persisted_session_tails(watermark, std::slice::from_ref(&owner));
+            let record = &inner.sessions[0];
+            assert_eq!(
+                record.session.messages.len(),
+                SESSION_IN_MEMORY_MESSAGE_LIMIT
+            );
+            assert!(record.message_start_index > 0);
+            assert!(
+                !record
+                    .session
+                    .messages
+                    .iter()
+                    .any(|message| message.id() == "original-prompt")
+            );
+        }
+        second.finish();
+        first.finish();
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[0];
+        let summaries = record
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::FileChanges { files, .. } => Some(files),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summaries.len(),
+            1,
+            "resident tail trim must retain the original turn's late publication"
+        );
+        assert_eq!(
+            summaries[0].len(),
+            2,
+            "both captures amend the same summary"
+        );
+        assert!(
+            summaries[0]
+                .iter()
+                .any(|file| file.path == path && file.kind == WorkspaceFileChangeKind::Created)
+        );
+        assert!(
+            summaries[0]
+                .iter()
+                .any(|file| file.path == second_path
+                    && file.kind == WorkspaceFileChangeKind::Modified)
+        );
+        assert!(!record.session.messages.iter().any(|message| matches!(message, Message::Markdown { title, .. } if title == "Unresolved file changes")));
+    }
+}
+
+#[test]
+fn file_change_capture_deleted_owner_is_never_reassigned() {
+    for hidden in [false, true] {
+        let (state, owner, path) = file_change_capture_fixture();
+        let capture = block_file_change_capture(
+            &state,
+            vec![file_change_capture_event(
+                &owner,
+                &path,
+                WorkspaceFileChangeKind::Modified,
+            )],
+        );
+        {
+            let mut inner = state.inner.try_lock_now().unwrap();
+            let workdir = inner.sessions[0].session.workdir.clone();
+            if hidden {
+                inner.sessions[0].hidden = true;
+            } else {
+                inner.remove_session_at(0);
+            }
+            inner.create_session(Agent::Codex, None, workdir, None, None);
+            let successor = inner.sessions.last_mut().unwrap();
+            successor.active_turn_start_message_count = Some(successor.session.messages.len());
+        }
+        assert_eq!(
+            capture.finish(),
+            1,
+            "deleted owner has a counted, path-free discard"
+        );
+        let inner = state.inner.lock().unwrap();
+        assert!(
+            inner
+                .sessions
+                .iter()
+                .all(|record| record.active_turn_file_changes.is_empty())
+        );
+        assert!(
+            inner
+                .sessions
+                .iter()
+                .all(
+                    |record| !record.session.messages.iter().any(|message| match message {
+                        Message::FileChanges { .. } => true,
+                        Message::Markdown { title, .. } => title == "Unresolved file changes",
+                        _ => false,
+                    })
+                )
+        );
+    }
+}
+
+#[test]
+fn file_change_capture_missing_late_summary_is_retained_as_unresolved() {
+    let (state, owner, path) = file_change_capture_fixture();
+    finish_active_turn_file_change_tracking(&mut state.inner.lock().unwrap().sessions[0]);
+    let capture = block_file_change_capture(
+        &state,
+        vec![file_change_capture_event(
+            &owner,
+            &path,
+            WorkspaceFileChangeKind::Deleted,
+        )],
+    );
+    let earlier_path = path.replace("deleted.rs", "earlier.rs");
+    state.record_active_turn_file_changes(&[file_change_capture_event(
+        &owner,
+        &earlier_path,
+        WorkspaceFileChangeKind::Created,
+    )]);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.sessions[0]
+            .session
+            .messages
+            .retain(|message| !matches!(message, Message::FileChanges { .. }));
+    }
+    capture.finish();
+    let inner = state.inner.lock().unwrap();
+    assert!(inner.sessions[0].active_turn_file_changes.is_empty());
+    assert!(
+        matches!(inner.sessions[0].session.messages.last(), Some(Message::Markdown { title, markdown, .. }) if title == "Unresolved file changes" && markdown.contains("deleted.rs"))
+    );
+    assert!(
+        !inner.sessions[0]
+            .session
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::FileChanges { .. }))
+    );
+}
+
+#[test]
+fn file_change_canonicalization_does_not_hold_global_state() {
+    let state = Arc::new(test_app_state());
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let owner = {
+        let mut inner = state.inner.lock().unwrap();
+        let owner = inner.create_session(
+            Agent::Codex,
+            None,
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let record = inner.sessions.last_mut().unwrap();
+        record.active_turn_start_message_count = Some(record.session.messages.len());
+        owner.session.id
+    };
+    let path = root.join("changed.rs").to_string_lossy().into_owned();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let watcher_state = Arc::clone(&state);
+    let watcher_owner = owner.clone();
+    let watcher_path = path.clone();
+    let watcher = std::thread::spawn(move || {
+        let first = std::cell::Cell::new(true);
+        PATH_NORMALIZATION_TEST_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |_| {
+                if first.replace(false) {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                }
+            }));
+        });
+        watcher_state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+            path: watcher_path,
+            kind: WorkspaceFileChangeKind::Modified,
+            root_path: None,
+            session_id: Some(watcher_owner),
+            mtime_ms: None,
+            size_bytes: None,
+        }]);
+        PATH_NORMALIZATION_TEST_HOOK.with(|hook| *hook.borrow_mut() = None);
+    });
+
+    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    // The barrier proves canonicalization is in progress. This non-waiting read
+    // distinguishes lock ownership without a latency threshold or sleeps.
+    let readable_session = state
+        .inner
+        .try_lock_now()
+        .map(|inner| inner.sessions.last().unwrap().session.id.clone());
+    // Release and join before asserting, so the expected RED leaves no worker.
+    release_tx.send(()).unwrap();
+    watcher.join().unwrap();
+    assert_eq!(
+        readable_session.as_deref(),
+        Some(owner.as_str()),
+        "ordinary state reads must proceed during watcher canonicalization"
+    );
+    let inner = state.inner.lock().unwrap();
+    assert_eq!(
+        inner
+            .sessions
+            .last()
+            .unwrap()
+            .active_turn_file_changes
+            .get(&path),
+        Some(&WorkspaceFileChangeKind::Modified)
+    );
+}
+
 #[test]
 fn watcher_noise_does_not_defer_idle_session_snapshots() {
     let state = test_app_state();

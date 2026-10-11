@@ -264,6 +264,11 @@ impl AppState {
                 record.active_turn_generation =
                     record.active_turn_generation.wrapping_add(1).max(1);
                 record.active_turn_start_message_count = Some(record.session.messages.len());
+                record.file_change_tracking =
+                    Some(Arc::new(FileChangeTrackingLifetime::new(Some((
+                        message_id.clone(),
+                        global_message_index(record, record.session.messages.len()),
+                    )))));
                 record.active_turn_mailbox_notification = None;
                 record.active_turn_file_changes.clear();
                 record.active_turn_file_change_grace_deadline = None;

@@ -494,11 +494,19 @@ fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
     if record.active_turn_start_message_count.take().is_some() {
         record.active_turn_file_change_grace_deadline =
             Some(std::time::Instant::now() + ACTIVE_TURN_FILE_CHANGE_GRACE);
+        if let Some(tracking) = &record.file_change_tracking {
+            tracking
+                .publication
+                .lock()
+                .expect("file tracking mutex poisoned")
+                .completed = true;
+        }
         return;
     }
 
     record.active_turn_file_changes.clear();
     record.active_turn_file_change_grace_deadline = None;
+    record.file_change_tracking = None;
 }
 
 /// Clears active turn file-change tracking without opening the post-turn grace window.
@@ -511,6 +519,7 @@ fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
 /// a failed persistence step rolled back the terminal message that would have
 /// owned the summary.
 fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
+    record.file_change_tracking = None;
     record.active_turn_mailbox_notification = None;
     record.active_turn_start_message_count = None;
     record.active_turn_file_changes.clear();
@@ -528,6 +537,15 @@ fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_i
         .map(|(path, kind)| FileChangeSummaryEntry { path, kind })
         .collect::<Vec<_>>();
     let count = files.len();
+    if record.active_turn_start_message_count.is_none()
+        && let Some(tracking) = &record.file_change_tracking
+    {
+        tracking
+            .publication
+            .lock()
+            .expect("file tracking mutex poisoned")
+            .late_summary_id = Some(message_id.clone());
+    }
     let title = if count == 1 {
         "1 file changed during turn".to_owned()
     } else {
