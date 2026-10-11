@@ -345,8 +345,42 @@ struct EngramRootReadFence {
     stores: Vec<(String, Option<EngramAuthorityStoreKey>)>,
 }
 
+// Test-only construction counts for the authority snapshots a scan may build
+// under the global lock: a full binding target, and the root read fence each
+// target captures (which clones every root, journal and project store).
+#[cfg(test)]
+thread_local! {
+    static ENGRAM_ROOT_READ_FENCE_CAPTURES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+    static ENGRAM_BINDING_TARGET_BUILDS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_engram_authority_build_counts() {
+    ENGRAM_ROOT_READ_FENCE_CAPTURES.with(|count| count.set(0));
+    ENGRAM_BINDING_TARGET_BUILDS.with(|count| count.set(0));
+}
+
+/// (root read fences captured, binding targets built) on this thread since
+/// the last reset.
+#[cfg(test)]
+fn engram_authority_build_counts() -> (usize, usize) {
+    (
+        ENGRAM_ROOT_READ_FENCE_CAPTURES.with(std::cell::Cell::get),
+        ENGRAM_BINDING_TARGET_BUILDS.with(std::cell::Cell::get),
+    )
+}
+
+#[cfg(test)]
+fn count_engram_binding_target_build() {
+    ENGRAM_BINDING_TARGET_BUILDS.with(|count| count.set(count.get() + 1));
+}
+
 impl EngramRootReadFence {
     fn capture(inner: &StateInner) -> Self {
+        #[cfg(test)]
+        ENGRAM_ROOT_READ_FENCE_CAPTURES.with(|count| count.set(count.get() + 1));
         Self {
             generation: inner.engram_source_root_generation,
             roots: inner.engram_work_source_roots.clone(),
@@ -1141,14 +1175,13 @@ impl AppState {
             }
         }
     }
+    // Reads the narrow reader view (engram_session_authority.rs): this runs
+    // under the global lock for every pending journal intent, and a full
+    // target would clone every root, journal and project store.
     fn engram_root_reporter_available(inner: &StateInner, event: &EngramNamedRootEvent) -> bool {
-        Self::engram_binding_target_for_session_shape_locked(inner, &event.reporter, true)
-            .ok()
-            .flatten()
-            .is_some_and(|target| {
-                target.settings.authority_store_key.as_ref() == Some(&event.root.store)
-                    && target.routing_token.is_some()
-            })
+        engram_session_reader_view_locked(inner, &event.reporter).is_some_and(|view| {
+            view.store == Some(&event.root.store) && view.routing_token.is_some()
+        })
     }
 
     fn engram_orphaned_root_pending(

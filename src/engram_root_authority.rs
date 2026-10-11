@@ -42,6 +42,31 @@ fn engram_retain_recovery_run(
     runs.push(binding.clone());
 }
 
+/// The recovery reader for `store`: among sessions whose target would carry
+/// that store and a routing token, the one whose connection is the namer's,
+/// else the first in session order (a stable sort keeps ties in order). It is
+/// chosen from the narrow reader view and only the winner's full target is
+/// built, under the caller's guard: every other session would otherwise build
+/// a target and clone every root, journal and project store.
+fn engram_root_recovery_reader_target_locked(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    namer: Option<&str>,
+) -> Option<EngramBindingTarget> {
+    let mut readers = inner
+        .sessions
+        .iter()
+        .filter_map(|record| engram_session_reader_view_locked(inner, &record.session.id))
+        .filter(|view| view.store == Some(store) && view.routing_token.is_some())
+        .map(|view| view.connection_session_id)
+        .collect::<Vec<_>>();
+    readers.sort_by_key(|session_id| Some(*session_id) != namer);
+    let winner = readers.first()?;
+    AppState::engram_binding_target_for_session_shape_locked(inner, winner, true)
+        .ok()
+        .flatten()
+}
+
 struct EngramRootEventReply {
     receipt: EngramNamedRootReceipt,
     owner: EngramAuthorityTransition,
@@ -852,24 +877,7 @@ impl AppState {
                 .find(|root| &root.store == store && root.work_id == owner.binding.work_id
                     && root.claim_id == owner.binding.claim_id)
                 .map(|root| root.named_by_session.as_str());
-            let mut readers = inner
-                .sessions
-                .iter()
-                .filter_map(|record| {
-                    Self::engram_binding_target_for_session_shape_locked(
-                        &inner,
-                        &record.session.id,
-                        true,
-                    )
-                    .ok()
-                    .flatten()
-                })
-                .filter(|target| {
-                    target.settings.authority_store_key.as_ref() == Some(store)
-                        && target.routing_token.is_some()
-                }).collect::<Vec<_>>();
-            readers.sort_by_key(|target| Some(target.connection.session_id.as_str()) != namer);
-            let target = readers.into_iter().next();
+            let target = engram_root_recovery_reader_target_locked(&inner, store, namer);
             let abandoned = inner
                 .engram_named_root_journal
                 .iter()
@@ -1385,8 +1393,11 @@ impl AppState {
                 .as_mut()
                 .expect("acknowledged recovery owner")
                 .phase = EngramAuthorityPhase::Published;
-            engram_publish_root_retirements_locked(&mut inner, store, work_id);
+            let retirements = engram_publish_root_retirements_locked(&mut inner, store, work_id);
             drop(inner);
+            for line in &retirements {
+                engram_root_reclamation_emit(self, line);
+            }
             let _ = self.persist_tx.send(PersistRequest::Delta);
             return Ok(true);
         }
@@ -1640,7 +1651,8 @@ impl AppState {
             .expect("acknowledged transition")
             .phase = EngramAuthorityPhase::Published;
         let reason = history.recovery_reason.clone();
-        engram_publish_root_retirements_locked(&mut inner, store, &owner.binding.work_id);
+        let retirements =
+            engram_publish_root_retirements_locked(&mut inner, store, &owner.binding.work_id);
         if engram_authority_work_unresolved(&inner, store, &owner.binding.work_id) {
             let line = format!(
                 "[TermAl] Source-root authority recovery remains incomplete: {}. Source, test and evaluation evidence are withheld. Retry the original naming request or refresh authority. A local-only legacy selection can be named prospectively for a later turn; an unexplained historical association still requires repair before a fresh evaluation.",
@@ -1675,6 +1687,9 @@ impl AppState {
         // Published is an already-acknowledged marker. Either durable side of
         // this optional cleanup is conservative; it removes no history proof.
         drop(inner);
+        for line in &retirements {
+            engram_root_reclamation_emit(self, line);
+        }
         if self.persist_tx.send(PersistRequest::Delta).is_err() {
             #[cfg(test)]
             {

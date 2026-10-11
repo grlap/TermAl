@@ -44,14 +44,17 @@ impl Drop for EngramRootReclamationFlight {
     }
 }
 
+// These eligibility and owner questions read the narrow reader view
+// (engram_session_authority.rs), never a full binding target: a target also
+// captures a root read fence cloning every root, journal and project store,
+// and these run under the global lock for every root and session.
 fn engram_root_reclamation_session_is_reader(
     inner: &StateInner,
     session_id: &str,
     store: &EngramAuthorityStoreKey,
 ) -> bool {
-    AppState::engram_binding_target_for_session_shape_locked(inner, session_id, true)
-        .ok().flatten().is_some_and(|target| target.routing_token.is_some()
-            && target.settings.authority_store_key.as_ref() == Some(store))
+    engram_session_reader_view_locked(inner, session_id)
+        .is_some_and(|view| view.routing_token.is_some() && view.store == Some(store))
 }
 
 fn engram_root_reclamation_reader_exists(inner: &StateInner, store: &EngramAuthorityStoreKey) -> bool {
@@ -81,8 +84,8 @@ fn engram_root_reclamation_idle_owner(inner: &StateInner, session_id: &str) -> b
             && !record.engram.checkpoint_in_progress
             && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error)
             && record.unmediated_claude_turn.is_none()
-            && AppState::engram_binding_target_for_session_shape_locked(inner, session_id, true)
-                .ok().flatten().is_some_and(|target| target.routing_token.is_some())
+            && engram_session_reader_view_locked(inner, session_id)
+                .is_some_and(|view| view.routing_token.is_some())
     })
 }
 
@@ -98,9 +101,8 @@ fn engram_root_reclamation_route_current(
                 && engram_root_reclamation_idle_owner(inner, session_id),
         EngramRootReclamationRoute::OwnClear(session_id) =>
             &root.named_by_session == session_id
-                && AppState::engram_binding_target_for_session_shape_locked(inner, session_id, true)
-                    .ok().flatten().is_some_and(|target|
-                        target.settings.authority_store_key.as_ref() == Some(&root.store)),
+                && engram_session_reader_view_locked(inner, session_id)
+                    .is_some_and(|view| view.store == Some(&root.store)),
     }
 }
 
@@ -175,21 +177,56 @@ fn engram_named_root_capacity(inner: &StateInner) -> usize {
             .count()
 }
 
+/// Marks the work's retirement notices published and returns their stderr
+/// lines; the caller writes them with `engram_root_reclamation_emit` once it
+/// has released the global guard.
+#[must_use]
 fn engram_publish_root_retirements_locked(
     inner: &mut StateInner,
     store: &EngramAuthorityStoreKey,
     work: &str,
-) {
+) -> Vec<String> {
+    let mut lines = Vec::new();
     if let Some(history) = inner.engram_work_naming_history.iter_mut()
         .find(|history| &history.store == store && history.work_id == work)
     {
         for notice in &mut history.retirements {
             if !notice.published {
                 notice.published = true;
-                eprintln!("engram> {}", notice.line);
+                lines.push(format!("engram> {}", notice.line));
             }
         }
     }
+    lines
+}
+
+// Test-only record of the reclamation lines written to stderr, so a witness
+// can show they were written, and written without the global lock.
+#[cfg(test)]
+thread_local! {
+    static TEST_ENGRAM_RECLAMATION_EMITTED: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn take_engram_root_reclamation_emitted() -> Vec<String> {
+    TEST_ENGRAM_RECLAMATION_EMITTED.with(|lines| std::mem::take(&mut *lines.borrow_mut()))
+}
+
+/// Writes one reclamation line to stderr. Never under the global state lock:
+/// a slow or blocked stderr must not extend the guard every session waits on.
+fn engram_root_reclamation_emit(state: &AppState, line: &str) {
+    #[cfg(test)]
+    {
+        assert!(
+            state.inner.is_not_held_by_current_thread_for_test(),
+            "named-root reclamation wrote stderr under the global state lock: {line}"
+        );
+        TEST_ENGRAM_RECLAMATION_EMITTED.with(|lines| lines.borrow_mut().push(line.to_owned()));
+    }
+    #[cfg(not(test))]
+    let _ = state;
+    eprintln!("{line}");
 }
 
 fn engram_root_retirement_reason(
@@ -322,12 +359,16 @@ impl AppState {
             if still_retained {
                 inner.engram_root_reclamation.cooldowns.push((task.root.clone(), clock.now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
             }
-            eprintln!("engram> named-root reclamation store={} work={} generation={} route={:?} outcome={}",
+            drop(inner);
+            // Formatted and written after the guard is released.
+            engram_root_reclamation_emit(self, &format!(
+                "engram> named-root reclamation store={} work={} generation={} route={:?} outcome={}",
                 task.root.store.project_id, task.root.work_id, task.root.generation, task.route,
-                match outcome { Ok(true) => "retired".to_owned(), Ok(false) => "retained by canonical authority".to_owned(), Err(error) => format!("retained: {}", error.message) });
+                match outcome { Ok(true) => "retired".to_owned(), Ok(false) => "retained by canonical authority".to_owned(), Err(error) => format!("retained: {}", error.message) }));
         }
-        eprintln!("engram> named-root reclamation pass attempted={} limit={} elapsed_ms={}",
-            attempted, ENGRAM_ROOT_RECLAMATION_READ_LIMIT, clock.now().saturating_duration_since(started).as_millis());
+        engram_root_reclamation_emit(self, &format!(
+            "engram> named-root reclamation pass attempted={} limit={} elapsed_ms={}",
+            attempted, ENGRAM_ROOT_RECLAMATION_READ_LIMIT, clock.now().saturating_duration_since(started).as_millis()));
     }
 
     fn engram_root_capacity_refusal(&self) -> ApiError {

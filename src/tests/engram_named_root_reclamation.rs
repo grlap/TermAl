@@ -14,6 +14,10 @@ mod reader_authority {
     include!("engram_named_root_reclamation_readers.rs");
 }
 
+mod eligibility {
+    include!("engram_named_root_reclamation_eligibility.rs");
+}
+
 fn settled_root(label: &str, proof_kind: &str) -> (ClaimedRoot, EngramWorkSourceRoot) {
     let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);

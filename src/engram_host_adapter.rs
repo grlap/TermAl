@@ -6789,54 +6789,30 @@ impl AppState {
         require_runtime_enabled: bool,
         project_reset_owner_generation: Option<u64>,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
-        let Some(delegation) = inner
-            .delegations
-            .iter()
-            .find(|delegation| delegation.child_session_id == session_id)
+        // The eligibility predicates live in engram_session_authority.rs,
+        // shared with the narrow reader view.
+        let Some(authority) = engram_child_session_authority_locked(
+            inner,
+            session_id,
+            require_runtime_enabled,
+            project_reset_owner_generation,
+        )?
         else {
             return Ok(None);
         };
-        let child = inner
-            .find_session_index(session_id)
-            .and_then(|index| inner.sessions.get(index))
-            .ok_or_else(|| format!("delegation child session `{session_id}` is missing"))?;
-        if !child.is_local_session() {
-            return Ok(None);
-        }
-        let Some(project) = engram_project_for_session_locked(inner, session_id) else {
-            // Engram is configured per project, so a projectless delegation
-            // is an ordinary disabled path rather than an adapter failure.
-            return Ok(None);
-        };
-        let Some(settings) = project.engram.as_ref() else {
-            return Ok(None);
-        };
-        let reset_access_allowed = match project_reset_owner_generation {
-            Some(owner_generation) => inner
-                .engram_project_resets
-                .is_owned_by(&project.id, owner_generation),
-            None => !inner.engram_project_resets.contains(&project.id),
-        };
-        if !reset_access_allowed
-            || project.remote_id != LOCAL_REMOTE_ID
-            || (require_runtime_enabled && child.engram.disabled_reason.is_some())
-            || (require_runtime_enabled && !settings.is_control_enabled())
-        {
-            return Ok(None);
-        }
-        let binary_path = settings
-            .binary_path
-            .as_deref()
-            .map(PathBuf::from)
-            .ok_or_else(|| "enabled Engram project is missing binaryPath".to_owned())?;
-        let home = settings
-            .home
-            .as_deref()
-            .map(PathBuf::from)
-            .ok_or_else(|| "enabled Engram project is missing home".to_owned())?;
+        let child = authority.record;
+        let delegation = authority
+            .delegation
+            .expect("a child session's authority names its delegation");
+        let project = authority.project;
+        let settings = authority.settings;
+        let binary_path = PathBuf::from(authority.binary_path);
+        let home = PathBuf::from(authority.home);
         let root = PathBuf::from(&project.root_path);
         let (actor_id, actor_context) =
             engram_runtime_actor_identity(&inner.preferences.engram.developer_name, child);
+        #[cfg(test)]
+        count_engram_binding_target_build();
         Ok(Some(EngramBindingTarget {
             runtime_snapshot: child.runtime.runtime_token(),
             work_binding: child.engram.work_binding.clone(),
@@ -6855,7 +6831,7 @@ impl AppState {
                 project_root: root,
                 actor_id,
                 actor_context,
-                session_id: session_id.to_owned(),
+                session_id: authority.connection_session_id.to_owned(),
             },
             settings: settings.clone(),
             project_id: project.id.clone(),
@@ -6892,48 +6868,27 @@ impl AppState {
         require_runtime_enabled: bool,
         project_reset_owner_generation: Option<u64>,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
-        let parent = inner
-            .find_session_index(parent_session_id)
-            .and_then(|index| inner.sessions.get(index))
-            .ok_or_else(|| format!("session `{parent_session_id}` is missing"))?;
-        if !parent.is_local_session() {
-            return Ok(None);
-        }
-        let Some(project_id) = parent.session.project_id.as_deref() else {
-            return Ok(None);
-        };
-        let project = inner
-            .find_project(project_id)
-            .ok_or_else(|| format!("project `{project_id}` is missing"))?;
-        let Some(settings) = project.engram.as_ref() else {
+        // The eligibility predicates live in engram_session_authority.rs,
+        // shared with the narrow reader view.
+        let Some(authority) = engram_parent_session_authority_locked(
+            inner,
+            parent_session_id,
+            require_runtime_enabled,
+            project_reset_owner_generation,
+        )?
+        else {
             return Ok(None);
         };
-        let reset_access_allowed = match project_reset_owner_generation {
-            Some(owner_generation) => inner
-                .engram_project_resets
-                .is_owned_by(&project.id, owner_generation),
-            None => !inner.engram_project_resets.contains(&project.id),
-        };
-        if !reset_access_allowed
-            || project.remote_id != LOCAL_REMOTE_ID
-            || (require_runtime_enabled && parent.engram.disabled_reason.is_some())
-            || (require_runtime_enabled && !settings.is_control_enabled())
-        {
-            return Ok(None);
-        }
-        let binary_path = settings
-            .binary_path
-            .as_deref()
-            .map(PathBuf::from)
-            .ok_or_else(|| "enabled Engram project is missing binaryPath".to_owned())?;
-        let home = settings
-            .home
-            .as_deref()
-            .map(PathBuf::from)
-            .ok_or_else(|| "enabled Engram project is missing home".to_owned())?;
+        let parent = authority.record;
+        let project = authority.project;
+        let settings = authority.settings;
+        let binary_path = PathBuf::from(authority.binary_path);
+        let home = PathBuf::from(authority.home);
         let root = PathBuf::from(&project.root_path);
         let (actor_id, actor_context) =
             engram_runtime_actor_identity(&inner.preferences.engram.developer_name, parent);
+        #[cfg(test)]
+        count_engram_binding_target_build();
         Ok(Some(EngramBindingTarget {
             runtime_snapshot: parent.runtime.runtime_token(),
             admission_started_at: None,
@@ -6950,7 +6905,7 @@ impl AppState {
                 project_root: root,
                 actor_id,
                 actor_context,
-                session_id: parent_session_id.to_owned(),
+                session_id: authority.connection_session_id.to_owned(),
             },
             settings: settings.clone(),
             project_id: project.id.clone(),
