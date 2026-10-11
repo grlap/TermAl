@@ -33,7 +33,16 @@ across the upgrade is granted the effects it requested, and when that grant's
 begin is refused the re-evaluation asks again for the same effects, since it
 runs under the same binding; only a `stale_fence` re-evaluation, which
 rebinds, asks for the current set, and the session otherwise takes the
-current set at its next admission. The turn's
+current set at its next admission. A begin refusal healed on the reused
+binding (every healable code but `stale_fence`, such as a
+`grant_scope_mismatch` whose grant status proves retired) can find that
+binding re-fenced, for example after a long park, and its re-evaluation is
+then refused `stale_fence`. Admission cures that once: it rebinds within the
+remaining budget and re-evaluates once more under the fresh binding and its
+own key, asking for the current set. A second `stale_fence` after that
+rebind, or a budget that runs out during it, holds the prompt with a card
+naming the code instead of ending it; there is never a second healing rebind
+in one admission. The turn's
 observation is judged against that grant's effects, which Engram checks it
 against, not against the session's current set, so a turn that changed
 source under such a grant reports nothing.

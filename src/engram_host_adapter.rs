@@ -5140,7 +5140,7 @@ impl AppState {
         // A known Defer's earliest retry, honoured if its card cannot be
         // saved and the prompt is retried automatically.
         let mut defer_not_before = None;
-        let (decision, refusal_code, directives, delivered_range, fail_mode) = loop {
+        let (decision, refusal_code, directives, delivered_range, fail_mode) = 'card: loop {
             match evaluation {
                 EngramDispatchEvaluation::Grant {
                     grant_id,
@@ -5529,129 +5529,220 @@ impl AppState {
                             } else {
                                 target.clone()
                             };
-                            let reevaluate_routing_token = reevaluate_target
-                                .routing_token
-                                .clone()
-                                .expect("re-evaluation target should carry a routing token");
-                            if code == "stale_fence" {
-                                binding_target = Some(reevaluate_target.clone());
-                                // Recovery consumes the original remaining budget.
-                            }
-                            let Some(_) = reevaluate_target
-                                .remaining_dispatch_timeout(dispatch_budget_started_at)
-                            else {
-                                causal_failure = Some(EngramCausalFailure::local_hold("turn_evaluate", "dispatch_budget_exhausted", "Engram admission budget exhausted before refusal-healing re-evaluation", "re-evaluation budget before transmission"));
-                                break (
-                                    EngramControlCardDecision::Degraded,
-                                    Some("dispatch_budget_exhausted".to_owned()),
-                                    Vec::new(),
-                                    delivered_range,
-                                    EngramControlFailMode::Degraded,
-                                );
-                            };
-                            // The re-evaluation asks again for what the refused
-                            // grant's evaluate asked: the binding it runs under
-                            // is unchanged, so a set that binding lacks (the
-                            // current one, when a retained evaluate from before
-                            // an effect-set change was replayed) would only be
-                            // refused. The session takes the current set at its
-                            // next admission. A stale_fence re-evaluation has
-                            // just rebound, declaring the current set, and
-                            // requests it.
-                            let reevaluate_effects = if code == "stale_fence" {
-                                reevaluate_target.effects.clone()
-                            } else {
-                                let inner = self.inner.lock().expect("state mutex poisoned");
-                                inner
-                                    .find_session_index(session_id)
-                                    .and_then(|index| inner.sessions[index].queued_prompts.front())
-                                    .and_then(|queued| queued.engram_evaluate.as_ref())
-                                    .and_then(|prepared| {
-                                        engram_evaluate_requested_effects(
-                                            &prepared.request,
-                                            &pending.intent_fingerprint,
+                            // A healing re-evaluate that reuses the binding (every
+                            // healable code but stale_fence) can find that binding
+                            // re-fenced, for example after a long park, and be
+                            // refused stale_fence. That is cured once per
+                            // admission: one rebind within the remaining budget,
+                            // then one more re-evaluate under the fresh binding and
+                            // its own key. A rebind that fails, or a budget that
+                            // runs out first, holds the head as the stale_fence path
+                            // does; a second stale_fence holds it naming the code.
+                            let mut reevaluate_target = reevaluate_target;
+                            let mut healing_rebound = false;
+                            let reevaluate_started = std::time::Instant::now();
+                            let (reevaluated, reevaluate_request, reevaluate_boundary) = loop {
+                                let reevaluate_routing_token = reevaluate_target
+                                    .routing_token
+                                    .clone()
+                                    .expect("re-evaluation target should carry a routing token");
+                                if code == "stale_fence" || healing_rebound {
+                                    binding_target = Some(reevaluate_target.clone());
+                                    // Recovery consumes the original remaining budget.
+                                }
+                                let Some(_) = reevaluate_target
+                                    .remaining_dispatch_timeout(dispatch_budget_started_at)
+                                else {
+                                    causal_failure = Some(EngramCausalFailure::local_hold("turn_evaluate", "dispatch_budget_exhausted", "Engram admission budget exhausted before refusal-healing re-evaluation", "re-evaluation budget before transmission"));
+                                    break 'card (
+                                        EngramControlCardDecision::Degraded,
+                                        Some("dispatch_budget_exhausted".to_owned()),
+                                        Vec::new(),
+                                        delivered_range,
+                                        EngramControlFailMode::Degraded,
+                                    );
+                                };
+                                // The re-evaluation asks again for what the refused
+                                // grant's evaluate asked: the binding it runs under
+                                // is unchanged, so a set that binding lacks (the
+                                // current one, when a retained evaluate from before
+                                // an effect-set change was replayed) would only be
+                                // refused. The session takes the current set at its
+                                // next admission. A re-evaluation that has just
+                                // rebound, declaring the current set, requests it.
+                                let reevaluate_effects = if code == "stale_fence" || healing_rebound {
+                                    reevaluate_target.effects.clone()
+                                } else {
+                                    let inner = self.inner.lock().expect("state mutex poisoned");
+                                    inner
+                                        .find_session_index(session_id)
+                                        .and_then(|index| inner.sessions[index].queued_prompts.front())
+                                        .and_then(|queued| queued.engram_evaluate.as_ref())
+                                        .and_then(|prepared| {
+                                            engram_evaluate_requested_effects(
+                                                &prepared.request,
+                                                &pending.intent_fingerprint,
+                                            )
+                                        })
+                                        .map(<[EngramEffect]>::to_vec)
+                                        .unwrap_or_else(|| reevaluate_target.effects.clone())
+                                };
+                                let mut reevaluate_request = None;
+                                let mut reevaluate_boundary = "refusal-healing durable retirement";
+                                // The re-evaluation, and any grant it issues, go
+                                // out under the binding the session has now.
+                                grant_binding = self.engram_bound_work_binding(session_id);
+                                let mut reevaluated = self
+                                    .retire_queued_engram_evaluation(
+                                        session_id,
+                                        admission_owner.as_ref(),
+                                    )
+                                    .and_then(|()| {
+                                        reevaluate_boundary = "re-evaluation durable preparation";
+                                        self.queued_engram_evaluate_request(
+                                            &reevaluate_target,
+                                            &EngramTurnIntentSnapshot {
+                                                session_id: session_id.to_owned(),
+                                                dispatch_generation: pending.dispatch_generation,
+                                                intent_fingerprint: pending.intent_fingerprint.clone(),
+                                            },
+                                            admission_owner.as_ref().ok_or_else(|| {
+                                                EngramTransportError::local_state(
+                                                    "Re-evaluation owner disappeared",
+                                                )
+                                            })?,
+                                            EngramControlRequest::TurnEvaluate {
+                                                routing_token: reevaluate_routing_token,
+                                                // The re-evaluation after the healing
+                                                // rebind keeps the historical prefix of
+                                                // every rebind re-evaluation.
+                                                idempotency_key: format!(
+                                                    "termal-{}reevaluate:{session_id}:{}:{grant_id}",
+                                                    if healing_rebound { "stale-" } else { "" },
+                                                    pending.dispatch_generation
+                                                ),
+                                                intent_fingerprint: pending.intent_fingerprint.clone(),
+                                                purpose: "ordinary".to_owned(),
+                                                requested_effects: reevaluate_effects,
+                                                resource_intents: Vec::new(),
+                                            },
                                         )
                                     })
-                                    .map(<[EngramEffect]>::to_vec)
-                                    .unwrap_or_else(|| reevaluate_target.effects.clone())
-                            };
-                            let reevaluate_started = std::time::Instant::now();
-                            let mut reevaluate_request = None;
-                            let mut reevaluate_boundary = "refusal-healing durable retirement";
-                            // The re-evaluation, and any grant it issues, go
-                            // out under the binding the session has now.
-                            grant_binding = self.engram_bound_work_binding(session_id);
-                            let mut reevaluated = self
-                                .retire_queued_engram_evaluation(
+                                    .and_then(|request| {
+                                        reevaluate_request = Some(request.clone());
+                                        reevaluate_boundary = "re-evaluation before transmission";
+                                        self.require_queued_engram_owner(
+                                            session_id,
+                                            admission_owner.as_ref().ok_or_else(|| {
+                                                EngramTransportError::local_state(
+                                                    "Re-evaluation owner disappeared",
+                                                )
+                                            })?,
+                                            "Engram re-evaluation transmission",
+                                        )?;
+                                        let timeout = reevaluate_target
+                                            .remaining_dispatch_timeout(dispatch_budget_started_at)
+                                            .ok_or_else(|| {
+                                                EngramTransportError::deadline(
+                                                    "Engram admission budget exhausted \
+                                                     before re-evaluation",
+                                                )
+                                            })?;
+                                        reevaluate_boundary = "re-evaluation control response";
+                                        reevaluate_target.adapter.request(
+                                            &reevaluate_target.connection,
+                                            &request,
+                                            timeout,
+                                        )
+                                    })
+                                    .and_then(|wire| {
+                                        reevaluate_boundary = "re-evaluation response parsing";
+                                        parse_engram_result::<EngramTurnDecisionResponse>(wire)
+                                    });
+                                if !admission_owner.as_ref().is_some_and(|owner| {
+                                    self.queued_engram_owner_is_current(session_id, owner)
+                                }) {
+                                    reevaluated = Err(EngramTransportError::local_state(
+                                        "Re-evaluation reply belonged to a superseded queue owner",
+                                    ));
+                                    reevaluate_boundary = "re-evaluation reply ownership";
+                                }
+                                let refused_on_reused_binding = code != "stale_fence"
+                                    && !healing_rebound
+                                    && matches!(
+                                        &reevaluated,
+                                        Ok(EngramTurnDecisionResponse::Refuse { directive })
+                                            if directive.code == "stale_fence"
+                                    );
+                                if !refused_on_reused_binding {
+                                    break (reevaluated, reevaluate_request, reevaluate_boundary);
+                                }
+                                // The healing rebind, as the stale_fence path above
+                                // rebinds: the refused binding is noted, the retained
+                                // evaluation retired, and one bind is made within the
+                                // remaining budget.
+                                healing_rebound = true;
+                                self.record_queued_engram_transport_success(
                                     session_id,
                                     admission_owner.as_ref(),
-                                )
-                                .and_then(|()| {
-                                    reevaluate_boundary = "re-evaluation durable preparation";
-                                    self.queued_engram_evaluate_request(
-                                        &reevaluate_target,
-                                        &EngramTurnIntentSnapshot {
-                                            session_id: session_id.to_owned(),
-                                            dispatch_generation: pending.dispatch_generation,
-                                            intent_fingerprint: pending.intent_fingerprint.clone(),
-                                        },
-                                        admission_owner.as_ref().ok_or_else(|| {
-                                            EngramTransportError::local_state(
-                                                "Re-evaluation owner disappeared",
-                                            )
-                                        })?,
-                                        EngramControlRequest::TurnEvaluate {
-                                            routing_token: reevaluate_routing_token,
-                                            idempotency_key: format!(
-                                                "termal-reevaluate:{session_id}:{}:{grant_id}",
-                                                pending.dispatch_generation
-                                            ),
-                                            intent_fingerprint: pending.intent_fingerprint.clone(),
-                                            purpose: "ordinary".to_owned(),
-                                            requested_effects: reevaluate_effects,
-                                            resource_intents: Vec::new(),
-                                        },
-                                    )
-                                })
-                                .and_then(|request| {
-                                    reevaluate_request = Some(request.clone());
-                                    reevaluate_boundary = "re-evaluation before transmission";
-                                    self.require_queued_engram_owner(
-                                        session_id,
-                                        admission_owner.as_ref().ok_or_else(|| {
-                                            EngramTransportError::local_state(
-                                                "Re-evaluation owner disappeared",
-                                            )
-                                        })?,
-                                        "Engram re-evaluation transmission",
-                                    )?;
-                                    let timeout = reevaluate_target
-                                        .remaining_dispatch_timeout(dispatch_budget_started_at)
-                                        .ok_or_else(|| {
-                                            EngramTransportError::deadline(
-                                                "Engram admission budget exhausted \
-                                                 before re-evaluation",
-                                            )
-                                        })?;
-                                    reevaluate_boundary = "re-evaluation control response";
-                                    reevaluate_target.adapter.request(
-                                        &reevaluate_target.connection,
-                                        &request,
-                                        timeout,
-                                    )
-                                })
-                                .and_then(|wire| {
-                                    reevaluate_boundary = "re-evaluation response parsing";
-                                    parse_engram_result::<EngramTurnDecisionResponse>(wire)
-                                });
-                            if !admission_owner.as_ref().is_some_and(|owner| {
-                                self.queued_engram_owner_is_current(session_id, owner)
-                            }) {
-                                reevaluated = Err(EngramTransportError::local_state(
-                                    "Re-evaluation reply belonged to a superseded queue owner",
-                                ));
-                                reevaluate_boundary = "re-evaluation reply ownership";
-                            }
+                                );
+                                self.note_engram_request_binding_refused(
+                                    session_id,
+                                    grant_binding.as_ref(),
+                                );
+                                if let Err(error) = self.retire_queued_engram_evaluation(
+                                    session_id,
+                                    admission_owner.as_ref(),
+                                ) {
+                                    causal_failure = Some(EngramCausalFailure::local(&error, "retire_evaluation", "refusal-healing durable retirement"));
+                                    break 'card (
+                                        EngramControlCardDecision::Degraded,
+                                        Some("authorization_unknown".to_owned()),
+                                        Vec::new(),
+                                        delivered_range,
+                                        EngramControlFailMode::Degraded,
+                                    );
+                                }
+                                self.mark_queued_engram_rebind_required(
+                                    session_id,
+                                    Some(&reevaluate_target),
+                                    admission_owner.as_ref(),
+                                );
+                                match self.ensure_engram_session_bound_with_budget_off_lock(
+                                    session_id,
+                                    Some(dispatch_budget_started_at),
+                                    admission_owner.as_ref(),
+                                ) {
+                                    Ok(Some(refreshed)) => reevaluate_target = refreshed,
+                                    Ok(None) => {
+                                        causal_failure = Some(EngramCausalFailure::local_hold("admission_binding", "binding_unavailable", "Engram binding disappeared during Begin refusal healing", "refusal-healing rebind"));
+                                        break 'card (
+                                            EngramControlCardDecision::Degraded,
+                                            Some("binding_unavailable".to_owned()),
+                                            Vec::new(),
+                                            delivered_range,
+                                            EngramControlFailMode::Degraded,
+                                        );
+                                    }
+                                    Err(error) => {
+                                        causal_failure = Some(EngramCausalFailure::error(&error, "admission_binding", None, &[]));
+                                        self.record_queued_engram_transport_failure(
+                                            session_id,
+                                            &error,
+                                            admission_owner.as_ref(),
+                                        );
+                                        let code =
+                                            self.engram_failure_card_code(session_id, &error);
+                                        break 'card (
+                                            EngramControlCardDecision::Degraded,
+                                            Some(code),
+                                            Vec::new(),
+                                            delivered_range,
+                                            EngramControlFailMode::Degraded,
+                                        );
+                                    }
+                                }
+                            };
                             evaluate_latency_ms = evaluate_latency_ms
                                 .saturating_add(duration_millis(reevaluate_started.elapsed()));
                             evaluation = match reevaluated {
@@ -5698,13 +5789,32 @@ impl AppState {
                                             admission_owner.as_ref(),
                                         );
                                     }
-                                    EngramDispatchEvaluation::Refuse {
-                                        directive: EngramControlDirectiveCard {
-                                            directive_id: directive.directive_id,
-                                            kind: directive.code,
-                                            audience: directive.target,
-                                            satisfaction: directive.satisfaction,
-                                        },
+                                    if healing_rebound && directive.code == "stale_fence" {
+                                        // A second stale_fence, after the healing
+                                        // rebind: no further rebind in this
+                                        // admission. The head is held, naming the
+                                        // code, and the next admission rebinds.
+                                        self.mark_queued_engram_rebind_required(
+                                            session_id,
+                                            Some(&reevaluate_target),
+                                            admission_owner.as_ref(),
+                                        );
+                                        EngramDispatchEvaluation::Degraded {
+                                            code: directive.code,
+                                            detail: "Engram refused the refusal-healing \
+                                                     re-evaluation stale_fence again after \
+                                                     its one rebind"
+                                                .to_owned(),
+                                        }
+                                    } else {
+                                        EngramDispatchEvaluation::Refuse {
+                                            directive: EngramControlDirectiveCard {
+                                                directive_id: directive.directive_id,
+                                                kind: directive.code,
+                                                audience: directive.target,
+                                                satisfaction: directive.satisfaction,
+                                            },
+                                        }
                                     }
                                 }
                                 Ok(EngramTurnDecisionResponse::Defer { deferral }) => {

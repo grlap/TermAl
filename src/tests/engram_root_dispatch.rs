@@ -10,6 +10,9 @@ mod causal_failure;
 #[path = "engram_root_recovery_corrections.rs"]
 mod recovery_corrections;
 
+#[path = "engram_refusal_healing_rebind.rs"]
+mod refusal_healing_rebind;
+
 #[path = "engram_post_receipt.rs"]
 mod post_receipt;
 
