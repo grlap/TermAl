@@ -2449,6 +2449,23 @@ automatically, without Resume, a new message or a restart
    no live runtime proof after a restart; once acknowledged it becomes the
    same record and its retained bind is replayed the same way.
 
+One active grant does not keep the hold: the prior turn's, left open only
+because its closing checkpoint ended without settling (a lost reply, a missed
+deadline) while the next prompt waited behind it, so that prompt's admission
+met the bind backoff and parked. The schedule takes that park when the newest
+checkpoint card for the active grant is the Degraded `turn_checkpoint` whose
+cause names this head as its continuation, under the same authority. Both the
+session preview and the control card show the scheduled attempt number and
+next due time from the retained retry, respecting the pending bind backoff. When
+the attempt is due, its rebind reads the session status first: a grant still open
+there is closed once by the recovery checkpoint, carrying the report the lost
+close built, and one the producer already closed is cleared, all before the
+head's own evaluate; the head is then delivered once, without Resume. A
+recovery that is refused, or answered with a receipt for another grant, ends
+the retry in the explicit hold, its card naming the code and, through the
+refused request, the grant. Any other active grant, and any uncertain grant,
+keeps the hold. Tests: `src/tests/engram_closing_checkpoint_retry.rs`.
+
 Nothing else enters the schedule, and each of these keeps its hold and its
 preview: a Reconcile disposition; a refusal; control disabled, or a fatal disabled
 reason; a Stop or a cancellation; a committed change of the project,

@@ -94,14 +94,18 @@ fn engram_admission_retry_preview(retry: &EngramAdmissionRetry) -> String {
 /// its possibly begun grant to be the one its prepared begin names
 /// (`engram_begin_replay.rs`), and a begin reconstruction requires it beside
 /// a retained evaluate with no prepared begin (`engram_begin_boot.rs`); only
-/// they relax those two exclusions.
+/// they relax those two exclusions, and an ordinary retry admits one active
+/// grant only while it is the prior turn's, left open by an unsettled closing
+/// checkpoint for this head (`engram_unsettled_closing_checkpoint_holds`).
 fn engram_admission_retry_head_matches(record: &SessionRecord, retry: &EngramAdmissionRetry) -> bool {
     let grants_settled = if retry.code == ENGRAM_BEGIN_REPLAY_CODE {
         engram_begin_replay_pending(record).is_some()
     } else if retry.code == ENGRAM_BEGIN_RECONSTRUCT_CODE {
         engram_begin_reconstruction_shape(record).is_some()
     } else {
-        record.engram.active_grant_id.is_none() && record.engram.uncertain_grant_id.is_none()
+        record.engram.uncertain_grant_id.is_none()
+            && (record.engram.active_grant_id.is_none()
+                || engram_unsettled_closing_checkpoint_holds(record, retry))
     };
     record.engram.dispatch_generation == retry.generation
         && grants_settled
@@ -122,6 +126,46 @@ fn engram_admission_retry_head_matches(record: &SessionRecord, retry: &EngramAdm
                     head.pending_prompt.source.as_ref(),
                     head.source,
                 ) == retry.fingerprint
+        })
+}
+
+/// Whether the session's active grant is the prior turn's, kept open only
+/// because its closing checkpoint ended unsettled while this retry's head was
+/// queued behind it: the newest checkpoint card for that grant is a Degraded
+/// `turn_checkpoint` whose cause names this head as its continuation, under
+/// this retry's authority. The attempt's rebind reads the session status and
+/// settles that grant before the head's own evaluate (as the binding backoff
+/// branch's cause, `engram_checkpoint_cause_for_owner`, explains the park). A
+/// later checkpoint for the grant, any other grant or any other cause keeps
+/// the hold.
+fn engram_unsettled_closing_checkpoint_holds(
+    record: &SessionRecord,
+    retry: &EngramAdmissionRetry,
+) -> bool {
+    let Some(grant) = record.engram.active_grant_id.as_deref() else {
+        return false;
+    };
+    record
+        .session
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            Message::EngramControl { card, .. }
+                if card.stage == EngramControlStage::Checkpoint
+                    && card.grant_id.as_deref() == Some(grant) =>
+            {
+                Some(card)
+            }
+            _ => None,
+        })
+        .is_some_and(|card| {
+            card.decision == EngramControlCardDecision::Degraded
+                && card.causal_failure.as_ref().is_some_and(|cause| {
+                    cause.operation == "turn_checkpoint"
+                        && cause.continuation_id.as_deref() == Some(retry.prompt_id.as_str())
+                        && cause.authority_fingerprint.as_deref() == Some(retry.authority.as_str())
+                })
         })
 }
 

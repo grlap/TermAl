@@ -830,14 +830,23 @@ impl AppState {
         if !scheduled {
             clear_engram_admission_retry(record);
         }
+        let retry_disposition = record
+            .engram
+            .admission_retry
+            .as_ref()
+            .filter(|_| scheduled)
+            .map(|retry| format!(
+                "Automatic retry scheduled by the existing admission scheduler, attempt {}, next at {}, pending durable acknowledgement.",
+                retry.attempts, retry.due_at
+            ));
         let latest_card = record.session.messages.iter().rposition(|message| matches!(message, Message::EngramControl { .. }));
         if let Some(cause) = latest_card.and_then(|index| match &mut record.session.messages[index] {
             Message::EngramControl { card, .. } => card.causal_failure.as_mut(),
             _ => None,
         }) {
             cause.publication_pending = true;
-            let disposition = if scheduled {
-                "Automatic retry scheduled by the existing admission scheduler, pending durable acknowledgement."
+            let disposition = if let Some(retry_disposition) = retry_disposition.as_deref() {
+                retry_disposition
             } else if interrupted {
                 "Automatic continuation withheld: retained authorization requires reconciliation."
             } else if defer {

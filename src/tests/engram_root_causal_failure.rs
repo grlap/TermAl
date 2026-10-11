@@ -7,6 +7,7 @@ use super::*;
 #[derive(Clone, Copy)]
 enum CausalFaultMode {
     LostReply,
+    DeadlineAfterApply,
     NeverStarted,
     Refuse,
     SecretReply,
@@ -37,6 +38,8 @@ struct CausalTransport {
     mode: Mutex<CausalFaultMode>,
     clock: Mutex<Option<EngramBudgetClock>>,
     after_fault: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    // Every requested operation, in order, for ordering witnesses.
+    order: Mutex<Vec<String>>,
 }
 
 impl CausalTransport {
@@ -51,6 +54,7 @@ impl CausalTransport {
             mode: Mutex::new(CausalFaultMode::LostReply),
             clock: Mutex::new(None),
             after_fault: Mutex::new(None),
+            order: Mutex::new(Vec::new()),
         })
     }
 
@@ -73,6 +77,7 @@ impl EngramControlTransport for CausalTransport {
     ) -> std::result::Result<Value, EngramTransportError> {
         let wire = serde_json::to_value(request).unwrap();
         let operation = wire["operation"].as_str().unwrap().to_owned();
+        self.order.lock().unwrap().push(operation.clone());
         let ordinal = {
             let mut attempts = self.attempts.lock().unwrap();
             let count = attempts.entry(operation.clone()).or_default();
@@ -204,6 +209,17 @@ impl EngramControlTransport for CausalTransport {
                 after();
             }
             match mode {
+                CausalFaultMode::DeadlineAfterApply => {
+                    self.clock
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .expect("deadline fault has a scripted clock")
+                        .advance(timeout);
+                    return Err(EngramTransportError::deadline(format!(
+                        "control reply deadline after applying {operation}"
+                    )));
+                }
                 CausalFaultMode::Malformed => return Ok(json!({"decision":"malformed"})),
                 CausalFaultMode::MissingBindingStatus => {
                     reply.as_object_mut().unwrap().remove("status");
@@ -463,11 +479,17 @@ impl CausalRoot {
 #[path = "engram_root_causal_publication.rs"]
 mod causal_publication;
 
+#[path = "engram_closing_checkpoint_retry_transient.rs"]
+mod closing_checkpoint_retry_transient;
+
 #[path = "engram_root_causal_rebind.rs"]
 mod causal_rebind;
 
 #[path = "engram_root_causal_value_free.rs"]
 mod causal_value_free;
+
+#[path = "engram_closing_checkpoint_retry.rs"]
+mod closing_checkpoint_retry;
 
 impl Drop for CausalRoot {
     fn drop(&mut self) {
