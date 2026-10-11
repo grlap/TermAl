@@ -418,7 +418,8 @@ struct EngramTurnCheck {
 struct EngramTurnCheckEnd {
     completed_at: String,
     exit: EngramCommandExit,
-    /// Build ingress/rejection facts, never used as eligible exit references.
+    /// Build, or focused Node Test, ingress/rejection facts, never used as
+    /// eligible exit references.
     build_diagnostic: Option<EngramBuildDiagnostic>,
     /// The runner's result lines (`engram_check_result_lines`).
     result_lines: Vec<String>,
@@ -2123,7 +2124,7 @@ impl AppState {
             .filter(|check| engram_is_focused_node_check(&check.command))
             .map(|check| {
                 if engram_check_command(command).as_ref() != Some(&check.command) {
-                    (EngramCommandExit::Unknown, Vec::new(), false)
+                    (EngramCommandExit::Unknown, Vec::new(), false, None)
                 } else {
                     engram_focused_node_completion(
                         check,
@@ -2317,11 +2318,12 @@ impl AppState {
                 && start.target == check.target
         });
         let mut build_diagnostic = None;
-        let check_exit = if let Some((node_exit, node_lines, node_passed)) =
+        let check_exit = if let Some((node_exit, node_lines, node_passed, node_diagnostic)) =
             node_completion.filter(|_| same_start)
         {
             result_lines = node_lines;
             showed_passing_tests = node_passed;
+            build_diagnostic = node_diagnostic;
             node_exit
         } else if engram_is_focused_node_check(&check.command) {
             result_lines.clear();

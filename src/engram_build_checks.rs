@@ -74,16 +74,25 @@ fn engram_build_toolchain_command(check: &EngramCheckCommand) -> EngramCheckComm
 }
 
 /// Bounded first-rejection categories; no artifact contents enter diagnostics.
+/// `Detached` and `Cwd` are told apart from `Root` for a focused Node Test
+/// only; a Build reports them as `Root`, as it always has
+/// (`EngramBuildDiagnostic::rejected`). `Compound`, `Runner` and `Counts` are
+/// focused Node Test guards a Build never reaches.
 #[derive(Clone, Copy, Debug)]
 enum EngramBuildRejection {
     Owner,
     Root,
+    Detached,
+    Cwd,
     Path,
     Argv,
     Terminal,
     Interval,
     Input,
     Association,
+    Compound,
+    Runner,
+    Counts,
 }
 
 impl EngramBuildRejection {
@@ -91,27 +100,56 @@ impl EngramBuildRejection {
         match self {
             Self::Owner => "owner",
             Self::Root => "root",
+            Self::Detached => "detached",
+            Self::Cwd => "cwd",
             Self::Path => "path",
             Self::Argv => "argv",
             Self::Terminal => "terminal",
             Self::Interval => "interval",
             Self::Input => "input",
             Self::Association => "association",
+            Self::Compound => "compound command",
+            Self::Runner => "runner",
+            Self::Counts => "counts",
         }
     }
 }
 
 /// Runtime ingress is diagnostic evidence, not an eligible stage exit. This
 /// stays separate from `EngramTurnCheckEnd.exit`, which controls credit/refs.
+/// A Build's, or a focused Node Test's whose launcher records were rejected.
 #[derive(Clone, Debug)]
 struct EngramBuildDiagnostic {
+    /// The check kind the summary names: `Build` or `Test`.
+    subject: &'static str,
     observed_exit: Option<i64>,
     rejection: EngramBuildRejection,
 }
 
 impl EngramBuildDiagnostic {
     fn rejected(exit: EngramCommandExit, rejection: EngramBuildRejection) -> Self {
+        let rejection = match rejection {
+            EngramBuildRejection::Detached | EngramBuildRejection::Cwd => {
+                EngramBuildRejection::Root
+            }
+            other => other,
+        };
+        Self::observed("Build", exit, rejection)
+    }
+
+    /// A focused Node Test whose run reported a terminal but whose launcher
+    /// records failed a guard: the guard is named as it is, `detached` too.
+    fn test_rejected(exit: EngramCommandExit, rejection: EngramBuildRejection) -> Self {
+        Self::observed("Test", exit, rejection)
+    }
+
+    fn observed(
+        subject: &'static str,
+        exit: EngramCommandExit,
+        rejection: EngramBuildRejection,
+    ) -> Self {
         Self {
+            subject,
             observed_exit: match exit {
                 EngramCommandExit::Code(code) => Some(code),
                 _ => None,
@@ -128,7 +166,8 @@ impl EngramBuildDiagnostic {
         // Put the discriminating facts before the untrusted command text so
         // neither can be lost to the existing UTF-8 summary budget.
         let prefix = format!(
-            "Build Unknown: {terminal}; {} validation rejected; command: ",
+            "{} Unknown: {terminal}; {} validation rejected; command: ",
+            self.subject,
             self.rejection.label()
         );
         format!(
@@ -212,6 +251,7 @@ fn engram_focused_build_exit(
 /// Shared local launcher facts. Callers own the bounded inner-command grammar
 /// and interpretation of counts; owner, argv, interval and input policy stay
 /// here, unchanged for Build. Reads happen before the lifecycle lock recheck.
+#[cfg(test)]
 fn engram_validated_focused_stage(
     check: &EngramTurnCheck,
     session_id: &str,
@@ -222,8 +262,8 @@ fn engram_validated_focused_stage(
     engram_validated_focused_stage_result(check, session_id, output, exit, build).ok()
 }
 
-/// Same validity policy for both callers. Node keeps its existing Option
-/// boundary; Build retains the first rejected guard for truthful diagnostics.
+/// Same validity policy for both callers. Each retains the first rejected
+/// guard for truthful diagnostics; a Build reports `Detached` as `Root`.
 fn engram_validated_focused_stage_result(
     check: &EngramTurnCheck,
     session_id: &str,
@@ -299,10 +339,14 @@ fn engram_validated_focused_stage_result(
     if !FsPath::new(&root).is_absolute()
         || engram_network_path(&root)
         || engram_exact_path_key(FsPath::new(&root)) != engram_exact_path_key(&check.target.root)
-        || request.get("detached").and_then(Value::as_bool) != Some(false)
         || !engram_launcher_is_focused_request(&request)
     {
         return Err(Rejected::Root);
+    }
+    // Only a request that says it ran in the foreground backs this command's
+    // exit; a record without the field (another launcher's) says nothing.
+    if request.get("detached").and_then(Value::as_bool) != Some(false) {
+        return Err(Rejected::Detached);
     }
     let [requested] = request
         .get("stages")
@@ -373,13 +417,15 @@ fn engram_validated_focused_stage_result(
     {
         return Err(Rejected::Argv);
     }
-    let cwd = text(stage, "cwd").ok_or(Rejected::Root)?;
+    // The stage must say where it ran; a record without it (another
+    // launcher's) cannot place the run in the credited directory.
+    let cwd = text(stage, "cwd").ok_or(Rejected::Cwd)?;
     if !FsPath::new(&cwd).is_absolute()
         || engram_network_path(&cwd)
         || engram_exact_path_key(FsPath::new(&cwd))
             != engram_exact_path_key(&check.target.directory)
     {
-        return Err(Rejected::Root);
+        return Err(Rejected::Cwd);
     }
     let time = |value: &Value, key: &str| {
         text(value, key)

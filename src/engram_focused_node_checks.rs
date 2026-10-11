@@ -80,36 +80,51 @@ fn engram_is_focused_node_check(check: &EngramCheckCommand) -> bool {
 
 /// A matched terminal stage and coherent native-runner counts are both needed.
 /// No counts or positive-looking summary text can rescue unvalidated artifacts.
+/// A rejection whose run reported a terminal keeps that exit and names the
+/// first guard that failed, as a Build's does (`EngramBuildDiagnostic`); the
+/// exit stays out of the check's own, so it earns nothing. Only a run that
+/// reported no terminal at all ends without an exit status.
 fn engram_focused_node_completion(
     check: &EngramTurnCheck,
     session_id: &str,
     output: &str,
     exit: EngramCommandExit,
-) -> (EngramCommandExit, Vec<String>, bool) {
+) -> (
+    EngramCommandExit,
+    Vec<String>,
+    bool,
+    Option<EngramBuildDiagnostic>,
+) {
+    use EngramBuildRejection as Rejected;
     let validated = || {
+        // A pipe, list, redirection or substitution, as TermAl reads the line,
+        // could mask the launcher's exit, so the exit cannot be the test's.
         if !check.command.simple {
-            return None;
+            return Err(Rejected::Compound);
         }
-        let words = engram_shell_words(&check.command.normalized)?;
-        let node = engram_focused_node_words(&check.command.program, &words[1..])?;
+        let words = engram_shell_words(&check.command.normalized).ok_or(Rejected::Argv)?;
+        let node = engram_focused_node_words(&check.command.program, &words[1..])
+            .ok_or(Rejected::Argv)?;
         let (native, stage) =
-            engram_validated_focused_stage(check, session_id, output, exit, &node)?;
-        let counts = stage.get("tests")?;
-        if counts.get("runner")?.as_str()? != "node-test" {
-            return None;
+            engram_validated_focused_stage_result(check, session_id, output, exit, &node)?;
+        let counts = stage
+            .get("tests")
+            .filter(|counts| counts.is_object())
+            .ok_or(Rejected::Counts)?;
+        if counts.get("runner").and_then(Value::as_str) != Some("node-test") {
+            return Err(Rejected::Runner);
         }
-        let passed = counts.get("passed")?.as_u64()?;
-        let failed = counts.get("failed")?.as_u64()?;
-        let ignored = counts.get("ignored")?.as_u64()?;
-        let executed = passed.checked_add(failed)?;
-        executed.checked_add(ignored)?;
+        let count = |name: &str| counts.get(name).and_then(Value::as_u64).ok_or(Rejected::Counts);
+        let (passed, failed, ignored) = (count("passed")?, count("failed")?, count("ignored")?);
+        let executed = passed.checked_add(failed).ok_or(Rejected::Counts)?;
+        executed.checked_add(ignored).ok_or(Rejected::Counts)?;
         if executed == 0 || (native == 0) != (failed == 0) {
-            return None;
+            return Err(Rejected::Counts);
         }
-        Some((native, passed, failed, ignored))
+        Ok((native, passed, failed, ignored))
     };
     match validated() {
-        Some((native, passed, failed, ignored)) => (
+        Ok((native, passed, failed, ignored)) => (
             EngramCommandExit::Code(native),
             vec![
                 // Generated only from the validated stage, so the existing
@@ -120,14 +135,29 @@ fn engram_focused_node_completion(
                 ),
             ],
             native == 0 && passed > 0,
+            None,
         ),
-        None => (
+        Err(rejection)
+            if matches!(
+                exit,
+                EngramCommandExit::Code(_) | EngramCommandExit::ReportedSuccess
+            ) =>
+        {
+            (
+                EngramCommandExit::Unknown,
+                Vec::new(),
+                false,
+                Some(EngramBuildDiagnostic::test_rejected(exit, rejection)),
+            )
+        }
+        Err(_) => (
             EngramCommandExit::Unknown,
             vec![
                 "focused Node Test evidence unavailable or inconsistent; no passing credit"
                     .to_owned(),
             ],
             false,
+            None,
         ),
     }
 }

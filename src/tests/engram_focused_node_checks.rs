@@ -222,12 +222,24 @@ impl FocusedNodeFixture {
     }
 
     fn with_one_call(label: &str, native: i64, one_call: bool) -> Self {
+        let args = [
+            "--test",
+            "--test-name-pattern",
+            "selected case",
+            "fixture.test.mjs",
+        ];
+        Self::with_test(label, native, one_call, NODE_TEST, &args)
+    }
+
+    /// `test` run as a plain line, or in the one-call form, with matched
+    /// launcher records whose stage ran `node` with `args`.
+    fn with_test(label: &str, native: i64, one_call: bool, test: &str, args: &[&str]) -> Self {
         let _placement = TestTempRootDirectoryScope::repository_local();
         let turn = CheckedTurn::start(label, true);
         let command = if one_call {
-            format!("pushd \"{}\" && {NODE_TEST}", turn.root.display())
+            format!("pushd \"{}\" && {test}", turn.root.display())
         } else {
-            NODE_TEST.to_owned()
+            test.to_owned()
         };
         turn.recorder()
             .command_started_in(
@@ -245,19 +257,15 @@ impl FocusedNodeFixture {
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let fingerprint = "f".repeat(64);
         let state = if native == 0 { "passed" } else { "failed" };
-        let args = [
-            "--test",
-            "--test-name-pattern",
-            "selected case",
-            "fixture.test.mjs",
-        ];
         let request = json!({"runId":run,"root":turn.root,"owner":turn.session_id,
             "started":now,"full":false,"detached":false,"expectedFingerprint":fingerprint,
             "stages":[{"name":"focused","command":"node","args":args}]});
+        let mut stage_command = vec![json!(turn.root.join("node.exe"))];
+        stage_command.extend(args.iter().map(|arg| json!(arg)));
         let results = json!({"runId":run,"owner":turn.session_id,"started":now,"ended":now,
             "state":state,"exitCode":native,"expectedFingerprint":fingerprint,"before":fingerprint,"after":fingerprint,
             "stages":[{"name":"focused","state":state,"code":native,"started":now,"ended":now,
-                "cwd":turn.root,"command":[turn.root.join("node.exe"),"--test","--test-name-pattern","selected case","fixture.test.mjs"],
+                "cwd":turn.root,"command":stage_command,
                 "tests":{"runner":"node-test","passed":u32::from(native == 0),"failed":u32::from(native != 0),"ignored":0}}]});
         let output = format!(
             "{} {run} exit={native}\nfocused: {state}\nresults: {}\n",
@@ -546,6 +554,117 @@ fn engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts() {
             one_node_test(&checkpoint, "unknown");
         }
     }
+}
+
+/// A launcher whose records lack TermAl's provenance fields (another
+/// repository's launcher, for one) is refused, but truthfully: the observed
+/// native exit is kept in the summary, the guard that rejected is named, and
+/// the exit stays ineligible as a reference, so no credit follows.
+#[test]
+fn engram_node_records_without_provenance_fields_are_refused_with_the_native_exit() {
+    type Change = fn(&mut FocusedNodeFixture);
+    fn drop_detached(f: &mut FocusedNodeFixture) {
+        f.request.as_object_mut().unwrap().remove("detached");
+    }
+    fn drop_runner(f: &mut FocusedNodeFixture) {
+        let tests = &mut f.results["stages"][0]["tests"];
+        tests.as_object_mut().unwrap().remove("runner");
+        tests["runners"] = json!(1);
+    }
+    fn drop_stage_cwd(f: &mut FocusedNodeFixture) {
+        f.results["stages"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("cwd");
+    }
+    let cases: &[(&str, &str, Change)] = &[
+        ("no-detached", "detached", drop_detached),
+        ("no-runner", "runner", drop_runner),
+        // Both missing, as another launcher writes them: the first guard.
+        ("foreign-launcher", "detached", |f| {
+            drop_detached(f);
+            drop_runner(f);
+        }),
+        // Both fields present and the other launcher's extra keys, but no
+        // stage `cwd`: what that launcher writes once it adds the two.
+        ("foreign-launcher-with-fields", "cwd", |f| {
+            drop_stage_cwd(f);
+            let tests = &mut f.results["stages"][0]["tests"];
+            for (key, value) in [
+                ("executed", 1),
+                ("runners", 1),
+                ("filteredOut", 0),
+                ("failures", 0),
+            ] {
+                tests[key] = json!(value);
+            }
+            f.results["stages"][0]["diagnostics"] = json!({"text": "", "truncated": false});
+            f.request["stages"][0]["kind"] = json!("test");
+            f.request["requiredBinaryEnv"] = json!([]);
+        }),
+        ("no-stage-cwd", "cwd", drop_stage_cwd),
+    ];
+    for (label, guard, change) in cases {
+        for native in [0, 1] {
+            let mut fixture =
+                FocusedNodeFixture::new(&format!("node-provenance-{label}-{native}"), native);
+            change(&mut fixture);
+            assert_truthful_refusal(
+                &fixture.finish(EngramCommandExit::Code(native)),
+                native,
+                guard,
+            );
+        }
+    }
+}
+
+/// A quoted `|` in a name pattern makes the line compound as TermAl reads it
+/// today, so its exit cannot be the test's own. Even with complete launcher
+/// provenance the run is refused, and the refusal says why.
+#[test]
+fn engram_node_compound_command_is_refused_with_the_native_exit() {
+    let test = "node scripts/test-launcher.mjs focused -- node --test --test-name-pattern=\"a|b\" fixture.test.mjs";
+    let args = ["--test", "--test-name-pattern=a|b", "fixture.test.mjs"];
+    for native in [0, 1] {
+        let fixture = FocusedNodeFixture::with_test(
+            &format!("node-compound-{native}"),
+            native,
+            false,
+            test,
+            &args,
+        );
+        assert!(!engram_check_command(&fixture.command).unwrap().simple);
+        assert_truthful_refusal(
+            &fixture.finish(EngramCommandExit::Code(native)),
+            native,
+            "compound command",
+        );
+    }
+}
+
+/// One unknown Test whose summary keeps `native` and names `guard`, and whose
+/// exit is not an eligible reference.
+fn assert_truthful_refusal(checkpoint: &Value, native: i64, guard: &str) {
+    one_node_test(checkpoint, "unknown");
+    let row = &checkpoint["verification_evidence"][0];
+    let text = row["summary"].as_str().expect("one Test summary");
+    assert!(
+        text.contains(&format!("observed native exit {native}")),
+        "the refusal must keep the native exit: {text}"
+    );
+    assert!(
+        text.contains(&format!("{guard} validation rejected")),
+        "the refusal must name the {guard} guard: {text}"
+    );
+    assert!(!text.contains("without an exit status"), "{text}");
+    assert!(text.len() <= ENGRAM_CHECK_SUMMARY_MAX_BYTES, "{text}");
+    assert!(
+        row.get("refs").is_none_or(|refs| !refs
+            .as_array()
+            .expect("present refs must be an array")
+            .contains(&json!(format!("exit:{native}")))),
+        "a refused run's exit is not eligible evidence: {checkpoint:#}"
+    );
 }
 
 #[test]
