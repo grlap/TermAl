@@ -2301,6 +2301,41 @@ fn the_test_run_index_tick_runs_no_automatic_retry() {
     assert_eq!(abort_retry::prompts_received(&receiver), 1);
 }
 
+/// A retry record's durable-acknowledgement fence is measured on the
+/// state's budget clock, as every abort, admission and bind retry reads it:
+/// with a writer that never answers, the fence is still pending one
+/// millisecond before its deadline on the scripted clock and expires exactly
+/// at it, so the next step asks for a fresh acknowledgement. No real time
+/// passes, so the outcome depends on the scripted clock alone.
+#[test]
+fn a_retry_record_acknowledgement_fence_expires_on_the_budget_clock() {
+    let (mut state, session, _receiver, _transport) = root_fixture([]);
+    state.shutdown_persist_blocking();
+    // A writer that takes the fence and never answers it.
+    let (persist_tx, _unanswered) = mpsc::channel();
+    state.persist_tx = persist_tx;
+    let clock = state.engram_budget_clock();
+    let mut inner = state.inner.lock().unwrap();
+    let index = inner.find_session_index(&session).unwrap();
+    state.request_engram_abort_acknowledgement_locked(&mut inner, index);
+    assert!(
+        inner.sessions[index].engram.abort_retry_fence.is_some(),
+        "the acknowledgement was asked of the writer"
+    );
+    clock.advance(ENGRAM_ABORT_SETTLEMENT_FENCE - Duration::from_millis(1));
+    assert_eq!(
+        engram_retry_acknowledgement_step(&mut inner.sessions[index], |_| {}),
+        Some(EngramAbortRetryStep::Wait),
+        "still pending just before its deadline"
+    );
+    clock.advance(Duration::from_millis(1));
+    assert_eq!(
+        engram_retry_acknowledgement_step(&mut inner.sessions[index], |_| {}),
+        Some(EngramAbortRetryStep::Acknowledge),
+        "expired exactly at its deadline on the budget clock: a fresh acknowledgement is asked for"
+    );
+}
+
 #[path = "engram_begin_unknown_recovery.rs"]
 mod begin_unknown_recovery;
 

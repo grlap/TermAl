@@ -69,9 +69,10 @@ fn retry_when_due(fixture: &CausalRoot) {
         clock.advance(left + Duration::from_millis(1));
     }
     if let Some(waiter) = waiter {
+        // Bounded on the fence's own clock, as its deadline is.
         waiter
             .0
-            .wait_until(std::time::Instant::now() + crate::tests::phase_sync::DEADLOCK_GUARD);
+            .wait_until(waiter.0.now() + crate::tests::phase_sync::DEADLOCK_GUARD);
     }
     let at = chrono::DateTime::parse_from_rfc3339(&due)
         .unwrap()

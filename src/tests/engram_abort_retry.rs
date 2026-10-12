@@ -167,9 +167,8 @@ pub(super) fn await_settlement_acknowledgement(state: &AppState, session: &str) 
             .clone()
     };
     if let Some(waiter) = waiter {
-        waiter
-            .0
-            .wait_until(std::time::Instant::now() + phase_sync::DEADLOCK_GUARD);
+        // Bounded on the fence's own clock, as its deadline is.
+        waiter.0.wait_until(waiter.0.now() + phase_sync::DEADLOCK_GUARD);
     }
 }
 

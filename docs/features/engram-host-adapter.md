@@ -2315,7 +2315,11 @@ tick are shared with every automatic retry, `src/engram_retry_schedule.rs`):
    is acknowledged by the persistence writer against the stored record. A
    failed acknowledgement is asked for again on the next tick; nothing is
    admitted before it succeeds. The acknowledgement is then saved on the
-   abort record itself.
+   abort record itself. Its 20-second wait (`ENGRAM_ABORT_SETTLEMENT_FENCE`,
+   for abort, admission and bind retry records alike) is measured, and
+   polled by the tick, on the state's budget clock: real time in production,
+   and a fixture's scripted clock alone in tests, so no test's outcome
+   depends on real elapsed time.
 3. Once acknowledged, the head stays interrupted, and so retained (delegation
    polling, mailbox coalescing and cancellation keep treating it as held), but
    it projects as a retryable hold rather than an unknown delivery, and only

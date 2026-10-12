@@ -534,7 +534,7 @@ fn retry_live_bind_without_resume(fixture: &LiveRootFixture) {
         assert!(matches!(
             waiter
                 .0
-                .wait_until(std::time::Instant::now() + phase_sync::DEADLOCK_GUARD),
+                .wait_until(waiter.0.now() + phase_sync::DEADLOCK_GUARD),
             Some(Ok(()))
         ));
     }

@@ -357,6 +357,12 @@ struct PersistFence {
     completion: Arc<PersistFenceCompletion>,
     on_acknowledged: Mutex<Option<PersistFenceAcknowledgement>>,
     on_resolved: Mutex<Option<PersistFenceResolution>>,
+    /// The fence acknowledges a retry record, which the retry tick polls,
+    /// rather than an admission's own durability, which its dispatch waits
+    /// on. The writer treats both alike; a test writer tells them apart by
+    /// this, not by the clock both are measured on.
+    #[cfg_attr(not(test), allow(dead_code))]
+    retry_acknowledgement: bool,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -392,9 +398,17 @@ impl PersistFence {
                 completion: completion.clone(),
                 on_acknowledged: Mutex::new(None),
                 on_resolved: Mutex::new(None),
+                retry_acknowledgement: false,
             },
             PersistFenceWaiter { completion },
         )
+    }
+
+    /// Marks the fence as a retry record's acknowledgement
+    /// (`retry_acknowledgement`).
+    fn retry_acknowledgement(mut self) -> Self {
+        self.retry_acknowledgement = true;
+        self
     }
 
     /// A completion hook for a caller that does not wait. It adds no timer or
@@ -464,6 +478,12 @@ impl Drop for PersistFence {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl PersistFenceWaiter {
+    /// Now, on the clock this fence's deadline is measured on: a caller that
+    /// polls the fence reads it there, never on another clock.
+    fn now(&self) -> std::time::Instant {
+        self.completion.clock.now()
+    }
+
     /// Blocking boundary: the caller must release StateInner before entering.
     fn wait(self) -> PersistFenceResult {
         #[cfg(test)]

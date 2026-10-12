@@ -328,12 +328,16 @@ impl AcknowledgingWriter {
                 let PersistRequest::Fence(fence) = request else {
                     continue;
                 };
-                // Only a dispatch's own admission fence waits on the
-                // scripted clock (a retry record's runs on the real one), and
-                // a dispatch makes it only after the Begin call returned, so
-                // an armed barrier lands after the receipt, before delivery.
+                // A dispatch's own admission fence, which its dispatch waits
+                // on, as opposed to a retry record's acknowledgement, which
+                // the tick polls. Both run on the state's budget clock, so the
+                // fence's purpose tells them apart, not its clock.
+                let dispatch_fence = !fence.retry_acknowledgement;
+                // A dispatch makes its admission fence only after the Begin
+                // call returned, so an armed barrier lands after the receipt,
+                // before delivery.
                 if matches!(fence.target, PersistFenceTarget::EngramAdmission { .. })
-                    && matches!(fence.completion.clock, EngramBudgetClock::Scripted(_))
+                    && dispatch_fence
                 {
                     log.cross_fence_barrier();
                 }
@@ -343,15 +347,13 @@ impl AcknowledgingWriter {
                 };
                 let carries_prepared = content.as_ref().and_then(prepared_begin).is_some();
                 // A retry record's acknowledgement fence carries the same
-                // admission content on the real clock, and nobody waits on it
-                // on the scripted one: the two-step variant scripts only the
-                // dispatch's own preparation fences, which run on that clock.
-                let scripted_wait = matches!(fence.completion.clock, EngramBudgetClock::Scripted(_));
+                // admission content, and nobody waits on it: the two-step
+                // variant scripts only the dispatch's own preparation fences.
                 let scripted_here = !matches!(
                     prepared_fence,
                     Some(PreparedFence::DeadlineThenAcknowledgeLate(_))
                         | Some(PreparedFence::FailSequence(_))
-                ) || scripted_wait;
+                ) || dispatch_fence;
                 if carries_prepared && faults_left > 0 && scripted_here {
                     faults_left -= 1;
                     writer_injected.store(true, Ordering::SeqCst);

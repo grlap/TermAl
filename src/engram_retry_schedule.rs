@@ -129,7 +129,8 @@ fn engram_retry_acknowledgement_step(
             .engram
             .abort_retry_fence
             .as_ref()
-            .map(|waiter| waiter.0.wait_until(std::time::Instant::now()))
+            // Polled on the clock its deadline is measured on.
+            .map(|waiter| waiter.0.wait_until(waiter.0.now()))
             .unwrap_or(Some(Err(PersistFenceError::Deadline)))
     };
     Some(match saved {
@@ -291,14 +292,20 @@ impl AppState {
     /// the admission content `index`'s session holds now, retry record
     /// included, and keeps the waiter for the tick.
     fn request_engram_abort_acknowledgement_locked(&self, inner: &mut StateInner, index: usize) {
+        // Measured on the state's budget clock, as the retry's own budget
+        // is: real time in production, and a fixture's scripted clock alone
+        // in tests.
+        let clock = inner.engram_budget_clock_snapshot();
         let record = &mut inner.sessions[index];
-        let (fence, waiter) = PersistFence::new(
+        let (fence, waiter) = PersistFence::new_with_clock(
             PersistFenceTarget::EngramAdmission {
                 session_id: record.session.id.clone(),
                 content: engram_admission_live_content(record),
             },
-            std::time::Instant::now() + ENGRAM_ABORT_SETTLEMENT_FENCE,
+            clock.now() + ENGRAM_ABORT_SETTLEMENT_FENCE,
+            clock,
         );
+        let fence = fence.retry_acknowledgement();
         if self
             .persist_tx
             .send(PersistRequest::Fence(Box::new(fence)))
