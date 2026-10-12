@@ -4196,6 +4196,7 @@ fn each_settlement_candidate_is_judged_by_its_own_closure() {
             build_diagnostic: None,
             result_lines: Vec::new(),
             showed_passing_tests: true,
+            focused_stage_line_missing: false,
             end_basis,
         };
         EngramResolvedCheck {

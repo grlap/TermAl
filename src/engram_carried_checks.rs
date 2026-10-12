@@ -1054,6 +1054,8 @@ fn engram_settle_carried_check(
         build_diagnostic: None,
         result_lines: engram_carried_result_lines(&verdict, directory),
         showed_passing_tests: verdict.passed,
+        // A carried run is a full gate, never a focused run.
+        focused_stage_line_missing: false,
         end_basis,
         declared: None,
     };

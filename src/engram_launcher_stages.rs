@@ -138,6 +138,28 @@ fn engram_launcher_is_focused_request(request: &Value) -> bool {
         })
 }
 
+/// Whether a focused launcher run's own records back its pass
+/// (`launcher_test_stages` holds its backed `focused` stage) while its
+/// summary, `result_lines`, has no `focused:` stage line, which
+/// `engram_check_showed_passing_tests` needs before crediting it. That is a
+/// launcher writing these records but not this summary line (another
+/// project's launcher), not a run that passed nothing, so its holder is told
+/// what is missing instead of that no test passed.
+fn engram_focused_stage_line_missing(
+    check: &EngramCheckCommand,
+    result_lines: &[String],
+    launcher_test_stages: &[String],
+) -> bool {
+    check.program == "node"
+        && engram_shell_words(engram_first_command(&check.normalized))
+            .is_some_and(|words| words.get(2).map(String::as_str) == Some("focused"))
+        && launcher_test_stages == [ENGRAM_LAUNCHER_FOCUSED_STAGE]
+        && !result_lines.iter().any(|line| {
+            line.strip_prefix(ENGRAM_LAUNCHER_FOCUSED_STAGE)
+                .is_some_and(|rest| rest.starts_with(": "))
+        })
+}
+
 /// Whether a focused run's `results` record backs a pass: the run passed with
 /// exit 0, its one `focused` stage passed with exit 0, and the counts the
 /// launcher read from the wrapped runner show at least one test passed and

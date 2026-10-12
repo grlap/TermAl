@@ -501,6 +501,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
             build_diagnostic: None,
             result_lines: vec!["test result: ok. 0 passed; 0 failed".to_owned()],
             showed_passing_tests: false,
+            focused_stage_line_missing: false,
             end_basis: engram_ready_basis_capture(),
         }),
     };
@@ -1437,6 +1438,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
             build_diagnostic: None,
             result_lines: Vec::new(),
             showed_passing_tests: true,
+            focused_stage_line_missing: false,
             end_basis,
         }),
     };
@@ -1501,6 +1503,7 @@ pub(super) fn finished_check(
             build_diagnostic: None,
             result_lines: Vec::new(),
             showed_passing_tests: true,
+            focused_stage_line_missing: false,
             end_basis,
         }),
     }

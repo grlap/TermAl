@@ -286,3 +286,6 @@ fn a_carried_full_gate_is_judged_by_the_same_rule() {
 
 #[path = "engram_focused_launcher_credit.rs"]
 mod focused_credit;
+
+#[path = "engram_focused_stage_line_notice.rs"]
+mod focused_stage_line_notice;

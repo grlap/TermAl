@@ -427,6 +427,9 @@ struct EngramTurnCheckEnd {
     /// (`engram_check_showed_passing_tests`); without that a check cannot
     /// claim success.
     showed_passing_tests: bool,
+    /// A focused launcher run whose records back a pass but whose summary
+    /// has no `focused:` stage line (`engram_focused_stage_line_missing`).
+    focused_stage_line_missing: bool,
     end_basis: Arc<EngramBasisCapture>,
     /// A declared check's result, judged from its artifact on its own thread
     /// as its command ended (`engram_declared_result`); it decides the
@@ -460,6 +463,9 @@ enum EngramWithheldReason {
     Overlapped,
     /// Its output showed no passing test.
     NoPassingTest,
+    /// A focused launcher run whose records back a pass, but whose summary
+    /// has no `focused:` stage line to credit it by.
+    FocusedStageLineMissing,
     /// The runtime omitted output and the supplied part showed no pass.
     RuntimeOutputCut,
     /// Claude work with no verified completion restricted it.
@@ -542,6 +548,8 @@ fn engram_withhold_unjudged_successes(
             } else if kept.check.command.kind == EngramVerificationKind::Test
                 && kept.check.runtime_output_cut {
                 EngramWithheldReason::RuntimeOutputCut
+            } else if kept.end.focused_stage_line_missing {
+                EngramWithheldReason::FocusedStageLineMissing
             } else {
                 EngramWithheldReason::NoPassingTest
             },
@@ -581,6 +589,16 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
             withheld.program, withheld.kind.label(), withheld.fingerprint
         );
     }
+    if withheld.reason == EngramWithheldReason::FocusedStageLineMissing {
+        return format!(
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned \
+             no credit and was not recorded: its launcher's run records back a pass, but its \
+             summary has no `focused: passed` stage line, which TermAl reads before it credits a \
+             focused launcher run. Running it again does not change that; the launcher must \
+             print that line.",
+            withheld.program, withheld.kind.label(), withheld.fingerprint
+        );
+    }
     if withheld.reason == EngramWithheldReason::Declared {
         return format!(
             "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} Declared test command earned no credit and was \
@@ -601,6 +619,7 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
         EngramWithheldReason::OutstandingClaudeWork => unreachable!("told above"),
         EngramWithheldReason::RuntimeOutputCut => unreachable!("told above"),
         EngramWithheldReason::Declared => unreachable!("told above"),
+        EngramWithheldReason::FocusedStageLineMissing => unreachable!("told above"),
     };
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned no \
@@ -2368,6 +2387,13 @@ impl AppState {
                     engram_declared_result(&binding, check_exit)
                 })
             });
+        // Read from the lines this end keeps, so it names only what they show.
+        let focused_stage_line_missing = !showed_passing_tests
+            && engram_focused_stage_line_missing(
+                &check.command,
+                &result_lines,
+                &launcher_test_stages,
+            );
         check.ended_at = Some(engram_interference_tick());
         check.runtime_output_cut = runtime_output_cut;
         check.end = Some(EngramTurnCheckEnd {
@@ -2376,6 +2402,7 @@ impl AppState {
             build_diagnostic,
             result_lines,
             showed_passing_tests,
+            focused_stage_line_missing,
             end_basis,
             declared,
         });
