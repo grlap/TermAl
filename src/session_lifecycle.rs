@@ -416,7 +416,9 @@ impl AppState {
     /// failure leaves the session paused and a later Resume retries the same
     /// head instead of finding an unblocked idle queue that nobody drains.
     /// Only an empty paused queue is released directly, because there is
-    /// nothing to promote. Idempotent on an unpaused session. Remote sessions
+    /// nothing to promote. A head still waiting for its durability
+    /// acknowledgement refuses the Resume with a conflict that says why, and
+    /// the pause stays. Idempotent on an unpaused session. Remote sessions
     /// forward to their owning server so the latch stays authoritative there.
     fn resume_session_queue(
         &self,
@@ -473,7 +475,7 @@ impl AppState {
         }
         self.reconcile_retired_source_observations(session_id).map_err(|error|
             ApiError::conflict(format!("Engram source observation recovery remains withheld: {error}")))?;
-        {
+        let checked_head = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -484,6 +486,14 @@ impl AppState {
             if !record.orchestrator_auto_dispatch_blocked {
                 return Ok(None);
             }
+            // A head still waiting for its durability acknowledgement cannot
+            // start: the Resume is refused with the reason and the pause stays.
+            // A bound Resume whose head is gone is superseded by the drain.
+            if owner.as_ref().is_none_or(|owner| owner.matches(record))
+                && let Some(refusal) = queued_head_durability_resume_refusal(record)
+            {
+                return Err(ApiError::conflict(refusal));
+            }
             if record.queued_prompts.is_empty() {
                 record.set_auto_dispatch_blocked(false);
                 inner.stamp_session_at_index(index);
@@ -492,7 +502,11 @@ impl AppState {
                 })?;
                 return Ok(None);
             }
-        }
+            record
+                .queued_prompts
+                .front()
+                .map(|head| head.pending_prompt.id.clone())
+        };
         // A begin-preparation hold, where nothing was sent, is admitted afresh
         // rather than refused as interrupted (`engram_begin_preparation_retry.rs`).
         // The release moves the head to a new dispatch generation, so the
@@ -501,16 +515,26 @@ impl AppState {
         // exposes meanwhile is never admitted in the released head's place.
         let released = self.release_engram_begin_preparation_hold_for_resume(session_id, owner.as_ref())?;
         let owner = released.or(owner);
-        let dispatch = match owner {
+        let dispatch = self.drain_resumed_queue(session_id, owner.clone())?;
+        let dispatch =
+            self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
+        Ok(dispatch.map(|dispatch| deliver_turn_dispatch(self, dispatch)))
+    }
+
+    /// One drain of a resumed queue: bound to `owner` when given, otherwise
+    /// to the head the drain finds first.
+    fn drain_resumed_queue(
+        &self,
+        session_id: &str,
+        owner: Option<EngramQueuedAdmissionOwner>,
+    ) -> std::result::Result<Option<TurnDispatch>, ApiError> {
+        match owner {
             Some(owner) => self.dispatch_next_queued_turn_for_resume(session_id, owner),
             None => self.dispatch_next_queued_turn(session_id, true),
         }
         .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to dispatch the resumed queue head: {err:#}"
-                ))
-            })?;
-        Ok(dispatch.map(|dispatch| deliver_turn_dispatch(self, dispatch)))
+            ApiError::internal(format!("failed to dispatch the resumed queue head: {err:#}"))
+        })
     }
 
     /// Public entry point for stopping a session's current turn while

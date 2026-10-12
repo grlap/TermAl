@@ -38,6 +38,14 @@ enum PersistFenceTarget {
     /// The test-run card epoch, which must be durable before any card is
     /// created (`test_run_cards.rs`).
     TestRunCardsEpoch(String),
+    /// A held queued prompt: its hold's nonce and the exact entry, both read
+    /// back from the durable session row (`queued_prompt_durability.rs`).
+    #[cfg_attr(not(test), allow(dead_code))]
+    QueuedPromptDurability {
+        session_id: String,
+        prompt_id: String,
+        content: Value,
+    },
 }
 
 impl PersistFenceTarget {
@@ -48,7 +56,7 @@ impl PersistFenceTarget {
             // Only read-back on the writer connection proves this content.
             Self::EngramCausalCard { .. } | Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
                 | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
-                | Self::EngramSourceRemoval { .. } => false,
+                | Self::EngramSourceRemoval { .. } | Self::QueuedPromptDurability { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
                 .as_deref()
@@ -203,6 +211,23 @@ impl PersistFenceTarget {
             // and the card epoch. Absence/mismatch there is already
             // conclusive for this tick.
             Self::WaitRegistration(_) | Self::TestRunCardsEpoch(_) => Ok(false),
+            // The hold's nonce and the exact queued entry must both be in the
+            // committed row; a removed or replaced entry never matches.
+            Self::QueuedPromptDurability { session_id, prompt_id, content } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
+                    == Some(content))
+            }
         }
     }
 }
@@ -323,10 +348,15 @@ impl PersistFenceCompletion {
 /// the completion mutex is released. Never on a failure, Deadline or Drop.
 type PersistFenceAcknowledgement = Box<dyn FnOnce() + Send>;
 
+/// Runs once, on the thread that resolves the fence, with its final result:
+/// an acknowledgement, a failure, Deadline, or WorkerStopped on drop.
+type PersistFenceResolution = Box<dyn FnOnce(PersistFenceResult) + Send>;
+
 struct PersistFence {
     target: PersistFenceTarget,
     completion: Arc<PersistFenceCompletion>,
     on_acknowledged: Mutex<Option<PersistFenceAcknowledgement>>,
+    on_resolved: Mutex<Option<PersistFenceResolution>>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -361,6 +391,7 @@ impl PersistFence {
                 target,
                 completion: completion.clone(),
                 on_acknowledged: Mutex::new(None),
+                on_resolved: Mutex::new(None),
             },
             PersistFenceWaiter { completion },
         )
@@ -371,6 +402,17 @@ impl PersistFence {
     /// its drop, and the hook runs only for the writer's exact ACK.
     fn on_acknowledged(self, hook: impl FnOnce() + Send + 'static) -> Self {
         if let Ok(mut slot) = self.on_acknowledged.lock() {
+            *slot = Some(Box::new(hook));
+        }
+        self
+    }
+
+    /// A completion hook for a caller that must also learn of a failure. Like
+    /// `on_acknowledged` it adds no timer or retry, and it runs at most once,
+    /// with the result the fence resolved to.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn on_resolved(self, hook: impl FnOnce(PersistFenceResult) + Send + 'static) -> Self {
+        if let Ok(mut slot) = self.on_resolved.lock() {
             *slot = Some(Box::new(hook));
         }
         self
@@ -389,6 +431,24 @@ impl PersistFence {
                 .and_then(|mut slot| slot.take());
             if let Some(hook) = hook {
                 hook();
+            }
+        }
+        let resolution = self
+            .on_resolved
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+        if let Some(hook) = resolution {
+            // The fence's settled result, never the argument of a later call:
+            // a terminal result does not change.
+            let settled = self
+                .completion
+                .result
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone());
+            if let Some(settled) = settled {
+                hook(settled);
             }
         }
     }

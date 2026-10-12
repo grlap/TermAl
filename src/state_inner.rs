@@ -149,6 +149,7 @@ impl StateInner {
             pending_acp_approval_order: VecDeque::new(),
             queued_prompts: VecDeque::new(),
             queued_peer_messages: HashMap::new(),
+            queued_prompt_durability_holds: BTreeMap::new(),
             message_start_index: 0,
             message_positions: HashMap::new(),
             remote_id: None,

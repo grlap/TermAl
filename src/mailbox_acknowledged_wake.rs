@@ -151,10 +151,15 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(false);
             };
-            inner.sessions[index]
+            // An entry enqueued with a durability prerequisite keeps the
+            // content proven durable: it is never rewritten as a continuation.
+            let record = &inner.sessions[index];
+            record
                 .queued_prompts
                 .iter()
-                .filter(|queued| !queued.is_engram_retained())
+                .filter(|queued| {
+                    !queued.is_engram_retained() && !queued_prompt_kept_standalone(record, queued)
+                })
                 .filter_map(|queued| {
                     let mailbox = queued.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
                     (mailbox.mailbox_id == mailbox_id && mailbox.sequence <= processed_through)
@@ -188,9 +193,11 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
+            let durability_holds = &record.queued_prompt_durability_holds;
             let Some(queued) = record.queued_prompts.iter_mut().find(|queued| {
                 queued.pending_prompt.id == prompt_id
                     && !queued.is_engram_retained()
+                    && !durability_holds.contains_key(&queued.pending_prompt.id)
                     && queued
                         .pending_prompt
                         .source

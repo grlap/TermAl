@@ -230,6 +230,7 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
     record
         .queued_peer_messages
         .retain(|prompt_id, _| live_prompt_ids.contains(&prompt_id.as_str()));
+    prune_queued_prompt_durability_holds(record);
     record.session.pending_prompts = projected_pending_prompts(record);
 }
 
@@ -597,7 +598,13 @@ fn append_to_tail_peer_message_batch(
     source: QueuedPromptSource,
 ) -> bool {
     let Some((tail_id, tail_prompt)) = record.queued_prompts.back().and_then(|queued| {
-        (queued.source == source && queued.attachments.is_empty() && !queued.is_engram_retained())
+        // A tail enqueued with a durability prerequisite keeps the exact
+        // content that was (or will be) proven durable while it is queued
+        // (queued_prompt_durability.rs).
+        (queued.source == source
+            && queued.attachments.is_empty()
+            && !queued.is_engram_retained()
+            && !queued_prompt_kept_standalone(record, queued))
             .then(|| {
                 (
                     queued.pending_prompt.id.clone(),
@@ -691,6 +698,7 @@ fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
         .queued_prompts
         .front()
         .is_some_and(QueuedPromptRecord::is_engram_retained)
+        || queued_head_held_for_durability(record)
     {
         return;
     }

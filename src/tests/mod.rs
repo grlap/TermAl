@@ -106,6 +106,7 @@ mod peer_messages;
 mod persist;
 mod persist_delta;
 mod persist_fence;
+mod queued_prompt_durability;
 mod project_creation_races;
 mod project_digest;
 mod projects;

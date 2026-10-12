@@ -658,6 +658,7 @@ fn push_remote_proxy_session_record(
         pending_acp_approval_order: VecDeque::new(),
         queued_prompts: VecDeque::new(),
         queued_peer_messages: HashMap::new(),
+        queued_prompt_durability_holds: BTreeMap::new(),
         message_start_index: if session.messages_loaded {
             0
         } else {

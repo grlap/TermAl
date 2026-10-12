@@ -409,6 +409,10 @@ struct PersistedSessionRecord {
     queued_prompts: VecDeque<QueuedPromptRecord>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     queued_peer_messages: HashMap<String, Vec<PendingPrompt>>,
+    /// Written so a content fence can prove the exact held entry is durable.
+    /// Read back, an entry's content is durable, so loading clears them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -551,6 +555,7 @@ impl PersistedSessionRecord {
             external_session_id: record.external_session_id.clone(),
             queued_prompts: record.queued_prompts.clone(),
             queued_peer_messages: record.queued_peer_messages.clone(),
+            queued_prompt_durability_holds: record.queued_prompt_durability_holds.clone(),
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
@@ -612,6 +617,23 @@ impl PersistedSessionRecord {
             .queued_prompts
             .iter()
             .any(QueuedPromptRecord::has_engram_intent);
+        // Read back from the durable row, every held entry's content is
+        // durable: each hold loads acknowledged, so it holds nothing back and
+        // only keeps its still-queued entry standalone.
+        let queued_prompt_durability_holds = self
+            .queued_prompt_durability_holds
+            .into_iter()
+            .filter(|(prompt_id, _)| {
+                self.queued_prompts
+                    .iter()
+                    .any(|queued| queued.pending_prompt.id == *prompt_id)
+            })
+            .map(|(prompt_id, mut hold)| {
+                hold.acknowledged = true;
+                hold.failure = None;
+                (prompt_id, hold)
+            })
+            .collect();
         let mut record = SessionRecord {
             codex_delegation_release: None,
             active_codex_approval_policy: self.active_codex_approval_policy,
@@ -643,6 +665,7 @@ impl PersistedSessionRecord {
             pending_acp_approval_order: VecDeque::new(),
             queued_prompts: self.queued_prompts,
             queued_peer_messages: self.queued_peer_messages,
+            queued_prompt_durability_holds,
             message_start_index: self.message_start_index,
             message_positions: build_message_positions(&session.messages),
             remote_id: self.remote_id,

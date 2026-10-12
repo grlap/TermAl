@@ -1945,6 +1945,10 @@ struct SessionRecord {
     /// Original peer messages represented by a coalesced queued prompt, keyed
     /// by that prompt's stable id. Ordinary queued prompts have no entry.
     queued_peer_messages: HashMap<String, Vec<PendingPrompt>>,
+    /// Queued prompts that may not be promoted until their exact content is
+    /// durable, keyed by prompt id (`queued_prompt_durability.rs`). Empty for
+    /// every ordinary prompt.
+    queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
     /// Global transcript position represented by `session.messages[0]`.
     ///
     /// Persisted sessions load only a bounded recent tail into memory. New
@@ -2043,6 +2047,9 @@ struct QueuePromotionSnapshot {
     prompt_history_mutation_stamp: u64,
     message_count: u32,
     messages_loaded: bool,
+    // Promotion prunes the promoted entry's durability hold with the queue;
+    // a restored entry gets its hold (an acknowledged marker) back.
+    queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
 }
 
 impl SessionRecord {
@@ -2090,6 +2097,7 @@ impl SessionRecord {
             prompt_history_mutation_stamp: self.prompt_history_mutation_stamp,
             message_count: self.session.message_count,
             messages_loaded: self.session.messages_loaded,
+            queued_prompt_durability_holds: self.queued_prompt_durability_holds.clone(),
         }
     }
 
@@ -2145,6 +2153,8 @@ impl SessionRecord {
         } else {
             self.queued_prompts.push_front(queued);
         }
+        // Holds of entries still queued come back; sync prunes the rest.
+        self.queued_prompt_durability_holds = snapshot.queued_prompt_durability_holds;
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
         self.active_turn_generation = snapshot.active_turn_generation;

@@ -348,6 +348,19 @@ impl AppState {
             return Ok(None);
         };
 
+        // A head held for its durability acknowledgement is promoted by no
+        // entry point, and the FIFO queue behind it waits with it. Its
+        // acknowledgement dispatches it (queued_prompt_durability.rs).
+        if queued_prompt_held_for_durability(&inner.sessions[index], &queued) {
+            abandon_engram_pending_dispatch(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                pending_engram,
+            );
+            return Ok(None);
+        }
+
         // Every nongated entry point must respect durable authorization, not
         // only the off-lock Resume wrapper. Settings reset is not non-delivery.
         if pending_engram.is_none() && queued.is_engram_retained() {
@@ -1349,7 +1362,13 @@ impl AppState {
         index: usize,
         followup: Option<&DelegationRecord>,
         prompt_id: &str,
-    ) -> Result<(u64, StartedTurn)> {
+    ) -> Result<Option<(u64, StartedTurn)>> {
+        // A head held for its durability acknowledgement keeps the queue,
+        // and the prompt just committed behind it, queued; the
+        // acknowledgement dispatches them (queued_prompt_durability.rs).
+        if queued_head_held_for_durability(&inner.sessions[index]) {
+            return Ok(None);
+        }
         let queued = inner.sessions[index]
             .queued_prompts
             .front()
@@ -1361,7 +1380,7 @@ impl AppState {
             .context("failed to start queued turn")?
             .ok_or_else(|| anyhow!("queued prompt disappeared before dispatch"))?;
         match self.commit_followup_prompt_locked(inner, followup, prompt_id, false) {
-            Ok(revision) => Ok((revision, started)),
+            Ok(revision) => Ok(Some((revision, started))),
             Err(error) => {
                 // A live follow-up admission has its own failure owner. For
                 // ordinary dispatch restore first, so the typed settlement
@@ -1501,6 +1520,16 @@ impl AppState {
             if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
                 let record = &inner.sessions[index];
                 if record.runtime_stop_in_progress {
+                    return Ok(None);
+                }
+                // As in the Engram branch below: a drain never starts a second
+                // turn on a busy session. The turn's own completion drains the
+                // queue; a durability acknowledgement that arrives mid-turn
+                // relies on that.
+                if matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                ) {
                     return Ok(None);
                 }
                 if record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
@@ -1691,6 +1720,10 @@ impl AppState {
                 let Some(queued) = record.queued_prompts.front().cloned() else {
                     return Ok(None);
                 };
+                // A held head asks Engram for nothing: it cannot be promoted.
+                if queued_prompt_held_for_durability(record, &queued) {
+                    return Ok(None);
+                }
                 if engram_queue_head_refused_as_interrupted(record)
                     && !record.engram.recovered_admission
                 {
@@ -2142,13 +2175,17 @@ impl AppState {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
+                    // An entry enqueued with a durability prerequisite keeps
+                    // its proven content; a wake never rewrites it.
+                    let durability_holds = &record.queued_prompt_durability_holds;
                     if let Some(existing) = record.queued_prompts.iter_mut().find(|queued| {
-                        queued
-                            .pending_prompt
-                            .source
-                            .as_ref()
-                            .and_then(|source| source.mailbox.as_ref())
-                            .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
+                        !durability_holds.contains_key(&queued.pending_prompt.id)
+                            && queued
+                                .pending_prompt
+                                .source
+                                .as_ref()
+                                .and_then(|source| source.mailbox.as_ref())
+                                .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
                     }) {
                         let existing_sequence = existing
                             .pending_prompt
@@ -2194,7 +2231,8 @@ impl AppState {
                                 followup,
                                 &message_id,
                             ) {
-                            Ok(started) => started,
+                            Ok(Some(started)) => started,
+                            Ok(None) => return Ok(DispatchTurnResult::Queued),
                             Err(error) => {
                                 drop(inner);
                                 return Err(self.finish_queued_followup_start_error(
@@ -2231,11 +2269,14 @@ impl AppState {
                 && orchestrator_auto_dispatch_blocked
                 && blocked_queue_contains_user_prompt
                 && queued_prompt_source == QueuedPromptSource::User;
+            // A head held for its durability acknowledgement is never
+            // overtaken: the manual send queues behind it instead.
             let prioritize_manual_dispatch_over_blocked_queue = !session_is_busy
                 && has_queued_prompts
                 && orchestrator_auto_dispatch_blocked
                 && !blocked_queue_contains_user_prompt
-                && queued_prompt_source == QueuedPromptSource::User;
+                && queued_prompt_source == QueuedPromptSource::User
+                && !queued_head_held_for_durability(&inner.sessions[index]);
 
             if recover_blocked_queue_with_existing_user_prompt {
                 queue_prompt_on_record_with_source(
@@ -2273,7 +2314,8 @@ impl AppState {
                     followup,
                     &message_id,
                 ) {
-                    Ok(started) => started,
+                    Ok(Some(started)) => started,
+                    Ok(None) => return Ok(DispatchTurnResult::Queued),
                     Err(error) => {
                         drop(inner);
                         return Err(self.finish_queued_followup_start_error(error));
@@ -2353,7 +2395,8 @@ impl AppState {
                     followup,
                     &message_id,
                 ) {
-                    Ok(started) => started,
+                    Ok(Some(started)) => started,
+                    Ok(None) => return Ok(DispatchTurnResult::Queued),
                     Err(error) => {
                         drop(inner);
                         return Err(self.finish_queued_followup_start_error(error));
@@ -2400,8 +2443,10 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                let durability_holds = &record.queued_prompt_durability_holds;
                 if let Some(existing) = record.queued_prompts.iter_mut().find(|queued| {
                     !queued.is_engram_retained()
+                        && !durability_holds.contains_key(&queued.pending_prompt.id)
                         && queued
                             .pending_prompt
                             .source
@@ -2488,7 +2533,8 @@ impl AppState {
             && has_queued_prompts
             && orchestrator_auto_dispatch_blocked
             && !blocked_queue_contains_user_prompt
-            && queued_prompt_source == QueuedPromptSource::User;
+            && queued_prompt_source == QueuedPromptSource::User
+            && !queued_head_held_for_durability(&inner.sessions[index]);
 
         queue_prompt_on_record_with_source(
             inner
@@ -2524,7 +2570,15 @@ impl AppState {
             .map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-        if session_is_busy || blocked_automatic_prompt {
+        // A head held for its durability acknowledgement keeps this prompt
+        // queued behind it. A drain now could start nothing, or, should the
+        // acknowledgement land while the lock is released, start that head
+        // past a pause without a Resume. The acknowledgement (on an unpaused
+        // queue) or a later Resume drains the queue.
+        if session_is_busy
+            || blocked_automatic_prompt
+            || queued_head_held_for_durability(&inner.sessions[index])
+        {
             return Ok(DispatchTurnResult::Queued);
         }
         drop(inner);

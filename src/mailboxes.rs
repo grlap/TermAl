@@ -772,8 +772,12 @@ impl AppState {
             }) {
                 continue;
             }
+            // An entry enqueued with a durability prerequisite keeps the
+            // content proven durable; it is never rewritten as a wake.
+            let durability_holds = &record.queued_prompt_durability_holds;
             if let Some(existing_index) = record.queued_prompts.iter().position(|queued| {
                 !queued.is_engram_retained()
+                    && !durability_holds.contains_key(&queued.pending_prompt.id)
                     && queued
                         .pending_prompt
                         .source
@@ -804,11 +808,14 @@ impl AppState {
                     existing.pending_prompt.source = Some(source);
                     changed = true;
                 }
+                // Like an Engram-retained head, a head held for its
+                // durability acknowledgement is never overtaken.
                 if promote_existing_to_front
                     && !record
                         .queued_prompts
                         .front()
                         .is_some_and(QueuedPromptRecord::is_engram_retained)
+                    && !queued_head_held_for_durability(record)
                 {
                     record.queued_prompts.push_front(existing);
                     changed |= existing_index != 0;
@@ -826,7 +833,8 @@ impl AppState {
                 record
                     .queued_prompts
                     .front()
-                    .is_some_and(QueuedPromptRecord::is_engram_retained),
+                    .is_some_and(QueuedPromptRecord::is_engram_retained)
+                    || queued_head_held_for_durability(record),
             );
             record.queued_prompts.insert(
                 insert_at,
@@ -908,10 +916,17 @@ impl AppState {
     ) -> Result<Option<FrontMailboxRevalidation>> {
         let Some(head) = ({
             let inner = self.inner.lock().expect("state mutex poisoned");
+            // An entry enqueued with a durability prerequisite keeps the
+            // content proven durable: revalidation never rewrites or drops it.
             inner
                 .find_session_index(session_id)
-                .and_then(|index| inner.sessions[index].queued_prompts.front())
-                .filter(|queued| !queued.is_engram_retained())
+                .map(|index| &inner.sessions[index])
+                .and_then(|record| {
+                    record.queued_prompts.front().filter(|queued| {
+                        !queued.is_engram_retained()
+                            && !queued_prompt_kept_standalone(record, queued)
+                    })
+                })
                 .and_then(|queued| {
                     let mailbox = queued.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
                     Some(FrontMailboxHead {
@@ -984,10 +999,14 @@ impl AppState {
         } = head;
         // Authorization may have been prepared during the off-lock mailbox
         // read. Its text/source is now replay input, not a coalescible wake.
+        // The same holds for an entry that took a durability hold meanwhile.
         if inner.sessions[index]
             .queued_prompts
             .front()
-            .is_some_and(QueuedPromptRecord::is_engram_retained)
+            .is_some_and(|queued| {
+                queued.is_engram_retained()
+                    || queued_prompt_kept_standalone(&inner.sessions[index], queued)
+            })
         {
             return Ok(false);
         }
