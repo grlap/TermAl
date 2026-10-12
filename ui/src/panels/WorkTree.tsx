@@ -5,15 +5,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { WorkItem } from "../work-visualizer-api";
 import { MAX_TREE_DEPTH, buildDependencyForest, buildHierarchyForest, type WorkTreeNode } from "./work-tree";
-import { WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection } from "./WorkRow";
+import { WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer } from "./WorkRow";
 import { WorkLabelChips } from "./WorkLabels";
 
 export type WorkTreeMode = "dependencies" | "hierarchy";
 
-export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel }: {
+export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, renderDetails, onHideSelection }: {
   rows: readonly WorkItem[]; universe: readonly WorkItem[]; mode: WorkTreeMode; selection: WorkSelection | null;
   onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void;
   onLabel?: (label: string) => void;
+  renderDetails?: WorkDetailsRenderer; onHideSelection?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const forest = useMemo(
@@ -62,7 +63,11 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel }:
       <div className="work-node-heading">
           {node.children.length > 0
             ? <button type="button" className="work-node-toggle" aria-expanded={open}
-              aria-label={`${open ? "Collapse" : "Expand"} ${node.item.shortRef}`} onClick={() => toggle(node.key)}>▾</button>
+              aria-label={`${open ? "Collapse" : "Expand"} ${node.item.shortRef}`} onClick={event => {
+                const selectedDescendant = (children: WorkTreeNode[]): boolean => children.some(child => isSelectedWorkItem(selection, child.item) || selectedDescendant(child.children));
+                if (open && selectedDescendant(node.children)) { onHideSelection?.(); event.currentTarget.focus({ preventScroll: true }); }
+                toggle(node.key);
+              }}>▾</button>
             : <span className="work-node-toggle work-node-leaf" aria-hidden="true" />}
           <WorkRowLead item={node.item} />
         <div className="work-node-content">
@@ -95,6 +100,7 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel }:
       <WorkLabelChips item={node.item} onLabel={onLabel} />
         </div>
       </div>
+      {renderDetails?.(node.item)}
       {node.children.length > 0 && open && <>
         {mode === "dependencies" && <p className="work-tree-relation">{allSatisfied ? "all prerequisites satisfied" : "waits for"}</p>}
         <ul data-relation={mode} data-satisfied={allSatisfied ? "true" : undefined}>{node.children.map(renderNode)}</ul>

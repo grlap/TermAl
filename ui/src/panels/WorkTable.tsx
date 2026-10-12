@@ -3,17 +3,19 @@
 // state belong to the caller. Moved out of WorkPanel.tsx when the tree views
 // were added and extended in the same change with the source, waits-for and
 // parent columns (not a pure move).
+import { Fragment } from "react";
 import type { WorkItem } from "../work-visualizer-api";
 import { WORK_SORT_COLUMNS, nextWorkSort, type WorkSort } from "./work-sort";
 import { WorkTime } from "./work-time";
-import { WorkRowButton, isSelectedWorkItem, type WorkSelection } from "./WorkRow";
+import { WorkRowButton, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer } from "./WorkRow";
 import { WorkLabelChips } from "./WorkLabels";
 
-export function WorkTable({ rows, selection, onSelect, sort, onSortChange, onLabel }: {
+export function WorkTable({ rows, selection, onSelect, sort, onSortChange, onLabel, renderDetails }: {
   rows: readonly WorkItem[]; selection: WorkSelection | null;
   onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void;
   sort: WorkSort | null; onSortChange: (sort: WorkSort) => void;
   onLabel?: (label: string) => void;
+  renderDetails?: WorkDetailsRenderer;
 }) {
   return <div className="work-table-scroll" role="region" tabIndex={0} aria-label="Work table scroll area">
     <table className="work-table"><caption>Work items</caption><thead><tr>
@@ -26,7 +28,9 @@ export function WorkTable({ rows, selection, onSelect, sort, onSortChange, onLab
           </button>
         </th>;
       })}
-    </tr></thead><tbody>{rows.map(row => <tr key={`${row.source}:${row.id}`}>
+    </tr></thead><tbody>{rows.map(row => {
+      const details = renderDetails?.(row);
+      return <Fragment key={`${row.source}:${row.id}`}><tr>
       <td>P{row.priority}</td>
       <td><WorkRowButton item={row} selected={isSelectedWorkItem(selection, row)} onSelect={onSelect} />
         <WorkLabelChips item={row} onLabel={onLabel} />
@@ -34,6 +38,7 @@ export function WorkTable({ rows, selection, onSelect, sort, onSortChange, onLab
       <td>{row.source}</td><td>{row.kind}</td><td>{row.lifecycle}</td><td>{row.availability}</td>
       <td>{row.prerequisites.length ? row.prerequisites.map(p => `${p.id}${p.satisfied ? " (satisfied)" : ""}`).join(", ") : "—"}</td>
       <td title="Assignment is not the holder. Inspect details for the holder label.">{row.assignedTo ?? "—"}</td><td className="work-table-time"><WorkTime value={row.updatedAt} /></td>
-    </tr>)}</tbody></table>
+    </tr>{details && <tr className="work-table-details"><td colSpan={WORK_SORT_COLUMNS.length}><div className="work-table-details-content">{details}</div></td></tr>}</Fragment>;
+    })}</tbody></table>
   </div>;
 }

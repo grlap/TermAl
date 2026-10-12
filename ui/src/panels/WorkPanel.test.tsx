@@ -470,19 +470,134 @@ describe("WorkPanel", () => {
     expect(screen.queryByRole("button", { name: "Load more work" })).not.toBeInTheDocument();
   });
 
-  it("returns focus to the list when the selected row's button is no longer mounted", async () => {
+  it("closes inline details and focuses the ancestor control when its branch collapses", async () => {
     vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "engram", state: "ready", message: "Ready" }],
       readerId: "host:reader", observedAt: "now", page: fixturePage() });
     vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
       notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     fireEvent.click(await screen.findByRole("button", { name: "tm-free — Ready bug" }));
-    const details = await screen.findByRole("complementary", { name: "Work item details" });
-    fireEvent.click(screen.getByRole("button", { name: "Collapse tm-root.1" }));
+    await screen.findByRole("complementary", { name: "Work item details" });
+    const collapse = screen.getByRole("button", { name: "Collapse tm-root.1" });
+    fireEvent.click(collapse);
     expect(screen.queryByRole("button", { name: "tm-free — Ready bug" })).not.toBeInTheDocument();
-    fireEvent.keyDown(details, { key: "Escape" });
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    expect(document.activeElement).toHaveClass("work-panel-list");
+    expect(collapse).toHaveFocus();
+    fireEvent.click(collapse);
+    expect(screen.getByRole("button", { name: "tm-free — Ready bug" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  it.each(["Dependencies", "Hierarchy", "Labels", "Table"])("expands details under the selected task in %s and toggles them closed", async view => {
+    vi.mocked(readProjectWork).mockResolvedValue(page());
+    vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
+      notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    await screen.findByRole("button", { name: "w-one — Visible task" });
+    fireEvent.click(screen.getByRole("button", { name: view }));
+    const title = screen.getByRole("button", { name: "w-one — Visible task" });
+    fireEvent.click(title);
+    const details = await screen.findByRole("complementary", { name: "Work item details" });
+    expect(title).toHaveAttribute("aria-expanded", "true");
+    if (view === "Table") {
+      expect(title.closest("tr")!.nextElementSibling).toContainElement(details);
+      expect(details.closest("td")).toHaveAttribute("colspan", "9");
+    } else {
+      expect(title.closest("li")).toContainElement(details);
+      expect(title.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(details.closest(".work-panel-list")).not.toBeNull();
+    fireEvent.click(title);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(title).toHaveAttribute("aria-expanded", "false");
+    expect(title).toHaveFocus();
+  });
+
+  it.each(["Hierarchy", "Table", "Labels"])("closes details on a switch to %s without stealing the view button's focus", async view => {
+    vi.mocked(readProjectWork).mockResolvedValue(page());
+    vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
+      notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    fireEvent.click(await screen.findByRole("button", { name: "w-one — Visible task" }));
+    await screen.findByRole("complementary");
+    const control = screen.getByRole("button", { name: view });
+    control.focus();
+    fireEvent.click(control);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(control).toHaveFocus();
+    // The destination must not briefly mount details and issue another read.
+    expect(readWorkDetail).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Dependencies" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  it("keeps focus on the Kind control when its filter removes the expanded item", async () => {
+    vi.mocked(readProjectWork).mockResolvedValue(page());
+    vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
+      notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    fireEvent.click(await screen.findByRole("button", { name: "w-one — Visible task" }));
+    await screen.findByRole("complementary");
+    const control = screen.getByRole("combobox", { name: "Kind (loaded rows)" });
+    control.focus();
+    fireEvent.change(control, { target: { value: "task" } });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(control).toHaveFocus();
+    fireEvent.change(control, { target: { value: "" } });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  it("collapses all labels without focusing the selected or previously selected title", async () => {
+    vi.mocked(readProjectWork).mockResolvedValue(page());
+    vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
+      notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    await screen.findByRole("button", { name: "w-one — Visible task" });
+    fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+    const title = screen.getByRole("button", { name: "w-one — Visible task" });
+    fireEvent.click(title);
+    await screen.findByRole("complementary");
+    const focus = vi.spyOn(title, "focus");
+    const collapse = screen.getByRole("button", { name: "Collapse all labels" });
+    collapse.focus();
+    fireEvent.click(collapse);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(focus).not.toHaveBeenCalled();
+    expect(collapse).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Expand all labels" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    fireEvent.click(collapse);
+    expect(focus).not.toHaveBeenCalled();
+    expect(collapse).toHaveFocus();
+    focus.mockRestore();
+  });
+
+  it("expands only the clicked label occurrence and closes it when the group collapses", async () => {
+    const loaded = page();
+    loaded.page!.items[0]!.labels = ["decision", "ui"];
+    vi.mocked(readProjectWork).mockResolvedValue(loaded);
+    vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
+      notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    await screen.findByRole("button", { name: "w-one — Visible task" });
+    fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+    const first = screen.getByRole("region", { name: "Label group: decision" });
+    const second = screen.getByRole("region", { name: "Label group: ui" });
+    const title = within(second).getByRole("button", { name: "w-one — Visible task" });
+    fireEvent.click(title);
+    expect(await within(second).findByRole("complementary")).toBeInTheDocument();
+    expect(within(first).queryByRole("complementary")).not.toBeInTheDocument();
+    expect(within(first).getByRole("button", { name: "w-one — Visible task" })).toHaveAttribute("aria-expanded", "false");
+    expect(readWorkDetail).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(first).getByRole("button", { name: "w-one — Visible task" }));
+    expect(await within(first).findByRole("complementary")).toBeInTheDocument();
+    expect(within(second).queryByRole("complementary")).not.toBeInTheDocument();
+    const collapse = within(first).getByRole("button", { name: /decision.*1/, expanded: true });
+    fireEvent.click(collapse);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(collapse).toHaveFocus();
+    fireEvent.click(collapse);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   it("never claims an empty tracker while a source failed", async () => {

@@ -86,7 +86,8 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   const [labels, setLabels] = useState<string[]>([]);
   const [labelMode, setLabelMode] = useState<WorkLabelMode>("any");
   const filterLabel = (label: string) => { setLabels([label]); setLabelMode("any"); };
-  const [selection, setSelection] = useState<WorkSelection | null>(null);
+  const [selection, setSelection] = useState<(WorkSelection & { view: WorkView }) | null>(null);
+  const visibleSelection = selection?.view === view ? selection : null;
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const listContainer = useRef<HTMLDivElement | null>(null);
   const page = result?.page;
@@ -107,30 +108,37 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   const loadedSummary = [
     page && `${page.items.length} of ${page.total} Engram items loaded`,
   ].filter(Boolean).join(" · ");
-  const select = (item: WorkItem, trigger: HTMLButtonElement) => { detailTrigger.current = trigger; setSelection({ source: item.source, ref: item.shortRef }); };
+  const select = (item: WorkItem, trigger: HTMLButtonElement, group?: string) => {
+    if (detailTrigger.current === trigger && selection) { closeDetails(); return; }
+    detailTrigger.current = trigger;
+    setSelection({ source: item.source, ref: item.shortRef, group, view });
+  };
+  const hideSelection = () => { setSelection(null); detailTrigger.current = null; };
   const closeDetails = () => {
-    setSelection(null);
     // The row button may be gone (collapsed ancestor, view switch, filter):
     // fall back to the list so keyboard focus is never dropped on the body.
     const trigger = detailTrigger.current;
+    hideSelection();
     if (trigger?.isConnected) trigger.focus(); else listContainer.current?.focus();
   };
-  // An Engram selection cannot outlive its reader generation: once the
-  // generation is dropped there is nothing to show for it. The drawer, and
-  // the control that dropped the generation, may have unmounted with the
-  // focus: like closeDetails, park it on the list rather than the body.
+  // Details belong to the clicked occurrence and presentation view. Never
+  // mount the previous view's details in the new view: their focus effect
+  // would steal focus from the view switch just before they are removed.
   const readerId = result?.readerId ?? null;
   useEffect(() => {
-    if (!selection || readerId) return;
-    setSelection(null);
-    const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
+    if (!selection || (visibleSelection && readerId && detailTrigger.current?.isConnected)) return;
     const trigger = detailTrigger.current;
+    hideSelection();
+    const active = document.activeElement;
+    // A reparented tree row may briefly remount its details. That focus target
+    // is about to disappear; only leave focus on a surviving external control.
+    if (active && active !== document.body && active.isConnected && !active.closest(".work-item-details")) return;
     if (trigger?.isConnected) trigger.focus(); else listContainer.current?.focus();
-  }, [selection, readerId]);
-  const details = !selection ? null
-    : result?.readerId ? <WorkItemDetails key={`${result.readerId}:${selection.ref}`} projectId={projectId} workRef={selection.ref} readerId={result.readerId} onClose={closeDetails} />
-        : null;
+  });
+  const renderDetails = (item: WorkItem, group?: string) => visibleSelection && readerId
+    && visibleSelection.source === item.source && visibleSelection.ref === item.shortRef && visibleSelection.group === group
+    ? <WorkItemDetails key={`${readerId}:${visibleSelection.ref}`} projectId={projectId} workRef={visibleSelection.ref} readerId={readerId} onClose={closeDetails} />
+    : null;
   return <>
     <div className="work-panel-actions">
       <button type="button" disabled={busy} onClick={() => { setSelection(null); reload(); }}>Refresh work</button>
@@ -158,12 +166,12 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
       </div>
       <p>{loadedSummary}; {rows.length} visible. Filters and sorting (the control above or a table header) apply only to loaded rows.</p>
       <p className="work-panel-caption">Read completed: <WorkTime value={result.observedAt} />. Refresh for current data.</p>
-      <div className="work-panel-body" data-details={details ? "open" : "closed"}>
+      <div className="work-panel-body">
         <div className="work-panel-list" ref={listContainer} tabIndex={-1}>
           {view === "table"
-            ? <WorkTable rows={rows} selection={selection} onSelect={select} sort={sort} onSortChange={onSortChange} onLabel={filterLabel} />
-            : view === "labels" ? <WorkLabels rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={selection} onSelect={select} onLabel={filterLabel} />
-              : <WorkTree key={view} rows={rows} universe={loaded} mode={view} selection={selection} onSelect={select} onLabel={filterLabel} />}
+            ? <WorkTable rows={rows} selection={visibleSelection} onSelect={select} sort={sort} onSortChange={onSortChange} onLabel={filterLabel} renderDetails={renderDetails} />
+            : view === "labels" ? <WorkLabels rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />
+              : <WorkTree key={view} rows={rows} universe={loaded} mode={view} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />}
           {rows.length === 0 && <p>{result.sources.some(source => source.state === "error")
             ? "No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view."
             : total === 0 ? "No work items match the source filters." : "No matching rows in the loaded page(s). More source items may exist."}</p>}
@@ -171,7 +179,6 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
           {page?.more && <p>More Engram items remain.{!page.after && " No continuation is available; the source page is byte-limited. See its hint above."}</p>}
           {page?.more && page.after && <button type="button" disabled={busy} onClick={more}>Load more work</button>}
         </div>
-        {details}
       </div>
     </>}
   </>;

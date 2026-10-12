@@ -3,10 +3,11 @@
 // by availability) and the trailing chips (source icon, assignment); does not
 // own selection state, fetching, or the relation a row is nested under.
 // Split out of WorkPanel.tsx (its table's row button and chips).
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import type { WorkItem } from "../work-visualizer-api";
 
-export type WorkSelection = { source: string; ref: string };
+export type WorkSelection = { source: string; ref: string; group?: string };
+export type WorkDetailsRenderer = (item: WorkItem, group?: string) => ReactNode;
 
 export function isSelectedWorkItem(selection: WorkSelection | null, item: WorkItem) {
   return !!selection && selection.source === item.source && selection.ref === item.shortRef;
@@ -15,7 +16,7 @@ export function isSelectedWorkItem(selection: WorkSelection | null, item: WorkIt
 export function WorkRowButton({ item, selected, onSelect, showRef = true }: {
   item: WorkItem; selected: boolean; onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void; showRef?: boolean;
 }) {
-  return <button type="button" className="work-row-title" aria-current={selected ? "true" : undefined}
+  return <button type="button" className="work-row-title" aria-current={selected ? "true" : undefined} aria-expanded={selected}
     aria-label={showRef ? undefined : `${item.shortRef} — ${item.title}`}
     onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(item, event.currentTarget)}>
     {showRef ? `${item.shortRef} — ${item.title}` : item.title}

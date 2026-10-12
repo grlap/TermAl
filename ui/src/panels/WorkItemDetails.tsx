@@ -1,4 +1,4 @@
-// New item drawer for inert Engram detail/notes. Owns window identity and
+// Inline item details for inert Engram detail/notes. Owns window identity and
 // explicit pagination, not holder identity inference or full-body CLI actions.
 import { useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../api-request";
