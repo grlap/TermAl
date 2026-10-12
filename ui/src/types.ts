@@ -956,6 +956,10 @@ export type EngramControlMessage = BaseMessage & {
     evaluate?: number | null;
     begin?: number | null;
     checkpoint?: number | null;
+    /** The retained evaluate's durability wait, inside `evaluate`. */
+    admissionFence?: number | null;
+    /** The prepared begin's durability wait, after evaluate. */
+    preparationFence?: number | null;
     total: number;
   };
   failMode: EngramControlFailMode;

@@ -27,8 +27,9 @@ const ENGRAM_ABORT_RETRY_MAX_JITTER_PERCENT: u64 = 20;
 const ENGRAM_ABORT_SETTLEMENT_FENCE: Duration = Duration::from_secs(20);
 
 /// The most in flight at once, host-wide: the automatic attempts of every
-/// retry kind and each parked admission's boot reconciliation (an abort
-/// retry's boot recovery keeps its existing path outside the cap). Bounds the
+/// retry kind and each parked admission's boot reconciliation, a
+/// begin-preparation abort retry's included (any other abort retry's boot
+/// recovery keeps its existing path outside the cap). Bounds the
 /// herd after a restart or an Engram outage; control-process concurrency is
 /// per session.
 const ENGRAM_RETRY_MAX_IN_FLIGHT: usize = 4;
@@ -373,17 +374,44 @@ impl AppState {
                     continue;
                 };
                 let record = &mut inner.sessions[index];
-                let step = match kind {
-                    EngramRetryKind::Bind => {
-                        engram_bind_retry_step(record, authority.as_deref(), now, budget_now)
+                let window_ended_before = record
+                    .engram
+                    .begin_preparation_lineage
+                    .as_ref()
+                    .is_some_and(|lineage| lineage.ended);
+                // A head that had a prepared begin withheld is bounded by its
+                // overall admission budget, whichever retry holds it now
+                // (`engram_begin_preparation_retry.rs`).
+                let step = engram_begin_preparation_lineage_step(record, now).unwrap_or_else(|| {
+                    match kind {
+                        EngramRetryKind::Bind => {
+                            engram_bind_retry_step(record, authority.as_deref(), now, budget_now)
+                        }
+                        EngramRetryKind::Admission => engram_admission_retry_step(
+                            record,
+                            authority.as_deref(),
+                            now,
+                            budget_now,
+                        ),
+                        EngramRetryKind::Abort => {
+                            engram_abort_retry_step(record, authority.as_deref(), now)
+                        }
                     }
-                    EngramRetryKind::Admission => {
-                        engram_admission_retry_step(record, authority.as_deref(), now, budget_now)
-                    }
-                    EngramRetryKind::Abort => {
-                        engram_abort_retry_step(record, authority.as_deref(), now)
-                    }
-                };
+                });
+                // A window an operator's pause or control disabled ended is
+                // saved whatever the retry's own step returned: control
+                // disabled is not saved, so after a restart only the ended
+                // window keeps the head from automatic advancement.
+                let window_newly_ended = !window_ended_before
+                    && record
+                        .engram
+                        .begin_preparation_lineage
+                        .as_ref()
+                        .is_some_and(|lineage| lineage.ended);
+                if window_newly_ended {
+                    inner.stamp_session_at_index(index);
+                    changed = true;
+                }
                 match step {
                     EngramAbortRetryStep::Wait => {}
                     EngramAbortRetryStep::Acknowledge => {
@@ -564,12 +592,19 @@ impl AppState {
         } = retry;
         #[cfg(test)]
         engram_retry_test_panic_point(self, &session_id);
-        if kind == EngramRetryKind::Admission {
+        // A parked admission, a begin-preparation abort retry included, makes
+        // its session's boot reconciliation under its own slot.
+        if matches!(kind, EngramRetryKind::Admission | EngramRetryKind::Abort) {
             let fenced = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                inner
-                    .find_session_index(&session_id)
-                    .is_some_and(|index| inner.sessions[index].engram_boot_recovery_pending)
+                inner.find_session_index(&session_id).is_some_and(|index| {
+                    let record = &inner.sessions[index];
+                    record.engram_boot_recovery_pending
+                        && (kind == EngramRetryKind::Admission
+                            || record.engram.abort_retry.as_ref().is_some_and(|retry| {
+                                retry.reason == EngramAbortReason::BeginPreparation
+                            }))
+                })
             };
             if fenced {
                 // The recovery holds this attempt's slot until it finishes.
@@ -578,6 +613,17 @@ impl AppState {
             }
         }
         let retry_owner = owner.clone();
+        // The attempt starts now: it counts against a begin-preparation
+        // lineage's attempts (a deferral by the cap never reaches here).
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(&session_id)
+                && owner.matches(&inner.sessions[index])
+                && count_engram_begin_preparation_attempt(&mut inner.sessions[index])
+            {
+                inner.stamp_session_at_index(index);
+            }
+        }
         let dispatch = match kind {
             EngramRetryKind::Bind => self.dispatch_next_queued_turn_for_bind_retry(&session_id, owner),
             EngramRetryKind::Admission => {

@@ -2503,17 +2503,202 @@ covers the retained evaluate, and only then is the begin sent
 (`src/engram_queued_admission.rs`). A recovery that reads this record replays
 that stored key string, never a recomputed one.
 
-When the acknowledgement fails or is ambiguous (a write failure, a missed
-deadline or a stopped writer), the begin is not sent, and its prepared record is
-withdrawn, so it is never saved later as a possibly sent begin. (An ambiguous
-acknowledgement may already have saved it, which errs only toward a needless
-replay.) The card's code is
-`begin_preparation_unacknowledged`. Its cause is a `local_state` failure of
-`turn_begin` whose request did not start. The prompt stays retained as a
-local-persistence hold, which no automatic retry schedule picks up. The issued
-grant was never begun, so it keeps the issued-grant retirement path. A head
-without a retained evaluate has nowhere to keep the begin, so it is not sent
-either.
+When the acknowledgement does not arrive, the begin is not sent. Its cause is
+a `local_state` failure of `turn_begin` whose request did not start. What
+happens to the prepared record depends on what the fence proved
+(`src/engram_queued_admission.rs`, `src/engram_begin_preparation_retry.rs`):
+
+- The attempt's wait ran out (a missed deadline, as under a release build's
+  load). A timeout proves nothing about the write, so the exact prepared begin
+  (key, grant, delivery tokens) is kept as pending. The card's code is
+  `begin_preparation_pending`; no orphan repair is armed and no fresh
+  admission races it. The head parks for an admission retry of that code. Its
+  attempt sends no evaluate: it acknowledges the same content again through
+  the admission fence, then sends that same begin. A pending record whose
+  re-acknowledgement fails stays pending.
+- The write is reported failed. The begin was never sent, so withdrawing the
+  record is safe, and it is not saved later as a possibly sent begin. (A
+  failed report can hide a commit whose acknowledgement was lost, and a write
+  that runs before the withdrawal may still save it; either errs only toward
+  one needless exact replay after a crash.) The card's code is
+  `begin_preparation_unacknowledged`. The head is settled as a
+  [Retained prompt recovery](#retained-prompt-recovery) abort record of its
+  own reason: the queued prompt and its content are kept, only the stale
+  retained evaluate is dropped, and the rebind is required. The issued grant
+  was never begun, so the rebind settles it before the fresh evaluate under a
+  new key, and there are never two live grants.
+- The writer stopped. The host that met it cannot wait that out, so the
+  record is withdrawn and the head keeps the local-persistence hold, named
+  `begin_preparation_unacknowledged`.
+- Only a begin proven never sent is ever withdrawn. A preparation that replays
+  a saved record (the same grant and key) whose pending marker a restart
+  dropped may be re-acknowledging a begin an earlier host sent. Whatever its
+  fence did, that record is kept, never marked as this host's pending begin,
+  and its grant is not armed for the orphan rebind. On a fence failure the
+  head keeps the hold, and a Resume says it may have been sent. When it is
+  acknowledged late and its begin then fails before transmission, it is left
+  possibly begun, for its exact replay.
+
+A head without a retained evaluate has nowhere to keep the begin, so it is not
+sent either.
+
+An acknowledgement that arrives only after the attempt's wait still made the
+prepared record durable. It is classified by what happened: the record is
+kept, never withdrawn as unacknowledged, and the begin later sent is that
+prepared begin. Such an acknowledgement usually leaves the attempt no time to
+transmit the begin. A begin that fails before transmission was never sent.
+After such a late acknowledgement, or while the head's budget is enforced, it
+stays the pending begin above. Its hold enforces the budget, counted from
+acceptance, so the budget still bounds it. Otherwise (an on-time
+acknowledgement whose begin's guard fails) the exact begin replay takes it. Whether a
+durable outcome may still advance is a separate question, answered by the
+budget below and by the holds.
+
+Two different bounds apply. Each control call and each dispatch attempt,
+including its fence waits, stays at most 20 seconds
+(`ENGRAM_DISPATCH_BUDGET_MS`). Above them, one admitted request's automatic
+recovery has an overall budget of 240 seconds
+(`ENGRAM_ADMISSION_BUDGET_SECONDS`):
+
+- **Start.** It starts when the queue head is accepted for control admission,
+  before any control, persistence or capacity wait. Ordinary prompt backlog
+  behind an earlier provider turn is not counted.
+- **Saved state.** Its start and deadline are saved with the head
+  (`begin_preparation_lineage`), together with the first prepared-begin hold,
+  a pending begin's grant and the automatic attempts started. It is kept
+  through retries, backoff, the rebind, fence waits, a change of retry kind
+  and a restart. It belongs to that prompt only; another head drops it.
+- **Enforcement.** It is enforced once a prepared begin of the head was
+  withheld, for every later phase of that head: bind, admission, abort and
+  the exact replay of a begin possibly sent. A head that never entered that
+  recovery keeps its existing bounds; its budget is saved but not enforced.
+- **Accounting.** Each attempt is clipped to what is left of the budget.
+  Waiting on the shared schedule (2, 5, 10, 20, 30, then every 60 seconds,
+  with jitter, one attempt per head, under the host-wide cap) uses up the
+  budget but starts no attempt.
+- **Exhaustion.** At or after the deadline no automatic send starts, even with
+  an attempt, an acknowledgement or a capacity slot due. The retry tick ends
+  the recovery before the step of whichever retry holds the head. The head
+  takes the resumable Resume/Cancel hold "automatic re-admission exhausted
+  after N attempts; last cause …", with no further control call. The last
+  cause is the code of the head's newest dispatch card. A begin still pending
+  then is kept as it is, with its marker, grant, key and delivery tokens: its
+  write may still be unresolved, so nothing proves it absent, and no rebind
+  is armed to expire its grant. Resume sends that same begin, never a fresh
+  grant.
+- **Holds.** Control disabled and an operator's pause stop automatic advancement
+  immediately, with the hold every park shows. A Stop ends it at once and
+  keeps its stopped hold, so only an explicit Resume admits the head again.
+  None of them grants the head more time or resets the clock. Each of them,
+  and exhaustion, ends the window but keeps it, with its start, deadline and
+  first hold (`ended`), so no later admission, boot or re-enablement reads
+  the head as having no budget and starts another. The boot pass leaves a
+  head with an ended window to its hold, since control disabled is not saved
+  across a restart: it marks a saved prepared begin possibly sent, so that
+  Resume replays it exactly, but schedules nothing. A project's Engram
+  settings change keeps the ended window but drops a pending begin's marker:
+  a begin evaluated under the old settings is never sent under the new ones,
+  so Resume says it may have been sent and keeps the hold. Only an explicit accepted Resume opens a new window (see below).
+- **Begin possibly sent.** A begin sent with an unknown outcome is not an
+  applied one, so the budget still bounds it. Its exact replay
+  ([Begin-unknown replay](#begin-unknown-replay)) runs inside what is left of
+  the budget. At the deadline it ends in the explicit hold with "last cause
+  begin_unknown": its prepared begin, grant and delivery tokens are kept,
+  never withdrawn and never replaced by a fresh grant, and Resume replays
+  that same begin. The same holds after a restart, which reads this host's
+  pending begin as possibly sent.
+- **Begin applied.** Once a begin was applied (an active grant), it was the
+  last automatic send and the budget ends: the steps that complete its turn,
+  such as the delivery durability fence and source observation, keep their
+  own per-attempt bounds and are not clipped to the budget. Receipt time is
+  when the host first observed the complete matching Begin response (or the
+  status read that settles a scope mismatch as applied), on the operation
+  budget clock, not when local application or delivery happens. A receipt
+  observed strictly before the deadline ends the budget even if the steps
+  after it cross the deadline. A receipt first observed at or after the
+  deadline is kept as the actual outcome ("applied, first observed after the
+  deadline", card code `begin_applied_after_deadline`, saved with the hold)
+  but delivers nothing automatically: the grant stays possibly begun, the
+  head ends in the explicit hold, and Resume replays that same begin, whose
+  idempotent receipt delivers the prompt once. Cancel removes the prompt and
+  keeps the applied grant recorded as possibly begun, with the rebind armed,
+  so the next bind settles it by a session status before any successor is
+  admitted; it never relabels the begin as not started.
+- **Boot reconciliation.** A restarted head's reconciliation (its status read,
+  focus read and bind) is clipped to the same saved deadline, so no control
+  call of it starts after the budget.
+
+While a retry is scheduled, its preview names the wait (for a pending begin,
+"the prepared begin awaits its durable acknowledgement; nothing sent"), the
+attempt, the next time and when automatic recovery ends.
+
+After a restart, only the time left before the saved deadline counts: the
+downtime is part of it, and a restart never grants another budget. A saved
+pending begin proves nothing after a restart, because the begin may have been
+sent after the marker was last saved. The boot pass therefore reads it as
+possibly sent and replays it exactly
+([Begin recovery after a restart](#begin-recovery-after-a-restart)).
+A stopped writer's saved hold is settled at boot the same way as a failed
+write, since nothing was sent. The head is admitted afresh once the new host's
+settlement is durably acknowledged, but only while its saved budget has time
+left. A hold whose budget is spent, or one saved by an earlier build with no
+budget to date it, keeps its hold at boot. A boot reconciliation of such a
+head runs under the host-wide cap.
+
+An explicit Resume on such a hold is never a silent no-op. It first looks at
+an interrupted head that nothing schedules any more and that has no grant
+active or possibly begun:
+
+- Its newest card names `begin_preparation_unacknowledged` and no prepared
+  begin is kept. This covers the hold a park leaves, or a Stop after a failed
+  write's settlement. Nothing was sent, so the stale evaluate is dropped and
+  the session moves to a new dispatch generation. The head takes the
+  resumable park, and the drain then admits it afresh, rebind first.
+- It keeps this host's pending prepared begin, for example after a Stop,
+  whatever its card's cause. That begin was never sent, so it is released
+  for its exact replay. Its grant is kept, without a rebind. The drain
+  acknowledges the same content again and sends the same begin, as an
+  acknowledged prepared begin requires.
+
+When Resume cannot release the head, it returns an error that says why and
+leaves the hold unchanged. That happens when:
+
+- control is disabled;
+- an automatic re-admission's settlement is not yet saved;
+- the release cannot be saved;
+- a prepared begin is kept without this host's pending marker, as a restart
+  leaves one (it may have been sent). Whatever its card's cause, it stays held
+  for reconciliation or Cancel.
+
+An accepted Resume that releases such a hold, or finds the head's window
+ended or spent, opens one new 240-second window in the same write; the head
+stays in prepared-begin recovery, so the new window is enforced. A Resume
+refused before its release (control disabled, an unsaved settlement, a
+begin that may have been sent, a failed save) keeps the old window. A
+repeated Resume, while that window's attempt is in flight, neither starts a
+second admission nor resets its deadline. A Resume that releases a head is
+bound to that head, so a successor a cancellation exposes meanwhile is never
+admitted in its place. A Resume bound to an owner that has since been
+superseded promotes nothing and changes nothing, and a delegation's Resume
+reports it as superseded. The provider receives the prompt at most once.
+
+The card's cause is published only once the card itself is durably saved
+(`src/engram_causal_publication.rs`), and under the load that withheld the
+begin that save can miss its deadline too. Such a card still names its code
+and boundary ("Failure: begin_preparation_unacknowledged · Boundary:
+prepared-Begin durable acknowledgement") instead of "Original failure details
+unavailable". Its latency carries the split: `evaluate`, `admissionFence` (the
+retained evaluate's durability wait, inside `evaluate`), `preparationFence`
+(the prepared begin's), `begin` and `total`. In the field cases the
+preparation fence took most of the twenty-second budget: the wait is on this
+host's single persistence writer, not on Engram.
+
+The queued bind's idempotency key includes the session's dispatch generation.
+A replay of a bind (a lost reply, a backoff, a restart) resends the exact bind
+retained on the head, so it keeps its key; only a new bind derives one. The
+generation is saved with the session, so it is unchanged after a restart. A
+settlement moves it on, so the rebind after one is a new bind that expires the
+issued grant, never a replay of the first bind's cached reply.
 
 Every causal failure names the control process it was observed on
 (`controlProcess`). Its identity is `pid N`, and its exit state is what was seen
@@ -2555,9 +2740,12 @@ The park schedules the replay as its own retry kind, the admission retry code
 60 seconds, with up to 20% positive jitter, under circuit and bind not-before
 times, the one-attempt-per-head guard and the host-wide slot cap. A cap
 deferral charges neither the attempt index nor the first-held time. The
-original admission budget does not end the schedule: each replay has its own
-call bound, and a failed replay schedules the next one with the same key until
-Engram answers definitely. While a replay is scheduled, the preview reads
+original 20-second admission budget does not end the schedule: each replay has
+its own call bound, and a failed replay schedules the next one with the same
+key until Engram answers definitely. The one exception is a head in
+prepared-begin recovery, whose 240-second budget ends its replay in the
+explicit hold at its deadline (see the budget above). While a replay is
+scheduled, the preview reads
 "waiting for admission; retrying automatically (begin reconciliation:
 replaying the same begin), attempt N, next at T."
 

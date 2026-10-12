@@ -682,6 +682,7 @@ fn a_defer_whose_card_cannot_be_saved_retries_no_earlier_than_retry_after() {
         record.engram.routing_token = Some("defer-abort-token".to_owned());
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            admission_fence_ms: None,
             causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint: fingerprint,
@@ -724,6 +725,8 @@ fn a_defer_whose_card_cannot_be_saved_retries_no_earlier_than_retry_after() {
                 directives: Vec::new(),
                 delivered_range: None,
                 latency_ms: EngramControlLatencyCard {
+                    admission_fence: None,
+                    preparation_fence: None,
                     evaluate: Some(0),
                     begin: None,
                     checkpoint: None,

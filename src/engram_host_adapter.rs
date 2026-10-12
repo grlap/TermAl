@@ -2782,6 +2782,12 @@ struct EngramSessionState {
     /// A parked head whose unknown admission is replayed automatically
     /// (`engram_admission_retry.rs`). Saved with the session.
     admission_retry: Option<EngramAdmissionRetry>,
+    /// The overall automatic-recovery budget of the queue head's admitted
+    /// request: when it was accepted for control admission, its deadline, its
+    /// first prepared-begin hold and a pending prepared begin, whichever retry
+    /// holds the head meanwhile (`engram_begin_preparation_retry.rs`). Saved
+    /// with the session.
+    begin_preparation_lineage: Option<EngramBeginPreparationLineage>,
     /// A user Stop left the queue paused for an explicit Resume: an operator
     /// queue pause, distinct from the pause a park sets. No automatic retry
     /// passes it. Saved with the session; cleared when the pause is lifted.
@@ -2877,6 +2883,7 @@ impl Default for EngramSessionState {
             bind_retry: None,
             bind_retry_runtime: None,
             admission_retry: None,
+            begin_preparation_lineage: None,
             operator_paused: false,
             abort_retry_acknowledged: false,
             abort_retry_saved: false,
@@ -2947,6 +2954,9 @@ struct EngramPendingDispatch {
     intent_fingerprint: String,
     evaluated: EngramDispatchEvaluation,
     evaluate_latency_ms: u64,
+    /// The retained evaluate's durability wait inside `evaluate_latency_ms`,
+    /// for the card's latency split.
+    admission_fence_ms: Option<u64>,
     started_at: std::time::Instant,
     awaiting_runtime_stop_resolution: bool,
     /// The grant whose `turn_begin` has been handed to the transport, which
@@ -3227,6 +3237,14 @@ struct EngramControlLatencyCard {
     begin: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<u64>,
+    /// The wait for the durable acknowledgement of the retained evaluate
+    /// before it was sent, inside `evaluate`'s span.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    admission_fence: Option<u64>,
+    /// The wait for the durable acknowledgement of the prepared begin, after
+    /// evaluate and before the begin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preparation_fence: Option<u64>,
     total: u64,
 }
 
@@ -3465,6 +3483,9 @@ struct EngramBindingTarget {
     adapter: Arc<EngramHostAdapter>,
     budget_clock: EngramBudgetClock,
     admission_started_at: Option<std::time::Instant>,
+    /// The head's enforced overall admission budget, on `budget_clock`: no
+    /// dispatch attempt runs past it (`engram_admission_budget_deadline`).
+    admission_deadline: Option<std::time::Instant>,
     #[cfg(test)]
     test_dispatch_budget: Option<Duration>,
     #[cfg(test)]
@@ -3501,10 +3522,26 @@ struct EngramBootRecoveryCompletion {
 
 impl EngramBindingTarget {
     fn dispatch_deadline(&self, started_at: std::time::Instant) -> std::time::Instant {
+        self.clip_to_admission_budget(self.applied_begin_deadline(started_at))
+    }
+
+    /// One attempt's deadline for the steps that complete a turn whose begin
+    /// Engram applied (root reconciliation, source observation): the
+    /// per-attempt bound only. The applied begin was the last automatic
+    /// send, so the head's admission budget, captured on this target before
+    /// the begin, no longer clips them (`engram_admission_budget_enforced`).
+    fn applied_begin_deadline(&self, started_at: std::time::Instant) -> std::time::Instant {
         let budget = Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS);
         #[cfg(test)]
         let budget = self.test_dispatch_budget.unwrap_or(budget);
         started_at + budget
+    }
+
+    /// `deadline`, but never past the head's enforced overall admission
+    /// budget: one attempt stays inside what is left of it.
+    fn clip_to_admission_budget(&self, deadline: std::time::Instant) -> std::time::Instant {
+        self.admission_deadline
+            .map_or(deadline, |budget| deadline.min(budget))
     }
 
     /// The deadline of the named-root guard right before Begin. It keeps
@@ -3528,7 +3565,9 @@ impl EngramBindingTarget {
         }
         match self.admission_started_at {
             Some(started) => self.dispatch_deadline(started),
-            None => standalone_started + self.settings.call_timeout(),
+            // A standalone operation (a boot reconciliation's bind) for a head
+            // with an enforced admission budget never outlives that budget.
+            None => self.clip_to_admission_budget(standalone_started + self.settings.call_timeout()),
         }
     }
 
@@ -3897,6 +3936,9 @@ impl AppState {
         // recovery scheduled (`engram_begin_boot.rs`) before any target is
         // picked, so no cold or restart-checkpoint recovery takes it first.
         let mut changed = self.reconstruct_engram_begin_recovery_on_boot_locked(&mut inner);
+        // A head an earlier host held after its prepared begin failed, with
+        // nothing sent, is admitted afresh (`engram_begin_preparation_retry.rs`).
+        changed |= self.readmit_engram_begin_preparation_holds_on_boot_locked(&mut inner);
         let targets = Self::engram_boot_recovery_targets_locked(&inner);
         let budget = Duration::from_millis(inner.preferences.engram.boot_recovery_budget_ms);
         let target_ids = targets
@@ -4178,13 +4220,20 @@ impl AppState {
         true
     }
 
-    /// Whether `session_id` holds a parked-admission retry record, whose
-    /// boot reconciliation runs under the host-wide retry cap.
+    /// Whether `session_id` holds a parked-admission retry record, a
+    /// begin-preparation abort record included, whose boot reconciliation
+    /// runs under the host-wide retry cap (as the lazy path's
+    /// `engram_retry_head_permit_locked`).
     fn engram_session_holds_admission_retry(&self, session_id: &str) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        inner
-            .find_session_index(session_id)
-            .is_some_and(|index| inner.sessions[index].engram.admission_retry.is_some())
+        inner.find_session_index(session_id).is_some_and(|index| {
+            let engram = &inner.sessions[index].engram;
+            engram.admission_retry.is_some()
+                || engram
+                    .abort_retry
+                    .as_ref()
+                    .is_some_and(|retry| retry.reason == EngramAbortReason::BeginPreparation)
+        })
     }
 
     fn finish_late_engram_restart_recovery(&self, completion: EngramBootRecoveryCompletion) {
@@ -4444,6 +4493,8 @@ impl AppState {
                 directives: Vec::new(),
                 delivered_range: None,
                 latency_ms: EngramControlLatencyCard {
+                    admission_fence: None,
+                    preparation_fence: None,
                     evaluate: None,
                     begin: None,
                     checkpoint: None,
@@ -4920,6 +4971,8 @@ impl AppState {
             directives: Vec::new(),
             delivered_range: None,
             latency_ms: EngramControlLatencyCard {
+                admission_fence: None,
+                preparation_fence: None,
                 evaluate: None,
                 begin: None,
                 checkpoint: Some(duration_millis(started_at.elapsed())),
@@ -5117,6 +5170,7 @@ impl AppState {
         };
         let mut evaluate_latency_ms = pending.evaluate_latency_ms;
         let mut begin_latency_ms = None;
+        let mut preparation_fence_ms: Option<u64> = None;
         let mut retry_used = false;
         let mut healing_refusal = None;
         let dispatch_budget_started_at = pending.started_at;
@@ -5128,6 +5182,10 @@ impl AppState {
         // cannot be checkpointed: the next attempt must rebind so Engram can
         // expire the issued-but-unbegun grant.
         let mut issued_unbegun_grant_id = None;
+        // The prepared begin was not durably acknowledged for a reason that
+        // can be waited out: the head is admitted afresh automatically
+        // (`engram_begin_preparation_retry.rs`).
+        let mut begin_preparation_transient = false;
         // A begin whose outcome never arrived, or arrived for another grant,
         // leaves this grant possibly begun on Engram. Recorded on the session
         // when the dispatch record is finished, so recovery settles it later.
@@ -5180,8 +5238,23 @@ impl AppState {
                         );
                     }
                     let reconstructing = reconstructing.is_some();
-                    issued_unbegun_grant_id =
-                        (replaying.is_none() && !reconstructing).then(|| grant_id.clone());
+                    // The head's pending prepared begin for this grant, never
+                    // sent: it is sent exactly, under its stored key.
+                    let pending_preparation = if replaying.is_none() && !reconstructing {
+                        self.engram_begin_preparation_pending_for(session_id, admission_owner.as_ref())
+                            .filter(|prepared| prepared.grant_id == grant_id)
+                    } else {
+                        None
+                    };
+                    // A first begin's grant is issued but not begun: a
+                    // failure before the begin is sent arms the orphan repair
+                    // that expires it. This host's pending begin keeps its
+                    // grant for that exact begin instead, so it is armed only
+                    // once that begin is about to be sent (below).
+                    issued_unbegun_grant_id = (replaying.is_none()
+                        && !reconstructing
+                        && pending_preparation.is_none())
+                    .then(|| grant_id.clone());
                     let Some(target) = binding_target.as_ref() else {
                         break (
                             EngramControlCardDecision::Degraded,
@@ -5229,27 +5302,106 @@ impl AppState {
                     }
                     let begin_request = EngramControlRequest::TurnBegin {
                         routing_token: routing_token.clone(), grant_id: grant_id.clone(), delivery_tokens,
-                        idempotency_key: replaying.as_ref().map_or_else(
+                        idempotency_key: replaying.as_ref().or(pending_preparation.as_ref()).map_or_else(
                             || self.queued_engram_begin_key(session_id, pending.dispatch_generation, &grant_id),
                             |prepared| prepared.idempotency_key.clone(),
                         ),
                     };
+                    let preparation_kind = if replaying.is_some() || reconstructing {
+                        EngramBeginPreparationKind::Recovery
+                    } else if pending_preparation.is_some() {
+                        EngramBeginPreparationKind::Pending
+                    } else {
+                        EngramBeginPreparationKind::First
+                    };
                     // Without a durable record of this exact begin, a lost
                     // reply could never be replayed: do not send it.
-                    if let Err(error) = admission_owner
+                    // Its durability wait is the card's preparation fence:
+                    // one attempt's wait, clipped to the overall budget.
+                    let preparation_started = std::time::Instant::now();
+                    let preparation_deadline = target.clip_to_admission_budget(
+                        dispatch_budget_started_at
+                            + Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS),
+                    );
+                    let prepared = admission_owner
                         .as_ref()
-                        .ok_or_else(|| EngramTransportError::local_state("Begin preparation owner disappeared"))
-                        .and_then(|owner| self.prepare_engram_begin_durable(session_id, dispatch_budget_started_at, owner, &begin_request, delivered_range.clone()))
-                    {
+                        .ok_or_else(|| EngramBeginPreparationFailure::not_transient(EngramTransportError::local_state("Begin preparation owner disappeared")))
+                        .and_then(|owner| {
+                            self.prepare_engram_begin_durable(
+                                session_id,
+                                preparation_deadline,
+                                owner,
+                                &begin_request,
+                                delivered_range.clone(),
+                                preparation_kind,
+                            )
+                        });
+                    // Acknowledged only at or after its wait's deadline: a
+                    // begin that then fails before transmission was withheld
+                    // by this late preparation, never sent.
+                    let preparation_late = prepared.is_ok()
+                        && target.budget_clock.now() >= preparation_deadline;
+                    // The acknowledged record replays one that may have been
+                    // sent before: a pre-send failure of this begin never
+                    // proves it unsent, so it is never kept pending.
+                    let preparation_possibly_sent = matches!(prepared, Ok(true));
+                    preparation_fence_ms = Some(
+                        preparation_fence_ms.unwrap_or(0)
+                            + duration_millis(preparation_started.elapsed()),
+                    );
+                    if let Err(failure) = prepared {
                         self.clear_engram_begin_requested_if_current(session_id, pending.dispatch_generation);
-                        causal_failure = Some(EngramCausalFailure::local_hold("turn_begin", "begin_preparation_unacknowledged", &error.message, "prepared Begin durable acknowledgement"));
+                        let fresh = replaying.is_none() && !reconstructing;
+                        // A pending prepared begin keeps its grant for that
+                        // same begin: no orphan repair, no fresh admission.
+                        let kept_pending = fresh && failure.pending;
+                        // A kept pending begin keeps its grant for that same
+                        // begin, and a possibly sent one may have begun it:
+                        // neither grant is expired by an orphan rebind.
+                        if kept_pending || failure.possibly_sent {
+                            issued_unbegun_grant_id = None;
+                        } else if fresh && pending_preparation.is_some() {
+                            // A pending begin whose re-acknowledgement failed
+                            // terminally is withdrawn, never sent: its grant
+                            // is a first begin's issued orphan, for the
+                            // orphan repair.
+                            issued_unbegun_grant_id = Some(grant_id.clone());
+                        }
+                        begin_preparation_transient = failure.transient && fresh && !kept_pending;
+                        // The head's first hold enforces its admission
+                        // budget, here or after a restart; it is saved with
+                        // the card below.
+                        if fresh && let Some(owner) = admission_owner.as_ref() {
+                            self.note_engram_begin_preparation_hold(
+                                session_id,
+                                owner,
+                                kept_pending.then(|| grant_id.clone()),
+                            );
+                        }
+                        causal_failure = Some(EngramCausalFailure::local_hold("turn_begin", ENGRAM_BEGIN_PREPARATION_CODE, &failure.error.message, "prepared Begin durable acknowledgement"));
                         break (
                             EngramControlCardDecision::Degraded,
-                            Some("begin_preparation_unacknowledged".to_owned()),
+                            Some(
+                                if kept_pending {
+                                    ENGRAM_BEGIN_PREPARATION_PENDING_CODE
+                                } else {
+                                    ENGRAM_BEGIN_PREPARATION_CODE
+                                }
+                                .to_owned(),
+                            ),
                             Vec::new(),
                             delivered_range,
                             EngramControlFailMode::Degraded,
                         );
+                    }
+                    // Acknowledged: the begin goes out now, so it is no
+                    // longer pending, and from here its grant is a first
+                    // send's: issued and not yet begun.
+                    if pending_preparation.is_some()
+                        && let Some(owner) = admission_owner.as_ref()
+                    {
+                        self.clear_engram_begin_preparation_pending(session_id, owner);
+                        issued_unbegun_grant_id = Some(grant_id.clone());
                     }
                     // The reconstructed begin is now the prepared begin of the
                     // uncertain grant: from here it is that begin's replay.
@@ -5266,6 +5418,12 @@ impl AppState {
                     };
                     let mut begin_root_guard = None;
                     let begin_started = std::time::Instant::now();
+                    // When the host first observed the complete Begin
+                    // response (or the status read that settles it as
+                    // applied), on the operation budget clock: the receipt
+                    // time the applied-begin exemption is judged by
+                    // (`engram_begin_receipt_after_deadline`).
+                    let mut receipt_observed_at = None;
                     let mut begin = self
                         .guard_engram_root_read_until(
                             target,
@@ -5278,19 +5436,18 @@ impl AppState {
                         })
                         .and_then(|guard| {
                             begin_root_guard = guard;
-                            target
-                                .adapter
-                                .request(
-                                    &target.connection,
-                                    &begin_request,
-                                    target.begin_rpc_timeout_until(
-                                        target.dispatch_deadline(dispatch_budget_started_at),
-                                    ).map_err(|mut error| {
-                                        error.causal_failure = Some(EngramCausalFailure::unsent_request(&error, &begin_request, "Begin budget before transmission"));
-                                        error
-                                    })?,
-                                )
-                                .and_then(parse_engram_result::<EngramTurnBeginResponse>)
+                            let reply = target.adapter.request(
+                                &target.connection,
+                                &begin_request,
+                                target.begin_rpc_timeout_until(
+                                    target.dispatch_deadline(dispatch_budget_started_at),
+                                ).map_err(|mut error| {
+                                    error.causal_failure = Some(EngramCausalFailure::unsent_request(&error, &begin_request, "Begin budget before transmission"));
+                                    error
+                                })?,
+                            );
+                            receipt_observed_at = Some(target.budget_clock.now());
+                            reply.and_then(parse_engram_result::<EngramTurnBeginResponse>)
                         });
                     begin_latency_ms = Some(duration_millis(begin_started.elapsed()));
                     if let Err(error) = &begin {
@@ -5366,7 +5523,7 @@ impl AppState {
                             // applies again (the healing route clears it).
                             issued_unbegun_grant_id = Some(grant_id.clone());
                         } else if code == "grant_scope_mismatch"
-                            && self.engram_status_shows_grant_begun(
+                            && let Some(status_observed_at) = self.engram_status_shows_grant_begun(
                                 target,
                                 routing_token,
                                 &grant_id,
@@ -5374,6 +5531,9 @@ impl AppState {
                                 admission_owner.as_ref(),
                             )
                         {
+                            // The status read is what settles it as applied:
+                            // the host observed that as the read returned.
+                            receipt_observed_at = Some(status_observed_at);
                             begin = Ok(EngramTurnBeginResponse::Begin {
                                 receipt: EngramTurnBeginReceipt {
                                     grant_id: grant_id.clone(),
@@ -5402,6 +5562,43 @@ impl AppState {
                                     EngramControlFailMode::Degraded,
                                 );
                             }
+                            // A matching receipt first observed at or after
+                            // the head's enforced deadline is the actual
+                            // outcome, kept, but it revives no automatic
+                            // advancement: no delivery now. The grant stays
+                            // possibly begun for its exact replay, which
+                            // Resume sends; the tick ends the recovery in the
+                            // explicit hold (`engram_begin_preparation_retry.rs`).
+                            if engram_begin_receipt_after_deadline(
+                                target.admission_deadline,
+                                receipt_observed_at,
+                            ) {
+                                let mut late = EngramTransportError::deadline(
+                                    "Engram applied this Begin (a matching receipt), but the host \
+                                     first observed the receipt at or after the admission \
+                                     budget's deadline: automatic delivery is exhausted. The \
+                                     applied grant and its prepared Begin are kept; Resume \
+                                     replays that same Begin.",
+                                );
+                                late.code = Some(ENGRAM_BEGIN_APPLIED_AFTER_DEADLINE_CODE.to_owned());
+                                causal_failure = Some(EngramCausalFailure::request(&late, &begin_request));
+                                uncertain_grant_id = Some(grant_id.clone());
+                                issued_unbegun_grant_id = None;
+                                if let Some(owner) = admission_owner.as_ref() {
+                                    self.note_engram_begin_applied_after_deadline(
+                                        session_id,
+                                        owner,
+                                        &grant_id,
+                                    );
+                                }
+                                break (
+                                    EngramControlCardDecision::Degraded,
+                                    Some(ENGRAM_BEGIN_APPLIED_AFTER_DEADLINE_CODE.to_owned()),
+                                    Vec::new(),
+                                    delivered_range,
+                                    EngramControlFailMode::Degraded,
+                                );
+                            }
                             active_grant_id = Some(grant_id.clone());
                             issued_unbegun_grant_id = None;
                             begin_root_projection_present = receipt.named_root.is_some();
@@ -5410,7 +5607,7 @@ impl AppState {
                                 &routing_token,
                                 begin_binding.as_ref(),
                                 receipt.named_root,
-                                target.dispatch_deadline(dispatch_budget_started_at),
+                                target.applied_begin_deadline(dispatch_budget_started_at),
                                 begin_root_guard,
                                 admission_owner.as_ref(),
                             ) {
@@ -5905,11 +6102,51 @@ impl AppState {
                             );
                         }
                         Err(error) => {
-                            self.record_queued_engram_transport_failure(
-                                session_id,
-                                &error,
-                                admission_owner.as_ref(),
-                            );
+                            // A fresh begin that failed before transmission
+                            // (its guard or its budget ran out after a late
+                            // durable acknowledgement) was never sent. After a
+                            // late preparation, or while the head's admission
+                            // budget is enforced, it stays the budget's pending
+                            // begin (its hold enforcing the budget from now
+                            // on), never a possibly begun one: it was not sent
+                            // (`engram_begin_preparation_retry.rs`). Nothing
+                            // reached Engram, so it is no transport failure:
+                            // no circuit count, no bind backoff, and no rebind
+                            // that would expire the pending begin's grant.
+                            let unsent = error.causal_failure.as_ref().is_some_and(|cause| {
+                                cause.remote_application == EngramRemoteApplication::NotStarted
+                            });
+                            let kept_pending_unsent = unsent
+                                && replaying.is_none()
+                                && !reconstructing
+                                && !preparation_possibly_sent
+                                && admission_owner.as_ref().is_some_and(|owner| {
+                                    preparation_late
+                                        || self.engram_admission_budget_enforced_for(session_id, owner)
+                                });
+                            if !kept_pending_unsent {
+                                self.record_queued_engram_transport_failure(
+                                    session_id,
+                                    &error,
+                                    admission_owner.as_ref(),
+                                );
+                            }
+                            if kept_pending_unsent && let Some(owner) = admission_owner.as_ref() {
+                                self.clear_engram_begin_requested_if_current(session_id, pending.dispatch_generation);
+                                self.note_engram_begin_preparation_hold(
+                                    session_id,
+                                    owner,
+                                    Some(grant_id.clone()),
+                                );
+                                issued_unbegun_grant_id = None;
+                                break (
+                                    EngramControlCardDecision::Degraded,
+                                    Some(ENGRAM_BEGIN_PREPARATION_PENDING_CODE.to_owned()),
+                                    Vec::new(),
+                                    delivered_range,
+                                    EngramControlFailMode::Degraded,
+                                );
+                            }
                             let code = self.engram_failure_card_code(session_id, &error);
                             // The request may have reached Engram before the
                             // failure, so the grant is possibly begun. That
@@ -6010,6 +6247,8 @@ impl AppState {
             directives,
             delivered_range,
             latency_ms: EngramControlLatencyCard {
+                admission_fence: pending.admission_fence_ms,
+                preparation_fence: preparation_fence_ms,
                 evaluate: Some(evaluate_latency_ms),
                 begin: begin_latency_ms,
                 checkpoint: None,
@@ -6107,17 +6346,17 @@ impl AppState {
                                 Ok(EngramSourceObservationCapture::SupersededRecovery { scope, observation_id }) => {
                                     source_capture_retained = true;
                                     if let Err(error) = self.close_retired_source_history(
-                                        &scope, &observation_id, target, target.dispatch_deadline(pending.started_at)) {
+                                        &scope, &observation_id, target, target.applied_begin_deadline(pending.started_at)) {
                                         eprintln!("engram> session={session_id} superseded source capture retains recovery: {error}");
                                     }
                                     break EngramTurnDeliveryPreparation::Superseded;
                                 }
                                 Ok(EngramSourceObservationCapture::NoEvidence) => Ok(()),
                                 Ok(EngramSourceObservationCapture::Gate) => self.advance_engram_source_observation(
-                                    session_id, target, target.dispatch_deadline(pending.started_at)),
+                                    session_id, target, target.applied_begin_deadline(pending.started_at)),
                                 Ok(EngramSourceObservationCapture::Invariant { reason }) => {
                                     let reason = match self.confirm_source_capture_recovery_durable(
-                                        session_id, owner, target, target.dispatch_deadline(pending.started_at)) {
+                                        session_id, owner, target, target.applied_begin_deadline(pending.started_at)) {
                                         Ok(()) => reason,
                                         Err(error) => format!("{reason} Its recovery persistence is unknown: {error}"),
                                     };
@@ -6126,7 +6365,7 @@ impl AppState {
                                 }
                                 Ok(EngramSourceObservationCapture::RetiredRecovery { reason }) => {
                                     let reason = match self.close_retired_source_capture(
-                                        session_id, owner, target, target.dispatch_deadline(pending.started_at)) {
+                                        session_id, owner, target, target.applied_begin_deadline(pending.started_at)) {
                                         Ok(()) => reason,
                                         Err(error) => format!("{reason} Captured recovery or settlement remains unknown: {error}"),
                                     };
@@ -6189,6 +6428,19 @@ impl AppState {
                     }
                 }
             }
+        };
+        // A prepared begin whose acknowledgement can be waited out was never
+        // sent and left no grant begun. With its card recorded, the head is
+        // settled for an automatic fresh admission instead of the explicit
+        // hold; the rebind it needs retires the issued grant first.
+        let preparation = if begin_preparation_transient
+            && preparation == EngramTurnDeliveryPreparation::Rejected
+            && let (Some(owner), Some(target)) = (admission_owner.as_ref(), binding_target.as_ref())
+            && self.settle_engram_begin_preparation_failure(session_id, owner, target)
+        {
+            EngramTurnDeliveryPreparation::PersistenceUnknown
+        } else {
+            preparation
         };
         if !source_capture_retained && !matches!(preparation, EngramTurnDeliveryPreparation::Ready | EngramTurnDeliveryPreparation::ObservationPending
             | EngramTurnDeliveryPreparation::ObservationRecovery)
@@ -6818,6 +7070,10 @@ impl AppState {
             work_binding: child.engram.work_binding.clone(),
             source_root_read_fence: EngramRootReadFence::capture(inner),
             admission_started_at: None,
+            admission_deadline: engram_admission_budget_deadline(
+                child,
+                &inner.engram_budget_clock_snapshot(),
+            ),
             adapter: inner.engram_host_adapter.clone(),
             budget_clock: inner.engram_budget_clock_snapshot(),
             #[cfg(test)]
@@ -6892,6 +7148,10 @@ impl AppState {
         Ok(Some(EngramBindingTarget {
             runtime_snapshot: parent.runtime.runtime_token(),
             admission_started_at: None,
+            admission_deadline: engram_admission_budget_deadline(
+                parent,
+                &inner.engram_budget_clock_snapshot(),
+            ),
             adapter: inner.engram_host_adapter.clone(),
             budget_clock: inner.engram_budget_clock_snapshot(),
             #[cfg(test)]
@@ -7462,7 +7722,15 @@ impl AppState {
                     current: current.as_ref(),
                     refused: &refused,
                 };
-                let work_binding_timeout = ENGRAM_WORK_BINDING_COMMAND_TIMEOUT;
+                // The focus read before the bind stays inside an enforced
+                // admission budget too: past it, nothing is sent.
+                let work_binding_timeout = if target.admission_deadline.is_some() {
+                    target
+                        .rpc_timeout_until(binding_deadline)?
+                        .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+                } else {
+                    ENGRAM_WORK_BINDING_COMMAND_TIMEOUT
+                };
                 #[cfg(test)]
                 let work_binding_timeout = if target.test_root_setup_deadline.is_some() {
                     target
@@ -7908,17 +8176,35 @@ impl AppState {
         let started_at = clock.now();
         let bind_phase_proof = self.capture_engram_bind_retry_proof(intent);
         let (disabled_reason, admission_owner) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let record = inner
-                .find_session_index(&intent.session_id)
-                .and_then(|index| inner.sessions.get(index));
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&intent.session_id);
+            let admission_owner = index
+                .and_then(|index| inner.sessions.get(index))
+                .and_then(EngramQueuedAdmissionOwner::capture);
+            // The head is accepted for control admission now, before any
+            // control, persistence or capacity wait: its overall budget
+            // starts here unless a retry of it already runs one. A new budget
+            // is stamped, so the session's next save carries its start.
+            if let (Some(index), Some(owner)) = (index, admission_owner.as_ref())
+                && accept_engram_admission_budget(
+                    &mut inner.sessions[index],
+                    owner,
+                    clock.wall_now(),
+                )
+            {
+                inner.stamp_session_at_index(index);
+            }
             (
-                record.and_then(|record| record.engram.disabled_reason.clone()),
-                record.and_then(EngramQueuedAdmissionOwner::capture),
+                inner
+                    .find_session_index(&intent.session_id)
+                    .and_then(|index| inner.sessions.get(index))
+                    .and_then(|record| record.engram.disabled_reason.clone()),
+                admission_owner,
             )
         };
         if let Some(code) = disabled_reason {
             return Some(EngramPendingDispatch {
+                admission_fence_ms: None,
                 causal_failure: Some(EngramCausalFailure::local_hold("admission_disabled", &code, "Engram control is disabled after a prior fatal error; original error details unavailable", "current admission disabled")),
                 dispatch_generation: intent.dispatch_generation,
                 intent_fingerprint: intent.intent_fingerprint.clone(),
@@ -7963,6 +8249,7 @@ impl AppState {
                     .flatten()
                 });
                 return Some(EngramPendingDispatch {
+                    admission_fence_ms: None,
                     causal_failure: Some(EngramCausalFailure::error(&error, "admission_binding", None, &[])),
                     dispatch_generation: intent.dispatch_generation,
                     intent_fingerprint: intent.intent_fingerprint.clone(),
@@ -7991,6 +8278,30 @@ impl AppState {
             self.engram_begin_replay_for(&intent.session_id, admission_owner.as_ref())
         {
             return Some(EngramPendingDispatch {
+                admission_fence_ms: None,
+                causal_failure: None,
+                dispatch_generation: intent.dispatch_generation,
+                intent_fingerprint: intent.intent_fingerprint.clone(),
+                evaluated: EngramDispatchEvaluation::Grant {
+                    grant_id: prepared.grant_id,
+                    delivery_tokens: prepared.delivery_tokens,
+                    delivered_range: prepared.delivered_range,
+                },
+                evaluate_latency_ms: 0,
+                started_at,
+                awaiting_runtime_stop_resolution: false,
+                begin_requested: None,
+                evaluated_work_binding: self.engram_bound_work_binding(&intent.session_id),
+            });
+        }
+        // A head whose prepared begin is pending sends no evaluate either: no
+        // fresh admission races that exact preparation. Its grant goes to
+        // that same begin, acknowledged again before it is sent.
+        if let Some(prepared) = self
+            .engram_begin_preparation_pending_for(&intent.session_id, admission_owner.as_ref())
+        {
+            return Some(EngramPendingDispatch {
+                admission_fence_ms: None,
                 causal_failure: None,
                 dispatch_generation: intent.dispatch_generation,
                 intent_fingerprint: intent.intent_fingerprint.clone(),
@@ -8016,6 +8327,7 @@ impl AppState {
         // after the reply.
         let mut evaluated_work_binding = None;
         let mut causal_failure = None;
+        let mut admission_fence_ms: Option<u64> = None;
         let evaluated = loop {
             let routing_token = target
                 .routing_token
@@ -8046,21 +8358,20 @@ impl AppState {
                         .to_owned(),
                 };
             }
-            let request = match self.queued_engram_evaluate_request(
-                &target,
-                intent,
-                match admission_owner.as_ref() {
-                    Some(owner) => owner,
-                    None => {
-                        break EngramDispatchEvaluation::Degraded {
-                            code: "authorization_superseded".to_owned(),
-                            detail: "Engram admission owner disappeared before evaluation"
-                                .to_owned(),
-                        };
-                    }
-                },
-                request,
-            ) {
+            let Some(owner) = admission_owner.as_ref() else {
+                break EngramDispatchEvaluation::Degraded {
+                    code: "authorization_superseded".to_owned(),
+                    detail: "Engram admission owner disappeared before evaluation".to_owned(),
+                };
+            };
+            // The retained evaluate's durability wait, for the latency split.
+            let fence_started = clock.now();
+            let prepared = self.queued_engram_evaluate_request(&target, intent, owner, request);
+            admission_fence_ms = Some(
+                admission_fence_ms.unwrap_or(0)
+                    + duration_millis(clock.elapsed_since(fence_started)),
+            );
+            let request = match prepared {
                 Ok(request) => request,
                 Err(error) => {
                     causal_failure = Some(EngramCausalFailure::local(&error, "turn_evaluate", "Evaluate durable preparation"));
@@ -8281,6 +8592,7 @@ impl AppState {
             causal_failure = Some(EngramCausalFailure::local_hold("turn_evaluate", code, detail, "Evaluate preparation"));
         }
         Some(EngramPendingDispatch {
+            admission_fence_ms,
             causal_failure,
             dispatch_generation: intent.dispatch_generation,
             intent_fingerprint: intent.intent_fingerprint.clone(),
@@ -8383,6 +8695,10 @@ impl AppState {
                 record.engram.next_bind_retry_at = None;
                 record.engram.rebind_required = true;
                 record.engram.drop_pending_source_root_lines();
+                // Control disabled is not saved, so the head's window ends
+                // in this same transition: a retry tick may never visit the
+                // head again to end it (`engram_begin_preparation_retry.rs`).
+                end_engram_admission_budget_window(record);
                 return;
             }
             if let Some(clock) = retry_clock {
@@ -8445,6 +8761,12 @@ impl AppState {
             record.engram.next_bind_retry_at = None;
             record.engram.rebind_required = true;
             record.engram.drop_pending_source_root_lines();
+            // A fatal reply to the head's own attempt removes its retry
+            // record, so no tick would end its window; and control disabled
+            // is not saved, so a restart would otherwise replay the retained
+            // Begin automatically. The window ends in this same transition,
+            // saved with the record (`engram_begin_preparation_retry.rs`).
+            end_engram_admission_budget_window(record);
             return;
         }
         if let Some(clock) = retry_clock {

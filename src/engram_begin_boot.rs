@@ -66,6 +66,10 @@ fn engram_begin_reconstruct_preview(retry: &EngramAdmissionRetry) -> String {
 struct EngramBeginBootPlan {
     code: &'static str,
     mark_uncertain: Option<String>,
+    /// Whether the recovery is scheduled. A head whose prepared-begin
+    /// recovery window ended only has its begin marked possibly begun: it
+    /// keeps its hold, and an explicit Resume replays that begin.
+    schedule: bool,
 }
 
 /// The boot pass's reading of `record`, without changing it. A Prepared begin
@@ -77,7 +81,12 @@ struct EngramBeginBootPlan {
 /// (`engram_begin_replay_pending`) is scheduled its replay and a pre-fix head
 /// its reconstruction. A head with a begin recovery already scheduled, or
 /// one another hold owns (an interrupted one, a Stop, an operator pause,
-/// control disabled, an unknown transcript position), is left as it is.
+/// control disabled, an unknown transcript position), is left as it is. A
+/// head whose prepared-begin recovery window ended (a Stop, a pause, control
+/// disabled, exhaustion) waits for an explicit Resume, which a restart does
+/// not give: control disabled is not saved, so the ended window keeps that
+/// hold. Its saved prepared begin is still marked possibly begun, so that
+/// Resume replays it exactly, but nothing is scheduled.
 fn engram_begin_boot_plan(record: &SessionRecord) -> Option<EngramBeginBootPlan> {
     let retry_code = record.engram.admission_retry.as_ref().map(|retry| retry.code.as_str());
     let eligible = !matches!(
@@ -92,6 +101,8 @@ fn engram_begin_boot_plan(record: &SessionRecord) -> Option<EngramBeginBootPlan>
     if !eligible {
         return None;
     }
+    let window_ended = engram_begin_preparation_lineage(record)
+        .is_some_and(|lineage| lineage.ended && lineage.enforced());
     if record.engram.uncertain_grant_id.is_none()
         && record.engram.active_grant_id.is_none()
         && let Some(grant_id) = record
@@ -106,10 +117,12 @@ fn engram_begin_boot_plan(record: &SessionRecord) -> Option<EngramBeginBootPlan>
         return Some(EngramBeginBootPlan {
             code: ENGRAM_BEGIN_REPLAY_CODE,
             mark_uncertain: Some(grant_id),
+            schedule: !window_ended,
         });
     }
-    // Any other head with a retry record keeps it.
-    if retry_code.is_some() {
+    // Any other head with a retry record keeps it, and a head whose window
+    // ended has nothing more to mark.
+    if retry_code.is_some() || window_ended {
         return None;
     }
     let code = if engram_begin_replay_pending(record).is_some() {
@@ -122,6 +135,7 @@ fn engram_begin_boot_plan(record: &SessionRecord) -> Option<EngramBeginBootPlan>
     Some(EngramBeginBootPlan {
         code,
         mark_uncertain: None,
+        schedule: true,
     })
 }
 
@@ -139,6 +153,9 @@ fn apply_engram_begin_boot_plan(
 ) {
     if let Some(grant_id) = plan.mark_uncertain {
         record.engram.uncertain_grant_id = Some(grant_id);
+    }
+    if !plan.schedule {
+        return;
     }
     if let Some(head) = record.queued_prompts.front_mut() {
         head.engram_waiting = true;
@@ -171,8 +188,7 @@ impl AppState {
     /// is stamped, and the budget clock is read only once one does. Returns
     /// whether a record changed.
     fn reconstruct_engram_begin_recovery_on_boot_locked(&self, inner: &mut StateInner) -> bool {
-        let now = chrono::Utc::now();
-        let mut budget_now = None;
+        let mut clock_now = None;
         let mut changed = false;
         for index in 0..inner.sessions.len() {
             let Some(plan) = engram_begin_boot_plan(&inner.sessions[index]) else {
@@ -180,9 +196,11 @@ impl AppState {
             };
             // The caller holds the state lock, so the clock is read from the
             // state it holds: `engram_budget_clock` takes that lock again in
-            // tests.
-            let budget_now =
-                *budget_now.get_or_insert_with(|| inner.engram_budget_clock_snapshot().now());
+            // tests. Its wall reading dates the recovery's schedule.
+            let (now, budget_now) = *clock_now.get_or_insert_with(|| {
+                let clock = inner.engram_budget_clock_snapshot();
+                (clock.wall_now(), clock.now())
+            });
             let session_id = inner.sessions[index].session.id.clone();
             // The recovery runs under the authority of the retained evaluate:
             // the current target's, only while the evaluate was issued under

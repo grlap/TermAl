@@ -493,6 +493,14 @@ impl AppState {
                 return Ok(None);
             }
         }
+        // A begin-preparation hold, where nothing was sent, is admitted afresh
+        // rather than refused as interrupted (`engram_begin_preparation_retry.rs`).
+        // The release moves the head to a new dispatch generation, so the
+        // owner is re-captured for that same head, and the drain is bound to
+        // it even when the caller named none: a successor a cancellation
+        // exposes meanwhile is never admitted in the released head's place.
+        let released = self.release_engram_begin_preparation_hold_for_resume(session_id, owner.as_ref())?;
+        let owner = released.or(owner);
         let dispatch = match owner {
             Some(owner) => self.dispatch_next_queued_turn_for_resume(session_id, owner),
             None => self.dispatch_next_queued_turn(session_id, true),

@@ -831,6 +831,7 @@ fn pending_engram_grant(
     grant_id: impl Into<String>,
 ) -> EngramPendingDispatch {
     EngramPendingDispatch {
+        admission_fence_ms: None,
         causal_failure: None,
         dispatch_generation,
         intent_fingerprint: format!("pending-grant-{dispatch_generation}"),
@@ -11439,6 +11440,8 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
             directives: Vec::new(),
             delivered_range: None,
             latency_ms: EngramControlLatencyCard {
+                admission_fence: None,
+                preparation_fence: None,
                 evaluate: Some(0),
                 begin: Some(0),
                 checkpoint: None,
@@ -16066,6 +16069,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
             .expect("child should be mutable");
         record.engram.active_grant_id = Some("preexisting-open-grant".to_owned());
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            admission_fence_ms: None,
             causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint: "degraded-card-preserves-grant".to_owned(),
@@ -16099,6 +16103,8 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
             directives: Vec::new(),
             delivered_range: None,
             latency_ms: EngramControlLatencyCard {
+                admission_fence: None,
+                preparation_fence: None,
                 evaluate: Some(0),
                 begin: None,
                 checkpoint: None,
@@ -16212,6 +16218,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
         });
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            admission_fence_ms: None,
             causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint,
@@ -16260,6 +16267,8 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
             directives: Vec::new(),
             delivered_range: None,
             latency_ms: EngramControlLatencyCard {
+                admission_fence: None,
+                preparation_fence: None,
                 evaluate: Some(0),
                 begin: Some(0),
                 checkpoint: None,

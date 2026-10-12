@@ -447,6 +447,10 @@ struct PersistedSessionRecord {
     /// rebuilds its retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_admission_retry: Option<EngramAdmissionRetry>,
+    /// The queue head's overall admission budget, kept across retries and
+    /// restarts (`EngramSessionState::begin_preparation_lineage`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_begin_preparation_lineage: Option<EngramBeginPreparationLineage>,
     /// An operator queue pause (`EngramSessionState::operator_paused`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     engram_operator_paused: bool,
@@ -567,6 +571,7 @@ impl PersistedSessionRecord {
             engram_source_observation_delete_requested: record.engram.source_observation_delete_requested,
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
             engram_admission_retry: record.engram.admission_retry.clone(),
+            engram_begin_preparation_lineage: record.engram.begin_preparation_lineage.clone(),
             engram_operator_paused: record.engram.operator_paused,
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
@@ -662,6 +667,15 @@ impl PersistedSessionRecord {
                 source_observation_delete_requested: self.engram_source_observation_delete_requested,
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
                 admission_retry: self.engram_admission_retry.clone(),
+                // A saved pending marker proves nothing after a restart: the
+                // begin may have been sent after it was last saved, so a
+                // loaded one is dropped (`engram_begin_preparation_retry.rs`).
+                begin_preparation_lineage: self.engram_begin_preparation_lineage.clone().map(
+                    |mut lineage| {
+                        lineage.pending_grant_id = None;
+                        lineage
+                    },
+                ),
                 operator_paused: self.engram_operator_paused,
                 ..EngramSessionState::default()
             },

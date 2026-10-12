@@ -55,6 +55,52 @@ describe("EngramControlCard", () => {
     expect(screen.getByText(/Operator paused this continuation/)).toBeInTheDocument();
   });
 
+  it("names a withheld begin's code and boundary when its cause is not published", () => {
+    renderEngramCard({
+      ...causalMessage,
+      refusalCode: "begin_preparation_unacknowledged",
+      causalFailure: undefined,
+    });
+    expect(screen.getByText(/Failure: begin_preparation_unacknowledged/)).toHaveTextContent(
+      "Boundary: prepared-Begin durable acknowledgement",
+    );
+    expect(screen.queryByText(/Original failure details unavailable/)).not.toBeInTheDocument();
+  });
+
+  it("tells a pending prepared begin's automatic wait apart from a withheld one", () => {
+    renderEngramCard({
+      ...causalMessage,
+      refusalCode: "begin_preparation_pending",
+      causalFailure: undefined,
+    });
+    expect(screen.getByText(/Failure: begin_preparation_pending/)).toHaveTextContent(
+      "Boundary: prepared-Begin durable acknowledgement (pending; the same Begin is kept for its retry)",
+    );
+    expect(screen.queryByText(/Original failure details unavailable/)).not.toBeInTheDocument();
+  });
+
+  it("never reads an inherited member as a code's boundary", () => {
+    renderEngramCard({
+      ...causalMessage,
+      refusalCode: "constructor",
+      causalFailure: undefined,
+    });
+    expect(screen.queryByText(/Boundary:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Original failure details unavailable/)).toBeInTheDocument();
+  });
+
+  it("splits the latency into its measured phases", () => {
+    renderEngramCard({
+      ...causalMessage,
+      latencyMs: { total: 20014, evaluate: 2883, admissionFence: 120, preparationFence: 17100 },
+    });
+    expect(
+      screen.getByText(
+        /Latency: 20014 ms \(evaluate 2883 ms, admission fence 120 ms, preparation fence 17100 ms\)/,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("reports missing legacy cause and missing correlation honestly", () => {
     const { unmount } = renderEngramCard({ ...causalMessage, causalFailure: undefined });
     expect(screen.getByText(/Original failure details unavailable/)).toBeInTheDocument();

@@ -153,11 +153,15 @@ impl AppState {
         }
     }
 
-    /// Whether producer status names `grant_id` as the session's open grant
-    /// in the begun state: the only answer that settles an ambiguous replay
-    /// refusal as applied. Status names an issued grant open too, so an issued,
-    /// unknown or absent state, a failed read, another grant or none settles
-    /// nothing.
+    /// When producer status named `grant_id` as the session's open grant in
+    /// the begun state: the only answer that settles an ambiguous replay
+    /// refusal as applied. The instant is the host's first observation of
+    /// that complete status response, on the operation budget clock, taken
+    /// as the read returns, before parsing or the owner check, which may wait
+    /// on the state lock: it is that answer's receipt time
+    /// (`engram_begin_receipt_after_deadline`). Status names an issued grant
+    /// open too, so an issued, unknown or absent state, a failed read,
+    /// another grant or none settles nothing (`None`).
     fn engram_status_shows_grant_begun(
         &self,
         target: &EngramBindingTarget,
@@ -165,30 +169,33 @@ impl AppState {
         grant_id: &str,
         deadline: std::time::Instant,
         owner: Option<&EngramQueuedAdmissionOwner>,
-    ) -> bool {
-        let Some(owner) = owner else {
-            return false;
-        };
-        let Ok(timeout) = target.rpc_timeout_until(deadline) else {
-            return false;
-        };
+    ) -> Option<std::time::Instant> {
+        let owner = owner?;
         if !self.queued_engram_owner_is_current(&target.connection.session_id, owner) {
-            return false;
+            return None;
         }
-        let status = target
-            .adapter
-            .request(
-                &target.connection,
-                &EngramControlRequest::SessionStatus {
-                    routing_token: routing_token.to_owned(),
-                },
-                timeout,
-            )
-            .and_then(parse_engram_result::<EngramSessionStatusResponse>);
-        self.queued_engram_owner_is_current(&target.connection.session_id, owner)
+        #[cfg(test)]
+        self.test_engram_authority_ack_boundary("begin_status_owner_checked");
+        // The owner check may wait on the state lock: the read's bound is
+        // taken after it, right before the read, so no read starts at or
+        // after the deadline.
+        let timeout = target.rpc_timeout_until(deadline).ok()?;
+        let reply = target.adapter.request(
+            &target.connection,
+            &EngramControlRequest::SessionStatus {
+                routing_token: routing_token.to_owned(),
+            },
+            timeout,
+        );
+        let observed_at = target.budget_clock.now();
+        #[cfg(test)]
+        self.test_engram_authority_ack_boundary("begin_status_observed");
+        let status = reply.and_then(parse_engram_result::<EngramSessionStatusResponse>);
+        (self.queued_engram_owner_is_current(&target.connection.session_id, owner)
             && status.is_ok_and(|status| {
                 status.open_grant_id.as_deref() == Some(grant_id)
                     && status.open_grant_state.as_deref() == Some("begun")
-            })
+            }))
+        .then_some(observed_at)
     }
 }

@@ -838,6 +838,7 @@ include!("runtime_process_tree.rs");
 include!("session_interaction.rs");
 include!("engram_queued_admission.rs");
 include!("engram_abort_retry.rs");
+include!("engram_begin_preparation_retry.rs");
 include!("engram_bind_retry.rs");
 include!("engram_admission_retry.rs");
 include!("engram_begin_replay.rs");

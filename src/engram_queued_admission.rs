@@ -379,18 +379,49 @@ impl AppState {
         started_at: std::time::Instant,
         owner: &EngramQueuedAdmissionOwner,
     ) -> std::result::Result<(), EngramTransportError> {
-        let clock = self.engram_budget_clock();
+        // One attempt's wait, never past the head's enforced overall
+        // admission budget (`engram_begin_preparation_retry.rs`).
         let deadline = started_at + Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS);
+        let deadline = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_session_index(session_id)
+                .and_then(|index| {
+                    engram_admission_budget_deadline(
+                        &inner.sessions[index],
+                        &inner.engram_budget_clock_snapshot(),
+                    )
+                })
+                .map_or(deadline, |budget| deadline.min(budget))
+        };
+        self.confirm_engram_admission_durable_classified(session_id, deadline, owner)
+            .map_err(|(error, _)| error)
+    }
+
+    /// `confirm_engram_admission_durable` waiting until `deadline`, also
+    /// saying what kind of failure it met (`EngramAdmissionDurabilityFault`),
+    /// so a caller can tell a late acknowledgement or a transient fence fault
+    /// from a lost owner.
+    fn confirm_engram_admission_durable_classified(
+        &self,
+        session_id: &str,
+        deadline: std::time::Instant,
+        owner: &EngramQueuedAdmissionOwner,
+    ) -> std::result::Result<(), (EngramTransportError, EngramAdmissionDurabilityFault)> {
+        let local = |error| (error, EngramAdmissionDurabilityFault::Local);
+        let clock = self.engram_budget_clock();
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id).ok_or_else(|| {
-                EngramTransportError::local_state("Session removed before durable admission")
+                local(EngramTransportError::local_state(
+                    "Session removed before durable admission",
+                ))
             })?;
             let record = &inner.sessions[index];
             if !owner.matches(record) {
-                return Err(EngramTransportError::local_state(
+                return Err(local(EngramTransportError::local_state(
                     "Admission durability fence no longer owns the queued prompt",
-                ));
+                )));
             }
             PersistFenceTarget::EngramAdmission {
                 session_id: session_id.to_owned(),
@@ -404,43 +435,68 @@ impl AppState {
             .is_ok()
         {
             waiter.wait().map_err(|error| {
-                EngramTransportError::deadline(format!(
-                    "Engram admission durability is unknown: {error:?}"
-                ))
+                (
+                    EngramTransportError::deadline(format!(
+                        "Engram admission durability is unknown: {error:?}"
+                    )),
+                    EngramAdmissionDurabilityFault::Fence(error),
+                )
             })?;
         } else {
             // Test/shutdown fallback: commit calls used synchronous persistence.
             // Recheck via the same persistence path rather than assume success.
             let inner = self.inner.lock().expect("state mutex poisoned");
             self.persist_internal_locked(&inner).map_err(|error| {
-                EngramTransportError::local_state(format!(
+                local(EngramTransportError::local_state(format!(
                     "Engram admission persistence failed: {error:#}"
-                ))
+                )))
             })?;
         }
-        self.require_queued_engram_owner(session_id, owner, "Admission durability fence")?;
+        self.require_queued_engram_owner(session_id, owner, "Admission durability fence")
+            .map_err(local)?;
         if clock.now() >= deadline {
-            return Err(EngramTransportError::deadline(
-                "Engram admission durability arrived after its operation budget",
+            return Err((
+                EngramTransportError::deadline(
+                    "Engram admission durability arrived after its operation budget",
+                ),
+                EngramAdmissionDurabilityFault::Late,
             ));
         }
         Ok(())
     }
-    /// Records the exact `begin` on the head's retained evaluate and waits
-    /// for the durable writer to acknowledge it through the admission fence.
-    /// Any other outcome, including an ambiguous one, means the begin is not
-    /// sent. A head without a retained evaluate has nowhere to keep it. A
-    /// replay re-acknowledges the record it replays and keeps its original
-    /// expiry basis; a failure never withdraws it, since that begin may have
-    /// been applied before.
+    /// Records the exact `begin` on the head's retained evaluate and waits,
+    /// until `deadline`, for the durable writer to acknowledge it through the
+    /// admission fence. Any other outcome, including an ambiguous one, means
+    /// the begin is not sent. A head without a retained evaluate has nowhere
+    /// to keep it. A replay re-acknowledges the record it replays and keeps
+    /// its original expiry basis; a failure never withdraws it, since that
+    /// begin may have been applied before. An acknowledgement that arrives
+    /// after the budget still makes the record durable: it is kept, and the
+    /// begin's own deadline then decides whether it is sent now or replayed
+    /// exactly.
+    ///
+    /// A begin never sent (`kind` First or Pending) is classified by what
+    /// the fence proved. A wait that ran out proves nothing about the write:
+    /// the record is kept as pending, to be acknowledged again before that
+    /// same begin is sent. A write reported failed for a first preparation
+    /// withdraws the record, for a fresh admission: that begin was never
+    /// sent, so withdrawing it is safe whatever the write did. A pending
+    /// record whose re-acknowledgement fails stays pending. A failure that
+    /// cannot be waited out withdraws it. A replayed record that may have
+    /// been sent (not this host's pending begin) is never withdrawn and never
+    /// marked pending, whatever the fence did; on success the function
+    /// returns `true` for it, so a later pre-send failure never treats that
+    /// begin as never sent.
     fn prepare_engram_begin_durable(
         &self,
         session_id: &str,
-        started_at: std::time::Instant,
+        deadline: std::time::Instant,
         owner: &EngramQueuedAdmissionOwner,
         begin: &EngramControlRequest,
         delivered_range: Option<EngramDeliveredRange>,
-    ) -> std::result::Result<(), EngramTransportError> {
+        kind: EngramBeginPreparationKind,
+    ) -> std::result::Result<bool, EngramBeginPreparationFailure> {
+        let unprepared = EngramBeginPreparationFailure::not_transient;
         let EngramControlRequest::TurnBegin {
             grant_id,
             delivery_tokens,
@@ -448,31 +504,33 @@ impl AppState {
             ..
         } = begin
         else {
-            return Err(EngramTransportError::local_state(
+            return Err(unprepared(EngramTransportError::local_state(
                 "Only a turn_begin is prepared for replay",
-            ));
+            )));
         };
         let replay = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id).ok_or_else(|| {
-                EngramTransportError::local_state("Session removed before Begin preparation")
+                unprepared(EngramTransportError::local_state(
+                    "Session removed before Begin preparation",
+                ))
             })?;
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             if !owner.matches(record) {
-                return Err(EngramTransportError::local_state(
+                return Err(unprepared(EngramTransportError::local_state(
                     "Begin preparation no longer owns the queued prompt",
-                ));
+                )));
             }
             let evaluate = record
                 .queued_prompts
                 .front_mut()
                 .and_then(|queued| queued.engram_evaluate.as_mut())
                 .ok_or_else(|| {
-                    EngramTransportError::local_state(
+                    unprepared(EngramTransportError::local_state(
                         "The queued prompt has no retained evaluate to carry its Begin",
-                    )
+                    ))
                 })?;
             let replayed = evaluate.prepared_begin.as_ref().filter(|prepared| {
                 prepared.grant_id == *grant_id && prepared.idempotency_key == *idempotency_key
@@ -491,12 +549,42 @@ impl AppState {
             });
             replay
         };
-        self.confirm_engram_admission_durable(session_id, started_at, owner)
-            .inspect_err(|_| {
-                if !replay {
+        // A record this preparation replays may have been sent before (a
+        // begin-unknown replay, or a saved prepared begin whose pending marker
+        // a restart dropped): only this host's pending begin, or a record this
+        // preparation writes afresh, is proven never sent.
+        let replayed_possibly_sent = replay && kind != EngramBeginPreparationKind::Pending;
+        match self.confirm_engram_admission_durable_classified(session_id, deadline, owner) {
+            Ok(()) | Err((_, EngramAdmissionDurabilityFault::Late)) => Ok(replayed_possibly_sent),
+            Err((error, fault)) => {
+                // Kept as this host's pending begin only when proven never
+                // sent: a possibly sent replay is never marked pending.
+                let kept_pending = !replayed_possibly_sent
+                    && match (kind, &fault) {
+                        (
+                            EngramBeginPreparationKind::First
+                            | EngramBeginPreparationKind::Pending,
+                            EngramAdmissionDurabilityFault::Fence(PersistFenceError::Deadline),
+                        )
+                        | (
+                            EngramBeginPreparationKind::Pending,
+                            EngramAdmissionDurabilityFault::Fence(PersistFenceError::WriteFailed(_)),
+                        ) => true,
+                        _ => false,
+                    };
+                // A possibly sent replay is never withdrawn.
+                let possibly_sent = replayed_possibly_sent;
+                if !kept_pending && !possibly_sent {
                     self.withdraw_engram_prepared_begin(session_id, owner, grant_id);
                 }
-            })
+                Err(EngramBeginPreparationFailure {
+                    error,
+                    transient: fault.is_transient() && !possibly_sent,
+                    pending: kept_pending,
+                    possibly_sent,
+                })
+            }
+        }
     }
 
     /// A begin that is not sent leaves no prepared record behind: once saved,
@@ -638,6 +726,9 @@ impl AppState {
         record.engram.abort_retry_fence = None;
         record.engram.abort_retry_acknowledged = false;
         record.engram.abort_retry_saved = false;
+        // A head in prepared-begin recovery keeps its window, ended: only an
+        // explicit accepted Resume opens a new one.
+        end_engram_admission_budget_window(record);
         record.set_auto_dispatch_blocked(true);
         record.engram.operator_paused = true;
         if !cleanup_pending {
@@ -705,7 +796,11 @@ impl AppState {
         runtime_token: &RuntimeToken,
         active_turn_generation: u64,
     ) -> EngramAuthorizationParkOutcome {
-        let budget_now = self.engram_budget_clock().now();
+        let clock = self.engram_budget_clock();
+        let budget_now = clock.now();
+        // The retry's due time on the same clock its budget deadline is
+        // measured on (real wall time in production).
+        let wall_now = clock.wall_now();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return EngramAuthorizationParkOutcome::Superseded;
@@ -824,7 +919,7 @@ impl AppState {
                     decision.as_ref().and_then(|(_, _, code, _)| code.as_deref())
                 },
                 authority.as_deref(),
-                chrono::Utc::now(),
+                wall_now,
                 budget_now,
             );
         if !scheduled {
@@ -1231,14 +1326,20 @@ impl AppState {
                 )
             },
             |queued| {
+                // Stable within one admission of the prompt, so a lost reply
+                // is replayed; the dispatch generation makes a rebind after a
+                // settlement moved it (`engram_abort_retry.rs`) a new bind
+                // rather than a replay of the first, whose cached reply would
+                // keep the old token and its issued grant.
                 format!(
                     "termal-bind:{}:{}:{}",
                     target.connection.session_id,
                     queued.pending_prompt.id,
                     sha256_hex(
                         format!(
-                            "{}:{}",
+                            "{}:{}:{}",
                             target.routing_token.as_deref().unwrap_or("unbound"),
+                            owner.generation,
                             serde_json::to_string(&work_binding).expect("work binding serializes")
                         )
                         .as_bytes()

@@ -15,6 +15,10 @@ struct ScriptedEngramBudgetClock {
     event: Mutex<u64>,
     changed: Condvar,
     waiters: std::sync::atomic::AtomicUsize,
+    /// A pinned wall reading and the scripted instant it was pinned at: from
+    /// then on the wall time this clock reads moves only with the scripted
+    /// clock (`EngramBudgetClock::wall_now`).
+    wall: Mutex<Option<(chrono::DateTime<chrono::Utc>, std::time::Instant)>>,
 }
 
 impl EngramBudgetClock {
@@ -24,6 +28,37 @@ impl EngramBudgetClock {
             #[cfg(test)]
             Self::Scripted(clock) => *clock.now.lock().expect("budget clock mutex poisoned"),
         }
+    }
+
+    /// The wall time this clock measures a saved wall-clock deadline from:
+    /// real wall time, or, on a scripted clock whose wall reading a fixture
+    /// pinned, that reading moved on by the scripted time since.
+    fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+        match self {
+            Self::Real => chrono::Utc::now(),
+            #[cfg(test)]
+            Self::Scripted(clock) => {
+                let pinned = *clock.wall.lock().expect("budget wall mutex poisoned");
+                match pinned {
+                    Some((wall, at)) => {
+                        wall + chrono::Duration::from_std(self.now().saturating_duration_since(at))
+                            .expect("scripted wall time in range")
+                    }
+                    None => chrono::Utc::now(),
+                }
+            }
+        }
+    }
+
+    /// Pins this scripted clock's wall reading at the real wall time now, so
+    /// a wall-clock deadline is measured on the scripted clock alone.
+    #[cfg(test)]
+    fn pin_wall(&self) {
+        let Self::Scripted(clock) = self else {
+            panic!("only a scripted clock can pin its wall reading");
+        };
+        let at = self.now();
+        *clock.wall.lock().expect("budget wall mutex poisoned") = Some((chrono::Utc::now(), at));
     }
 
     fn elapsed_since(&self, started: std::time::Instant) -> Duration {
@@ -46,6 +81,7 @@ impl EngramBudgetClock {
             event: Mutex::new(0),
             changed: Condvar::new(),
             waiters: std::sync::atomic::AtomicUsize::new(0),
+            wall: Mutex::new(None),
         }))
     }
 

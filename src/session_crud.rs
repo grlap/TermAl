@@ -2973,6 +2973,11 @@ impl AppState {
                     // worktree its workdir resolved to stays, keyed by that
                     // workdir: a session in a turn would otherwise count as a
                     // writer in every worktree until it reports again.
+                    // A head in prepared-begin recovery keeps its window,
+                    // ended: the settings change grants it no new one
+                    // (`engram_begin_preparation_retry.rs`).
+                    let begin_preparation_lineage =
+                        take_engram_admission_budget_for_settings_reset(record);
                     record.engram = EngramSessionState {
                         source_observation_gate,
                         source_observation_delete_requested: record
@@ -2981,6 +2986,7 @@ impl AppState {
                         source_observation_preparations: record.engram.source_observation_preparations,
                         dispatch_generation,
                         workdir_worktree: record.engram.workdir_worktree.take(),
+                        begin_preparation_lineage,
                         ..EngramSessionState::default()
                     };
                     for line in carried_lines {
@@ -3275,6 +3281,8 @@ impl AppState {
                 directives: Vec::new(),
                 delivered_range: None,
                 latency_ms: EngramControlLatencyCard {
+                    admission_fence: None,
+                    preparation_fence: None,
                     evaluate: None,
                     begin: None,
                     checkpoint: Some(latency_ms),

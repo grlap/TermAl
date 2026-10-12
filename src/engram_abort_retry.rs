@@ -25,6 +25,10 @@ enum EngramAbortReason {
     DispatchCard,
     /// The dispatch card of a known Defer could not be saved.
     DeferCard,
+    /// The prepared begin was not durably acknowledged, so no begin was sent
+    /// (`engram_begin_preparation_retry.rs`); its issued grant is retired by
+    /// the rebind. Its re-admission is bounded in time.
+    BeginPreparation,
 }
 
 /// A retained prompt whose last delivery this host withheld before provider
@@ -254,6 +258,15 @@ fn engram_abort_retry_step(
         record.engram.abort_retry_fence = None;
         return EngramAbortRetryStep::Dropped;
     }
+    if retry.reason == EngramAbortReason::BeginPreparation && engram_begin_preparation_retry_held(record)
+    {
+        // Control was disabled or the operator paused the queue: the
+        // re-admission ends before the authority check, which a disabled
+        // control fails too. Nothing was sent, so the head takes the
+        // resumable explicit hold (`end_engram_begin_preparation_retry`).
+        end_engram_begin_preparation_retry(record, ENGRAM_ADMISSION_HELD_PREVIEW.to_owned());
+        return EngramAbortRetryStep::Dropped;
+    }
     if authority != Some(retry.authority.as_str()) {
         // The project, connection or settings changed (a committed change:
         // the tick waits while the project's settings fence is raised): no
@@ -332,6 +345,9 @@ impl AppState {
         authority: &str,
         not_before: Option<chrono::DateTime<chrono::Utc>>,
     ) -> bool {
+        // The retry's due time on the wall time its budget deadline is
+        // measured on (real wall time in production).
+        let now = inner.engram_budget_clock_snapshot().wall_now();
         let settled = settle_engram_abort_before_handoff_locked(
             inner
                 .session_mut_by_index(index)
@@ -340,7 +356,7 @@ impl AppState {
             grant_id,
             authority,
             not_before,
-            chrono::Utc::now(),
+            now,
         );
         if settled {
             if let Err(error) = self.commit_locked(inner) {
@@ -445,6 +461,9 @@ impl AppState {
             }
             record.set_auto_dispatch_blocked(true);
             record.engram.operator_paused = true;
+            // The window ends but is kept: only an explicit accepted Resume
+            // opens a new one.
+            end_engram_admission_budget_window(record);
             inner.stamp_session_at_index(index);
             self.commit_locked(&mut inner).map_err(|error| {
                 ApiError::internal(format!("Failed to persist the stopped retry: {error:#}"))
@@ -483,6 +502,7 @@ impl AppState {
             record.session.live_activity = None;
             record.set_auto_dispatch_blocked(true);
             record.engram.operator_paused = true;
+            end_engram_admission_budget_window(record);
             record.session.preview = "Engram: automatic bind retry stopped. Prompt retained; remove it before starting a new operation.".to_owned();
             sync_pending_prompts(record);
             inner.stamp_session_at_index(index);
@@ -528,6 +548,18 @@ impl AppState {
         record.engram.abort_retry_fence = None;
         record.engram.abort_retry_acknowledged = false;
         record.engram.abort_retry_saved = false;
+        // The operator took the head over. A head in prepared-begin recovery
+        // keeps its window, ended, and only an explicit accepted Resume opens
+        // a new one; any other head's budget is dropped as before.
+        end_engram_admission_budget_window(record);
+        if !record
+            .engram
+            .begin_preparation_lineage
+            .as_ref()
+            .is_some_and(|lineage| lineage.ended)
+        {
+            record.engram.begin_preparation_lineage = None;
+        }
         record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
         detach_engram_pending_dispatch_keeping_uncertain_begin(record);
         record.engram.rebind_required = true;
@@ -582,6 +614,8 @@ impl AppState {
             {
                 clear_engram_admission_retry(record);
             }
+            // A delivered head's re-admission bound is spent.
+            clear_engram_begin_preparation_lineage_for(record, head.as_deref());
         }
     }
 }

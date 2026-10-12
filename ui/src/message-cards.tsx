@@ -519,7 +519,38 @@ function engramSourceRootDetail(
     : `Source basis: ${sourceRoot.root}`;
 }
 
+/**
+ * The boundary a card's own refusal code names, for a card whose causal
+ * failure is not yet published (it is shown only once the card itself is
+ * saved). Only codes that identify their failing step are listed.
+ */
+const ENGRAM_CODE_BOUNDARIES: Record<string, string> = {
+  begin_preparation_unacknowledged: "prepared-Begin durable acknowledgement",
+  begin_preparation_pending:
+    "prepared-Begin durable acknowledgement (pending; the same Begin is kept for its retry)",
+};
+
+/** The card's latency: the total, then each measured phase. */
+function engramLatencyDetail(latency: EngramControlMessage["latencyMs"]) {
+  const phases = [
+    latency.evaluate != null ? `evaluate ${latency.evaluate} ms` : null,
+    latency.admissionFence != null ? `admission fence ${latency.admissionFence} ms` : null,
+    latency.preparationFence != null ? `preparation fence ${latency.preparationFence} ms` : null,
+    latency.begin != null ? `begin ${latency.begin} ms` : null,
+  ].filter((value): value is string => Boolean(value));
+  return phases.length > 0
+    ? `Latency: ${latency.total} ms (${phases.join(", ")})`
+    : `Latency: ${latency.total} ms`;
+}
+
 function EngramControlCard({ message }: { message: EngramControlMessage }) {
+  // An own-property lookup: the code comes from the wire, and a name such as
+  // `constructor` must not resolve to an inherited member.
+  const codeBoundary =
+    message.refusalCode &&
+    Object.prototype.hasOwnProperty.call(ENGRAM_CODE_BOUNDARIES, message.refusalCode)
+      ? ENGRAM_CODE_BOUNDARIES[message.refusalCode]
+      : undefined;
   const title =
     message.dispatch === "queued"
       ? "Turn queued by Engram control"
@@ -550,7 +581,7 @@ function EngramControlCard({ message }: { message: EngramControlMessage }) {
     message.repairArmed ? "Repair: armed" : null,
     message.nextIntent ? `Next intent: ${message.nextIntent}` : null,
     engramSourceRootDetail(message.sourceRoot),
-    `Latency: ${message.latencyMs.total} ms`,
+    engramLatencyDetail(message.latencyMs),
   ].filter((value): value is string => Boolean(value));
 
   return (
@@ -573,6 +604,11 @@ function EngramControlCard({ message }: { message: EngramControlMessage }) {
           </p>
           <p className="support-copy">{message.causalFailure.continuationReason}</p>
         </div>
+      ) : message.decision === "degraded" && codeBoundary ? (
+        <p className="support-copy">
+          Failure: {message.refusalCode} · Boundary: {codeBoundary} · The full cause is not
+          published with this card.
+        </p>
       ) : message.decision === "degraded" ? (
         <p className="support-copy">Original failure details unavailable; this card does not identify the failed operation or remote application.</p>
       ) : null}

@@ -28,12 +28,16 @@
 /// grant begun, replaying the retained intent is the reconciliation; on a
 /// begin-unknown head the same codes schedule its exact begin replay.
 /// The same list is the Retry arm of `engram_admission_disposition`.
-const ENGRAM_ADMISSION_RETRY_CODES: [&str; 5] = [
+/// A prepared begin whose acknowledgement is pending enters it too: its
+/// attempt acknowledges that same begin again and sends it
+/// (`engram_begin_preparation_retry.rs`).
+const ENGRAM_ADMISSION_RETRY_CODES: [&str; 6] = [
     "deadline_exceeded",
     "control_unavailable",
     "control_circuit_open",
     "control_backoff",
     "dispatch_budget_exhausted",
+    ENGRAM_BEGIN_PREPARATION_PENDING_CODE,
 ];
 
 /// The preview of a parked head that is not scheduled for an automatic
@@ -74,16 +78,25 @@ struct EngramAdmissionRetry {
     acknowledged: bool,
 }
 
-fn engram_admission_retry_preview(retry: &EngramAdmissionRetry) -> String {
+/// The preview of `record`'s head scheduled for `retry`; with an enforced
+/// admission budget it also names when automatic recovery ends.
+fn engram_admission_retry_preview(record: &SessionRecord, retry: &EngramAdmissionRetry) -> String {
     if retry.code == ENGRAM_BEGIN_REPLAY_CODE {
         return engram_begin_replay_preview(retry);
     }
     if retry.code == ENGRAM_BEGIN_RECONSTRUCT_CODE {
         return engram_begin_reconstruct_preview(retry);
     }
+    let waiting_for = if retry.code == ENGRAM_BEGIN_PREPARATION_PENDING_CODE {
+        " (the prepared begin awaits its durable acknowledgement; nothing sent)"
+    } else {
+        ""
+    };
     format!(
-        "{ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX}, attempt {}, next at {}.",
-        retry.attempts, retry.due_at
+        "{ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX}{waiting_for}, attempt {}, next at {}.{}",
+        retry.attempts,
+        retry.due_at,
+        engram_admission_budget_preview_suffix(record)
     )
 }
 
@@ -306,7 +319,7 @@ fn schedule_engram_admission_retry_locked(
         record.engram.abort_retry = None;
     }
     clear_engram_bind_retry(record);
-    record.session.preview = engram_admission_retry_preview(&retry);
+    record.session.preview = engram_admission_retry_preview(record, &retry);
     record.engram.admission_retry = Some(retry);
     record.engram.abort_retry_acknowledged = false;
     record.engram.abort_retry_saved = false;
@@ -427,7 +440,7 @@ fn rebuild_engram_admission_retry_on_load(
         record.engram.abort_retry_acknowledged = true;
         record.set_auto_dispatch_blocked(true);
         if let Some(retry) = record.engram.admission_retry.clone() {
-            record.session.preview = engram_admission_retry_preview(&retry);
+            record.session.preview = engram_admission_retry_preview(record, &retry);
         }
     } else {
         record.engram.admission_retry = None;
@@ -446,8 +459,9 @@ fn rebuild_engram_admission_retry_on_load(
 /// The retry-head rule's answer for one automatic Engram call (a boot
 /// reconciliation or a bind made outside the head's own attempt) on a
 /// session: proceed as before when it holds no parked-admission retry
-/// record; with a record, proceed only holding a retry slot, or defer to the
-/// head's own due attempt, which makes the call under its slot.
+/// record (a begin-preparation abort record counts as one); with a record,
+/// proceed only holding a retry slot, or defer to the head's own due
+/// attempt, which makes the call under its slot.
 enum EngramRetryHeadPermit {
     NoRecord,
     Held(EngramRetrySlot),
@@ -465,9 +479,16 @@ impl AppState {
         inner: &StateInner,
         session_id: &str,
     ) -> EngramRetryHeadPermit {
-        let holds_record = inner
-            .find_session_index(session_id)
-            .is_some_and(|index| inner.sessions[index].engram.admission_retry.is_some());
+        // A begin-preparation abort record is a parked admission too: its
+        // boot reconciliation runs under the cap, unlike other abort retries.
+        let holds_record = inner.find_session_index(session_id).is_some_and(|index| {
+            let engram = &inner.sessions[index].engram;
+            engram.admission_retry.is_some()
+                || engram
+                    .abort_retry
+                    .as_ref()
+                    .is_some_and(|retry| retry.reason == EngramAbortReason::BeginPreparation)
+        });
         if !holds_record {
             return EngramRetryHeadPermit::NoRecord;
         }
@@ -525,7 +546,7 @@ impl AppState {
         retry.attempts = retry.attempts.saturating_add(1);
         retry.due_at = (now + engram_abort_retry_delay(session_id, retry.attempts))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        record.session.preview = engram_admission_retry_preview(&retry);
+        record.session.preview = engram_admission_retry_preview(record, &retry);
         record.engram.admission_retry = Some(retry);
         sync_pending_prompts(record);
         inner.stamp_session_at_index(index);

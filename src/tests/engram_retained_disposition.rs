@@ -699,6 +699,8 @@ fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
                     directives: Vec::new(),
                     delivered_range: None,
                     latency_ms: EngramControlLatencyCard {
+                        admission_fence: None,
+                        preparation_fence: None,
                         evaluate: Some(0),
                         begin: None,
                         checkpoint: None,
@@ -835,6 +837,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
         record.engram.routing_token = Some("defer-persist-token".to_owned());
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
+            admission_fence_ms: None,
             causal_failure: None,
             dispatch_generation: record.engram.dispatch_generation,
             intent_fingerprint: fingerprint,
@@ -882,6 +885,8 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
                 directives: Vec::new(),
                 delivered_range: None,
                 latency_ms: EngramControlLatencyCard {
+                    admission_fence: None,
+                    preparation_fence: None,
                     evaluate: Some(0),
                     begin: None,
                     checkpoint: None,
