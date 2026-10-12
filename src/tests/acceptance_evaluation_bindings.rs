@@ -1,7 +1,8 @@
 // Tests for criteria bound to a typed host check in acceptance evaluation.
 // Owns: the binding each brief states for a bound criterion, the admission rule
-// both briefs give, the marker on host-minted verification records, and the
-// submission's refusal of a bound pass that Engram could not admit. Does not
+// both briefs give, the marker on host-minted verification records (and the
+// context-only marker on one from another revision than the judged one), and
+// the submission's refusal of a bound pass that Engram could not admit. Does not
 // own evidence selection, omission inventories or the tracker's own matching.
 // Reuses the parent module's deterministic fixtures; no tracker process runs.
 use super::*;
@@ -184,6 +185,103 @@ fn verification_records_are_marked_with_kind_result_and_revision_in_both_briefs(
     assert!(independent.contains("aaaaaaaa1111 (note"));
     assert!(independent.contains("bbbbbbbb2222 (gate"));
     assert_eq!(independent.matches("(verification ").count(), 1);
+}
+
+/// The source revision the evaluation in the next test judges.
+const JUDGED_REVISION: &str = "content-v1:9c723064";
+/// An earlier source revision, as before a carry onto a new base.
+const EARLIER_REVISION: &str = "content-v1:4deb0fcd";
+
+#[test]
+fn a_verification_from_another_revision_is_context_only_and_the_binding_names_the_judged_one() {
+    // A carried item: its fail-first test passed at the earlier revision, and
+    // again at the revision now judged. Engram admits only the current one
+    // for the bound criterion, so the briefs say which is citable.
+    let stale = "1111aaaa1111aaaa1111aaaa1111aaaa";
+    let current = "2222bbbb2222bbbb2222bbbb2222bbbb";
+    let closure = "3333cccc3333cccc3333cccc3333cccc";
+    let mut show = show_receipt(None);
+    let notes = show["notes"].as_array_mut().unwrap();
+    for (locator, revision) in [(stale, EARLIER_REVISION), (current, JUDGED_REVISION)] {
+        notes.push(json!({
+            "locator": locator, "kind": "verification", "family": "notes",
+            "body_bytes": 20, "by": "greg/claude", "created_at": "2026-10-12T21:00:00Z",
+            "non_holder": false, "summary": "fail-first test passed",
+            "verification": {"check_kind": "test", "result": "passed",
+                "source_revision": revision}
+        }));
+    }
+    let mut task = parse_acceptance_evaluation_task(show, bound_full_receipt()).unwrap();
+    // The criterion's original closure, outside the window, from the earlier
+    // revision: the record the index offers first for criterion 2.
+    task.indexed_evidence.push(AcceptanceEvaluationEvidence {
+        locator: closure.to_owned(),
+        kind: "verification".to_owned(),
+        by: None,
+        created_at: None,
+        summary: Some("fail-first test passed".to_owned()),
+        non_holder: false,
+        body_bytes: Some(22),
+        cut_by_tracker: false,
+        verification: Some(AcceptanceEvidenceVerification {
+            check_kind: "test".to_owned(),
+            result: "passed".to_owned(),
+            source_revision: Some(EARLIER_REVISION.to_owned()),
+        }),
+    });
+    task.criterion_evidence.push(AcceptanceCriterionEvidence {
+        criterion: 2,
+        locators: vec![closure.to_owned()],
+        association: "original obligation closure".to_owned(),
+    });
+    task.judged_revision = Some(JUDGED_REVISION.to_owned());
+
+    let marker = format!(
+        "[context only: it ran at {EARLIER_REVISION}, not at {JUDGED_REVISION}, the revision \
+         this evaluation judges; not citable for a bound criterion]"
+    );
+    let independent = build_acceptance_evaluator_brief(&task, "/repo", MAX_ACCEPTANCE_BRIEF_BYTES)
+        .unwrap()
+        .prompt;
+    let same_session = build_same_session_acceptance_brief(
+        &task,
+        Some(JUDGED_REVISION),
+        MAX_ACCEPTANCE_BRIEF_BYTES,
+    )
+    .unwrap();
+    for (name, prompt) in [
+        ("independent", independent.as_str()),
+        ("same_session", same_session.as_str()),
+    ] {
+        assert!(
+            prompt.contains(&format!(
+                "cites only verification records of kind test that passed at {JUDGED_REVISION}, \
+                 the revision this evaluation judges, nothing else]"
+            )),
+            "{name}: the binding names the judged revision: {prompt}"
+        );
+        let records = |locator: &str| {
+            prompt
+                .lines()
+                .filter(|line| line.contains(locator) && line.contains("(verification test"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        for locator in [stale, closure] {
+            let lines = records(locator);
+            assert!(!lines.is_empty(), "{name}: {locator} is listed: {prompt}");
+            assert!(
+                lines.iter().all(|line| line.contains(&marker)),
+                "{name}: {locator} is marked context only: {lines:?}"
+            );
+        }
+        let lines = records(current);
+        assert!(!lines.is_empty(), "{name}: the current record is listed: {prompt}");
+        assert!(
+            lines.iter().all(|line| !line.contains("context only")),
+            "{name}: the current record stays citable: {lines:?}"
+        );
+    }
 }
 
 #[test]

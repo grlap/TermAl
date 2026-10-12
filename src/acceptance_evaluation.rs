@@ -686,6 +686,13 @@ struct AcceptanceEvaluationTask {
     /// The obligation assessments of the indexed verification records
     /// (`acceptance_obligation_assessment.rs`).
     obligation_assessments: Vec<AcceptanceObligationAssessment>,
+    /// The source revision this evaluation judges: the host's measured
+    /// revision of the task's source root, which the evaluation declares
+    /// (`acceptance_evaluation_source_revision`). Engram refuses a citation
+    /// of a verification record from any other revision for a bound
+    /// criterion, so the briefs mark such records context only. `None` when
+    /// the source is unmeasured.
+    judged_revision: Option<String>,
 }
 
 fn parse_acceptance_evaluation_task(
@@ -794,6 +801,8 @@ fn parse_acceptance_evaluation_task(
         canonical_identity: None,
         assessment_first_pages: Vec::new(),
         obligation_assessments: Vec::new(),
+        // Set by the request once the host has measured the source.
+        judged_revision: None,
     })
 }
 
@@ -896,7 +905,10 @@ fn acceptance_brief_criteria(task: &AcceptanceEvaluationTask) -> String {
                 .iter()
                 .find(|binding| binding.criterion == position)
             {
-                Some(binding) => format!("{line}\n     {}", acceptance_brief_binding(binding)),
+                Some(binding) => format!(
+                    "{line}\n     {}",
+                    acceptance_brief_binding(binding, task.judged_revision.as_deref())
+                ),
                 None => line,
             }
         })
@@ -904,7 +916,10 @@ fn acceptance_brief_criteria(task: &AcceptanceEvaluationTask) -> String {
         .join("\n")
 }
 
-fn acceptance_brief_binding(binding: &AcceptanceCriterionBinding) -> String {
+/// `judged`, the revision this evaluation judges, is named when the host
+/// measured it: Engram admits for a bound criterion only records that ran at
+/// that revision.
+fn acceptance_brief_binding(binding: &AcceptanceCriterionBinding, judged: Option<&str>) -> String {
     // The evidence list does not show a record's own command fingerprint, so a
     // pinned binding says that the pin, not only the kind, decides.
     let pinned = binding
@@ -916,10 +931,33 @@ fn acceptance_brief_binding(binding: &AcceptanceCriterionBinding) -> String {
             )
         })
         .unwrap_or_default();
+    let at = judged
+        .map(|judged| format!(" at {judged}, the revision this evaluation judges"))
+        .unwrap_or_default();
     format!(
-        "[bound to a host-recorded `{kind}` check{pinned}: a pass needs basis observed and cites only verification records of kind {kind} that passed, nothing else]",
+        "[bound to a host-recorded `{kind}` check{pinned}: a pass needs basis observed and cites only verification records of kind {kind} that passed{at}, nothing else]",
         kind = binding.check_kind,
     )
+}
+
+/// The marker on a verification record that ran at another source revision
+/// than `judged`, the one this evaluation judges: Engram refuses it as a
+/// citation for a bound criterion, so it is context only. Empty for any other
+/// record, and when either revision is unknown.
+fn acceptance_brief_off_revision_marker(
+    evidence: &AcceptanceEvaluationEvidence,
+    judged: Option<&str>,
+) -> String {
+    let ran_at = evidence
+        .verification
+        .as_ref()
+        .and_then(|verification| verification.source_revision.as_deref());
+    match (ran_at, judged) {
+        (Some(ran_at), Some(judged)) if ran_at != judged => format!(
+            " [context only: it ran at {ran_at}, not at {judged}, the revision this evaluation judges; not citable for a bound criterion]"
+        ),
+        _ => String::new(),
+    }
 }
 
 /// The carried failure as both briefs state it, shrinking with the omission
@@ -1104,10 +1142,13 @@ fn acceptance_brief_clipped_body(body: &str, locator: &str) -> Option<String> {
 /// A body is listed whole; with `clip` it is cut to the entry bound where that
 /// makes the entry shorter. Every cut, the host's or the tracker's, is said on
 /// the entry with its locator and the sizes known, so that an evaluator never
-/// takes a part for the whole record.
+/// takes a part for the whole record. A verification record that ran at
+/// another source revision than `judged` is marked context only
+/// (`acceptance_brief_off_revision_marker`).
 fn acceptance_brief_evidence_line(
     evidence: &AcceptanceEvaluationEvidence,
     clip: bool,
+    judged: Option<&str>,
 ) -> (String, bool) {
     let locator = acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
     let mut attribution = match evidence.verification.as_ref() {
@@ -1166,9 +1207,9 @@ fn acceptance_brief_evidence_line(
     }
     // Saying so here spares the evaluator a refused submission.
     let citable = if evidence.non_holder || !is_citable_acceptance_locator(&evidence.locator) {
-        " [context only: the tracker refuses this as a citation]"
+        " [context only: the tracker refuses this as a citation]".to_owned()
     } else {
-        ""
+        acceptance_brief_off_revision_marker(evidence, judged)
     };
     (
         format!("  - {locator} ({attribution}){citable}: {text}"),
@@ -1716,7 +1757,8 @@ fn render_acceptance_evaluator_brief_with_index_detail(
     let mut evidence = Vec::with_capacity(listed.len() + 1);
     let mut fully_rendered = BTreeSet::new();
     for (index, entry) in listed.iter().enumerate() {
-        let (line, was_clipped) = acceptance_brief_evidence_line(entry, index < clipped);
+        let (line, was_clipped) =
+            acceptance_brief_evidence_line(entry, index < clipped, task.judged_revision.as_deref());
         if was_clipped {
             cuts.clipped.push(locator_of(entry));
         }
@@ -2063,8 +2105,11 @@ fn acceptance_same_session_verifications(
             .map(|revision| format!(" at {revision}"))
             .unwrap_or_default();
         lines.push(format!(
-            "  - {} (verification {} {}{at})",
-            evidence.locator, verification.check_kind, verification.result
+            "  - {} (verification {} {}{at}){}",
+            evidence.locator,
+            verification.check_kind,
+            verification.result,
+            acceptance_brief_off_revision_marker(evidence, task.judged_revision.as_deref()),
         ));
     }
     if shown > 0 && read.len() > shown {

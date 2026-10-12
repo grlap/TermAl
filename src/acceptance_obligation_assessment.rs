@@ -1046,7 +1046,11 @@ fn acceptance_brief_protected_rendering(
     let mut lines = Vec::new();
     for (index, entry) in task.evidence.iter().enumerate() {
         let line = (index >= start).then(|| {
-            let (line, clipped) = acceptance_brief_evidence_line(entry, index - start < plan.clipped);
+            let (line, clipped) = acceptance_brief_evidence_line(
+                entry,
+                index - start < plan.clipped,
+                task.judged_revision.as_deref(),
+            );
             if !clipped && !entry.cut_by_tracker && entry.summary.is_some() {
                 fully_rendered.insert(entry.locator.clone());
             }

@@ -733,6 +733,7 @@ fn render_acceptance_criterion_evidence(
                         acceptance_brief_evidence_line(
                             evidence,
                             detail == AcceptanceOmissionDetail::Compact,
+                            task.judged_revision.as_deref(),
                         )
                         .0,
                     );
@@ -779,8 +780,12 @@ fn acceptance_criterion_evidence_cuts(
         else {
             continue;
         };
-        let clipped =
-            acceptance_brief_evidence_line(evidence, detail == AcceptanceOmissionDetail::Compact).1;
+        let clipped = acceptance_brief_evidence_line(
+            evidence,
+            detail == AcceptanceOmissionDetail::Compact,
+            task.judged_revision.as_deref(),
+        )
+        .1;
         cuts.left_out.retain(|entry| entry != locator);
         if !clipped {
             cuts.clipped.retain(|entry| entry != locator);

@@ -1485,6 +1485,8 @@ impl AppState {
                         .map(|model| model.trim().to_owned())
                 });
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
+                // The brief marks records of any other revision context only.
+                task.judged_revision = source_fingerprint.clone();
                 let unmeasured = unmeasured(&source_fingerprint);
                 let seed = AcceptanceEvaluationTargetSeed {
                     naming_history: Some(naming_history.clone()),
@@ -1610,6 +1612,8 @@ impl AppState {
                     )));
                 }
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
+                // The brief marks records of any other revision context only.
+                task.judged_revision = source_fingerprint.clone();
                 {
                     let inner = self.inner.lock().expect("state mutex poisoned");
                     if !engram_work_naming_is_current(&inner, &target.store, &naming_history) {
