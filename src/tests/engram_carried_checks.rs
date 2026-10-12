@@ -3246,6 +3246,171 @@ fn a_scratch_write_under_tmp_leaves_a_carried_gate_alone_and_a_source_write_does
     assert_refused(&turn, &checkpoint, "a file in its worktree changed");
 }
 
+/// The shape of a gate that lost its credit: a Rust test fixture's store
+/// (`termal.sqlite` and its journal) in a `termal-test-state-*` directory
+/// under the gate worktree's own `.tmp/`, removed when the fixture drops,
+/// reported by the watcher in its own spelling (`normalize_user_facing_path`,
+/// not the verbatim form). Changes there, while the directory exists
+/// and after it is gone, alone or in a batch with the directory's own
+/// deletion, leave the carried gate unfenced, and it is credited.
+#[test]
+fn a_fixture_store_under_a_removed_scratch_directory_leaves_a_carried_gate_alone() {
+    let (turn, worktree) = named_turn("carried-scratch-fixture-store");
+    launch_gate(&turn, &worktree, false);
+    let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
+    let store = watched.join(".tmp").join("termal-test-state-0000");
+    fs::create_dir_all(&store).expect("the fixture store directory should be created");
+    let journal = store.join("termal.sqlite-journal");
+    fs::write(&journal, "journal\n").unwrap();
+    let change = |path: &FsPath, kind: WorkspaceFileChangeKind| WorkspaceFileChangeEvent {
+        path: path.to_string_lossy().into_owned(),
+        kind,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
+    };
+    let fence = || turn.record(|record| record.engram.carried_checks[0].fence.clone());
+
+    turn.state
+        .note_engram_workspace_file_changes(&[change(&journal, WorkspaceFileChangeKind::Modified)]);
+    assert_eq!(fence(), None, "while the fixture store exists");
+
+    fs::remove_dir_all(&store).expect("the fixture store directory should be removed");
+    for batch in [
+        vec![change(&journal, WorkspaceFileChangeKind::Deleted)],
+        vec![change(&journal, WorkspaceFileChangeKind::Modified)],
+        vec![
+            change(&journal, WorkspaceFileChangeKind::Deleted),
+            change(&store, WorkspaceFileChangeKind::Deleted),
+        ],
+        vec![change(&store, WorkspaceFileChangeKind::Deleted)],
+    ] {
+        turn.state.note_engram_workspace_file_changes(&batch);
+        assert_eq!(
+            fence(),
+            None,
+            "after the fixture store is gone: {:?}",
+            batch.iter().map(|change| change.path.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let checkpoint = turn.finish();
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+}
+
+/// A fixture that runs `git init` in its scratch directory under the gate
+/// worktree's `.tmp/` after the watcher already routed a change there: the
+/// routing key the watcher remembers for that directory (up to 30 s) still
+/// names the gate's worktree, while a fresh resolution finds a repository of
+/// the fixture's own. A change in that git-ignored directory still leaves the
+/// carried gate unfenced, and it is credited.
+#[test]
+fn a_fixture_store_under_a_scratch_directory_that_becomes_a_repository_leaves_a_carried_gate_alone()
+{
+    let (turn, worktree) = named_turn("carried-scratch-fixture-repository");
+    // As this repository's .gitignore does, which the exemption assumes:
+    // what stays under .tmp/ until the gate settles is no source.
+    fs::write(worktree.join(".gitignore"), ".tmp\n").expect("the worktree ignores .tmp");
+    launch_gate(&turn, &worktree, false);
+    let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
+    let repository = watched.join(".tmp").join("termal-test-state-0001");
+    fs::create_dir_all(&repository).expect("the fixture directory should be created");
+    let journal = repository.join("termal.sqlite-journal");
+    fs::write(&journal, "journal\n").unwrap();
+    let change = |path: &FsPath| WorkspaceFileChangeEvent {
+        path: path.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Modified,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
+    };
+    let fence = || turn.record(|record| record.engram.carried_checks[0].fence.clone());
+
+    turn.state.note_engram_workspace_file_changes(&[change(&journal)]);
+    assert_eq!(fence(), None, "before the fixture's git init");
+    fs::create_dir_all(repository.join(".git")).expect("the fixture's .git should be created");
+    turn.state.note_engram_workspace_file_changes(&[change(&journal)]);
+    assert_eq!(
+        fence(),
+        None,
+        "after the fixture's git init, with the routing key still remembered"
+    );
+
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let checkpoint = turn.finish();
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+}
+
+/// A path that names `.tmp` but is not under the scratch directory at its
+/// worktree's root (here `src/.tmp/`) still fences a carried gate, and the
+/// fence's cause states what the scratch test judged it by: the worktree key
+/// it was routed to, the exact keys of its worktree root and its directory,
+/// and whether that directory existed when they were resolved.
+#[test]
+fn a_tmp_naming_path_that_fences_states_the_scratch_tests_inputs_in_the_cause() {
+    let change = |path: &FsPath| WorkspaceFileChangeEvent {
+        path: path.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Modified,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
+    };
+    for (name, present) in [
+        ("carried-scratch-detail-present", true),
+        ("carried-scratch-detail-gone", false),
+    ] {
+        let (turn, worktree) = named_turn(name);
+        launch_gate(&turn, &worktree, false);
+        let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
+        let directory = watched.join("src").join(".tmp");
+        if present {
+            fs::create_dir_all(&directory).expect("the nested .tmp should be created");
+            fs::write(directory.join("x.log"), "x\n").unwrap();
+        }
+        let path = directory.join("x.log");
+        turn.state.note_engram_workspace_file_changes(&[change(&path)]);
+        let fence = turn
+            .record(|record| record.engram.carried_checks[0].fence.clone())
+            .expect("a change under a nested .tmp fences the gate");
+
+        let canonical = engram_canonical_path(&directory);
+        let root = engram_worktree_root_path(&canonical);
+        let existed = if present { "existed" } else { "was gone" };
+        assert_eq!(
+            fence,
+            format!(
+                "a file in its worktree changed: {} (not left out as scratch: routed to {}; \
+                 worktree root {}; directory {}, which {existed} when resolved)",
+                path.to_string_lossy(),
+                engram_path_key(&root),
+                engram_exact_path_key(&root),
+                engram_exact_path_key(&canonical),
+            )
+        );
+        assert!(
+            fence.contains("not left out as scratch: routed to "),
+            "{fence}"
+        );
+        assert!(
+            fence.contains(if present {
+                "which existed when resolved"
+            } else {
+                "which was gone when resolved"
+            }),
+            "{fence}"
+        );
+        finish_run(&worktree, "passed", &"f".repeat(64));
+        let checkpoint = turn.finish();
+        assert_refused(&turn, &checkpoint, "not left out as scratch");
+    }
+}
+
 #[test]
 fn a_launch_while_another_writable_session_is_in_a_turn_there_is_not_carried() {
     // Once a gate is carried, another session's presence in a turn fences

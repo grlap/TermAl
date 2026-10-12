@@ -1994,6 +1994,25 @@ fn engram_is_worktree_scratch(worktree: &str, directory_key: &str, name: Option<
         || (directory_key == worktree && name == Some(ENGRAM_WORKTREE_SCRATCH_DIRECTORY))
 }
 
+/// How the changed `path`, which names the scratch directory yet was not
+/// left out, is shown in a fence's cause: with the inputs the scratch test
+/// judged it by (`engram_is_worktree_scratch`), the worktree key it was
+/// routed to (`routed`), the exact keys of its worktree root and of its
+/// directory, and whether that directory existed when they were resolved.
+fn engram_scratch_fence_detail(
+    path: &str,
+    routed: &str,
+    root_exact: &str,
+    directory_key: &str,
+    existed: bool,
+) -> String {
+    let existed = if existed { "existed" } else { "was gone" };
+    format!(
+        "{path} (not left out as scratch: routed to {routed}; worktree root {root_exact}; \
+         directory {directory_key}, which {existed} when resolved)"
+    )
+}
+
 impl AppState {
     /// The workspace watcher saw the files in `changes` change (its ignored
     /// directories, such as `.git`, `target` and `node_modules`, already left
@@ -2056,40 +2075,66 @@ impl AppState {
             // resolving it would read the file system for each event of a
             // build. A network path is not resolved, as its worktree key is
             // not (`engram_worktree_root`), and so is never scratch.
-            let mut exact: Vec<(PathBuf, String, String)> = Vec::new();
+            // Such a path is also routed by this same fresh resolution, not
+            // by the remembered key: a scratch subdirectory that became a
+            // repository since its key was remembered is judged against that
+            // repository, so routing it to the remembered worktree would
+            // fence that worktree for a change it git-ignores.
+            // Whether the directory still existed when it was resolved is kept
+            // with its keys: a path that names the scratch directory and still
+            // fences states all of these in its cause, so the holder sees why
+            // the exemption did not apply without the host's stderr.
+            let mut exact: Vec<(PathBuf, String, String, String, bool)> = Vec::new();
             let mut placed: Vec<(Option<String>, String)> = Vec::new();
             for change in changes {
                 let path = FsPath::new(&change.path);
                 let directory = path.parent().unwrap_or(path);
-                let Some((_, worktree)) = resolved.iter().find(|(known, _)| known == directory)
+                let Some((_, remembered)) = resolved.iter().find(|(known, _)| known == directory)
                 else {
                     continue;
                 };
+                let mut worktree = remembered;
+                let mut shown = None;
                 let names_scratch = path.components().any(|component| {
                     component.as_os_str() == std::ffi::OsStr::new(ENGRAM_WORKTREE_SCRATCH_DIRECTORY)
                 });
                 if names_scratch && !engram_network_path(&change.path) {
-                    if !exact.iter().any(|(known, _, _)| known == directory) {
+                    if !exact.iter().any(|(known, ..)| known == directory) {
+                        let existed = directory.is_dir();
                         let canonical = engram_canonical_path(directory);
+                        let root = engram_worktree_root_path(&canonical);
                         exact.push((
                             directory.to_path_buf(),
-                            engram_exact_path_key(&engram_worktree_root_path(&canonical)),
+                            engram_exact_path_key(&root),
                             engram_exact_path_key(&canonical),
+                            engram_path_key(&root),
+                            existed,
                         ));
                     }
                     let name = path.file_name().map(|name| name.to_string_lossy());
-                    if exact.iter().any(|(known, root_exact, key)| {
-                        known == directory
-                            && engram_is_worktree_scratch(root_exact, key, name.as_deref())
-                    }) {
+                    let Some((_, root_exact, key, fresh, existed)) =
+                        exact.iter().find(|(known, ..)| known == directory)
+                    else {
+                        continue;
+                    };
+                    if engram_is_worktree_scratch(root_exact, key, name.as_deref()) {
                         continue;
                     }
+                    worktree = fresh;
+                    shown = Some(engram_scratch_fence_detail(
+                        &change.path,
+                        fresh,
+                        root_exact,
+                        key,
+                        *existed,
+                    ));
                 }
                 if !placed
                     .iter()
                     .any(|(known, _)| known.as_deref() == Some(worktree.as_str()))
                 {
-                    placed.push((Some(worktree.clone()), change.path.clone()));
+                    let shown = shown.unwrap_or_else(|| change.path.clone());
+                    placed.push((Some(worktree.clone()), shown));
                 }
             }
             placed
