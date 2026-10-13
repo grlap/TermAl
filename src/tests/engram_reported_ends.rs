@@ -10,7 +10,8 @@
 // the holder in the worktree before the late end refuses it; a check started
 // in the worktree before the late end is overlapped by it, even once its
 // evidence was refused, and one started after is not; its runtime's exit
-// ends it; a host restart
+// ends it; one whose end never comes stays carried across later turns,
+// told as still running, never closed by a count of turns; a host restart
 // before the end closes it with outcome Unknown; a command keyed by its line,
 // and a Claude or ACP session's test, are closed Unknown as before.
 // Does not own: the carried checks' record, fence and credit, whose tests are
@@ -947,6 +948,73 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
     );
 }
 
+/// A carried Codex test whose end never comes, its runtime alive, is never
+/// closed by a count of turns: Codex reports no other fact that its process
+/// is gone, and it may still write what later checks read. It stays carried
+/// across later turns, its holder is told it is still running, what that
+/// holds up and how to end the wait, and a check started in its worktree
+/// turns later is overlapped with it named as still running.
+#[test]
+fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
+    const LATER: [&str; 3] = [
+        "turn-check-grant-later-1",
+        "turn-check-grant-later-2",
+        "turn-check-grant-later-3",
+    ];
+    let mut replies = vec![checkpoint_reply(CHECK_GRANT)];
+    for grant in LATER {
+        replies.extend([grant_reply(grant), begin_reply(grant), checkpoint_reply(grant)]);
+    }
+    let turn = CheckedTurn::start_with_opening(
+        "reported-end-never-comes",
+        true,
+        None,
+        replies,
+        1 + LATER.len(),
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
+    start_test(&turn, &worktree, ITEM);
+    let carried = holder_line_after_carry(&turn);
+    assert!(
+        carried.contains("Until then it is still running")
+            && carried.contains("later checks in its worktree are overlapped until it ends")
+            && carried.contains(
+                "ending its process, or Stopping the session (whose runtime exit closes it), \
+                 ends the wait"
+            ),
+        "{carried}"
+    );
+
+    let still_carried = |why: &str| {
+        turn.record(|record| {
+            assert_eq!(record.engram.carried_checks.len(), 1, "{why}");
+            assert_eq!(record.engram.carried_checks[0].check.key, ITEM, "{why}");
+            assert!(record.engram.carried_checks[0].check.end.is_none(), "{why}");
+        })
+    };
+    for later in 1..=2 {
+        let checkpoint = next_turn_checkpoint(&turn);
+        assert!(
+            checkpoint.get("verification_evidence").is_none(),
+            "turn {later}: {checkpoint:#}"
+        );
+        still_carried(&format!("still carried after later turn {later}"));
+    }
+
+    let checkpoint = second_test_checkpoint(&turn, &worktree);
+    assert!(
+        checkpoint.get("verification_evidence").is_none(),
+        "a check beside it earns no credit: {checkpoint:#}"
+    );
+    let line = holder_line(&turn);
+    let named = &sha256_hex(ITEM.as_bytes())[..12];
+    assert!(
+        line.contains(&format!("its own command (key {named}) was still running")),
+        "{line}"
+    );
+}
+
 /// A runtime of the session replaced without being cleared: its tests run no
 /// more for the session, and the clear of a stranded runtime drops exactly
 /// those, keeping the current runtime's still-running test.
@@ -1010,6 +1078,13 @@ fn a_runtime_exit_ends_a_still_running_tests_overlap() {
         turn.record(|record| record.engram.running_codex_tests.is_empty()),
         "its runtime's exit ends it"
     );
+}
+
+/// The first turn's close carries the test it left running, as
+/// `assert_carried_at_close` checks, and returns the holder's line.
+fn holder_line_after_carry(turn: &CheckedTurn) -> String {
+    assert_carried_at_close(turn);
+    holder_line(turn)
 }
 
 /// What is not carried at a turn's close is closed with outcome Unknown as

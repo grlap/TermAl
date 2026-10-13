@@ -313,12 +313,19 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, grant_id: &str)
     lines
 }
 
-/// The line the holder of a Codex test carried at its turn's close gets.
+/// The line the holder of a Codex test carried at its turn's close gets. It
+/// stays carried, however many turns pass, until Codex reports its end: no
+/// other fact says its process is gone (Codex reports none for an agent's
+/// exec session), so it is told as still running, with what that holds up
+/// and how to end the wait.
 fn engram_carried_running_line(command: &EngramCheckCommand) -> String {
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a Codex test still running when its turn closed, \
          a {} {} (check {}), is carried: it is recorded at a later checkpoint on this claim \
-         once its end is reported, if nothing writes in its worktree before then.",
+         once its end is reported, if nothing writes in its worktree before then. Until \
+         then it is still running, and later checks in its worktree are overlapped until \
+         it ends; ending its process, or Stopping the session (whose runtime exit closes \
+         it), ends the wait.",
         command.program,
         command.kind.label(),
         engram_check_fingerprint(command)
