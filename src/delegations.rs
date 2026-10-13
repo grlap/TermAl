@@ -4038,16 +4038,24 @@ fn detach_delegation_child_runtime_locked(
         SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
         SessionRuntime::None => None,
     };
+    // The detached runtime's turn, captured before it is retired.
+    let ending_turn = child.active_turn_generation;
     child.clear_runtime();
     child.clear_runtime_reset();
     child.clear_runtime_stop();
-    child.deferred_stop_callbacks.clear();
     child.active_turn_mailbox_notification = None;
     child.active_turn_start_message_count = None;
     child.active_turn_file_changes.clear();
     child.active_turn_file_change_grace_deadline = None;
     let dropped_begin = dropped_engram_intent_grant(child, child.queued_prompts.iter());
+    let removed_head = handing_off_head(child);
     child.queued_prompts.clear();
+    // The queue is gone, so a head promoted for its hand-off and any deferred
+    // hand-off are retired unsent, and whatever the detached runtime never
+    // acknowledged is ambiguous, all in this same write (prompt_delivery.rs).
+    discard_deferred_stop_callbacks(child);
+    settle_removed_handing_off_head(child, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
+    settle_retired_runtime_attempt(child, ending_turn);
     record_dropped_engram_intent(child, dropped_begin);
     sync_pending_prompts(child);
     clear_all_pending_requests(child);

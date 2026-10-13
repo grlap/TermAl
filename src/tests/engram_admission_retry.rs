@@ -787,6 +787,188 @@ fn an_operator_pause_keeps_the_hold() {
     assert!(unpaused.get("engramOperatorPaused").is_none());
 }
 
+/// A due admission retry whose head is a receipted prompt the paused queue
+/// may send only on an explicit Resume parks: repeated due ticks begin and
+/// charge nothing, the retry keeps its lineage, and the session says it
+/// waits for Resume.
+#[test]
+fn a_due_admission_retry_parks_a_receipted_head_paused_without_resume() {
+    let (state, session, receiver, transport) = parked_after_deadline([]);
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+    // The retry record's durable acknowledgement, before anything is due.
+    abort_retry::await_settlement_acknowledgement(&state, &session);
+    state.engram_abort_retry_tick(chrono::Utc::now());
+    let lineage = receipted_admission::retry_lineage(&state, &session);
+    let sent = transport.requests().len();
+    for _ in 0..3 {
+        tick_past_due(&state, &session);
+    }
+    assert_eq!(transport.requests().len(), sent, "no admission is begun");
+    assert!(receiver.try_recv().is_err(), "nothing is sent");
+    receipted_admission::assert_parked_for_resume(&state, &session, &id, &lineage);
+}
+
+/// An explicit Resume of the parked receipted head begins its write-ahead;
+/// while that is in flight a due tick begins and charges nothing, and its
+/// acknowledgement sends the head, once.
+#[test]
+fn a_resume_of_a_parked_receipted_head_sends_it_once_and_a_tick_meanwhile_charges_nothing() {
+    let (mut state, session, receiver, transport) =
+        parked_after_deadline([grant_reply("resumed-grant"), begin_reply("resumed-grant")]);
+    let writer = crate::tests::prompt_delivery::DeliveryWriter::attach(&mut state);
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+    abort_retry::await_settlement_acknowledgement(&state, &session);
+    state.engram_abort_retry_tick(chrono::Utc::now());
+
+    state.resume_session_queue(&session).expect("the Resume begins the head's write-ahead");
+    let write_ahead = writer.take(crate::tests::prompt_delivery::HeldFence::WriteAhead);
+    let lineage = receipted_admission::retry_lineage(&state, &session);
+    let sent = transport.requests().len();
+    tick_past_due(&state, &session);
+    assert_eq!(transport.requests().len(), sent, "the tick begins nothing while the write-ahead is in flight");
+    assert_eq!(receipted_admission::retry_lineage(&state, &session), lineage, "and charges nothing");
+    assert!(receiver.try_recv().is_err(), "nothing is sent before the acknowledgement");
+
+    write_ahead.finish(Ok(()));
+    assert!(
+        matches!(
+            recv_within_guard(&receiver, "the resumed head"),
+            Ok(CodexRuntimeCommand::Prompt { .. })
+        ),
+        "the acknowledged Resume sends the head"
+    );
+    tick_past_due(&state, &session);
+    assert!(receiver.try_recv().is_err(), "exactly once");
+    let delivery = with_record(&state, &session, |record| record.prompt_deliveries[&id].clone());
+    assert!(delivery.turn_generation.is_some(), "promoted");
+}
+
+/// A due attempt whose snapshot was taken before a newer Pause reaches the
+/// hand-off after it: the final eligibility check there parks it, so the
+/// stale snapshot neither charges nor begins anything.
+#[test]
+fn a_stale_due_snapshot_after_a_newer_pause_neither_charges_nor_begins() {
+    let (state, session, receiver, transport) = parked_after_deadline([]);
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+    abort_retry::await_settlement_acknowledgement(&state, &session);
+    state.engram_abort_retry_tick(chrono::Utc::now());
+    // The tick's snapshot of the due attempt.
+    let owner = with_record(&state, &session, EngramQueuedAdmissionOwner::capture)
+        .expect("the parked head");
+    // A newer Pause lands before the attempt reaches its hand-off.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.session_mut_by_index(index).unwrap().set_auto_dispatch_blocked(true);
+        state.commit_locked(&mut inner).unwrap();
+    }
+    let lineage = receipted_admission::retry_lineage(&state, &session);
+    let sent = transport.requests().len();
+    let slot = state.engram_retry_slots.try_acquire().expect("a free slot");
+    state.run_engram_retry_attempt(
+        EngramDueRetry {
+            session_id: session.clone(),
+            owner,
+            kind: EngramRetryKind::Admission,
+            due_at: String::new(),
+        },
+        chrono::Utc::now(),
+        slot,
+    );
+    assert_eq!(transport.requests().len(), sent, "the stale attempt begins nothing");
+    assert!(receiver.try_recv().is_err(), "nothing is sent");
+    receipted_admission::assert_parked_for_resume(&state, &session, &id, &lineage);
+}
+
+/// A newer Pause racing a real control attempt already in flight (the
+/// Resume's admission of the head, held in its evaluate): the real attempt
+/// happened and is settled by its own path, nothing is sent, and the
+/// acknowledged write-ahead is not left unowned: it returns to pending, and
+/// the Pause stays.
+#[test]
+fn a_pause_racing_an_in_flight_admission_leaves_no_unowned_acknowledged_write_ahead() {
+    let (evaluate, evaluate_gate) = gated_engram_step("turn_evaluate", grant_reply("resumed-grant"));
+    let (mut state, session, receiver) = receipted_admission::gated_root_fixture([
+        immediate_engram_step("session_bind", bind_reply("retry-token")),
+        immediate_engram_step("turn_evaluate", deadline_reply()),
+        evaluate,
+    ]);
+    deliver_turn_dispatch(&state, root_dispatch(&state, &session, false))
+        .expect("the unknown admission parks");
+    assert!(admission_retry(&state, &session).is_some(), "the retry is scheduled");
+    let writer = crate::tests::prompt_delivery::DeliveryWriter::attach(&mut state);
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+
+    state.resume_session_queue(&session).expect("the Resume begins the head's write-ahead");
+    let write_ahead = writer.take(crate::tests::prompt_delivery::HeldFence::WriteAhead);
+    let nonce = with_record(&state, &session, |record| record.prompt_deliveries[&id].write_ahead.clone());
+    // The acknowledgement drives the Resume's admission, which holds in its
+    // evaluate: a real control attempt in flight.
+    let acknowledging = std::thread::spawn(move || write_ahead.finish(Ok(())));
+    evaluate_gate.wait();
+
+    // A newer Pause wins before the admission's promotion.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.session_mut_by_index(index).unwrap().set_auto_dispatch_blocked(true);
+        state.commit_locked(&mut inner).unwrap();
+    }
+    evaluate_gate.release();
+    acknowledging.join().expect("the acknowledgement does not panic");
+    let settled = phase_sync::PollGuard::new();
+    while with_record(&state, &session, |record| {
+        record.prompt_deliveries[&id].disposition == PromptDeliveryDisposition::HandingOff
+            || record.engram.admission_in_progress.is_some()
+    }) {
+        settled.wait("the in-flight admission gives the head up");
+    }
+
+    assert!(receiver.try_recv().is_err(), "nothing is sent");
+    with_record(&state, &session, |record| {
+        let delivery = &record.prompt_deliveries[&id];
+        assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending, "{:?}", delivery.reason);
+        assert!(!delivery.write_ahead_acknowledged, "no acknowledged write-ahead is left");
+        assert_ne!(delivery.write_ahead, nonce, "a superseding write");
+        assert_eq!(delivery.turn_generation, None);
+        assert!(record.orchestrator_auto_dispatch_blocked, "the Pause stays");
+    });
+    drop(writer);
+}
+
+/// A Stop of the parked receipted head ends its retry: no tick begins
+/// anything, and the receipt is not invented a settlement.
+#[test]
+fn a_stop_of_a_parked_receipted_head_ends_its_retry_and_settles_nothing() {
+    let (state, session, receiver, transport) = parked_after_deadline([]);
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+    state.request_stop_session(&session).unwrap();
+    let sent = transport.requests().len();
+    tick_past_due(&state, &session);
+    assert_eq!(transport.requests().len(), sent);
+    assert!(receiver.try_recv().is_err());
+    with_record(&state, &session, |record| {
+        assert!(record.engram.admission_retry.is_none(), "the Stop ended the retry");
+        assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Pending);
+    });
+}
+
+/// A reload keeps the parked receipted head pending and its acknowledged
+/// retry, under the conservative restart rules: nothing is replayed.
+#[test]
+fn a_reload_keeps_a_parked_receipted_head_pending_with_its_retry() {
+    let (state, session, _receiver, _transport) = parked_after_deadline([]);
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+    abort_retry::await_settlement_acknowledgement(&state, &session);
+    state.engram_abort_retry_tick(chrono::Utc::now());
+    let loaded = with_record(&state, &session, |record| {
+        PersistedSessionRecord::from_record(record).into_record().expect("the row loads")
+    });
+    assert_eq!(loaded.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Pending);
+    assert!(loaded.orchestrator_auto_dispatch_blocked);
+    assert!(loaded.engram.admission_retry.is_some(), "the acknowledged retry is rebuilt");
+}
+
 /// Criterion 4: an owner superseded since the park (another head, changed
 /// content, or a moved generation) starts nothing and drops the schedule.
 #[test]

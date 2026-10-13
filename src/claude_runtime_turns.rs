@@ -177,8 +177,15 @@ impl AppState {
             // no one's, and what follows is not separable from it, so the
             // prompt's grant is marked mixed and the turn stays unassigned
             // for what the recorder sees until its result.
-            ClaudeFrameOwnership::JoinedHost(_) => {
+            ClaudeFrameOwnership::JoinedHost(owner) => {
                 self.mark_engram_turn_attribution_mixed(session_id, token);
+                // Mixed attribution or not, Claude took up the host's prompt:
+                // a receipted prompt's delivery is accepted.
+                self.note_prompt_delivery_outcome(
+                    session_id,
+                    Some(owner.turn_generation),
+                    PromptDeliveryOutcome::Accepted,
+                );
             }
             // Contradictory identities: from now on nothing the recorder sees
             // is anyone's, and the transcript says so at once.
@@ -195,7 +202,17 @@ impl AppState {
                 }
                 self.mark_engram_turn_attribution_mixed(session_id, token);
             }
-            ClaudeFrameOwnership::Unchanged | ClaudeFrameOwnership::OpenedHost(_) => {}
+            // The runtime took up the host's prompt: its command lifecycle
+            // `started`, or the unique echo of the prompt. A receipted
+            // prompt's delivery is accepted (prompt_delivery.rs).
+            ClaudeFrameOwnership::OpenedHost(owner) => {
+                self.note_prompt_delivery_outcome(
+                    session_id,
+                    Some(owner.turn_generation),
+                    PromptDeliveryOutcome::Accepted,
+                );
+            }
+            ClaudeFrameOwnership::Unchanged => {}
         }
     }
 
@@ -419,6 +436,24 @@ impl AppState {
         );
     }
 
+    /// An error `result` the router tied to the host's prompt proves Claude
+    /// received that prompt, as a successful one does: a receipted prompt's
+    /// delivery not yet acknowledged is accepted before the turn ends in its
+    /// error (prompt_delivery.rs).
+    fn accept_prompt_delivery_of_correlated_error(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        turn_generation: u64,
+    ) {
+        self.settle_prompt_delivery_of_runtime_turn(
+            session_id,
+            token,
+            Some(turn_generation),
+            PromptDeliveryOutcome::Accepted,
+        );
+    }
+
     /// Finalizes the turn a Claude `result` ended, and only that turn.
     /// `error_detail` is set for an error result.
     fn finish_claude_result(
@@ -432,12 +467,19 @@ impl AppState {
             // A late duplicate ends nothing (the router never passes one).
             ClaudeResultOwner::Stale => Ok(()),
             ClaudeResultOwner::Host(owner) => match error_detail {
-                Some(detail) => self.mark_turn_error_if_runtime_and_generation_match(
-                    session_id,
-                    token,
-                    owner.turn_generation,
-                    detail,
-                ),
+                Some(detail) => {
+                    self.accept_prompt_delivery_of_correlated_error(
+                        session_id,
+                        token,
+                        owner.turn_generation,
+                    );
+                    self.mark_turn_error_if_runtime_and_generation_match(
+                        session_id,
+                        token,
+                        owner.turn_generation,
+                        detail,
+                    )
+                }
                 None => self.finish_turn_ok_if_runtime_and_generation_match(
                     session_id,
                     token,
@@ -478,12 +520,19 @@ impl AppState {
                 let turn = self.open_unmediated_claude_turn_of(session_id, token);
                 self.mark_engram_turn_attribution_mixed(session_id, token);
                 let result = match error_detail {
-                    Some(detail) => self.mark_turn_error_if_runtime_and_generation_match(
-                        session_id,
-                        token,
-                        owner.turn_generation,
-                        detail,
-                    ),
+                    Some(detail) => {
+                        self.accept_prompt_delivery_of_correlated_error(
+                            session_id,
+                            token,
+                            owner.turn_generation,
+                        );
+                        self.mark_turn_error_if_runtime_and_generation_match(
+                            session_id,
+                            token,
+                            owner.turn_generation,
+                            detail,
+                        )
+                    }
                     None => self.finish_turn_ok_if_runtime_and_generation_match(
                         session_id,
                         token,

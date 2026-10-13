@@ -2543,9 +2543,28 @@ impl AppState {
     }
 }
 
+/// A receipted head's acknowledged, never-promoted write-ahead attempt that
+/// the acknowledgement left to the queued admission evaluating that head
+/// (prompt_delivery.rs). `token` is a strong clone of that admission's guard
+/// token, so pointer identity names exactly that guard for as long as it
+/// owns the attempt; the guard's release promotes nothing more and returns
+/// this exact attempt to pending if it is still unsent.
+#[derive(Clone, Debug)]
+struct EngramAdmissionAttempt {
+    token: Arc<std::sync::atomic::AtomicBool>,
+    prompt_id: String,
+    write_ahead: String,
+}
+
 #[derive(Clone, Debug)]
 struct EngramSessionState {
     admission_in_progress: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// The queue head the admission in `admission_in_progress` captured,
+    /// when that admission is a queued prompt's. In memory only.
+    admission_prompt_id: Option<String>,
+    /// The receipted attempt left to that admission. In memory only; a
+    /// restart settles a never-promoted attempt by its durable row.
+    admission_attempt: Option<EngramAdmissionAttempt>,
     source_observation_preparations: usize,
     recovered_admission: bool,
     routing_token: Option<String>,
@@ -2826,6 +2845,8 @@ impl Default for EngramSessionState {
     fn default() -> Self {
         Self {
             admission_in_progress: None,
+            admission_prompt_id: None,
+            admission_attempt: None,
             source_observation_preparations: 0,
             recovered_admission: false,
             routing_token: None,
@@ -7085,12 +7106,24 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
+            // The rejected turn, captured before its runtime is retired.
+            let ending_turn = record.active_turn_generation;
             take_and_abandon_engram_pending_dispatch(record);
             record.clear_runtime();
             record.clear_runtime_reset();
             record.set_auto_dispatch_blocked(false);
             record.clear_runtime_stop();
-            record.deferred_stop_callbacks.clear();
+            discard_deferred_stop_callbacks(record);
+            // The dispatch still owned its pending marker, so it was never
+            // handed off: its receipt records a rejection, not an ambiguity
+            // (prompt_delivery.rs).
+            apply_prompt_delivery_outcome(
+                record,
+                ending_turn,
+                PromptDeliveryOutcome::Rejected(format!(
+                    "Engram rejected the turn before its hand-off; the prompt was not sent: {cleaned}"
+                )),
+            );
             clear_active_turn_file_change_tracking(record);
             clear_all_pending_requests(record);
             record.session.status = SessionStatus::Error;

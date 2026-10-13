@@ -8,8 +8,9 @@
 //! prepared begin acknowledged after one attempt's wait; the window a Stop,
 //! a pause or control disabled ends but keeps until an accepted Resume opens
 //! one new window; a restarted pending begin, read as possibly sent, still
-//! bounded by its original deadline; a stale owner's Resume; and the
-//! recoveries the budget leaves alone. Does not own the settlement, the late
+//! bounded by its original deadline; a stale owner's Resume; a receipted
+//! head's release by Resume before its hand-off record (prompt_delivery.rs);
+//! and the recoveries the budget leaves alone. Does not own the settlement, the late
 //! acknowledgement or the fresh admission's order
 //! (src/tests/engram_begin_unknown_recovery.rs, whose fixtures it uses). New
 //! module.
@@ -2849,4 +2850,108 @@ fn cap_saturation_consumes_the_admission_budget_and_starts_no_attempt() {
         assert_eq!(begins.len(), 1, "{label}: exactly one begin: {begins:?}");
         assert_eq!(begins[0]["idempotency_key"], pending.idempotency_key.as_str(), "{label}");
     }
+}
+
+/// A receipted head of a root session whose admission's prepared begin met a
+/// stopped writer: held for Resume. The admission never handed the prompt
+/// off, so its receipt is back to pending (prompt_delivery.rs).
+fn receipted_held_after_stopped_writer() -> (
+    AppState,
+    String,
+    String,
+    mpsc::Receiver<CodexRuntimeCommand>,
+    Arc<LostBeginReply>,
+    AcknowledgingWriter,
+) {
+    let (mut state, session, receiver, transport) = lost_begin_fixture(false);
+    let writer = AcknowledgingWriter::install(
+        &mut state,
+        transport.log.clone(),
+        Some(PersistFenceError::WorkerStopped),
+    );
+    let id = {
+        let mut inner = state.inner.lock().unwrap();
+        let prompt = PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
+            attachments: Vec::new(),
+            id: inner.next_message_id(),
+            timestamp: stamp_now(),
+            text: "a receipted root prompt".to_owned(),
+            expanded_text: None,
+            source: None,
+        };
+        let id = prompt.id.clone();
+        let index = inner.find_session_index(&session).unwrap();
+        queue_receipted_orchestrator_prompt_on_record(
+            inner.session_mut_by_index(index).unwrap(),
+            prompt,
+            Vec::new(),
+        );
+        state.commit_locked(&mut inner).unwrap();
+        id
+    };
+    // Its durability acknowledgement, then its write-ahead's, then the
+    // admission, whose prepared begin meets the stopped writer.
+    assert!(state.request_queued_prompt_durability(&session, &id));
+    // The hold and the dispatch's held return are published from the
+    // settlement thread, which signals nothing on completion: the wait names
+    // the receipt's observed state, so a receipt left handing off is what a
+    // failure reports.
+    let held = crate::tests::phase_sync::PollGuard::new();
+    loop {
+        let (is_held, receipt) = with_record(&state, &session, |record| {
+            (
+                engram_begin_preparation_held_head(record),
+                record
+                    .prompt_deliveries
+                    .get(&id)
+                    .map(|delivery| (delivery.disposition, delivery.turn_generation)),
+            )
+        });
+        if is_held
+            && receipt.is_some_and(|(disposition, _)| disposition == PromptDeliveryDisposition::Pending)
+        {
+            break;
+        }
+        held.wait(format!(
+            "the receipted head held by its prepared begin, its receipt back to pending \
+             (held: {is_held}; receipt disposition and turn: {receipt:?})"
+        ));
+    }
+    (state, session, id, receiver, transport, writer)
+}
+
+/// A receipted head held by its prepared begin: its receipt is pending again
+/// (the admission sent nothing), and an explicit Resume, as for any head,
+/// releases the begin-preparation hold first and only then begins the
+/// receipt's write-ahead for the released head, which is sent once with one
+/// begin. (This hold has no automatic recovery for a Stop to end: the Stop of
+/// a retained admission is covered in src/tests/prompt_delivery.rs.)
+#[test]
+fn a_receipted_head_on_a_begin_preparation_hold_is_released_by_resume_and_sent_once() {
+    let (state, session, id, receiver, transport, writer) = receipted_held_after_stopped_writer();
+    with_record(&state, &session, |record| {
+        let delivery = &record.prompt_deliveries[&id];
+        assert_eq!(delivery.turn_generation, None, "never handed off");
+        assert!(delivery.resume.is_none());
+    });
+    assert!(begin_requests(&transport).is_empty(), "nothing sent before Resume");
+
+    state
+        .resume_local_session_queue(&session, None)
+        .unwrap_or_else(|error| panic!("Resume is accepted: {}", error.message));
+    let promoted = crate::tests::phase_sync::PollGuard::new();
+    while !with_record(&state, &session, |record| {
+        record
+            .prompt_deliveries
+            .get(&id)
+            .is_some_and(|delivery| delivery.turn_generation.is_some())
+            && record.queued_prompts.is_empty()
+    }) {
+        promoted.wait("the released receipted head is promoted and handed off");
+    }
+    writer.finish(&state);
+    assert_eq!(abort_retry::prompts_received(&receiver), 1, "delivered once");
+    assert_eq!(begin_requests(&transport).len(), 1, "exactly one begin");
 }

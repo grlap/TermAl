@@ -231,6 +231,7 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
         .queued_peer_messages
         .retain(|prompt_id, _| live_prompt_ids.contains(&prompt_id.as_str()));
     prune_queued_prompt_durability_holds(record);
+    prune_prompt_deliveries(record);
     record.session.pending_prompts = projected_pending_prompts(record);
 }
 
@@ -728,10 +729,14 @@ fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedProm
             .iter()
             .filter(|queued| queued.source == source),
     );
+    let removed_head = handing_off_head(record);
     record
         .queued_prompts
         .retain(|queued| queued.source != source);
     if record.queued_prompts.len() != original_len {
+        // A removed head promoted for its hand-off was never sent: its
+        // receipt turns terminal in this same write (prompt_delivery.rs).
+        settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
         record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }
@@ -763,6 +768,7 @@ fn clear_queued_prompts_by_source_except_admission_owner(
             .filter(|(index, queued)| !keep(*index, queued))
             .map(|(_, queued)| queued),
     );
+    let removed_head = handing_off_head(record);
     let mut index = 0usize;
     record.queued_prompts.retain(|queued| {
         let retain = keep(index, queued);
@@ -770,6 +776,9 @@ fn clear_queued_prompts_by_source_except_admission_owner(
         retain
     });
     if record.queued_prompts.len() != original_len {
+        // A removed head promoted for its hand-off was never sent; a
+        // preserved one stays with its Stop (prompt_delivery.rs).
+        settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
         record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }

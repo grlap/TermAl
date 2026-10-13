@@ -220,7 +220,7 @@ fn deliver_turn_dispatch_holding(
             })
         {
             let detail = format!("failed to start Codex Fast discovery worker: {err}");
-            return if record_rejected_turn_dispatch(
+            let rejected = record_rejected_turn_dispatch(
                 state,
                 &session_id,
                 &detail,
@@ -228,7 +228,15 @@ fn deliver_turn_dispatch_holding(
                 engram_generation,
                 &runtime_token,
                 generation,
-            ) {
+            );
+            // Never handed to the runtime; noted after the rejection settled
+            // the queue, as for any rejected dispatch (prompt_delivery.rs).
+            state.note_prompt_delivery_outcome(
+                &session_id,
+                Some(generation),
+                PromptDeliveryOutcome::Rejected(detail.clone()),
+            );
+            return if rejected {
                 TurnDispatchDeliveryOutcome::Rejected(ApiError::internal(detail))
             } else {
                 TurnDispatchDeliveryOutcome::Superseded
@@ -250,9 +258,47 @@ fn deliver_turn_dispatch_now(
     dispatch: TurnDispatch,
 ) -> TurnDispatchDeliveryOutcome {
     let session_id = dispatch.session_id().to_owned();
+    let active_turn_generation = dispatch.active_turn_generation();
     let outcome = deliver_prepared_turn_dispatch_now(state, dispatch);
+    // A dispatch rejected or superseded before its channel send never
+    // reached the runtime: a receipted prompt's delivery records that. Every
+    // other outcome leaves it handing off until the runtime acknowledges it
+    // (prompt_delivery.rs).
+    match &outcome {
+        TurnDispatchDeliveryOutcome::Rejected(error) => state.note_prompt_delivery_outcome(
+            &session_id,
+            Some(active_turn_generation),
+            PromptDeliveryOutcome::Rejected(error.message.clone()),
+        ),
+        TurnDispatchDeliveryOutcome::Superseded => state.note_prompt_delivery_outcome(
+            &session_id,
+            Some(active_turn_generation),
+            PromptDeliveryOutcome::Rejected(
+                "the dispatch was superseded before it reached the runtime".to_owned(),
+            ),
+        ),
+        TurnDispatchDeliveryOutcome::Delivered
+        | TurnDispatchDeliveryOutcome::Scheduled
+        | TurnDispatchDeliveryOutcome::Held { .. } => {}
+    }
     state.sync_delegation_attempt_for_child_session(&session_id);
     outcome
+}
+
+/// A dispatch held before its provider hand-off and then dropped (parked for
+/// a retry, held for recovery, or held by unknown persistence) sent nothing:
+/// a receipted head it promoted returns to pending through the ordinary
+/// still-queued outcome (prompt_delivery.rs). A parked dispatch that is itself
+/// delivered later keeps its hand-off.
+fn note_held_before_hand_off(state: &AppState, session_id: &str, active_turn_generation: u64) {
+    state.note_prompt_delivery_outcome(
+        session_id,
+        Some(active_turn_generation),
+        PromptDeliveryOutcome::Rejected(
+            "the dispatch was held before it reached the runtime; the prompt was not sent"
+                .to_owned(),
+        ),
+    );
 }
 
 fn deliver_prepared_turn_dispatch_now(
@@ -267,6 +313,7 @@ fn deliver_prepared_turn_dispatch_now(
         {
             EngramTurnDeliveryPreparation::Ready => {}
             EngramTurnDeliveryPreparation::ObservationRecovery => {
+                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
                 return TurnDispatchDeliveryOutcome::Held { error: None };
             }
             EngramTurnDeliveryPreparation::ObservationPending => {
@@ -278,6 +325,7 @@ fn deliver_prepared_turn_dispatch_now(
                 return TurnDispatchDeliveryOutcome::Superseded;
             }
             EngramTurnDeliveryPreparation::PersistenceUnknown => {
+                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
                 return TurnDispatchDeliveryOutcome::Held {
                     error: Some(engram_persistence_unknown_error()),
                 };
@@ -294,6 +342,7 @@ fn deliver_prepared_turn_dispatch_now(
                     active_turn_generation,
                 ) {
                     EngramAuthorizationParkOutcome::Parked => {
+                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
                         TurnDispatchDeliveryOutcome::Held { error: None }
                     }
                     EngramAuthorizationParkOutcome::Withdrawn => {
@@ -308,6 +357,7 @@ fn deliver_prepared_turn_dispatch_now(
                         }
                     }
                     EngramAuthorizationParkOutcome::PersistenceUnknown => {
+                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
                         TurnDispatchDeliveryOutcome::Held {
                             error: Some(engram_persistence_unknown_error()),
                         }
@@ -341,9 +391,11 @@ fn deliver_prepared_turn_dispatch_now(
                     active_turn_generation,
                 ) {
                     EngramAuthorizationParkOutcome::Parked => {
+                        note_held_before_hand_off(state, &session_id, active_turn_generation);
                         return TurnDispatchDeliveryOutcome::Held { error: None };
                     }
                     EngramAuthorizationParkOutcome::PersistenceUnknown => {
+                        note_held_before_hand_off(state, &session_id, active_turn_generation);
                         return TurnDispatchDeliveryOutcome::Held {
                             error: Some(engram_persistence_unknown_error()),
                         };

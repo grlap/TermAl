@@ -204,6 +204,22 @@ impl EngramAdmissionGuard<'_> {
         let Some(index) = inner.find_session_index(self.session_id) else {
             return false;
         };
+        // The receipted attempt the acknowledgement left to this admission is
+        // given up first, under this same lock, on every release: normal,
+        // retrying, after a Stop moved the generation on, or on an unwind. It
+        // returns to pending if it is still this exact unsent attempt
+        // (prompt_delivery.rs); a successor's attempt is never this guard's.
+        let owned_attempt = inner.sessions[index]
+            .engram
+            .admission_attempt
+            .as_ref()
+            .is_some_and(|attempt| Arc::ptr_eq(&attempt.token, &self.wake));
+        if owned_attempt
+            && let Some(attempt) = inner.sessions[index].engram.admission_attempt.take()
+        {
+            self.state
+                .release_admission_attempt_locked(&mut inner, index, attempt);
+        }
         let record = &mut inner.sessions[index];
         if !record
             .engram
@@ -214,6 +230,7 @@ impl EngramAdmissionGuard<'_> {
             return false;
         }
         record.engram.admission_in_progress = None;
+        record.engram.admission_prompt_id = None;
         if !self
             .owner
             .as_ref()
@@ -260,7 +277,11 @@ fn promoted_engram_head_matches(record: &SessionRecord, fingerprint: &str) -> bo
 
 fn retire_promoted_engram_head(record: &mut SessionRecord, fingerprint: &str) {
     if promoted_engram_head_matches(record, fingerprint) {
+        // The head never reached its hand-off: a receipt promoted for it
+        // turns terminal in this same write (prompt_delivery.rs).
+        let removed_head = handing_off_head(record);
         record.queued_prompts.pop_front();
+        settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
         sync_pending_prompts(record);
     }
 }
@@ -736,6 +757,19 @@ impl AppState {
         }
         record.session.live_activity = None;
         sync_pending_prompts(record);
+        // A receipted head promoted for this admission was never handed off
+        // (an admission keeps its head queued until then): its receipt
+        // returns to pending in this same write (prompt_delivery.rs).
+        if let Some(turn_generation) = head_prompt_delivery_turn(record) {
+            apply_prompt_delivery_outcome(
+                record,
+                turn_generation,
+                PromptDeliveryOutcome::Rejected(
+                    "the Engram admission was stopped before the hand-off; the prompt was not sent"
+                        .to_owned(),
+                ),
+            );
+        }
         self.commit_locked(&mut inner).map_err(|error| {
             ApiError::internal(format!(
                 "Failed to persist authorization cancellation: {error:#}"

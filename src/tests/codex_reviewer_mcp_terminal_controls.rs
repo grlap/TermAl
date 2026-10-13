@@ -157,6 +157,7 @@ fn worker_with_scope(fixture: &ReviewerFixture, startup: bool, scope: CodexRevie
         model: "gpt-5.4".to_owned(), prompt: "Review local source.".to_owned(),
         reasoning_effort: CodexReasoningEffort::Medium, service_tier: None,
         resume_thread_id: None, sandbox_mode: CodexSandboxMode::ReadOnly,
+        delivery_receipt: None,
     }, None));
     // Drive the actual worker, not a replacement model. The direct attachment
     // arranges the phase; the queried request proves its current-owner loop ran.

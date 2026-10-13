@@ -1293,7 +1293,8 @@ fn start_shared_codex_thread_setup_request(
     // each failure arm, i.e. a rule you had to remember at each new `?`; one of the
     // two arms was in fact never exercised by a test. The guard makes releasing the
     // default and holding the slot the thing you have to opt into.
-    let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
+    let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id)
+        .rejecting_unsent_prompt(state, runtime_id);
 
     let (mcp_config, engram_enabled) = state
         .termal_delegation_mcp_codex_config_for_shared_runtime(
@@ -1394,7 +1395,8 @@ fn finish_shared_codex_thread_setup(
     if !shared_codex_thread_setup_is_current(sessions, session_id, &request_id) {
         return Ok(());
     }
-    let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
+    let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id)
+        .rejecting_unsent_prompt(state, runtime_id);
     // Bind recovery to the thread in this RPC, not a later parked command.
     let resumed_thread_id = (method == "thread/resume")
         .then(|| {
@@ -1523,6 +1525,16 @@ fn finish_shared_codex_thread_setup(
                             &waiter_session_id,
                             &request_id,
                         ) {
+                            // The parked prompt is dropped with the setup:
+                            // turn/start was never written (prompt_delivery.rs).
+                            waiter_state.note_prompt_delivery_outcome(
+                                &waiter_session_id,
+                                Some(active_turn_generation),
+                                PromptDeliveryOutcome::Rejected(
+                                    "the Codex thread setup returned no thread id; the prompt was not sent"
+                                        .to_owned(),
+                                ),
+                            );
                             let _ = fail_shared_codex_turn_after_start_error(
                                 &waiter_state,
                                 &waiter_session_id,
@@ -1935,6 +1947,29 @@ fn handle_shared_codex_start_turn_inner(
     }
     drop(reviewer_send_guard);
     drop(reviewer_shared_guard);
+    // From here the prompt may reach Codex. A receipted prompt is admitted
+    // only while its exact attempt is still unwritten; one already settled
+    // (rejected, so known unsent) or gone is never written now, and this
+    // request's own marker, if it is still this request's, is cleared.
+    if !state.begin_prompt_delivery_runtime_write(
+        session_id,
+        &runtime_token,
+        active_turn_generation,
+        command.delivery_receipt.as_ref(),
+    ) {
+        let mut sessions = sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        if let Some(session_state) = sessions.get_mut(session_id)
+            && session_state.pending_turn_start_request_id.as_deref() == Some(&request_id)
+            && session_state.active_turn_generation == Some(active_turn_generation)
+        {
+            session_state.pending_turn_start_request_id = None;
+            session_state.turn_started_before_response = false;
+            session_state.turn_started = false;
+        }
+        return Ok(());
+    }
     let turn_start_result = start_codex_json_rpc_request_with_id(
         writer,
         pending_requests,
@@ -1966,6 +2001,16 @@ fn handle_shared_codex_start_turn_inner(
                     session_state.turn_started = false;
                 }
             }
+            drop(sessions);
+            // Part of the request may have reached Codex: a receipted
+            // prompt's delivery is unknown (prompt_delivery.rs).
+            state.note_prompt_delivery_outcome(
+                session_id,
+                Some(active_turn_generation),
+                PromptDeliveryOutcome::Ambiguous(format!(
+                    "writing turn/start to Codex failed: {err:?}"
+                )),
+            );
             return Err(err.into());
         }
     };
@@ -1991,6 +2036,24 @@ fn handle_shared_codex_start_turn_inner(
             SHARED_CODEX_RESPONSE_POLL_SLICE,
         );
 
+        // What the `turn/start` reply says about a receipted prompt's
+        // delivery (prompt_delivery.rs): the response accepts it; an error
+        // response refuses the turn, so the prompt never reached the model;
+        // a timeout or a broken transport leaves it unknown.
+        let delivery_outcome = match &result {
+            Ok(_) => PromptDeliveryOutcome::Accepted,
+            Err(CodexResponseError::JsonRpc(detail)) => PromptDeliveryOutcome::Rejected(format!(
+                "Codex refused the turn: {detail}"
+            )),
+            Err(error) => PromptDeliveryOutcome::Ambiguous(format!(
+                "Codex's turn/start reply did not arrive: {error:?}"
+            )),
+        };
+        wait_state.note_prompt_delivery_outcome(
+            &wait_session_id,
+            Some(active_turn_generation),
+            delivery_outcome,
+        );
         match result {
             Ok(turn_result) => {
                 let mut watchdog_cancel_rx = None;
@@ -2376,6 +2439,8 @@ struct PendingCodexThreadSetupGuard<'a> {
     request_id: &'a str,
     session_id: &'a str,
     sessions: &'a SharedCodexSessionMap,
+    /// The state and runtime whose receipted prompt a release settles.
+    unsent_prompt_owner: Option<(&'a AppState, &'a str)>,
 }
 
 impl<'a> PendingCodexThreadSetupGuard<'a> {
@@ -2385,7 +2450,16 @@ impl<'a> PendingCodexThreadSetupGuard<'a> {
             request_id,
             session_id,
             sessions,
+            unsent_prompt_owner: None,
         }
+    }
+
+    /// A release also settles the parked prompt's receipt on `runtime_id`'s
+    /// session as rejected: the setup request never reached Codex, so
+    /// neither did the prompt waiting for it (prompt_delivery.rs).
+    fn rejecting_unsent_prompt(mut self, state: &'a AppState, runtime_id: &'a str) -> Self {
+        self.unsent_prompt_owner = Some((state, runtime_id));
+        self
     }
 
     /// The request is in flight; the waiter owns the slot from here.
@@ -2402,7 +2476,31 @@ impl Drop for PendingCodexThreadSetupGuard<'_> {
         // The caller is returning `Err` either way; the slot just must not stay
         // claimed. `NotCurrent` is fine and expected — a detach can have taken the
         // whole session out from under us while we were failing.
-        let _ = abort_shared_codex_thread_setup(self.sessions, self.session_id, self.request_id);
+        let released = abort_shared_codex_thread_setup(self.sessions, self.session_id, self.request_id);
+        let (
+            CodexThreadSetupAbort::Released {
+                active_turn_generation,
+            },
+            Some((state, runtime_id)),
+        ) = (released, self.unsent_prompt_owner)
+        else {
+            return;
+        };
+        // Settled before the caller's error retires the runtime, whose exit
+        // would otherwise leave the receipt unknown and drop its retry entry.
+        if state.session_matches_runtime_token(
+            self.session_id,
+            &RuntimeToken::Codex(runtime_id.to_owned()),
+        ) {
+            state.note_prompt_delivery_outcome(
+                self.session_id,
+                Some(active_turn_generation),
+                PromptDeliveryOutcome::Rejected(
+                    "the Codex thread setup failed before its request was sent; the prompt was not sent"
+                        .to_owned(),
+                ),
+            );
+        }
     }
 }
 
@@ -2510,6 +2608,16 @@ fn handle_shared_codex_thread_setup_response_error_if_current(
     if !state.session_matches_runtime_token(session_id, &runtime_token) {
         return;
     }
+    // The prompt was parked on this setup and is dropped with it: turn/start
+    // was never written, so a receipted prompt's delivery records a rejection
+    // before the turn ends (prompt_delivery.rs).
+    state.note_prompt_delivery_outcome(
+        session_id,
+        Some(active_turn_generation),
+        PromptDeliveryOutcome::Rejected(
+            "the Codex thread setup failed before the prompt was sent".to_owned(),
+        ),
+    );
     handle_shared_codex_startup_response_error(
         state,
         runtime_id,

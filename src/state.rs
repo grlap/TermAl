@@ -1949,6 +1949,9 @@ struct SessionRecord {
     /// durable, keyed by prompt id (`queued_prompt_durability.rs`). Empty for
     /// every ordinary prompt.
     queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
+    /// Delivery receipts of receipted prompts, keyed by prompt id
+    /// (`prompt_delivery.rs`). Empty for every ordinary prompt.
+    prompt_deliveries: BTreeMap<String, PromptDelivery>,
     /// Global transcript position represented by `session.messages[0]`.
     ///
     /// Persisted sessions load only a bounded recent tail into memory. New
@@ -1985,6 +1988,10 @@ struct SessionRecord {
     /// owner's fence after the runtime has been replaced.
     runtime_stop_owner: Option<RuntimeStopOwner>,
     runtime_stop_generation: u64,
+    /// In memory: advanced by every pause of the queue, from any source, so a
+    /// Resume's continuation bound to the pause it crossed is ended by a later
+    /// pause even when the queue reads paused again (prompt_delivery.rs).
+    auto_dispatch_pause_epoch: u64,
     /// An immediate Engram MCP revocation arrived while an ordinary Stop owned
     /// the runtime callback fence. Stop completion consumes this marker: a
     /// successful Stop has no runtime left to revoke, while a failed Stop
@@ -2050,6 +2057,9 @@ struct QueuePromotionSnapshot {
     // Promotion prunes the promoted entry's durability hold with the queue;
     // a restored entry gets its hold (an acknowledged marker) back.
     queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
+    // The promoted entry's delivery receipt names the turn it was promoted
+    // under; a restored entry gets its receipt as it was before promotion.
+    prompt_deliveries: BTreeMap<String, PromptDelivery>,
 }
 
 impl SessionRecord {
@@ -2100,6 +2110,7 @@ impl SessionRecord {
             message_count: self.session.message_count,
             messages_loaded: self.session.messages_loaded,
             queued_prompt_durability_holds: self.queued_prompt_durability_holds.clone(),
+            prompt_deliveries: self.prompt_deliveries.clone(),
         }
     }
 
@@ -2157,6 +2168,7 @@ impl SessionRecord {
         }
         // Holds of entries still queued come back; sync prunes the rest.
         self.queued_prompt_durability_holds = snapshot.queued_prompt_durability_holds;
+        self.prompt_deliveries = snapshot.prompt_deliveries;
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
         self.active_turn_generation = snapshot.active_turn_generation;
@@ -2183,6 +2195,9 @@ impl SessionRecord {
     fn set_auto_dispatch_blocked(&mut self, blocked: bool) {
         self.orchestrator_auto_dispatch_blocked = blocked;
         self.session.queue_paused = blocked;
+        if blocked {
+            self.auto_dispatch_pause_epoch = self.auto_dispatch_pause_epoch.wrapping_add(1);
+        }
         if !blocked {
             // Lifting the pause lifts an operator's pause with it.
             self.engram.operator_paused = false;

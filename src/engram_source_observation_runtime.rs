@@ -211,10 +211,14 @@ impl AppState {
             dispatch
         };
         if let Some(dispatch) = dispatch {
+            let active_turn_generation = dispatch.active_turn_generation();
             // Reuses final Stop and runtime arbitration, without another begin.
-            if let Err(error) = handoff_prepared_turn_dispatch(self, dispatch) {
+            // Its receipt records what the hand-off proved (prompt_delivery.rs).
+            let outcome = handoff_prepared_turn_dispatch(self, dispatch);
+            if let Err(error) = &outcome {
                 eprintln!("engram> session={session_id} resumed provider handoff failed: {error:?}");
             }
+            self.note_direct_hand_off_outcome(session_id, active_turn_generation, &outcome);
         }
     }
 

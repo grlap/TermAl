@@ -320,12 +320,16 @@ impl AppState {
                 .iter()
                 .filter(|queued| queued.pending_prompt.id == prompt_id),
         );
+        let removed_head = handing_off_head(record);
         record
             .queued_prompts
             .retain(|queued| queued.pending_prompt.id != prompt_id);
         if record.queued_prompts.len() == original_len {
             return Err(ApiError::not_found("queued prompt not found"));
         }
+        // A canceled head promoted for its hand-off was never sent: its
+        // receipt turns terminal in the cancel's own write.
+        settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
         if cancel_admission {
             record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
             record.engram.recovered_admission = false;
@@ -418,7 +422,10 @@ impl AppState {
     /// Only an empty paused queue is released directly, because there is
     /// nothing to promote. A head still waiting for its durability
     /// acknowledgement refuses the Resume with a conflict that says why, and
-    /// the pause stays. Idempotent on an unpaused session. Remote sessions
+    /// the pause stays. A durable receipted head is accepted as being
+    /// prepared: its hand-off record is saved first, and the head is sent
+    /// once it is, unless a Stop, pause or Cancel came since; the pause stays
+    /// until the turn starts. Idempotent on an unpaused session. Remote sessions
     /// forward to their owning server so the latch stays authoritative there.
     fn resume_session_queue(
         &self,
@@ -502,11 +509,18 @@ impl AppState {
                 })?;
                 return Ok(None);
             }
-            record
-                .queued_prompts
-                .front()
-                .map(|head| head.pending_prompt.id.clone())
+            // A receipted head: what this Resume accepts, exactly, for the
+            // write-ahead it begins after the release below (prompt_delivery.rs).
+            let receipted = receipted_resume_identity(record, owner.as_ref());
+            (
+                record
+                    .queued_prompts
+                    .front()
+                    .map(|head| head.pending_prompt.id.clone()),
+                receipted,
+            )
         };
+        let (checked_head, receipted) = checked_head;
         // A begin-preparation hold, where nothing was sent, is admitted afresh
         // rather than refused as interrupted (`engram_begin_preparation_retry.rs`).
         // The release moves the head to a new dispatch generation, so the
@@ -515,6 +529,20 @@ impl AppState {
         // exposes meanwhile is never admitted in the released head's place.
         let released = self.release_engram_begin_preparation_hold_for_resume(session_id, owner.as_ref())?;
         let owner = released.or(owner);
+        // A durable receipted head's hand-off record must be saved before it
+        // is sent: this Resume begins that write-ahead, after the release and
+        // only for exactly the head it accepted, and carries the attempt across
+        // the pause it crossed once saved, while nothing ends it; the pause
+        // stays until the turn starts (prompt_delivery.rs).
+        if let Some(receipted) = receipted {
+            match self.resume_receipted_head(session_id, owner.as_ref(), &receipted) {
+                ReceiptedResume::NotReceipted => {}
+                ReceiptedResume::Preparing => {
+                    return Ok(Some(TurnDispatchDeliveryOutcome::Scheduled));
+                }
+                ReceiptedResume::Refused(refusal) => return Err(ApiError::conflict(refusal)),
+            }
+        }
         let dispatch = self.drain_resumed_queue(session_id, owner.clone())?;
         let dispatch =
             self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
@@ -1106,7 +1134,11 @@ impl AppState {
                 // wins, and the abandon below records that same grant.
                 let retired_head_begin =
                     dropped_engram_intent_grant(record, record.queued_prompts.front());
+                // A head promoted for its hand-off and retired here was never
+                // sent: its receipt turns terminal in this same write.
+                let removed_head = handing_off_head(record);
                 record.queued_prompts.pop_front();
+                settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
                 record_dropped_engram_intent(record, retired_head_begin);
                 sync_pending_prompts(record);
                 self.commit_locked(&mut inner).map_err(|error| {
@@ -1140,6 +1172,9 @@ impl AppState {
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
         let suppress_automatic_resume = options.pause_automatic_resumes_on_success;
         let mut queued_followup_start_error = None;
+        // A successor the Stop's promotion refused as a receipted head whose
+        // hand-off has not begun: woken only after the Stop's commit.
+        let mut receipted_successor = None;
         let transition = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1195,10 +1230,15 @@ impl AppState {
                     .expect("session index should be valid");
                 let stopped_mailbox_notification = record.active_turn_mailbox_notification.take();
                 take_and_abandon_engram_pending_dispatch(record);
+                // The stopped runtime's turn, captured before it is retired.
+                let ending_turn = record.active_turn_generation;
                 record.clear_runtime();
                 record.clear_runtime_reset();
                 record.clear_runtime_stop();
-                record.deferred_stop_callbacks.clear();
+                // Unsent deferred hand-offs first, then whatever the stopped
+                // runtime never acknowledged, in this write (prompt_delivery.rs).
+                discard_deferred_stop_callbacks(record);
+                settle_retired_runtime_attempt(record, ending_turn);
                 if suppress_automatic_resume {
                     record.set_auto_dispatch_blocked(true);
                     // The operator's pause, marked where the latch is set.
@@ -1364,7 +1404,10 @@ impl AppState {
                             .expect("started queued turn should append one message");
                         created_message_indices.push(successor_message_index);
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        receipted_successor =
+                            receipted_head_awaiting_write_ahead(&inner.sessions[index]);
+                    }
                     Err(_) => {
                         inner.sessions[index] = post_stop_record
                             .as_ref()
@@ -1553,8 +1596,18 @@ impl AppState {
         if let Some(error) = queued_followup_start_error {
             return Err(self.finish_queued_followup_start_error(error));
         }
-        if let Some(started) = queued_turn_result? {
-            deliver_turn_dispatch(self, started.dispatch).into_public_result()?;
+        match queued_turn_result? {
+            Some(started) => {
+                deliver_turn_dispatch(self, started.dispatch).into_public_result()?;
+            }
+            // The Stop's commit succeeded and its deltas are published: the
+            // receipted successor its promotion refused is drained now, and
+            // that drain begins its write-ahead (prompt_delivery.rs).
+            None => {
+                if let Some(prompt_id) = receipted_successor {
+                    self.wake_receipted_head_after_commit(session_id, &prompt_id);
+                }
+            }
         }
 
         Ok(self.snapshot())

@@ -107,6 +107,8 @@ mod persist;
 mod persist_delta;
 mod persist_fence;
 mod queued_prompt_durability;
+mod prompt_delivery;
+mod prompt_delivery_codex_write;
 mod project_creation_races;
 mod project_digest;
 mod projects;
@@ -601,6 +603,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
                 service_tier: None,
                 resume_thread_id: None,
                 sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+                delivery_receipt: None,
             },
         }),
         pending_turn_start_request_id: Some("turn-start-1".to_owned()),
@@ -1305,6 +1308,7 @@ fn sample_remote_orchestrator_state(
                 message_count: 0,
                 markers: Vec::new(),
                 pending_prompts: Vec::new(),
+                prompt_deliveries: Vec::new(),
                 queue_paused: false,
                 source_tracking_recovery: false,
                 queue_projection_hash: None,

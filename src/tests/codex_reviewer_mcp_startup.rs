@@ -132,6 +132,7 @@ impl ReviewerFixture {
                 service_tier: None,
                 resume_thread_id: None,
                 sandbox_mode: CodexSandboxMode::ReadOnly,
+                delivery_receipt: None,
             },
         )
         .unwrap();

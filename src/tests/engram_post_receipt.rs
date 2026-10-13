@@ -1319,6 +1319,222 @@ async fn successful_public_stop_never_retires_a_replacement_for_its_orchestrator
     assert!(root_rx.try_recv().is_err());
 }
 
+/// Engram on: a successful Stop whose drain meets a pending receipted
+/// successor does not begin its write-ahead inside the Stop's transaction;
+/// the Stop publishes its own message once, and the drain it wakes after its
+/// commit begins the write-ahead, whose acknowledgement admits and hands the
+/// successor off exactly once, with no further input.
+#[test]
+fn an_engram_stop_wakes_its_receipted_successor_after_its_own_commit() {
+    use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
+    // The Stop evaluates its successor once; the woken drain evaluates the
+    // same intent again under the same idempotency key, then begins it.
+    let (mut state, session, receiver, transport) = root_fixture([
+        grant_reply("successor-grant"),
+        grant_reply("successor-grant"),
+        begin_reply("successor-grant"),
+        checkpoint_reply("successor-grant"),
+    ]);
+    // Hands the test the receipt's durability and write-ahead fences.
+    let writer = DeliveryWriter::attach(&mut state);
+    let prompt_id = {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let prompt = PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
+            attachments: Vec::new(),
+            id: inner.next_message_id(),
+            timestamp: stamp_now(),
+            text: "the receipted Engram successor".to_owned(),
+            expanded_text: None,
+            source: None,
+        };
+        let id = prompt.id.clone();
+        let record = inner.session_mut_by_index(index).unwrap();
+        record.engram.routing_token = Some("old-token".into());
+        // Exercise Stop's missing-runtime recovery of a running session; a
+        // busy session's durability acknowledgement dispatches nothing.
+        record.session.status = SessionStatus::Active;
+        queue_receipted_orchestrator_prompt_on_record(record, prompt, Vec::new());
+        state.commit_locked(&mut inner).unwrap();
+        id
+    };
+    assert!(state.request_queued_prompt_durability(&session, &prompt_id));
+    writer.take(HeldFence::Durability).finish(Ok(()));
+    let acknowledged = phase_sync::PollGuard::new();
+    loop {
+        let done = {
+            let inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index]
+                .queued_prompt_durability_holds
+                .get(&prompt_id)
+                .is_some_and(|hold| hold.acknowledged)
+        };
+        if done {
+            break;
+        }
+        acknowledged.wait("the successor's durability acknowledgement");
+    }
+    let mut delta_events = state.subscribe_delta_events();
+    state
+        .stop_session_with_options(
+            &session,
+            StopSessionOptions {
+                dispatch_queued_prompts_on_success: true,
+                pause_automatic_resumes_on_success: false,
+                orchestrator_stop_instance_id: None,
+            },
+        )
+        .unwrap();
+    // The last commit so far is the write-ahead's; its acknowledgement is
+    // still held, so nothing commits after it yet.
+    let write_ahead_revision = state.snapshot().revision;
+    let mut stop_revisions = Vec::new();
+    while let Ok(payload) = delta_events.try_recv() {
+        let event: DeltaEvent = serde_json::from_str(&payload).expect("delta should deserialize");
+        if let DeltaEvent::MessageCreated {
+            revision,
+            message: Message::Text { text, .. },
+            ..
+        } = event
+            && text == "Turn stopped by user."
+        {
+            stop_revisions.push(revision);
+        }
+    }
+    assert_eq!(stop_revisions.len(), 1, "the Stop's message is published once");
+    assert!(
+        stop_revisions[0] < write_ahead_revision,
+        "the Stop committed and published before the write-ahead began: {stop_revisions:?} vs {write_ahead_revision}"
+    );
+    let write_ahead = writer.take(HeldFence::WriteAhead);
+    assert!(receiver.try_recv().is_err(), "nothing before the acknowledgement");
+    write_ahead.finish(Ok(()));
+    match recv_within_guard(&receiver, "the woken successor's hand-off") {
+        Ok(CodexRuntimeCommand::Prompt { .. }) => {}
+        Ok(_) => panic!("the runtime got another command first"),
+        Err(error) => panic!(
+            "the successor was not handed off: {error:?}; Engram saw {:?}",
+            operations(&transport)
+        ),
+    }
+    let promoted = phase_sync::PollGuard::new();
+    loop {
+        let done = {
+            let inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].prompt_deliveries[&prompt_id].turn_generation.is_some()
+        };
+        if done {
+            break;
+        }
+        promoted.wait("the successor's promotion");
+    }
+    assert!(
+        !receiver.try_iter().any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. })),
+        "handed off once"
+    );
+    assert_eq!(
+        operations(&transport).iter().filter(|op| *op == "turn_begin").count(),
+        1,
+        "one admission begins: {:?}",
+        operations(&transport)
+    );
+}
+
+/// A Stop of a session whose receipted head was promoted for its admission and
+/// never handed off retires that head with its receipt rejected, in the
+/// Stop's own retirement write (prompt_delivery.rs), and a restart reads that
+/// terminal receipt back: none is left handing off for a prompt that provably
+/// never reached the runtime.
+#[tokio::test]
+async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably() {
+    let (state, session, root_rx, _) = root_fixture([
+        bind_reply("token"),
+        grant_reply("grant"),
+        begin_reply("grant"),
+        checkpoint_reply("grant"),
+    ]);
+    let dispatch = root_dispatch(&state, &session, false);
+    let generation = dispatch.engram_dispatch_generation().unwrap();
+    let turn_generation = dispatch.active_turn_generation();
+    assert!(matches!(
+        state.prepare_engram_turn_delivery_off_lock(&session, generation),
+        EngramTurnDeliveryPreparation::Ready
+    ));
+    // The admitted head as a receipted one: handing off under this turn, its
+    // write-ahead acknowledged, the prompt not yet sent.
+    let prompt_id = {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let record = &mut inner.sessions[index];
+        let head = record.queued_prompts[0].pending_prompt.id.clone();
+        record.prompt_deliveries.insert(
+            head.clone(),
+            PromptDelivery {
+                disposition: PromptDeliveryDisposition::HandingOff,
+                attempt: 1,
+                write_ahead: "admitted-write-ahead".to_owned(),
+                sequence: 1,
+                message_id: None,
+                turn_generation: Some(turn_generation),
+                attempt_key: None,
+                reason: None,
+                entry: None,
+                write_ahead_acknowledged: true,
+                resume: None,
+                runtime_write: PromptRuntimeWrite::Untracked,
+            },
+        );
+        head
+    };
+    let (runtime, _receiver) =
+        test_acp_runtime_handle(AcpAgent::OpenCode, "receipted-stop-retirement");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+    }
+    let mut events = state.subscribe_events();
+    state.request_stop_session(&session).unwrap();
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
+        loop {
+            {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                if !record.runtime_stop_in_progress
+                    && record.session.status != SessionStatus::Stopping
+                {
+                    break;
+                }
+            }
+            events.recv().await.unwrap();
+        }
+    })
+    .await
+    .expect("the Stop settles");
+    {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.queued_prompts.is_empty(), "the Stop retired the admitted head");
+        let delivery = &record.prompt_deliveries[&prompt_id];
+        assert_eq!(delivery.disposition, PromptDeliveryDisposition::Rejected);
+        assert_eq!(delivery.turn_generation, Some(turn_generation));
+        let reloaded = PersistedSessionRecord::from_record(record)
+            .into_record()
+            .expect("the row loads");
+        assert_eq!(
+            reloaded.prompt_deliveries[&prompt_id].disposition,
+            PromptDeliveryDisposition::Rejected,
+            "the terminal receipt survives a restart"
+        );
+    }
+    drop(dispatch);
+    assert!(root_rx.try_recv().is_err(), "never handed off");
+}
+
 #[test]
 fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
     for child in [false, true] {

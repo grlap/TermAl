@@ -413,6 +413,11 @@ struct PersistedSessionRecord {
     /// Read back, an entry's content is durable, so loading clears them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
+    /// Delivery receipts. Written so a write-ahead fence can prove a hand-off
+    /// record durable; loading settles a hand-off without acceptance as
+    /// ambiguous (`prompt_delivery.rs`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    prompt_deliveries: BTreeMap<String, PromptDelivery>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -556,6 +561,7 @@ impl PersistedSessionRecord {
             queued_prompts: record.queued_prompts.clone(),
             queued_peer_messages: record.queued_peer_messages.clone(),
             queued_prompt_durability_holds: record.queued_prompt_durability_holds.clone(),
+            prompt_deliveries: record.prompt_deliveries.clone(),
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
@@ -666,6 +672,7 @@ impl PersistedSessionRecord {
             queued_prompts: self.queued_prompts,
             queued_peer_messages: self.queued_peer_messages,
             queued_prompt_durability_holds,
+            prompt_deliveries: self.prompt_deliveries,
             message_start_index: self.message_start_index,
             message_positions: build_message_positions(&session.messages),
             remote_id: self.remote_id,
@@ -708,6 +715,7 @@ impl PersistedSessionRecord {
             runtime_stop_in_progress: false,
             runtime_stop_owner: None,
             runtime_stop_generation: 0,
+            auto_dispatch_pause_epoch: 0,
             engram_mcp_revocation_pending: false,
             deferred_stop_callbacks: Vec::new(),
             hidden: false,
@@ -722,6 +730,10 @@ impl PersistedSessionRecord {
         // is rebuilt from it so a loaded session never advertises a stale
         // paused/unpaused state from an older snapshot.
         record.session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        // A hand-off without acceptance is ambiguous after a restart, and its
+        // entry never runs again; this happens before any recovery below
+        // reads the queue head.
+        settle_prompt_deliveries_after_load(&mut record);
         // A background full gate carried when the host went down lost its
         // credit: the host could not watch its worktree meanwhile.
         for marker in &self.engram_carried_launches {

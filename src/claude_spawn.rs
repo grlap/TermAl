@@ -325,10 +325,25 @@ fn apply_claude_writer_command(
         ClaudeRuntimeCommand::HookResponse(response) => Some(response.write_record()),
         _ => None,
     };
+    let prompt_turn_generation = match &command {
+        ClaudeRuntimeCommand::Prompt(prompt) => Some(prompt.turn_generation),
+        _ => None,
+    };
     let result =
         write_claude_runtime_command(writer, &context.replay_prompt, &context.ownership, command);
     if let Some(hook_write) = hook_write {
         finish_claude_hook_write(context, hook_write, result.is_ok());
+    }
+    if let (Some(turn_generation), Err(err)) = (prompt_turn_generation, &result) {
+        // Part of the prompt may have reached Claude's stdin: whether the
+        // runtime received it cannot be known (prompt_delivery.rs).
+        context.state.note_prompt_delivery_outcome(
+            &context.session_id,
+            Some(turn_generation),
+            PromptDeliveryOutcome::Ambiguous(format!(
+                "writing the prompt to Claude's stdin failed: {err:#}"
+            )),
+        );
     }
     if let Err(err) = result {
         let _ = context.state.handle_runtime_exit_if_matches(

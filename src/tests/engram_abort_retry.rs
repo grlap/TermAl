@@ -639,6 +639,28 @@ fn a_retry_withheld_again_keeps_counting_attempts() {
     persister.stop(&state);
 }
 
+/// A due abort retry whose head is a receipted prompt the paused queue may
+/// send only on an explicit Resume parks: repeated due ticks begin and charge
+/// nothing, the retry keeps its lineage, and the session says it waits for
+/// Resume.
+#[test]
+fn a_due_abort_retry_parks_a_receipted_head_paused_without_resume() {
+    let (state, session, receiver, persister, transport) =
+        withheld_root_delivery(checkpoint_reply("abort-grant-1"), Vec::new());
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+    await_settlement_acknowledgement(&state, &session);
+    state.engram_abort_retry_tick(chrono::Utc::now());
+    let lineage = receipted_admission::retry_lineage(&state, &session);
+    let sent = transport.requests().len();
+    for _ in 0..3 {
+        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(120));
+    }
+    assert_eq!(transport.requests().len(), sent, "no admission is begun");
+    assert_eq!(prompts_received(&receiver), 0, "nothing is sent");
+    receipted_admission::assert_parked_for_resume(&state, &session, &id, &lineage);
+    persister.stop(&state);
+}
+
 /// Criterion 3: a known Defer whose card cannot be saved is settled, and its
 /// fresh admission waits for retry_after as well as the backoff.
 #[test]

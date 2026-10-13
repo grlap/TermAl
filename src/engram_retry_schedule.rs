@@ -438,6 +438,19 @@ impl AppState {
                             }
                             continue;
                         }
+                        // A receipted head the paused queue sends only on an
+                        // explicit Resume, or whose Resume's write-ahead is in
+                        // flight, parks its retry: nothing begun, charged or
+                        // rescheduled (prompt_delivery.rs).
+                        let (parked, preview_changed) =
+                            park_receipted_head_retry(&mut inner.sessions[index]);
+                        if parked {
+                            if preview_changed {
+                                inner.stamp_session_at_index(index);
+                                changed = true;
+                            }
+                            continue;
+                        }
                         // The attempt bypasses the paused queue only for the
                         // head it was due for, revalidated under the
                         // promotion lock; a Cancel, takeover or changed
@@ -621,14 +634,31 @@ impl AppState {
         }
         let retry_owner = owner.clone();
         // The attempt starts now: it counts against a begin-preparation
-        // lineage's attempts (a deferral by the cap never reaches here).
+        // lineage's attempts (a deferral by the cap never reaches here). The
+        // hand-off is checked again first, under this lock: a tick's snapshot
+        // taken before a newer Pause, or before a Resume's write-ahead began,
+        // parks here, charging and rescheduling nothing (prompt_delivery.rs).
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(&session_id)
                 && owner.matches(&inner.sessions[index])
-                && count_engram_begin_preparation_attempt(&mut inner.sessions[index])
             {
-                inner.stamp_session_at_index(index);
+                let (parked, preview_changed) =
+                    park_receipted_head_retry(&mut inner.sessions[index]);
+                if parked {
+                    if preview_changed {
+                        inner.stamp_session_at_index(index);
+                        if let Err(error) = self.commit_locked(&mut inner) {
+                            eprintln!(
+                                "engram> session={session_id} failed persisting a parked retry: {error:#}"
+                            );
+                        }
+                    }
+                    return;
+                }
+                if count_engram_begin_preparation_attempt(&mut inner.sessions[index]) {
+                    inner.stamp_session_at_index(index);
+                }
             }
         }
         let dispatch = match kind {

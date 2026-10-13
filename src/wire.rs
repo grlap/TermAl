@@ -697,6 +697,11 @@ struct Session {
     markers: Vec<ConversationMarker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_prompts: Vec<PendingPrompt>,
+    /// Delivery receipts of the session's receipted prompts, oldest first:
+    /// pending, handing-off, accepted, rejected or ambiguous
+    /// (`prompt_delivery.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    prompt_deliveries: Vec<PromptDeliveryView>,
     /// True while queued prompts are parked behind the explicit-resume latch:
     /// a user Stop (or a failed stop persistence) keeps user and mailbox
     /// prompts durable but refuses to auto-dispatch them until the user sends

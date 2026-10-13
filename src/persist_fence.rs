@@ -46,6 +46,14 @@ enum PersistFenceTarget {
         prompt_id: String,
         content: Value,
     },
+    /// A receipted prompt's write-ahead hand-off record, read back from the
+    /// durable session row: handing off under exactly this write-ahead nonce
+    /// (`prompt_delivery.rs`).
+    PromptDeliveryWriteAhead {
+        session_id: String,
+        prompt_id: String,
+        write_ahead: String,
+    },
 }
 
 impl PersistFenceTarget {
@@ -56,7 +64,8 @@ impl PersistFenceTarget {
             // Only read-back on the writer connection proves this content.
             Self::EngramCausalCard { .. } | Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
                 | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
-                | Self::EngramSourceRemoval { .. } | Self::QueuedPromptDurability { .. } => false,
+                | Self::EngramSourceRemoval { .. } | Self::QueuedPromptDurability { .. }
+                | Self::PromptDeliveryWriteAhead { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
                 .as_deref()
@@ -227,6 +236,25 @@ impl PersistFenceTarget {
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
                     == Some(content))
+            }
+            // The committed row must hold this exact hand-off record; a
+            // return to pending writes a fresh nonce that never matches.
+            Self::PromptDeliveryWriteAhead { session_id, prompt_id, write_ahead } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(actual.prompt_deliveries.get(prompt_id).is_some_and(|delivery| {
+                    delivery.disposition == PromptDeliveryDisposition::HandingOff
+                        && delivery.write_ahead == *write_ahead
+                }))
             }
         }
     }

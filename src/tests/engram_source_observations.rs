@@ -1755,3 +1755,64 @@ mod removal;
 
 #[path = "engram_source_observation_delete_races.rs"]
 mod delete_races;
+
+/// A receipted head parked behind its source observation, whose parked
+/// dispatch is then retired and never delivered: the retirement's own write
+/// returns its receipt to pending (prompt_delivery.rs), so a later Resume
+/// begins a fresh hand-off instead of being refused as if another dispatch
+/// still held it.
+#[test]
+fn a_retired_parked_continuation_returns_its_receipted_head_to_pending() {
+    let claimed = held_observation("source-observation-receipted-retirement");
+    let prompt_id = claimed.record(|record| {
+        let head = record
+            .queued_prompts
+            .front()
+            .expect("the parked head stays queued")
+            .pending_prompt
+            .id
+            .clone();
+        // The parked head as a receipted one: handing off under the parked
+        // dispatch's turn, its write-ahead acknowledged.
+        let turn_generation = record.active_turn_generation;
+        record.prompt_deliveries.insert(
+            head.clone(),
+            PromptDelivery {
+                disposition: PromptDeliveryDisposition::HandingOff,
+                attempt: 1,
+                write_ahead: "parked-write-ahead".to_owned(),
+                sequence: 1,
+                message_id: None,
+                turn_generation: Some(turn_generation),
+                attempt_key: None,
+                reason: None,
+                entry: None,
+                write_ahead_acknowledged: true,
+                resume: None,
+                runtime_write: PromptRuntimeWrite::Untracked,
+            },
+        );
+        head
+    });
+    // The observation runs out of attempts: its parked continuation is
+    // retired, never delivered.
+    claimed.record(|record| {
+        record
+            .engram
+            .source_observation_gate
+            .as_mut()
+            .expect("the observation holds the head")
+            .attempts = 8;
+    });
+    claimed.state.source_observation_retry_tick(chrono::Utc::now());
+    claimed.record(|record| {
+        assert!(record.engram.source_observation_continuation.is_none(), "retired");
+        let delivery = &record.prompt_deliveries[&prompt_id];
+        assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
+        assert_eq!(delivery.turn_generation, None);
+        assert!(delivery.resume.is_none());
+        assert!(record.orchestrator_auto_dispatch_blocked, "the head waits for a Resume");
+        assert!(receipted_resume_identity(record, None).is_some(), "Resume can begin its hand-off");
+    });
+    assert!(claimed.runtime_rx.try_recv().is_err(), "never delivered");
+}

@@ -34,6 +34,9 @@ mod acknowledged_mailbox_wake;
 #[path = "engram_delegation_held.rs"]
 mod delegation_held;
 
+#[path = "engram_receipted_admission.rs"]
+mod receipted_admission;
+
 #[test]
 fn root_known_defer_resume_uses_new_evaluation_identity() {
     let (state, session, receiver, transport) = root_fixture([

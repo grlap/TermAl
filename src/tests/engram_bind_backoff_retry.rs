@@ -1242,6 +1242,29 @@ fn a_transient_first_bind_failure_retries_after_backoff_without_resume() {
     );
 }
 
+/// A due bind retry whose head is a receipted prompt the paused queue may
+/// send only on an explicit Resume parks: repeated due ticks begin and charge
+/// nothing, the retry keeps its lineage, and the session says it waits for
+/// Resume.
+#[test]
+fn a_due_bind_retry_parks_a_receipted_head_paused_without_resume() {
+    let (state, session, receiver, transport) = root_fixture([bind_failure()]);
+    deliver_turn_dispatch(&state, root_dispatch(&state, &session, false))
+        .expect("the original prompt is retained");
+    let id = receipted_admission::receipt_the_parked_head(&state, &session);
+    elapse_bind_backoff(&state, &session);
+    abort_retry::await_settlement_acknowledgement(&state, &session);
+    state.engram_abort_retry_tick(chrono::Utc::now());
+    let lineage = receipted_admission::retry_lineage(&state, &session);
+    let sent = transport.requests().len();
+    for _ in 0..3 {
+        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(120));
+    }
+    assert_eq!(transport.requests().len(), sent, "no bind is replayed");
+    assert!(receiver.try_recv().is_err(), "nothing is sent");
+    receipted_admission::assert_parked_for_resume(&state, &session, &id, &lineage);
+}
+
 #[test]
 fn bind_retry_before_wire_preparation_keeps_the_explicit_phase() {
     let (state, session, receiver, _) = root_fixture([]);

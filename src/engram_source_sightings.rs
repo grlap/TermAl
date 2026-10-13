@@ -408,7 +408,19 @@ fn retire_source_observation_locked(inner: &mut StateInner, index: usize) -> boo
         continuation.payload.0.lock().expect("source observation continuation mutex poisoned")
             .as_ref().is_some_and(|dispatch| dispatch.engram_dispatch_generation() == Some(gate.dispatch_generation)
                 && dispatch.active_turn_generation() == gate.active_turn_generation));
-    if old_continuation { record.engram.source_observation_continuation = None; }
+    if old_continuation {
+        record.engram.source_observation_continuation = None;
+        // The parked dispatch is dropped, never delivered: a receipted head it
+        // promoted returns to pending in this same write (prompt_delivery.rs).
+        apply_prompt_delivery_outcome(
+            record,
+            gate.active_turn_generation,
+            PromptDeliveryOutcome::Rejected(
+                "the dispatch parked for its source observation was retired before the hand-off; the prompt was not sent"
+                    .to_owned(),
+            ),
+        );
+    }
     if owned || record.engram.source_observation_delivery_grant.as_ref() == Some(&gate.grant_id) {
         record.engram.source_opening_disposition = EngramSourceOpeningDisposition::Pending;
         record.engram.source_observation_delivery_grant = None;

@@ -79,6 +79,7 @@ pub(super) fn test_pending_codex_thread_setup(request_id: &str) -> PendingCodexT
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     }
 }
@@ -175,6 +176,7 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
         service_tier: Some("priority".to_owned()),
         resume_thread_id: None,
         sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        delivery_receipt: None,
     };
 
     // No thread yet: fires `thread/start` and parks the command on that setup.
@@ -338,6 +340,7 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         service_tier: None,
         resume_thread_id: resume.map(str::to_owned),
         sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        delivery_receipt: None,
     };
 
     // A `thread/resume` is in flight, with a prompt parked on it.
@@ -539,6 +542,7 @@ fn prompt_resuming_the_thread_its_own_setup_just_started_parks_instead_of_supers
         service_tier: None,
         resume_thread_id: resume.map(str::to_owned),
         sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        delivery_receipt: None,
     };
 
     // A fresh `thread/start` (no resume target) claims the setup.
@@ -667,6 +671,7 @@ fn failed_thread_setup_write_releases_the_setup_slot() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     );
     assert!(
@@ -912,6 +917,7 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .expect("Standard turn should start");
@@ -1028,6 +1034,7 @@ pub(super) fn shared_codex_setup_request_for_tracker_test(
             } else {
                 CodexSandboxMode::WorkspaceWrite
             },
+            delivery_receipt: None,
         },
     )
     .expect("seeded MCP config must not prevent Codex thread setup");
@@ -1459,6 +1466,7 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .unwrap();

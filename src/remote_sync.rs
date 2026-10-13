@@ -659,6 +659,7 @@ fn push_remote_proxy_session_record(
         queued_prompts: VecDeque::new(),
         queued_peer_messages: HashMap::new(),
         queued_prompt_durability_holds: BTreeMap::new(),
+        prompt_deliveries: BTreeMap::new(),
         message_start_index: if session.messages_loaded {
             0
         } else {
@@ -679,6 +680,7 @@ fn push_remote_proxy_session_record(
         runtime_stop_in_progress: false,
         runtime_stop_owner: None,
         runtime_stop_generation: 0,
+        auto_dispatch_pause_epoch: 0,
         engram_mcp_revocation_pending: false,
         deferred_stop_callbacks: Vec::new(),
         engram: EngramSessionState::default(),
@@ -928,6 +930,7 @@ fn localize_remote_session_summary(
             })
             .collect(),
         pending_prompts: Vec::new(),
+        prompt_deliveries: Vec::new(),
         queue_paused: remote_session.queue_paused,
         source_tracking_recovery: remote_session.source_tracking_recovery,
         queue_projection_hash: remote_session.queue_projection_hash.clone(),

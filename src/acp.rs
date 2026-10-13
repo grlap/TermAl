@@ -587,6 +587,21 @@ fn handle_acp_prompt_command(
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
+    // ACP's replies do not name their turn: the turn this prompt belongs to
+    // is read now, as the runtime takes it up, and every delivery outcome
+    // below names it. A Stop waits for this prompt to settle, so no later
+    // turn starts before (prompt_delivery.rs).
+    let delivery_turn = state.prompt_delivery_turn_of_runtime(session_id, runtime_token);
+    let reject_unsent = |err: &anyhow::Error| {
+        state.note_prompt_delivery_outcome(
+            session_id,
+            delivery_turn,
+            PromptDeliveryOutcome::Rejected(format!(
+                "the {} ACP runtime failed before the prompt was written: {err:#}",
+                agent.label()
+            )),
+        );
+    };
     let external_session_id = match ensure_acp_session_ready_for_runtime(
         writer,
         pending_requests,
@@ -601,6 +616,7 @@ fn handle_acp_prompt_command(
         Ok(external_session_id) => external_session_id,
         Err(err) => {
             set_acp_turn_active(turn_lifecycle, false);
+            reject_unsent(&err);
             return Err(err);
         }
     };
@@ -629,6 +645,7 @@ fn handle_acp_prompt_command(
             )
         }) {
             set_acp_turn_active(turn_lifecycle, false);
+            reject_unsent(&err);
             return Err(err);
         }
         // The effective mode is acknowledged for this prompt: from here until
@@ -672,6 +689,16 @@ fn handle_acp_prompt_command(
         Ok(pending) => pending,
         Err(err) => {
             set_acp_turn_active(turn_lifecycle, false);
+            // Part of the request may have reached the runtime: a receipted
+            // prompt's delivery is unknown (prompt_delivery.rs).
+            state.note_prompt_delivery_outcome(
+                session_id,
+                delivery_turn,
+                PromptDeliveryOutcome::Ambiguous(format!(
+                    "writing session/prompt to the {} ACP runtime failed: {err:#}",
+                    agent.label()
+                )),
+            );
             return Err(err);
         }
     };
@@ -700,6 +727,22 @@ fn handle_acp_prompt_command(
         if agent == AcpAgent::Kimi {
             set_kimi_mode_gate_armed(&wait_runtime_state, false);
         }
+        // ACP acknowledges a prompt only with its end-of-turn response: a
+        // receipted prompt stays handing off until then, and a failed reply
+        // leaves its delivery unknown. The outcome names the turn read when
+        // the prompt was taken up, never the session's turn now
+        // (prompt_delivery.rs).
+        wait_state.note_prompt_delivery_outcome(
+            &wait_session_id,
+            delivery_turn,
+            match &result {
+                Ok(_) => PromptDeliveryOutcome::Accepted,
+                Err(error) => PromptDeliveryOutcome::Ambiguous(format!(
+                    "the {} ACP runtime's session/prompt reply failed: {error:#}",
+                    agent.label()
+                )),
+            },
+        );
 
         match result {
             Ok(_) => {

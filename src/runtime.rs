@@ -117,6 +117,10 @@ struct CodexPromptCommand {
     service_tier: Option<String>,
     resume_thread_id: Option<String>,
     sandbox_mode: CodexSandboxMode,
+    /// The receipted attempt this command carries, set at its promotion;
+    /// `None` only for a prompt that was never receipted
+    /// (prompt_delivery.rs).
+    delivery_receipt: Option<CodexPromptReceipt>,
 }
 
 /// Finds Fast in the active model's advertised service tiers.

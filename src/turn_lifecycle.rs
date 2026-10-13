@@ -376,7 +376,15 @@ impl AppState {
                         .expect("deferred handoff mutex poisoned")
                         .take();
                     if let Some(prepared) = prepared {
-                        handoff_prepared_turn_dispatch(self, prepared)
+                        // Its receipt records what the replayed hand-off
+                        // proved (prompt_delivery.rs).
+                        let outcome = handoff_prepared_turn_dispatch(self, prepared);
+                        self.note_direct_hand_off_outcome(
+                            session_id,
+                            active_turn_generation,
+                            &outcome,
+                        );
+                        outcome
                             .map(|_| ())
                             .map_err(|error| anyhow!(error.message))
                     } else {
@@ -450,7 +458,7 @@ impl AppState {
                 .expect("session index should be valid");
             record.engram_mcp_runtime_quarantined = false;
             record.clear_runtime_stop();
-            record.deferred_stop_callbacks.clear();
+            discard_deferred_stop_callbacks(record);
         }
         self.commit_locked(&mut inner).map_err(|error| {
             self.publish_state_locked(&inner);
@@ -594,6 +602,8 @@ impl AppState {
                     .expect("session index should be valid");
                 let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
                 take_and_abandon_engram_pending_dispatch(record);
+                // The stopped runtime's turn, captured before it is retired.
+                let ending_turn = record.active_turn_generation;
                 if retain_runtime_for_retry {
                     // Termination failed and process exit was not confirmed.
                     // Keep the only application-owned handle quarantined so a
@@ -607,7 +617,13 @@ impl AppState {
                     record.clear_runtime_reset();
                 }
                 record.clear_runtime_stop();
-                record.deferred_stop_callbacks.clear();
+                // Unsent deferred hand-offs first; then, once the runtime is
+                // retired, whatever it never acknowledged (prompt_delivery.rs).
+                // A runtime kept for a teardown retry keeps its own route.
+                discard_deferred_stop_callbacks(record);
+                if !retain_runtime_for_retry {
+                    settle_retired_runtime_attempt(record, ending_turn);
+                }
                 let auto_dispatch_blocked = record.orchestrator_auto_dispatch_blocked
                     || shutdown_error.is_some()
                     || suppress_automatic_resume;
@@ -907,6 +923,18 @@ impl AppState {
                     });
                 return Ok(false);
             }
+            // A turn that failed before its runtime acknowledged a receipted
+            // prompt leaves that delivery unknown. Settled here, under the
+            // lock and past a Stop's deferral, so a hand-off a Stop still
+            // carries is that Stop's to settle as unsent (prompt_delivery.rs).
+            let failed_turn = record.active_turn_generation;
+            apply_prompt_delivery_outcome(
+                record,
+                failed_turn,
+                PromptDeliveryOutcome::Ambiguous(format!(
+                    "the turn failed before the runtime acknowledged the prompt: {cleaned}"
+                )),
+            );
             take_and_abandon_engram_pending_dispatch(record);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
@@ -1515,10 +1543,19 @@ impl AppState {
                     record.clear_runtime_stop();
                     std::mem::take(&mut record.deferred_stop_callbacks)
                 } else {
+                    // The failed runtime's turn, captured before it is retired.
+                    let ending_turn = record.active_turn_generation;
                     record.clear_runtime();
                     record.clear_runtime_reset();
                     record.clear_runtime_stop();
-                    record.deferred_stop_callbacks.clear();
+                    // Unsent deferred hand-offs first, then whatever the
+                    // retired runtime never acknowledged (prompt_delivery.rs).
+                    // A rejected delivery proved its own prompt unsent, and
+                    // its caller records that.
+                    discard_deferred_stop_callbacks(record);
+                    if !matches!(mode, AtomicTurnFailureMode::RejectedDelivery { .. }) {
+                        settle_retired_runtime_attempt(record, ending_turn);
+                    }
                     Vec::new()
                 };
                 let pending_interaction_indices =
@@ -1600,6 +1637,24 @@ impl AppState {
 
         if let Some(token) = mode.retained_runtime_token() {
             self.replay_deferred_runtime_stop_callbacks(session_id, token, deferred_stop_callbacks);
+            // The runtime is kept, but its failed turn ends here: once the
+            // replay has settled any carried hand-off, an attempt of that
+            // turn still handing off, which no path proved unsent before
+            // this, is settled conservatively rather than left in flight
+            // (prompt_delivery.rs).
+            if let AtomicTurnFailureMode::MatchingRuntime {
+                active_turn_generation,
+                ..
+            } = mode
+            {
+                self.note_prompt_delivery_outcome(
+                    session_id,
+                    Some(active_turn_generation),
+                    PromptDeliveryOutcome::Ambiguous(format!(
+                        "the turn failed before the runtime acknowledged the prompt: {cleaned}"
+                    )),
+                );
+            }
         }
         if let Some(notification) = failed_mailbox_notification.as_ref() {
             if let Err(error) = self.requeue_rejected_mailbox_notification(notification) {
@@ -1938,6 +1993,15 @@ impl AppState {
         token: &RuntimeToken,
         expected_active_turn_generation: Option<u64>,
     ) -> Result<()> {
+        // The runtime finished the turn: it received the prompt, so a
+        // receipted delivery not yet acknowledged is accepted
+        // (prompt_delivery.rs).
+        self.settle_prompt_delivery_of_runtime_turn(
+            session_id,
+            token,
+            expected_active_turn_generation,
+            PromptDeliveryOutcome::Accepted,
+        );
         #[cfg(windows)]
         {
             let joining_owner = {
@@ -2308,7 +2372,21 @@ impl AppState {
                     retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some(),
                 );
                 record.clear_runtime_stop();
-                record.deferred_stop_callbacks.clear();
+                // Unsent deferred hand-offs first; then the runtime went away
+                // before it acknowledged a receipted prompt, so whether it
+                // received it is unknown (prompt_delivery.rs).
+                discard_deferred_stop_callbacks(record);
+                let exited_turn = record.active_turn_generation;
+                apply_prompt_delivery_outcome(
+                    record,
+                    exited_turn,
+                    PromptDeliveryOutcome::Ambiguous(format!(
+                        "the runtime exited before it acknowledged the prompt{}",
+                        error_message
+                            .map(|message| format!(": {}", message.trim()))
+                            .unwrap_or_default()
+                    )),
+                );
                 if quarantined_exit && !retain_cleanup_owner {
                     // This is the delayed success condition for a runtime that
                     // earlier failed revocation teardown and now confirms

@@ -679,6 +679,16 @@ fn handle_shared_codex_app_server_notification(
                 // reconcile without losing the sole request identity.
                 *completed_turn_id = None;
                 *turn_started = true;
+                // The sole armed turn started: Codex took up the prompt, so a
+                // receipted delivery is accepted even before the `turn/start`
+                // response, which a notification can overtake
+                // (prompt_delivery.rs).
+                state.settle_prompt_delivery_of_runtime_turn(
+                    session_id,
+                    runtime_token,
+                    None,
+                    PromptDeliveryOutcome::Accepted,
+                );
                 let response_already_arrived = turn_started_watchdog_cancel_tx.is_some();
                 *turn_started_before_response = !response_already_arrived;
                 if response_already_arrived {
@@ -736,6 +746,14 @@ fn handle_shared_codex_app_server_notification(
             *completed_turn_id = None;
             *turn_started = true;
             *turn_started_before_response = false;
+            // Codex took up the prompt: a receipted delivery is accepted,
+            // whether or not the `turn/start` response came first.
+            state.settle_prompt_delivery_of_runtime_turn(
+                session_id,
+                runtime_token,
+                None,
+                PromptDeliveryOutcome::Accepted,
+            );
             cancel_shared_codex_turn_started_watchdog(
                 pending_turn_start_request_id,
                 turn_started_watchdog_cancel_tx,
@@ -798,6 +816,16 @@ fn handle_shared_codex_app_server_notification(
                     );
                     clear_codex_turn_state(turn_state);
                     recorder.reset_turn_state()?;
+                    // This terminal event names the session's own turn, so
+                    // Codex received the prompt: a receipted delivery is
+                    // accepted before the failure settles the turn, which
+                    // would otherwise leave it unknown (prompt_delivery.rs).
+                    state.settle_prompt_delivery_of_runtime_turn(
+                        session_id,
+                        runtime_token,
+                        None,
+                        PromptDeliveryOutcome::Accepted,
+                    );
                     if defer_codex_reviewer_mcp_finish(state, sessions, session_id, runtime_token,
                         session_thread_id.as_deref(), reviewer_mcp_gate, Some(summarize_error(error))) {
                         return Ok(());

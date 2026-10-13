@@ -2578,6 +2578,7 @@ fn remote_session_create_forwards_configured_default_model() {
         message_count: 0,
         markers: Vec::new(),
         pending_prompts: Vec::new(),
+        prompt_deliveries: Vec::new(),
         queue_paused: false,
         source_tracking_recovery: false,
         queue_projection_hash: None,

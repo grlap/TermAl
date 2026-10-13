@@ -224,6 +224,16 @@ fn apply_claude_frame_plan(
         &context.ownership,
         &plan.ownership,
     );
+    // A command lifecycle `queued` or `started` naming a prompt's command
+    // uuid proves Claude received that prompt, however the turn's
+    // attribution resolves (prompt_delivery.rs).
+    if let Some(command_uuid) = claude_lifecycle_receipt_uuid(message) {
+        context.state.accept_prompt_delivery_by_attempt_key(
+            &context.session_id,
+            &context.token,
+            command_uuid,
+        );
+    }
     // A frame that opens a prompt's attempt prepares the root parser for it
     // first, whatever the frame is (a lifecycle `started`, turn output, an
     // echo, a result or a control request): reset once, an inherited barrier

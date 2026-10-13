@@ -659,11 +659,30 @@ impl AppState {
                 self.commit_locked(&mut inner)?;
                 return Err(anyhow!("dedicated reset configuration or admission changed; callbacks retained for exact retry"));
             }
+            // The reset runtime's turn, captured before it is retired.
+            let ending_turn = record.active_turn_generation;
             record.clear_runtime();
             record.clear_runtime_reset();
             clear_all_pending_requests(record);
             self.commit_locked(&mut inner)?;
-            inner.sessions[index].deferred_stop_callbacks.clear();
+            // Only after the reset is durable are its deferred callbacks
+            // discarded (unsent hand-offs first), and whatever the reset
+            // runtime never acknowledged settled, under the same lock and in
+            // their own commit (prompt_delivery.rs).
+            // Through the stamping accessor, so this commit rewrites the row.
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            let discarded = discard_deferred_stop_callbacks(record);
+            if (settle_retired_runtime_attempt(record, ending_turn) || discarded)
+                && let Err(error) = self.commit_locked(&mut inner)
+            {
+                // The reset itself is durable; only the receipts' settlement
+                // is not, and a restart settles them conservatively.
+                eprintln!(
+                    "prompt delivery> failed to persist the receipts settled by the reset of `{session_id}`: {error:#}"
+                );
+            }
             Ok(())
         }
     }

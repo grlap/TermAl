@@ -363,7 +363,25 @@ impl AppState {
 
         // Every nongated entry point must respect durable authorization, not
         // only the off-lock Resume wrapper. Settings reset is not non-delivery.
+        // Checked before the receipt gate, so a refused head consumes no
+        // Resume.
         if pending_engram.is_none() && queued.is_engram_retained() {
+            return Ok(None);
+        }
+
+        // A receipted head is promoted only once its write-ahead hand-off
+        // record is durable, and the queue waits for it, as for a held head.
+        // This is the promotion's own gate: past a pause it consumes the
+        // explicit Resume that carries the attempt, in this critical section,
+        // and it begins no write-ahead inside its caller's transaction; the
+        // ordinary drain does (prompt_delivery.rs).
+        if !self.prompt_delivery_gate_locked(inner, index, &queued.pending_prompt.id, true) {
+            abandon_engram_pending_dispatch(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                pending_engram,
+            );
             return Ok(None);
         }
 
@@ -407,6 +425,12 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
+        mark_prompt_delivery_promoted(
+            record,
+            &queued,
+            &mut started.dispatch,
+            &started.message_delta.message_id,
+        );
         // Authorization intent survives until the provider handoff is known.
         if !retain_for_admission {
             record.queued_prompts.pop_front();
@@ -728,6 +752,8 @@ impl AppState {
                         service_tier: None,
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
+                        // A receipted promotion sets it (prompt_delivery.rs).
+                        delivery_receipt: None,
                     },
                     engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),
@@ -1037,6 +1063,17 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        // A receipted prompt comes back only under a new prompt id held for a
+        // new durability acknowledgement (prompt_delivery.rs).
+        if inner.sessions[index]
+            .prompt_deliveries
+            .get(&queued.pending_prompt.id)
+            .is_some_and(|delivery| delivery.disposition == PromptDeliveryDisposition::Rejected)
+        {
+            drop(inner);
+            self.requeue_rejected_prompt_delivery_at(session_id, &queued.pending_prompt.id, true)?;
+            return Ok(());
+        }
         queued.pending_prompt.id = inner.next_message_id();
         queued.pending_prompt.timestamp = stamp_now();
         let record = inner
@@ -1332,6 +1369,10 @@ impl AppState {
                     let wake = Arc::new(std::sync::atomic::AtomicBool::new(false));
                     let owner = EngramQueuedAdmissionOwner::capture(record);
                     record.engram.admission_in_progress = Some(wake.clone());
+                    // The head this admission evaluates, so a receipted
+                    // attempt is left only to the admission of its own prompt.
+                    record.engram.admission_prompt_id =
+                        owner.as_ref().map(|owner| owner.prompt_id.clone());
                     Some(EngramAdmissionGuard {
                         state: self,
                         session_id,
@@ -1379,10 +1420,22 @@ impl AppState {
             .cloned()
             .ok_or_else(|| anyhow!("queued prompt disappeared before dispatch"))?;
         let snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
-        let started = self
+        let receipted_head = inner.sessions[index]
+            .prompt_deliveries
+            .contains_key(&queued.pending_prompt.id);
+        let Some(started) = self
             .start_next_queued_turn_locked(inner, index, true, None)
             .context("failed to start queued turn")?
-            .ok_or_else(|| anyhow!("queued prompt disappeared before dispatch"))?;
+        else {
+            // A receipted head waits for its write-ahead hand-off record, and
+            // the queue with it: the caller wakes the ordinary drain once the
+            // lock is released, which begins that record, and its
+            // acknowledgement dispatches them (prompt_delivery.rs).
+            if receipted_head {
+                return Ok(None);
+            }
+            return Err(anyhow!("queued prompt disappeared before dispatch"));
+        };
         match self.commit_followup_prompt_locked(inner, followup, prompt_id, false) {
             Ok(revision) => Ok(Some((revision, started))),
             Err(error) => {
@@ -1560,7 +1613,20 @@ impl AppState {
                 let Some(queued) = record.queued_prompts.front().cloned() else {
                     return Ok(None);
                 };
-                let promotion_snapshot = record.capture_queue_promotion_snapshot();
+                // As in the Engram branch below, this drain, not the
+                // promotion, begins a receipted head's write-ahead or awaits
+                // the one in flight; a held head writes no hand-off record.
+                if !queued_prompt_held_for_durability(record, &queued)
+                    && !self.prompt_delivery_gate_locked(
+                        &mut inner,
+                        index,
+                        &queued.pending_prompt.id,
+                        false,
+                    )
+                {
+                    return Ok(None);
+                }
+                let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
                 let Some(started) = self.start_next_queued_turn_locked(
                     &mut inner,
                     index,
@@ -1728,11 +1794,35 @@ impl AppState {
                 if queued_prompt_held_for_durability(record, &queued) {
                     return Ok(None);
                 }
+                // Nor does a receipted head before its write-ahead hand-off
+                // record is durable; the gate starts or awaits that record,
+                // and only when a turn could start now (the busy check below
+                // runs too late for that).
+                if record.prompt_deliveries.contains_key(&queued.pending_prompt.id)
+                    && matches!(
+                        record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                    )
+                {
+                    return Ok(None);
+                }
                 if engram_queue_head_refused_as_interrupted(record)
                     && !record.engram.recovered_admission
                 {
                     return Ok(None);
                 }
+                // Last of the head checks, so a head refused above writes no
+                // hand-off record. Only checked here: the promotion's own gate,
+                // after the evaluation, consumes a Resume it relies on.
+                if !self.prompt_delivery_gate_locked(
+                    &mut inner,
+                    index,
+                    &queued.pending_prompt.id,
+                    false,
+                ) {
+                    return Ok(None);
+                }
+                let record = &inner.sessions[index];
                 (
                     queued,
                     record.engram.dispatch_generation,
@@ -2236,7 +2326,11 @@ impl AppState {
                                 &message_id,
                             ) {
                             Ok(Some(started)) => started,
-                            Ok(None) => return Ok(DispatchTurnResult::Queued),
+                            Ok(None) => {
+                                return Ok(self.queued_after_direct_enqueue(
+                                    inner, index, session_id,
+                                ));
+                            }
                             Err(error) => {
                                 drop(inner);
                                 return Err(self.finish_queued_followup_start_error(
@@ -2319,7 +2413,9 @@ impl AppState {
                     &message_id,
                 ) {
                     Ok(Some(started)) => started,
-                    Ok(None) => return Ok(DispatchTurnResult::Queued),
+                    Ok(None) => {
+                        return Ok(self.queued_after_direct_enqueue(inner, index, session_id));
+                    }
                     Err(error) => {
                         drop(inner);
                         return Err(self.finish_queued_followup_start_error(error));
@@ -2400,7 +2496,9 @@ impl AppState {
                     &message_id,
                 ) {
                     Ok(Some(started)) => started,
-                    Ok(None) => return Ok(DispatchTurnResult::Queued),
+                    Ok(None) => {
+                        return Ok(self.queued_after_direct_enqueue(inner, index, session_id));
+                    }
                     Err(error) => {
                         drop(inner);
                         return Err(self.finish_queued_followup_start_error(error));

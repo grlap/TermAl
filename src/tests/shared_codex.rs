@@ -100,6 +100,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .unwrap();
@@ -355,6 +356,7 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
             service_tier: Some("priority".to_owned()),
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .unwrap();
@@ -439,6 +441,7 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .unwrap();
@@ -566,6 +569,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .unwrap();
@@ -717,6 +721,7 @@ fn shared_codex_stale_start_turn_handoff_skips_runtime_config_persistence() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::DangerFullAccess,
+            delivery_receipt: None,
         },
     )
     .unwrap();
@@ -804,6 +809,7 @@ fn stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone() {
                 service_tier: None,
                 resume_thread_id: None,
                 sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+                delivery_receipt: None,
             },
         });
     }
@@ -831,6 +837,7 @@ fn stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .expect("a stale hand-off must be abandoned quietly, not fail the shared writer thread");
@@ -1014,6 +1021,7 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .unwrap();
@@ -1664,6 +1672,7 @@ fn assert_prompt_writer_fixture_cleanup(panic_phase: Option<&'static str>) {
                     service_tier: None,
                     resume_thread_id: None,
                     sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+                    delivery_receipt: None,
                 },
             }))
             .unwrap();
@@ -2197,6 +2206,7 @@ fn shared_codex_turn_started_watchdog_is_armed_by_the_real_turn_start_waiter() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .expect("turn/start should be written");
@@ -2307,6 +2317,7 @@ fn shared_codex_turn_started_event_cancels_the_real_waiter_watchdog() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .expect("turn/start should be written");
@@ -2432,6 +2443,7 @@ fn idless_turn_started_before_response_reconciles_without_arming_watchdog() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .expect("turn/start should be written");
@@ -2582,6 +2594,7 @@ fn idless_turn_completed_before_response_finishes_the_armed_turn() {
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     )
     .expect("turn/start should be written");
@@ -4216,6 +4229,7 @@ impl EngramBootstrapFixture {
                 service_tier: None,
                 resume_thread_id: None,
                 sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+                delivery_receipt: None,
             },
         )
         .unwrap();
@@ -4579,6 +4593,7 @@ fn engram_bootstrap_first_config_write_failure_releases_slot_and_allows_retry() 
             service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            delivery_receipt: None,
         },
     );
     assert!(

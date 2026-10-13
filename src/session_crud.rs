@@ -2987,6 +2987,9 @@ impl AppState {
                         dispatch_generation,
                         workdir_worktree: record.engram.workdir_worktree.take(),
                         begin_preparation_lineage,
+                        // The admission that owns a receipted attempt still
+                        // settles it when its guard is released.
+                        admission_attempt: record.engram.admission_attempt.take(),
                         ..EngramSessionState::default()
                     };
                     for line in carried_lines {
@@ -4768,6 +4771,9 @@ impl AppState {
                         source_observation_preparations: record.engram.source_observation_preparations,
                         dispatch_generation,
                         workdir_worktree: record.engram.workdir_worktree.take(),
+                        // The admission that owns a receipted attempt still
+                        // settles it when its guard is released.
+                        admission_attempt: record.engram.admission_attempt.take(),
                         ..EngramSessionState::default()
                     };
                 }

@@ -202,6 +202,7 @@ fn codex_reviewer_mcp_initial_request_is_removed_on_every_early_worker_exit() {
                 model: "gpt-5.4".to_owned(), prompt: "Review local source.".to_owned(),
                 reasoning_effort: CodexReasoningEffort::Medium, service_tier: None,
                 resume_thread_id: None, sandbox_mode: CodexSandboxMode::ReadOnly,
+                delivery_receipt: None,
             }, None)), None,
         );
         // Join the actual worker, awaiting its finish instead of a polling
