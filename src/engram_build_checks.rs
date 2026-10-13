@@ -87,7 +87,7 @@ enum EngramBuildRejection {
     Path,
     Argv,
     Terminal,
-    Interval,
+    Interval(&'static str),
     Input,
     Association,
     Compound,
@@ -105,7 +105,7 @@ impl EngramBuildRejection {
             Self::Path => "path",
             Self::Argv => "argv",
             Self::Terminal => "terminal",
-            Self::Interval => "interval",
+            Self::Interval(_) => "interval",
             Self::Input => "input",
             Self::Association => "association",
             Self::Compound => "compound command",
@@ -165,8 +165,12 @@ impl EngramBuildDiagnostic {
         );
         // Put the discriminating facts before the untrusted command text so
         // neither can be lost to the existing UTF-8 summary budget.
+        let detail = match self.rejection {
+            EngramBuildRejection::Interval(comparison) => format!(" ({comparison})"),
+            _ => String::new(),
+        };
         let prefix = format!(
-            "{} Unknown: {terminal}; {} validation rejected; command: ",
+            "{} Unknown: {terminal}; {} validation rejected{detail}; command: ",
             self.subject,
             self.rejection.label()
         );
@@ -427,24 +431,45 @@ fn engram_validated_focused_stage_result(
     {
         return Err(Rejected::Cwd);
     }
-    let time = |value: &Value, key: &str| {
+    let time = |value: &Value, key: &str, invalid: &'static str| {
         text(value, key)
             .and_then(|text| engram_parse_time(&text))
-            .ok_or(Rejected::Interval)
+            .ok_or(Rejected::Interval(invalid))
     };
-    let observed_start = engram_parse_time(&check.started_at).ok_or(Rejected::Interval)?;
-    let requested_start = time(&request, "started")?;
-    let started = time(stage, "started")?;
-    let ended = time(stage, "ended")?;
-    let run_ended = time(&results, "ended")?;
-    if observed_start > requested_start
-        || requested_start > started
-        || started > ended
-        || ended > run_ended
-        || run_ended > chrono::Utc::now()
-        || text(&request, "started") != text(&results, "started")
-    {
-        return Err(Rejected::Interval);
+    let observed_start =
+        engram_parse_time(&check.started_at).ok_or(Rejected::Interval("invalid observed_start"))?;
+    let requested_start = time(&request, "started", "invalid request.started")?;
+    let started = time(stage, "started", "invalid stage.started")?;
+    let ended = time(stage, "ended", "invalid stage.ended")?;
+    let run_ended = time(&results, "ended", "invalid run.ended")?;
+    // The runtime's start notification can arrive after the launcher wrote
+    // its request. Use the existing carried-launch window, with the same
+    // conservative refusal of a run already completed before observation.
+    // All owner, invocation, input, source and overlap guards still apply.
+    let earliest_start = observed_start
+        .checked_sub_signed(chrono::Duration::seconds(
+            ENGRAM_CARRIED_LAUNCH_SLACK_SECONDS,
+        ))
+        .ok_or(Rejected::Interval("invalid observed_start window"))?;
+    let failed_comparison = if requested_start < earliest_start {
+        Some("request.started < observed_start - 10s")
+    } else if requested_start < observed_start && run_ended < observed_start {
+        Some("early run.ended < observed_start")
+    } else if requested_start > started {
+        Some("request.started > stage.started")
+    } else if started > ended {
+        Some("stage.started > stage.ended")
+    } else if ended > run_ended {
+        Some("stage.ended > run.ended")
+    } else if run_ended > chrono::Utc::now() {
+        Some("run.ended > host now")
+    } else if text(&request, "started") != text(&results, "started") {
+        Some("request.started != results.started")
+    } else {
+        None
+    };
+    if let Some(comparison) = failed_comparison {
+        return Err(Rejected::Interval(comparison));
     }
     let fingerprint = text(&request, "expectedFingerprint").ok_or(Rejected::Input)?;
     if fingerprint.len() != 64

@@ -6,6 +6,9 @@ use super::*;
 #[path = "engram_build_outcomes.rs"]
 mod outcomes;
 
+#[path = "engram_focused_intervals.rs"]
+mod intervals;
+
 fn complete_command(
     turn: &CheckedTurn,
     key: &str,
