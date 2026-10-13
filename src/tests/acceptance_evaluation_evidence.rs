@@ -2,6 +2,9 @@
 // Uses the parent fixtures; no live tracker is touched.
 use super::*;
 
+#[path = "acceptance_selected_evidence_diagnostics.rs"]
+mod selected_evidence_diagnostics;
+
 // Compact continuations are generated from the producer's compact header and
 // window schema, rather than by cloning an initial show response.
 fn compact_notes_chain() -> (Value, Value, Value, Value) {
@@ -972,10 +975,11 @@ fn criterion_evidence_request_refuses_wrong_or_partial_records_and_changed_basis
                 StatusCode::CONFLICT,
                 "changed while criterion evidence was read",
             ),
-            _ => (
-                StatusCode::CONFLICT,
-                "not returned whole as a citable record",
-            ),
+            "wrong_locator" => (StatusCode::CONFLICT, "locator mismatch"),
+            "non_holder" => (StatusCode::CONFLICT, "non-holder record is not citable"),
+            "body_omitted" => (StatusCode::CONFLICT, "body omitted"),
+            "summary_truncated" => (StatusCode::CONFLICT, "summary truncated"),
+            _ => unreachable!("every fixture failure has an expected diagnostic"),
         };
         assert_eq!(error.status, status, "{failure}: {}", error.message);
         assert!(

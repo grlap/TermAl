@@ -1,7 +1,8 @@
 // Acceptance-evaluation tests: mode selection, the evaluator brief, the
 // evaluator-only submission (authority, validation, execution through an
 // injected runner) and the parent-side request through an injected reader.
-// No test here spawns an Engram process; every store below is a fixture. The
+// No test touches a live Engram store; command-boundary tests use scripted
+// fixture children, and every store below is a fixture. The
 // `evaluate` receipt and refusal shapes are copied from runs of the real CLI.
 use super::work_visualizer::fixture;
 use super::*;

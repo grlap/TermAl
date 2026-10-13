@@ -472,6 +472,124 @@ fn read_requested_acceptance_evidence(
     read_acceptance_selected_evidence(task, links, connection, show_args, read, deadline, now, None)
 }
 
+fn is_acceptance_selected_note_read(args: &[&str]) -> bool {
+    // Work actor/session attribution precedes the verb's subcommand. Match
+    // only the exact selected-read tail, never strings in attribution values.
+    args.first() == Some(&"work")
+        && matches!(args.get(args.len().saturating_sub(5)..),
+            Some(["show", _, "--note", locator, "--json"])
+                if is_acceptance_record_id(locator))
+}
+
+fn decode_acceptance_selected_cli_output(
+    output: EngramCliOutput,
+) -> Result<Value, EngramTransportError> {
+    if output.success {
+        return engram_decode_slice(&output.stdout, "invalid Engram selected record response");
+    }
+    // Engram JSON work-word refusals use exit1 and a whole stderr envelope.
+    // Never infer a selection refusal from prose, a crash or a usage exit.
+    // Only this documented selection code changes classification; discard
+    // producer bodies/details instead of retaining them in the typed error.
+    if output.exit.code() == Some(ACCEPTANCE_EVALUATION_REFUSAL_EXIT_CODE)
+        && acceptance_evaluation_error_envelope(&output.stderr)
+            .is_some_and(|(code, _, _)| code == "work_note_reference_invalid")
+    {
+        return Err(EngramTransportError::remote(EngramControlErrorBody {
+            code: "work_note_reference_invalid".to_owned(),
+            message: "selected record reference is invalid".to_owned(),
+        }));
+    }
+    Err(EngramTransportError::transport(
+        "Engram selected record read failed",
+    ))
+}
+
+fn acceptance_selected_record_error(
+    locator: &str,
+    status: StatusCode,
+    reason: &'static str,
+    remedy: &'static str,
+) -> ApiError {
+    // Only the validated requested locator and host-static text are exposed.
+    // Decoder and transport error bodies can contain private evidence.
+    ApiError::from_status(
+        status,
+        format!("selected evidence {locator}: {reason}; {remedy}"),
+    )
+}
+
+fn validate_acceptance_selected_record(
+    result: &Value,
+    work_ref: &str,
+    locator: &str,
+) -> Result<(EngramShowNoteForEvaluation, String), ApiError> {
+    let refusal = |reason, remedy| {
+        acceptance_selected_record_error(locator, StatusCode::CONFLICT, reason, remedy)
+    };
+    if result.get("work_ref").and_then(Value::as_str) != Some(work_ref) {
+        return Err(acceptance_selected_record_error(
+            locator,
+            StatusCode::BAD_GATEWAY,
+            "receipt belongs to another task",
+            "select a correct record of this task",
+        ));
+    }
+    let mut note: EngramShowNoteForEvaluation = serde_json::from_value(result["note"].clone())
+        .map_err(|_| {
+            acceptance_selected_record_error(
+                locator,
+                StatusCode::BAD_GATEWAY,
+                "invalid record",
+                "retry the exact record read or select a correct record",
+            )
+        })?;
+    if note.locator != locator {
+        return Err(refusal(
+            "locator mismatch",
+            "select the correct full record locator",
+        ));
+    }
+    if note.body_omitted {
+        return Err(refusal(
+            "body omitted",
+            "select a smaller whole proof record",
+        ));
+    }
+    if note.summary_truncated {
+        return Err(refusal(
+            "summary truncated",
+            "select a smaller whole proof record",
+        ));
+    }
+    let summary = note
+        .summary
+        .take()
+        .ok_or_else(|| refusal("no readable body", "select a smaller whole proof record"))?;
+    if summary.len() > 16 * 1024 {
+        return Err(refusal(
+            "body exceeds the brief read bound",
+            "select a smaller whole proof record",
+        ));
+    }
+    Ok((note, summary))
+}
+
+fn merge_acceptance_selected_refusal(refusals: Option<ApiError>, error: ApiError) -> ApiError {
+    if let Some(mut first) = refusals {
+        // Keep the first failure's HTTP class, as the former early return did.
+        first.message.push('\n');
+        first.message.push_str(&error.message);
+        first
+    } else {
+        error
+    }
+}
+
+fn collect_acceptance_selected_refusal(refusals: &mut Option<ApiError>, error: ApiError) {
+    *refusals = Some(merge_acceptance_selected_refusal(refusals.take(), error));
+}
+
 fn read_acceptance_selected_evidence(
     task: &mut AcceptanceEvaluationTask,
     links: &[AcceptanceCriterionEvidenceRequest],
@@ -495,6 +613,7 @@ fn read_acceptance_selected_evidence(
     }
     let mut fetched = BTreeSet::new();
     let mut unusable = BTreeSet::new();
+    let mut refusals = None;
     for link in links {
         for locator in &link.locators {
             if !fetched.insert(locator.clone()) {
@@ -509,39 +628,60 @@ fn read_acceptance_selected_evidence(
                     .expect("show args contain notes"),
             );
             args.extend(["--note".to_owned(), locator.clone(), "--json".to_owned()]);
-            let result = read(
-                connection,
-                &args,
-                acceptance_criterion_evidence_read_timeout(deadline, now)?,
-            )
-            .map_err(|error| {
-                acceptance_evaluation_transport_error("engram work show --note", error)
-            })?;
-            if result.get("work_ref").and_then(Value::as_str) != Some(task.work_ref.as_str()) {
-                return Err(ApiError::bad_gateway(
-                    "selected evidence receipt belongs to another task",
-                ));
-            }
-            let note: EngramShowNoteForEvaluation = serde_json::from_value(result["note"].clone())
-                .map_err(|error| {
-                    ApiError::bad_gateway(format!("selected evidence: invalid record: {error}"))
-                })?;
-            if note.locator != *locator
-                || note.body_omitted
-                || note.summary_truncated
-            {
-                return Err(ApiError::conflict(
-                    "selected evidence was not returned whole as a citable record of this task",
-                ));
-            }
-            let summary = note
-                .summary
-                .ok_or_else(|| ApiError::conflict("selected evidence has no readable body"))?;
-            if summary.len() > 16 * 1024 {
-                return Err(ApiError::conflict(
-                    "selected evidence body exceeds the brief read bound; supply a smaller proof record",
-                ));
-            }
+            let timeout = acceptance_criterion_evidence_read_timeout(deadline, now)
+                .map_err(|error| merge_acceptance_selected_refusal(refusals.take(), error))?;
+            let result = match read(connection, &args, timeout) {
+                Ok(result) => result,
+                Err(error)
+                    if error.kind == EngramTransportErrorKind::Remote
+                        && error.code.as_deref() == Some("work_note_reference_invalid") =>
+                {
+                    collect_acceptance_selected_refusal(
+                        &mut refusals,
+                        acceptance_selected_record_error(
+                            locator,
+                            StatusCode::BAD_REQUEST,
+                            "record does not belong to this task",
+                            "select a record of this task",
+                        ),
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    // An unavailable read is not a definitive invalid selection.
+                    // Retain the existing gateway class and stop, without echoing
+                    // the transport's potentially body-sensitive error message.
+                    let reason = match error.kind {
+                        EngramTransportErrorKind::LocalState => {
+                            "exact record reader is unavailable"
+                        }
+                        EngramTransportErrorKind::Deadline => "exact record read deadline exceeded",
+                        EngramTransportErrorKind::Transport => "exact record read transport failed",
+                        EngramTransportErrorKind::Protocol => "invalid exact record response",
+                        EngramTransportErrorKind::Remote => {
+                            "producer refused the exact record read"
+                        }
+                        EngramTransportErrorKind::Backoff => "exact record reader is in backoff",
+                    };
+                    return Err(merge_acceptance_selected_refusal(
+                        refusals,
+                        acceptance_selected_record_error(
+                            locator,
+                            StatusCode::BAD_GATEWAY,
+                            reason,
+                            "retry the exact record read after resolving the reader failure",
+                        ),
+                    ));
+                }
+            };
+            let (note, summary) =
+                match validate_acceptance_selected_record(&result, &task.work_ref, locator) {
+                    Ok(record) => record,
+                    Err(error) => {
+                        collect_acceptance_selected_refusal(&mut refusals, error);
+                        continue;
+                    }
+                };
             // A validated whole exact receipt explicitly marked non-holder is a
             // definitive non-citable record. Missing, malformed, partial or
             // failed reads remain errors; none proves an unusable selection.
@@ -550,7 +690,16 @@ fn read_acceptance_selected_evidence(
                 continue;
             }
             if note.non_holder {
-                return Err(ApiError::conflict("selected evidence was not returned whole as a citable record of this task"));
+                collect_acceptance_selected_refusal(
+                    &mut refusals,
+                    acceptance_selected_record_error(
+                        locator,
+                        StatusCode::CONFLICT,
+                        "non-holder record is not citable",
+                        "quote its proof in a current-run holder note",
+                    ),
+                );
+                continue;
             }
             let is_verification = note.kind.as_str() == Some("verification");
             // The exact read already returned the assessment's first page, or
@@ -603,9 +752,18 @@ fn read_acceptance_selected_evidence(
             }
             task.indexed_evidence.push(evidence);
         }
-        let locators = link.locators.iter().filter(|locator| !unusable.contains(*locator)).cloned().collect::<Vec<_>>();
+        let locators = link
+            .locators
+            .iter()
+            .filter(|locator| !unusable.contains(*locator))
+            .cloned()
+            .collect::<Vec<_>>();
         if let Some(disclosures) = disclosed_drops.as_mut() {
-            for locator in link.locators.iter().filter(|locator| unusable.contains(*locator)) {
+            for locator in link
+                .locators
+                .iter()
+                .filter(|locator| unusable.contains(*locator))
+            {
                 disclosures.push(format!("The requester's evidence selection for criterion {} was not carried for record {locator}: the exact record is non-holder and cannot be cited.", link.criterion));
             }
         }
@@ -616,6 +774,11 @@ fn read_acceptance_selected_evidence(
                 association: "requester".to_owned(),
             });
         }
+    }
+    if let Some(error) = refusals {
+        // No evaluator may receive the successfully read subset of a refused
+        // selection. Only invalid records are aggregated; no extra reads occur.
+        return Err(error);
     }
     // A targeted record read is not a snapshot of the run. Revalidate the
     // task's bases after all reads; never mix proof across a moving item.
