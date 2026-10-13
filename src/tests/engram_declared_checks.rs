@@ -14,11 +14,11 @@ use super::*;
 
 /// The declared .NET line of the documentation's example, for a project at
 /// the repository root.
-const DECLARED_TEST: &str =
+pub(super) const DECLARED_TEST: &str =
     "dotnet test --logger \"trx;LogFileName=results.trx\" --results-directory .termal-results";
 
 /// The result file `DECLARED_TEST` writes, relative to the repository root.
-const DECLARED_ARTIFACT: &str = ".termal-results/results.trx";
+pub(super) const DECLARED_ARTIFACT: &str = ".termal-results/results.trx";
 
 /// Real TRX files `dotnet test --logger trx` wrote (fixtures/declared-trx).
 const PASSING_TRX: &[u8] = include_bytes!(concat!(
@@ -41,7 +41,7 @@ const MIXED_TRX: &[u8] = include_bytes!(concat!(
 /// Commits a termal-tests.toml declaring `command` with `artifact`, and a
 /// .gitignore for the result directory, so neither is a change the test
 /// makes to its own source.
-fn declare(turn: &CheckedTurn, command: &str, artifact: &str) {
+pub(super) fn declare(turn: &CheckedTurn, command: &str, artifact: &str) {
     let declaration = format!(
         "[[test]]\ncommand = {}\ncwd = \".\"\nartifact = {}\n",
         toml_string(command),

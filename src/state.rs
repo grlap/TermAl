@@ -2081,6 +2081,8 @@ impl SessionRecord {
         self.engram_mcp_installed = None;
         // A runtime-started turn ends with its runtime.
         self.unmediated_claude_turn = None;
+        // So does every Codex test carried until its runtime reports its end.
+        EngramHost::runtime_cleared(self);
     }
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {

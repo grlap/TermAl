@@ -2581,6 +2581,16 @@ struct EngramSessionState {
     /// (`engram_carried_checks.rs`). In memory; a marker of each is persisted
     /// so a restart can tell the holder the run lost its credit.
     carried_checks: Vec<EngramCarriedCheck>,
+    /// The Codex tests of this session still running when their turn closed,
+    /// carried or not (`engram_reported_ends.rs`). Kept apart from
+    /// `carried_checks`: refusing or dropping a test's evidence does not end
+    /// its process, so a check that starts in its worktree is overlapped by
+    /// it until its end is reported or its runtime exits or is replaced, and
+    /// by nothing else. In memory only: a host restart clears it, since the
+    /// host can then no longer observe the process. A runtime's exit, clear
+    /// or replacement does not prove the command ended either: a stated
+    /// limitation (`EngramRunningCodexTest`).
+    running_codex_tests: Vec<EngramRunningCodexTest>,
     /// The run directories carried checks of this session settled or
     /// dropped used, newest last (`engram_note_consumed_runs`). In memory.
     carried_consumed_runs: Vec<PathBuf>,
@@ -2622,6 +2632,11 @@ struct EngramSessionState {
     /// its record after writes the old one saw. In memory only; cleared with
     /// `running_command_keys`.
     withheld_command_keys: BTreeSet<String>,
+    /// Checks a turn boundary closed with outcome Unknown because no end was
+    /// reported for them, newest last, so an end reported later is told to
+    /// the holder once (`engram_close_unended_checks`). Bounded
+    /// (`ENGRAM_UNENDED_CLOSURE_LIMIT`); in memory only.
+    unended_check_closures: std::collections::VecDeque<EngramUnendedClosure>,
     /// The place in the turn the next check takes, so check ids stay unique
     /// after a check is dropped. Reset with `active_turn_checks`.
     next_turn_check_sequence: usize,
@@ -2820,6 +2835,7 @@ impl Default for EngramSessionState {
             turn_begun_since_binding_read: false,
             active_turn_checks: Vec::new(),
             carried_checks: Vec::new(),
+            running_codex_tests: Vec::new(),
             carried_consumed_runs: Vec::new(),
             carried_unmatched_launches: Vec::new(),
             running_command_keys: BTreeMap::new(),
@@ -2828,6 +2844,7 @@ impl Default for EngramSessionState {
             workdir_worktree: None,
             capture_workers: Arc::default(),
             withheld_command_keys: BTreeSet::new(),
+            unended_check_closures: std::collections::VecDeque::new(),
             next_turn_check_sequence: 0,
             shell_directory: None,
             active_grant_id: None,
@@ -4678,8 +4695,15 @@ impl AppState {
         // at most the freeze bound once: what is not ready by then is
         // withheld or goes unlabelled.
         let mut end_basis_observed_at = None;
-        let (end_basis, mut resolved_checks, mut settled_carried) = match capture {
+        let mut captured_ends = Vec::new();
+        let (end_basis, mut resolved_checks, mut check_notices, mut settled_carried) = match capture
+        {
             Some((place, sealed, checks, carried, workers)) => {
+                captured_ends = checks
+                    .iter()
+                    .filter(|check| check.grant_id == planned_grant_id && check.end.is_some())
+                    .map(|check| (check.key.clone(), check.sequence))
+                    .collect();
                 let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
                 let provenance = self.engram_turn_root_capture(session_id);
                 let end_basis = self.engram_turn_end_basis_within(
@@ -4694,13 +4718,17 @@ impl AppState {
                 } else {
                     None
                 };
-                let resolved_checks =
-                    engram_resolve_turn_checks(session_id, &planned_grant_id, checks, deadline);
+                let (resolved_checks, check_notices) = engram_resolve_turn_checks_with_notices(
+                    session_id,
+                    &planned_grant_id,
+                    checks,
+                    deadline,
+                );
                 // Carried gates settle within the same budget.
                 let settled_carried = engram_settle_carried_checks(&carried, &workers, deadline);
-                (end_basis, resolved_checks, settled_carried)
+                (end_basis, resolved_checks, check_notices, settled_carried)
             }
-            None => (None, Vec::new(), Vec::new()),
+            None => (None, Vec::new(), Vec::new(), Vec::new()),
         };
         #[cfg(test)]
         wait_at_test_engram_turn_report_gate(self, session_id);
@@ -4752,6 +4780,39 @@ impl AppState {
                 EngramTurnReportPlan::Nothing => EngramTurnReport::default(),
                 EngramTurnReportPlan::Cached(report) => report,
                 EngramTurnReportPlan::Fresh { outcome, .. } => {
+                    // The grant, purpose, runtime and checkpoint claim were
+                    // revalidated above. A cached report wins without adding
+                    // notices from another closer's discarded candidate.
+                    check_notices.extend(engram_check_settlement_notices(
+                        &grant_id,
+                        &captured_ends,
+                        &inner.sessions[index].engram.active_turn_checks,
+                    ));
+                    // A check whose end was never reported is closed with
+                    // outcome Unknown here, before the live checks are
+                    // cleared below, rather than dropped silently: every
+                    // live check, whichever grant it ran under, since the
+                    // clear below removes them all. A Codex test still
+                    // running is carried first instead, when it can be: its
+                    // end comes when its process exits, which may be after
+                    // this close (`engram_reported_ends.rs`).
+                    check_notices.extend(engram_carry_running_codex_checks(
+                        &mut inner.sessions[index],
+                        &grant_id,
+                    ));
+                    check_notices.extend(engram_close_unended_checks(
+                        &mut inner.sessions[index].engram,
+                        None,
+                        "the turn's close",
+                    ));
+                    for line in std::mem::take(&mut check_notices) {
+                        engram_publish_check_notice(
+                            session_id,
+                            &mut inner.sessions[index].engram,
+                            line,
+                            &mut std::io::stderr(),
+                        );
+                    }
                     // A root can become uncertain after a check finished or
                     // while the off-lock settlement ran. Do not publish its
                     // captured evidence until authority is confirmed again.
@@ -6771,7 +6832,21 @@ impl AppState {
                         .map(|mutates| (grant_id.clone(), mutates));
                 // The agent may take or release a claim during this turn.
                 record.engram.turn_begun_since_binding_read = true;
-                // The checks of an earlier turn belong to its own report.
+                // The checks of an earlier turn belong to its own report. One
+                // whose end was never reported and that its turn's close did
+                // not close is closed with outcome Unknown now, not dropped.
+                for line in engram_close_unended_checks(
+                    &mut record.engram,
+                    None,
+                    "the next turn's start",
+                ) {
+                    engram_publish_check_notice(
+                        session_id,
+                        &mut record.engram,
+                        line,
+                        &mut std::io::stderr(),
+                    );
+                }
                 record.engram.active_turn_checks.clear();
                 record.engram.running_command_keys.clear();
                 record.engram.withheld_command_keys.clear();

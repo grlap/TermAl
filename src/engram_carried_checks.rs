@@ -74,6 +74,16 @@ struct EngramCarriedCheck {
     /// The check as its launch recorded it: grant, command, root, start time
     /// and start source basis. It has no end.
     check: EngramTurnCheck,
+    /// A Codex test still running when its turn closed
+    /// (`engram_reported_ends.rs`): it ends by the end its runtime reports for
+    /// it (`check.end`), not by a launcher run's terminal record, so it has no
+    /// run to find. `false` for a launcher full gate.
+    ends_by_report: bool,
+    /// For such a test: the runtime it ran under, whose exit closes it
+    /// (`engram_close_reported_end_carries`), since no end can come from a
+    /// runtime that is gone. `None` for a launcher full gate, which outlives
+    /// the runtime that launched it.
+    runtime: Option<RuntimeToken>,
     /// The claimed work the launching turn was bound to.
     work_id: String,
     claim_id: String,
@@ -129,7 +139,15 @@ fn engram_carried_candidate_closure(
     carried: &EngramCarriedCheck,
     candidate: &EngramResolvedCheck,
 ) -> Option<u64> {
-    carried.terminal_digest.as_ref()?;
+    if !carried.ended() {
+        return None;
+    }
+    // A carried Codex test's interval closes as a check's in its turn does:
+    // at the latest of its end, its snapshots and a declared check's artifact
+    // read (`EngramTurnCheck::interference_end`).
+    if carried.ends_by_report {
+        return carried.check.interference_end();
+    }
     Some(
         carried
             .terminal_at?
@@ -146,6 +164,11 @@ struct EngramCarriedLaunchMarker {
     root: String,
     launched_at: String,
     fingerprint: String,
+    /// For a carried Codex test (`EngramCarriedCheck::ends_by_report`): the
+    /// line its holder gets, closing it with outcome Unknown, since its end
+    /// can no longer be reported to the host. Absent for a launcher full gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unknown_line: Option<String>,
 }
 
 impl EngramCarriedCheck {
@@ -154,15 +177,54 @@ impl EngramCarriedCheck {
             root: self.check.target.root.to_string_lossy().into_owned(),
             launched_at: self.check.started_at.clone(),
             fingerprint: engram_check_fingerprint(&self.check.command),
+            unknown_line: self.ends_by_report.then(|| {
+                engram_reported_end_lost_to_restart_line(&self.check.command, self.end_reported())
+            }),
         }
     }
 
+    /// Whether what it waited for has ended, so no write can reach its result
+    /// any more: a launcher run read as terminal, or, for a Codex test carried
+    /// until its end is reported, that end with its closing snapshot taken and
+    /// a declared check's artifact read (`EngramTurnCheck::open_to_writes`).
+    /// Until then it stays fenced, as a check in its turn is.
+    fn ended(&self) -> bool {
+        if self.ends_by_report {
+            !self.check.open_to_writes()
+        } else {
+            self.terminal_digest.is_some()
+        }
+    }
+
+    /// For a Codex test carried until its end is reported: whether that end
+    /// was reported, whatever its captures. A test whose end came is never
+    /// closed for want of one; it is settled.
+    fn end_reported(&self) -> bool {
+        self.check.end.is_some()
+    }
+
     /// The line its holder gets when the check is refused, naming the gate by
-    /// fingerprint and root, never by its command line.
+    /// fingerprint and root, never by its command line. A Codex test refused
+    /// before its end was reported is still running: refusing its evidence
+    /// does not end its process, which still overlaps later checks in its
+    /// worktree (`EngramRunningCodexTest`), so the line says so and how to
+    /// end the wait.
     fn refusal_line(&self, why: &str) -> String {
+        let (what, again) = if !self.ends_by_report {
+            ("background full gate", "Run the gate again")
+        } else if self.end_reported() {
+            ("Codex test", "Run the test again")
+        } else {
+            (
+                "Codex test",
+                "It is still running, and later checks in its worktree are overlapped until it \
+                 ends; ending its process, or Stopping the session (whose runtime exit closes \
+                 it), ends the wait. Run the test again once it has ended",
+            )
+        };
         format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the background full gate launched at {} in {} \
-             (check {}) earned no credit: {why}. Run the gate again.",
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the {what} launched at {} in {} (check {}) earned \
+             no credit: {why}. {again}.",
             self.check.started_at,
             engram_source_root_display(&self.check.target.root.to_string_lossy()),
             engram_check_fingerprint(&self.check.command),
@@ -172,6 +234,9 @@ impl EngramCarriedCheck {
 
 /// The line the holder of a check the host carried when it restarted gets.
 fn engram_carried_lost_to_restart_line(marker: &EngramCarriedLaunchMarker) -> String {
+    if let Some(line) = &marker.unknown_line {
+        return line.clone();
+    }
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the host restarted while the background full gate \
          launched at {} in {} (check {}) was running; it earned no credit, since the host \
@@ -419,7 +484,7 @@ fn engram_fence_carried_for_other_session(
     // Most commands run while no other session carries a gate that a write
     // could still reach: nothing is read or formatted for them.
     let open = |carried: &EngramCarriedCheck| {
-        carried.fence.is_none() && carried.terminal_digest.is_none()
+        carried.fence.is_none() && !carried.ended()
     };
     if matches!(act, EngramWriterAct::Presence)
         || !inner.sessions.iter().enumerate().any(|(other, record)| {
@@ -966,6 +1031,11 @@ fn engram_settle_carried_check(
     workers: &Arc<std::sync::atomic::AtomicUsize>,
     deadline: std::time::Instant,
 ) -> Result<Option<EngramResolvedCheck>, String> {
+    // A carried Codex test is settled from its own reported end, as a check
+    // in its turn would be (`engram_reported_ends.rs`).
+    if carried.ends_by_report {
+        return engram_settle_reported_end(carried, deadline);
+    }
     if carried.ambiguous {
         return Err(ENGRAM_CARRIED_AMBIGUOUS.to_owned());
     }
@@ -1440,8 +1510,10 @@ fn engram_carry_check(record: &mut SessionRecord, launched: EngramTurnCheck) -> 
         }
         _ => true,
     };
+    // A carried Codex test has no run, so it can be confused with none.
     let ambiguous = engram.carried_checks.iter().any(|carried| {
-        carried.run_directory.is_none()
+        !carried.ends_by_report
+            && carried.run_directory.is_none()
             && engram_path_key(&carried.check.target.root) == root_key
             && recent(&carried.check.started_at)
     }) || engram
@@ -1454,26 +1526,64 @@ fn engram_carry_check(record: &mut SessionRecord, launched: EngramTurnCheck) -> 
         .as_ref()
         .map(|cause| format!("{cause} (while it was being launched)"));
     let carried = EngramCarriedCheck {
+        ambiguous,
+        fence,
+        ..engram_new_carried_check(binding, turn_root.generation, launched, None)
+    };
+    engram_push_carried_check(record, carried)
+}
+
+/// `check` as a carried check of the claimed work `binding`, measured in the
+/// named-root generation `root_generation`, unfenced and with no run found
+/// yet. With `reported_by`, the runtime it ran under, it ends by the end that
+/// runtime reports for it; without, it is a launcher gate's launch.
+fn engram_new_carried_check(
+    binding: &EngramControlWorkBinding,
+    root_generation: u64,
+    check: EngramTurnCheck,
+    reported_by: Option<RuntimeToken>,
+) -> EngramCarriedCheck {
+    EngramCarriedCheck {
+        ends_by_report: reported_by.is_some(),
+        runtime: reported_by,
         work_id: binding.work_id.clone(),
         claim_id: binding.claim_id.clone(),
-        root_generation: turn_root.generation,
-        check: launched,
+        root_generation,
+        check,
         run_directory: None,
         terminal_digest: None,
         launcher_gone: false,
         run_missing: false,
         terminal_conflict: false,
-        ambiguous,
+        ambiguous: false,
         ruled_out_runs: std::collections::BTreeSet::new(),
-        fence,
+        fence: None,
         terminal_at: None,
         potential: None,
-    };
-    let mut told = None;
-    if engram.carried_checks.len() >= ENGRAM_CARRIED_CHECK_LIMIT {
-        let dropped = engram.carried_checks.remove(0);
-        told = Some(dropped.refusal_line("a newer background gate took its place"));
+    }
+}
+
+/// Keeps `carried` on `record`. Past `ENGRAM_CARRIED_CHECK_LIMIT` the oldest
+/// carried check is dropped, and the line telling its holder is returned; a
+/// dropped gate leaves its run used or its launch unmatched, a dropped Codex
+/// test neither, since it has no run.
+fn engram_push_carried_check(
+    record: &mut SessionRecord,
+    carried: EngramCarriedCheck,
+) -> Option<String> {
+    let engram = &mut record.engram;
+    if engram.carried_checks.len() < ENGRAM_CARRIED_CHECK_LIMIT {
         engram.carried_checks.push(carried);
+        return None;
+    }
+    let dropped = engram.carried_checks.remove(0);
+    let told = dropped.refusal_line(if carried.ends_by_report {
+        "a newer carried Codex test took its place"
+    } else {
+        "a newer background gate took its place"
+    });
+    engram.carried_checks.push(carried);
+    if !dropped.ends_by_report {
         match dropped.run_directory {
             Some(directory) => engram_note_consumed_runs(record, vec![directory]),
             None => engram_note_unmatched_launch(
@@ -1482,10 +1592,8 @@ fn engram_carry_check(record: &mut SessionRecord, launched: EngramTurnCheck) -> 
                 &dropped.check.started_at,
             ),
         }
-        return told;
     }
-    engram.carried_checks.push(carried);
-    told
+    Some(told)
 }
 
 /// Keeps the run directories `used` by carried checks of `record` that
@@ -1565,7 +1673,7 @@ fn engram_fence_carried_checks_in(
 ) {
     for carried in &mut record.engram.carried_checks {
         if carried.fence.is_none()
-            && (even_after_end || carried.terminal_digest.is_none())
+            && (even_after_end || !carried.ended())
             && engram_worktrees_may_hold(worktrees, &engram_path_key(&carried.check.target.root))
         {
             carried.fence = Some(cause.to_owned());
@@ -1596,7 +1704,7 @@ fn engram_fence_carried_checks_for_edit(record: &mut SessionRecord, target: Opti
         None => "this session reported a file edit".to_owned(),
     };
     for carried in &mut record.engram.carried_checks {
-        if carried.fence.is_none() && carried.terminal_digest.is_none() {
+        if carried.fence.is_none() && !carried.ended() {
             carried.fence = Some(cause.clone());
         }
     }
@@ -1685,7 +1793,7 @@ fn engram_carried_checks_to_settle(record: &SessionRecord) -> Vec<EngramCarriedC
             !engram_carried_check_expired(carried, now)
                 && carried.claim_id == binding.claim_id
                 && carried.root_generation == turn_root.generation
-                && (carried.terminal_digest.is_some()
+                && (carried.ended()
                     || carried.launcher_gone
                     || carried.run_missing
                     || carried.ambiguous)
@@ -1714,14 +1822,17 @@ fn engram_take_settled_carried_checks(
 ) -> (Vec<EngramResolvedCheck>, Vec<String>) {
     let mut credited = Vec::new();
     let mut lines = Vec::new();
+    // The runtime a carried Codex test still waiting for its end must run
+    // under for that end to reach the host (`engram_reported_ends.rs`).
+    let current_runtime = record.runtime.runtime_token();
     let carried_checks = std::mem::take(&mut record.engram.carried_checks);
     let mut left = Vec::new();
     let mut unmatched = Vec::new();
     for (position, carried) in carried_checks.into_iter().enumerate() {
-        // Every check that leaves below leaves its run used, or, with none
-        // found, its launch unmatched.
+        // Every gate that leaves below leaves its run used, or, with none
+        // found, its launch unmatched. A carried Codex test has no run.
         left.extend(carried.run_directory.clone());
-        if carried.run_directory.is_none() {
+        if carried.run_directory.is_none() && !carried.ends_by_report {
             unmatched.push((
                 carried.check.target.root.clone(),
                 carried.check.started_at.clone(),
@@ -1733,6 +1844,13 @@ fn engram_take_settled_carried_checks(
                 *grant_id == carried.check.grant_id && *sequence == carried.check.sequence
             })
             .map(|found| settled.swap_remove(found).2);
+        if engram_reported_end_stranded(&carried, current_runtime.as_ref()) {
+            lines.push(engram_stranded_reported_end_line(
+                &carried.check.command,
+                current_runtime.as_ref(),
+            ));
+            continue;
+        }
         if let Some(cause) = &carried.fence {
             lines.push(carried.refusal_line(&format!(
                 "the host saw something that may have written in its worktree before it \
@@ -1752,7 +1870,7 @@ fn engram_take_settled_carried_checks(
             binding.claim_id == carried.claim_id
         });
         if same_claim == Some(false)
-            && (carried.terminal_digest.is_some()
+            && (carried.ended()
                 || carried.launcher_gone
                 || carried.run_missing
                 || carried.ambiguous)
@@ -1771,13 +1889,22 @@ fn engram_take_settled_carried_checks(
         // Six hours after its launch a gate is refused, whatever a
         // settlement made of it.
         if engram_carried_check_expired(&carried, now) {
-            lines.push(carried.refusal_line(if carried.terminal_digest.is_some() {
-                concat!(
+            let came = if carried.ends_by_report {
+                carried.end_reported()
+            } else {
+                carried.ended()
+            };
+            lines.push(carried.refusal_line(match (came, carried.ends_by_report) {
+                (true, false) => concat!(
                     "it was not settled within six hours of its launch (a background gate is ",
                     "settled only at a checkpoint on the same claim and source root)"
-                )
-            } else {
-                "its run did not end within six hours of its launch"
+                ),
+                (true, true) => concat!(
+                    "it was not settled within six hours of its launch (a carried test is ",
+                    "settled only at a checkpoint on the same claim and source root)"
+                ),
+                (false, false) => "its run did not end within six hours of its launch",
+                (false, true) => "no end of it was reported within six hours of its launch",
             }));
             continue;
         }
@@ -1921,7 +2048,9 @@ fn engram_carried_check_polls(
     carried: &EngramCarriedCheck,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
-    carried.terminal_digest.is_none()
+    // A carried Codex test ends by its reported end; it has no run to read.
+    !carried.ends_by_report
+        && carried.terminal_digest.is_none()
         && carried.fence.is_none()
         && !carried.ambiguous
         && !carried.launcher_gone

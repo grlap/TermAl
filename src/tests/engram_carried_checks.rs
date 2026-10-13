@@ -26,6 +26,11 @@ mod credit_outcomes {
 #[path = "engram_overlap_cause.rs"]
 mod overlap_cause;
 
+// A Codex test carried past its turn until its end is reported, a child
+// module so this file does not grow further.
+#[path = "engram_reported_ends.rs"]
+mod reported_ends;
+
 #[test]
 fn a_full_gate_launch_is_carried_dropped_or_ordinary_by_its_line_and_result() {
     use EngramLaunchDisposition::{Carry, Drop, Ordinary};
@@ -2154,6 +2159,7 @@ fn check_credit_lines_read_cleanly_and_merge_without_evicting_bind_lines() {
             root: "C:/repo".to_owned(),
             launched_at: "2026-09-29T00:00:00.000Z".to_owned(),
             fingerprint: "a".repeat(64),
+            unknown_line: None,
         }),
         ENGRAM_CARRIED_RUN_NEITHER.to_owned(),
     ];

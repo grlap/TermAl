@@ -278,10 +278,7 @@ fn engram_apply_claude_hazards(
                 ended_at: None,
                 simple_full_gate: engram_is_simple_full_launcher(&carried.check.command),
             };
-            let terminal_at = carried
-                .terminal_digest
-                .as_ref()
-                .and(carried.terminal_at);
+            let terminal_at = carried.ended().then_some(()).and(carried.terminal_at);
             for hazard in hazards {
                 let Some(cause) = engram_claude_interference(hazard, &subject) else {
                     continue;

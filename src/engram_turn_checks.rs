@@ -412,6 +412,10 @@ struct EngramTurnCheck {
     /// (`engram_claude_interference.rs`). Its evidence interval closes only
     /// once its snapshots are taken as well (`interference_end`).
     ended_at: Option<u64>,
+    /// Its runtime keyed it by its own command line, as Codex keys a command
+    /// whose item has no id: such a key names no one run, so it is never
+    /// carried to wait for a later end (`engram_reported_ends.rs`).
+    keyed_by_line: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -642,6 +646,123 @@ fn engram_overlap_cause_suffix(cause: Option<&str>) -> String {
     cause.map_or_else(String::new, |cause| format!(" ({cause})"))
 }
 
+/// Identifies an unrecorded check without copying command arguments or a
+/// runtime key, either of which may contain a secret.
+fn engram_unrecorded_check_line(command: &EngramCheckCommand, cause: &str) -> String {
+    format!(
+        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) was not recorded: {cause}.",
+        command.program,
+        command.kind.label(),
+        engram_check_fingerprint(command)
+    )
+}
+
+/// A check closed with outcome Unknown because no end was reported for it by
+/// a turn boundary (`engram_close_unended_checks`), kept by its runtime key so
+/// the first end reported later under that key, with no check running under
+/// it, is told to the holder once as an observation (`engram_late_end_line`),
+/// never as a second outcome. Retired by that end, or by a new check starting
+/// under the key, whose ends are its own; a start that starts no check keeps
+/// it.
+#[derive(Clone, Debug)]
+struct EngramUnendedClosure {
+    key: String,
+    command: EngramCheckCommand,
+}
+
+/// At most this many closures are kept for late ends, newest last.
+const ENGRAM_UNENDED_CLOSURE_LIMIT: usize = ENGRAM_TURN_CHECK_LIMIT;
+
+/// Closes, with outcome Unknown, each live check of `grant_id` (of any grant
+/// when `None`) whose start the host saw but whose end was never reported
+/// (a runtime that lost the command's completion), as `boundary` drops the
+/// live checks, and returns the holder lines that say so. A background run's
+/// check ended at its launch and a carried gate left the live checks, so
+/// neither is closed here. Each closure is kept for a late end
+/// (`engram_late_end_line`). Runs only at a turn boundary: no timer.
+fn engram_close_unended_checks(
+    engram: &mut EngramSessionState,
+    grant_id: Option<&str>,
+    boundary: &str,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for check in &engram.active_turn_checks {
+        if check.end.is_some() || grant_id.is_some_and(|grant| grant != check.grant_id) {
+            continue;
+        }
+        lines.push(engram_unrecorded_check_line(
+            &check.command,
+            &format!(
+                "no end was reported for it by {boundary}, so it was closed with outcome \
+                 Unknown and is not credited; run it again to record it"
+            ),
+        ));
+        engram
+            .unended_check_closures
+            .retain(|closed| closed.key != check.key);
+        engram.unended_check_closures.push_back(EngramUnendedClosure {
+            key: check.key.clone(),
+            command: check.command.clone(),
+        });
+        while engram.unended_check_closures.len() > ENGRAM_UNENDED_CLOSURE_LIMIT {
+            engram.unended_check_closures.pop_front();
+        }
+    }
+    lines
+}
+
+/// The holder line for an end reported, with no check running under its key,
+/// under the key of a check closed with outcome Unknown. It states what was
+/// observed, the end's exit status and the command it was reported for, and
+/// claims no identity: a runtime may reuse a key, and an end may name its
+/// command by a title only, so the end need not be the closed check's. It is
+/// not a second outcome. Like `engram_unrecorded_check_line`, it copies no
+/// command arguments or runtime key: the ended command is named by its check
+/// label when it is a recognised check, and otherwise by a fingerprint of its
+/// text.
+fn engram_late_end_line(
+    closed: &EngramCheckCommand,
+    ended: &str,
+    exit: Option<EngramCommandExit>,
+) -> String {
+    let status = match exit {
+        Some(EngramCommandExit::Code(code)) => format!("exit code {code}"),
+        Some(EngramCommandExit::ReportedSuccess) => {
+            "success reported without an exit code".to_owned()
+        }
+        Some(EngramCommandExit::NotFinished) => "moved to the background".to_owned(),
+        Some(EngramCommandExit::Unknown) | None => "no exit status".to_owned(),
+    };
+    let ended = match engram_check_command(ended) {
+        Some(command) => engram_check_label(&command),
+        None => format!(
+            "a command (text fingerprint {})",
+            &sha256_hex(ended.as_bytes())[..ENGRAM_LATE_END_TEXT_FINGERPRINT_LEN]
+        ),
+    };
+    format!(
+        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} an end ({status}) was reported for {ended} under the \
+         same runtime id after {} was closed with outcome Unknown; it is not recorded; run the \
+         check again to record it.",
+        engram_check_label(closed)
+    )
+}
+
+/// How many hex digits of an ended command's text fingerprint a late-end
+/// line shows: enough to tell commands apart, not to stand in for the text.
+const ENGRAM_LATE_END_TEXT_FINGERPRINT_LEN: usize = 12;
+
+/// A check named as a holder line names it: program, kind and fingerprint,
+/// with no command arguments.
+fn engram_check_label(command: &EngramCheckCommand) -> String {
+    format!(
+        "a {} {} (check {})",
+        command.program,
+        command.kind.label(),
+        engram_check_fingerprint(command)
+    )
+}
+
 /// The checks of `grant_id` that can be reported, with their snapshots
 /// waited for until `deadline`: finished, ending in a result that marks the
 /// end, and taken on one unchanged source revision. A check whose snapshots
@@ -649,13 +770,27 @@ fn engram_overlap_cause_suffix(cause: Option<&str>) -> String {
 /// ran, so its result belongs to no one revision. Each kept check carries
 /// the toolchain label it captured as it started, waited for until
 /// `deadline` too.
+#[cfg(test)]
 fn engram_resolve_turn_checks(
     session_id: &str,
     grant_id: &str,
     checks: Vec<EngramTurnCheck>,
     deadline: std::time::Instant,
 ) -> Vec<EngramResolvedCheck> {
+    engram_resolve_turn_checks_with_notices(session_id, grant_id, checks, deadline).0
+}
+
+/// Resolves checks off-lock and retains the source-capture refusal lines
+/// for publication only after the caller revalidates the owning grant.
+/// A late capture never changes the refused check into passing evidence.
+fn engram_resolve_turn_checks_with_notices(
+    session_id: &str,
+    grant_id: &str,
+    checks: Vec<EngramTurnCheck>,
+    deadline: std::time::Instant,
+) -> (Vec<EngramResolvedCheck>, Vec<String>) {
     let mut resolved = Vec::new();
+    let mut notices = Vec::new();
     for check in checks {
         if check.grant_id != grant_id {
             continue;
@@ -680,7 +815,24 @@ fn engram_resolve_turn_checks(
         let finish = end.end_basis.wait_until(deadline);
         let basis = match (start, finish) {
             (Some(Some(start)), Some(Some(finish))) if start == finish => start,
-            _ => {
+            (start, finish) => {
+                let cause = match (start, finish) {
+                    (None, _) => {
+                        "its start source snapshot was still pending at the settlement deadline"
+                    }
+                    (Some(None), _) => "its start source snapshot could not be captured",
+                    (_, None) => {
+                        "its finish source snapshot was still pending at the settlement deadline"
+                    }
+                    (_, Some(None)) => "its finish source snapshot could not be captured",
+                    _ => "its source snapshots differ, so the result belongs to no single revision",
+                };
+                notices.push(engram_unrecorded_check_line(
+                    &check.command,
+                    &format!(
+                        "{cause}; run it again on an unchanged source once capture work has finished"
+                    ),
+                ));
                 // Named by program and fingerprint: the command line itself can
                 // carry a secret, and it goes to Engram only in the report.
                 eprintln!(
@@ -722,7 +874,51 @@ fn engram_resolve_turn_checks(
     for kept in &mut resolved {
         kept.toolchain = kept.check.toolchain.wait_until(deadline).flatten();
     }
-    resolved
+    (resolved, notices)
+}
+
+/// Finished commands that arrived after the off-lock copy cannot be judged
+/// from that copy. Account them before the live checks are cleared, without
+/// waiting for captures under the state lock or changing the report on retry.
+/// The caller publishes these lines only under a fresh checkpoint claim for
+/// the same grant; key and sequence together distinguish reused runtime keys.
+fn engram_check_settlement_notices(
+    grant_id: &str,
+    captured_ends: &[(String, usize)],
+    live: &[EngramTurnCheck],
+) -> Vec<String> {
+    live.iter()
+        .filter(|check| {
+            check.grant_id == grant_id
+                && check
+                    .end
+                    .as_ref()
+                    .is_some_and(|end| end.exit != EngramCommandExit::NotFinished)
+                && !captured_ends
+                    .iter()
+                    .any(|(key, sequence)| key == &check.key && *sequence == check.sequence)
+        })
+        .map(|check| {
+            engram_unrecorded_check_line(
+                &check.command,
+                "its completion arrived during closing settlement after the checks were \
+                 copied; run it again on its own in a new turn to record it",
+            )
+        })
+        .collect()
+}
+
+/// Publish only after the caller accepts this notice for the live owner.
+/// The bounded prompt line can discard older notices; its host-log fallback
+/// must retain each complete redacted identity and cause before that merge.
+fn engram_publish_check_notice(
+    session_id: &str,
+    engram: &mut EngramSessionState,
+    line: String,
+    log: &mut impl std::io::Write,
+) {
+    let _ = writeln!(log, "engram> session={session_id} {line}");
+    engram.set_pending_source_root_line(line);
 }
 
 /// Carries into `resolved` the overlap marks the live records of its checks
@@ -1724,12 +1920,26 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
+        let current_runtime = record.runtime.runtime_token();
         let engram = &mut record.engram;
+        // A Codex test of the session still running in the check's worktree
+        // since its turn closed, carried or not, runs alongside it as a
+        // command of its turn would (`engram_carried_running_key`).
         let others_running = engram
             .running_command_keys
             .keys()
             .find(|running| running.as_str() != key)
-            .cloned();
+            .cloned()
+            .or_else(|| {
+                target.as_ref().and_then(|(_, _, target)| {
+                    engram_carried_running_key(
+                        &*engram,
+                        current_runtime.as_ref(),
+                        &engram_path_key(&target.root),
+                        key,
+                    )
+                })
+            });
         let fresh = engram
             .running_command_keys
             .insert(key.to_owned(), reported)
@@ -1800,6 +2010,18 @@ impl AppState {
         // finished, whether or not the checks it serves are still kept.
         let workers = record.engram.capture_workers.clone();
         if workers.load(std::sync::atomic::Ordering::SeqCst) >= ENGRAM_CAPTURE_WORKER_LIMIT {
+            if record.engram.withheld_command_keys.insert(key.to_owned()) {
+                engram_publish_check_notice(
+                    session_id,
+                    &mut record.engram,
+                    engram_unrecorded_check_line(
+                        &command,
+                        "capture capacity reached: earlier capture workers are still running; \
+                         wait for them to finish, then run the check again",
+                    ),
+                    &mut std::io::stderr(),
+                );
+            }
             return;
         }
         // Only the latest checks are reported, so a finished check past the
@@ -1813,6 +2035,18 @@ impl AppState {
                 .iter()
                 .position(|check| check.end.is_some())
             else {
+                if record.engram.withheld_command_keys.insert(key.to_owned()) {
+                    engram_publish_check_notice(
+                        session_id,
+                        &mut record.engram,
+                        engram_unrecorded_check_line(
+                            &command,
+                            "capture capacity reached: the retained-check limit is occupied by \
+                             unfinished checks; wait for them to finish, then run the check again",
+                        ),
+                        &mut std::io::stderr(),
+                    );
+                }
                 return;
             };
             record.engram.active_turn_checks.remove(oldest);
@@ -1842,6 +2076,12 @@ impl AppState {
         let overlapped = overlap_cause.is_some() || foreign_work;
         let sequence = record.engram.next_turn_check_sequence;
         record.engram.next_turn_check_sequence += 1;
+        // A new check under the key of a check closed with outcome Unknown is
+        // a new run, even of the same command: its end is its own.
+        record
+            .engram
+            .unended_check_closures
+            .retain(|closed| closed.key != key);
         record.engram.active_turn_checks.push(EngramTurnCheck {
             grant_id,
             key: key.to_owned(),
@@ -1860,6 +2100,7 @@ impl AppState {
             runtime_output_cut: false,
             end: None,
             ended_at: None,
+            keyed_by_line: ran == Some(key),
         });
     }
 
@@ -2117,67 +2358,12 @@ impl AppState {
                 },
             )
         };
-        let checked = starting_check.is_some();
-        let build_completion = starting_check.as_ref()
-            .filter(|check| check.command.kind == EngramVerificationKind::Build)
-            .map(|check| {
-                if engram_check_command(command).as_ref() != Some(&check.command) {
-                    (
-                        EngramCommandExit::Unknown,
-                        Vec::new(),
-                        Some(EngramBuildDiagnostic::rejected(
-                            exit.unwrap_or(EngramCommandExit::Unknown),
-                            EngramBuildRejection::Association,
-                        )),
-                    )
-                } else {
-                    engram_build_completion(
-                        check,
-                        session_id,
-                        output,
-                        exit.unwrap_or(EngramCommandExit::Unknown),
-                    )
-                }
-            });
-        let node_completion = starting_check.as_ref()
-            .filter(|check| engram_is_focused_node_check(&check.command))
-            .map(|check| {
-                if engram_check_command(command).as_ref() != Some(&check.command) {
-                    (EngramCommandExit::Unknown, Vec::new(), false, None)
-                } else {
-                    engram_focused_node_completion(
-                        check,
-                        session_id,
-                        output,
-                        exit.unwrap_or(EngramCommandExit::Unknown),
-                    )
-                }
-            });
+        let reading =
+            engram_read_check_end(starting_check.as_ref(), session_id, command, output, exit);
         // The session's worktree, resolved off the lock for overlap marking,
         // and those of the writers not resolved yet.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
         let resolved_writers = engram_resolve_writer_worktrees(unresolved_writers);
-        // A launcher full gate's test stages are its own request record's,
-        // read off the lock (`engram_launcher_output_test_stages`), for
-        // whichever command the check's end is read as below.
-        let launcher_test_stages = if starting_check.as_ref()
-            .is_some_and(|check| check.command.kind == EngramVerificationKind::Test) {
-            engram_launcher_output_test_stages(output)
-        } else {
-            Vec::new()
-        };
-        let parsed = checked
-            .then(|| engram_check_command(command))
-            .flatten()
-            .map(|finished| {
-                let result_lines = engram_check_result_lines(&finished.program, output);
-                let showed_passing_tests = engram_check_showed_passing_tests(
-                    &finished,
-                    &result_lines,
-                    &launcher_test_stages,
-                );
-                (finished, result_lines, showed_passing_tests)
-            });
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         // Before any writer is counted below, in this same hold of the lock.
         engram_note_writer_worktrees(&mut inner, resolved_writers);
@@ -2247,6 +2433,7 @@ impl AppState {
         }
         if exit != Some(EngramCommandExit::NotFinished) {
             record.engram.running_command_keys.remove(key);
+            engram_forget_running_codex_test(&mut record.engram, key);
             record.engram.withheld_command_keys.remove(key);
             record
                 .engram
@@ -2269,6 +2456,34 @@ impl AppState {
                 runtime_output_cut,
             },
         );
+        // An end under the key of a check a turn boundary closed with outcome
+        // Unknown, with no check running under that key: told to the holder
+        // once, with its exit status and the command it was reported for,
+        // whichever turn it arrives in, and the closure retired; never a
+        // second outcome. It is told as what was observed, not as that check's
+        // end: a runtime may reuse a key for another command, report a start
+        // that starts no check, or name a command by a title only. A check
+        // started under the key since retired the closure, so its own end is
+        // never told here.
+        if !record
+            .engram
+            .active_turn_checks
+            .iter()
+            .any(|check| check.key == key && check.end.is_none())
+            && let Some(position) = record
+                .engram
+                .unended_check_closures
+                .iter()
+                .position(|closed| closed.key == key)
+            && let Some(closed) = record.engram.unended_check_closures.remove(position)
+        {
+            engram_publish_check_notice(
+                session_id,
+                &mut record.engram,
+                engram_late_end_line(&closed.command, command, exit),
+                &mut std::io::stderr(),
+            );
+        }
         if disposition.excludes_live_grant() {
             return;
         }
@@ -2314,98 +2529,19 @@ impl AppState {
             }
         }
         let check = &mut record.engram.active_turn_checks[position];
-        let (mut result_lines, mut showed_passing_tests) = match parsed {
-            Some((finished, result_lines, showed_passing_tests)) if finished == check.command => {
-                (result_lines, showed_passing_tests)
-            }
-            // The end names another command than the check's start (a reused
-            // key): the check's own command decides how its output reads.
-            _ => {
-                let result_lines = engram_check_result_lines(&check.command.program, output);
-                let showed_passing_tests = engram_check_showed_passing_tests(
-                    &check.command,
-                    &result_lines,
-                    &launcher_test_stages,
-                );
-                (result_lines, showed_passing_tests)
-            }
-        };
-        let same_start = starting_check.as_ref().is_some_and(|start| {
-            start.grant_id == check.grant_id
-                && start.sequence == check.sequence
-                && start.command == check.command
-                && start.target == check.target
-        });
-        let mut build_diagnostic = None;
-        let check_exit = if let Some((node_exit, node_lines, node_passed, node_diagnostic)) =
-            node_completion.filter(|_| same_start)
-        {
-            result_lines = node_lines;
-            showed_passing_tests = node_passed;
-            build_diagnostic = node_diagnostic;
-            node_exit
-        } else if engram_is_focused_node_check(&check.command) {
-            result_lines.clear();
-            showed_passing_tests = false;
-            EngramCommandExit::Unknown
-        } else if let Some((build_exit, build_lines, diagnostic)) =
-            build_completion.filter(|_| same_start)
-        {
-            result_lines = build_lines;
-            build_diagnostic = diagnostic;
-            build_exit
-        } else if check.command.kind == EngramVerificationKind::Build {
-            result_lines.clear();
-            build_diagnostic = Some(EngramBuildDiagnostic::rejected(
-                exit.unwrap_or(EngramCommandExit::Unknown),
-                EngramBuildRejection::Association,
-            ));
-            EngramCommandExit::Unknown
-        } else {
-            exit.unwrap_or(EngramCommandExit::Unknown)
-        };
         if let Some(cause) = other_writer {
             check.note_overlap(|| cause);
         }
-        let end_basis = if exit == Some(EngramCommandExit::NotFinished) {
-            // A background run's result marks its launch; it is never
-            // reported, so it takes no closing snapshot.
-            EngramBasisCapture::settled(None)
-        } else {
-            // The worktree the check ran in, as its opening snapshot was.
-            engram_spawn_basis_capture(check.target.basis_place(), &workers, provenance)
-        };
-        // A declared check's declaration and artifact are read as its command
-        // ends, on their own thread, like its closing snapshot.
-        let declared = check
-            .declared
-            .as_deref()
-            .filter(|_| check_exit != EngramCommandExit::NotFinished)
-            .map(|binding| {
-                let binding = binding.clone();
-                EngramCapture::spawn(&workers, move || {
-                    engram_declared_result(&binding, check_exit)
-                })
-            });
-        // Read from the lines this end keeps, so it names only what they show.
-        let focused_stage_line_missing = !showed_passing_tests
-            && engram_focused_stage_line_missing(
-                &check.command,
-                &result_lines,
-                &launcher_test_stages,
-            );
-        check.ended_at = Some(engram_interference_tick());
-        check.runtime_output_cut = runtime_output_cut;
-        check.end = Some(EngramTurnCheckEnd {
-            completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            exit: check_exit,
-            build_diagnostic,
-            result_lines,
-            showed_passing_tests,
-            focused_stage_line_missing,
-            end_basis,
-            declared,
-        });
+        engram_record_check_end(
+            check,
+            reading,
+            starting_check.as_ref(),
+            output,
+            exit,
+            runtime_output_cut,
+            &workers,
+            provenance,
+        );
     }
 
     /// A command in `session_id` will never report its end (Claude's Bash call

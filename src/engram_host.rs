@@ -12,7 +12,7 @@
 //!
 //! Does not own the checks, their captures, the overlap marking, the carried
 //! fence or the checkpoint's composition: those stay in the fragments
-//! `engram_turn_checks.rs`, `engram_carried_checks.rs`,
+//! `engram_turn_checks.rs`, `engram_carried_checks.rs`, `engram_reported_ends.rs`,
 //! `engram_check_recognition.rs`, `engram_launcher_stages.rs` and
 //! `engram_one_call.rs`, which only the
 //! component and this facade name. Does not own turn admission, source roots,
@@ -126,6 +126,58 @@ impl EngramHost<'_> {
         self.state.note_engram_host_write(path);
     }
 
+    /// The session in `record` is composing the prompt of a turn it starts:
+    /// a check an earlier turn left live with no end reported (its close
+    /// repeated a cached report or was skipped) is closed with outcome
+    /// Unknown, and the holder line that says so is published now, so this
+    /// very prompt carries it. The closed checks leave the live checks, so the
+    /// begin's clear does not close them again (`engram_close_unended_checks`).
+    /// Called under the state lock, by the dispatch that holds it, before the
+    /// prompt's host line is composed.
+    pub(crate) fn turn_prompt_composing(record: &mut SessionRecord) {
+        for line in
+            engram_close_unended_checks(&mut record.engram, None, "the next turn's start")
+        {
+            engram_publish_check_notice(
+                &record.session.id,
+                &mut record.engram,
+                line,
+                &mut std::io::stderr(),
+            );
+        }
+        record
+            .engram
+            .active_turn_checks
+            .retain(|check| check.end.is_some());
+    }
+
+    /// The runtime `exited` of the session in `record` exited: every Codex
+    /// test carried under it until its end is reported is closed with outcome
+    /// Unknown, since no end can come from it any more, and its holder told
+    /// (`engram_close_reported_end_carries`). Called under the state lock, by
+    /// the exit handler, once it matched the exiting runtime to the session.
+    pub(crate) fn runtime_exited(record: &mut SessionRecord, exited: &RuntimeToken) {
+        engram_close_reported_end_carries(record, exited);
+    }
+
+    /// The runtime of the session in `record` was cleared (stopped, reset or
+    /// gone): every Codex test carried under a runtime that is no longer the
+    /// session's, still waiting for its end, is closed with outcome Unknown,
+    /// since no end of it can reach the host any more, and its holder told
+    /// (`engram_take_stranded_reported_ends`). Called under the state lock,
+    /// by `SessionRecord::clear_runtime`, once the runtime is cleared.
+    pub(crate) fn runtime_cleared(record: &mut SessionRecord) {
+        let session_id = record.session.id.clone();
+        for line in engram_take_stranded_reported_ends(record) {
+            engram_publish_check_notice(
+                &session_id,
+                &mut record.engram,
+                line,
+                &mut std::io::stderr(),
+            );
+        }
+    }
+
     /// A turn of `session_id` is about to start: its worktree is resolved
     /// off the state lock for the marks the start makes under it.
     pub(crate) fn turn_starting(&self, session_id: &str) {
@@ -222,6 +274,24 @@ impl EngramHost<'_> {
     /// The exit a Codex command item states.
     pub(crate) fn codex_command_exit(item: &Value) -> EngramCommandExit {
         engram_codex_command_exit(item)
+    }
+
+    /// Codex reported, on `session_id`'s own thread, the end of the command
+    /// its item `key` names in a turn that is no longer running, an end the
+    /// turn's events otherwise drop. It is taken only for a Codex test of that
+    /// session carried since its turn closed under exactly that item key
+    /// (`note_engram_reported_end`); the transcript is not touched. Returns
+    /// whether it was taken.
+    pub(crate) fn codex_reported_end(
+        &self,
+        session_id: &str,
+        key: &str,
+        command: &str,
+        output: &str,
+        exit: EngramCommandExit,
+    ) -> bool {
+        self.state
+            .note_engram_reported_end(session_id, key, command, output, exit)
     }
 
     /// The exit a Claude Bash tool result states.

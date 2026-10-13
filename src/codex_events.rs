@@ -895,6 +895,32 @@ fn handle_shared_codex_app_server_notification(
                 return Ok(());
             }
             let event_turn_id = shared_codex_event_turn_id(message);
+            // A command that outlived its turn reports its end here, tagged
+            // with that turn, with no turn or with the turn now running. A
+            // test its turn's close carried under exactly this item's id takes
+            // it as its end whichever turn it names, and it is dropped from
+            // the transcript, as an end of a turn no longer running is.
+            if take_shared_codex_late_command_end(
+                state,
+                session_id,
+                session_thread_id.as_deref(),
+                message,
+                item,
+            ) {
+                trace_shared_codex_event(
+                    "drop",
+                    method,
+                    Some(session_id),
+                    session_thread_id.as_deref(),
+                    event_turn_id,
+                    turn_id.as_deref(),
+                    completed_turn_id.as_deref(),
+                    Some(*turn_started),
+                    pending_turn_start_request_id.as_deref(),
+                    Some("item_completed_carried_test_end"),
+                );
+                return Ok(());
+            }
             let matches_completed_agent_message = turn_id.is_none()
                 && completed_turn_id.is_some()
                 && matches!(
@@ -1180,6 +1206,45 @@ fn handle_shared_codex_task_complete(
         turn_id,
     );
     Ok(())
+}
+
+/// Hands the end in `message`, of a `commandExecution` `item`, whichever turn
+/// it names, to the Engram host, which takes it only for a test a turn's close
+/// carried under exactly this item's id (`EngramHost::codex_reported_end`).
+/// Only an end on the session's own thread, of an item with an id, that
+/// ended, is handed over: a command keyed by its line names no one run.
+/// Returns whether it was taken.
+fn take_shared_codex_late_command_end(
+    state: &AppState,
+    session_id: &str,
+    session_thread_id: Option<&str>,
+    message: &Value,
+    item: &Value,
+) -> bool {
+    if item.get("type").and_then(Value::as_str) != Some("commandExecution") {
+        return false;
+    }
+    let thread = codex_message_thread_id(message);
+    if thread.is_none() || thread != session_thread_id {
+        return false;
+    }
+    let (Some(key), Some(command)) = (
+        item.get("id").and_then(Value::as_str),
+        item.get("command").and_then(Value::as_str),
+    ) else {
+        return false;
+    };
+    let exit = EngramHost::codex_command_exit(item);
+    if exit == EngramCommandExit::NotFinished {
+        return false;
+    }
+    let output = item
+        .get("aggregatedOutput")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    state
+        .engram_host()
+        .codex_reported_end(session_id, key, command, output, exit)
 }
 
 /// Extracts the turn id from a Codex event by probing the several

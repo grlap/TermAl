@@ -494,6 +494,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         watcher_fence: None,
         runtime_output_cut: false,
         ended_at: None,
+        keyed_by_line: false,
         end: Some(EngramTurnCheckEnd {
             declared: None,
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -1125,6 +1126,626 @@ fn observations(checkpoint: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// A refused check must have no credit and a notice that identifies it
+/// without exposing its command arguments.
+fn has_check_outcome(turn: &CheckedTurn, checkpoint: &Value, cause: &str) -> bool {
+    if checkpoint["verification_evidence"]
+        .as_array()
+        .is_some_and(|evidence| !evidence.is_empty())
+    {
+        return false;
+    }
+    let fingerprint = engram_check_fingerprint(
+        &engram_check_command(SIZE_TEST).expect("the fixture command is recognised"),
+    );
+    turn.record(|record| {
+        record
+            .engram
+            .pending_source_root_line
+            .as_ref()
+            .is_some_and(|line| {
+                line.contains(cause)
+                    && line.contains(&fingerprint)
+                    && !line.contains("--test")
+                    && !line.contains("source_file_size")
+                    && !line.contains("--nocapture")
+            })
+    })
+}
+
+#[test]
+fn silent_check_outcome_truncated_notices_keep_complete_redacted_host_log() {
+    let turn = CheckedTurn::start("check-outcome-log-burst", true);
+    let mut log = Vec::new();
+    let mut notices = Vec::new();
+    turn.record_mut(|record| {
+        for index in 0..20 {
+            let command = engram_check_command(&format!("{SIZE_TEST} private-argument-{index}"))
+                .expect("the fixture command is recognised");
+            let line = engram_unrecorded_check_line(
+                &command,
+                "capture capacity reached; wait for earlier workers, then run the check again",
+            );
+            engram_publish_check_notice(
+                &turn.session_id,
+                &mut record.engram,
+                line.clone(),
+                &mut log,
+            );
+            notices.push(line);
+        }
+        let pending = record.engram.pending_source_root_line.as_ref().unwrap();
+        assert!(pending.len() <= ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES);
+        assert!(pending.contains("earlier lines cut; the host log has them"));
+        assert!(!pending.contains(&notices[0]));
+    });
+    let log = String::from_utf8(log).unwrap();
+    for line in notices {
+        assert_eq!(
+            log.matches(&format!("engram> session={} {line}\n", turn.session_id))
+                .count(),
+            1
+        );
+    }
+    assert!(!log.contains("private-argument"));
+    assert!(!log.contains("source_file_size"));
+}
+
+#[test]
+fn silent_check_outcome_background_launch_ack_is_not_a_late_completion() {
+    let turn = CheckedTurn::start("check-outcome-launch-ack", true);
+    turn.run(
+        "background-check",
+        SIZE_TEST,
+        EngramCommandExit::Code(0),
+        || {},
+    );
+    turn.record_mut(|record| {
+        let check = &mut record.engram.active_turn_checks[0];
+        check.end.as_mut().unwrap().exit = EngramCommandExit::NotFinished;
+        assert!(
+            engram_check_settlement_notices(CHECK_GRANT, &[], &record.engram.active_turn_checks)
+                .is_empty()
+        );
+        record.engram.active_turn_checks[0]
+            .end
+            .as_mut()
+            .unwrap()
+            .exit = EngramCommandExit::Code(0);
+        assert_eq!(
+            engram_check_settlement_notices(CHECK_GRANT, &[], &record.engram.active_turn_checks)
+                .len(),
+            1
+        );
+    });
+}
+
+#[test]
+fn silent_check_outcome_source_captures_are_reported_or_explained() {
+    let mut missing = Vec::new();
+    for shape in [
+        "missing-start",
+        "missing-finish",
+        "different",
+        "pending-finish",
+    ] {
+        let turn = CheckedTurn::start(&format!("check-outcome-{shape}"), true);
+        turn.run("check", SIZE_TEST, EngramCommandExit::Code(0), || {});
+        let original = turn.record(|record| {
+            record.engram.active_turn_checks[0]
+                .start_basis
+                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+                .expect("the actual start capture settled")
+                .expect("the actual start capture has a basis")
+        });
+        let capture = Arc::new(EngramBasisCapture::default());
+        if shape == "different" {
+            let mut changed = original.clone();
+            changed.source_revision = "another-source-revision".to_owned();
+            capture.finish(Some(changed));
+        } else if shape != "pending-finish" {
+            capture.finish(None);
+        }
+        turn.record_mut(|record| {
+            let check = &mut record.engram.active_turn_checks[0];
+            if shape == "missing-start" {
+                check.start_basis = capture.clone();
+            } else {
+                check.end.as_mut().expect("the command finished").end_basis = capture.clone();
+            }
+        });
+        // The pending case spends the real shared settlement budget. No
+        // sleeps or synthetic work determine which side of the cut it takes.
+        let checkpoint = turn.finish();
+        if shape == "pending-finish" {
+            capture.finish(Some(original));
+            let cached = turn
+                .state
+                .cached_engram_turn_report(&turn.session_id, CHECK_GRANT);
+            let accounted = cached.verification_evidence.is_empty()
+                && has_check_outcome(&turn, &checkpoint, "snapshot");
+            if !accounted {
+                missing.push("pending capture became available after an empty report was cached");
+            }
+        }
+        let expected_cause = match shape {
+            "missing-start" => "start source snapshot could not be captured",
+            "missing-finish" => "finish source snapshot could not be captured",
+            "different" => "source snapshots differ",
+            "pending-finish" => "finish source snapshot was still pending",
+            _ => unreachable!(),
+        };
+        if !has_check_outcome(&turn, &checkpoint, expected_cause) {
+            missing.push(shape);
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "recognised checks disappeared without a holder outcome: {missing:?}"
+    );
+}
+
+#[test]
+fn silent_check_outcome_capacity_refusals_are_explained() {
+    let mut missing = Vec::new();
+    for capacity in ["workers", "retained"] {
+        const NEXT_GRANT: &str = "capacity-next-grant";
+        const RECOVERED_GRANT: &str = "capacity-recovered-grant";
+        let turn = if capacity == "workers" {
+            CheckedTurn::start_with_turns(
+                "check-outcome-transient-capacity",
+                true,
+                None,
+                vec![
+                    checkpoint_reply(CHECK_GRANT),
+                    grant_reply(NEXT_GRANT),
+                    begin_reply(NEXT_GRANT),
+                    checkpoint_reply(NEXT_GRANT),
+                    grant_reply(RECOVERED_GRANT),
+                    begin_reply(RECOVERED_GRANT),
+                    checkpoint_reply(RECOVERED_GRANT),
+                ],
+                3,
+            )
+        } else {
+            CheckedTurn::start("check-outcome-capacity-retained", true)
+        };
+        let workers = turn.record(|record| record.engram.capture_workers.clone());
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let pending = if capacity == "workers" {
+            (0..ENGRAM_CAPTURE_WORKER_LIMIT)
+                .map(|_| {
+                    let gate = gate.clone();
+                    EngramCapture::spawn(&workers, move || {
+                        let (open, opened) = &*gate;
+                        let _ = opened
+                            .wait_timeout_while(
+                                open.lock().expect("gate mutex poisoned"),
+                                DEADLOCK_GUARD,
+                                |open| !*open,
+                            )
+                            .expect("gate mutex poisoned");
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            turn.record_mut(|record| {
+                record.engram.active_turn_checks = (0..ENGRAM_TURN_CHECK_LIMIT)
+                    .map(|sequence| {
+                        let mut check = turn.finished_check(sequence, engram_ready_basis_capture());
+                        check.end = None;
+                        check
+                    })
+                    .collect();
+                record.engram.next_turn_check_sequence = ENGRAM_TURN_CHECK_LIMIT;
+            });
+            Vec::new()
+        };
+        if capacity == "workers" {
+            // These captures belong to the previous turn. Closing its grant
+            // does not cancel their workers or allocate a new worker count.
+            turn.finish();
+            assert_eq!(
+                workers.load(std::sync::atomic::Ordering::SeqCst),
+                ENGRAM_CAPTURE_WORKER_LIMIT
+            );
+            begin_check_outcome_turn(&turn);
+            assert!(turn.record(|record| Arc::ptr_eq(&record.engram.capture_workers, &workers)));
+            assert_eq!(
+                turn.record(|record| record.engram.active_grant_id.clone())
+                    .as_deref(),
+                Some(NEXT_GRANT)
+            );
+        }
+        turn.run(
+            "capacity-refused",
+            SIZE_TEST,
+            EngramCommandExit::Code(0),
+            || {},
+        );
+        assert!(
+            turn.record(|record| {
+                record
+                    .engram
+                    .active_turn_checks
+                    .iter()
+                    .all(|check| check.key != "capacity-refused")
+            }),
+            "the resource cap must still refuse a new capture"
+        );
+        // Release every worker before asserting the outcome, including on
+        // the failing baseline; no blocked fixture thread is abandoned.
+        let (open, opened) = &*gate;
+        *open.lock().expect("gate mutex poisoned") = true;
+        opened.notify_all();
+        for capture in pending {
+            capture
+                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+                .expect("the released worker finishes");
+        }
+        if capacity == "retained" {
+            // The unfinished checks that filled the retained cap are fixture
+            // scaffolding: closing them with no end reported is its own test
+            // (`silent_check_outcome_a_started_check_with_no_end_is_closed_unknown`),
+            // and their lines would crowd this refusal out of the bounded
+            // holder line.
+            turn.record_mut(|record| {
+                record
+                    .engram
+                    .active_turn_checks
+                    .retain(|check| check.end.is_some())
+            });
+        }
+        let checkpoint = finish_check_outcome_turn(&turn);
+        if !has_check_outcome(&turn, &checkpoint, "capacity") {
+            missing.push(capacity);
+        }
+        if capacity == "workers" {
+            // The backlog is transient: once the previous turn's workers
+            // drain, this same session can record the next recognised check.
+            assert_eq!(workers.load(std::sync::atomic::Ordering::SeqCst), 0);
+            begin_check_outcome_turn(&turn);
+            turn.run(
+                "after-capacity",
+                SIZE_TEST,
+                EngramCommandExit::Code(0),
+                || {},
+            );
+            let recovered = finish_check_outcome_turn(&turn);
+            assert_eq!(recovered["grant_id"], RECOVERED_GRANT);
+            assert_eq!(
+                recovered["verification_evidence"].as_array().map(Vec::len),
+                Some(1),
+                "a drained backlog must not permanently disable checks: {recovered:#}"
+            );
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "capture capacity silently refused recognised checks: {missing:?}"
+    );
+}
+
+fn begin_check_outcome_turn(turn: &CheckedTurn) {
+    let dispatch = match turn
+        .state
+        .dispatch_turn(
+            &turn.session_id,
+            SendMessageRequest {
+                text: "Run the next check.".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .expect("root should reach admission")
+    {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("an idle root should dispatch"),
+    };
+    deliver_turn_dispatch(&turn.state, dispatch).expect("the next turn should be delivered");
+}
+
+fn finish_check_outcome_turn(turn: &CheckedTurn) -> Value {
+    turn.finish();
+    turn.transport
+        .requests()
+        .into_iter()
+        .rev()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the current turn is checkpointed")
+        .request
+}
+
+#[test]
+fn silent_check_outcome_completion_during_settlement_is_accounted() {
+    let turn = CheckedTurn::start("check-outcome-late-completion", true);
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("late-check", SIZE_TEST)
+        .expect("the start records");
+    turn.wait_for_snapshots();
+    let token = turn.record(|record| {
+        record
+            .runtime
+            .runtime_token()
+            .expect("the turn owns a runtime")
+    });
+    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+    let finishing = {
+        let state = turn.state.clone();
+        let session_id = turn.session_id.clone();
+        std::thread::spawn(move || {
+            state
+                .finish_turn_ok_if_runtime_matches(&session_id, &token)
+                .expect("the turn completes");
+        })
+    };
+    gate.wait_until_claimed();
+    recorder
+        .command_completed_with_exit(
+            "late-check",
+            SIZE_TEST,
+            "running 3 tests\ntest result: ok. 3 passed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .expect("the completion records while settlement is off the state lock");
+    turn.wait_for_snapshots();
+    assert!(turn.record(|record| record.engram.active_turn_checks[0].end.is_some()));
+    gate.release();
+    finishing
+        .join()
+        .expect("the checkpoint thread does not panic");
+    let checkpoint = turn
+        .transport
+        .requests()
+        .into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the turn is checkpointed")
+        .request;
+    assert!(
+        has_check_outcome(&turn, &checkpoint, "settlement"),
+        "a completion visible before publication was cleared without a record or holder notice: {checkpoint:#}"
+    );
+}
+
+#[test]
+fn silent_check_outcome_notices_do_not_escape_a_stale_or_cached_closer() {
+    for changed in ["grant", "generation", "cached"] {
+        let turn = CheckedTurn::start(&format!("check-outcome-owner-{changed}"), true);
+        turn.run("check", SIZE_TEST, EngramCommandExit::Code(0), || {});
+        let failed = Arc::new(EngramBasisCapture::default());
+        failed.finish(None);
+        turn.record_mut(|record| {
+            record.engram.active_turn_checks[0].start_basis = failed;
+            record.engram.pending_source_root_line = None;
+        });
+        let (token, generation) = turn.record(|record| {
+            (
+                record
+                    .runtime
+                    .runtime_token()
+                    .expect("the turn owns a runtime"),
+                record.active_turn_generation,
+            )
+        });
+        let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+        let closing = {
+            let state = turn.state.clone();
+            let session_id = turn.session_id.clone();
+            std::thread::spawn(move || {
+                state.checkpoint_engram_turn_off_lock(
+                    &session_id,
+                    EngramCheckpointPurpose::TurnTerminal,
+                    Some(&token),
+                    Some(generation),
+                    EngramNextIntent::Wait,
+                    Some(EngramExecutionOutcome::Succeeded),
+                    None,
+                )
+            })
+        };
+        gate.wait_until_claimed();
+        turn.record_mut(|record| match changed {
+            "grant" => record.engram.active_grant_id = Some("successor-grant".to_owned()),
+            "generation" => record.active_turn_generation += 1,
+            "cached" => {
+                // Another closer's report won while this candidate resolved.
+                // Its exact bytes govern retries; the discarded candidate's
+                // source-capture refusal must not be published alongside it.
+                record.engram.active_turn_report =
+                    Some((CHECK_GRANT.to_owned(), EngramTurnReport::default()));
+            }
+            _ => unreachable!(),
+        });
+        gate.release();
+        let outcome = closing.join().expect("the closer does not panic");
+        assert!(
+            turn.record(|record| record.engram.pending_source_root_line.is_none()),
+            "a {changed} closer published its discarded capture notice"
+        );
+        let checkpoints: Vec<_> = turn
+            .transport
+            .requests()
+            .into_iter()
+            .filter(|request| request.request["operation"] == "turn_checkpoint")
+            .collect();
+        if changed == "cached" {
+            assert_eq!(checkpoints.len(), 1);
+            assert!(observations(&checkpoints[0].request).is_empty());
+            assert!(
+                checkpoints[0]
+                    .request
+                    .get("verification_evidence")
+                    .is_none()
+            );
+        } else {
+            assert!(matches!(outcome, EngramCheckpointOutcome::Skipped));
+            assert!(checkpoints.is_empty(), "a stale closer sent a checkpoint");
+        }
+    }
+}
+
+/// A recognised check the host saw start but whose end is never reported (a
+/// runtime that lost the command's completion event) is closed at the turn's
+/// close with outcome Unknown and a holder line saying no end was reported;
+/// it is never credited. A background run, whose result marks only its
+/// launch, is exempt. An end that arrives after that closure adds no second
+/// outcome: the holder is told of it once, with its exit status, as a late
+/// end of the check closed Unknown.
+#[test]
+fn silent_check_outcome_a_started_check_with_no_end_is_closed_unknown() {
+    let turn = CheckedTurn::start("check-outcome-no-end", true);
+    let command = engram_check_command(SIZE_TEST).expect("the fixture command is recognised");
+    let fingerprint = engram_check_fingerprint(&command);
+    let program = command.program.clone();
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("lost-end", SIZE_TEST)
+        .expect("the start records");
+    turn.wait_for_snapshots();
+    turn.run("background", SIZE_TEST, EngramCommandExit::NotFinished, || {});
+    let checkpoint = turn.finish();
+    assert!(
+        has_check_outcome(&turn, &checkpoint, "no end was reported"),
+        "a started check with no end was dropped without a holder outcome: {checkpoint:#}"
+    );
+    let closing = turn.record(|record| {
+        record
+            .engram
+            .pending_source_root_line
+            .clone()
+            .unwrap_or_default()
+    });
+    assert!(closing.contains("outcome Unknown"), "{closing}");
+    assert_eq!(
+        closing.matches("no end was reported").count(),
+        1,
+        "only the check with no end is closed, not the background run: {closing}"
+    );
+
+    turn.record_mut(|record| record.engram.pending_source_root_line = None);
+    let late_end = |recorder: &mut SessionRecorder| {
+        recorder
+            .command_completed_with_exit(
+                "lost-end",
+                SIZE_TEST,
+                "running 3 tests\ntest result: ok. 3 passed",
+                CommandStatus::Success,
+                EngramCommandExit::Code(0),
+            )
+            .expect("the late end records");
+    };
+    late_end(&mut recorder);
+    let late = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the late end is shown to the holder");
+    assert!(
+        late.contains(&format!(
+            "an end (exit code 0) was reported for a {program} test (check {fingerprint}) under \
+             the same runtime id after a {program} test (check {fingerprint}) was closed with \
+             outcome Unknown; it is not recorded"
+        ))
+            && !late.contains("--nocapture")
+            && !late.contains("source_file_size"),
+        "{late}"
+    );
+    assert_eq!(
+        turn.transport
+            .requests()
+            .iter()
+            .filter(|request| request.request["operation"] == "turn_checkpoint")
+            .count(),
+        1,
+        "the late end adds no second outcome"
+    );
+    // The same end reported again is not told twice.
+    turn.record_mut(|record| record.engram.pending_source_root_line = None);
+    late_end(&mut recorder);
+    assert_eq!(
+        turn.record(|record| record.engram.pending_source_root_line.clone()),
+        None
+    );
+}
+
+/// A turn whose close repeats a cached report (another closer of its grant
+/// built it first) does not resolve its checks, so a check started with no
+/// end reported is still live afterwards. The next turn's start closes it
+/// with outcome Unknown, once, and the prompt that starts that turn tells
+/// the holder.
+#[test]
+fn silent_check_outcome_a_check_a_cached_close_left_is_closed_at_the_next_turn_start() {
+    const NEXT_GRANT: &str = "cached-close-next-grant";
+    let turn = CheckedTurn::start_with_turns(
+        "check-outcome-cached-close",
+        true,
+        None,
+        vec![
+            checkpoint_reply(CHECK_GRANT),
+            grant_reply(NEXT_GRANT),
+            begin_reply(NEXT_GRANT),
+            checkpoint_reply(NEXT_GRANT),
+        ],
+        2,
+    );
+    turn.recorder()
+        .command_started("lost-end", SIZE_TEST)
+        .expect("the start records");
+    turn.wait_for_snapshots();
+    turn.record_mut(|record| {
+        record.engram.active_turn_report =
+            Some((CHECK_GRANT.to_owned(), EngramTurnReport::default()));
+    });
+    turn.finish();
+    let after_close = turn.record(|record| {
+        (
+            record.engram.pending_source_root_line.clone(),
+            record
+                .engram
+                .active_turn_checks
+                .iter()
+                .any(|check| check.key == "lost-end" && check.end.is_none()),
+        )
+    });
+    assert!(
+        !after_close
+            .0
+            .as_deref()
+            .is_some_and(|line| line.contains("no end was reported")),
+        "the cached close resolves no check: {:?}",
+        after_close.0
+    );
+    assert!(after_close.1, "the check is still live after the cached close");
+
+    begin_check_outcome_turn(&turn);
+    // Told in the very prompt that starts the next turn, not a turn later.
+    let CodexRuntimeCommand::Prompt { command, .. } =
+        receive(&turn._runtime_rx, "the next turn's prompt reaches the runtime")
+    else {
+        panic!("the next turn's prompt is delivered");
+    };
+    assert_eq!(
+        command
+            .prompt
+            .matches("no end was reported for it by the next turn's start")
+            .count(),
+        1,
+        "{}",
+        command.prompt
+    );
+    assert!(
+        turn.record(|record| record
+            .engram
+            .active_turn_checks
+            .iter()
+            .all(|check| check.key != "lost-end")),
+        "the closed check left the live checks"
+    );
+}
+
 #[test]
 fn a_passing_test_run_is_reported_as_test_evidence_with_its_environment() {
     let turn = CheckedTurn::start("passing", true);
@@ -1431,6 +2052,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         watcher_fence: None,
         runtime_output_cut: false,
         ended_at: None,
+        keyed_by_line: false,
         end: Some(EngramTurnCheckEnd {
             declared: None,
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -1496,6 +2118,7 @@ pub(super) fn finished_check(
         watcher_fence: None,
         runtime_output_cut: false,
         ended_at: None,
+        keyed_by_line: false,
         end: Some(EngramTurnCheckEnd {
             declared: None,
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
@@ -4198,3 +4821,8 @@ mod focused_node_checks;
 
 #[path = "engram_declared_checks.rs"]
 mod declared_checks;
+
+// Late ends of checks closed with outcome Unknown, a child module so this
+// file does not grow further.
+#[path = "engram_unended_closures.rs"]
+mod unended_closures;

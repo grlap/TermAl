@@ -2218,6 +2218,14 @@ impl AppState {
             }) {
                 return Ok(());
             }
+            // A test carried until its end is reported can get no end from
+            // the runtime that exited.
+            EngramHost::runtime_exited(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                token,
+            );
             // A root exit is not tree cleanup. All provider callbacks (including
             // an ACP writer awakened by a failed pending request) share this
             // retained lease, so none may discard it while cleanup is uncertain.

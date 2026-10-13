@@ -518,6 +518,10 @@ impl AppState {
                 .map(|source| peer_message_runtime_prompt(&runtime_prompt, source))
                 .unwrap_or(runtime_prompt)
         };
+        // A check an earlier turn left live with no end reported is closed
+        // with outcome Unknown here, before the host line below is composed,
+        // so this very prompt tells the holder (`EngramHost`).
+        EngramHost::turn_prompt_composing(record);
         // A one-time host line about where the agent's turns on claimed work
         // are measured (`engram_source_roots.rs`): after the context fence
         // when one is delivered, before the prompt. It is cleared only once the
