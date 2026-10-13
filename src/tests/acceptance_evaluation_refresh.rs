@@ -453,6 +453,7 @@ fn enable_attempt_history(state: &AppState, id: &str, parent: &str, child: &str)
         previous: Vec::new(),
         refusal: None,
         prepared_brief: None,
+        citation_retry: None,
     });
     inner.mark_delegation_mutated(index);
     state.commit_locked(&mut inner).unwrap();

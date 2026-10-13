@@ -717,6 +717,7 @@ impl AppState {
                 previous: Vec::new(),
                 refusal: None,
                 prepared_brief: None,
+                citation_retry: None,
             });
             target
         });

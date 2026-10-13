@@ -3692,7 +3692,27 @@ starts this preparation again. The response gives the running evaluator the
 fresh host-authored brief with the old and new cuts and newly available checks.
 It must judge every criterion afresh. Other definitive refusals end the attempt
 and are reported to the parent; source/root changes keep their existing
-distinct refusal. A late evidence append alone does not trigger refresh: the
+distinct refusal.
+
+One refusal is not definitive at first: an off-source
+`acceptance_evaluation_refused` whose `details.cause` names its criterion and,
+in `citable_records.records`, the records Engram admits for that bound
+criterion instead (same kind, judged revision and workspace, newest first, at
+most four; absent when none exists, and then the refusal stays definitive). The host keeps it as the attempt's one citation retry, persisted
+with the attempt history, and answers the evaluator that it may submit once
+more under the same key and cut, citing for each named criterion only the
+records named for it. A re-submission citing anything else for those criteria
+is refused before it reaches the tracker. A refusal of the re-submission, with
+or without alternatives, is definitive. A new attempt key starts without a
+retry.
+
+The briefs mark a verification record context only when it ran on another
+source than the evaluation judges: at another revision, or at the same
+revision in another workspace when the evaluation is on a named source root.
+The workspace comes from the record's `source_workspace` in the tracker's
+window, or from the obligation's original-closure projection, which also lends
+it to the window's copy of that record; a record whose workspace is unknown is
+not marked. A late evidence append alone does not trigger refresh: the
 producer's exception for a check passed on the declared source revision still
 applies. No refusal permits another send of the old judgment under a new cut.
 

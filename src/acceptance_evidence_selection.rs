@@ -733,7 +733,7 @@ fn render_acceptance_criterion_evidence(
                         acceptance_brief_evidence_line(
                             evidence,
                             detail == AcceptanceOmissionDetail::Compact,
-                            task.judged_revision.as_deref(),
+                            task.judged_source(),
                         )
                         .0,
                     );
@@ -783,7 +783,7 @@ fn acceptance_criterion_evidence_cuts(
         let clipped = acceptance_brief_evidence_line(
             evidence,
             detail == AcceptanceOmissionDetail::Compact,
-            task.judged_revision.as_deref(),
+            task.judged_source(),
         )
         .1;
         cuts.left_out.retain(|entry| entry != locator);
@@ -1190,10 +1190,30 @@ fn apply_acceptance_binding_evidence(
             verification: Some(AcceptanceEvidenceVerification {
                 check_kind: verification.check_kind, result: verification.result,
                 source_revision: Some(verification.source_basis.source_revision),
+                source_workspace: acceptance_source_workspace(&verification.source_basis.workspace_id),
             }),
         });
     }
     for evidence in additions {
+        // The canonical closure names the workspace its record ran in, which
+        // the window's copy of that same record may not: carry it over, so a
+        // complete copy listed in place of the projection is marked alike.
+        let workspace = evidence
+            .verification
+            .as_ref()
+            .and_then(|verification| verification.source_workspace.clone());
+        for entry in task
+            .indexed_evidence
+            .iter_mut()
+            .chain(task.evidence.iter_mut())
+            .filter(|entry| entry.locator == evidence.locator)
+        {
+            if let Some(verification) = entry.verification.as_mut() {
+                if verification.source_workspace.is_none() {
+                    verification.source_workspace = workspace.clone();
+                }
+            }
+        }
         // A selected complete record remains complete. The closure association
         // adds canonical discovery without replacing its stored body.
         if !task

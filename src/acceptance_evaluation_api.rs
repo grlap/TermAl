@@ -12,7 +12,7 @@ const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME: &str = "termal_submit_acceptance_evaluation";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_acceptance_evaluation";
-const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A definitive refusal ends that attempt. Only acceptance_evaluation_resubmit supplies a refreshed host brief: judge every criterion afresh and echo its new attemptKey. Other refusals must be reported to the parent. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. If a refusal says the worktree changed while it was evaluated, do not submit again: finish and report it, because only the parent can request a new evaluation. Once an evaluation is recorded, further submissions are refused.";
+const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A definitive refusal ends that attempt. Only acceptance_evaluation_resubmit supplies a refreshed host brief: judge every criterion afresh and echo its new attemptKey. A refusal whose answer names records the tracker admits instead allows one re-submission under the same attemptKey, citing for each criterion it names only the records named for it; any further refusal is final. Other refusals must be reported to the parent. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. If a refusal says the worktree changed while it was evaluated, do not submit again: finish and report it, because only the parent can request a new evaluation. Once an evaluation is recorded, further submissions are refused.";
 
 const ACCEPTANCE_EVALUATION_READER_LABEL: &str = "acceptance-evaluation reader";
 const ACCEPTANCE_EVALUATION_SUBMIT_LABEL: &str = "acceptance-evaluation submission";
@@ -67,6 +67,16 @@ impl AppState {
     /// basis comes from, or `None` when it cannot be taken within the freeze
     /// budget ([`bounded_content_revision_capture`]).
     fn acceptance_evaluation_source_revision(&self, place: &EngramBasisPlace) -> Option<String> {
+        self.acceptance_evaluation_source_basis(place)
+            .map(|basis| basis.source_revision)
+    }
+
+    /// The whole source basis at `place`, taken as
+    /// [`Self::acceptance_evaluation_source_revision`] takes its revision.
+    fn acceptance_evaluation_source_basis(
+        &self,
+        place: &EngramBasisPlace,
+    ) -> Option<EngramExecutionSourceBasis> {
         let live = self
             .inner
             .lock()
@@ -78,8 +88,25 @@ impl AppState {
             &live,
             ACCEPTANCE_SOURCE_CAPTURE_LIMIT,
             REVIEW_FREEZE_TIMEOUT,
-            move || engram_place_source_basis(&place).map(|basis| basis.source_revision),
+            move || engram_place_source_basis(&place),
         )
+    }
+
+    /// The revision an evaluation at `place` judges and declares, and the
+    /// workspace it judges. Engram judges a workspace only on a named source
+    /// root: the evaluation declares none, so on a workdir a peer worktree's
+    /// record of the same revision is admitted and no workspace is returned.
+    fn acceptance_evaluation_judged_source(
+        &self,
+        place: &EngramBasisPlace,
+    ) -> (Option<String>, Option<String>) {
+        let Some(basis) = self.acceptance_evaluation_source_basis(place) else {
+            return (None, None);
+        };
+        let workspace = matches!(place, EngramBasisPlace::Named { .. })
+            .then(|| acceptance_source_workspace(&basis.workspace_id))
+            .flatten();
+        (Some(basis.source_revision), workspace)
     }
 }
 
@@ -1484,9 +1511,11 @@ impl AppState {
                         .flatten()
                         .map(|model| model.trim().to_owned())
                 });
-                let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
-                // The brief marks records of any other revision context only.
+                let (source_fingerprint, judged_workspace) =
+                    self.acceptance_evaluation_judged_source(&place);
+                // The brief marks records of any other source context only.
                 task.judged_revision = source_fingerprint.clone();
+                task.judged_workspace = judged_workspace;
                 let unmeasured = unmeasured(&source_fingerprint);
                 let seed = AcceptanceEvaluationTargetSeed {
                     naming_history: Some(naming_history.clone()),
@@ -1611,9 +1640,11 @@ impl AppState {
                         carried.evaluation,
                     )));
                 }
-                let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
-                // The brief marks records of any other revision context only.
+                let (source_fingerprint, judged_workspace) =
+                    self.acceptance_evaluation_judged_source(&place);
+                // The brief marks records of any other source context only.
                 task.judged_revision = source_fingerprint.clone();
+                task.judged_workspace = judged_workspace;
                 {
                     let inner = self.inner.lock().expect("state mutex poisoned");
                     if !engram_work_naming_is_current(&inner, &target.store, &naming_history) {
@@ -1720,6 +1751,11 @@ impl AppState {
         }
         if let Some(refusal) = authority.target.attempt_history.as_ref().and_then(|h| h.refusal.as_ref()) {
             return Err(ApiError::conflict(format!("this attempt was definitively refused: {}. Finish and report it; a fresh judgment requires a new host-authored brief", refusal.message)));
+        }
+        // Checked before anything is sent: the one re-submission a refusal
+        // allowed cites only the records it named.
+        if let Some(retry) = authority.target.attempt_history.as_ref().and_then(|h| h.citation_retry.as_ref()) {
+            request.validate_citation_retry(retry).map_err(ApiError::bad_request)?;
         }
         request
             .validate_coverage(authority.target.criteria_count)
@@ -1963,8 +1999,11 @@ impl AppState {
             (AcceptanceEvaluationRunOutcome::Receipt(receipt), _) => receipt,
             // A confirmed refusal settles this key, never authorizes a changed
             // judgment under the old cut. Only the typed resubmit asks for reads.
-            (AcceptanceEvaluationRunOutcome::Refused { code, message: words }, None) => {
-                self.record_acceptance_evaluation_refusal(&authority, code.as_deref(), &words, original)?;
+            (AcceptanceEvaluationRunOutcome::Refused { code, message: words, alternatives }, None) => {
+                let shown = alternatives.clone();
+                if self.record_acceptance_evaluation_refusal(&authority, code.as_deref(), &words, original, alternatives)? {
+                    return Err(ApiError::conflict(acceptance_citation_retry_offer(&words, &shown)));
+                }
                 if code.as_deref() == Some("acceptance_evaluation_resubmit")
                     && authority.target.attempt_history.as_ref().is_some_and(|h| h.schema_version == 1)
                 {

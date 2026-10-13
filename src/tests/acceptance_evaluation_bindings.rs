@@ -170,6 +170,7 @@ fn verification_records_are_marked_with_kind_result_and_revision_in_both_briefs(
             check_kind: "test".to_owned(),
             result: "passed".to_owned(),
             source_revision: Some("content-v1:fc2ca148".to_owned()),
+            source_workspace: None,
         })
     );
     let marker = "verification test passed at content-v1:fc2ca148";
@@ -227,6 +228,7 @@ fn a_verification_from_another_revision_is_context_only_and_the_binding_names_th
             check_kind: "test".to_owned(),
             result: "passed".to_owned(),
             source_revision: Some(EARLIER_REVISION.to_owned()),
+            source_workspace: None,
         }),
     });
     task.criterion_evidence.push(AcceptanceCriterionEvidence {

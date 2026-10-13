@@ -185,6 +185,8 @@ impl AppState {
             submission: old.submission.clone(),
             refusal: history.refusal.take(),
         });
+        // A new key is a new attempt, with its own one re-submission.
+        history.citation_retry = None;
         history.ordinal += 1;
         let key = acceptance_evaluation_ordinal_key(&previous.id, history.ordinal);
         let prompt =

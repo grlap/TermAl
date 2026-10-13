@@ -815,6 +815,7 @@ include!("review_freeze_api.rs");
 include!("acceptance_evaluation.rs");
 include!("acceptance_evaluation_attempts.rs");
 include!("acceptance_evaluation_refusal.rs");
+include!("acceptance_evaluation_citation_retry.rs");
 include!("acceptance_evaluation_reuse.rs");
 include!("acceptance_evaluation_brief_delivery.rs");
 include!("acceptance_evaluation_api.rs");

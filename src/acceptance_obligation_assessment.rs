@@ -1049,7 +1049,7 @@ fn acceptance_brief_protected_rendering(
             let (line, clipped) = acceptance_brief_evidence_line(
                 entry,
                 index - start < plan.clipped,
-                task.judged_revision.as_deref(),
+                task.judged_source(),
             );
             if !clipped && !entry.cut_by_tracker && entry.summary.is_some() {
                 fully_rendered.insert(entry.locator.clone());

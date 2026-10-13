@@ -1,14 +1,19 @@
 // Confirmed no-record ownership. Unknown writes retain the original submission
 // ladder; a later refusal never establishes that an earlier send did not land.
 impl AppState {
+    /// Settles a confirmed refusal of this attempt. One that names citable
+    /// alternatives, on an attempt that has not used its re-submission, is
+    /// kept as that retry instead of as definitive, and `true` says so
+    /// (acceptance_evaluation_citation_retry.rs).
     fn record_acceptance_evaluation_refusal(
         &self,
         authority: &AcceptanceEvaluationSubmitAuthority,
         code: Option<&str>,
         message: &str,
         original: AcceptanceEvaluationOpenWrite,
-    ) -> Result<(), ApiError> {
-        let (written, dispatch) = {
+        alternatives: Vec<AcceptanceCitableAlternatives>,
+    ) -> Result<bool, ApiError> {
+        let (written, dispatch, retry) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 acceptance_evaluation_attempt_index_locked(&inner, authority).ok_or_else(|| {
@@ -34,12 +39,22 @@ impl AppState {
                         previous: Vec::new(),
                         refusal: None,
                         prepared_brief: None,
+                        citation_retry: None,
                     });
-            history.refusal = Some(AcceptanceEvaluationDefinitiveRefusal {
-                code: code.unwrap_or("usage_error").to_owned(),
-                message: message.to_owned(),
-                original,
-            });
+            let retry = acceptance_citation_retry_allowed(history, code, &alternatives);
+            if retry {
+                history.citation_retry = Some(AcceptanceEvaluationCitationRetry {
+                    code: code.unwrap_or_default().to_owned(),
+                    message: message.to_owned(),
+                    alternatives,
+                });
+            } else {
+                history.refusal = Some(AcceptanceEvaluationDefinitiveRefusal {
+                    code: code.unwrap_or("usage_error").to_owned(),
+                    message: message.to_owned(),
+                    original,
+                });
+            }
             history.identity_refused |= code.is_some() && message.contains("independent_session evaluation must come from a session that neither holds nor executes the run");
             target.submission = AcceptanceEvaluationSubmission::None;
             inner.mark_delegation_mutated(index);
@@ -50,7 +65,7 @@ impl AppState {
                         "confirmed refusal retained; its local acknowledgement is unknown: {e:#}"
                     ))
                 })?;
-            (inner.delegations[index].clone(), dispatch)
+            (inner.delegations[index].clone(), dispatch, retry)
         };
         if dispatch != PersistDispatch::Synchronous {
             self.confirm_acceptance_evaluation_submission_durable(authority, &written)
@@ -60,6 +75,6 @@ impl AppState {
                     ))
                 })?;
         }
-        Ok(())
+        Ok(retry)
     }
 }

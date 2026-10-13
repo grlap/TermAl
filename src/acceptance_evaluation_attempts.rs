@@ -21,6 +21,10 @@ struct AcceptanceEvaluationAttemptHistory {
     refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     prepared_brief: Option<AcceptanceEvaluationPreparedBrief>,
+    /// A refusal of this attempt that allowed its one re-submission
+    /// (acceptance_evaluation_citation_retry.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    citation_retry: Option<AcceptanceEvaluationCitationRetry>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

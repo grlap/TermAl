@@ -558,6 +558,9 @@ struct EngramVerificationForEvaluation {
     result: Option<String>,
     #[serde(default)]
     source_revision: Option<String>,
+    /// The workspace the check ran in, from the record's source basis.
+    #[serde(default)]
+    source_workspace: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -565,6 +568,20 @@ struct AcceptanceEvidenceVerification {
     check_kind: String,
     result: String,
     source_revision: Option<String>,
+    /// `None` when the tracker did not say, or said it in an unusable form.
+    source_workspace: Option<String>,
+}
+
+/// The longest workspace id kept from a record or measured for a judgment,
+/// the bound the tracker puts on a source basis's workspace.
+const MAX_ACCEPTANCE_SOURCE_WORKSPACE_BYTES: usize = 512;
+
+/// A workspace id as a source basis names it: a non-empty path of bounded
+/// size without control characters, which could break the brief's lines.
+fn acceptance_source_workspace(workspace: &str) -> Option<String> {
+    ((1..=MAX_ACCEPTANCE_SOURCE_WORKSPACE_BYTES).contains(&workspace.len())
+        && !workspace.chars().any(char::is_control))
+    .then(|| workspace.to_owned())
 }
 
 /// The typed fields of a verification record, kept only as bounded words: they
@@ -591,10 +608,15 @@ fn acceptance_evidence_verification(
                     .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '.')
         })
         .map(str::to_owned);
+    let source_workspace = verification
+        .source_workspace
+        .as_deref()
+        .and_then(acceptance_source_workspace);
     Some(AcceptanceEvidenceVerification {
         check_kind: check_kind.to_owned(),
         result: result.to_owned(),
         source_revision,
+        source_workspace,
     })
 }
 
@@ -693,6 +715,20 @@ struct AcceptanceEvaluationTask {
     /// criterion, so the briefs mark such records context only. `None` when
     /// the source is unmeasured.
     judged_revision: Option<String>,
+    /// The workspace this evaluation judges, from the same measured source
+    /// basis as `judged_revision`. Engram refuses, for a bound criterion, a
+    /// verification record that ran in another workspace even at the same
+    /// revision, so the briefs mark such records context only. `None` when
+    /// the source is unmeasured.
+    judged_workspace: Option<String>,
+}
+
+/// The source an evaluation judges, as the brief markers compare a
+/// verification record against it.
+#[derive(Clone, Copy, Debug, Default)]
+struct AcceptanceJudgedSource<'a> {
+    revision: Option<&'a str>,
+    workspace: Option<&'a str>,
 }
 
 fn parse_acceptance_evaluation_task(
@@ -803,10 +839,18 @@ fn parse_acceptance_evaluation_task(
         obligation_assessments: Vec::new(),
         // Set by the request once the host has measured the source.
         judged_revision: None,
+        judged_workspace: None,
     })
 }
 
 impl AcceptanceEvaluationTask {
+    fn judged_source(&self) -> AcceptanceJudgedSource<'_> {
+        AcceptanceJudgedSource {
+            revision: self.judged_revision.as_deref(),
+            workspace: self.judged_workspace.as_deref(),
+        }
+    }
+
     fn canonical_work_id(&self) -> Option<&str> {
         self.canonical_identity
             .as_ref()
@@ -940,21 +984,31 @@ fn acceptance_brief_binding(binding: &AcceptanceCriterionBinding, judged: Option
     )
 }
 
-/// The marker on a verification record that ran at another source revision
-/// than `judged`, the one this evaluation judges: Engram refuses it as a
-/// citation for a bound criterion, so it is context only. Empty for any other
-/// record, and when either revision is unknown.
-fn acceptance_brief_off_revision_marker(
+/// The marker on a verification record that ran on another source than
+/// `judged`, the one this evaluation judges: at another source revision, or at
+/// the same revision in another workspace. Engram refuses it as a citation
+/// for a bound criterion, so it is context only. A revision that differs is
+/// named first, being the stronger reason. Empty for any other record, and
+/// when neither comparison can be made because a side is unknown.
+fn acceptance_brief_off_source_marker(
     evidence: &AcceptanceEvaluationEvidence,
-    judged: Option<&str>,
+    judged: AcceptanceJudgedSource<'_>,
 ) -> String {
-    let ran_at = evidence
-        .verification
-        .as_ref()
-        .and_then(|verification| verification.source_revision.as_deref());
-    match (ran_at, judged) {
-        (Some(ran_at), Some(judged)) if ran_at != judged => format!(
-            " [context only: it ran at {ran_at}, not at {judged}, the revision this evaluation judges; not citable for a bound criterion]"
+    let Some(verification) = evidence.verification.as_ref() else {
+        return String::new();
+    };
+    if let (Some(ran_at), Some(judged)) = (verification.source_revision.as_deref(), judged.revision) {
+        if ran_at != judged {
+            return format!(
+                " [context only: it ran at {ran_at}, not at {judged}, the revision this evaluation judges; not citable for a bound criterion]"
+            );
+        }
+    }
+    match (verification.source_workspace.as_deref(), judged.workspace) {
+        (Some(ran_in), Some(judged)) if ran_in != judged => format!(
+            " [context only: it ran in workspace {}, not in {}, the workspace this evaluation judges; not citable for a bound criterion]",
+            acceptance_brief_line(ran_in),
+            acceptance_brief_line(judged),
         ),
         _ => String::new(),
     }
@@ -1120,7 +1174,7 @@ fn acceptance_brief_failed_contract(
 }
 
 /// Engram's admission rule for a pass, as both briefs state it.
-const ACCEPTANCE_BRIEF_ADMISSION_RULE: &str = "A pass with basis observed may cite only host-minted verification records that passed (each marked `verification <kind> passed` in the evidence list); a pass on a bound criterion must use basis observed and cite only records of its bound kind. A judgment pass may cite notes and gates. If the tracker refuses a citation, finish and report the refusal; a new judgment is requested explicitly with a freshly prepared host brief and key.";
+const ACCEPTANCE_BRIEF_ADMISSION_RULE: &str = "A pass with basis observed may cite only host-minted verification records that passed (each marked `verification <kind> passed` in the evidence list); a pass on a bound criterion must use basis observed and cite only records of its bound kind. A judgment pass may cite notes and gates. If the tracker refuses a citation, finish and report the refusal, unless the refusal names records the tracker admits instead: then submit once more, citing for each criterion it names only the records named for it, and report any further refusal. Otherwise a new judgment is requested explicitly with a freshly prepared host brief and key.";
 
 /// `body` cut to its first `MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS` characters,
 /// with the marker that says so, or `None` when that is not shorter than the
@@ -1142,13 +1196,13 @@ fn acceptance_brief_clipped_body(body: &str, locator: &str) -> Option<String> {
 /// A body is listed whole; with `clip` it is cut to the entry bound where that
 /// makes the entry shorter. Every cut, the host's or the tracker's, is said on
 /// the entry with its locator and the sizes known, so that an evaluator never
-/// takes a part for the whole record. A verification record that ran at
-/// another source revision than `judged` is marked context only
-/// (`acceptance_brief_off_revision_marker`).
+/// takes a part for the whole record. A verification record that ran on
+/// another source than `judged` is marked context only
+/// (`acceptance_brief_off_source_marker`).
 fn acceptance_brief_evidence_line(
     evidence: &AcceptanceEvaluationEvidence,
     clip: bool,
-    judged: Option<&str>,
+    judged: AcceptanceJudgedSource<'_>,
 ) -> (String, bool) {
     let locator = acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
     let mut attribution = match evidence.verification.as_ref() {
@@ -1209,7 +1263,7 @@ fn acceptance_brief_evidence_line(
     let citable = if evidence.non_holder || !is_citable_acceptance_locator(&evidence.locator) {
         " [context only: the tracker refuses this as a citation]".to_owned()
     } else {
-        acceptance_brief_off_revision_marker(evidence, judged)
+        acceptance_brief_off_source_marker(evidence, judged)
     };
     (
         format!("  - {locator} ({attribution}){citable}: {text}"),
@@ -1758,7 +1812,7 @@ fn render_acceptance_evaluator_brief_with_index_detail(
     let mut fully_rendered = BTreeSet::new();
     for (index, entry) in listed.iter().enumerate() {
         let (line, was_clipped) =
-            acceptance_brief_evidence_line(entry, index < clipped, task.judged_revision.as_deref());
+            acceptance_brief_evidence_line(entry, index < clipped, task.judged_source());
         if was_clipped {
             cuts.clipped.push(locator_of(entry));
         }
@@ -1835,8 +1889,10 @@ new verdict or infer missing proof.\n\
 sentences on a single line.\n\
 - Submit once with {submit_tool}. If the host returns a\n  \
 refusal, finish and report it unless the host supplies a refreshed brief.\n  \
-Judge every criterion afresh under that brief and echo its new key. Call no other\n  \
-tracker tool.\n\
+Judge every criterion afresh under that brief and echo its new key. If instead\n  \
+the refusal names records the tracker admits and allows one re-submission,\n  \
+submit once more, citing for each criterion it names only the records named\n  \
+for it; any further refusal is final. Call no other tracker tool.\n\
 - Finish with a short plain-text summary of the verdicts; it is the `Summary:`\n  \
 of the result packet described below.",
         work_ref = acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
@@ -2109,7 +2165,7 @@ fn acceptance_same_session_verifications(
             evidence.locator,
             verification.check_kind,
             verification.result,
-            acceptance_brief_off_revision_marker(evidence, task.judged_revision.as_deref()),
+            acceptance_brief_off_source_marker(evidence, task.judged_source()),
         ));
     }
     if shown > 0 && read.len() > shown {
@@ -2469,8 +2525,13 @@ enum AcceptanceEvaluationRunOutcome {
     /// code and the shape together: exit 1 with the tracker's error envelope
     /// (emitted only when the operation's transaction did not commit), or
     /// exit 2 with the argument parser's usage error (raised before any store
-    /// is opened). Carries those words.
-    Refused { code: Option<String>, message: String },
+    /// is opened). Carries those words, and the records an off-source
+    /// refusal names as citable instead (acceptance_evaluation_citation_retry.rs).
+    Refused {
+        code: Option<String>,
+        message: String,
+        alternatives: Vec<AcceptanceCitableAlternatives>,
+    },
     /// The store stayed locked through the runner's retry: nothing recorded.
     Locked(String),
     /// The process never started, so this run sent nothing.
@@ -2527,13 +2588,23 @@ fn classify_acceptance_evaluation_run(
     // such as failing to print the receipt.
     match code {
         ACCEPTANCE_EVALUATION_REFUSAL_EXIT_CODE => {
-            if let Some((code, message)) = acceptance_evaluation_error_envelope(&output.stderr) {
-                return AcceptanceEvaluationRunOutcome::Refused { code: Some(code), message: truncate_chars(&message, 4_000) };
+            if let Some((code, message, alternatives)) =
+                acceptance_evaluation_error_envelope(&output.stderr)
+            {
+                return AcceptanceEvaluationRunOutcome::Refused {
+                    code: Some(code),
+                    message: truncate_chars(&message, 4_000),
+                    alternatives,
+                };
             }
         }
         ACCEPTANCE_EVALUATION_USAGE_EXIT_CODE => {
             if is_acceptance_evaluation_usage_error(&output.stderr) {
-                return AcceptanceEvaluationRunOutcome::Refused { code: None, message: detail };
+                return AcceptanceEvaluationRunOutcome::Refused {
+                    code: None,
+                    message: detail,
+                    alternatives: Vec::new(),
+                };
             }
         }
         _ => {}
@@ -2553,15 +2624,22 @@ const ACCEPTANCE_EVALUATION_REFUSAL_EXIT_CODE: u8 = 1;
 const ACCEPTANCE_EVALUATION_USAGE_EXIT_CODE: u8 = 2;
 
 /// Engram's refusal: `{"error":{"code":<word>,"message":…}}` on stderr, which
-/// it prints only when the operation's transaction did not commit.
-fn acceptance_evaluation_error_envelope(stderr: &[u8]) -> Option<(String, String)> {
+/// it prints only when the operation's transaction did not commit, with any
+/// citable alternatives its details name.
+fn acceptance_evaluation_error_envelope(
+    stderr: &[u8],
+) -> Option<(String, String, Vec<AcceptanceCitableAlternatives>)> {
     let envelope = serde_json::from_slice::<Value>(stderr).ok()?;
     let error = envelope.get("error")?;
     let code = error
         .get("code")?
         .as_str()
         .filter(|code| !code.trim().is_empty())?;
-    Some((code.to_owned(), error.get("message")?.as_str()?.to_owned()))
+    Some((
+        code.to_owned(),
+        error.get("message")?.as_str()?.to_owned(),
+        acceptance_citable_alternatives(&envelope),
+    ))
 }
 
 /// The argument parser's usage error (`error: …` then `Usage: …`), raised

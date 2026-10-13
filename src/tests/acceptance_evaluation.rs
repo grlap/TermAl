@@ -19,6 +19,12 @@ mod omissions;
 #[path = "acceptance_evaluation_bindings.rs"]
 mod bindings;
 
+#[path = "acceptance_evaluation_workspace.rs"]
+mod workspace;
+
+#[path = "acceptance_evaluation_citation_retry.rs"]
+mod citation_retry;
+
 #[path = "acceptance_evaluation_carried_failure.rs"]
 mod carried_failure;
 
@@ -4399,9 +4405,9 @@ fn acceptance_run_is_refused_only_by_the_expected_exit_code_with_the_known_shape
     // The two shapes the real CLI produces when nothing was recorded.
     assert_eq!(
         classify(EngramCliExit::Code(1), "", &envelope),
-        AcceptanceEvaluationRunOutcome::Refused { code: Some("work_revision_conflict".to_owned()), message: REVISION_CONFLICT.to_owned() }
+        AcceptanceEvaluationRunOutcome::Refused { code: Some("work_revision_conflict".to_owned()), message: REVISION_CONFLICT.to_owned(), alternatives: Vec::new() }
     );
-    let AcceptanceEvaluationRunOutcome::Refused { message: words, code: None } =
+    let AcceptanceEvaluationRunOutcome::Refused { message: words, code: None, .. } =
         classify(EngramCliExit::Code(2), "", CLAP_USAGE_ERROR)
     else {
         panic!("a usage error is raised before any store is opened");
