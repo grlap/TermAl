@@ -507,9 +507,63 @@ fn a_test_run_after_another_command_on_its_line_is_a_near_miss() {
         "cargo test",
         "echo \"a && cargo test\"",
         "cargo build && echo done",
+        // A build after another command is no test: it is told nothing here.
+        "cd x && cargo build",
+        BUILD_AFTER_COMMANDS,
     ] {
         assert_eq!(engram_embedded_test(command), None, "{command}");
     }
+    // A test after an embedded build is still the line's test.
+    assert_eq!(
+        engram_embedded_test("Write-Output a; cargo build; cargo test --lib")
+            .map(|check| check.normalized),
+        Some("cargo test --lib".to_owned())
+    );
+}
+
+/// A line a Codex session ran in PowerShell, timing a build with commands
+/// around it on its line: a build, no test, after another command.
+const BUILD_AFTER_COMMANDS: &str = "$activityBuildStart = [DateTime]::UtcNow.ToString(\"o\"); \
+     Write-Output \"BUILD_START=$activityBuildStart\"; cargo build --release --bin engram -q; \
+     $activityBuildCode = $LASTEXITCODE; Write-Output (\"BUILD_END=\" + \
+     [DateTime]::UtcNow.ToString(\"o\")); Write-Output \"BUILD_EXIT=$activityBuildCode\"; \
+     exit $activityBuildCode";
+
+#[test]
+fn a_build_after_another_command_on_its_line_leaves_no_test_near_miss_line() {
+    // A runtime that reports its directory ran, in the named root, a line
+    // with a build after other commands: no test ran, so the agent is told
+    // nothing of a test. A test after another command there is still told.
+    let turn = CheckedTurn::start("embedded-build-no-near-miss", true);
+    let worktree = name_turn_source_root(&turn);
+    let (root, _) = root_as_named(&worktree);
+    turn.recorder()
+        .command_started_in(
+            "build-line",
+            BUILD_AFTER_COMMANDS,
+            Some(BUILD_AFTER_COMMANDS),
+            Some(&root),
+        )
+        .expect("the start should record");
+    turn.wait_for_snapshots();
+    assert!(kept_checks(&turn).is_empty(), "{:?}", kept_checks(&turn));
+    assert_eq!(
+        take_pending_line(&turn),
+        None,
+        "a build after another command is no test to tell of"
+    );
+
+    let test_line = format!("cd \"{root}\" && cargo test");
+    turn.recorder()
+        .command_started_in("test-line", &test_line, Some(&test_line), Some(&root))
+        .expect("the start should record");
+    turn.wait_for_snapshots();
+    let line = take_pending_line(&turn).expect("the agent is told why the test gets no credit");
+    assert!(
+        line.contains("A recognised test gets no credit")
+            && line.contains("ran after another command on its line"),
+        "{line}"
+    );
 }
 
 #[test]

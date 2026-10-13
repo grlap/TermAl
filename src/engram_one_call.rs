@@ -158,7 +158,8 @@ fn engram_check_command_outcome(
 /// The recognised test a line runs after another command, `A && TEST` or
 /// `A; TEST` (in a wrapper's script too): the near miss of the one-call form
 /// (`cd "DIR" && cargo test`), whose test runs somewhere TermAl cannot place.
-/// `None` for a line with no such test. Asked only of a line that is no check
+/// `None` for a line with no such test; a build after another command is
+/// none, since it is no test. Asked only of a line that is no check
 /// itself (its caller has just recognised none in it, so the line is not read
 /// twice on the runtime's event reader): a one-call line would otherwise
 /// yield its own test. Its agent is told why, where it would otherwise get no
@@ -192,10 +193,13 @@ fn engram_embedded_test(command: &str) -> Option<EngramCheckCommand> {
         }
     }
     segments.push(&script[start..]);
+    // Only a test is told of: a build after another command
+    // (`A; cargo build`) is no test, and its line would name it one.
     segments
         .into_iter()
         .skip(1)
-        .find_map(engram_plain_check_command)
+        .filter_map(engram_plain_check_command)
+        .find(|check| check.kind == EngramVerificationKind::Test)
         .map(|check| match dialect {
             EngramShellDialect::Unknown => check,
             wrapper => EngramCheckCommand {
