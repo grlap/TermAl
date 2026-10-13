@@ -669,17 +669,25 @@ pub(super) fn register_named_root(turn: &CheckedTurn, worktree: &FsPath, generat
         .unwrap();
     let mut inner = turn.state.inner.lock().unwrap();
     inner.engram_source_root_generation = inner.engram_source_root_generation.max(entry.generation);
-    inner.engram_work_source_roots = vec![entry.clone()];
-    inner.engram_named_root_journal = vec![EngramNamedRootJournal {
-        store: store.clone(),
-        claim_id: entry.claim_id.clone(),
-        read_binding: Some(binding.clone()),
-        confirmed: Some((event, receipt.receipt)),
-        pending: None,
-        obsolete: false,
-        retirement: None,
-        reconciliation: None,
-    }];
+    inner
+        .engram_work_source_roots
+        .retain(|existing| existing.store != store || existing.work_id != entry.work_id);
+    inner.engram_work_source_roots.push(entry.clone());
+    inner
+        .engram_named_root_journal
+        .retain(|existing| existing.store != store || existing.claim_id != entry.claim_id);
+    inner
+        .engram_named_root_journal
+        .push(EngramNamedRootJournal {
+            store: store.clone(),
+            claim_id: entry.claim_id.clone(),
+            read_binding: Some(binding.clone()),
+            confirmed: Some((event, receipt.receipt)),
+            pending: None,
+            obsolete: false,
+            retirement: None,
+            reconciliation: None,
+        });
     let index = inner.find_session_index(&turn.session_id).unwrap();
     let runtime = &mut inner.sessions[index].engram;
     runtime.named_root = Some(EngramNamedRootState::Bound {
@@ -2284,6 +2292,7 @@ fn a_carried_gate_is_kept_until_it_can_be_settled_and_told_when_it_never_was() {
             record,
             vec![(grant, sequence, Ok(None))],
             &[generation],
+            None,
             chrono::Utc::now(),
         );
         assert!(credited.is_empty() && lines.is_empty(), "{lines:?}");
@@ -2295,6 +2304,7 @@ fn a_carried_gate_is_kept_until_it_can_be_settled_and_told_when_it_never_was() {
             record,
             Vec::new(),
             &[generation],
+            None,
             chrono::Utc::now(),
         );
         assert!(credited.is_empty() && lines.is_empty(), "{lines:?}");
@@ -2304,6 +2314,7 @@ fn a_carried_gate_is_kept_until_it_can_be_settled_and_told_when_it_never_was() {
             record,
             Vec::new(),
             &[generation],
+            None,
             chrono::Utc::now() + chrono::Duration::hours(7),
         );
         assert!(credited.is_empty());
@@ -2430,6 +2441,7 @@ fn a_conflict_found_after_the_settlement_copy_still_refuses_the_gate() {
             record,
             vec![(copy.check.grant_id.clone(), copy.check.sequence, settled)],
             &[Some(1)],
+            None,
             chrono::Utc::now(),
         );
         assert!(credited.is_empty());
@@ -2722,6 +2734,7 @@ fn a_run_a_dropped_gate_used_is_never_taken_by_a_later_launch() {
             record,
             vec![(grant, sequence, Err("dropped for the test".to_owned()))],
             &[Some(1)],
+            None,
             chrono::Utc::now(),
         );
         assert_eq!(lines.len(), 1);
@@ -3042,6 +3055,7 @@ fn a_gate_settled_after_six_hours_is_refused_whatever_its_run_says() {
             record,
             vec![(copy.check.grant_id.clone(), copy.check.sequence, settled)],
             &[Some(1)],
+            None,
             chrono::Utc::now() + chrono::Duration::hours(7),
         );
         assert!(credited.is_empty(), "a late settlement is not credited");
@@ -4237,6 +4251,7 @@ fn each_settlement_candidate_is_judged_by_its_own_closure() {
             &mut record,
             settled,
             &[Some(carried.root_generation)],
+            None,
             chrono::Utc::now(),
         );
         assert_eq!(taken.len(), usize::from(credited), "{lines:?}");

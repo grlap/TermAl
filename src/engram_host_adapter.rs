@@ -4642,9 +4642,9 @@ impl AppState {
         // whether its report needs a fresh basis. Nothing is claimed yet, so
         // the bounded basis capture that follows runs outside the
         // checkpoint_in_progress window that session teardown waits for.
-        let (planned_grant_id, planned_purpose, capture, card_source_root) = {
+        let (planned_grant_id, planned_purpose, capture, card_source_root, held_claims_target) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some((index, grant_id, _, resolved)) = Self::engram_checkpoint_grant_locked(
+            let Some((index, grant_id, target, resolved)) = Self::engram_checkpoint_grant_locked(
                 &inner,
                 session_id,
                 purpose,
@@ -4687,15 +4687,54 @@ impl AppState {
                             .as_ref(),
                     )
                 });
-            (grant_id, resolved, capture, card_source_root)
+            let engram = &inner.sessions[index].engram;
+            let store = engram_project_for_session_locked(&inner, session_id)
+                .and_then(|project| project.engram.as_ref())
+                .and_then(|settings| settings.authority_store_key.as_ref());
+            let now = chrono::Utc::now();
+            let held_claims_target = (capture.is_some()
+                && engram.carried_checks.iter().any(|carried| {
+                    carried.fence.is_none()
+                        && !carried.terminal_conflict
+                        && !engram_carried_check_expired(carried, now)
+                        && store
+                            .and_then(|store| {
+                                engram_work_source_root_for_claim(
+                                    &inner.engram_work_source_roots,
+                                    store,
+                                    &carried.work_id,
+                                    &carried.claim_id,
+                                )
+                            })
+                            .is_some_and(|entry| entry.generation == carried.root_generation)
+                        && (carried.ended()
+                            || carried.launcher_gone
+                            || carried.run_missing
+                            || carried.ambiguous)
+                        && engram.work_binding.as_ref().is_some_and(|binding| {
+                            binding.claim_id != carried.claim_id
+                                || binding.work_id != carried.work_id
+                                || binding.claim_fence != carried.claim_fence
+                        })
+                }))
+            .then_some(target)
+            .flatten();
+            (
+                grant_id,
+                resolved,
+                capture,
+                card_source_root,
+                held_claims_target,
+            )
         };
         // The closing basis, and the checks the turn ran with their own
         // snapshots and toolchain labels, all off the lock. One budget bounds
-        // the three together, so the close that gates the next prompt waits
+        // the captures and held read together, so the next prompt waits
         // at most the freeze bound once: what is not ready by then is
         // withheld or goes unlabelled.
         let mut end_basis_observed_at = None;
         let mut captured_ends = Vec::new();
+        let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
         let (end_basis, mut resolved_checks, mut check_notices, mut settled_carried) = match capture
         {
             Some((place, sealed, checks, carried, workers)) => {
@@ -4704,7 +4743,6 @@ impl AppState {
                     .filter(|check| check.grant_id == planned_grant_id && check.end.is_some())
                     .map(|check| (check.key.clone(), check.sequence))
                     .collect();
-                let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
                 let provenance = self.engram_turn_root_capture(session_id);
                 let end_basis = self.engram_turn_end_basis_within(
                     &place,
@@ -4730,6 +4768,26 @@ impl AppState {
             }
             None => (None, Vec::new(), Vec::new(), Vec::new()),
         };
+        // Capture this turn's evidence first. A held read can only refuse or
+        // retain another claim's carry; it must not starve the captures.
+        let held_claims = held_claims_target.and_then(|target| {
+            let timeout = target
+                .settings
+                .call_timeout()
+                .min(deadline.saturating_duration_since(std::time::Instant::now()));
+            if timeout.is_zero() {
+                return None;
+            }
+            target
+                .adapter
+                .read_held_claims(&target.connection, timeout)
+                .map_err(|error| {
+                    eprintln!(
+                        "engram> session={session_id} carried claim status is unconfirmed: {error}"
+                    );
+                })
+                .ok()
+        });
         #[cfg(test)]
         wait_at_test_engram_turn_report_gate(self, session_id);
         // Then, under the lock again: the same conditions must still admit a
@@ -4848,6 +4906,7 @@ impl AppState {
                         index,
                         session_id,
                         std::mem::take(&mut settled_carried),
+                        held_claims.as_ref(),
                         &mut resolved_checks,
                     );
                     // A check the host cannot judge after a successful run

@@ -7,6 +7,280 @@ mod credit_corrections {
     include!("engram_carried_credit_corrections.rs");
 }
 
+fn same_claim_refresh_outcome(label: &str, recovered_after_lapse: bool) {
+    let (turn, worktree) = three_turns_with_a_terminal_carried_run(label);
+    let original = turn.record(|record| record.engram.work_binding.clone().unwrap());
+    let mut refreshed = original.clone();
+    refreshed.work_revision += 1;
+    if recovered_after_lapse {
+        refreshed.claim_fence += 1;
+    }
+    *turn.transport.work_bindings.lock().unwrap() = [Ok(Some(refreshed.clone()))].into();
+    turn.transport
+        .responses
+        .lock()
+        .unwrap()
+        .push_front(bind_reply("refreshed-a-token"));
+    turn.transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: vec![EngramHeldClaim {
+            work_id: refreshed.work_id.clone(),
+            claim_id: refreshed.claim_id.clone(),
+            claim_fence: refreshed.claim_fence,
+            focused: true,
+            control_binding: Some(refreshed.clone()),
+            ..EngramHeldClaim::default()
+        }],
+        omitted: 0,
+    })]);
+    let run = review_runs(&worktree).join("test-carried");
+    let checkpoint = finish_next_turn(&turn);
+    if recovered_after_lapse {
+        assert_refused(
+            &turn,
+            &checkpoint,
+            "its claim is no longer the one this session holds",
+        );
+    } else {
+        assert_credited(&turn, &checkpoint, &run, "succeeded");
+    }
+    assert_eq!(
+        turn.record(|record| record.engram.work_binding.clone()),
+        Some(refreshed)
+    );
+}
+
+#[test]
+fn a_live_revision_renewal_preserves_the_launch_claims_credit() {
+    same_claim_refresh_outcome("live-renewal-credit", false);
+}
+
+#[test]
+fn a_same_id_recovery_refuses_credit_launched_before_authority_lapsed() {
+    // Engram preserves claim_id on recovery but advances its fence. A retained
+    // old naming cannot prove that authority remained held through the gate.
+    same_claim_refresh_outcome("recovered-fence-credit", true);
+}
+
+#[test]
+fn checkpoint_held_read_uncertainty_defers_but_complete_absence_refuses() {
+    for case in ["error", "omitted", "absent"] {
+        let (turn, worktree) = named_turn(&format!("held-read-{case}"));
+        launch_gate(&turn, &worktree, true);
+        finish_run(&worktree, "passed", &"f".repeat(64));
+        turn.state.poll_engram_carried_runs();
+        let other = test_control_work_binding(&format!("held-other-{case}"), 1);
+        turn.record_mut(|record| record.engram.work_binding = Some(other.clone()));
+        let read = if case == "error" {
+            Err(EngramTransportError::transport(
+                "scripted held read unavailable",
+            ))
+        } else {
+            Ok(EngramHeldClaims {
+                items: vec![EngramHeldClaim {
+                    work_id: other.work_id.clone(),
+                    claim_id: other.claim_id.clone(),
+                    claim_fence: other.claim_fence,
+                    focused: true,
+                    control_binding: Some(other),
+                    ..EngramHeldClaim::default()
+                }],
+                omitted: u64::from(case == "omitted"),
+            })
+        };
+        turn.transport.replace_held_claims([read]);
+        let checkpoint = turn.finish();
+        if case == "absent" {
+            assert_refused(
+                &turn,
+                &checkpoint,
+                "its claim is no longer the one this session holds",
+            );
+        } else {
+            assert!(
+                checkpoint.get("verification_evidence").is_none(),
+                "{checkpoint:#}"
+            );
+            assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
+            let line = turn
+                .record(|record| record.engram.pending_source_root_line.clone())
+                .unwrap();
+            assert!(line.contains("once its held claim is confirmed"), "{line}");
+        }
+    }
+}
+
+#[test]
+fn first_post_gate_note_on_another_held_claim_defers_credit_to_launch_item() {
+    const FOCUS_B_GRANT: &str = "focus-b-grant";
+    const RETURN_A_GRANT: &str = "return-a-grant";
+    let turn = CheckedTurn::start_with_opening(
+        "held-focus-deferred",
+        true,
+        None,
+        vec![
+            checkpoint_reply(CHECK_GRANT),
+            bind_reply("focus-b-token"),
+            grant_reply(FOCUS_B_GRANT),
+            begin_reply(FOCUS_B_GRANT),
+            checkpoint_reply(FOCUS_B_GRANT),
+            bind_reply("return-a-token"),
+            grant_reply(RETURN_A_GRANT),
+            begin_reply(RETURN_A_GRANT),
+            checkpoint_reply(RETURN_A_GRANT),
+        ],
+        3,
+        true,
+    );
+    let worktree = turn.root.join(".worktrees").join("wt");
+    let launch_binding = turn.record(|record| record.engram.work_binding.clone().unwrap());
+    let launch_named_root = turn.record(|record| record.engram.named_root.clone());
+    let focused_binding = test_control_work_binding("held-focus-other", 1);
+
+    // Both claims are named before launching; setup is not a post-result write.
+    turn.record_mut(|record| record.engram.work_binding = Some(focused_binding.clone()));
+    register_named_root(&turn, &worktree, 2);
+    turn.record_mut(|record| {
+        record.engram.work_binding = Some(launch_binding.clone());
+        record.engram.named_root = launch_named_root;
+    });
+    turn.transport
+        .enable_named_roots(&turn.session_id, &launch_binding);
+    turn.transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: [&launch_binding, &focused_binding]
+            .into_iter()
+            .map(|binding| EngramHeldClaim {
+                work_id: binding.work_id.clone(),
+                short_ref: binding.work_id.clone(),
+                claim_id: binding.claim_id.clone(),
+                claim_fence: binding.claim_fence,
+                focused: binding.claim_id == launch_binding.claim_id,
+                control_binding: Some(binding.clone()),
+            })
+            .collect(),
+        omitted: 0,
+    })]);
+    launch_gate(&turn, &worktree, true);
+    let opening = turn.finish();
+    assert!(opening.get("verification_evidence").is_none());
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    assert!(turn.record(|record| record.engram.carried_checks[0].terminal_digest.is_some()));
+
+    // The held read after the note reports B's focus while retaining A's claim.
+    let focus_b_claims = EngramHeldClaims {
+        items: [&launch_binding, &focused_binding]
+            .into_iter()
+            .map(|binding| EngramHeldClaim {
+                work_id: binding.work_id.clone(),
+                short_ref: binding.work_id.clone(),
+                claim_id: binding.claim_id.clone(),
+                claim_fence: binding.claim_fence,
+                focused: binding.claim_id == focused_binding.claim_id,
+                control_binding: Some(binding.clone()),
+            })
+            .collect(),
+        omitted: 0,
+    };
+    let selected_b = select_engram_held_binding(
+        focus_b_claims.items.clone(),
+        focus_b_claims.omitted,
+        EngramBindingPreference {
+            current: Some(&launch_binding),
+            refused: &[],
+        },
+    );
+    assert_eq!(selected_b, Some(focused_binding.clone()));
+    *turn.transport.work_bindings.lock().unwrap() = [Ok(selected_b)].into();
+    turn.transport
+        .replace_held_claims([Ok(focus_b_claims.clone())]);
+
+    // The first post-terminal tracker note selects held B. Its admission and
+    // checkpoint use B's grant, never an intermediate checkpoint on A.
+    let on_b = finish_next_turn(&turn);
+    assert_eq!(on_b["grant_id"], FOCUS_B_GRANT, "{on_b:#}");
+    assert!(
+        on_b.get("verification_evidence").is_none(),
+        "no gate evidence on B: {on_b:#}"
+    );
+    let line = turn.record(|record| record.engram.pending_source_root_line.clone());
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks.len()),
+        1,
+        "{line:?}"
+    );
+    let line = line.expect("a finished gate waiting for its launch item tells the holder");
+    assert!(
+        line.contains("finished") && line.contains("next checkpoint focused on"),
+        "{line}"
+    );
+    assert!(
+        line.contains(&launch_binding.work_id) || line.contains("w-carried"),
+        "{line}"
+    );
+    assert!(!line.contains("earned no credit"), "{line}");
+    turn.record(|record| assert!(!record.engram.carried_consumed_runs.contains(&run)));
+
+    let mut focus_a_claims = focus_b_claims;
+    for claim in &mut focus_a_claims.items {
+        claim.focused = claim.claim_id == launch_binding.claim_id;
+    }
+    let selected_a = select_engram_held_binding(
+        focus_a_claims.items.clone(),
+        focus_a_claims.omitted,
+        EngramBindingPreference {
+            current: Some(&focused_binding),
+            refused: &[],
+        },
+    );
+    assert_eq!(selected_a, Some(launch_binding.clone()));
+    *turn.transport.work_bindings.lock().unwrap() = [Ok(selected_a)].into();
+    turn.transport.replace_held_claims([Ok(focus_a_claims)]);
+    let on_a = finish_next_turn(&turn);
+    assert_eq!(on_a["grant_id"], RETURN_A_GRANT, "{on_a:#}");
+    assert_credited(&turn, &on_a, &run, "succeeded");
+    assert_eq!(
+        turn.record(|record| record.engram.work_binding.clone()),
+        Some(launch_binding.clone())
+    );
+    // Engram's evidence writer derives the item's binding from the checkpoint
+    // grant. The last real bind is A, and only A's checkpoint carries evidence.
+    let last_bind = turn
+        .transport
+        .requests()
+        .into_iter()
+        .filter(|request| request.request["operation"] == "session_bind")
+        .last()
+        .unwrap()
+        .request;
+    assert_eq!(last_bind["work_binding"]["work_id"], launch_binding.work_id);
+    assert_eq!(
+        last_bind["work_binding"]["claim_id"],
+        launch_binding.claim_id
+    );
+}
+
+#[test]
+fn terminal_carry_with_released_launch_claim_still_refuses() {
+    let (turn, worktree) = named_turn("released-launch-claim");
+    launch_gate(&turn, &worktree, true);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    turn.transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: Vec::new(),
+        omitted: 0,
+    })]);
+    turn.record_mut(|record| {
+        record.engram.work_binding = Some(test_control_work_binding("released-launch-other", 1))
+    });
+    let checkpoint = turn.finish();
+    assert_refused(
+        &turn,
+        &checkpoint,
+        "its claim is no longer the one this session holds",
+    );
+    turn.record(|record| assert!(record.engram.carried_consumed_runs.contains(&run)));
+}
+
 #[test]
 fn terminal_carry_with_retained_old_root_refuses_a_different_current_claim() {
     let (turn, worktree) = named_turn("outcome-retained-claim");
@@ -17,6 +291,18 @@ fn terminal_carry_with_retained_old_root_refuses_a_different_current_claim() {
     turn.record_mut(|record| {
         record.engram.work_binding.as_mut().unwrap().claim_id = "replacement-claim".to_owned();
     });
+    let replacement = turn.record(|record| record.engram.work_binding.clone().unwrap());
+    turn.transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: vec![EngramHeldClaim {
+            work_id: replacement.work_id.clone(),
+            claim_id: replacement.claim_id.clone(),
+            claim_fence: replacement.claim_fence,
+            focused: true,
+            control_binding: Some(replacement),
+            ..EngramHeldClaim::default()
+        }],
+        omitted: 0,
+    })]);
     {
         let inner = turn.state.inner.lock().unwrap();
         assert!(
@@ -42,7 +328,7 @@ fn terminal_carry_with_retained_old_root_refuses_a_different_current_claim() {
     turn.record(|record| assert!(record.engram.carried_consumed_runs.contains(&run)));
     turn.record_mut(|record| {
         let (credited, lines) =
-            engram_take_settled_carried_checks(record, Vec::new(), &[], chrono::Utc::now());
+            engram_take_settled_carried_checks(record, Vec::new(), &[], None, chrono::Utc::now());
         assert!(
             credited.is_empty() && lines.is_empty(),
             "a later drain must not repeat the refusal"
@@ -617,6 +903,7 @@ fn a_retained_terminal_carry_without_binding_keeps_existing_fence_and_expiry_ref
                 record,
                 Vec::new(),
                 &[Some(generation)],
+                None,
                 chrono::Utc::now(),
             );
             assert!(credited.is_empty() && lines.is_empty());
@@ -630,8 +917,13 @@ fn a_retained_terminal_carry_without_binding_keeps_existing_fence_and_expiry_ref
                 } else {
                     chrono::Duration::hours(7)
                 };
-            let (credited, lines) =
-                engram_take_settled_carried_checks(record, Vec::new(), &[Some(generation)], now);
+            let (credited, lines) = engram_take_settled_carried_checks(
+                record,
+                Vec::new(),
+                &[Some(generation)],
+                None,
+                now,
+            );
             assert!(credited.is_empty());
             assert_eq!(lines.len(), 1);
             assert!(
@@ -668,7 +960,7 @@ fn the_existing_fence_wins_over_a_different_claim_and_is_consumed_once() {
     );
     turn.record_mut(|record| {
         let (credited, lines) =
-            engram_take_settled_carried_checks(record, Vec::new(), &[], chrono::Utc::now());
+            engram_take_settled_carried_checks(record, Vec::new(), &[], None, chrono::Utc::now());
         assert!(credited.is_empty() && lines.is_empty());
     });
 }
@@ -684,6 +976,7 @@ fn a_nonterminal_carry_under_a_different_claim_keeps_its_existing_wait() {
             record,
             Vec::new(),
             &[Some(generation)],
+            None,
             chrono::Utc::now(),
         );
         assert!(credited.is_empty() && lines.is_empty());
@@ -725,6 +1018,10 @@ fn final_lock_does_not_credit_an_off_lock_candidate_after_claim_loss() {
                 record,
                 vec![(copy.check.grant_id.clone(), copy.check.sequence, result)],
                 &[Some(copy.root_generation)],
+                Some(&EngramHeldClaims {
+                    items: Vec::new(),
+                    omitted: 0,
+                }),
                 chrono::Utc::now(),
             );
             assert!(credited.is_empty());
@@ -769,4 +1066,39 @@ fn bound_unmeasured_launch_keeps_its_existing_refusal() {
         assert_eq!(record.engram.carried_unmatched_launches.len(), 1);
     });
     assert_no_verification_state(&turn);
+}
+
+#[test]
+fn unconfirmed_launch_claim_waits_only_until_existing_carried_expiry() {
+    let (turn, worktree) = named_turn("unknown-held-expiry");
+    launch_gate(&turn, &worktree, true);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    turn.record_mut(|record| {
+        record.engram.work_binding.as_mut().unwrap().claim_id = "other-held-claim".to_owned();
+        let generation = record.engram.carried_checks[0].root_generation;
+        let now = chrono::Utc::now();
+        let (credited, lines) =
+            engram_take_settled_carried_checks(record, Vec::new(), &[Some(generation)], None, now);
+        assert!(credited.is_empty());
+        assert_eq!(record.engram.carried_checks.len(), 1);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].contains("once its held claim is confirmed"),
+            "{lines:?}"
+        );
+        assert!(!record.engram.carried_consumed_runs.contains(&run));
+        let (credited, lines) = engram_take_settled_carried_checks(
+            record,
+            Vec::new(),
+            &[Some(generation)],
+            None,
+            now + chrono::Duration::hours(7),
+        );
+        assert!(credited.is_empty());
+        assert!(record.engram.carried_checks.is_empty());
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("six hours"), "{lines:?}");
+        assert!(record.engram.carried_consumed_runs.contains(&run));
+    });
 }

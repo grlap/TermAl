@@ -20,6 +20,11 @@
 // New file: nothing was moved into it.
 use super::*;
 
+mod claim_deferral {
+    use super::*;
+    include!("engram_reported_claim_deferral.rs");
+}
+
 /// The Codex item id the test's command runs under.
 const ITEM: &str = "exec-late-item";
 /// The Codex item id a second test, in the next turn, runs under.

@@ -87,6 +87,9 @@ struct EngramCarriedCheck {
     /// The claimed work the launching turn was bound to.
     work_id: String,
     claim_id: String,
+    /// Authority at launch. Live renewal keeps this fence; recovery after a
+    /// lapse advances it even if the claim id and root naming survive.
+    claim_fence: i64,
     /// The generation of the named source root the check ran in.
     root_generation: u64,
     /// The run's directory, once found (`engram_find_carried_run`).
@@ -1548,6 +1551,7 @@ fn engram_new_carried_check(
         runtime: reported_by,
         work_id: binding.work_id.clone(),
         claim_id: binding.claim_id.clone(),
+        claim_fence: binding.claim_fence,
         root_generation,
         check,
         run_directory: None,
@@ -1779,6 +1783,10 @@ fn engram_carried_check_expired(
 /// turn: bound to the same claim, measured in the same named-root
 /// generation, read as terminal and not fenced. They are settled off the
 /// lock (`engram_settle_carried_check`).
+/// Another held claim's gate waits for its launch claim's own grant. Engram's
+/// `renew_holder_claim`, `rebase_planning_claim` and live `claim_work_on`
+/// branch keep the fence; release and lapsed recovery advance it. A retained
+/// claim id or root therefore does not prove continuous launch authority.
 fn engram_carried_checks_to_settle(record: &SessionRecord) -> Vec<EngramCarriedCheck> {
     let engram = &record.engram;
     let (Some(binding), Some(turn_root)) = (&engram.work_binding, &engram.active_turn_source_root)
@@ -1792,6 +1800,8 @@ fn engram_carried_checks_to_settle(record: &SessionRecord) -> Vec<EngramCarriedC
         .filter(|carried| {
             !engram_carried_check_expired(carried, now)
                 && carried.claim_id == binding.claim_id
+                && carried.work_id == binding.work_id
+                && carried.claim_fence == binding.claim_fence
                 && carried.root_generation == turn_root.generation
                 && (carried.ended()
                     || carried.launcher_gone
@@ -1814,10 +1824,14 @@ fn engram_carried_checks_to_settle(record: &SessionRecord) -> Vec<EngramCarriedC
 /// each one's claim, `None` when it records none). Returns the credited
 /// checks for the report, in the order they launched, and the lines for the
 /// holder.
+/// `held_claims` confirms that a finished check on another focused claim can
+/// wait for its launch claim's grant. An incomplete or unavailable read only
+/// retains it within the existing refusal and expiry bounds, never credits.
 fn engram_take_settled_carried_checks(
     record: &mut SessionRecord,
     mut settled: Vec<EngramCarriedSettlement>,
     generations: &[Option<u64>],
+    held_claims: Option<&EngramHeldClaims>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> (Vec<EngramResolvedCheck>, Vec<String>) {
     let mut credited = Vec::new();
@@ -1864,22 +1878,13 @@ fn engram_take_settled_carried_checks(
             ));
             continue;
         }
-        // A retained root entry is not standing on the current claim. Decide
-        // again under the final lock, before accepting an off-lock result.
+        // Only the launch claim's grant can publish its evidence. Recheck
+        // that exact authority under the final lock before accepting it.
         let same_claim = record.engram.work_binding.as_ref().map(|binding| {
             binding.claim_id == carried.claim_id
+                && binding.work_id == carried.work_id
+                && binding.claim_fence == carried.claim_fence
         });
-        if same_claim == Some(false)
-            && (carried.ended()
-                || carried.launcher_gone
-                || carried.run_missing
-                || carried.ambiguous)
-        {
-            lines.push(carried.refusal_line(
-                "its claim is no longer the one this session holds",
-            ));
-            continue;
-        }
         // A poll that read off the lock may have found the conflict after
         // this checkpoint copied the check to settle it.
         if carried.terminal_conflict {
@@ -1907,6 +1912,61 @@ fn engram_take_settled_carried_checks(
                 (false, true) => "no end of it was reported within six hours of its launch",
             }));
             continue;
+        }
+        if same_claim == Some(false)
+            && (carried.ended()
+                || carried.launcher_gone
+                || carried.run_missing
+                || carried.ambiguous)
+        {
+            let launch_claim = held_claims.and_then(|held| {
+                held.items
+                    .iter()
+                    .find(|claim| claim.work_id == carried.work_id)
+            });
+            let held = match (launch_claim, held_claims) {
+                (Some(claim), _) => Some(
+                    claim.claim_id == carried.claim_id && claim.claim_fence == carried.claim_fence,
+                ),
+                (None, Some(claims)) if claims.omitted == 0 => Some(false),
+                _ => None,
+            };
+            if held == Some(false) {
+                lines.push(
+                    carried.refusal_line("its claim is no longer the one this session holds"),
+                );
+                continue;
+            }
+            // A settlement error discovered before focus moved still refuses
+            // the gate below; do not also promise a future settlement.
+            if let Some(Err(why)) = &outcome {
+                lines.push(carried.refusal_line(why));
+                continue;
+            }
+            let item = launch_claim
+                .map(|claim| claim.short_ref.as_str())
+                .filter(|name| !name.is_empty())
+                .unwrap_or(&carried.work_id);
+            let state = if carried.ended() {
+                "finished"
+            } else {
+                "awaits settlement"
+            };
+            let confirmation = if held.is_none() {
+                " once its held claim is confirmed"
+            } else {
+                ""
+            };
+            lines.push(format!(
+                "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} check {} {state}; settles at your next \
+                 checkpoint focused on {}{confirmation}.",
+                engram_check_fingerprint(&carried.check.command),
+                engram_display_reported_target(item),
+            ));
+            // An unavailable or bounded held read is not proof of release.
+            // Unknown status can wait only within the existing bounds: fence,
+            // root loss, terminal conflict and six-hour expiry were checked
+            // above, on every checkpoint, before this deferral.
         }
         match outcome {
             Some(Ok(Some(resolved))) if same_claim == Some(true) => {
@@ -1963,6 +2023,7 @@ fn engram_credit_carried_checks(
     index: usize,
     session_id: &str,
     settled: Vec<EngramCarriedSettlement>,
+    held_claims: Option<&EngramHeldClaims>,
     resolved: &mut Vec<EngramResolvedCheck>,
 ) -> usize {
     let store = engram_project_for_session_locked(inner, session_id)
@@ -1987,8 +2048,13 @@ fn engram_credit_carried_checks(
     let record = inner
         .session_mut_by_index(index)
         .expect("session index should be valid");
-    let (credited, lines) =
-        engram_take_settled_carried_checks(record, settled, &generations, chrono::Utc::now());
+    let (credited, lines) = engram_take_settled_carried_checks(
+        record,
+        settled,
+        &generations,
+        held_claims,
+        chrono::Utc::now(),
+    );
     for line in lines {
         eprintln!("engram> session={session_id} {line}");
         record.engram.set_pending_source_root_line(line);
