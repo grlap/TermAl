@@ -383,3 +383,12 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
   - [Conversation overview map](docs/features/conversation-overview-map.md) — the one-call minimap
   - [Virtualized transcripts](docs/features/session-virtualized-transcript.md) — bounded paging for huge sessions
   - [Project-scoped remotes](docs/features/project-scoped-remotes.md) — remote binding at project level
+
+## License
+
+Copyright 2026 TermAl contributors.
+
+TermAl's code and documentation are licensed under the
+[Apache License 2.0](LICENSE), unless stated otherwise.
+
+Third-party components keep their own licenses.
