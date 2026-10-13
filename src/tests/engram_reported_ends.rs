@@ -830,6 +830,192 @@ fn a_check_started_after_the_carried_tests_end_is_not_overlapped_by_it() {
     );
 }
 
+/// A second claimed session in the same AppState, with its own runtime and
+/// control replies. Its checks run in the original session's named worktree.
+fn another_checking_session(owner: &CheckedTurn, worktree: &FsPath) -> CheckedTurn {
+    let project = owner.record(|record| record.session.project_id.clone().unwrap());
+    let session_id = create_test_project_session(&owner.state, Agent::Codex, &project, worktree);
+    {
+        let mut inner = owner.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].engram.context_nudge_pending = false;
+    }
+    let binding = test_control_work_binding("other-running-test", 1);
+    let transport = ScriptedEngramControlTransport::new_with_work_bindings(
+        vec![
+            bind_reply("other-check-token"),
+            grant_reply("other-check-grant"),
+            begin_reply("other-check-grant"),
+            checkpoint_reply("other-check-grant"),
+            grant_reply("other-check-grant-after-end"),
+            begin_reply("other-check-grant-after-end"),
+            checkpoint_reply("other-check-grant-after-end"),
+        ],
+        vec![Ok(Some(binding.clone())), Ok(Some(binding.clone()))],
+    );
+    transport.enable_named_roots(&session_id, &binding);
+    install_control_only_transport(&owner.state, transport.clone());
+    // This fixture never consumes the second session's prompt channel: the
+    // original state's test runtime supplies it, as for later_turns above.
+    let (_, receiver) = std::sync::mpsc::channel();
+    let other = CheckedTurn {
+        state: owner.state.clone(),
+        session_id,
+        root: owner.root.clone(),
+        transport,
+        _runtime_rx: receiver,
+    };
+    dispatch_next_turn(&other);
+    other.record(|record| {
+        assert_eq!(record.session.status, SessionStatus::Active);
+        assert!(
+            record.engram.active_grant_id.is_some(),
+            "S2 has begun its own turn"
+        );
+    });
+    assert!(other
+        .transport
+        .requests()
+        .iter()
+        .any(|request| { request.request["operation"] == "turn_begin" }));
+    other
+}
+
+/// Session S1 is Idle, but its Codex process still writes in W. Session S2's
+/// check in W cannot earn credit until S1 reports that process's end. Codex
+/// item keys are session-scoped, so deliberately reuse the same key in S2.
+#[test]
+fn another_sessions_carried_codex_test_overlaps_until_its_reported_end() {
+    let (owner, worktree) = two_turns("reported-end-other-session");
+    start_test(&owner, &worktree, ITEM);
+    assert_carried_at_close(&owner);
+    assert_eq!(
+        owner.record(|record| record.session.status),
+        SessionStatus::Idle
+    );
+    let other = another_checking_session(&owner, &worktree);
+
+    start_test(&other, &worktree, ITEM);
+    other
+        .recorder()
+        .command_completed_with_exit(
+            ITEM,
+            SIZE_TEST,
+            PASSING,
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .expect("S2's passing check ends");
+    other.wait_for_snapshots();
+    let checkpoint = other.finish();
+    assert!(
+        checkpoint.get("verification_evidence").is_none(),
+        "S1's still-running test prevents S2's credit: {checkpoint:#}"
+    );
+    let line = holder_line(&other);
+    assert!(
+        line.contains(&owner.session_id)
+            && line.contains("another session's still-running test")
+            && line.contains(&sha256_hex(ITEM.as_bytes())[..12]),
+        "the original owner and test are identified: {line}"
+    );
+    assert!(owner.record(|record| !record.engram.running_codex_tests.is_empty()));
+
+    report_late_end(&owner, THREAD, ITEM, 0);
+    assert!(owner.record(|record| record.engram.running_codex_tests.is_empty()));
+    let checkpoint = passing_test_checkpoint(&other, &worktree, ITEM);
+    assert_eq!(
+        checkpoint["verification_evidence"].as_array().map(Vec::len),
+        Some(1),
+        "S2's new check after S1's end is credited: {checkpoint:#}"
+    );
+}
+
+/// The cross-session hazard is scoped to its owner's current runtime, its
+/// captured worktree, and a writable owner. Refusing the carried evidence
+/// alone must not erase the hazard; runtime exit does end its lifetime.
+#[test]
+fn another_sessions_carried_codex_test_respects_owner_scope() {
+    let (owner, worktree) = two_turns("reported-end-other-scope");
+    start_test(&owner, &worktree, ITEM);
+    assert_carried_at_close(&owner);
+    let project = owner.record(|record| record.session.project_id.clone().unwrap());
+    let other = create_test_project_session(&owner.state, Agent::Codex, &project, &worktree);
+    let running = owner.record(|record| record.engram.running_codex_tests[0].clone());
+    let cause = || {
+        let inner = owner.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&other).unwrap();
+        engram_other_writer_cause(&inner, index, &running.root_key)
+    };
+    assert!(cause().is_some(), "the idle owner's live test overlaps S2");
+    {
+        let inner = owner.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&owner.session_id).unwrap();
+        assert!(
+            engram_other_writer_cause(&inner, index, &running.root_key).is_none(),
+            "the other-writer lookup does not include its own session"
+        );
+    }
+
+    owner.record_mut(|record| {
+        record.engram.running_codex_tests[0].runtime =
+            RuntimeToken::Codex("replaced-owner-runtime".to_owned());
+    });
+    assert!(
+        cause().is_none(),
+        "a replaced runtime's stale record is ignored"
+    );
+    owner.record_mut(|record| record.engram.running_codex_tests[0] = running.clone());
+    let elsewhere = sibling_worktree(&owner, "other-running-root");
+    owner.record_mut(|record| {
+        record.engram.running_codex_tests[0].root_key = engram_worktree_root(&elsewhere);
+    });
+    assert!(
+        cause().is_none(),
+        "a different worktree does not overlap S2"
+    );
+    owner.record_mut(|record| {
+        record.engram.running_codex_tests[0] = running.clone();
+        record.engram.carried_checks.clear();
+    });
+    assert!(
+        cause().is_some(),
+        "discarded evidence does not end its process"
+    );
+
+    let (delegation, _) = super::super::install_required_review_delegation(&owner.state, &other);
+    {
+        let mut inner = owner.state.inner.lock().unwrap();
+        let review = inner
+            .delegations
+            .iter_mut()
+            .find(|entry| entry.id == delegation)
+            .unwrap();
+        review.child_session_id = owner.session_id.clone();
+        let index = inner.find_session_index(&owner.session_id).unwrap();
+        inner.sessions[index].session.parent_delegation_id = Some(delegation.clone());
+    }
+    assert!(cause().is_none(), "a read-only owner cannot overlap S2");
+    {
+        let mut inner = owner.state.inner.lock().unwrap();
+        inner.delegations.retain(|entry| entry.id != delegation);
+        let index = inner.find_session_index(&owner.session_id).unwrap();
+        inner.sessions[index].session.parent_delegation_id = None;
+    }
+    assert!(
+        cause().is_some(),
+        "the live writable owner is still counted"
+    );
+    owner
+        .state
+        .handle_runtime_exit_if_matches(&owner.session_id, &running.runtime, Some("runtime exited"))
+        .expect("the owner's runtime exit is handled");
+    assert!(
+        cause().is_none(),
+        "runtime exit ends the cross-session hazard"
+    );
+}
+
 /// A claimed Codex turn measured in its named worktree, with Engram answering
 /// one later turn under each grant of `later`.
 fn later_turns(label: &str, later: &[&str]) -> (CheckedTurn, PathBuf) {

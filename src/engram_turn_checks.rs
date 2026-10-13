@@ -1218,14 +1218,27 @@ fn engram_worktrees_may_hold(worktrees: &[Option<String>], root: &str) -> bool {
 /// (`engram_mark_checks_overlapped_by`). Runs under the state lock, on
 /// worktrees resolved before (`engram_unresolved_writers`); one not resolved
 /// yet counts as the same. Names the first such session and why it matched
-/// (`engram_writer_match`), for the line its holder is told.
+/// (`engram_writer_match`), for the line its holder is told. A Codex test
+/// still running after another session's turn closed also counts, under
+/// that session's current runtime, until its reported end or runtime exit.
 fn engram_other_writer_cause(inner: &StateInner, index: usize, root: &str) -> Option<String> {
     inner.sessions.iter().enumerate().find_map(|(other, record)| {
-        (other != index
-            && engram_session_in_turn(record)
-            && engram_session_may_write(inner, other))
-        .then(|| engram_writer_match(inner, other, root))
-        .flatten()
+        if other == index || !engram_session_may_write(inner, other) {
+            return None;
+        }
+        let current = record.runtime.runtime_token();
+        if let Some(running) = record.engram.running_codex_tests.iter().find(|running| {
+            Some(&running.runtime) == current.as_ref() && running.root_key == root
+        }) {
+            return Some(format!(
+                "another session's still-running test (session {}, key {}) runs in this worktree",
+                record.session.id,
+                &sha256_hex(running.key.as_bytes())[..12],
+            ));
+        }
+        engram_session_in_turn(record)
+            .then(|| engram_writer_match(inner, other, root))
+            .flatten()
     })
 }
 
