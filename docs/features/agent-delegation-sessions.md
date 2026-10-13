@@ -15,6 +15,7 @@ parallel work, review lenses, focused investigations, and small isolated
 patches that a lead agent can later resume from.
 
 Related:
+- [Root coding sessions](./root-coding-sessions.md) — supported UI/API creation, coordinator provenance and ownership limits; bounded coding delegations remain parent-integrated.
 - [Orchestration](./orchestration.md)
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Diff Review Workflow](./diff-review-workflow.md)

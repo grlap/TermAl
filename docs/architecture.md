@@ -13,6 +13,13 @@ operator-validated project store (no agent session or binding takes part) and
 never enable an integration. A project without a declaration shows that no
 tracker is bound, with no fallback reader.
 
+## Root coding sessions
+
+Independent coding packages use ordinary roots created through the supported
+[root-session procedure](features/root-coding-sessions.md); its API contract
+distinguishes session creation from turn admission and records coordinator
+provenance. Bounded coding subwork still uses parent-integrated delegations.
+
 ## Delegation follow-up admission
 
 Follow-ups reserve a terminal result before restoring a Codex thread and re-arm
