@@ -22,6 +22,9 @@ use super::*;
 #[path = "engram_source_observations.rs"]
 mod source_observations;
 
+#[path = "engram_drift_reaches_store.rs"]
+mod drift_reaches_store;
+
 #[test]
 fn a_change_between_named_root_turns_is_recorded_before_the_next_provider_handoff() {
     let label = "between-named-turns";

@@ -13,7 +13,11 @@
 // turn's measured begin with its close (`engram_turn_observations.rs`). The
 // begin basis is never replaced by the anchor, so a change between turns is
 // never attributed to the next turn. It also does not own reporting the drift
-// to Engram, which waits on the producer representation agreed with Engram.
+// to Engram: when the source-sighting path has a scope for the next turn (a
+// claimed binding with a confirmed root capture and canonical proof), a change
+// between turns reaches the store as the inter_turn_change it records before
+// that turn's provider handoff (`engram_source_observation_runtime.rs`),
+// compared against its own accounted baseline, not this anchor.
 //
 // New file; nothing was split out of another.
 
