@@ -767,6 +767,7 @@ include!("engram_turn_observations.rs");
 include!("engram_turn_continuity.rs");
 include!("engram_source_sightings.rs");
 include!("engram_source_observation_protocol.rs");
+include!("engram_unadmitted_observation.rs");
 include!("engram_source_observation_recovery.rs");
 include!("engram_source_observation_finalization.rs");
 include!("engram_source_observation_removal.rs");

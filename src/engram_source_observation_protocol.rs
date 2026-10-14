@@ -134,6 +134,18 @@ enum EngramObservedSourceChange {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum EngramInterTurnOccurrence {
     InterTurnChange { source_change: EngramObservedSourceChange },
+    // Grant-free occurrences of a turn the host observed only after it began
+    // (`engram_unadmitted_observation.rs`). A null source change reports no
+    // change; it never asserts the source was unchanged. Only that module's
+    // tests build them until the runtime-started turn path sends them.
+    #[cfg_attr(not(test), allow(dead_code))]
+    UnadmittedTurn {
+        host_turn_ref: String,
+        source_change: Option<EngramObservedSourceChange>,
+        observed_checks: Vec<EngramObservedCheck>,
+    },
+    #[cfg_attr(not(test), allow(dead_code))]
+    ObservedCheck { host_turn_ref: String, check: EngramObservedCheck },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -302,29 +314,43 @@ impl EngramSourceObservationReceipt {
         Ok(receipt)
     }
 
+    // Producer terminal historical reasons resolve recording only. They
+    // cannot turn explicit audit, unknown reasons or equality into credit.
+    fn is_historical(&self) -> bool {
+        matches!(&self.accounting, EngramObservationAccounting::AuditOnly { reason }
+            if matches!(reason.as_str(), "root_basis_moved" | "historical_binding" | "finished_run"))
+            && self.opened_obligations.is_empty()
+    }
+
+    // Whether the receipt records `request` under its exact scope, policy and
+    // observer, whatever the occurrence: shared by the inter-turn and the
+    // unadmitted receipt checks (`engram_unadmitted_observation.rs`).
+    fn recorded_scope_matches(
+        &self,
+        request: &EngramInterTurnObservation,
+        observing_session: &str,
+    ) -> Result<bool, EngramTransportError> {
+        let recorded_at = chrono::DateTime::parse_from_rfc3339(&self.recorded_at)
+            .map_err(|_| EngramTransportError::protocol("source observation receipt has an invalid timestamp"))?;
+        let through = chrono::DateTime::parse_from_rfc3339(&request.observed_interval.through)
+            .map_err(|_| EngramTransportError::protocol("source observation request has an invalid timestamp"))?;
+        Ok(self.decision == "recorded" && self.admission == "unadmitted"
+            && self.binding == request.binding && self.causality == request.causality
+            && self.policy_basis == request.policy_basis && !observing_session.is_empty()
+            && self.observing_session == observing_session
+            && self.position.feed.kind == "run_execution"
+            && self.position.feed.id == request.binding.run_id && self.position.position > 0
+            && recorded_at >= through
+            && self.opened_obligations.iter().all(|id| engram_observation_object_id(id)))
+    }
+
     fn validate_recorded(
         &self,
         request: &EngramInterTurnObservation,
         observing_session: &str,
     ) -> Result<(), EngramTransportError> {
-        let recorded_at = chrono::DateTime::parse_from_rfc3339(&self.recorded_at)
-            .map_err(|_| EngramTransportError::protocol("source observation receipt has an invalid timestamp"))?;
-        let through = chrono::DateTime::parse_from_rfc3339(&request.observed_interval.through)
-            .map_err(|_| EngramTransportError::protocol("source observation request has an invalid timestamp"))?;
-        // Producer terminal historical reasons resolve recording only. They
-        // cannot turn explicit audit, unknown reasons or equality into credit.
-        let historical = matches!(&self.accounting, EngramObservationAccounting::AuditOnly { reason }
-            if matches!(reason.as_str(), "root_basis_moved" | "historical_binding" | "finished_run"))
-            && self.opened_obligations.is_empty();
-        if self.decision != "recorded" || self.admission != "unadmitted"
-            || self.binding != request.binding || self.causality != request.causality
-            || self.policy_basis != request.policy_basis || observing_session.is_empty()
-            || self.observing_session != observing_session
-            || self.position.feed.kind != "run_execution"
-            || self.position.feed.id != request.binding.run_id || self.position.position <= 0
-            || recorded_at < through
-            || !self.opened_obligations.iter().all(|id| engram_observation_object_id(id))
-            || !self.observed_checks.is_empty() || !(self.is_accounted() || historical)
+        if !self.recorded_scope_matches(request, observing_session)?
+            || !self.observed_checks.is_empty() || !(self.is_accounted() || self.is_historical())
         {
             return Err(EngramTransportError::protocol(
                 "source observation receipt does not account for the captured scope and policy",
