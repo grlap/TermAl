@@ -64,29 +64,7 @@ source root before its first edit, following the repository's turn-boundary rule
 
 ## Team strategy
 
-The TermAl and Engram coordinators agreed this strategy on 2026-10-13. It records
-the existing operating decision; repository landing and authority rules still
-govern.
-
-1. **Roots:** one independent ready package per coding root, with its own claim,
-   worktree, evidence and landing under its project's rule. Engram implementers
-   land in their coordinator's window; TermAl producers hand off to the
-   integration owner. Codex `gpt-6.1-sol` is the default, with exceptions recorded.
-   The creator records creator, project and cwd, explicit model, purpose and
-   creation receipt on the package's item.
-2. **Delegations:** bounded coding subwork whose parent integrates and keeps the
-   package claim. Delegations do not land independently.
-3. **Count:** active coding roots per project do not exceed the ready, disjoint
-   packages or host capacity. One gate-sized job runs on the machine at a time;
-   at most one filtered test per project runs during the other project's gate.
-   Read Windows commit charge as a share of the commit limit before creating a
-   root or starting WSL. Above about 75%, create no new root and start no WSL.
-4. **Idle:** a root with no ready package for more than about two hours releases
-   its claim and receives no further assignment until there is ready work.
-5. **Reassess:** daily, or after a load incident, use landings per hour, gate
-   failures by class, commit peak, review rounds and idle root-hours. Each
-   coordinator records these measurements in one note on the decision item at
-   each reassessment.
+The TermAl and Engram coordinators agreed a joint team strategy on 2026-10-13. Its single maintained text is Engram's [team strategy](https://github.com/grlap/Engram/blob/master/docs/team-strategy.md); this page does not restate it. For TermAl, a root's package lands by hand-off to the integration owner under this repository's CLAUDE.md, and the coordinator who creates a root records it as described in [Creating and recording a local root](#creating-and-recording-a-local-root).
 
 ## Request contract
 
