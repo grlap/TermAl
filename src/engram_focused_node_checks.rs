@@ -163,7 +163,8 @@ fn engram_focused_node_completion(
 }
 
 /// Only this bounded foreground launcher form gets a non-recognition notice.
-/// Build and other recognized checks are excluded by the caller.
+/// Describe non-test commands separately from unsupported test forms. This
+/// changes feedback only; recognized checks (including Builds) stay excluded.
 fn engram_unsupported_focused_line(command: &str) -> Option<String> {
     if engram_check_command(command).is_some() {
         return None;
@@ -188,12 +189,35 @@ fn engram_unsupported_focused_line(command: &str) -> Option<String> {
         return None;
     }
     let words = engram_shell_words(&line)?;
-    let [node, script, mode, separator, inner, ..] = words.as_slice() else {
+    let [node, script, mode, separator, inner, inner_args @ ..] = words.as_slice() else {
         return None;
     };
-    (engram_program_name(node) == "node"
-        && matches!(script.replace('\\', "/").as_str(),
-            "scripts/test-launcher.mjs" | "./scripts/test-launcher.mjs")
-        && mode == "focused" && separator == "--" && !inner.is_empty())
-        .then(|| format!("[TermAl] Unsupported focused launcher command {command:?}: no Test record will follow. Use a supported test runner form."))
+    if !(engram_program_name(node) == "node"
+        && matches!(
+            script.replace('\\', "/").as_str(),
+            "scripts/test-launcher.mjs" | "./scripts/test-launcher.mjs"
+        )
+        && mode == "focused"
+        && separator == "--"
+        && !inner.is_empty())
+    {
+        return None;
+    }
+    let inner_program = engram_program_name(inner);
+    // Native Node --test may express test intent while falling outside the
+    // bounded foreground grammar. --no-run and lint/script commands do not
+    // claim a Test; they may still have evidence of another verification kind.
+    let test_intent = engram_is_test_command(&inner_program, inner_args)
+        || (inner_program == "node" && inner_args.first().is_some_and(|arg| arg == "--test"));
+    Some(if test_intent {
+        format!(
+            "[TermAl] Unsupported focused test-runner form {line:?}: no Test record will follow; \
+             use a supported test runner form."
+        )
+    } else {
+        format!(
+            "[TermAl] Focused launcher command {line:?}: its inner command is not a recognized \
+             test runner; no Test record will follow; no rerun is needed."
+        )
+    })
 }

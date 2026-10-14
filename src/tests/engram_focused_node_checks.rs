@@ -3,6 +3,9 @@
 // not open a live store or reproduce a historical caller's run.
 use super::*;
 
+#[path = "engram_focused_launcher_notice.rs"]
+mod launcher_notice;
+
 const NODE_TEST: &str = "node scripts/test-launcher.mjs focused -- node --test --test-name-pattern \"selected case\" fixture.test.mjs";
 
 #[test]
@@ -408,15 +411,13 @@ fn assert_wrapped_unsupported_notice(cmd_wrapper: bool) {
         }
         let line = turn
             .record(|record| record.engram.pending_source_root_line.clone())
-            .expect("supported envelope must receive the unsupported focused notice");
+            .expect("supported envelope must receive the focused notice");
         assert!(
             line.contains("ordinary.mjs") && line.contains("no Test record will follow"),
             "{line}",
         );
-        assert!(
-            line.contains(if cmd_wrapper { "cmd /c" } else { "pushd" }),
-            "{line}",
-        );
+        assert_eq!(line, engram_unsupported_focused_line(inner).unwrap());
+        assert!(!line.contains("cmd /c") && !line.contains("pushd"), "{line}");
         assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
         turn.record_mut(|record| {
             record.engram.pending_source_root_line.take();
