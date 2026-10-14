@@ -117,8 +117,21 @@ builds the production UI, touches `ui/dist`, restarts a host, or accesses live
 store policy.
 
 Each run owns a unique directory below Git's `review-runs` metadata directory.
-A foreground run prints `RUN RUN_DIRECTORY` before any stage executes, so an
+Foreground and detached launches print `RUN RUN_DIRECTORY` after the initial
+request write, before registration or any stage executes, so an
 interrupted host wait can still inspect or settle the run without rerunning it.
+In a TermAl session, the launcher requires a versioned durable registration ACK
+and an exact host query before fingerprint capture, preflight, Cargo bootstrap
+or stages, then prints `TRACKED RUN_ID`. A detached worker rechecks its receipt,
+immutable request and host visibility before preflight. Registration failure
+ends the launch with a nonzero result and an explicit error. Ambiguous lost POST
+replies permit a bounded retry with the same identity; definitive refusals,
+malformed replies and unconfirmed queries never admit execution.
+Only an invocation with none of `TERMAL_BASE_URL`, `TERMAL_SESSION_ID` and
+`TERMAL_CLI` may run standalone and print `UNTRACKED RUN_ID` with a reason.
+A partial context cannot downgrade to standalone. The `RUN` receipt identifies
+the initial request, whose registration and source fingerprint are added later;
+neither `RUN` nor `TRACKED` is a passing test result.
 `request.json` records the exact plan and captured source fingerprint, plus
 `detached` and the creating process's `creatorPid`, which TermAl's test-run
 index reads (see [test runs](features/test-runs.md)); `results.json` records

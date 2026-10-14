@@ -27,9 +27,18 @@ exact launcher request in the local project's Git run directories. Its successfu
 response identifies `contract: "termal-durable-test-run-registration"`, `version: 1`
 and `registered: true`. The host acknowledges only after content persistence and
 query visibility. Identical retries retain one record; changed immutable request
-identity is refused. Registration failure never returns a durable ACK. This host
-prerequisite does not change the production launcher; launcher enforcement is a
-separate stage after the running host's capability has been verified.
+identity is refused. Registration failure never returns a durable ACK.
+
+The production launcher requires this versioned ACK and an exact durable run
+query before fingerprint capture, preflight, Cargo bootstrap or any stage.
+Foreground and detached launches fail with an explicit registration error when
+the host configuration, acknowledgement or query cannot be confirmed. A lost
+POST reply may be retried with the same run identity and immutable request;
+definitive refusals and malformed ACKs are not retried. A detached worker checks
+the saved receipt, immutable request and host visibility again before preflight.
+Only a standalone invocation with no `TERMAL_BASE_URL`, `TERMAL_SESSION_ID` or
+`TERMAL_CLI` environment variables may execute as `UNTRACKED`; a partial context
+fails closed. Registration and its receipt never establish test credit.
 
 Rows distinguish `registered`, `hostObserved` and `discovered` provenance. An
 observed command merges with a launcher row only through its explicitly returned

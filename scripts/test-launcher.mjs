@@ -26,6 +26,7 @@ import {
   isolatedGitEnvironment,
 } from "./review-freeze-fingerprint.mjs";
 import { processMayBeAlive } from "./test-temp-root.mjs";
+import { registerTestRun, validateRunRegistration, validateRegistrationContext } from "./test-run-registration.mjs";
 import {
   durationReportKinds,
   durationReportPlan,
@@ -81,6 +82,8 @@ const helperSupportFiles = Object.freeze([
   "scripts/test-durations.mjs",
   "scripts/test-fixture-cleanup.mjs",
   "scripts/test-launcher.mjs",
+  "scripts/test-launcher-registration-fixtures.mjs",
+  "scripts/test-run-registration.mjs",
   "scripts/test-temp-root.mjs",
   "scripts/vitest-resource-preflight.mjs",
 ]);
@@ -343,12 +346,22 @@ export async function createRun({
   full = false,
   scope,
   detached = false,
+  onRunCreated,
 }, env = process.env) {
   const normalizedRoot = resolve(root);
   const gitEnv = isolatedGitEnvironment(env);
-  const notification = notifyTo === undefined
-    ? undefined
-    : validateNotification({ notifyTo, owner: env.TERMAL_SESSION_ID, root: normalizedRoot }, env);
+  let notification;
+  try {
+    notification = notifyTo === undefined
+      ? undefined
+      : validateNotification({ notifyTo, owner: env.TERMAL_SESSION_ID, root: normalizedRoot }, env);
+  } catch (error) {
+    // A partial host identity is a registration refusal even when detached
+    // notification validation notices it first. Valid contexts keep the
+    // notification's existing diagnostic.
+    validateRegistrationContext(env);
+    throw error;
+  }
   const git = spawnSync(
     "git",
     ["rev-parse", "--path-format=absolute", "--git-path", "review-runs"],
@@ -385,9 +398,24 @@ export async function createRun({
     runId,
     state: "running",
     started: request.started,
+    preflight: [],
     ...(scope ? { scope } : {}),
     stages: (stages ?? []).map(({ name }) => ({ name, state: "unrun" })),
   });
+  onRunCreated?.(runDir);
+  try {
+    request.registration = await registerTestRun(request, runDir, env);
+    save(join(runDir, "request.json"), request);
+  } catch (error) {
+    const result = readJson(join(runDir, "results.json"));
+    Object.assign(result, {
+      state: "failed", exitCode: 1, ended: new Date().toISOString(),
+      error: error.message,
+      registration: { state: "failed", reason: error.message },
+    });
+    save(join(runDir, "results.json"), result);
+    throw new Error(`${error.message}; run directory: ${runDir}`);
+  }
   try {
     const input = await captureFingerprint(normalizedRoot, gitEnv);
     save(join(runDir, "input.json"), input);
@@ -602,6 +630,7 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
       ? result.started
       : typeof request?.started === "string" ? request.started : new Date().toISOString(),
     stages,
+    preflight: [],
     exitCode: 1,
     ended: new Date().toISOString(),
     error: `worker startup failed before readiness: ${error.message}`,
@@ -621,6 +650,7 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
   try {
     request = readJson(join(runDir, "request.json"));
     validateInitialRequest(runDir, request, env);
+    await validateRunRegistration(request, env, runDir);
     requestTrusted = true;
     result = readJson(resultPath);
     validateInitialResult(request, result);
@@ -1294,11 +1324,11 @@ async function main(args) {
       : undefined,
     full: mode === "full",
     detached: Boolean(options.detach),
+    onRunCreated: (directory) => console.log(`RUN ${directory}`),
   });
   if (!options.detach) {
     // The run directory is known before any stage executes, so an interrupted
     // host wait can still inspect or settle this run without rerunning it.
-    console.log(`RUN ${runDir}`);
     await finish(runDir);
     return;
   }

@@ -417,17 +417,35 @@ fn native_windows_launch_supervises_real_focused_launcher_and_recovers_run() {
         .arg("root")
         .arg(&marker)
         .current_dir(&repository);
+    // This deliberately interrupted private fixture is standalone. Its copied
+    // launcher must never register with the live host that runs the Rust gate.
+    for name in ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"] {
+        spec.env_remove(name);
+    }
+    assert!(
+        ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"]
+            .iter()
+            .all(|name| {
+                spec.env.iter().any(|(key, value)| {
+                    key.as_os_str() == std::ffi::OsStr::new(*name) && value.is_none()
+                })
+            }),
+        "private launcher isolation must be configured before spawning"
+    );
     let launch = prepare(&spec).unwrap();
     let process = launch.process();
     assert!(matches!(launch.containment(), ContainmentStatus::Contained));
     let stdout = process.take_stdout().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
+    let (untracked_tx, untracked_rx) = std::sync::mpsc::channel();
     let reader = std::thread::spawn(move || {
         use std::io::BufRead;
         for line in std::io::BufReader::new(stdout).lines() {
             let line = line.unwrap();
             if let Some(path) = line.strip_prefix("RUN ") {
                 let _ = tx.send(PathBuf::from(path));
+            } else if let Some(receipt) = line.strip_prefix("UNTRACKED ") {
+                let _ = untracked_tx.send(receipt.to_owned());
             }
         }
     });
@@ -440,6 +458,16 @@ fn native_windows_launch_supervises_real_focused_launcher_and_recovers_run() {
     );
     let earliest = creation(process.handle.as_raw_handle());
     let mut members = identities(&ready(&marker, &process), earliest);
+    let request: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(run.join("request.json")).unwrap()).unwrap();
+    assert_eq!(request["registration"]["state"], "untracked");
+    assert!(request["owner"].is_null());
+    assert!(
+        untracked_rx
+            .recv_timeout(GUARD)
+            .expect("standalone launcher receipt")
+            .starts_with(&format!("{}:", request["runId"].as_str().unwrap()))
+    );
     members.push(Identity::capture(process.id(), earliest));
     assert_eq!(members.len(), 4);
     // End only the retained launcher root. Its host supervisor then observes
@@ -461,6 +489,9 @@ fn native_windows_launch_supervises_real_focused_launcher_and_recovers_run() {
         .args(["scripts/test-launcher.mjs", "recover"])
         .arg(&run)
         .current_dir(&repository);
+    for name in ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"] {
+        recover.env_remove(name);
+    }
     let (recovered, _) = output(&recover, false);
     assert!(
         recovered.status.success(),
