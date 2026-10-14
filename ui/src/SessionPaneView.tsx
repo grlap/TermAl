@@ -513,17 +513,16 @@ export function SessionPaneView({
     !isSending &&
     activeDelegationWaits.length > 0;
   const hasPendingTestRunWait = useHasPendingTestRunWait(activeSession?.id);
-  // An Idle session that a pending delegation or test-run wait would resume
-  // keeps Stop, the operator's brake on that resume.
+  // Keep the operator's Stop control while an idle session awaits recovery.
   const canStopWaitingSession =
     activeSession?.status === "idle" &&
-    (activeDelegationWaits.length > 0 || hasPendingTestRunWait);
+    (activeDelegationWaits.length > 0 || hasPendingTestRunWait || activeSession.providerCapacityWaiting);
   // Busy state is independent of which transcript messages are resident.
   const showWaitingIndicator =
     isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
-    (isSessionBusy || isSending || showDelegationWaitIndicator);
+    (isSessionBusy || isSending || showDelegationWaitIndicator || Boolean(activeSession?.providerCapacityWaiting));
   // Delegated children are transcript/control surfaces owned by the parent
   // delegation flow: keep transcript tools reachable, but do not allow prompts
   // or new delegations to be injected from the child pane.

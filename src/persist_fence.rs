@@ -10,6 +10,7 @@ delegation admission, provider delivery, SQL schema, or HTTP response policy.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone)]
 enum PersistFenceTarget {
+    ProviderCapacityRecovery { session_id: String, content: Value },
     EngramCausalCard { session_id: String, message_id: String, content: Value },
     EngramRecovery { session_id: String, content: Value },
     EngramWorkAuthority(Box<EngramAuthorityImage>),
@@ -65,7 +66,7 @@ impl PersistFenceTarget {
             Self::EngramCausalCard { .. } | Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
                 | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
                 | Self::EngramSourceRemoval { .. } | Self::QueuedPromptDurability { .. }
-                | Self::PromptDeliveryWriteAhead { .. } => false,
+                | Self::PromptDeliveryWriteAhead { .. } | Self::ProviderCapacityRecovery { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
                 .as_deref()
@@ -185,6 +186,15 @@ impl PersistFenceTarget {
                 };
                 let metadata: PersistedState = serde_json::from_str(&stored)?;
                 Ok(image.matches_metadata(&metadata))
+            }
+            Self::ProviderCapacityRecovery { session_id, content } => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
+                    |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false); };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(serde_json::to_value(&actual.provider_capacity_retry)? == *content)
             }
             Self::EngramAdmission {
                 session_id,

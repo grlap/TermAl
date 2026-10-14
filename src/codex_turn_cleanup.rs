@@ -41,6 +41,7 @@
 /// buffered subagent results, the assistant-output-started flag, and
 /// the visible-assistant-message anchor.
 fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
+    turn_state.remote_compaction_progressed = false;
     turn_state.current_agent_message_id = None;
     turn_state.streamed_agent_message_text_by_item_id.clear();
     turn_state.streamed_agent_message_item_ids.clear();
@@ -295,6 +296,9 @@ fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionS
         let _ = cancel_tx.send(());
     }
     session_state.turn_started_before_response = false;
+    session_state.turn_id_provisional = false;
+    session_state.deferred_terminals.clear();
+    session_state.terminal_identity_unresolved = false;
     session_state.active_turn_generation = None;
     session_state.turn_id = None;
     session_state.turn_started = false;

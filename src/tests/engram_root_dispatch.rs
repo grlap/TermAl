@@ -37,6 +37,9 @@ mod delegation_held;
 #[path = "engram_receipted_admission.rs"]
 mod receipted_admission;
 
+#[path = "engram_capacity_retry_admission.rs"]
+mod capacity_retry_admission;
+
 #[test]
 fn root_known_defer_resume_uses_new_evaluation_identity() {
     let (state, session, receiver, transport) = root_fixture([

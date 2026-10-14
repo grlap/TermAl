@@ -182,8 +182,14 @@ impl PersistedState {
         persisted.sessions = inner
             .sessions
             .iter()
-            .filter(|record| !record.hidden || source_observation_removal_blocker(inner,
-                &source_observation_removal_set(inner, &record.session.id)).is_some())
+            .filter(|record| {
+                !record.hidden
+                    || source_observation_removal_blocker(
+                        inner,
+                        &source_observation_removal_set(inner, &record.session.id),
+                    )
+                    .is_some()
+            })
             .map(PersistedSessionRecord::from_record)
             .collect();
         persisted
@@ -358,11 +364,19 @@ impl PersistedState {
                     root,
                     EngramNamedRootEndReason::SessionGoneAtRestore,
                 );
-                if let Some(binding) = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-                    .and_then(|journal| journal.read_binding.clone())
-                    && let Some(history) = inner.engram_work_naming_history.iter_mut()
-                        .find(|history| history.store == root.store && history.work_id == root.work_id)
-                {engram_retain_recovery_run(&mut history.unresolved_runs, &binding);}
+                if let Some(binding) = engram_root_journal(
+                    &inner.engram_named_root_journal,
+                    &root.store,
+                    &root.claim_id,
+                )
+                .and_then(|journal| journal.read_binding.clone())
+                    && let Some(history) =
+                        inner.engram_work_naming_history.iter_mut().find(|history| {
+                            history.store == root.store && history.work_id == root.work_id
+                        })
+                {
+                    engram_retain_recovery_run(&mut history.unresolved_runs, &binding);
+                }
             }
         }
         engram_end_orphaned_work_source_roots(&mut inner.engram_work_source_roots, |named_by| {
@@ -424,6 +438,8 @@ struct PersistedSessionRecord {
     remote_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
     orchestrator_auto_dispatch_blocked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_capacity_retry: Option<ProviderCapacityRetry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_routing_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -565,6 +581,7 @@ impl PersistedSessionRecord {
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
+            provider_capacity_retry: record.provider_capacity_retry.clone(),
             engram_routing_token: record.engram.routing_token.clone(),
             engram_open_grant_id: record.engram.active_grant_id.clone(),
             engram_uncertain_grant_id: record.engram.uncertain_grant_id.clone(),
@@ -684,6 +701,8 @@ impl PersistedSessionRecord {
             retained_dedicated_owners: Vec::new(),
             engram_mcp_runtime_quarantined: false,
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
+            provider_capacity_retry: self.provider_capacity_retry,
+            codex_terminal_identity_unresolved: false,
             engram: EngramSessionState {
                 recovered_admission,
                 routing_token: self.engram_routing_token.clone(),
@@ -730,6 +749,9 @@ impl PersistedSessionRecord {
         // is rebuilt from it so a loaded session never advertises a stale
         // paused/unpaused state from an older snapshot.
         record.session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        // A restarted host cannot prove that an in-flight Resume sent nothing.
+        // Keep the persisted hold and leave recovery to the operator.
+        clear_provider_capacity_retry(&mut record);
         // A hand-off without acceptance is ambiguous after a restart, and its
         // entry never runs again; this happens before any recovery below
         // reads the queue head.

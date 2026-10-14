@@ -486,7 +486,9 @@ impl AppState {
             return Err(ApiError::conflict("session is stopping"));
         }
         if record.dedicated_predecessor_pending() {
-            return Err(ApiError::conflict("previous runtime cleanup remains pending"));
+            return Err(ApiError::conflict(
+                "previous runtime cleanup remains pending",
+            ));
         }
         if let Some(detail) = record.runtime.dedicated_cleanup_failure() {
             return Err(ApiError::conflict(format!("{detail}; Stop or Delete must finish cleanup before a new turn")));
@@ -1265,7 +1267,11 @@ impl AppState {
         // Where the session writes, for the overlap marks its turn start
         // makes under the lock.
         self.engram_host().turn_starting(session_id);
-        let result = self.with_queued_engram_admission(session_id, || {
+        let capacity_resume_owner = match owner.as_ref() {
+            Some(QueuedDrainOwner::Resume(owner)) if owner.capacity_nonce.is_some() => Some(owner),
+            _ => None,
+        };
+        let result = self.with_queued_engram_admission_for_capacity_resume(session_id, capacity_resume_owner, || {
             self.start_next_queued_turn_inner_off_lock(
                 session_id,
                 allow_blocked_dispatch,
@@ -1310,9 +1316,19 @@ impl AppState {
         result
     }
 
+    #[cfg(test)]
     fn with_queued_engram_admission(
         &self,
         session_id: &str,
+        drain: impl FnMut() -> Result<Option<StartedQueuedTurn>>,
+    ) -> Result<Option<StartedQueuedTurn>> {
+        self.with_queued_engram_admission_for_capacity_resume(session_id, None, drain)
+    }
+
+    fn with_queued_engram_admission_for_capacity_resume(
+        &self,
+        session_id: &str,
+        capacity_resume_owner: Option<&EngramQueuedAdmissionOwner>,
         mut drain: impl FnMut() -> Result<Option<StartedQueuedTurn>>,
     ) -> Result<Option<StartedQueuedTurn>> {
         loop {
@@ -1367,8 +1383,22 @@ impl AppState {
                         return Ok(None);
                     }
                     let wake = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                    let owner = EngramQueuedAdmissionOwner::capture(record);
+                    let owner = capacity_resume_owner.filter(|owner| owner.matches(record))
+                        .cloned().or_else(|| EngramQueuedAdmissionOwner::capture(record));
                     record.engram.admission_in_progress = Some(wake.clone());
+                    // Bind the ACK's exact capacity continuation as its guard
+                    // is acquired, before evaluation can leave this lock. The
+                    // after-drain attachment is too late for the retry tick.
+                    if let Some(owner) = owner.as_ref().filter(|owner| owner.capacity_nonce.is_some())
+                        && prompt_delivery_resume_holds(record, &owner.prompt_id)
+                        && let Some(delivery) = record.prompt_deliveries.get(&owner.prompt_id)
+                        && delivery.write_ahead_acknowledged
+                    {
+                        record.engram.admission_attempt = Some(EngramAdmissionAttempt {
+                            token: wake.clone(), prompt_id: owner.prompt_id.clone(),
+                            write_ahead: delivery.write_ahead.clone(),
+                        });
+                    }
                     // The head this admission evaluates, so a receipted
                     // attempt is left only to the admission of its own prompt.
                     record.engram.admission_prompt_id =
@@ -1857,6 +1887,8 @@ impl AppState {
                 return Ok(None);
             };
             let unchanged = inner.sessions[index].engram.dispatch_generation == snapshot.1
+                && (!allow_blocked_dispatch
+                    || bypass_owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index])))
                 && inner.sessions[index]
                     .queued_prompts
                     .front()
@@ -2052,7 +2084,11 @@ impl AppState {
         }
         self.prepare_codex_child_followup(session_id)?;
         self.prepare_dedicated_runtime_reset_off_lock(session_id, false)
-            .map_err(|error| ApiError::conflict(format!("failed preparing dedicated runtime reset: {error:#}")))?;
+            .map_err(|error| {
+                ApiError::conflict(format!(
+                    "failed preparing dedicated runtime reset: {error:#}"
+                ))
+            })?;
         if request.source_mailbox.is_none() {
             if let Err(err) =
                 self.reconcile_never_woken_mailbox_notifications_for_session(session_id)
@@ -2133,6 +2169,18 @@ impl AppState {
                 }
             })
         });
+        // Only a genuine user turn replaces automatic capacity recovery.
+        if inner.sessions[index].codex_terminal_identity_unresolved {
+            return Err(ApiError::conflict(
+                "Codex terminal identity is unresolved; Stop before sending another prompt",
+            ));
+        }
+        // Peer/mailbox provenance is resolved above; their wakes stay queued.
+        if source.is_none() && request.source_mailbox.is_none()
+            && clear_provider_capacity_retry(&mut inner.sessions[index])
+        {
+            inner.stamp_session_at_index(index);
+        }
         if record_has_archived_codex_thread(&inner.sessions[index]) {
             return Err(ApiError::conflict(
                 "the current Codex thread is archived; unarchive it before sending another prompt",
@@ -2192,8 +2240,11 @@ impl AppState {
         } else {
             QueuedPromptSource::User
         };
+        let capacity_automatic_prompt = inner.sessions[index].provider_capacity_retry.is_some()
+            && (source.is_some() || request.source_mailbox.is_some());
         let explicit_reset_resume = project_reset_fenced
             && orchestrator_auto_dispatch_blocked
+            && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User;
         if explicit_reset_resume {
             // A user prompt accepted while a project-settings fence is active
@@ -2209,7 +2260,8 @@ impl AppState {
         // notifications must join the durable queue even when it was empty at
         // the moment of Stop; only a later user prompt may lift the latch.
         let blocked_automatic_prompt = orchestrator_auto_dispatch_blocked
-            && queued_prompt_source == QueuedPromptSource::Mailbox;
+            && (queued_prompt_source == QueuedPromptSource::Mailbox
+                || capacity_automatic_prompt);
 
         let mut message_id = inner.next_message_id();
         // S0 ("off means off") keeps the pre-adapter dispatch algorithm
@@ -2327,9 +2379,9 @@ impl AppState {
                             ) {
                             Ok(Some(started)) => started,
                             Ok(None) => {
-                                return Ok(self.queued_after_direct_enqueue(
-                                    inner, index, session_id,
-                                ));
+                                return Ok(
+                                    self.queued_after_direct_enqueue(inner, index, session_id)
+                                );
                             }
                             Err(error) => {
                                 drop(inner);
@@ -2366,6 +2418,7 @@ impl AppState {
                 && has_queued_prompts
                 && orchestrator_auto_dispatch_blocked
                 && blocked_queue_contains_user_prompt
+                && !capacity_automatic_prompt
                 && queued_prompt_source == QueuedPromptSource::User;
             // A head held for its durability acknowledgement is never
             // overtaken: the manual send queues behind it instead.
@@ -2373,6 +2426,7 @@ impl AppState {
                 && has_queued_prompts
                 && orchestrator_auto_dispatch_blocked
                 && !blocked_queue_contains_user_prompt
+                && !capacity_automatic_prompt
                 && queued_prompt_source == QueuedPromptSource::User
                 && !queued_head_held_for_durability(&inner.sessions[index]);
 
@@ -2630,11 +2684,13 @@ impl AppState {
             && has_queued_prompts
             && orchestrator_auto_dispatch_blocked
             && blocked_queue_contains_user_prompt
+            && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User;
         let prioritize_manual_dispatch_over_blocked_queue = !session_is_busy
             && has_queued_prompts
             && orchestrator_auto_dispatch_blocked
             && !blocked_queue_contains_user_prompt
+            && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User
             && !queued_head_held_for_durability(&inner.sessions[index]);
 

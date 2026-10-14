@@ -162,6 +162,8 @@ impl StateInner {
             retained_dedicated_owners: Vec::new(),
             engram_mcp_runtime_quarantined: false,
             orchestrator_auto_dispatch_blocked: false,
+            provider_capacity_retry: None,
+            codex_terminal_identity_unresolved: false,
             runtime_stop_in_progress: false,
             runtime_stop_owner: None,
             runtime_stop_generation: 0,
@@ -249,6 +251,7 @@ impl StateInner {
                 pending_prompts: Vec::new(),
                 prompt_deliveries: Vec::new(),
                 queue_paused: false,
+                provider_capacity_waiting: false,
                 source_tracking_recovery: false,
                 queue_projection_hash: None,
                 session_mutation_stamp: None,
@@ -494,8 +497,15 @@ impl StateInner {
         if !session_id.is_empty() {
             let retired_bindings = self.engram_work_source_roots.iter()
                 .filter(|root| root.named_by_session == session_id)
-                .filter_map(|root| engram_root_journal(&self.engram_named_root_journal, &root.store, &root.claim_id)
-                    .and_then(|journal| journal.read_binding.clone()).map(|binding| (root.store.clone(), binding)))
+                .filter_map(|root| {
+                    engram_root_journal(
+                        &self.engram_named_root_journal,
+                        &root.store,
+                        &root.claim_id,
+                    )
+                    .and_then(|journal| journal.read_binding.clone())
+                    .map(|binding| (root.store.clone(), binding))
+                })
                 .collect::<Vec<_>>();
             for (store, binding) in retired_bindings {
                 if let Some(history) = self.engram_work_naming_history.iter_mut()

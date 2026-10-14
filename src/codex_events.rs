@@ -433,9 +433,20 @@ fn handle_shared_codex_app_server_message(
             && message.pointer("/params/status").and_then(Value::as_str) == Some("failed") {
             let mut shared = sessions.lock().expect("shared Codex session mutex poisoned");
             let s = shared.entry(session_id.clone()).or_default();
-            if s.thread_id.as_deref().is_none_or(|id| Some(id) == message_thread_id) {
-                s.reviewer_mcp_failure = Some(codex_reviewer_mcp_reason(message.pointer("/params/error").and_then(Value::as_str)
-                    .or_else(|| message.pointer("/params/failureReason").and_then(Value::as_str))));
+            if s.thread_id
+                .as_deref()
+                .is_none_or(|id| Some(id) == message_thread_id)
+            {
+                s.reviewer_mcp_failure = Some(codex_reviewer_mcp_reason(
+                    message
+                        .pointer("/params/error")
+                        .and_then(Value::as_str)
+                        .or_else(|| {
+                            message
+                                .pointer("/params/failureReason")
+                                .and_then(Value::as_str)
+                        }),
+                ));
             }
         }
         return Ok(());
@@ -449,11 +460,62 @@ fn handle_shared_codex_app_server_message(
     // because complete_shared_codex_thread_setup hasn't run. Insert a default
     // entry so early events from Codex are not dropped.
     let session_state = shared_sessions.entry(session_id.clone()).or_default();
+    if method == "turn/started"
+        && !state.provider_capacity_event_is_current(&session_id, session_state.active_turn_generation)
+    {
+        return Ok(());
+    }
+    if !codex_terminal_is_owned_or_deferred(
+        method,
+        message,
+        state,
+        &session_id,
+        &runtime_token,
+        session_state,
+    )? {
+        return Ok(());
+    }
+    let explicit_start = (method == "turn/started")
+        .then(|| message.pointer("/params/turn/id").and_then(Value::as_str))
+        .flatten();
+    let mut deferred_terminal = None;
+    if method == "turn/started" && explicit_start.is_none() && session_state.turn_id_provisional {
+        // An id-less duplicate start cannot turn an item-routing candidate
+        // into proof or consume the pending response needed to resolve it.
+        session_state.turn_id = None;
+        session_state.turn_id_provisional = false;
+    }
+    if let Some(start_id) = explicit_start {
+        if codex_turn_is_retired(session_state, start_id)
+            || (session_state.pending_turn_start_request_id.is_some()
+                && !session_state.turn_id_provisional
+                && session_state
+                    .turn_id
+                    .as_deref()
+                    .is_some_and(|id| id != start_id))
+        {
+            return Ok(());
+        }
+        if let Some(request_id) = session_state.pending_turn_start_request_id.clone() {
+            deferred_terminal = take_proven_codex_terminal(
+                session_state,
+                &runtime_token,
+                &request_id,
+                session_state.active_turn_generation,
+                Some(start_id),
+            );
+        }
+        if session_state.turn_id_provisional {
+            session_state.turn_id = None;
+        }
+        session_state.turn_id_provisional = false;
+    }
     let SharedCodexSessionState {
         pending_thread_setup: _,
         pending_turn_start_request_id,
-        turn_started_watchdog_cancel_tx,
+        turn_started_watchdog_cancel_tx: _,
         turn_started_before_response,
+        turn_id_provisional,
         active_turn_generation: _,
         recorder: recorder_state,
         thread_id,
@@ -461,7 +523,7 @@ fn handle_shared_codex_app_server_message(
         completed_turn_id,
         turn_started,
         turn_state,
-        reviewer_mcp_gate,
+        reviewer_mcp_gate: _,
         ..
     } = session_state;
     let turn_started_turn_id = (method == "turn/started")
@@ -491,10 +553,9 @@ fn handle_shared_codex_app_server_message(
         && turn_id.is_none()
         && event_turn_id.is_some()
     {
-        // The first turn-scoped event can race ahead of the response waiter
-        // too. Its id belongs to the sole armed request and is safe to adopt;
-        // doing so keeps approvals and item events routable in that window.
+        // Useful for item routing, but never proof for a terminal event.
         *turn_id = event_turn_id.map(str::to_owned);
+        *turn_id_provisional = true;
     }
     if method == "turn/started"
         && pending_turn_start_request_id.is_some()
@@ -575,25 +636,30 @@ fn handle_shared_codex_app_server_message(
         return handle_codex_app_server_request(method, message, &mut recorder);
     }
 
-    handle_shared_codex_app_server_notification(
+    apply_owned_shared_codex_notification(
         method,
         message,
         state,
         &session_id,
         &runtime_token,
         sessions,
-        thread_id,
-        turn_id,
-        completed_turn_id,
-        turn_started,
-        pending_turn_start_request_id,
-        turn_started_watchdog_cancel_tx,
-        turn_started_before_response,
-        turn_state,
         thread_sessions,
-        &mut recorder,
-        reviewer_mcp_gate,
-    )
+        session_state,
+    )?;
+    if let Some(terminal) = deferred_terminal {
+        let terminal_method = terminal.get("method").and_then(Value::as_str).unwrap_or("");
+        apply_owned_shared_codex_notification(
+            terminal_method,
+            &terminal,
+            state,
+            &session_id,
+            &runtime_token,
+            sessions,
+            thread_sessions,
+            session_state,
+        )?;
+    }
+    Ok(())
 }
 
 /// Dispatches fire-and-forget notifications (no response expected) to
@@ -611,6 +677,7 @@ fn handle_shared_codex_app_server_notification(
     state: &AppState,
     session_id: &str,
     runtime_token: &RuntimeToken,
+    runtime_generation: Option<u64>,
     sessions: &SharedCodexSessionMap,
     session_thread_id: &mut Option<String>,
     turn_id: &mut Option<String>,
@@ -794,6 +861,15 @@ fn handle_shared_codex_app_server_notification(
             };
             if let Some(error) = message.pointer("/params/turn/error") {
                 if !error.is_null() {
+                    let typed_capacity = is_typed_provider_capacity(error);
+                    if typed_capacity
+                        && (!state.provider_capacity_event_is_current(session_id, runtime_generation)
+                            || state.provider_capacity_failure_already_scheduled(
+                                session_id, runtime_token, runtime_generation,
+                            ))
+                    {
+                        return Ok(());
+                    }
                     trace_shared_codex_event(
                         "turn_completed",
                         method,
@@ -806,6 +882,11 @@ fn handle_shared_codex_app_server_notification(
                         pending_turn_start_request_id.as_deref(),
                         Some("error"),
                     );
+                    let capacity = state.prepare_provider_capacity_failure(
+                        session_id, runtime_token, runtime_generation, true, error,
+                        turn_state.remote_compaction_progressed,
+                    );
+                    if capacity.is_none() { state.cancel_provider_capacity_retry(session_id); }
                     *turn_id = None;
                     *completed_turn_id = None;
                     *turn_started = false;
@@ -826,15 +907,26 @@ fn handle_shared_codex_app_server_notification(
                         None,
                         PromptDeliveryOutcome::Accepted,
                     );
-                    if defer_codex_reviewer_mcp_finish(state, sessions, session_id, runtime_token,
-                        session_thread_id.as_deref(), reviewer_mcp_gate, Some(summarize_error(error))) {
-                        return Ok(());
-                    }
-                    state.fail_turn_if_runtime_matches(
+                    if defer_codex_reviewer_mcp_finish(
+                        state,
+                        sessions,
                         session_id,
                         runtime_token,
+                        session_thread_id.as_deref(),
+                        reviewer_mcp_gate,
+                        Some(summarize_error(error)),
+                    ) {
+                        return Ok(());
+                    }
+                    state.fail_turn_if_runtime_matches_and_report(
+                        session_id,
+                        runtime_token,
+                        if typed_capacity { runtime_generation } else { None },
                         &summarize_error(error),
                     )?;
+                    if let Some(nonce) = capacity {
+                        state.finish_provider_capacity_failure(session_id, &nonce)?;
+                    }
                     return Ok(());
                 }
             }
@@ -866,7 +958,16 @@ fn handle_shared_codex_app_server_notification(
             // final must replace the existing bubble
             // in place rather than appending a second message. The cleanup worker
             // or the next turn/started event clears this recorder state.
-            if !defer_codex_reviewer_mcp_finish(state, sessions, session_id, runtime_token, session_thread_id.as_deref(), reviewer_mcp_gate, None) {
+            if !defer_codex_reviewer_mcp_finish(
+                state,
+                sessions,
+                session_id,
+                runtime_token,
+                session_thread_id.as_deref(),
+                reviewer_mcp_gate,
+                None,
+            ) {
+                state.cancel_provider_capacity_retry(session_id);
                 state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
             }
             if let Some(completed_turn_id) = completed_turn_id.as_deref() {
@@ -899,6 +1000,9 @@ fn handle_shared_codex_app_server_notification(
                 return Ok(());
             }
             if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
+                if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
+                    turn_state.remote_compaction_progressed = true;
+                }
                 handle_codex_app_server_item_started(item, recorder)?;
             }
         }
@@ -909,6 +1013,8 @@ fn handle_shared_codex_app_server_notification(
             // Manual compaction can have a different turn id; record the
             // completed boundary before filtering ordinary work-turn items.
             if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
+                turn_state.remote_compaction_progressed = true;
+                state.cancel_provider_capacity_retry(session_id);
                 if state.mark_engram_context_refresh_needed(
                     session_id,
                     item.get("id").and_then(Value::as_str),
@@ -1032,6 +1138,8 @@ fn handle_shared_codex_app_server_notification(
             )?;
         }
         "thread/compacted" => {
+            turn_state.remote_compaction_progressed = true;
+            state.cancel_provider_capacity_retry(session_id);
             handle_shared_codex_thread_compacted(
                 message,
                 state,
@@ -1063,10 +1171,30 @@ fn handle_shared_codex_app_server_notification(
         "error" => {
             let payload = message.get("params").unwrap_or(message);
             let detail = summarize_error(payload);
+            let event_turn_id = payload.get("turnId").and_then(Value::as_str);
+            let error = payload.get("error").unwrap_or(payload);
+            let typed_capacity = is_typed_provider_capacity(error);
+            if typed_capacity
+                && (!state.provider_capacity_event_is_current(session_id, runtime_generation)
+                    || state.provider_capacity_failure_already_scheduled(
+                        session_id, runtime_token, runtime_generation,
+                    )
+                    || (turn_id.is_some() && event_turn_id.is_some() && event_turn_id != turn_id.as_deref()))
+            {
+                return Ok(());
+            }
 
-            if is_retryable_connectivity_error(payload) {
+            if is_retryable_connectivity_error(payload)
+                || (is_typed_provider_capacity(error) && codex_error_will_retry(payload))
+            {
                 state.note_turn_retry_if_runtime_matches(session_id, runtime_token, &detail)?;
             } else {
+                let capacity = state.prepare_provider_capacity_failure(
+                    session_id, runtime_token, runtime_generation,
+                    *turn_started && event_turn_id.is_some(), error,
+                    turn_state.remote_compaction_progressed,
+                );
+                if capacity.is_none() { state.cancel_provider_capacity_retry(session_id); }
                 *turn_id = None;
                 *completed_turn_id = None;
                 *turn_started = false;
@@ -1077,11 +1205,24 @@ fn handle_shared_codex_app_server_notification(
                 );
                 clear_codex_turn_state(turn_state);
                 recorder.reset_turn_state()?;
-                if defer_codex_reviewer_mcp_finish(state, sessions, session_id, runtime_token,
-                    session_thread_id.as_deref(), reviewer_mcp_gate, Some(detail.clone())) {
+                if defer_codex_reviewer_mcp_finish(
+                    state,
+                    sessions,
+                    session_id,
+                    runtime_token,
+                    session_thread_id.as_deref(),
+                    reviewer_mcp_gate,
+                    Some(detail.clone()),
+                ) {
                     return Ok(());
                 }
-                state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
+                state.fail_turn_if_runtime_matches_and_report(
+                    session_id, runtime_token,
+                    if typed_capacity { runtime_generation } else { None }, &detail,
+                )?;
+                if let Some(nonce) = capacity {
+                    state.finish_provider_capacity_failure(session_id, &nonce)?;
+                }
             }
         }
         "codex/event/item_completed" => {

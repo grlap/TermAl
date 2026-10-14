@@ -139,6 +139,7 @@ struct CodexPromptReceipt {
 /// consumes it.
 #[derive(Clone, Debug)]
 struct PromptDeliveryResume {
+    capacity_nonce: Option<String>,
     dispatch_generation: u64,
     active_turn_generation: u64,
     intent: String,
@@ -152,6 +153,7 @@ impl PromptDeliveryResume {
     /// was captured for, never one captured afresh.
     fn owner(&self, prompt_id: &str) -> EngramQueuedAdmissionOwner {
         EngramQueuedAdmissionOwner {
+            capacity_nonce: self.capacity_nonce.clone(),
             prompt_id: prompt_id.to_owned(),
             generation: self.dispatch_generation,
             active_turn_generation: self.active_turn_generation,
@@ -193,6 +195,7 @@ fn prompt_delivery_resume_holds(record: &SessionRecord, prompt_id: &str) -> bool
         && record.active_turn_generation == resume.active_turn_generation
         && record.runtime_stop_generation == resume.stop_generation
         && record.auto_dispatch_pause_epoch == resume.pause_epoch
+        && resume.capacity_nonce.as_deref().is_none_or(|nonce| provider_capacity_resume_owned(record, nonce))
         && !record.runtime_stop_in_progress
         && receipted_prompt_intent(head) == resume.intent
 }
@@ -808,7 +811,7 @@ impl AppState {
             | PromptDeliveryDisposition::Rejected
             | PromptDeliveryDisposition::Ambiguous => return false,
         }
-        self.begin_prompt_delivery_write_ahead_locked(inner, index, prompt_id, false);
+        self.begin_prompt_delivery_write_ahead_locked(inner, index, prompt_id, false, None);
         false
     }
 
@@ -822,6 +825,7 @@ impl AppState {
         index: usize,
         prompt_id: &str,
         explicit_resume: bool,
+        capacity_nonce: Option<&str>,
     ) {
         let session_id = inner.sessions[index].session.id.clone();
         let record = inner
@@ -846,6 +850,7 @@ impl AppState {
         delivery.write_ahead_acknowledged = false;
         delivery.resume = match (explicit_resume, content) {
             (true, Some(content)) => Some(PromptDeliveryResume {
+                capacity_nonce: capacity_nonce.map(str::to_owned),
                 dispatch_generation,
                 active_turn_generation,
                 intent: content,
@@ -932,7 +937,10 @@ impl AppState {
             | PromptDeliveryDisposition::Rejected
             | PromptDeliveryDisposition::Ambiguous => return ReceiptedResume::NotReceipted,
         }
-        self.begin_prompt_delivery_write_ahead_locked(&mut inner, index, &prompt_id, true);
+        self.begin_prompt_delivery_write_ahead_locked(
+            &mut inner, index, &prompt_id, true,
+            owner.and_then(|owner| owner.capacity_nonce.as_deref()),
+        );
         ReceiptedResume::Preparing
     }
 

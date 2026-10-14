@@ -1982,6 +1982,8 @@ struct SessionRecord {
     /// both block mailbox/workflow auto-dispatch until a manual user turn
     /// resets the latch in `start_turn_on_record`.
     orchestrator_auto_dispatch_blocked: bool,
+    provider_capacity_retry: Option<ProviderCapacityRetry>,
+    codex_terminal_identity_unresolved: bool,
     runtime_stop_in_progress: bool,
     /// Token-scoped owner for the runtime callback fence. The generation
     /// prevents a stale Stop/revocation completion from releasing a newer
@@ -2077,7 +2079,7 @@ impl SessionRecord {
     }
 
     fn runtime_preview(&self, preview: String) -> String {
-        if self.runtime_projection_allowed() {
+        if self.runtime_projection_allowed() && !self.codex_terminal_identity_unresolved {
             preview
         } else {
             self.session.preview.clone()
@@ -2085,6 +2087,7 @@ impl SessionRecord {
     }
 
     fn clear_runtime(&mut self) {
+        self.codex_terminal_identity_unresolved = false;
         #[cfg(windows)]
         self.retained_dedicated_owners.retain(|owner| !owner.tree.is_confirmed());
         self.runtime = SessionRuntime::None;

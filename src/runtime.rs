@@ -805,6 +805,7 @@ struct PendingSubagentResult {
 /// Tracks Codex turn state.
 #[derive(Default)]
 struct CodexTurnState {
+    remote_compaction_progressed: bool,
     current_agent_message_id: Option<String>,
     streamed_agent_message_text_by_item_id: HashMap<String, String>,
     streamed_agent_message_item_ids: HashSet<String>,
@@ -889,6 +890,12 @@ struct SharedCodexSessionState {
     /// response on the reader thread. Keep that proof until the response
     /// waiter installs the response-derived turn id.
     turn_started_before_response: bool,
+    /// Item routing may learn an id before the handshake proves it.
+    turn_id_provisional: bool,
+    deferred_terminals: Vec<DeferredCodexTerminal>,
+    terminal_identity_unresolved: bool,
+    /// Defense against delayed starts/terminals across subsequent requests.
+    retired_turn_ids: VecDeque<(String, String)>,
     active_turn_generation: Option<u64>,
     recorder: SessionRecorderState,
     thread_id: Option<String>,

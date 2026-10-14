@@ -137,6 +137,7 @@ struct EngramQueuedAdmissionOwner {
     prompt_id: String,
     generation: u64,
     active_turn_generation: u64,
+    capacity_nonce: Option<String>,
 }
 
 impl EngramQueuedAdmissionOwner {
@@ -154,11 +155,14 @@ impl EngramQueuedAdmissionOwner {
             prompt_id: queued.pending_prompt.id.clone(),
             generation: record.engram.dispatch_generation,
             active_turn_generation: record.active_turn_generation,
+            capacity_nonce: None,
         })
     }
 
     fn matches(&self, record: &SessionRecord) -> bool {
-        record.engram.dispatch_generation == self.generation
+        self.capacity_nonce.as_ref().is_none_or(|nonce|
+            provider_capacity_resume_owned(record, nonce))
+            && record.engram.dispatch_generation == self.generation
             && record.active_turn_generation == self.active_turn_generation
             && record
                 .queued_prompts

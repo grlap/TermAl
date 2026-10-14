@@ -523,14 +523,30 @@ fn spawn_shared_codex_runtime(
                             ),
                         )
                     }
-                    CodexRuntimeCommand::ReviewerMcpReady { scope, command, watchdog } => {
-                        handle_shared_codex_prompt_command_result(&writer_state, &scope.session_id,
-                            &writer_runtime_token, scope.generation,
-                            handle_shared_codex_start_turn_inner(&mut stdin, &writer_pending_requests,
-                                &writer_state, &writer_runtime_id, &writer_sessions, &writer_thread_sessions,
-                                Some(&writer_context), &scope.session_id, &scope.thread_id, watchdog,
-                                command, Some(&scope)))
-                    }
+                    CodexRuntimeCommand::ReviewerMcpReady {
+                        scope,
+                        command,
+                        watchdog,
+                    } => handle_shared_codex_prompt_command_result(
+                        &writer_state,
+                        &scope.session_id,
+                        &writer_runtime_token,
+                        scope.generation,
+                        handle_shared_codex_start_turn_inner(
+                            &mut stdin,
+                            &writer_pending_requests,
+                            &writer_state,
+                            &writer_runtime_id,
+                            &writer_sessions,
+                            &writer_thread_sessions,
+                            Some(&writer_context),
+                            &scope.session_id,
+                            &scope.thread_id,
+                            watchdog,
+                            command,
+                            Some(&scope),
+                        ),
+                    ),
                     CodexRuntimeCommand::RecoverLostThread {
                         session_id,
                         request_id,
@@ -1749,8 +1765,20 @@ fn handle_shared_codex_start_turn(
     turn_started_watchdog_config: Option<SharedCodexTurnStartedWatchdogConfig>,
     command: CodexPromptCommand,
 ) -> Result<()> {
-    handle_shared_codex_start_turn_inner(writer, pending_requests, state, runtime_id, sessions,
-        thread_sessions, writer_context, session_id, thread_id, turn_started_watchdog_config, command, None)
+    handle_shared_codex_start_turn_inner(
+        writer,
+        pending_requests,
+        state,
+        runtime_id,
+        sessions,
+        thread_sessions,
+        writer_context,
+        session_id,
+        thread_id,
+        turn_started_watchdog_config,
+        command,
+        None,
+    )
 }
 
 fn handle_shared_codex_start_turn_inner(
@@ -1821,37 +1849,100 @@ fn handle_shared_codex_start_turn_inner(
     }
 
     if let Some(scope) = approved_scope {
-        let gate_matches = sessions.lock().expect("shared Codex session mutex poisoned").get(session_id)
-            .is_some_and(|s| s.thread_id.as_deref() == Some(thread_id) && s.reviewer_mcp_gate.as_deref() == Some(&scope.gate));
-        if !gate_matches { return Ok(()); }
-        if !codex_reviewer_mcp_current(&state.inner.lock().expect("state mutex poisoned"), scope) {
-            fail_codex_reviewer_mcp(state, scope, "Reviewer MCP lost send eligibility before model work started.");
+        let gate_matches = sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .get(session_id)
+            .is_some_and(|s| {
+                s.thread_id.as_deref() == Some(thread_id)
+                    && s.reviewer_mcp_gate.as_deref() == Some(&scope.gate)
+            });
+        if !gate_matches {
             return Ok(());
         }
-    } else if state.inner.lock().expect("state mutex poisoned").delegations.iter()
-        .any(|d| d.child_session_id == session_id && d.mode == DelegationMode::Reviewer) {
+        if !codex_reviewer_mcp_current(&state.inner.lock().expect("state mutex poisoned"), scope) {
+            fail_codex_reviewer_mcp(
+                state,
+                scope,
+                "Reviewer MCP lost send eligibility before model work started.",
+            );
+            return Ok(());
+        }
+    } else if state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .delegations
+        .iter()
+        .any(|d| d.child_session_id == session_id && d.mode == DelegationMode::Reviewer)
+    {
         let Some(scope) = codex_reviewer_mcp_scope(state, session_id, thread_id, runtime_id)
-            .filter(|s| s.generation == command.active_turn_generation) else {
-                if let Some(scope) = codex_reviewer_mcp_scope_with_stop(state, session_id, thread_id, runtime_id, true, false)
-                    .filter(|s| s.generation == command.active_turn_generation) {
-                    fail_codex_reviewer_mcp(state, &scope, "Reviewer MCP startup fenced by a runtime stop; model work was not started.");
-                } else if state.inner.lock().expect("state mutex poisoned").sessions.iter()
-                    .any(|r| r.session.id == session_id && r.external_session_id.as_deref() == Some(thread_id)) {
-                    fail_shared_codex_turn_without_runtime_exit(state, session_id, runtime_id,
-                        command.active_turn_generation, "Reviewer MCP startup scope is unavailable; model work was not started.",
-                        "reviewer MCP startup scope");
-                }
+            .filter(|s| s.generation == command.active_turn_generation)
+        else {
+            if let Some(scope) = codex_reviewer_mcp_scope_with_stop(
+                state, session_id, thread_id, runtime_id, true, false,
+            )
+            .filter(|s| s.generation == command.active_turn_generation)
+            {
+                fail_codex_reviewer_mcp(
+                    state,
+                    &scope,
+                    "Reviewer MCP startup fenced by a runtime stop; model work was not started.",
+                );
+            } else if state
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .sessions
+                .iter()
+                .any(|r| {
+                    r.session.id == session_id
+                        && r.external_session_id.as_deref() == Some(thread_id)
+                })
+            {
+                fail_shared_codex_turn_without_runtime_exit(
+                    state,
+                    session_id,
+                    runtime_id,
+                    command.active_turn_generation,
+                    "Reviewer MCP startup scope is unavailable; model work was not started.",
+                    "reviewer MCP startup scope",
+                );
+            }
+            return Ok(());
+        };
+        {
+            let mut sessions = sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            let Some(s) = sessions
+                .get_mut(session_id)
+                .filter(|s| s.thread_id.as_deref() == Some(thread_id))
+            else {
                 return Ok(());
             };
-        {
-            let mut sessions = sessions.lock().expect("shared Codex session mutex poisoned");
-            let Some(s) = sessions.get_mut(session_id).filter(|s| s.thread_id.as_deref() == Some(thread_id)) else { return Ok(()); };
-            if s.reviewer_mcp_gate.as_deref().is_some_and(|g| g.starts_with("finish:")) { return Ok(()); }
+            if s.reviewer_mcp_gate
+                .as_deref()
+                .is_some_and(|g| g.starts_with("finish:"))
+            {
+                return Ok(());
+            }
             s.reviewer_mcp_gate = Some(scope.gate.clone());
         }
-        let request = start_codex_json_rpc_request(writer, pending_requests, "mcpServerStatus/list", codex_reviewer_mcp_params(&scope, None));
-        spawn_codex_reviewer_mcp_observation(state.clone(), sessions.clone(), scope,
-            Some((pending_requests.clone(), request)), Some((command, turn_started_watchdog_config)), None);
+        let request = start_codex_json_rpc_request(
+            writer,
+            pending_requests,
+            "mcpServerStatus/list",
+            codex_reviewer_mcp_params(&scope, None),
+        );
+        spawn_codex_reviewer_mcp_observation(
+            state.clone(),
+            sessions.clone(),
+            scope,
+            Some((pending_requests.clone(), request)),
+            Some((command, turn_started_watchdog_config)),
+            None,
+        );
         return Ok(());
     }
 
@@ -1917,31 +2008,72 @@ fn handle_shared_codex_start_turn_inner(
     );
     // Check approved-send eligibility under the guards, then release before I/O.
     // In-flight Stop/replacement handling owns the ordinary check-to-write window.
-    let reviewer_shared_guard = approved_scope.map(|_| sessions.lock().expect("shared Codex session mutex poisoned"));
-    if approved_scope.is_some_and(|scope| !reviewer_shared_guard.as_deref().expect("reviewer guard").get(session_id)
-        .is_some_and(|s| s.reviewer_mcp_gate.as_deref() == Some(&scope.gate))) { return Ok(()); }
-    let reviewer_send_guard = approved_scope.map(|_| state.inner.lock().expect("state mutex poisoned"));
-    if approved_scope.is_some_and(|scope| !codex_reviewer_mcp_current(reviewer_send_guard.as_deref().expect("reviewer guard"), scope)) {
-        drop(reviewer_send_guard);
-        drop(reviewer_shared_guard);
-        fail_codex_reviewer_mcp(state, approved_scope.expect("approved reviewer"), "Reviewer MCP lost send eligibility before model work started.");
+    let reviewer_shared_guard = approved_scope.map(|_| {
+        sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+    });
+    if approved_scope.is_some_and(|scope| {
+        !reviewer_shared_guard
+            .as_deref()
+            .expect("reviewer guard")
+            .get(session_id)
+            .is_some_and(|s| s.reviewer_mcp_gate.as_deref() == Some(&scope.gate))
+    }) {
         return Ok(());
     }
-    if let Some((scope, reason)) = approved_scope.and_then(|scope| reviewer_shared_guard.as_deref()
-        .and_then(|shared| shared.get(session_id)).and_then(|s| s.reviewer_mcp_failure.clone())
-        .map(|reason| (scope, reason))) {
+    let reviewer_send_guard =
+        approved_scope.map(|_| state.inner.lock().expect("state mutex poisoned"));
+    if approved_scope.is_some_and(|scope| {
+        !codex_reviewer_mcp_current(
+            reviewer_send_guard.as_deref().expect("reviewer guard"),
+            scope,
+        )
+    }) {
         drop(reviewer_send_guard);
-        let saved = record_codex_reviewer_mcp_observation(state, scope, CodexReviewerMcpObservation {
-            phase: "startup".to_owned(), outcome: CodexReviewerMcpOutcome::Failed,
-            elapsed_ms: scope.query_started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-            budget_ms: CODEX_REVIEWER_MCP_BUDGET.as_millis() as u64,
-            measurement: "readiness query to failed send-boundary recheck".to_owned(), reason,
-        });
+        drop(reviewer_shared_guard);
+        fail_codex_reviewer_mcp(
+            state,
+            approved_scope.expect("approved reviewer"),
+            "Reviewer MCP lost send eligibility before model work started.",
+        );
+        return Ok(());
+    }
+    if let Some((scope, reason)) = approved_scope.and_then(|scope| {
+        reviewer_shared_guard
+            .as_deref()
+            .and_then(|shared| shared.get(session_id))
+            .and_then(|s| s.reviewer_mcp_failure.clone())
+            .map(|reason| (scope, reason))
+    }) {
+        drop(reviewer_send_guard);
+        let saved = record_codex_reviewer_mcp_observation(
+            state,
+            scope,
+            CodexReviewerMcpObservation {
+                phase: "startup".to_owned(),
+                outcome: CodexReviewerMcpOutcome::Failed,
+                elapsed_ms: scope
+                    .query_started
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64,
+                budget_ms: CODEX_REVIEWER_MCP_BUDGET.as_millis() as u64,
+                measurement: "readiness query to failed send-boundary recheck".to_owned(),
+                reason,
+            },
+        );
         drop(reviewer_shared_guard);
         if !matches!(saved, Ok(false)) {
-            fail_codex_reviewer_mcp(state, scope,
-                if saved.is_err() { "Failed to persist reviewer MCP startup failure; model work was not started." }
-                else { "Reviewer MCP startup failed before send; see the persisted typed observation." });
+            fail_codex_reviewer_mcp(
+                state,
+                scope,
+                if saved.is_err() {
+                    "Failed to persist reviewer MCP startup failure; model work was not started."
+                } else {
+                    "Reviewer MCP startup failed before send; see the persisted typed observation."
+                },
+            );
         }
         return Ok(());
     }
@@ -1996,6 +2128,8 @@ fn handle_shared_codex_start_turn_inner(
                 .expect("shared Codex session mutex poisoned");
             if let Some(session_state) = sessions.get_mut(session_id) {
                 if session_state.pending_turn_start_request_id.as_deref() == Some(&request_id) {
+                    session_state.deferred_terminals.clear();
+                    session_state.turn_id_provisional = false;
                     session_state.pending_turn_start_request_id = None;
                     session_state.turn_started_before_response = false;
                     session_state.turn_started = false;
@@ -2042,9 +2176,9 @@ fn handle_shared_codex_start_turn_inner(
         // a timeout or a broken transport leaves it unknown.
         let delivery_outcome = match &result {
             Ok(_) => PromptDeliveryOutcome::Accepted,
-            Err(CodexResponseError::JsonRpc(detail)) => PromptDeliveryOutcome::Rejected(format!(
-                "Codex refused the turn: {detail}"
-            )),
+            Err(CodexResponseError::JsonRpc(detail)) => {
+                PromptDeliveryOutcome::Rejected(format!("Codex refused the turn: {detail}"))
+            }
             Err(error) => PromptDeliveryOutcome::Ambiguous(format!(
                 "Codex's turn/start reply did not arrive: {error:?}"
             )),
@@ -2071,12 +2205,36 @@ fn handle_shared_codex_start_turn_inner(
                     // The response proves only that Codex accepted the RPC; the
                     // event establishes the routing identity used by every
                     // subsequent item/turn notification.
-                    if session_state.turn_id.is_none() {
-                        session_state.turn_id = turn_result
-                            .pointer("/turn/id")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned);
+                    if session_state.active_turn_generation != Some(active_turn_generation)
+                        || !wait_state.session_matches_runtime_token(
+                            &wait_session_id,
+                            &RuntimeToken::Codex(wait_runtime_id.clone()),
+                        )
+                    {
+                        return;
                     }
+                    let response_id = turn_result
+                        .pointer("/turn/id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    if response_id.is_none() && !session_state.deferred_terminals.is_empty() {
+                        let _ = hold_unresolved_codex_terminal(
+                            &wait_state,
+                            &wait_session_id,
+                            &RuntimeToken::Codex(wait_runtime_id.clone()),
+                            session_state,
+                        );
+                    }
+                    // The matching RPC proves identity independently of item routing.
+                    session_state.turn_id = response_id.clone();
+                    session_state.turn_id_provisional = false;
+                    let deferred_terminal = take_proven_codex_terminal(
+                        session_state,
+                        &RuntimeToken::Codex(wait_runtime_id.clone()),
+                        &request_id,
+                        Some(active_turn_generation),
+                        response_id.as_deref(),
+                    );
                     let reconciled_early_start = session_state.turn_started_before_response;
                     session_state.turn_started_before_response = false;
                     if reconciled_early_start {
@@ -2096,6 +2254,21 @@ fn handle_shared_codex_start_turn_inner(
                         let (cancel_tx, cancel_rx) = mpsc::channel();
                         session_state.turn_started_watchdog_cancel_tx = Some(cancel_tx);
                         watchdog_cancel_rx = Some(cancel_rx);
+                    }
+                    if let Some(terminal) = deferred_terminal {
+                        let method = terminal.get("method").and_then(Value::as_str).unwrap_or("");
+                        if let Err(error) = apply_owned_shared_codex_notification(
+                            method,
+                            &terminal,
+                            &wait_state,
+                            &wait_session_id,
+                            &RuntimeToken::Codex(wait_runtime_id.clone()),
+                            &wait_sessions,
+                            &wait_thread_sessions,
+                            session_state,
+                        ) {
+                            eprintln!("runtime state warning> deferred Codex terminal: {error:#}");
+                        }
                     }
                 }
 
@@ -2130,6 +2303,8 @@ fn handle_shared_codex_start_turn_inner(
                     if session_state.pending_turn_start_request_id.as_deref() != Some(&request_id) {
                         return;
                     }
+                    session_state.deferred_terminals.clear();
+                    session_state.turn_id_provisional = false;
                     session_state.pending_turn_start_request_id = None;
                     session_state.turn_started_before_response = false;
                     session_state.turn_started = false;
@@ -2158,6 +2333,8 @@ fn handle_shared_codex_start_turn_inner(
                     if session_state.pending_turn_start_request_id.as_deref() != Some(&request_id) {
                         false
                     } else {
+                        session_state.deferred_terminals.clear();
+                        session_state.turn_id_provisional = false;
                         session_state.pending_turn_start_request_id = None;
                         session_state.turn_started_before_response = false;
                         session_state.turn_started = false;
@@ -2186,6 +2363,8 @@ fn handle_shared_codex_start_turn_inner(
                     if session_state.pending_turn_start_request_id.as_deref() != Some(&request_id) {
                         false
                     } else {
+                        session_state.deferred_terminals.clear();
+                        session_state.turn_id_provisional = false;
                         session_state.pending_turn_start_request_id = None;
                         session_state.turn_started_before_response = false;
                         session_state.turn_started = false;

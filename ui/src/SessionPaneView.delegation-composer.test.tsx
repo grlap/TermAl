@@ -759,6 +759,23 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onStopSession).toHaveBeenCalledWith("session-parent");
   });
 
+  it("offers Stop while an idle root waits for provider capacity", async () => {
+    const session = makeSession({
+      id: "capacity-root",
+      status: "idle",
+      queuePaused: true,
+      providerCapacityWaiting: true,
+      preview: "Waiting: provider at capacity, retry 1/8 at 01:30",
+    });
+    const { onStopSession } = renderSessionPaneView({ session, draft: "" });
+    await settleAsyncUi();
+
+    const stop = screen.getByRole("button", { name: "Stop" });
+    expect(stop).toBeEnabled();
+    act(() => { stop.click(); });
+    expect(onStopSession).toHaveBeenCalledWith("capacity-root");
+  });
+
   it("offers Stop for an Idle session with a pending test-run wait and stops it", async () => {
     const session = makeSession({ id: "session-parent", status: "idle" });
     const { onStopSession } = renderSessionPaneView({

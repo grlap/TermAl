@@ -190,9 +190,14 @@ impl AppState {
             let sessions = source_observation_removal_set(&inner, session_id);
             if let Some(blocker) = source_observation_removal_blocker(&inner, &sessions) {
                 retain_source_observation_removal_locked(&mut inner, &sessions);
-                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!(
-                    "Session retained; source tracking persistence is uncertain: {error:#}")))?;
-                return Err(ApiError::conflict(format!("{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}.")));
+                self.commit_locked(&mut inner).map_err(|error| {
+                    ApiError::internal(format!(
+                        "Session retained; source tracking persistence is uncertain: {error:#}"
+                    ))
+                })?;
+                return Err(ApiError::conflict(format!(
+                    "{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}."
+                )));
             }
             let agent = inner.sessions[index].session.agent;
             let external_session_id = inner.sessions[index].external_session_id.clone();
@@ -327,6 +332,7 @@ impl AppState {
         if record.queued_prompts.len() == original_len {
             return Err(ApiError::not_found("queued prompt not found"));
         }
+        clear_provider_capacity_retry(record);
         // A canceled head promoted for its hand-off was never sent: its
         // receipt turns terminal in the cancel's own write.
         settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
@@ -451,11 +457,34 @@ impl AppState {
         session_id: &str,
         owner: Option<EngramQueuedAdmissionOwner>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        self.cancel_provider_capacity_retry(session_id);
+        self.resume_local_session_queue_inner(session_id, owner, None)
+    }
+
+    fn resume_local_session_queue_inner(
+        &self,
+        session_id: &str,
+        mut owner: Option<EngramQueuedAdmissionOwner>,
+        capacity_nonce: Option<&str>,
+    ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        if let Some(nonce) = capacity_nonce {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if !inner.find_visible_session_index(session_id).is_some_and(|index|
+                provider_capacity_resume_owned(&inner.sessions[index], nonce)) {
+                return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
+            }
+        }
         if self.resume_source_observation_delete(session_id)? { return Ok(None); }
         let retained_observation = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            inner.find_visible_session_index(session_id).is_some_and(|index|
-                inner.sessions[index].engram.source_observation_gate.is_some())
+            inner
+                .find_visible_session_index(session_id)
+                .is_some_and(|index| {
+                    inner.sessions[index]
+                        .engram
+                        .source_observation_gate
+                        .is_some()
+                })
         };
         if retained_observation {
             let live_continuation = {
@@ -480,8 +509,12 @@ impl AppState {
                 return Ok(Some(TurnDispatchDeliveryOutcome::Held { error: None }));
             }
         }
-        self.reconcile_retired_source_observations(session_id).map_err(|error|
-            ApiError::conflict(format!("Engram source observation recovery remains withheld: {error}")))?;
+        self.reconcile_retired_source_observations(session_id)
+            .map_err(|error| {
+                ApiError::conflict(format!(
+                    "Engram source observation recovery remains withheld: {error}"
+                ))
+            })?;
         let checked_head = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -490,6 +523,14 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
+            if capacity_nonce.is_some_and(|nonce| !provider_capacity_resume_owned(record, nonce)) {
+                return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
+            }
+            if record.codex_terminal_identity_unresolved {
+                return Err(ApiError::conflict(
+                    "Codex terminal identity is unresolved; Stop before resuming",
+                ));
+            }
             if !record.orchestrator_auto_dispatch_blocked {
                 return Ok(None);
             }
@@ -508,6 +549,17 @@ impl AppState {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
                 return Ok(None);
+            }
+            // The tick may have observed an empty queue before a peer arrived.
+            // Bind the head this Resume accepts under the same lock as its
+            // capacity check, so receipt and ordinary drains retain the fence.
+            if let Some(nonce) = capacity_nonce
+                && owner.is_none()
+            {
+                owner = EngramQueuedAdmissionOwner::capture(record);
+                if let Some(owner) = &mut owner {
+                    owner.capacity_nonce = Some(nonce.to_owned());
+                }
             }
             // A receipted head: what this Resume accepts, exactly, for the
             // write-ahead it begins after the release below (prompt_delivery.rs).
@@ -528,7 +580,10 @@ impl AppState {
         // it even when the caller named none: a successor a cancellation
         // exposes meanwhile is never admitted in the released head's place.
         let released = self.release_engram_begin_preparation_hold_for_resume(session_id, owner.as_ref())?;
-        let owner = released.or(owner);
+        let mut owner = released.or(owner);
+        if let Some(owner) = &mut owner {
+            owner.capacity_nonce = capacity_nonce.map(str::to_owned);
+        }
         // A durable receipted head's hand-off record must be saved before it
         // is sent: this Resume begins that write-ahead, after the release and
         // only for exactly the head it accepted, and carries the attempt across
@@ -595,8 +650,12 @@ impl AppState {
             || self.stop_engram_abort_retry(session_id)?;
         let cleanup_pending = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            inner.find_session_index(session_id).is_some_and(|index|
-                inner.sessions[index].runtime.dedicated_cleanup_failure().is_some())
+            inner.find_session_index(session_id).is_some_and(|index| {
+                inner.sessions[index]
+                    .runtime
+                    .dedicated_cleanup_failure()
+                    .is_some()
+            })
         };
         if admission_stopped && !cleanup_pending {
             // The same Stop also brakes the session's pending waits.
@@ -655,6 +714,25 @@ impl AppState {
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
 
+        if inner.sessions[index].provider_capacity_retry.is_some()
+            && !matches!(inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        {
+            let record = &mut inner.sessions[index];
+            clear_provider_capacity_retry(record);
+            record.set_auto_dispatch_blocked(true);
+            record.engram.operator_paused = true;
+            record.session.status = SessionStatus::Idle;
+            record.session.preview = "Provider capacity recovery stopped; queue paused.".to_owned();
+            inner.stamp_session_at_index(index);
+            self.commit_locked(&mut inner).map_err(|error| {
+                ApiError::internal(format!(
+                    "failed to persist stopped capacity recovery: {error:#}"
+                ))
+            })?;
+            return Ok((self.snapshot_from_inner(&inner), None));
+        }
+
         if inner.sessions[index].session.status == SessionStatus::Stopping {
             return Ok((self.snapshot_from_inner(&inner), None));
         }
@@ -669,15 +747,23 @@ impl AppState {
             return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
         }
 
+        clear_provider_capacity_retry(&mut inner.sessions[index]);
         let original = inner.sessions[index].clone();
-        let admission_owner = EngramQueuedAdmissionOwner::capture_promoted(&original).filter(|_| {
-            // Only cleanup recovery preserves an unbegun parked admission.
-            original.session.status != SessionStatus::Error
-                || original.runtime.dedicated_cleanup_failure().is_none()
-                || original.queued_prompts.front().is_none_or(|head| !(head.engram_interrupted || head.engram_waiting)
-                || head.engram_evaluate.as_ref().is_some_and(|intent| intent.begun_grant_id.is_some()))
-                || original.engram.active_grant_id.is_some() || original.engram.uncertain_grant_id.is_some()
-        });
+        let admission_owner =
+            EngramQueuedAdmissionOwner::capture_promoted(&original).filter(|_| {
+                // Only cleanup recovery preserves an unbegun parked admission.
+                original.session.status != SessionStatus::Error
+                    || original.runtime.dedicated_cleanup_failure().is_none()
+                    || original.queued_prompts.front().is_none_or(|head| {
+                        !(head.engram_interrupted || head.engram_waiting)
+                            || head
+                                .engram_evaluate
+                                .as_ref()
+                                .is_some_and(|intent| intent.begun_grant_id.is_some())
+                    })
+                    || original.engram.active_grant_id.is_some()
+                    || original.engram.uncertain_grant_id.is_some()
+            });
         let runtime_token = inner.sessions[index].runtime.runtime_token();
         let owner_generation = {
             let record = inner

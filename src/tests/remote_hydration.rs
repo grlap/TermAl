@@ -2580,6 +2580,7 @@ fn remote_session_create_forwards_configured_default_model() {
         pending_prompts: Vec::new(),
         prompt_deliveries: Vec::new(),
         queue_paused: false,
+        provider_capacity_waiting: false,
         source_tracking_recovery: false,
         queue_projection_hash: None,
         session_mutation_stamp: None,

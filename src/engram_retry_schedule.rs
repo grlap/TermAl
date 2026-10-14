@@ -502,6 +502,7 @@ impl AppState {
         } else if !admitted.is_empty() {
             self.run_engram_retry_attempts_concurrently(admitted, now);
         }
+        self.provider_capacity_retry_tick(now);
     }
 
     /// Runs two or more admitted attempts side by side and returns when all

@@ -709,6 +709,8 @@ struct Session {
     /// distinguish "paused, waiting for the user" from "about to start".
     #[serde(default)]
     queue_paused: bool,
+    #[serde(default)]
+    provider_capacity_waiting: bool,
     /// Derived from the original session's retained Delete recovery mode.
     #[serde(default, skip_serializing_if = "is_false")]
     source_tracking_recovery: bool,
@@ -803,6 +805,8 @@ struct StateSessionSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     markers: Vec<ConversationMarker>,
     queue_paused: bool,
+    #[serde(default)]
+    provider_capacity_waiting: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     source_tracking_recovery: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

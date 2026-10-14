@@ -112,6 +112,7 @@ mod prompt_delivery_codex_write;
 mod project_creation_races;
 mod project_digest;
 mod projects;
+mod provider_capacity_retry;
 mod read_only_refusal_rules;
 mod remote;
 mod remote_authority_races;
@@ -609,6 +610,10 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
         pending_turn_start_request_id: Some("turn-start-1".to_owned()),
         turn_started_watchdog_cancel_tx: Some(watchdog_cancel_tx),
         turn_started_before_response: true,
+        turn_id_provisional: false,
+        deferred_terminals: Vec::new(),
+        terminal_identity_unresolved: false,
+        retired_turn_ids: VecDeque::new(),
         active_turn_generation: None,
         recorder: SessionRecorderState {
             command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
@@ -638,6 +643,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
             }],
             assistant_output_started: true,
             first_visible_assistant_message_id: Some("visible-1".to_owned()),
+            remote_compaction_progressed: false,
         },
     };
 
@@ -1310,6 +1316,7 @@ fn sample_remote_orchestrator_state(
                 pending_prompts: Vec::new(),
                 prompt_deliveries: Vec::new(),
                 queue_paused: false,
+                provider_capacity_waiting: false,
                 source_tracking_recovery: false,
                 queue_projection_hash: None,
                 session_mutation_stamp: None,
@@ -1439,6 +1446,7 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         message_count: session.message_count,
         markers: session.markers.clone(),
         queue_paused: session.queue_paused,
+        provider_capacity_waiting: session.provider_capacity_waiting,
         source_tracking_recovery: session.source_tracking_recovery,
         queue_projection_hash: session.queue_projection_hash.clone(),
         session_mutation_stamp: session.session_mutation_stamp,

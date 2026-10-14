@@ -427,6 +427,7 @@ fn mismatched_turn_started_preserves_the_exact_watchdog() {
             }),
         });
         inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 7;
     }
     let (cancel_tx, cancel_rx) = mpsc::channel();
     runtime
@@ -554,6 +555,7 @@ fn turn_started_without_event_id_uses_the_armed_response_turn_id() {
             }),
         });
         inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 8;
     }
     let (cancel_tx, cancel_rx) = mpsc::channel();
     runtime
@@ -634,6 +636,7 @@ fn fully_idless_turn_started_cancels_the_armed_watchdog_and_completes() {
             }),
         });
         inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 9;
     }
     let (cancel_tx, cancel_rx) = mpsc::channel();
     runtime
@@ -1076,7 +1079,7 @@ fn assert_shared_codex_turn_completed_uses_available_identity(
 ) {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let (runtime, _input_rx, process) = test_shared_codex_runtime(test_name);
+    let (runtime, input_rx, process) = test_shared_codex_runtime(test_name);
 
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -1113,6 +1116,17 @@ fn assert_shared_codex_turn_completed_uses_available_identity(
         .expect("shared Codex thread mutex poisoned")
         .insert("thread-terminal-fallback".to_owned(), session_id.clone());
 
+    let unbound_explicit_terminal = active_turn_id.is_none() && event_turn_id.is_some();
+    let before = state.full_snapshot();
+    let before_record = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        (record.active_turn_generation,
+            serde_json::to_value(&record.prompt_deliveries).unwrap(),
+            serde_json::to_value(&record.provider_capacity_retry).unwrap(),
+            record.orchestrator_auto_dispatch_blocked,
+            record.queued_prompts.len())
+    };
     let mut turn = json!({ "error": null });
     if let Some(event_turn_id) = event_turn_id {
         turn["id"] = Value::String(event_turn_id.to_owned());
@@ -1140,15 +1154,40 @@ fn assert_shared_codex_turn_completed_uses_available_identity(
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
-    assert_eq!(session.status, SessionStatus::Idle);
-    assert_eq!(session.preview, "Ready for a prompt.");
+    if unbound_explicit_terminal {
+        let before_session = before.sessions.iter().find(|session| session.id == session_id).unwrap();
+        assert_eq!(session.status, SessionStatus::Active);
+        assert_eq!(serde_json::to_value(session).unwrap(), serde_json::to_value(before_session).unwrap(),
+            "an unbound explicit terminal changes no public session state");
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        assert_eq!(before_record, (record.active_turn_generation,
+            serde_json::to_value(&record.prompt_deliveries).unwrap(),
+            serde_json::to_value(&record.provider_capacity_retry).unwrap(),
+            record.orchestrator_auto_dispatch_blocked,
+            record.queued_prompts.len()));
+        drop(inner);
+        let shared = runtime.sessions.lock().unwrap();
+        let shared = &shared[&session_id];
+        assert!(shared.turn_started);
+        assert!(shared.turn_id.is_none());
+        assert!(shared.pending_turn_start_request_id.is_none());
+        assert!(shared.active_turn_generation.is_none());
+        assert!(shared.deferred_terminals.is_empty());
+        assert!(shared.retired_turn_ids.is_empty());
+        assert!(!shared.terminal_identity_unresolved);
+        assert!(input_rx.try_recv().is_err(), "no provider work or queue promotion");
+    } else {
+        assert_eq!(session.status, SessionStatus::Idle);
+        assert_eq!(session.preview, "Ready for a prompt.");
+    }
 
     let _ = process.kill();
     let _ = process.wait();
 }
 
 #[test]
-fn shared_codex_turn_completed_recovers_event_identity_when_active_id_is_missing() {
+fn shared_codex_unbound_explicit_terminal_preserves_started_state_without_handshake() {
     assert_shared_codex_turn_completed_uses_available_identity(
         "shared-codex-completed-event-identity-fallback",
         None,
@@ -4506,6 +4545,10 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
                 pending_turn_start_request_id: Some("turn-start-1".to_owned()),
                 turn_started_watchdog_cancel_tx: Some(cancel_tx),
                 turn_started_before_response: false,
+                turn_id_provisional: false,
+                deferred_terminals: Vec::new(),
+                terminal_identity_unresolved: false,
+                retired_turn_ids: VecDeque::new(),
                 active_turn_generation: None,
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
@@ -4826,6 +4869,10 @@ fn shared_codex_error_notification_clears_recorder_state() {
                 pending_turn_start_request_id: Some("turn-start-1".to_owned()),
                 turn_started_watchdog_cancel_tx: Some(cancel_tx),
                 turn_started_before_response: false,
+                turn_id_provisional: false,
+                deferred_terminals: Vec::new(),
+                terminal_identity_unresolved: false,
+                retired_turn_ids: VecDeque::new(),
                 active_turn_generation: None,
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(

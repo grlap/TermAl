@@ -571,6 +571,10 @@ impl AppState {
     /// turn to end.
     fn mailbox_queued_wake_disposition(&self, target_session_id: &str) -> &'static str {
         let inner = self.inner.lock().expect("state mutex poisoned");
+        if inner.find_session_index(target_session_id).is_some_and(|index|
+            inner.sessions[index].provider_capacity_retry.as_ref().is_some_and(|retry| retry.due_at.is_some() || (retry.recovering && !retry.dispatched))) {
+            return "waitingForProviderCapacity";
+        }
         let held = inner
             .find_session_index(target_session_id)
             .map(|index| &inner.sessions[index])
