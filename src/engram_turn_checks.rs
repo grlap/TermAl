@@ -404,6 +404,9 @@ struct EngramTurnCheck {
     /// fence of the carried check (`engram_carry_check`), since the run may
     /// have tested that change.
     watcher_fence: Option<String>,
+    /// Exact-root Cargo sibling events awaiting a carried gate's terminal
+    /// settlement. Kept on the check so launch-time events carry with it.
+    watcher_cargo_candidates: Vec<EngramCargoTargetCandidate>,
     /// The runtime supplied only part of the output. Diagnostic metadata,
     /// never passing evidence; the persisted file path is not retained.
     runtime_output_cut: bool,
@@ -2110,6 +2113,7 @@ impl AppState {
             overlap_cause,
             fenced_by_outstanding: restricted_by,
             watcher_fence: None,
+            watcher_cargo_candidates: Vec::new(),
             runtime_output_cut: false,
             end: None,
             ended_at: None,

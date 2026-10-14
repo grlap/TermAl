@@ -1037,6 +1037,12 @@ fn engram_settle_carried_check(
     // A carried Codex test is settled from its own reported end, as a check
     // in its turn would be (`engram_reported_ends.rs`).
     if carried.ends_by_report {
+        // Only a launcher gate has the terminal run that judges Cargo's
+        // candidates. A missing launcher completion can instead carry by
+        // its reported end; its inherited candidate must still refuse it.
+        if let Some(candidate) = carried.check.watcher_cargo_candidates.first() {
+            return Err(format!("a file in its worktree changed: {}", candidate.path));
+        }
         return engram_settle_reported_end(carried, deadline);
     }
     if carried.ambiguous {
@@ -1118,6 +1124,18 @@ fn engram_settle_carried_check(
         return Err(
             "the host's source basis at settlement differs from its basis at the launch".to_owned(),
         );
+    }
+    // Judge Cargo's temporary names only now, after its run is terminal and
+    // the settlement snapshot has closed. The Create event may have arrived
+    // before Cargo renamed its sibling to target/.
+    for candidate in &carried.check.watcher_cargo_candidates {
+        if !FsPath::new(&candidate.root).join("target").is_dir() {
+            return Err(format!(
+                "a file in its worktree changed: {} (pending Cargo sibling; target/ is not a \
+                 directory at terminal settlement)",
+                candidate.path
+            ));
+        }
     }
     let basis = start;
     let mut check = carried.check.clone();
@@ -1970,6 +1988,24 @@ fn engram_take_settled_carried_checks(
         }
         match outcome {
             Some(Ok(Some(resolved))) if same_claim == Some(true) => {
+                // Settlement ran off-lock. A newly arrived candidate was not
+                // judged by that copy, so never consume it as passing evidence.
+                if carried.check.watcher_cargo_candidates != resolved.check.watcher_cargo_candidates
+                {
+                    let path = carried
+                        .check
+                        .watcher_cargo_candidates
+                        .iter()
+                        .find(|candidate| {
+                            !resolved.check.watcher_cargo_candidates.contains(candidate)
+                        })
+                        .map(|candidate| candidate.path.as_str())
+                        .unwrap_or("an unknown path");
+                    lines.push(carried.refusal_line(&format!(
+                        "a pending Cargo sibling event arrived during settlement: {path}"
+                    )));
+                    continue;
+                }
                 // This candidate is judged by its own closure: Claude work
                 // registered no later than it may be in what it recorded,
                 // and work registered only after it is not.
@@ -2191,6 +2227,61 @@ fn engram_is_worktree_scratch(worktree: &str, directory_key: &str, name: Option<
         || (directory_key == worktree && name == Some(ENGRAM_WORKTREE_SCRATCH_DIRECTORY))
 }
 
+fn engram_is_cargo_target_sibling_name(name: &str) -> bool {
+    name.strip_prefix("target").is_some_and(|suffix| {
+        suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    })
+}
+
+/// Cargo atomically creates target/ through a sibling made by tempfile's
+/// Builder with prefix "target" and its default six ASCII alphanumeric
+/// characters, then renames it. Events may arrive after that sibling is gone.
+/// Match only the first component at this worktree's exact root. Candidates
+/// wait until terminal settlement, which requires target/ to be a directory,
+/// Cargo's post-rename state. This accepts a residual ambiguity: an ordinary
+/// root file with exactly this name, or descendants of a matching directory,
+/// while target/ exists are also exempt, so their writes can miss a fence.
+/// The watcher event no longer carries the file/directory subtype; the name
+/// and destination-directory guard avoid exempting arbitrary target* files.
+fn engram_is_cargo_target_sibling(worktree: &str, directory_key: &str, name: Option<&str>) -> bool {
+    let worktree = worktree.trim_end_matches('/');
+    let candidate = if directory_key == worktree {
+        name
+    } else {
+        directory_key
+            .strip_prefix(worktree)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .and_then(|rest| rest.split('/').next())
+    };
+    candidate.is_some_and(engram_is_cargo_target_sibling_name)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramCargoTargetCandidate {
+    root: String,
+    path: String,
+}
+
+/// Same bound as the watcher's directory batch, applied across notifications
+/// for one gate. Overflow keeps a permanent fence; target/ appearing later
+/// cannot turn an unbounded stream of candidates into passing evidence.
+fn engram_note_cargo_target_candidate(
+    check: &mut EngramTurnCheck,
+    candidate: &EngramCargoTargetCandidate,
+) -> Option<String> {
+    if check.watcher_cargo_candidates.contains(candidate) {
+        return None;
+    }
+    if check.watcher_cargo_candidates.len() >= ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT {
+        return Some(format!(
+            "too many pending Cargo sibling events: {}",
+            candidate.path
+        ));
+    }
+    check.watcher_cargo_candidates.push(candidate.clone());
+    None
+}
+
 /// How the changed `path`, which names the scratch directory yet was not
 /// left out, is shown in a fence's cause: with the inputs the scratch test
 /// judged it by (`engram_is_worktree_scratch`), the worktree key it was
@@ -2215,8 +2306,11 @@ impl AppState {
     /// directories, such as `.git`, `target` and `node_modules`, already left
     /// out): a carried check whose worktree holds one of them is fenced, with
     /// the path. A change under the `.tmp/` of its own worktree is left out
-    /// too (`engram_is_worktree_scratch`). The worktrees are resolved off the
-    /// state lock, once per distinct directory, and only while some carried
+    /// too (`engram_is_worktree_scratch`). Cargo's root-level temporary
+    /// target-directory siblings are kept pending until terminal settlement
+    /// (`engram_is_cargo_target_sibling`). The
+    /// worktrees are resolved off the state lock, once per distinct directory,
+    /// and only while some carried
     /// check is unfenced.
     fn note_engram_workspace_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
         if changes.is_empty() {
@@ -2251,6 +2345,7 @@ impl AppState {
                 directories.push(directory);
             }
         }
+        let mut cargo_candidates = Vec::new();
         let placed = if directories.len() > ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT {
             // Too many places to resolve: any carried check may be touched.
             vec![(None, format!("{} files changed at once", changes.len()))]
@@ -2263,12 +2358,12 @@ impl AppState {
                     (directory, worktree)
                 })
                 .collect();
-            // For the scratch test, the exact keys of a directory's worktree
-            // root and of itself, both resolved alike through their longest
+            // For the scratch and Cargo sibling tests, the exact keys of a
+            // directory's worktree root and of itself, resolved through their longest
             // existing part, so a directory already gone when its event is
             // handled still reads in its resolved spelling. They are resolved
-            // only for a path that names the scratch directory at all, and
-            // once per directory: every other path cannot be scratch, and
+            // only for a path naming scratch or a possible Cargo sibling, and
+            // once per directory: every other path cannot be exempt, and
             // resolving it would read the file system for each event of a
             // build. A network path is not resolved, as its worktree key is
             // not (`engram_worktree_root`), and so is never scratch.
@@ -2295,7 +2390,13 @@ impl AppState {
                 let names_scratch = path.components().any(|component| {
                     component.as_os_str() == std::ffi::OsStr::new(ENGRAM_WORKTREE_SCRATCH_DIRECTORY)
                 });
-                if names_scratch && !engram_network_path(&change.path) {
+                let names_cargo_sibling = path.components().any(|component| {
+                    component
+                        .as_os_str()
+                        .to_str()
+                        .is_some_and(engram_is_cargo_target_sibling_name)
+                });
+                if (names_scratch || names_cargo_sibling) && !engram_network_path(&change.path) {
                     if !exact.iter().any(|(known, ..)| known == directory) {
                         let existed = directory.is_dir();
                         let canonical = engram_canonical_path(directory);
@@ -2317,14 +2418,28 @@ impl AppState {
                     if engram_is_worktree_scratch(root_exact, key, name.as_deref()) {
                         continue;
                     }
+                    if names_cargo_sibling
+                        && engram_is_cargo_target_sibling(root_exact, key, name.as_deref())
+                    {
+                        cargo_candidates.push((
+                            Some(fresh.clone()),
+                            EngramCargoTargetCandidate {
+                                root: root_exact.clone(),
+                                path: change.path.clone(),
+                            },
+                        ));
+                        continue;
+                    }
                     worktree = fresh;
-                    shown = Some(engram_scratch_fence_detail(
-                        &change.path,
-                        fresh,
-                        root_exact,
-                        key,
-                        *existed,
-                    ));
+                    if names_scratch {
+                        shown = Some(engram_scratch_fence_detail(
+                            &change.path,
+                            fresh,
+                            root_exact,
+                            key,
+                            *existed,
+                        ));
+                    }
                 }
                 if !placed
                     .iter()
@@ -2336,11 +2451,41 @@ impl AppState {
             }
             placed
         };
-        if placed.is_empty() {
+        if placed.is_empty() && cargo_candidates.is_empty() {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         for record in inner.sessions.iter_mut() {
+            for (worktree, candidate) in &cargo_candidates {
+                for carried in &mut record.engram.carried_checks {
+                    if carried.fence.is_none()
+                        && engram_worktrees_may_hold(
+                            std::slice::from_ref(worktree),
+                            &engram_path_key(&carried.check.target.root),
+                        )
+                    {
+                        carried.fence = if carried.ends_by_report {
+                            // Reported-end tests keep their existing watcher
+                            // fence; only launcher gates judge candidates.
+                            Some(format!("a file in its worktree changed: {}", candidate.path))
+                        } else {
+                            engram_note_cargo_target_candidate(&mut carried.check, candidate)
+                        };
+                    }
+                }
+                for check in &mut record.engram.active_turn_checks {
+                    if check.end.is_none()
+                        && check.watcher_fence.is_none()
+                        && engram_check_is_launcher_full(&check.command)
+                        && engram_worktrees_may_hold(
+                            std::slice::from_ref(worktree),
+                            &engram_path_key(&check.target.root),
+                        )
+                    {
+                        check.watcher_fence = engram_note_cargo_target_candidate(check, candidate);
+                    }
+                }
+            }
             for (worktree, path) in &placed {
                 // The watcher reports late, so its change may have landed
                 // while the run was going, even when the run has ended since.
