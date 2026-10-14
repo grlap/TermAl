@@ -144,6 +144,25 @@ the isolated Git reports, which can differ from an ordinary `git status` where
 system settings such as `core.autocrlf` apply. A drift error names the changed
 fingerprint components, not the paths within them.
 
+The launcher retains the CLI field name `trackedIndexDiffSha256`, but now hashes
+the raw `git ls-files --stage -z` output: each index entry's mode, full blob id,
+stage number and NUL-terminated path. This identifies the entire staged index,
+independently of checkout line endings or absent files in a no-checkout worktree.
+Previously it hashed `git diff --cached HEAD --binary` patch text. Git can reuse
+stat-clean checkout files to render that patch, and with no inherited autocrlf
+setting, CRLF checkout bytes can produce a different patch than the staged LF
+blob. Older staged-field hashes and launcher composite fingerprints are not
+comparable with the new format; CLI field names and ordering stay unchanged.
+Existing run artifacts retain their original recorded fingerprints.
+
+`trackedHeadDiffSha256` still hashes `git diff HEAD --binary` and records the
+tracked checkout state. It intentionally remains sensitive to checkout line
+endings and missing tracked files; an LF checkout, a CRLF checkout and a
+no-checkout worktree can share the staged-field hash while differing in this
+field. The launcher composite also includes the root, HEAD, status and untracked
+content, so equality of staged content alone does not imply composite equality.
+This launcher format is separate from Engram's schema-1 review freeze.
+
 An existing root worker may deliver completion to a different coordinator:
 
 ```bash

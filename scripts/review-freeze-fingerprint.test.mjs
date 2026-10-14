@@ -3,11 +3,14 @@ import {
   appendFileSync,
   chmodSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { devNull } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -101,6 +104,68 @@ async function fingerprint(root) {
       .map((line) => line.split("=")),
   );
 }
+
+test("staged-content fingerprint is identical in LF, CRLF and no-checkout worktrees", async () => {
+  const root = createRepository();
+  const crlfRoot = `${root}-crlf`;
+  const emptyRoot = `${root}-no-checkout`;
+  const worktrees = [];
+  try {
+    const base = run("git", ["rev-parse", "HEAD"], root).trim();
+    writeFileSync(join(root, "tracked.txt"), "staged-one\nsecond line\n");
+    run("git", ["add", "tracked.txt"], root);
+    run("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "staged content"], root);
+    const staged = run("git", ["rev-parse", "HEAD"], root).trim();
+
+    run("git", ["-c", "core.autocrlf=true", "worktree", "add", "--detach", crlfRoot, staged], root);
+    worktrees.push(crlfRoot);
+    run("git", ["worktree", "add", "--detach", "--no-checkout", emptyRoot, base], root);
+    worktrees.push(emptyRoot);
+    run("git", ["read-tree", staged], emptyRoot);
+    // Keep the checkout's stat-clean index while giving every index the same base.
+    run("git", ["update-ref", "HEAD", base], crlfRoot);
+    run("git", ["reset", "--soft", base], root);
+
+    // Non-racy stat-clean entries let Git reuse checkout bytes for cached diffs.
+    // Make this precondition deterministic without sleeping for timestamp ticks.
+    const older = new Date(Date.now() - 10_000);
+    for (const [checkout, autocrlf] of [[root, "false"], [crlfRoot, "true"]]) {
+      const trackedPath = join(checkout, "tracked.txt");
+      utimesSync(trackedPath, older, older);
+      run("git", ["-c", `core.autocrlf=${autocrlf}`, "update-index", "--refresh"], checkout);
+      const indexPath = run("git", ["rev-parse", "--git-path", "index"], checkout).trim();
+      assert.ok(statSync(trackedPath).mtimeMs < statSync(resolve(checkout, indexPath)).mtimeMs);
+      assert.equal(run("git", ["-c", `core.autocrlf=${autocrlf}`, "diff-files", "--raw"], checkout), "");
+    }
+
+    assert.equal(readFileSync(join(root, "tracked.txt"), "utf8"), "staged-one\nsecond line\n");
+    assert.equal(readFileSync(join(crlfRoot, "tracked.txt"), "utf8"), "staged-one\r\nsecond line\r\n");
+    const index = run("git", ["ls-files", "--stage", "-z"], root);
+    assert.equal(run("git", ["ls-files", "--stage", "-z"], crlfRoot), index);
+    assert.equal(run("git", ["ls-files", "--stage", "-z"], emptyRoot), index);
+
+    const lf = await fingerprint(root);
+    const crlf = await fingerprint(crlfRoot);
+    const noCheckout = await fingerprint(emptyRoot);
+    assert.equal(crlf.trackedIndexDiffSha256, lf.trackedIndexDiffSha256);
+    assert.equal(noCheckout.trackedIndexDiffSha256, lf.trackedIndexDiffSha256);
+    // The HEAD diff intentionally records checkout state, including its EOLs
+    // or absent tracked files, rather than just the shared staged blobs.
+    assert.notEqual(crlf.trackedHeadDiffSha256, lf.trackedHeadDiffSha256);
+    assert.notEqual(noCheckout.trackedHeadDiffSha256, lf.trackedHeadDiffSha256);
+
+    writeFileSync(join(crlfRoot, "tracked.txt"), "staged-two\r\nsecond line\r\n");
+    run("git", ["-c", "core.autocrlf=true", "add", "tracked.txt"], crlfRoot);
+    const changed = await fingerprint(crlfRoot);
+    assert.notEqual(changed.trackedIndexDiffSha256, lf.trackedIndexDiffSha256);
+    assert.notEqual(changed.trackedHeadDiffSha256, crlf.trackedHeadDiffSha256);
+  } finally {
+    for (const worktree of worktrees.reverse()) {
+      run("git", ["worktree", "remove", "--force", worktree], root);
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("fingerprint detects staged content changes even when short status is unchanged", async () => {
   const root = createRepository();

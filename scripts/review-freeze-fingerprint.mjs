@@ -288,7 +288,9 @@ export async function captureFingerprint(requestedRoot = process.cwd(), sourceEn
     .toString("utf8")
     .trim();
   const trackedIndexDiffSha256 = await hashGitOutput(
-    ["diff", "--cached", "HEAD", "--binary"],
+    // Hash index identities directly: cached patch rendering can reuse stat-clean
+    // checkout files, whose line endings need not match their staged blobs.
+    ["ls-files", "--stage", "-z"],
     root,
     env,
   );
