@@ -74,6 +74,8 @@ struct TestRunStageSummary {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TestRunSummary {
+    #[serde(flatten)]
+    registration: TestRunRegistrationView,
     run_id: String,
     project_id: Option<String>,
     worktree: String,
@@ -156,6 +158,8 @@ struct TestRunLogTail {
 #[serde(rename_all = "camelCase")]
 struct TestRunListResponse {
     runs: Vec<TestRunSummary>,
+    #[serde(flatten)]
+    history: TestRunHistory,
 }
 
 #[derive(Serialize)]
@@ -176,6 +180,17 @@ struct TestRunEntry {
 /// mirrors disk and is never persisted.
 #[derive(Clone, Debug, Default)]
 struct TestRunIndex {
+    compactions_durable: HashSet<String>,
+    compactions_revalidating: HashSet<String>,
+    compaction_persistence: TestRunCompactionPersistence,
+    compaction_stamps: HashMap<String, (TestRunFileStamp, TestRunFileStamp, bool)>,
+    registered: HashSet<String>,
+    registration_failures: HashSet<String>,
+    observations_durable: HashSet<String>,
+    observations_failed: HashSet<String>,
+    observation_persistence: TestRunObservationPersistence,
+    lifecycle_revalidated: HashSet<(String, String)>,
+    unclassified_commands: HashMap<String, TestRunUnclassifiedCommand>,
     entries: Vec<TestRunEntry>,
     /// Every run directory the last rescan parsed, listed or aged out, so a
     /// run whose files did not change is never parsed again. Aged-out runs
@@ -333,12 +348,17 @@ fn test_run_project_id(
 }
 
 fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSummary {
+    if let Some(compacted) = inner.test_run_compacted.get(&scanned.disk.run_id)
+        .filter(|row| row.compacted && test_run_compact_is_installed(inner, row)) {
+        return test_run_compacted_summary(inner, compacted);
+    }
     let disk = &scanned.disk;
     let results = disk.results.as_ref();
     let stages = disk.stages();
     // Found among all stages, so a running stage past the kept ones counts.
     let current_stage = results.and_then(|results| results.current_stage.clone());
-    TestRunSummary {
+    let mut summary = TestRunSummary {
+        registration: test_run_registration_view(inner, disk),
         run_id: disk.run_id.clone(),
         project_id: scanned.project_id.clone(),
         worktree: disk.worktree.clone(),
@@ -366,7 +386,9 @@ fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSumm
         exit_code: results.and_then(|results| results.exit_code),
         error: results.and_then(|results| results.error.clone()),
         detail_version: results.map(|results| results.digest.clone()),
-    }
+    };
+    test_run_enrich_artifact_summary(inner, &mut summary, Some(disk));
+    summary
 }
 
 /// The index after a rescan whose deltas were not all sent: a run whose delta
@@ -412,7 +434,6 @@ impl AppState {
     /// Rescans every local project's run directories and publishes what
     /// changed. Returns whether any indexed run is `running`, which sets the
     /// next rescan's interval.
-    #[cfg(not(test))]
     fn refresh_test_runs(&self) -> bool {
         self.refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|inner, event| {
             self.publish_delta_locked(inner, event.clone())
@@ -459,7 +480,7 @@ impl AppState {
         // The card map and the published detail versions are copied too: they
         // decide the retention exemption and which failure excerpts to read
         // before the lock.
-        let (roots, mut previous, card_refs, retained_runs, published_versions, reevaluate_cards) = {
+        let (roots, mut previous, card_refs, _retained_runs, published_versions, reevaluate_cards, compacted_dirs, mut compact_stamps) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let roots: Vec<(String, String)> = inner
                 .projects
@@ -495,6 +516,10 @@ impl AppState {
                         .iter()
                         .flat_map(|wait| wait.run_ids.iter().cloned()),
                 )
+                .chain(inner.test_run_registrations.keys().cloned())
+                .chain(inner.sessions.iter().flat_map(|record| &record.engram.carried_checks)
+                    .filter_map(|carried| carried.run_directory.as_ref())
+                    .filter_map(|directory| directory.file_name().and_then(|name| name.to_str()).map(str::to_owned)))
                 .collect();
             (
                 roots,
@@ -503,6 +528,10 @@ impl AppState {
                 retained_runs,
                 published_versions,
                 inner.test_runs.cards_enabled && inner.test_runs.cards_reevaluate,
+                inner.test_run_compacted.values().filter(|row| row.compacted && test_run_compact_is_installed(&inner, row))
+                    .filter(|row| !row.summary.run_dir.is_empty())
+                    .map(|row| (test_run_path_key(&row.summary.run_dir), row.clone())).collect::<HashMap<_, _>>(),
+                inner.test_runs.compaction_stamps.clone(),
             )
         };
         let mut projects = Vec::new();
@@ -529,6 +558,22 @@ impl AppState {
         let mut tracked_dirs = Vec::new();
         for (common_key, common_dir) in &common_dirs {
             for run_dir in test_runs_directories(common_dir, &mut tracked_dirs) {
+                if let Some(compacted) = compacted_dirs.get(&test_run_path_key(&test_run_display_path(&run_dir))) {
+                    let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
+                    let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
+                    if compact_stamps.get(&compacted.summary.run_id).is_some_and(|(request, results, _)| *request == request_stamp && *results == results_stamp) {
+                        continue;
+                    }
+                    if request_stamp == compacted.request_stamp && results_stamp == compacted.results_stamp {
+                        compact_stamps.insert(compacted.summary.run_id.clone(), (request_stamp, results_stamp, false));
+                        continue;
+                    }
+                    let conflict = TestRunDisk::read(&run_dir, None).is_none_or(|disk| !test_run_compact_artifact_matches(compacted, &disk));
+                    compact_stamps.insert(compacted.summary.run_id.clone(), (request_stamp, results_stamp, conflict));
+                    // A retained identity never returns as a fresh discovery.
+                    // Contradictions surface on its original minimal record.
+                    continue;
+                }
                 let earlier = previous.remove(&run_dir);
                 // A run directory still waiting for a file is stamped before
                 // its files are read: the launcher creates the directory, then
@@ -625,15 +670,8 @@ impl AppState {
         // terminal snapshot stays too, so the card gets its verdict (only a
         // card in its session's in-memory window, see above). Only the kept
         // runs get summaries.
-        let mut terminal_kept: HashMap<Option<String>, usize> = HashMap::new();
-        scanned.retain(|run| {
-            if !run.disk.is_terminal() || retained_runs.contains(&run.disk.run_id) {
-                return true;
-            }
-            let kept = terminal_kept.entry(run.project_id.clone()).or_default();
-            *kept += 1;
-            *kept <= TEST_RUN_TERMINAL_RUNS_PER_PROJECT
-        });
+        // Retention is decided after the evidence projection under the lock.
+        // Artifact terminal state alone cannot prove restart-safe settlement.
         // Failure excerpts, read without the lock: only for a failed run whose
         // card was built from other results, or an uncarded one with an owner
         // whose results this index has not published yet (or every uncarded
@@ -641,6 +679,7 @@ impl AppState {
         let failures: HashMap<String, TestRunCardFailureRead> = scanned
             .iter()
             .filter_map(|run| {
+                if compacted_dirs.contains_key(&test_run_path_key(&test_run_display_path(&run.disk.run_dir))) { return None; }
                 let results = run.disk.results.as_ref()?;
                 if results.terminal_state != Some(TestRunState::Failed) {
                     return None;
@@ -664,7 +703,32 @@ impl AppState {
         // as every commit_delta_locked caller must: published after unlock,
         // another thread's later revision could reach clients first, which
         // they treat as a gap and answer with a full resync.
+        let unavailable: HashSet<_> = compacted_dirs.values().filter(|row| {
+            let path = FsPath::new(&row.summary.run_dir);
+            test_run_file_stamp(&path.join("request.json")).is_none()
+                || test_run_file_stamp(&path.join("results.json")).is_none()
+        }).map(|row| row.summary.run_id.clone()).collect();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        inner.test_runs.compaction_stamps = compact_stamps;
+        let mut compact_metadata_changed = false;
+        let compact_updates: HashMap<_, _> = inner.test_runs.compaction_stamps.iter()
+            .map(|(id, (_, _, conflict))| (id.clone(), *conflict)).collect();
+        for (id, compacted) in &mut inner.test_run_compacted {
+            if compacted.compacted && !compacted.summary.run_dir.is_empty()
+                && compacted.artifact_unavailable != unavailable.contains(id) {
+                compacted.artifact_unavailable = unavailable.contains(id);
+                compact_metadata_changed = true;
+            }
+            if let Some(conflict) = compact_updates.get(id) {
+                if compacted.artifact_conflict != *conflict {
+                    compacted.artifact_conflict = *conflict;
+                    compact_metadata_changed = true;
+                }
+            }
+        }
+        if compact_metadata_changed {
+            let _ = self.commit_locked_with_persist_dispatch(&mut inner);
+        }
         inner.test_runs.parsed = parsed;
         inner.test_runs.tracked_dirs = tracked_dirs;
         let entries: Vec<TestRunEntry> = scanned
@@ -674,6 +738,58 @@ impl AppState {
                 disk: run.disk.clone(),
             })
             .collect();
+        for entry in &entries {
+            if entry.summary.registration.restart_would_void_evidence == Some(false)
+                || !entry.summary.registration.superseded_run_ids.is_empty()
+                || inner
+                    .test_run_registrations
+                    .contains_key(&entry.summary.run_id)
+            {
+                continue;
+            }
+            let disk = &entry.disk;
+            let mut retained = TestRunCompacted {
+                compacted: false,
+                request_identity: disk.request_identity.clone(),
+                summary: test_run_minimal_summary(entry.summary.clone()),
+                registration: None,
+                observations: Vec::new(),
+                request_stamp: disk.request_stamp,
+                results_stamp: disk.results_stamp,
+                reason: "Unresolved discovered artifact identity retained across artifact loss."
+                    .to_owned(),
+                artifact_conflict: false,
+                artifact_unavailable: false,
+            };
+            let id = retained.summary.run_id.clone();
+            if let Some(old) = inner.test_run_compacted.get(&id) {
+                if old.request_identity != retained.request_identity
+                    || (matches!(
+                        old.summary.state,
+                        TestRunState::Passed | TestRunState::Failed
+                    ) && old.summary.detail_version != retained.summary.detail_version)
+                {
+                    retained = old.clone();
+                    retained.artifact_conflict = true;
+                } else if !matches!(
+                    old.summary.state,
+                    TestRunState::Passed | TestRunState::Failed
+                ) && !matches!(
+                    retained.summary.state,
+                    TestRunState::Passed | TestRunState::Failed
+                ) {
+                    // Stage progress belongs to the live artifact index. The
+                    // retained identity changes only at a terminal boundary.
+                    retained = old.clone();
+                }
+            }
+            if inner.test_run_compacted.get(&id) != Some(&retained) {
+                inner
+                    .test_run_compacted
+                    .insert(id.clone(), retained.clone());
+                let _ = self.persist_test_run_compacted_locked(&mut inner, retained);
+            }
+        }
         let before: HashMap<String, TestRunEntry> = inner
             .test_runs
             .entries
@@ -696,6 +812,16 @@ impl AppState {
             })
             .map(|entry| entry.summary.clone())
             .collect();
+        // An artifact that disappears or loses its exact correlation must
+        // restore its original observation row to SSE clients as well as API
+        // readers. This does not remove or recreate the persisted execution.
+        let merged: HashSet<&str> = entries.iter().flat_map(|entry| &entry.summary.registration.superseded_run_ids)
+            .map(String::as_str).collect();
+        let restored: std::collections::BTreeSet<&str> = before.values()
+            .flat_map(|entry| &entry.summary.registration.superseded_run_ids)
+            .map(String::as_str).filter(|id| !merged.contains(id)).collect();
+        let restored: Vec<TestRunSummary> = restored.into_iter().filter_map(|id| inner.test_run_observations.get(id))
+            .map(|row| test_run_observation_summary(&inner, row)).collect();
         let mut removed = removed;
         removed.sort();
         // Once a commit fails, nothing after it is sent; those runs keep
@@ -704,13 +830,35 @@ impl AppState {
         let mut unsent_removed = Vec::new();
         let mut unsent_changed = HashSet::new();
         let mut published_changed = HashSet::new();
+        // Restore first: a publication failure then retains the old artifact
+        // entry so its alias transition is retried on the next scan.
+        for run in restored {
+            if failed { break; }
+            match self.commit_delta_locked(&mut inner) {
+                Ok(revision) => publish(&inner, &DeltaEvent::TestRunChanged { revision, run }),
+                Err(err) => {
+                    eprintln!("test runs> failed to restore an observed run: {err:#}");
+                    failed = true;
+                }
+            }
+        }
         for run_id in removed {
             if failed {
                 unsent_removed.push(run_id);
                 continue;
             }
+            let retained = test_run_artifact_fallback(&inner, &run_id).map(|mut run| {
+                test_run_enrich_artifact_summary(&inner, &mut run, None);
+                run
+            });
             match self.commit_delta_locked(&mut inner) {
-                Ok(revision) => publish(&inner, &DeltaEvent::TestRunRemoved { revision, run_id }),
+                Ok(revision) => {
+                    let event = match retained {
+                        Some(run) => DeltaEvent::TestRunChanged { revision, run },
+                        None => DeltaEvent::TestRunRemoved { revision, run_id },
+                    };
+                    publish(&inner, &event);
+                }
                 Err(err) => {
                     eprintln!("test runs> failed to record a removed run: {err:#}");
                     failed = true;
@@ -745,6 +893,7 @@ impl AppState {
         inner.test_runs.entries = entries;
         // Run waits may settle from here on (`refresh_test_run_waits`).
         inner.test_runs.scanned_once = true;
+        self.compact_test_runs_locked(&mut inner);
         inner.test_runs.any_running()
     }
 
@@ -752,22 +901,20 @@ impl AppState {
     fn test_run_entry(&self, run_id: &str) -> Option<(TestRunSummary, PathBuf)> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let entry = inner.test_runs.find(run_id)?;
-        Some((entry.summary.clone(), entry.disk.run_dir.clone()))
+        let summary = test_run_summaries_locked(&inner).into_iter().find(|run| run.run_id == run_id)?;
+        Some((summary, entry.disk.run_dir.clone()))
     }
 
     /// Indexed runs, optionally for one project, in list order.
     fn test_run_summaries(&self, project_id: Option<&str>) -> Vec<TestRunSummary> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        inner
-            .test_runs
-            .entries
-            .iter()
-            .filter(|entry| {
+        test_run_summaries_locked(&inner)
+            .into_iter()
+            .filter(|run| {
                 project_id.is_none_or(|project_id| {
-                    entry.summary.project_id.as_deref() == Some(project_id)
+                    run.project_id.as_deref() == Some(project_id)
                 })
             })
-            .map(|entry| entry.summary.clone())
             .collect()
     }
 
@@ -806,6 +953,8 @@ impl AppState {
                 let mut cards_enabled = false;
                 let mut epoch_fence = None;
                 while !*shutdown.borrow() {
+                    state.step_test_command_observation_persistence();
+                    state.step_test_run_compaction();
                     // The card epoch is durable before any card is created;
                     // until then rescans publish runs but create no card. The
                     // step never waits, so the index is never held up by it.

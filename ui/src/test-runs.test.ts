@@ -1,8 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { applyTestRunDelta, reconcileTestRunSnapshot, sortTestRuns, testRunSessionMarker, testRunStageLabel } from "./test-runs";
+import { applyTestRunDelta, reconcileTestRunSnapshot, sortTestRuns, testRunRestartImpact, testRunSessionMarker, testRunStageLabel } from "./test-runs";
 import { makeTestRun, makeTestRunDetail } from "./test-runs-fixtures";
 
 describe("test run presentation", () => {
+  it("does not invent detachment for a host-observed provider command", () => {
+    const run = makeTestRun({ registrationState: "hostObserved", detached: null, currentStage: null });
+    expect(testRunSessionMarker([run], "session-owner")).toBe("test running");
+  });
+  it("aggregates restart impact across every run and keeps uncertainty distinct from safe", () => {
+    const safe = makeTestRun({ state: "failed", restartWouldVoidEvidence: false });
+    const unknown = makeTestRun({ runId: "unknown", state: "passed", restartWouldVoidEvidence: null });
+    const risk = makeTestRun({ runId: "pending", state: "passed", restartWouldVoidEvidence: true });
+    expect(testRunRestartImpact([safe])).toBe(false);
+    expect(testRunRestartImpact([safe, unknown])).toBeNull();
+    expect(testRunRestartImpact([unknown, risk, safe])).toBe(true);
+    expect(testRunRestartImpact([risk, unknown])).toBe(true);
+    expect(testRunRestartImpact([makeTestRun({ state: "passed" })])).toBeNull();
+  });
+  it("replaces only positively correlated observed identities in one live update", () => {
+    const observed = makeTestRun({ runId: "observed-original" });
+    const other = makeTestRun({ runId: "observed-other" });
+    const artifact = makeTestRun({ runId: "launcher", supersededRunIds: [observed.runId],
+      trackingProvenances: ["hostObserved", "discovered"], restartWouldVoidEvidence: true });
+    expect(applyTestRunDelta([observed, other], { type: "testRunChanged", revision: 2, run: artifact }))
+      .toEqual(sortTestRuns([other, artifact]));
+    const restored = applyTestRunDelta([artifact], { type: "testRunChanged", revision: 3, run: observed });
+    expect(applyTestRunDelta(restored, { type: "testRunRemoved", revision: 4, runId: artifact.runId }))
+      .toEqual([observed]);
+  });
   it.each(["processGone", "resultsUnreadable", "noPid", "heartbeatStale"] as const)("adopts unknown reason %s without inferring a missing reason", unknownReason => {
     const run = makeTestRun({ state: "unknown" });
     expect(run.unknownReason).toBeUndefined();

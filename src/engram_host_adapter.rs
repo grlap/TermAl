@@ -898,6 +898,10 @@ enum EngramTurnCheckpointResponse {
 #[derive(Clone, Debug, Deserialize)]
 struct EngramCheckpointReceipt {
     grant_id: String,
+    #[serde(default)]
+    checkpoint: Option<String>,
+    #[serde(default)]
+    verification_evidence: Vec<String>,
     #[serde(rename = "cursor")]
     _cursor: i64,
     #[serde(rename = "confirmed_cursor")]
@@ -4948,6 +4952,7 @@ impl AppState {
                     // A credited carried gate is never withheld (its outcome
                     // is passed or failed), so it still leads the checks.
                     engram_trim_turn_checks(&mut resolved_checks, carried_count);
+                    self.associate_reported_test_checks_locked(&mut inner, index, &resolved_checks);
                     let closing = end_basis.clone().zip(end_basis_observed_at.clone());
                     let (report, fallback) = engram_turn_report(
                         &inner.sessions[index],
@@ -5030,6 +5035,9 @@ impl AppState {
                         EngramTurnCheckpointResponse::Checkpointed { receipt }
                             if receipt.grant_id == grant_id =>
                         {
+                            if let Some((store, binding)) = target.settings.authority_store_key.as_ref().zip(target.work_binding.as_ref()) {
+                                self.settle_test_run_verification_receipt(&report, &receipt, store, binding);
+                            }
                             Ok(())
                         }
                         EngramTurnCheckpointResponse::Checkpointed { .. } => {

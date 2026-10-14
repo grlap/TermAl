@@ -1297,6 +1297,7 @@ impl AppState {
                     error.message,
                 ))
             })?;
+        self.revalidate_test_run_lifecycle(store, binding, &read);
         Ok(read)
     }
 

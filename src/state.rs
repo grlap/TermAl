@@ -1615,6 +1615,9 @@ struct StateInner {
     /// The test launcher's runs, mirrored from their run directories by the
     /// rescan in `test_runs.rs`. Memory only: disk stays the record.
     test_runs: TestRunIndex,
+    test_run_registrations: BTreeMap<String, TestRunRegistration>,
+    test_run_observations: BTreeMap<String, TestRunCommandObservation>,
+    test_run_compacted: BTreeMap<String, TestRunCompacted>,
     /// When this host first ran with test-run cards; runs that started
     /// earlier never get one (`test_run_cards.rs`). Persisted, never derived
     /// from "now" again once stored.
@@ -1711,6 +1714,9 @@ impl StateInner {
             engram_turn_basis_captures_live: Arc::default(),
             engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
+            test_run_registrations: BTreeMap::new(),
+            test_run_observations: BTreeMap::new(),
+            test_run_compacted: BTreeMap::new(),
             test_run_cards_epoch: None,
             test_run_cards: BTreeMap::new(),
             test_run_waits: Vec::new(),

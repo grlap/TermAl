@@ -2081,6 +2081,15 @@ fn engram_credit_carried_checks(
             })
         })
         .collect::<Vec<_>>();
+    let artifact_candidates: BTreeMap<_, _> = inner.sessions[index].engram.carried_checks.iter()
+        .filter_map(|carried| Some(((carried.check.grant_id.clone(), carried.check.sequence),
+            TestRunObservedArtifact {
+                run_id: carried.run_directory.as_ref()?.file_name()?.to_str()?.to_owned(),
+                run_directory: test_run_display_path(carried.run_directory.as_ref()?),
+                request_identity: None,
+                terminal_digest: Some(carried.terminal_digest.clone()?),
+            })))
+        .collect();
     let record = inner
         .session_mut_by_index(index)
         .expect("session index should be valid");
@@ -2096,6 +2105,20 @@ fn engram_credit_carried_checks(
         record.engram.set_pending_source_root_line(line);
     }
     let carried_count = credited.len();
+    for check in &credited {
+        let Some(artifact) = artifact_candidates.get(&(check.check.grant_id.clone(), check.check.sequence)) else { continue; };
+        let grant_identity = sha256_hex(check.check.grant_id.as_bytes());
+        let tool_identity = sha256_hex(check.check.key.as_bytes());
+        let candidates: Vec<_> = inner.test_run_observations.values().filter(|row| {
+            row.summary.owner_session_id.as_deref() == Some(session_id)
+                && row.grant_identity.as_deref() == Some(grant_identity.as_str())
+                && row.tool_identity == tool_identity && row.summary.started_at.as_deref() == Some(check.check.started_at.as_str())
+        }).map(|row| row.execution_id.clone()).collect();
+        if candidates.len() == 1 && let Some(row) = inner.test_run_observations.get_mut(&candidates[0]) {
+            row.artifact = Some(artifact.clone());
+            inner.test_runs.observations_durable.remove(&candidates[0]);
+        }
+    }
     resolved.splice(0..0, credited);
     carried_count
 }

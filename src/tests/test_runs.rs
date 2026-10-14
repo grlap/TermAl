@@ -11,6 +11,9 @@
 
 use super::*;
 
+#[path = "test_run_registration.rs"]
+mod test_run_registration;
+
 struct RunFixture {
     state: AppState,
     root: PathBuf,
@@ -339,6 +342,84 @@ fn owners_and_notification_targets_resolve_to_visible_sessions() {
     );
 }
 
+#[test]
+fn detached_full_run_is_globally_listed_while_its_initiator_is_idle() {
+    let fixture = RunFixture::new("idle-detached-owner");
+    let owner = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Idle gate owner".to_owned()),
+            fixture.root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        assert_eq!(record.session.status, SessionStatus::Idle);
+        let id = record.session.id.clone();
+        fixture.state.commit_locked(&mut inner).unwrap();
+        id
+    };
+    let mut request = full_request(&fixture.root, "2026-09-25T11:00:00.000Z");
+    request["owner"] = json!(owner);
+    request["detached"] = json!(true);
+    request["creatorPid"] = json!(6);
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-idle-detached-full",
+        request,
+        Some(running_results(Some(7))),
+    );
+
+    // Positive control for the existing reader: no active agent turn or
+    // transcript card is needed to keep a detached worker globally visible.
+    assert!(fixture.refresh(&[7]));
+    let run = fixture.summary("test-idle-detached-full");
+    assert_eq!(run.state, TestRunState::Running);
+    assert_eq!(run.preset, TestRunPreset::Full);
+    assert_eq!(run.detached, Some(true));
+    assert_eq!(run.owner_session_id.as_deref(), Some(owner.as_str()));
+    assert_eq!(run.current_stage.as_deref(), Some("rust-tests"));
+    assert_eq!(run.run_dir, test_run_display_path(&run_dir));
+    assert_eq!(fixture.summaries().len(), 1);
+    let inner = fixture.state.inner.lock().unwrap();
+    assert_eq!(
+        inner.sessions[inner.find_session_index(&owner).unwrap()]
+            .session
+            .status,
+        SessionStatus::Idle,
+        "indexing a run does not activate its initiating session"
+    );
+}
+
+#[test]
+fn artifact_status_without_exact_credit_correlation_exposes_unknown_restart_risk() {
+    for state in ["passed", "failed"] {
+        let fixture = RunFixture::new(&format!("uncorrelated-risk-{state}"));
+        let mut result = passed_results();
+        result["state"] = json!(state);
+        result["exitCode"] = json!(if state == "passed" { 0 } else { 1 });
+        write_run(
+            &fixture.runs_dir(),
+            "test-uncorrelated-risk",
+            full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+            Some(result),
+        );
+        fixture.refresh(&[]);
+        let run = serde_json::to_value(fixture.summary("test-uncorrelated-risk")).unwrap();
+        assert_eq!(
+            run.get("restartWouldVoidEvidence"),
+            Some(&Value::Null),
+            "an artifact alone neither proves a work binding nor its settlement: {run}"
+        );
+        assert!(
+            run["restartEvidenceReason"]
+                .as_str()
+                .is_some_and(|reason| !reason.trim().is_empty()),
+            "unknown risk needs an actionable, host-computed reason: {run}"
+        );
+    }
+}
+
 fn drain_test_run_deltas(
     receiver: &mut tokio::sync::broadcast::Receiver<String>,
 ) -> Vec<DeltaEvent> {
@@ -442,9 +523,34 @@ fn the_rescan_publishes_only_changes_with_consecutive_revisions() {
         Some(passed_results()),
     );
     let mut receiver = fixture.state.subscribe_delta_events();
+    let mut state_receiver = fixture.state.subscribe_events();
     let before = fixture.state.full_snapshot().revision;
 
     fixture.refresh(&[9]);
+    assert!(
+        matches!(
+            state_receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ),
+        "private discovered-identity saves publish no state snapshot"
+    );
+    let stored = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    for run_id in ["test-a", "test-b"] {
+        assert_eq!(
+            stored.test_run_compacted.get(run_id),
+            fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_compacted
+                .get(run_id),
+            "the private identity save survives reload without a publication"
+        );
+        assert!(stored.test_run_compacted.contains_key(run_id));
+    }
     let events = drain_test_run_deltas(&mut receiver);
     let revisions: Vec<u64> = events
         .iter()
@@ -492,8 +598,11 @@ fn the_rescan_publishes_only_changes_with_consecutive_revisions() {
     fixture.refresh(&[]);
     let events = drain_test_run_deltas(&mut receiver);
     assert!(
-        matches!(events.as_slice(), [DeltaEvent::TestRunRemoved { run_id, .. }] if run_id == "test-a"),
-        "a removed run leaves the index"
+        matches!(events.as_slice(), [DeltaEvent::TestRunChanged { run, .. }]
+            if run.run_id == "test-a"
+                && run.registration.artifact_unavailable == Some(true)
+                && run.registration.restart_would_void_evidence.is_none()),
+        "artifact disappearance retains unresolved evidence in the live index"
     );
 }
 
@@ -611,7 +720,7 @@ fn linked_worktree_runs_join_the_project_that_shares_the_common_directory() {
 }
 
 #[test]
-fn terminal_runs_are_bounded_per_project_and_non_terminal_runs_always_stay() {
+fn terminal_runs_with_unknown_evidence_are_retained_beyond_the_ordinary_cap() {
     let fixture = RunFixture::new("retention");
     let runs = fixture.runs_dir();
     for index in 0..52 {
@@ -634,17 +743,16 @@ fn terminal_runs_are_bounded_per_project_and_non_terminal_runs_always_stay() {
         .into_iter()
         .map(|run| run.run_id)
         .collect();
-    assert_eq!(indexed.len(), 51);
+    assert_eq!(indexed.len(), 53);
     assert!(indexed.contains(&"test-oldest-running".to_owned()));
     assert!(
-        !indexed.contains(&"test-done-00".to_owned()),
-        "the oldest terminal runs age out"
+        indexed.contains(&"test-done-00".to_owned()),
+        "artifact PASS does not prove evidence-safe retention"
     );
-    assert!(!indexed.contains(&"test-done-01".to_owned()));
+    assert!(indexed.contains(&"test-done-01".to_owned()));
     assert!(indexed.contains(&"test-done-51".to_owned()));
 
-    // Aged-out runs stay in the parse cache, so an unchanged run directory,
-    // listed or not, is never parsed again.
+    // Retained unknown-risk runs still reuse the existing parse cache.
     let parsed = |fixture: &RunFixture| {
         fixture
             .state
@@ -668,8 +776,8 @@ fn terminal_runs_are_bounded_per_project_and_non_terminal_runs_always_stay() {
         );
     }
 
-    // An aged-out run keeps its bounded extract, so when it comes back into
-    // the list its summary is whole without reading anything again.
+    // Removing a newer artifact does not require rereading an older retained
+    // run or discard its stages/detail identity.
     let aged_out = runs.join("test-done-01");
     assert!(second[&aged_out].is_terminal());
     fs::remove_dir_all(runs.join("test-done-51")).unwrap();
@@ -680,7 +788,7 @@ fn terminal_runs_are_bounded_per_project_and_non_terminal_runs_always_stay() {
     assert!(returned.detail_version.is_some());
     assert!(
         Arc::ptr_eq(&second[&aged_out], &parsed(&fixture)[&aged_out]),
-        "coming back into the list needs no new read"
+        "the older retained run needs no new read"
     );
 }
 
@@ -1347,7 +1455,7 @@ impl RunFileFault {
 }
 
 #[test]
-fn a_failed_read_gets_one_rescan_of_grace_and_then_the_run_is_unknown_or_dropped() {
+fn a_failed_read_gets_one_rescan_of_grace_and_then_the_run_is_retained_as_unknown() {
     for fault in [
         RunFileFault::Directory,
         RunFileFault::Malformed,
@@ -1379,8 +1487,8 @@ fn a_failed_read_gets_one_rescan_of_grace_and_then_the_run_is_unknown_or_dropped
             );
             assert_eq!(fixture.summary("test-fault"), before, "{label}");
 
-            // The grace is one rescan: failing again, the stale evidence is
-            // given up.
+            // The grace is one rescan: failing again, execution monitoring
+            // becomes unknown while the original unresolved identity stays.
             fixture.refresh(&[4]);
             let events = drain_test_run_deltas(&mut receiver);
             if file == "results.json" {
@@ -1396,9 +1504,14 @@ fn a_failed_read_gets_one_rescan_of_grace_and_then_the_run_is_unknown_or_dropped
                 assert!(
                     matches!(
                         events.as_slice(),
-                        [DeltaEvent::TestRunRemoved { run_id, .. }] if run_id == "test-fault"
+                        [DeltaEvent::TestRunChanged { run, .. }]
+                            if run.run_id == "test-fault"
+                                && run.state == TestRunState::Unknown
+                                && run.interrupted
+                                && run.registration.artifact_unavailable == Some(true)
+                                && run.registration.restart_would_void_evidence.is_none()
                     ),
-                    "{label}: an unreadable request drops the run"
+                    "{label}: an unreadable request retains the unresolved run"
                 );
             }
 

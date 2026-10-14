@@ -417,7 +417,7 @@ fn a_run_whose_core_exceeds_ten_kib_gets_no_card() {
 }
 
 #[test]
-fn a_resident_card_without_its_verdict_holds_its_run_until_it_has_it() {
+fn unresolved_evidence_holds_terminal_run_even_after_its_card_leaves_the_resident_window() {
     for cold in [false, true] {
         let fixture = CardFixture::new(if cold { "retention-cold" } else { "retention" });
         fixture.state.inner.lock().unwrap().test_run_cards_epoch =
@@ -464,14 +464,14 @@ fn a_resident_card_without_its_verdict_holds_its_run_until_it_has_it() {
                 .any(|run| run.run_id == "test-carded")
         };
         if cold {
-            assert!(!indexed(&fixture), "a card out of the window does not hold its run");
+            assert!(indexed(&fixture), "unknown evidence risk outlives the resident card");
             continue;
         }
         assert!(indexed(&fixture), "held until its card has the verdict");
         assert_eq!(fixture.card("test-carded").state, TestRunState::Passed);
         fixture.refresh(&[]);
-        assert!(!indexed(&fixture), "then it ages out");
-        assert!(fixture.card_ref("test-carded").is_none(), "and its terminal entry is pruned");
+        assert!(indexed(&fixture), "artifact PASS does not establish evidence-safe aging");
+        assert!(fixture.card_ref("test-carded").is_some(), "the unresolved run remains indexed");
         assert_eq!(fixture.card("test-carded").state, TestRunState::Passed, "the card stays");
     }
 }
@@ -717,7 +717,11 @@ fn the_epoch_never_blocks_rescans_and_cards_follow_once_it_is_durable() {
     let next_fence = |rx: &mpsc::Receiver<PersistRequest>| {
         rx.try_iter()
             .find_map(|request| match request {
-                PersistRequest::Fence(fence) => Some(fence),
+                PersistRequest::Fence(fence)
+                    if matches!(&fence.target, PersistFenceTarget::TestRunCardsEpoch(_)) =>
+                {
+                    Some(fence)
+                }
                 _ => None,
             })
             .expect("the epoch's fence was sent")

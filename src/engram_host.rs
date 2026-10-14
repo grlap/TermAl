@@ -252,6 +252,41 @@ impl EngramHost<'_> {
         engram_check_command(line).is_some_and(|command| engram_is_simple_full_launcher(&command))
     }
 
+    /// The existing command recognizer, for run visibility without granting credit.
+    pub(crate) fn recognized_check(line: &str) -> Option<EngramCheckCommand> {
+        engram_check_command(line)
+    }
+
+    /// The check machinery's canonical identity for an already recognized command.
+    pub(crate) fn check_fingerprint(command: &EngramCheckCommand) -> String {
+        engram_check_fingerprint(command)
+    }
+
+    /// The existing launcher's arguments, without adding a recognition rule.
+    pub(crate) fn launcher_arguments(command: &EngramCheckCommand) -> Option<Vec<String>> {
+        engram_launcher_words(command)
+    }
+
+    /// Whether a recognized command is a full launcher run.
+    pub(crate) fn is_full_launcher(command: &EngramCheckCommand) -> bool {
+        engram_check_is_launcher_full(command)
+    }
+
+    /// Whether this result describes a launch rather than the test run's end.
+    pub(crate) fn is_launch_only(command: &EngramCheckCommand, exit: EngramCommandExit) -> bool {
+        !matches!(engram_launch_disposition(command, exit), EngramLaunchDisposition::Ordinary)
+    }
+
+    /// Resolves the check component's artifact directory; call outside StateInner.
+    pub(crate) fn run_artifact_directory(root: &FsPath) -> Option<PathBuf> {
+        engram_git_run_directory(root)
+    }
+
+    /// Parses the timestamp format accepted by the existing carried-run matcher.
+    pub(crate) fn check_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        engram_parse_time(value)
+    }
+
     /// The watcher saw `changes` in a workspace. Its one caller, the watcher
     /// thread, is not built into tests, which call the handler directly.
     #[cfg_attr(test, allow(dead_code))]

@@ -25,7 +25,8 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
     (!sessionId || testRunMatchesSession(run, sessionId)) && (!state || run.state === state)));
   const selected = visible.find(run => run.runId === selectedId);
   return <section className="test-runs-panel" aria-label="Test Runs">
-    <header><h2>Test Runs</h2><p>Read-only launcher discovery. A notification target is not a registered wait.</p></header>
+    <header><h2>Test Runs</h2><p>Registered launches and host-observed tests. Execution results and verification settlement are shown separately.</p>
+      <p>Detailed history normally keeps the newest 50 resolved runs per project. Unresolved runs remain visible; older resolved identities and proof are retained.</p></header>
     <div className="test-runs-filters">
       <label>Project <select value={projectId} onChange={event => setProjectId(event.target.value)}>
         <option value="">All projects</option>
@@ -48,11 +49,17 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
           onClick={() => setSelectedId(run.runId)}>
           <span className={`test-run-state is-${run.state}`}>{run.state}{run.interrupted ? " · interrupted" : ""}</span>
           <strong>{run.command?.join(" ") || run.preset}{run.commandTruncated ? " … (truncated)" : ""}</strong>
-          <span>{run.runId}</span><span title={run.worktree}>{run.worktree}</span>
+          <span>{run.runId}</span><span title={run.worktree}>{run.worktree || "Worktree not recorded"}</span>
           <span>Owner: {run.ownerSessionId ? names.get(run.ownerSessionId) ?? run.ownerSessionId : "not recorded"}</span>
           <span>Notify: {run.notifySessionId ? names.get(run.notifySessionId) ?? run.notifySessionId : run.notifyTo ?? "none"}</span>
-          <span>Started: {run.startedAt ?? "not recorded"} · <TestRunDuration start={run.startedAt} end={run.endedAt} running={run.state === "running"} /></span>
-          {run.state === "running" ? <span>Stage: {run.currentStage ?? "none"}</span> : null}
+          <span>Tracking: {run.registrationState ?? "discovered"} · {run.trackingDurability ?? "unconfirmed"}</span>
+          <span>Observed through: {run.trackingProvenances?.join(", ") ?? "discovery"}</span>
+          <span>Creator PID: {run.creatorPid ?? "unknown"} · Runner PID: {run.runnerPid ?? "unknown"}</span>
+          <span>Evidence impact on restart: {run.restartWouldVoidEvidence === true ? "would void evidence" : run.restartWouldVoidEvidence === false ? "no pending evidence" : "unknown"}</span>
+          <span>{run.restartEvidenceReason ?? "Exact verification correlation is not available."}</span>
+          {run.monitoringInterruptedAt ? <span>Monitoring interrupted: {run.monitoringInterruptedAt}</span> : null}
+          <span>{run.startTimeOrigin === "hostCommandStart" ? "Command start observed" : "Started"}: {run.startedAt ?? "not recorded"} · <TestRunDuration start={run.startedAt} end={run.endedAt} running={run.state === "running"} /></span>
+          {run.state === "running" ? <span>Stage: {run.currentStage ?? "not recorded"}</span> : null}
         </button>)}
       </div>
       {selected ? <TestRunDetails key={selected.runId} run={selected} /> : initialRun && selectedId === initialRun.runId && !runs.some(run => run.runId === initialRun.runId) ?

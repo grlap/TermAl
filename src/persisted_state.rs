@@ -62,6 +62,12 @@ struct PersistedState {
     test_run_cards_epoch: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     test_run_cards: BTreeMap<String, TestRunCardRef>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    test_run_registrations: BTreeMap<String, TestRunRegistration>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    test_run_observations: BTreeMap<String, TestRunCommandObservation>,
+    #[serde(default)]
+    test_run_compacted: BTreeMap<String, TestRunCompacted>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     test_run_waits: Vec<TestRunWaitRecord>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -115,6 +121,9 @@ impl PersistedState {
             delegation_waits: inner.delegation_waits.clone(),
             test_run_cards_epoch: inner.test_run_cards_epoch.clone(),
             test_run_cards: inner.test_run_cards.clone(),
+            test_run_registrations: inner.test_run_registrations.clone(),
+            test_run_observations: inner.test_run_observations.clone(),
+            test_run_compacted: inner.test_run_compacted.clone(),
             test_run_waits: inner.test_run_waits.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: Vec::new(),
@@ -167,6 +176,9 @@ impl PersistedState {
             delegation_waits: self.delegation_waits.clone(),
             test_run_cards_epoch: self.test_run_cards_epoch.clone(),
             test_run_cards: self.test_run_cards.clone(),
+            test_run_registrations: self.test_run_registrations.clone(),
+            test_run_observations: self.test_run_observations.clone(),
+            test_run_compacted: self.test_run_compacted.clone(),
             test_run_waits: self.test_run_waits.clone(),
             workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
@@ -197,6 +209,15 @@ impl PersistedState {
 
     /// Converts the value into inner.
     fn into_inner(self) -> Result<StateInner> {
+        let terminal_unbound_registrations: HashSet<_> = self
+            .test_run_registrations
+            .values()
+            .filter(|registration| {
+                test_run_registration_final_observation(registration, &self.test_run_observations, None)
+                    .is_some()
+            })
+            .map(|registration| registration.run_id.clone())
+            .collect();
         let mut preferences = self.preferences;
         preferences.remotes = validate_persisted_remote_configs(preferences.remotes)?;
         let mut inner = StateInner {
@@ -246,10 +267,29 @@ impl PersistedState {
             engram_source_root_validations_live: Arc::default(),
             // An epoch loaded from disk is already durable.
             test_runs: TestRunIndex {
+                registered: self.test_run_registrations.keys().cloned().collect(),
+                observations_durable: self.test_run_observations.keys().cloned().collect(),
+                compactions_durable: self.test_run_compacted.keys().cloned().collect(),
                 cards_enabled: self.test_run_cards_epoch.is_some(),
                 ..TestRunIndex::default()
             },
             test_run_cards_epoch: self.test_run_cards_epoch,
+            test_run_compacted: self.test_run_compacted.into_iter().map(|(id, mut row)| {
+                for observation in &mut row.observations {
+                    test_run_observation_boot(observation);
+                }
+                (id, row)
+            }).collect(),
+            test_run_observations: self.test_run_observations.into_iter().map(|(id, mut row)| {
+                test_run_observation_boot(&mut row);
+                (id, row)
+            }).collect(),
+            test_run_registrations: self.test_run_registrations.into_iter().map(|(id, mut registration)| {
+                if !terminal_unbound_registrations.contains(&id) {
+                    registration.monitoring_interrupted_at.get_or_insert_with(test_run_timestamp);
+                }
+                (id, registration)
+            }).collect(),
             // The map is written with the metadata, but a card's transcript
             // row can be deferred to a later persist tick, so after a restart
             // the transcript is the authority: the flags are re-derived by the

@@ -39,6 +39,9 @@ enum PersistFenceTarget {
     /// The test-run card epoch, which must be durable before any card is
     /// created (`test_run_cards.rs`).
     TestRunCardsEpoch(String),
+    TestRunRegistration(TestRunRegistration),
+    TestRunObservation(Box<TestRunCommandObservation>),
+    TestRunCompaction(Box<TestRunCompacted>),
     /// A held queued prompt: its hold's nonce and the exact entry, both read
     /// back from the durable session row (`queued_prompt_durability.rs`).
     #[cfg_attr(not(test), allow(dead_code))]
@@ -81,6 +84,9 @@ impl PersistFenceTarget {
             Self::TestRunCardsEpoch(expected) => {
                 delta.metadata.test_run_cards_epoch.as_deref() == Some(expected.as_str())
             }
+            Self::TestRunRegistration(expected) => delta.metadata.test_run_registrations.get(&expected.run_id) == Some(expected),
+            Self::TestRunObservation(expected) => delta.metadata.test_run_observations.get(&expected.execution_id) == Some(expected.as_ref()),
+            Self::TestRunCompaction(expected) => delta.metadata.test_run_compacted.get(&expected.summary.run_id) == Some(expected.as_ref()),
         }
     }
 
@@ -229,7 +235,7 @@ impl PersistFenceTarget {
             // Every delta writes the whole metadata document, including waits
             // and the card epoch. Absence/mismatch there is already
             // conclusive for this tick.
-            Self::WaitRegistration(_) | Self::TestRunCardsEpoch(_) => Ok(false),
+            Self::WaitRegistration(_) | Self::TestRunCardsEpoch(_) | Self::TestRunRegistration(_) | Self::TestRunObservation(_) | Self::TestRunCompaction(_) => Ok(false),
             // The hold's nonce and the exact queued entry must both be in the
             // committed row; a removed or replaced entry never matches.
             Self::QueuedPromptDurability { session_id, prompt_id, content } => {

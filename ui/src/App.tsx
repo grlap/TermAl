@@ -11,7 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
-import { TestRunsProvider } from "./test-runs-context";
+import { TestRunsProvider, TestRunsGlobalStatus } from "./test-runs-context";
 import { openTestRunsInWorkspaceState } from "./workspace";
 import { DialogCloseIcon } from "./message-card-icons";
 import type { KimiApprovalMode, OpenCodeApprovalMode } from "./types";
@@ -2116,13 +2116,14 @@ export default function App() {
 
   return (
     <TestRunsProvider runs={testRuns} waits={testRunWaits} failures={testRunWaitFailures}
-      dismissFailure={dismissTestRunWaitFailure} snapshotReady={hasAdoptedStateSnapshot} open={(sessionId = null, target) => {
+      dismissFailure={dismissTestRunWaitFailure} snapshotReady={hasAdoptedStateSnapshot} open={(sessionId = null, target, allProjects = false) => {
       setWorkspace(current => applyControlPanelLayout(openTestRunsInWorkspaceState(
         current, current.activePaneId, sessionId ?? activeSession?.id ?? null,
-        sessionId || target ? null : activeSession?.projectId ?? null, sessionId, target,
+        allProjects || sessionId || target ? null : activeSession?.projectId ?? null, sessionId, target,
       )));
     }}>
     <div className="shell">
+      <TestRunsGlobalStatus />
       <div className="background-orbit background-orbit-left" />
       <div className="background-orbit background-orbit-right" />
 

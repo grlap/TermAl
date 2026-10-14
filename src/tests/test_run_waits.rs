@@ -694,6 +694,7 @@ fn a_run_named_by_a_pending_wait_stays_indexed_past_retention() {
 /// A failed run as the index summarizes it, for prompt tests.
 fn failed_summary(run_id: &str) -> TestRunSummary {
     TestRunSummary {
+        registration: TestRunRegistrationView::default(),
         run_id: run_id.to_owned(),
         project_id: Some("project-1".to_owned()),
         worktree: "/repo".to_owned(),

@@ -4,6 +4,9 @@
 
 use super::*;
 
+#[path = "test_run_registration_fence.rs"]
+mod test_run_registration;
+
 struct FenceFixture {
     cache: SqlitePersistConnectionCache,
     root: TestTempRoot,

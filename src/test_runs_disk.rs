@@ -392,6 +392,7 @@ impl TestRunRead {
 #[derive(Clone, Debug)]
 struct TestRunDisk {
     run_id: String,
+    request_identity: Option<String>,
     run_dir: PathBuf,
     request_stamp: TestRunFileStamp,
     results_stamp: TestRunFileStamp,
@@ -605,6 +606,7 @@ impl TestRunDisk {
             .or_else(|| results.as_ref().and_then(|results| results.started.clone()));
         TestRunRead::Run(Self {
             run_id,
+            request_identity: test_run_registration_identity(&request).ok(),
             run_dir: run_dir.to_path_buf(),
             request_stamp,
             results_stamp,

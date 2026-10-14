@@ -12,6 +12,9 @@
 // engram_turn_checks.rs.
 use super::*;
 
+#[path = "test_run_registration_declared.rs"]
+mod test_run_registration;
+
 /// The declared .NET line of the documentation's example, for a project at
 /// the repository root.
 pub(super) const DECLARED_TEST: &str =

@@ -37,12 +37,17 @@ export function TestRunDetails({ run }: { run: TestRunSummary }) {
   return <section className="test-run-details" aria-label={`Run details ${run.runId}`}>
     <h3>{run.runId}</h3>
     <p>State: {run.state}{run.interrupted ? " (interrupted)" : ""} · Exit: {run.exitCode ?? "not recorded"}</p>
+    <p>Tracking: {run.registrationState ?? "discovered"} · {run.trackingDurability ?? "unconfirmed"}</p>
+    <p>Restart evidence impact: {run.restartWouldVoidEvidence === true ? "would void evidence" : run.restartWouldVoidEvidence === false ? "no pending evidence" : "unknown"}. {run.restartEvidenceReason ?? "Exact verification correlation is unavailable."}</p>
+    {run.monitoringInterruptedAt ? <p>Monitoring interrupted at {run.monitoringInterruptedAt}.</p> : null}
+    {run.plannedStageNames?.length ? <p>Planned stages: {run.plannedStageNames.join(", ")}. Actual progress comes from the result artifact.</p> : null}
+    {run.artifactLocations?.map(path => <p key={path}>Declared result file: <code>{path}</code></p>)}
     {run.state === "unknown" ? <p>Terminal evidence is missing. Unknown does not mean passed or safely finished.</p> : null}
     {run.error ? <p role="alert">{run.error}</p> : null}
     <p className="test-run-path">{run.runDir}</p>
-    <button type="button" onClick={() => {
+    {run.runDir ? <button type="button" onClick={() => {
       void copyTextToClipboard(run.runDir).then(() => setCopyNotice("Run directory copied"), () => setCopyNotice("Copy failed; select the path above"));
-    }}>Copy run directory</button>
+    }}>Copy run directory</button> : <p>No launcher artifact directory was reported.</p>}
     {copyNotice ? <p role="status">{copyNotice}</p> : null}
     <button type="button" onClick={() => setReload(value => value + 1)}>Refresh details</button>
     {!current ? <p role="status">{detail ? "Refreshing details… Showing the previous detail snapshot." : "Loading details…"}</p>

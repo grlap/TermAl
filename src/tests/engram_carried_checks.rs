@@ -16,6 +16,9 @@ use super::*;
 const GATE: &str = "node scripts/test-launcher.mjs full";
 const DETACHED_GATE: &str = "node scripts/test-launcher.mjs full --detach";
 
+#[path = "test_run_restart_evidence.rs"]
+mod test_run_restart_evidence;
+
 mod credit_outcomes {
     use super::*;
     include!("engram_carried_credit_outcomes.rs");

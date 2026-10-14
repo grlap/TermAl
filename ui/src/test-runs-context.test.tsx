@@ -1,10 +1,44 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { useContext } from "react";
-import { TestRunsProvider, TestRunSessionMarker, TestRunsOpenContext } from "./test-runs-context";
+import { TestRunsProvider, TestRunSessionMarker, TestRunsOpenContext, TestRunsGlobalStatus } from "./test-runs-context";
 import { makeTestRun } from "./test-runs-fixtures";
+import { applyTestRunDelta } from "./test-runs";
 import { ControlPanelSurface } from "./panels/ControlPanelSurface";
 afterEach(cleanup);
+it("keeps the unknown warning when a contiguous SSE change retains a missing artifact", () => {
+  let runs = [makeTestRun({ state: "passed", restartWouldVoidEvidence: null })];
+  const view = () => <TestRunsProvider snapshotReady runs={runs} open={vi.fn()}>
+    <TestRunsGlobalStatus />
+  </TestRunsProvider>;
+  const rendered = render(view());
+  runs = applyTestRunDelta(runs, {
+    type: "testRunChanged", revision: 2,
+    run: { ...runs[0], state: "unknown", interrupted: true, unknownReason: "resultsUnreadable" },
+  });
+  rendered.rerender(view());
+  expect(runs).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Tests: 0 running · restart impact unknown" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /no pending test evidence/ })).not.toBeInTheDocument();
+});
+it("keeps global evidence warnings after a process passes and opens all projects", () => {
+  const open = vi.fn();
+  const renderStatus = (impact: boolean | null) => <TestRunsProvider snapshotReady
+    runs={[makeTestRun({ state: "passed", projectId: "another-project", restartWouldVoidEvidence: impact })]} open={open}>
+    <TestRunsGlobalStatus />
+  </TestRunsProvider>;
+  const rendered = render(renderStatus(true));
+  fireEvent.click(screen.getByRole("button", { name: "Tests: 0 running · restart would void test evidence" }));
+  expect(open).toHaveBeenCalledWith(null, undefined, true);
+  rendered.rerender(renderStatus(null));
+  expect(screen.getByRole("button", { name: "Tests: 0 running · restart impact unknown" })).toBeInTheDocument();
+  rendered.rerender(renderStatus(false));
+  expect(screen.getByRole("button", { name: "Tests: 0 running · no pending test evidence" })).toBeInTheDocument();
+});
+it("keeps an unknown global warning before the first state snapshot", () => {
+  render(<TestRunsProvider snapshotReady={false} runs={[]} open={vi.fn()}><TestRunsGlobalStatus /></TestRunsProvider>);
+  expect(screen.getByRole("button", { name: "Tests: loading · restart impact unknown" })).toBeInTheDocument();
+});
 it("keeps action-only consumers independent of run updates", () => {
   let renders = 0;
   const open = vi.fn();

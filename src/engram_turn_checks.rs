@@ -1581,6 +1581,7 @@ impl AppState {
             child,
             turn_generation,
             unresolved_writers,
+            test_run_origin,
         ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -1634,8 +1635,12 @@ impl AppState {
                 } else {
                     Vec::new()
                 },
+                TestRunCommandOrigin::capture(&inner, index, provenance, key),
             )
         };
+        if ran.is_none() {
+            self.remember_unclassified_test_command(test_run_origin.clone(), workdir.clone(), started_at.clone(), places.clone());
+        }
         // Where the command's `cd` leads, from where its shell is presumed to
         // be; it moves the shell only once the command has run. A line TermAl
         // cannot follow loses the shell among the places its changes lead to.
@@ -1695,6 +1700,35 @@ impl AppState {
             )?;
             Some((workdir.clone(), command, target))
         });
+        // Visibility is independent of a work grant. Reuse only the existing
+        // recognition boundary; this extra declared read cannot admit credit.
+        let visibility_declared = if !mediated && recognised.is_none() {
+            engram_declared_start(ran, FsPath::new(&workdir), places.as_deref(), None).0
+        } else { None };
+        // ACP may repeat a start when it first supplies command text. Consume
+        // any saved original observation before considering a new start; this
+        // does not create a retroactive check or borrow the current grant.
+        let has_original_start = self.observe_test_command_description(
+            session_id, provenance, key, ran, cwd,
+        );
+        if let Some(command) = recognised.as_ref()
+            .or_else(|| declared.as_ref().map(|(command, _, _)| command))
+            .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command))
+            && !has_original_start {
+            // The same start's validated target is also the observation's
+            // source. A named linked root must not be resolved again as the
+            // session worktree, nor lent to a different command.
+            let observed_root = match target.as_ref() {
+                Some((_, validated_command, target)) => (validated_command == command)
+                    .then(|| test_run_display_path(&target.root)),
+                None => engram_check_worktree_from(
+                    command, FsPath::new(&workdir), places.as_deref(), None,
+                ).map(|target| test_run_display_path(&target.root)),
+            }.unwrap_or_default();
+            let declared_binding = declared.as_ref().map(|(_, _, binding)| binding)
+                .or_else(|| visibility_declared.as_ref().map(|(_, _, binding)| binding));
+            self.observe_test_command_start(test_run_origin, command, &observed_root, &started_at, declared_binding);
+        }
         #[cfg(test)]
         TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {
             if let Some((now, next)) = slot.borrow_mut().as_mut()
@@ -2137,6 +2171,7 @@ impl AppState {
         ran: Option<&str>,
         cwd: Option<&str>,
     ) {
+        self.observe_test_command_description(session_id, provenance, key, ran, cwd);
         if ran.is_none() && cwd.is_none() {
             return;
         }
@@ -2350,6 +2385,9 @@ impl AppState {
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
     ) {
+        self.observe_test_command_description(session_id, provenance, key, Some(command), None);
+        self.observe_test_command_artifact(session_id, provenance, key, command, output, runtime_output_cut);
+        self.observe_test_command_end(session_id, provenance, key, exit);
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
@@ -2572,6 +2610,7 @@ impl AppState {
         provenance: &EngramObservationProvenance,
         key: &str,
     ) {
+        self.observe_test_command_end(session_id, provenance, key, Some(EngramCommandExit::Unknown));
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id) {
             let disposition = claude_observation_disposition(&inner.sessions[index], provenance);

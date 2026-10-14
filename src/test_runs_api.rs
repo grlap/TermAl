@@ -35,8 +35,14 @@ async fn get_test_runs(
     query: Result<Query<TestRunListQuery>, QueryRejection>,
 ) -> Result<Json<TestRunListResponse>, ApiError> {
     let Query(query) = query.map_err(|err| api_query_rejection("test runs", err))?;
+    let project = query.project_id.as_deref();
+    let inner = state.inner.lock().expect("state mutex poisoned");
     Ok(Json(TestRunListResponse {
-        runs: state.test_run_summaries(query.project_id.as_deref()),
+        runs: test_run_summaries_locked(&inner)
+            .into_iter()
+            .filter(|run| project.is_none_or(|id| run.project_id.as_deref() == Some(id)))
+            .collect(),
+        history: test_run_history_locked(&inner, project),
     }))
 }
 
@@ -44,9 +50,46 @@ async fn get_test_run(
     State(state): State<AppState>,
     AxumPath(run_id): AxumPath<String>,
 ) -> Result<Json<TestRunDetailResponse>, ApiError> {
-    let (run, run_dir) = state
-        .test_run_entry(&run_id)
-        .ok_or_else(|| ApiError::not_found("unknown test run"))?;
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        if let Some(row) = inner.test_run_compacted.values().find(|row| {
+            test_run_compact_is_installed(&inner, row)
+                && (row.compacted || inner.test_runs.find(&row.summary.run_id).is_none())
+                && test_run_summary_ids(&row.summary).any(|id| id == run_id)
+        }) {
+            return Ok(Json(TestRunDetailResponse {
+                run: test_run_summaries_locked(&inner)
+                    .into_iter()
+                    .find(|run| run.run_id == row.summary.run_id)
+                    .unwrap_or_else(|| test_run_compacted_summary(&inner, row)),
+                detail: TestRunDetail {
+                    limitations: Some(if row.compacted {
+                        format!(
+                            "Compacted retained identity and proof. {} Full stage/log detail is omitted; artifacts were not deleted.",
+                            row.reason
+                        )
+                    } else {
+                        "Retained unresolved artifact identity; current stage/log detail is unavailable.".to_owned()
+                    }),
+                    ..TestRunDetail::default()
+                },
+            }));
+        }
+    }
+    if let Some(run) = state.test_run_summaries(None).into_iter().find(|run| run.run_id == run_id && run.run_dir.is_empty()) {
+        return Ok(Json(TestRunDetailResponse { run, detail: TestRunDetail {
+            limitations: Some("Host-observed provider execution; no launcher artifact directory was reported.".to_owned()),
+            ..TestRunDetail::default()
+        } }));
+    }
+    let Some((run, run_dir)) = state.test_run_entry(&run_id) else {
+        let run = state.test_run_summaries(None).into_iter().find(|run| run.run_id == run_id)
+            .ok_or_else(|| ApiError::not_found("unknown test run"))?;
+        return Ok(Json(TestRunDetailResponse { run, detail: TestRunDetail {
+            limitations: Some("The durable registration is retained; current launcher artifacts are unavailable.".to_owned()),
+            ..TestRunDetail::default()
+        } }));
+    };
     run_blocking_api(move || {
         Ok(Json(TestRunDetailResponse {
             run,

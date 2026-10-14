@@ -653,6 +653,7 @@ impl AppState {
         output: &str,
         exit: EngramCommandExit,
     ) -> bool {
+        self.observe_test_command_end(session_id, &EngramObservationProvenance::Ambient, key, Some(exit));
         // The output is read off the lock, for a carried test only.
         let started = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");

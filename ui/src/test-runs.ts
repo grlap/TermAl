@@ -11,6 +11,23 @@ export interface TestRunStageSummary {
   endedAt: string | null;
 }
 export interface TestRunSummary {
+  registrationState?: "registered" | "registrationPending" | "hostObserved" | "discovered" | null;
+  trackingDurability?: "durable" | "pending" | "failed" | "unconfirmed" | null;
+  initiatingSessionId?: string | null;
+  boundWorkIds?: string[];
+  creatorPid?: number | null;
+  runnerPid?: number | null;
+  monitoringInterruptedAt?: string | null;
+  restartWouldVoidEvidence?: boolean | null;
+  restartEvidenceReason?: string;
+  observedAt?: string | null;
+  verificationRecordIds?: string[];
+  sourceFingerprints?: string[];
+  artifactLocations?: string[];
+  trackingProvenances?: string[];
+  supersededRunIds?: string[];
+  startTimeOrigin?: "launcherRequest" | "hostCommandStart" | null;
+  plannedStageNames?: string[];
   runId: string;
   /** Opaque backend detail identity; older hosts may omit it. */
   detailVersion?: string | null;
@@ -34,6 +51,12 @@ export interface TestRunSummary {
   endedAt: string | null;
   exitCode: number | null;
   error: string | null;
+}
+
+export function testRunRestartImpact(runs: readonly TestRunSummary[]): boolean | null {
+  if (runs.some(run => run.restartWouldVoidEvidence === true)) return true;
+  if (runs.some(run => run.restartWouldVoidEvidence !== false)) return null;
+  return false;
 }
 export interface TestRunDiagnostics { text: string; truncated: boolean }
 export interface TestRunStageDetail extends TestRunStageSummary {
@@ -88,7 +111,8 @@ function sameWireValue(a: unknown, b: unknown): boolean {
 }
 export function applyTestRunDelta(runs: readonly TestRunSummary[], event: TestRunDelta) {
   const id = event.type === "testRunChanged" ? event.run.runId : event.runId;
-  const next = runs.filter(run => run.runId !== id);
+  const superseded = event.type === "testRunChanged" ? event.run.supersededRunIds ?? [] : [];
+  const next = runs.filter(run => run.runId !== id && !superseded.includes(run.runId));
   // Adopt equal summaries too: each changed event also invalidates detail.
   if (event.type === "testRunChanged") next.push(event.run);
   return sortTestRuns(next);
@@ -101,7 +125,9 @@ export function testRunSessionMarker(runs: readonly TestRunSummary[], sessionId:
   if (!relevant.length) return null;
   const foreground = relevant.some(run => run.ownerSessionId === sessionId && run.detached === false);
   const owned = relevant.some(run => run.ownerSessionId === sessionId);
-  const label = foreground ? "running tests" : owned ? "test run in background" : "test run will notify this session";
+  const observedWithoutDetach = relevant.some(run => run.ownerSessionId === sessionId
+    && run.registrationState === "hostObserved" && run.detached == null);
+  const label = foreground ? "running tests" : owned ? observedWithoutDetach ? "test running" : "test run in background" : "test run will notify this session";
   const roleRuns = relevant.filter(run => foreground
     ? run.ownerSessionId === sessionId && run.detached === false
     : owned ? run.ownerSessionId === sessionId : run.notifySessionId === sessionId);

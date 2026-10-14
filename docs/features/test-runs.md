@@ -9,7 +9,81 @@ The runner is `scripts/test-launcher.mjs` (see [Testing](../test.md)). Its run
 directories are the record of truth; TermAl mirrors them and never decides a
 verdict itself.
 
-Declared test commands (`termal-tests.toml`, TRX/JUnit artifacts) are a separate, planned feature: see [Declared Test Commands](declared-test-commands.md).
+Declared test commands (`termal-tests.toml`, TRX/JUnit artifacts) use the existing
+artifact adapter: see [Declared Test Commands](declared-test-commands.md).
+
+## Shared registration and command visibility
+
+The global Test Runs list and app-shell status include both launcher runs and
+recognized provider commands, including declared tests. A command appears when
+its start is observed, before its result artifact exists. If a provider supplies
+the command text later, the row retains the original runtime/tool identity,
+start time and work ownership; that late description creates no retroactive
+verification check. Visibility is independent of the owner's active or open
+session. Unknown PIDs, stages and locations remain unknown.
+
+`POST /api/sessions/{sessionId}/test-runs` accepts `{runId, runDirectory}` for an
+exact launcher request in the local project's Git run directories. Its successful
+response identifies `contract: "termal-durable-test-run-registration"`, `version: 1`
+and `registered: true`. The host acknowledges only after content persistence and
+query visibility. Identical retries retain one record; changed immutable request
+identity is refused. Registration failure never returns a durable ACK. This host
+prerequisite does not change the production launcher; launcher enforcement is a
+separate stage after the running host's capability has been verified.
+
+Rows distinguish `registered`, `hostObserved` and `discovered` provenance. An
+observed command merges with a launcher row only through its explicitly returned
+run locator and matching immutable request identity, or the existing validated
+terminal digest. Time, PID or similar command text never chooses a run. An exact
+merge lists `supersededRunIds` so the live client replaces provider-only rows in
+one update; losing that proof restores the original durable observation. Command
+start timestamps are labelled separately from launcher request timestamps.
+
+Registration and observation grant no test credit. `restartWouldVoidEvidence` is
+`true`, `false` or `null`, with a reason. Exact pending verification and a recorded
+pass whose associated work lifecycle is unfinished remain `true` after the
+process exits. `false` requires a positively validated unbound run, or settlement
+of every associated check and canonical completion of each passing work lifecycle.
+Missing or contradictory correlation is `null`; `true` dominates `null`, which
+dominates `false`. Receipt ObjectIds are retained separately from the existing
+canonical named-root read and its feed/read cut. Evaluation submission, release
+and cancellation do not substitute for completion. Restart-loaded correlations
+remain unknown until revalidated through existing producer boundaries. A terminal
+unbound execution can be revalidated locally only from durable final host proof:
+the original owner/runtime and turn still matched when it ended, work tracking was
+positively disabled, and no binding, grant, check or report operation remained.
+A registration or command-start snapshot and terminal artifact alone do not
+supply that proof. The proof binds exact original execution and terminal facts;
+changed facts or any later evidence association invalidate it. Known terminal
+execution results survive boot independently of evidence safety. Historical
+monitoring gaps remain visible without permanently poisoning revalidated proof.
+Unresolved
+terminal rows remain beyond the ordinary 50-row retention cap.
+
+Resolved terminal detail uses one 50-row budget per project across all tracking
+provenances, ordered by terminal time and stable identity; runs without a project
+share an explicit separate bucket. Pending waits, reporting or persistence keep
+their detail. Older resolved rows transfer every exact execution, registration
+fingerprint, alias and verification association into a minimal durable record
+before full detail is removed. Failed persistence keeps the original detail.
+Launcher artifacts and Engram verification records are never deleted by this
+policy. Rescans do not recreate resolved detail from unchanged old artifacts;
+contradictory artifacts restore an unknown warning on the retained identity.
+Unresolved discoveries retain their identity even when their artifacts disappear.
+
+The list API discloses `detailHistoryLimit`, `compactedCount`, `omittedCount` and
+`unresolvedBacklog`. Exact-ID detail reads distinguish retained compact identity
+from a never-known run and explain when stage/log detail is unavailable. Minimal
+resolved records stay out of recurring UI snapshots; bound proof becomes visible
+as unknown after boot until existing canonical reads revalidate it. This bounds
+resolved detail and normal payload/reparsing work, not total identity storage:
+unresolved obligations and minimal immutable identity records remain lossless.
+
+Host-observed native exits are execution observations. When the existing declared
+artifact adapter judges a result, its verdict updates the row while retaining the
+native exit code separately; exit zero cannot override a failing TRX. A restart or
+lost provider runtime marks an unfinished observation unknown and records the
+monitoring gap. The registry adds no process scanner or tracker poller.
 
 **Status:**
 - **Slice 1:** shipped (7f3c32c, with the PID-reuse fix in b77f1fa).
