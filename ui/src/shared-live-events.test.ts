@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import serverSseSource from "../../src/api_sse.rs?raw";
 import { createLiveEventSource, SharedLiveEventSource } from "./live-event-source";
 import { TestPort, TestSource } from "./shared-live-events.test-support";
 import {
@@ -448,7 +447,20 @@ describe("shared stream lifecycle", () => {
     await vi.advanceTimersByTimeAsync(SHARED_LIVE_LEASE_MS);
   });
 
-  it("keeps the named event allowlist in sync with the server wire events", () => {
+  it("keeps the named event allowlist in sync with the server wire events", async () => {
+    const nodeFsModule = "node:fs";
+    const nodeUrlModule = "node:url";
+    const { readFileSync } = await import(nodeFsModule) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
+    const { fileURLToPath } = await import(nodeUrlModule) as {
+      fileURLToPath: (url: string) => string;
+    };
+    // Resolve this Node-only fixture from the test file, keeping Vite's allowlist intact.
+    const moduleUrl = import.meta.url;
+    const serverSseSource = readFileSync(
+      fileURLToPath(new URL("../../src/api_sse.rs", moduleUrl).href), "utf8",
+    );
     const names = [...serverSseSource.matchAll(/\.event\("([^"]+)"\)/g)].map((match) => match[1]);
     expect([...new Set(names)].sort()).toEqual([...LIVE_EVENT_TYPES].sort());
   });
