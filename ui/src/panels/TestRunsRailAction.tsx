@@ -32,7 +32,7 @@ export function TestRunsRailAction() {
       </svg>
     </span>
     {activeCount > 0 ? <span className="control-panel-activity-badge" aria-hidden="true">
-      {activeCount}
+      {Math.min(activeCount, 99)}
     </span> : null}
   </button>;
 }

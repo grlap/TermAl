@@ -47,6 +47,24 @@ it("waits for the snapshot before displaying a count and keeps the panel's loadi
   expect(screen.getByRole("button", { name: "Open Test Runs" }).textContent).toBe("");
   expect(screen.getByText("Waiting for the test-run index…")).toBeInTheDocument();
 });
+it.each([
+  [1, "1", "Open Test Runs (1 active run)"],
+  [2, "2", "Open Test Runs (2 active runs)"],
+  [99, "99", "Open Test Runs (99 active runs)"],
+  [100, "99", "Open Test Runs (100 active runs)"],
+  [145, "99", "Open Test Runs (145 active runs)"],
+] as const)("shows the capped badge and exact accessible count for %i active runs", (activeCount, badgeText, label) => {
+  const runs = [
+    ...Array.from({ length: activeCount }, (_, index) => makeTestRun({ runId: `active-${index}` })),
+    makeTestRun({ runId: "finished", state: "passed" }),
+  ];
+  render(<TestRunsProvider snapshotReady runs={runs} open={vi.fn()}>
+    <TestRunsRailAction />
+  </TestRunsProvider>);
+  const button = screen.getByRole("button", { name: label });
+  expect(button).toHaveAttribute("title", label);
+  expect(button.querySelector(".control-panel-activity-badge")?.textContent).toBe(badgeText);
+});
 it("keeps action-only consumers independent of run updates", () => {
   let renders = 0;
   const open = vi.fn();
