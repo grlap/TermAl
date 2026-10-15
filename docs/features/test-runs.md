@@ -14,13 +14,18 @@ artifact adapter: see [Declared Test Commands](declared-test-commands.md).
 
 ## Shared registration and command visibility
 
-The global Test Runs list and app-shell status include both launcher runs and
+The global Test Runs list and left-rail active-run badge include both launcher runs and
 recognized provider commands, including declared tests. A command appears when
 its start is observed, before its result artifact exists. If a provider supplies
 the command text later, the row retains the original runtime/tool identity,
 start time and work ownership; that late description creates no retroactive
 verification check. Visibility is independent of the owner's active or open
 session. Unknown PIDs, stages and locations remain unknown.
+
+The flask icon shows the active-run count after the first state snapshot, with
+the same count in its accessible label and tooltip. Zero active runs means no
+badge. Clicking the icon opens all projects. Per-run status and restart evidence
+impact remain in the Test Runs panel; there is no persistent global-header chip.
 
 `POST /api/sessions/{sessionId}/test-runs` accepts `{runId, runDirectory}` for an
 exact launcher request in the local project's Git run directories. Its successful

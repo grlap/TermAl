@@ -1,15 +1,18 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { useContext } from "react";
-import { TestRunsProvider, TestRunSessionMarker, TestRunsOpenContext, TestRunsGlobalStatus } from "./test-runs-context";
+import { TestRunsProvider, TestRunSessionMarker, TestRunsOpenContext } from "./test-runs-context";
 import { makeTestRun } from "./test-runs-fixtures";
 import { applyTestRunDelta } from "./test-runs";
 import { ControlPanelSurface } from "./panels/ControlPanelSurface";
+import { TestRunsRailAction } from "./panels/TestRunsRailAction";
+import { TestRunsPanel } from "./panels/TestRunsPanel";
 afterEach(cleanup);
-it("keeps the unknown warning when a contiguous SSE change retains a missing artifact", () => {
+it("retains missing-artifact uncertainty in the panel without a rail warning", () => {
   let runs = [makeTestRun({ state: "passed", restartWouldVoidEvidence: null })];
   const view = () => <TestRunsProvider snapshotReady runs={runs} open={vi.fn()}>
-    <TestRunsGlobalStatus />
+    <TestRunsRailAction />
+    <TestRunsPanel projects={[]} sessions={[]} />
   </TestRunsProvider>;
   const rendered = render(view());
   runs = applyTestRunDelta(runs, {
@@ -18,26 +21,31 @@ it("keeps the unknown warning when a contiguous SSE change retains a missing art
   });
   rendered.rerender(view());
   expect(runs).toHaveLength(1);
-  expect(screen.getByRole("button", { name: "Tests: 0 running · restart impact unknown" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /no pending test evidence/ })).not.toBeInTheDocument();
+  expect(screen.getByText("Evidence impact on restart: unknown")).toBeInTheDocument();
+  expect(screen.getByText("unknown · interrupted")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Open Test Runs" }).textContent).toBe("");
 });
-it("keeps global evidence warnings after a process passes and opens all projects", () => {
+it("opens all projects without a badge for finished runs regardless of evidence impact", () => {
   const open = vi.fn();
   const renderStatus = (impact: boolean | null) => <TestRunsProvider snapshotReady
     runs={[makeTestRun({ state: "passed", projectId: "another-project", restartWouldVoidEvidence: impact })]} open={open}>
-    <TestRunsGlobalStatus />
+    <TestRunsRailAction />
   </TestRunsProvider>;
   const rendered = render(renderStatus(true));
-  fireEvent.click(screen.getByRole("button", { name: "Tests: 0 running · restart would void test evidence" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Test Runs" }));
   expect(open).toHaveBeenCalledWith(null, undefined, true);
+  expect(screen.getByRole("button").textContent).toBe("");
   rendered.rerender(renderStatus(null));
-  expect(screen.getByRole("button", { name: "Tests: 0 running · restart impact unknown" })).toBeInTheDocument();
+  expect(screen.getByRole("button").textContent).toBe("");
   rendered.rerender(renderStatus(false));
-  expect(screen.getByRole("button", { name: "Tests: 0 running · no pending test evidence" })).toBeInTheDocument();
+  expect(screen.getByRole("button").textContent).toBe("");
 });
-it("keeps an unknown global warning before the first state snapshot", () => {
-  render(<TestRunsProvider snapshotReady={false} runs={[]} open={vi.fn()}><TestRunsGlobalStatus /></TestRunsProvider>);
-  expect(screen.getByRole("button", { name: "Tests: loading · restart impact unknown" })).toBeInTheDocument();
+it("waits for the snapshot before displaying a count and keeps the panel's loading state", () => {
+  render(<TestRunsProvider snapshotReady={false} runs={[]} open={vi.fn()}>
+    <TestRunsRailAction /><TestRunsPanel projects={[]} sessions={[]} />
+  </TestRunsProvider>);
+  expect(screen.getByRole("button", { name: "Open Test Runs" }).textContent).toBe("");
+  expect(screen.getByText("Waiting for the test-run index…")).toBeInTheDocument();
 });
 it("keeps action-only consumers independent of run updates", () => {
   let renders = 0;
@@ -72,7 +80,7 @@ it("offers the Test Runs dock action separately from section navigation", () => 
     gitStatusCount={0} isPreferencesOpen={false} onOpenPreferences={vi.fn()}
     projectCount={0} sessionCount={0} renderSection={() => null} /></TestRunsProvider>);
   fireEvent.click(screen.getByRole("button", { name: "Open Test Runs" }));
-  expect(open).toHaveBeenCalledWith();
+  expect(open).toHaveBeenCalledWith(null, undefined, true);
   expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
 });
 it("draws the Test Runs dock action as an icon like the other rail actions", () => {

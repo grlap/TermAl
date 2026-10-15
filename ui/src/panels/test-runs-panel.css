@@ -31,26 +31,3 @@
    down by that height; this is accepted. */
 .pane-view-strip .test-run-session-marker { flex: 0 0 auto; max-width: 16rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 650px) { .test-runs-layout { grid-template-columns: minmax(0, 1fr); } }
-.test-runs-global-status {
-  flex: 0 0 auto;
-  padding: 4px 12px;
-}
-.shell:has(> .test-runs-global-status) {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-.shell:has(> .test-runs-global-status) > .workspace-shell {
-  height: 100%;
-}
-.test-runs-global-status button {
-  max-width: 100%;
-  font: inherit;
-  font-size: 12px;
-  color: inherit;
-  background: transparent;
-  border: 1px solid currentColor;
-  border-radius: 6px;
-  padding: 4px 8px;
-}
-.test-runs-global-status[data-evidence-warning="true"] {
-  color: #d49b36;
-}

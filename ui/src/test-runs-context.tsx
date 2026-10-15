@@ -2,7 +2,7 @@
 // inference that a notification recipient is idle or registered as waiting.
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { useStableEvent } from "./panels/use-stable-event";
-import { testRunRestartImpact, testRunSessionMarker, type TestRunSummary } from "./test-runs";
+import { testRunSessionMarker, type TestRunSummary } from "./test-runs";
 import "./panels/test-runs-panel.css";
 import type { TestRunCardTarget } from "./test-run-card";
 import type { TestRunWaitRecord, TestRunWaitFailures } from "./test-run-waits";
@@ -60,19 +60,4 @@ export function TestRunSessionMarker({ sessionId }: { sessionId: string }) {
     event.stopPropagation();
     open?.(sessionId);
   }} title={`${label} — Open test runs for this session`}>{label}</button>;
-}
-
-// App-shell status has no project/session filter and stays visible when every
-// session is Idle. Process completion alone cannot dismiss evidence warnings.
-export function TestRunsGlobalStatus() {
-  const { runs, open, snapshotReady } = useContext(TestRunsContext);
-  const running = runs.filter(run => run.state === "running").length;
-  const impact = snapshotReady ? testRunRestartImpact(runs) : null;
-  const evidence = impact === true ? "restart would void test evidence"
-    : impact === null ? "restart impact unknown" : "no pending test evidence";
-  return <div className="test-runs-global-status" data-evidence-warning={impact !== false}>
-    <button type="button" onClick={() => open?.(null, undefined, true)}>
-      Tests: {snapshotReady ? `${running} running` : "loading"} · {evidence}
-    </button>
-  </div>;
 }

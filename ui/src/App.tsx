@@ -11,7 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
-import { TestRunsProvider, TestRunsGlobalStatus } from "./test-runs-context";
+import { TestRunsProvider } from "./test-runs-context";
 import { openTestRunsInWorkspaceState } from "./workspace";
 import { DialogCloseIcon } from "./message-card-icons";
 import type { KimiApprovalMode, OpenCodeApprovalMode } from "./types";
@@ -2123,7 +2123,6 @@ export default function App() {
       )));
     }}>
     <div className="shell">
-      <TestRunsGlobalStatus />
       <div className="background-orbit background-orbit-left" />
       <div className="background-orbit background-orbit-right" />
 
