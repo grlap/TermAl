@@ -23,6 +23,21 @@ async fn create_test_run_wait(
 #[serde(rename_all = "camelCase")]
 struct TestRunListQuery {
     project_id: Option<String>,
+    limit: Option<usize>,
+    after: Option<String>,
+}
+
+const TEST_RUN_LIST_DEFAULT_LIMIT: usize = 100;
+const TEST_RUN_LIST_MAX_LIMIT: usize = 200;
+
+/// A keyset position, scoped to the project filter. It remains usable if the
+/// boundary row disappears. This is a live listing, not a frozen snapshot.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TestRunListCursor {
+    project_id: Option<String>,
+    started_at: Option<String>,
+    run_id: String,
 }
 
 #[derive(Deserialize)]
@@ -35,13 +50,65 @@ async fn get_test_runs(
     query: Result<Query<TestRunListQuery>, QueryRejection>,
 ) -> Result<Json<TestRunListResponse>, ApiError> {
     let Query(query) = query.map_err(|err| api_query_rejection("test runs", err))?;
+    let limit = query.limit.unwrap_or(TEST_RUN_LIST_DEFAULT_LIMIT);
+    if limit == 0 {
+        return Err(ApiError::bad_request(
+            "test run list limit must be positive",
+        ));
+    }
+    let limit = limit.min(TEST_RUN_LIST_MAX_LIMIT);
+    let cursor = query
+        .after
+        .as_deref()
+        .map(|encoded| {
+            let invalid = || ApiError::bad_request("invalid test run list cursor");
+            if encoded.len() > 4096 {
+                return Err(invalid());
+            }
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(encoded)
+                .map_err(|_| invalid())?;
+            let cursor: TestRunListCursor =
+                serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+            if cursor.project_id != query.project_id || cursor.run_id.is_empty() {
+                return Err(invalid());
+            }
+            Ok(cursor)
+        })
+        .transpose()?;
     let project = query.project_id.as_deref();
     let inner = state.inner.lock().expect("state mutex poisoned");
+    let mut runs: Vec<_> = test_run_summaries_locked(&inner)
+        .into_iter()
+        .filter(|run| project.is_none_or(|id| run.project_id.as_deref() == Some(id)))
+        .filter(|run| {
+            cursor.as_ref().is_none_or(|cursor| {
+                run.started_at < cursor.started_at
+                    || (run.started_at == cursor.started_at && run.run_id > cursor.run_id)
+            })
+        })
+        .take(limit + 1)
+        .collect();
+    let next_cursor = if runs.len() > limit {
+        runs.truncate(limit);
+        let last = runs.last().expect("positive page limit");
+        Some(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+                serde_json::to_vec(&TestRunListCursor {
+                    project_id: query.project_id.clone(),
+                    started_at: last.started_at.clone(),
+                    run_id: last.run_id.clone(),
+                })
+                .expect("list cursor contains only strings"),
+            ),
+        )
+    } else {
+        None
+    };
     Ok(Json(TestRunListResponse {
-        runs: test_run_summaries_locked(&inner)
-            .into_iter()
-            .filter(|run| project.is_none_or(|id| run.project_id.as_deref() == Some(id)))
-            .collect(),
+        runs,
+        limit,
+        next_cursor,
         history: test_run_history_locked(&inner, project),
     }))
 }

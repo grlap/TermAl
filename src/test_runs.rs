@@ -158,6 +158,8 @@ struct TestRunLogTail {
 #[serde(rename_all = "camelCase")]
 struct TestRunListResponse {
     runs: Vec<TestRunSummary>,
+    limit: usize,
+    next_cursor: Option<String>,
     #[serde(flatten)]
     history: TestRunHistory,
 }

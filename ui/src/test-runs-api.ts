@@ -2,9 +2,14 @@
 import { request } from "./api-request";
 import type { TestRunDetail, TestRunSummary } from "./test-runs";
 
-export function readTestRuns(projectId?: string, signal?: AbortSignal) {
-  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-  return request<{ runs: TestRunSummary[] }>(`/api/test-runs${query}`, { signal }, { preserveGatewayErrorBody: true });
+export interface TestRunPage {
+  runs: TestRunSummary[];
+  limit: number;
+  nextCursor: string | null;
+}
+export function readTestRuns(projectId?: string, signal?: AbortSignal, after?: string) {
+  const query = `?limit=100${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ""}${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+  return request<TestRunPage>(`/api/test-runs${query}`, { signal }, { preserveGatewayErrorBody: true });
 }
 export function readTestRun(runId: string, signal?: AbortSignal) {
   return request<{ run: TestRunSummary; detail: TestRunDetail }>(

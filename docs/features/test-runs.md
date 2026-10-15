@@ -85,6 +85,24 @@ policy. Rescans do not recreate resolved detail from unchanged old artifacts;
 contradictory artifacts restore an unknown warning on the retained identity.
 Unresolved discoveries retain their identity even when their artifacts disappear.
 
+`GET /api/test-runs` returns one bounded page: `limit` defaults to 100 and
+is capped at 200; zero, negative or malformed limits return HTTP 400. Optional
+`projectId` filtering happens before pagination. Responses contain `runs`, the
+effective `limit`, and `nextCursor` (null at the end). Pass a non-null cursor as
+`after`, with the same project filter, to request the next page explicitly.
+Malformed cursors or a changed project filter return HTTP 400. Cursors are opaque;
+clients must not automatically drain the whole history.
+
+Pages retain the existing order: `startedAt` descending (missing timestamps last),
+then `runId` ascending. Continuation uses this stable key rather than an offset,
+so new runs ahead of the cursor do not shift later pages. The list is live;
+concurrent updates may move a run between pages. Refresh the first page for the
+latest state. Exact-ID detail/log GETs remain independent of the page cap, as do
+the live state snapshot and deltas that keep all active runs visible. Launcher
+registration continues to query its exact run ID; it never lists the history.
+The UI listing helper requests a single 100-row page and follows a continuation
+only when its caller explicitly supplies one.
+
 The list API discloses `detailHistoryLimit`, `compactedCount`, `omittedCount` and
 `unresolvedBacklog`. Exact-ID detail reads distinguish retained compact identity
 from a never-known run and explain when stage/log detail is unavailable. Minimal
