@@ -108,15 +108,21 @@ in Engram::Advisor's session, recorded verbatim):
   when all three hold for the exact tree committed:
   1. The review pair (`/review-changes`: two independent read-only
      `/review-code` children of different vendors, one Codex and one
-     Claude, `writePolicy: readOnly`; while Codex is unavailable — a usage
-     limit or outage met in this round, recorded on the item with the
-     refusal text — Kimi stands in for it, and an unavailable Claude
-     reviewer has no stand-in, under Greg's word to Termal::Opus2 of
+     Claude, `writePolicy: readOnly`; while Codex or Claude is unavailable —
+     a usage limit or outage met in this round, recorded on the item with
+     the refusal text — Kimi stands in for the unavailable reviewer, and
+     Kimi never stands in for both reviewers of the same round, under
+     Greg's word to Termal::Opus2 of
      2026-09-28, 21:20Z, 'let's go with 3. we could try how the new model
      is working' (option 3 being Kimi as the
      second reviewer while Codex is out), and to Engram::Opus of
      2026-09-29, 'if clean you have a go', 'you should just check-in, that
-     should be the rule') has no outstanding in-scope finding of Medium or
+     should be the rule', and, for an unavailable Claude, his word in the
+     acting Engram::Advisor session of 2026-10-14/15 (Pacific), relayed
+     verbatim by Engram::Advisor in TermAl mailbox b9d13887 #805, line
+     breaks shown as ' / ': 'claude will soon run of tokens / we need to
+     use Kimi as replacement / and focus on simple cleanup / we have
+     enormous backlog') has no outstanding in-scope finding of Medium or
      higher on the reviewed input, and every in-scope finding of Medium or
      higher from earlier rounds was fixed and reviewed again; a Low or a
      Note need not be fixed before the landing, and a Low left unfixed is
@@ -127,7 +133,8 @@ in Engram::Advisor's session, recorded verbatim):
      the change's scope, filed as their own items with provenance, do not
      block. Engram's amendment of the same rule is its commit fc3c3aa; the
      two coordinators decided on 2026-09-29 to narrow both projects' rule
-     to an unavailable Codex.
+     to an unavailable Codex, and Greg's word of 2026-10-15 above widened
+     it to an unavailable Codex or Claude.
   2. The full gate is green on exactly that input, compiled from it, before
      every commit whether or not a commit prompt is shown.
   3. The tasks carry the evidence needed to close them.

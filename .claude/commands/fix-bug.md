@@ -71,7 +71,7 @@ All checks must pass before proceeding.
 
 ## Step 5: Review via /review-changes
 
-Invoke `/review-changes` directly in the active parent session to run validation and get independent `/review-code` sign-off from two reviewers of different vendors (Codex and Claude; Kimi stands in for an unavailable Codex) on the changes.
+Invoke `/review-changes` directly in the active parent session to run validation and get independent `/review-code` sign-off from two reviewers of different vendors (Codex and Claude; Kimi stands in for an unavailable Codex or Claude, never for both) on the changes.
 
 After the review completes:
 - **Critical, High or Medium findings** → fix them, re-run Step 4, and re-review

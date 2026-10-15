@@ -1,19 +1,19 @@
 ---
 name: review-changes
-description: Review current changes by running /review-code in two TermAl reviewer delegations of different vendors, Codex and Claude, or Kimi for an unavailable Codex.
+description: Review current changes by running /review-code in two TermAl reviewer delegations of different vendors, Codex and Claude, or Kimi for an unavailable Codex or Claude.
 metadata:
   termal:
     title:
       strategy: default
 ---
 
-Review current staged and unstaged changes by delegating `/review-code` to two reviewers of different vendors — Codex and Claude, Kimi standing in for an unavailable Codex — through TermAl delegation sessions.
+Review current staged and unstaged changes by delegating `/review-code` to two reviewers of different vendors — Codex and Claude, Kimi standing in for an unavailable Codex or Claude, never for both — through TermAl delegation sessions.
 
 **IMPORTANT: Run `/review-changes` directly in the existing active, writable parent session. Never delegate or spawn `/review-changes` itself. The coordinator must be able to create normal build/test artifacts; only the `/review-code` children are delegated with `writePolicy: readOnly`.**
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) may only be used when the current session write policy allows workspace mutation.**
 
-**IMPORTANT: This command must use TermAl MCP delegation tools to obtain the review pair — at most two reviews that count, one Codex and one Claude, with at most one Kimi stand-in replacing an unavailable Codex reviewer as Step 3 describes — so a round makes at most three spawns and counts no more than two reviews. A round that ends with fewer than two reviews reports the missing reviewer as unavailable, spawns no further reviewer, and does not satisfy the commit rule's review pair. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-code` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-changes` requires the TermAl delegation MCP bridge.**
+**IMPORTANT: This command must use TermAl MCP delegation tools to obtain the review pair — at most two reviews that count, one Codex and one Claude, with at most one Kimi stand-in replacing an unavailable Codex or Claude reviewer as Step 3 describes — so a round makes at most three spawns and counts no more than two reviews. A round that ends with fewer than two reviews reports the missing reviewer as unavailable, spawns no further reviewer, and does not satisfy the commit rule's review pair. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-code` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-changes` requires the TermAl delegation MCP bridge.**
 
 Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, mutate the tracker, or query tracker tasks to reconcile findings. Read-only startup recovery required by project instructions is allowed. Their `Suggested tracker updates` sections are proposals only. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates; it first consolidates and deduplicates both reviews in Step 5, then reconciles the consolidated result with the Engram tracker in Step 6.
 
@@ -125,11 +125,11 @@ Using `termal_spawn_session`, create two child delegation sessions from the curr
    - Write policy: `readOnly`.
    - Title: `Claude /review-code`
 
-When Codex is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt `/review-code`, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`. The stand-in replaces the unavailable Codex reviewer, whether its spawn was refused or its result was lost to Codex's usage limit or outage, so a round never has more than two reviews that count. Never two reviewers of one vendor. An unavailable Claude reviewer is reported as unavailable; no stand-in replaces it. A round is one pass of Steps 3–5 over one gated input; the same freeze means the reviewed files unchanged since that gate, as Step 4 requires. A Kimi reviewer's read-only gate is weaker than Claude's or Codex's (docs/features/kimi-cli-integration.md, Read-only delegation children); the stand-in is accepted only for an unavailable Codex.
+When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt `/review-code`, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`. The stand-in replaces the unavailable reviewer, whether its spawn was refused or its result was lost to that reviewer's usage limit or outage, so a round never has more than two reviews that count. Never two reviewers of one vendor. Kimi never stands in for both reviewers of the same round: when Codex and Claude are both unavailable, only one stand-in is spawned, the other reviewer is reported as unavailable, and the round does not satisfy the commit rule's review pair. A round is one pass of Steps 3–5 over one gated input; the same freeze means the reviewed files unchanged since that gate, as Step 4 requires. A Kimi reviewer's read-only gate is weaker than Claude's or Codex's (docs/features/kimi-cli-integration.md, Read-only delegation children); the stand-in is accepted only for an unavailable Codex or Claude.
 
 Use read-only delegation sessions here so reviewers see the exact current worktree, including untracked files. Do not request `isolatedWorktree` for this command until the known "isolated delegation worktree snapshots omit untracked files" limitation is fixed by mirroring or explicitly rejecting untracked dirty state.
 
-If either spawn fails, report the failure clearly. When the Codex spawn fails because Codex is unavailable (a usage limit or outage met in this round), record the refusal text on the item and spawn Kimi in its place on the same freeze. For any other failure, or when the stand-in fails too, stop unless one reviewer was already created; in that case continue to Step 4 for the created reviewer and mark the missing reviewer as unavailable.
+If either spawn fails, report the failure clearly. When the Codex or Claude spawn fails because that reviewer is unavailable (a usage limit or outage met in this round), record the refusal text on the item and, if no stand-in has been spawned this round, spawn Kimi in its place on the same freeze. For any other failure, or when the stand-in fails too, stop unless one reviewer was already created; in that case continue to Step 4 for the created reviewer and mark the missing reviewer as unavailable.
 
 ## Step 4: Wait for both reviewers
 
@@ -170,7 +170,7 @@ Deduplicate findings. If both reviewers report the same issue, merge it and note
 Also merge their proposed tracker follow-ups into the consolidated action list.
 Do not create, update, comment on, or close tracker items until this
 consolidation is complete. The one exception besides the Step 2 gate-failure
-record is recording an unavailable Codex's refusal text (Steps 3 and 5): a
+record is recording an unavailable Codex's or Claude's refusal text (Steps 3 and 5): a
 note on the Engram item the change lands under — the held item, or, when none
 is held, the item the change belongs to — made when the refusal is met and
 limited to that refusal.
@@ -178,7 +178,7 @@ limited to that refusal.
 Treat each fetched compact packet as authoritative because it is backed by the
 validated mailbox submission. If a reviewer status is failed or its result says
 the structured submission is unavailable, report that reviewer as unavailable;
-when the reviewer is Codex and the cause is its unavailability met in this
+when the reviewer is Codex or Claude and the cause is its unavailability met in this
 round, record the refusal text on the item and, if no stand-in has been spawned this round,
 spawn Kimi in its place on the same freeze, as Step 3 describes, then wait for
 it through Step 4 and fetch its result before presenting; otherwise report the

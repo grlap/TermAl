@@ -39,7 +39,8 @@ summary alone.
 **The formal review gate — separate from both.** The repository-required
 dual `/review-changes` round (two independent read-only `/review-code`
 children of different vendors — Codex and Claude, with Kimi standing in for
-an unavailable Codex as CLAUDE.md's Commit and push section describes) is
+an unavailable Codex or Claude, never for both, as CLAUDE.md's Commit and push
+section describes) is
 the only authority for check-in. The referee's audits explicitly
 never substitute for it. This is the rule that keeps advisory involvement
 from becoming false confidence.
@@ -171,7 +172,8 @@ the normal dual gate. The formal gate never tiers down.
   thinking. Mitigations that held: the gate stays blind to design
   provenance; two different vendors always sit in the formal gate regardless
   of who designed or implemented — Codex and Claude, or Kimi in place of an
-  unavailable Codex, as the formal review gate above describes; the
+  unavailable Codex or Claude, never both, as the formal review gate above
+  describes; the
   empirical parity gates carry objectivity no
   model shares.
 - **Advisory false confidence.** Mitigated by the standing rule that the

@@ -2874,13 +2874,18 @@ fn review_changes_pins_two_review_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
-        "at most one Kimi stand-in replacing an unavailable Codex reviewer",
-        "/review-changes must admit at most one stand-in, only for an unavailable Codex",
+        "at most one Kimi stand-in replacing an unavailable Codex or Claude reviewer",
+        "/review-changes must admit at most one stand-in, only for an unavailable Codex or Claude",
     );
     assert_command_contains(
         review_changes,
-        "An unavailable Claude reviewer is reported as unavailable; no stand-in replaces it.",
-        "/review-changes must give an unavailable Claude reviewer no stand-in",
+        "Kimi never stands in for both reviewers of the same round",
+        "/review-changes must never let Kimi stand in for both reviewers",
+    );
+    assert_command_excludes(
+        review_changes,
+        "no stand-in replaces it",
+        "/review-changes must not reinstate the Claude no-stand-in rule",
     );
     assert_command_contains(
         review_changes,
@@ -2894,17 +2899,17 @@ fn review_changes_pins_two_review_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
-        "the stand-in is accepted only for an unavailable Codex",
-        "/review-changes must accept the stand-in only for an unavailable Codex",
+        "the stand-in is accepted only for an unavailable Codex or Claude",
+        "/review-changes must accept the stand-in only for an unavailable Codex or Claude",
     );
     assert_command_contains(
         review_changes,
-        "When Codex is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt `/review-code`, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`.",
+        "When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt `/review-code`, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`.",
         "/review-changes must define an unavailable Codex and spawn the stand-in as a read-only reviewer",
     );
     assert_command_contains(
         review_changes,
-        "When the Codex spawn fails because Codex is unavailable (a usage limit or outage met in this round), record the refusal text on the item and spawn Kimi in its place on the same freeze.",
+        "When the Codex or Claude spawn fails because that reviewer is unavailable (a usage limit or outage met in this round), record the refusal text on the item and, if no stand-in has been spawned this round, spawn Kimi in its place on the same freeze.",
         "/review-changes must admit the stand-in after a failed spawn only for a usage limit or outage, with the refusal recorded",
     );
     assert_command_contains(
