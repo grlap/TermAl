@@ -18,6 +18,10 @@ mod begin_unsent {
     include!("engram_root_begin_unsent.rs");
 }
 
+mod begin_inflight_clear {
+    include!("engram_root_begin_inflight_clear.rs");
+}
+
 struct FailingAdmissionRootReader {
     control: Arc<ScriptedEngramControlTransport>,
     fail_after: &'static str,

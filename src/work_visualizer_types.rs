@@ -42,9 +42,9 @@ impl WorkListQuery {
     }
 
     fn arguments(&self) -> Vec<String> {
-        // Open work only: `--all` would add every
-        // completed, cancelled and superseded item to the default view.
-        let mut args = vec!["ls", "--verbose", "--json", "--limit", "20"]
+        // Fetch all lifecycles once; the UI defaults to Open and filters the
+        // loaded set. Ready/blocked remain Engram's open-only source filters.
+        let mut args = vec!["ls", "--all", "--verbose", "--json", "--limit", "200"]
             .into_iter()
             .map(str::to_owned)
             .collect::<Vec<_>>();

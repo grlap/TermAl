@@ -1,7 +1,7 @@
 // Integration coverage for loaded-only label browsing, independent of the
 // source filter/reader contract and without live tracker access.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../types";
 import { readProjectWork, type WorkItem, type WorkListResponse } from "../work-visualizer-api";
 import { WorkPanel } from "./WorkPanel";
@@ -25,6 +25,7 @@ const group = (name: string) => screen.getByRole("region", { name: `Label group:
 
 describe("Work label browsing", () => {
   beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); });
+  afterEach(() => vi.unstubAllGlobals());
 
   it("shows chips in both trees and the table; clicking filters locally", async () => {
     await mount();

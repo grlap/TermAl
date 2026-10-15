@@ -1450,6 +1450,132 @@ fn stop_head_content_runtime_and_settings_changes_disarm_bind_retry() {
     }
 }
 
+// A user Stop of a bind retry still waiting for its backoff takes the retained
+// head over: it stays queued and interrupted, the Stop owns it, and a held
+// delegation reads it as stopped rather than as a delivery of unknown fate.
+// The retry is armed before its wire request was prepared, so the head carries
+// no wire intent and the Stop reaches the bind retry itself, not the Stop of a
+// waiting admission.
+#[test]
+fn stopping_a_waiting_bind_retry_records_the_stopped_head() {
+    let (state, session, receiver, _) = root_fixture([]);
+    let transport = ScriptedEngramControlTransport::new_with_work_bindings(
+        Vec::new(),
+        [Err(EngramTransportError::deadline(
+            "work focus unavailable",
+        ))],
+    );
+    state.install_control_test_transport(transport.clone());
+    deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
+    {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(!record.queued_prompts[0].has_engram_intent());
+        assert_eq!(
+            record.engram.bind_retry.as_ref().unwrap().proof.phase,
+            EngramBindRetryPhase::BeforePreparation
+        );
+    }
+    acknowledge_bind_retry(&state, &session);
+    state.request_stop_session(&session).unwrap();
+    assert!(transport.requests().is_empty());
+    assert!(receiver.try_recv().is_err());
+
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    let head = record
+        .queued_prompts
+        .front()
+        .expect("the stopped prompt is retained");
+    assert!(record.engram.bind_retry.is_none());
+    assert!(head.engram_interrupted);
+    assert_eq!(
+        record.engram.stopped_prompt_id.as_deref(),
+        Some(head.pending_prompt.id.as_str()),
+        "the Stop owns the retained head"
+    );
+    assert_eq!(
+        record.session.preview,
+        "Engram: automatic bind retry stopped. Prompt retained; remove it before starting a new operation."
+    );
+    assert_eq!(
+        delegation_child_hold(record).map(|hold| hold.reason),
+        Some(DelegationHoldReason::Stopped)
+    );
+}
+
+// A bind retry dropped because its head's content, its runtime or its settings
+// changed schedules nothing more, so the retained prompt must no longer say it
+// waits for an automatic retry.
+#[test]
+fn a_dropped_bind_retry_no_longer_promises_an_automatic_retry() {
+    for change in ["content", "runtime", "settings"] {
+        let (state, session, receiver, transport) = root_fixture([bind_failure()]);
+        deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
+        acknowledge_bind_retry(&state, &session);
+        elapse_bind_backoff(&state, &session);
+        let prompt_id = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let prompt_id = inner.sessions[index].queued_prompts[0]
+                .pending_prompt
+                .id
+                .clone();
+            match change {
+                "content" => inner.sessions[index].queued_prompts[0]
+                    .pending_prompt
+                    .text
+                    .push_str(" changed"),
+                "runtime" => inner.sessions[index].clear_runtime(),
+                "settings" => {
+                    let project_id = engram_project_for_session_locked(&inner, &session)
+                        .unwrap()
+                        .id
+                        .clone();
+                    inner
+                        .projects
+                        .iter_mut()
+                        .find(|project| project.id == project_id)
+                        .unwrap()
+                        .engram
+                        .as_mut()
+                        .unwrap()
+                        .deadline_ms = Some(777);
+                }
+                _ => unreachable!(),
+            }
+            prompt_id
+        };
+        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(3600));
+        assert_eq!(operations(&transport), ["session_bind"], "{change}");
+        assert!(receiver.try_recv().is_err(), "{change}");
+
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.engram.bind_retry.is_none(), "{change}");
+        assert_eq!(
+            record
+                .queued_prompts
+                .front()
+                .map(|head| head.pending_prompt.id.as_str()),
+            Some(prompt_id.as_str()),
+            "{change}: the prompt is retained"
+        );
+        assert_eq!(
+            record.session.preview,
+            "Engram: automatic bind retry no longer owns this prompt. Prompt retained; reconcile or cancel before continuing.",
+            "{change}"
+        );
+        assert!(
+            !record
+                .session
+                .preview
+                .contains("waiting for durable automatic retry"),
+            "{change}"
+        );
+    }
+}
+
 #[test]
 fn an_unknown_evaluate_or_begin_never_becomes_a_bind_only_retry() {
     for lost in ["turn_evaluate", "turn_begin"] {

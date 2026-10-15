@@ -15,6 +15,7 @@ import { WorkLabels } from "./WorkLabels";
 import { WorkMemories } from "./WorkMemories";
 import { WorkLabelPicker } from "./WorkLabelPicker";
 import { matchesWorkLabels, type WorkLabelMode } from "./work-labels";
+import { WorkPaging } from "./WorkPaging";
 import "./work-panel.css";
 
 const PROJECT_KEY = "termal-work-project";
@@ -68,6 +69,7 @@ function WorkProjectView({ projectId }: { projectId: string }) {
         <option value="">All</option><option value="ready">Ready</option><option value="blocked">Blocked</option>
       </select></label>
       <button type="submit">Apply filters</button>
+      {filters.availability && <small>Ready and Blocked source filters include only open work.</small>}
     </form>
     <WorkResults key={`${submission}:${JSON.stringify(filters)}`} projectId={projectId} filters={filters}
       view={view} sort={sort} onSortChange={setSort} />
@@ -79,10 +81,11 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   projectId: string; filters: WorkFilters; view: Exclude<WorkView, "memories">;
   sort: WorkSort | null; onSortChange: (sort: WorkSort | null) => void;
 }) {
-  const { result, busy, error, reload, more } = useWorkList(projectId, filters);
+  const { result, busy, error, needsReload, reload, retry } = useWorkList(projectId, filters);
   // The kind filter is per read generation: its options come from the loaded
   // rows, which a new generation replaces.
   const [kind, setKind] = useState("");
+  const [lifecycle, setLifecycle] = useState("open");
   const [labels, setLabels] = useState<string[]>([]);
   const [labelMode, setLabelMode] = useState<WorkLabelMode>("any");
   const filterLabel = (label: string) => { setLabels([label]); setLabelMode("any"); };
@@ -103,7 +106,9 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   );
   // One sort model serves the control below and the table headers; it orders
   // loaded rows only and never touches the sources' pages or identities.
-  const rows = useMemo(() => sortWorkRows(loaded.filter(row => (!kind || row.kind === kind) && matchesWorkLabels(row, labels, labelMode)), sort), [loaded, kind, labels, labelMode, sort]);
+  const rows = useMemo(() => sortWorkRows(loaded.filter(row => (!kind || row.kind === kind)
+    && (!lifecycle || (lifecycle === "closed" ? ["completed", "cancelled", "superseded"].includes(row.lifecycle) : row.lifecycle === lifecycle))
+    && matchesWorkLabels(row, labels, labelMode)), sort), [loaded, kind, lifecycle, labels, labelMode, sort]);
   const total = page?.total ?? 0;
   const loadedSummary = [
     page && `${page.items.length} of ${page.total} Engram items loaded`,
@@ -127,6 +132,14 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   const readerId = result?.readerId ?? null;
   useEffect(() => {
     if (!selection || (visibleSelection && readerId && detailTrigger.current?.isConnected)) return;
+    // A later page can reparent a tree occurrence. Its logical selection and
+    // details survive; adopt the replacement trigger rather than closing it.
+    if (visibleSelection && readerId && rows.some(item => item.source === selection.source && item.shortRef === selection.ref)) {
+      const replacement = [...listContainer.current?.querySelectorAll<HTMLButtonElement>("[data-work-ref]") ?? []].find(button =>
+        button.dataset.workRef === selection.ref && button.dataset.workSource === selection.source
+        && button.closest<HTMLElement>("[data-work-group]")?.dataset.workGroup === selection.group);
+      if (replacement) { detailTrigger.current = replacement; return; }
+    }
     const trigger = detailTrigger.current;
     hideSelection();
     const active = document.activeElement;
@@ -143,7 +156,8 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
     <div className="work-panel-actions">
       <button type="button" disabled={busy} onClick={() => { setSelection(null); reload(); }}>Refresh work</button>
       {busy && <span role="status">Reading work…{page?.more ? ` ${page.items.length} of ${page.total} Engram items so far` : ""}</span>}</div>
-    {error && <p role="alert">{error} Use Refresh work for a new snapshot.</p>}
+    {error && <div role="alert">{error} {needsReload ? "Use Refresh work for a new snapshot."
+      : <button type="button" disabled={busy} onClick={retry}>Retry</button>}</div>}
     {result?.sources.map(source => <p key={source.source} className="work-source-status" data-state={source.state}>
       <strong>{source.source}: {source.state}</strong> — {source.message}
     </p>)}
@@ -154,6 +168,10 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
         <WorkLabelPicker rows={loaded} selected={labels} onChange={setLabels} mode={labelMode} onModeChange={setLabelMode} />
         <label>Kind (loaded rows) <select value={kind} onChange={e => setKind(e.target.value)}><option value="">All</option>
           {kinds.map(value => <option key={value}>{value}</option>)}</select></label>
+        <label>Lifecycle (loaded rows) <select value={lifecycle} onChange={e => setLifecycle(e.target.value)}>
+          <option value="open">Open</option><option value="closed">Closed</option><option value="">All</option>
+          <option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="superseded">Superseded</option>
+        </select></label>
         <label>Sort (loaded rows) <select value={sort?.key ?? ""} onChange={e => {
           const key = e.target.value as WorkSortKey | "";
           onSortChange(key ? { key, direction: sort?.key === key ? sort.direction : defaultWorkSortDirection(key) } : null);
@@ -167,17 +185,15 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
       <p>{loadedSummary}; {rows.length} visible. Filters and sorting (the control above or a table header) apply only to loaded rows.</p>
       <p className="work-panel-caption">Read completed: <WorkTime value={result.observedAt} />. Refresh for current data.</p>
       <div className="work-panel-body">
-        <div className="work-panel-list" ref={listContainer} tabIndex={-1}>
+        <div className="work-panel-list" ref={listContainer} tabIndex={0} role="region" aria-label="Work list">
           {view === "table"
-            ? <WorkTable rows={rows} selection={visibleSelection} onSelect={select} sort={sort} onSortChange={onSortChange} onLabel={filterLabel} renderDetails={renderDetails} />
-            : view === "labels" ? <WorkLabels rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />
-              : <WorkTree key={view} rows={rows} universe={loaded} mode={view} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />}
+            ? <WorkTable viewport={listContainer} rows={rows} selection={visibleSelection} onSelect={select} sort={sort} onSortChange={onSortChange} onLabel={filterLabel} renderDetails={renderDetails} />
+            : view === "labels" ? <WorkLabels viewport={listContainer} rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />
+              : <WorkTree key={view} viewport={listContainer} rows={rows} universe={loaded} mode={view} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />}
           {rows.length === 0 && <p>{result.sources.some(source => source.state === "error")
             ? "No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view."
             : total === 0 ? "No work items match the source filters." : "No matching rows in the loaded page(s). More source items may exist."}</p>}
-          {page?.hint && <p>{page.hint}</p>}
-          {page?.more && <p>More Engram items remain.{!page.after && " No continuation is available; the source page is byte-limited. See its hint above."}</p>}
-          {page?.more && page.after && <button type="button" disabled={busy} onClick={more}>Load more work</button>}
+          <WorkPaging page={page} busy={busy} error={error} />
         </div>
       </div>
     </>}

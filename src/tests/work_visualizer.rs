@@ -3,6 +3,27 @@
 // fixtures, never live.
 use super::*;
 
+#[test]
+fn work_list_requests_two_hundred_rows_of_all_lifecycles_and_forwards_the_cursor() {
+    let query = WorkListQuery {
+        after: Some("opaque-cursor".to_owned()),
+        reader_id: Some("host-reader".to_owned()),
+        ..Default::default()
+    };
+    assert_eq!(
+        query.arguments(),
+        [
+            "ls",
+            "--all",
+            "--verbose",
+            "--json",
+            "--limit",
+            "200",
+            "--after=opaque-cursor"
+        ]
+    );
+}
+
 /// The reader key the host reader currently serves for `project`.
 fn host_reader_key(state: &AppState, project: &str) -> String {
     state
@@ -339,9 +360,9 @@ fn work_arguments_keep_filters_as_data_and_validate_continuations() {
             .contains(&"--search=--init; $(claim) 'quoted' &".to_owned())
     );
     assert_eq!(query.arguments()[0], "ls");
-    // Open work only, on the first page and on every continuation: `--all`
-    // never enters the argv, so automatic reading ahead stays consistent.
-    assert!(!query.arguments().iter().any(|arg| arg == "--all"));
+    // All lifecycles on the first page and on every continuation. The UI's
+    // default Open filter does not change cursor membership.
+    assert!(query.arguments().iter().any(|arg| arg == "--all"));
     let continuation = WorkListQuery {
         after: Some("cursor".into()),
         reader_id: Some("host:reader".into()),
@@ -353,7 +374,7 @@ fn work_arguments_keep_filters_as_data_and_validate_continuations() {
             .arguments()
             .contains(&"--after=cursor".to_owned())
     );
-    assert!(!continuation.arguments().iter().any(|arg| arg == "--all"));
+    assert!(continuation.arguments().iter().any(|arg| arg == "--all"));
     assert!(
         WorkListQuery {
             after: Some("opaque".into()),

@@ -5,9 +5,14 @@
 // Split out of WorkPanel.tsx (its table's row button and chips).
 import type { MouseEvent, ReactNode } from "react";
 import type { WorkItem } from "../work-visualizer-api";
+import { WorkTime } from "./work-time";
 
 export type WorkSelection = { source: string; ref: string; group?: string };
 export type WorkDetailsRenderer = (item: WorkItem, group?: string) => ReactNode;
+
+export function WorkRowUpdated({ item }: { item: WorkItem }) {
+  return <span className="work-row-updated" title={item.updatedAt}>Last updated <WorkTime value={item.updatedAt} /></span>;
+}
 
 export function isSelectedWorkItem(selection: WorkSelection | null, item: WorkItem) {
   return !!selection && selection.source === item.source && selection.ref === item.shortRef;
@@ -17,6 +22,7 @@ export function WorkRowButton({ item, selected, onSelect, showRef = true }: {
   item: WorkItem; selected: boolean; onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void; showRef?: boolean;
 }) {
   return <button type="button" className="work-row-title" aria-current={selected ? "true" : undefined} aria-expanded={selected}
+    data-work-ref={item.shortRef} data-work-source={item.source}
     aria-label={showRef ? undefined : `${item.shortRef} — ${item.title}`}
     onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(item, event.currentTarget)}>
     {showRef ? `${item.shortRef} — ${item.title}` : item.title}

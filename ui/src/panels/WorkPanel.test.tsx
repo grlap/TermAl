@@ -1,9 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../types";
 import { ApiRequestError } from "../api-request";
 import { readProjectWork, readWorkDetail, type WorkItem, type WorkListResponse, type WorkDetailResponse, type WorkPage } from "../work-visualizer-api";
-import { WORK_AUTO_LOAD_TARGET_ROWS } from "./use-work-list";
 import { WorkPanel } from "./WorkPanel";
 import { WorkDetailsHeader } from "./WorkDetailsHeader";
 
@@ -33,6 +32,7 @@ function showTable() { fireEvent.click(screen.getByRole("button", { name: "Table
 
 describe("WorkPanel", () => {
   beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); });
+  afterEach(() => vi.unstubAllGlobals());
 
   it("keeps the compact detail icons named and wired to their actions", () => {
     const onClose = vi.fn();
@@ -80,7 +80,8 @@ describe("WorkPanel", () => {
       const content = title.closest(".work-node-content")!;
       expect(content.previousElementSibling).toHaveClass("work-priority");
       expect(content.children[0]).toHaveClass("work-node-row");
-      expect(content.children[1]).toHaveClass("work-label-chips");
+      expect(content.children[1]).toHaveClass("work-row-secondary");
+      expect(content.children[1].querySelector(".work-label-chips")).toBeInTheDocument();
       expect(within(content as HTMLElement).getByRole("button", { name: "Filter by label decision" })).toBeInTheDocument();
     }
     showTable();
@@ -293,10 +294,8 @@ describe("WorkPanel", () => {
     await waitFor(() => expect(readProjectWork).toHaveBeenCalledTimes(2));
     expect(readProjectWork).toHaveBeenLastCalledWith("p-one", expect.any(Object), expect.any(AbortSignal), { after: "opaque", readerId: "host:reader" });
     expect(screen.getByRole("status")).toHaveTextContent("Reading work… 1 of 2 Engram items so far");
-    // Clicks while that read is in flight add nothing.
-    const more = screen.getByRole("button", { name: "Load more work" });
-    expect(more).toBeDisabled();
-    fireEvent.click(more); fireEvent.click(more);
+    // Scroll events are not page demand and cannot overlap the serial read.
+    fireEvent.scroll(screen.getByRole("region", { name: "Work list" }));
     expect(readProjectWork).toHaveBeenCalledTimes(2);
     const next = page("Second"); next.page!.total = 2; next.page!.shownBefore = 1;
     await act(async () => pending.resolve(next));
@@ -324,28 +323,25 @@ describe("WorkPanel", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("stops reading ahead once a page of rows is loaded and leaves the rest to Load more", async () => {
+  it("continues serially beyond the former 200-row prefetch target without a click", async () => {
+    const loadedRows = 200;
     const full = page("Row 0", "c1");
-    full.page!.items = Array.from({ length: WORK_AUTO_LOAD_TARGET_ROWS }, (_, index) => ({ ...full.page!.items[0], id: `row-${index}`, shortRef: `w-${index}`, title: `Row ${index}` }));
-    full.page!.total = WORK_AUTO_LOAD_TARGET_ROWS + 50;
+    full.page!.items = Array.from({ length: loadedRows }, (_, index) => ({ ...full.page!.items[0], id: `row-${index}`, shortRef: `w-${index}`, title: `Row ${index}` }));
+    full.page!.total = loadedRows + 50;
     const pending = deferred<WorkListResponse>();
     vi.mocked(readProjectWork).mockResolvedValueOnce(full).mockReturnValueOnce(pending.promise);
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
-    await screen.findByRole("button", { name: `w-${WORK_AUTO_LOAD_TARGET_ROWS - 1} — Row ${WORK_AUTO_LOAD_TARGET_ROWS - 1}` });
+    await screen.findByRole("button", { name: "w-0 — Row 0" });
     await act(async () => {});
-    expect(readProjectWork).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(new RegExp(`${WORK_AUTO_LOAD_TARGET_ROWS} of ${WORK_AUTO_LOAD_TARGET_ROWS + 50} Engram items loaded`))).toBeInTheDocument();
-    const more = screen.getByRole("button", { name: "Load more work" });
-    expect(more).toBeEnabled();
-    fireEvent.click(more);
+    expect(readProjectWork).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(new RegExp(`${loadedRows} of ${loadedRows + 50} Engram items loaded`))).toBeInTheDocument();
     expect(readProjectWork).toHaveBeenCalledTimes(2);
     expect(readProjectWork).toHaveBeenLastCalledWith("p-one", expect.any(Object), expect.any(AbortSignal), { after: "c1", readerId: "host:reader" });
   });
 
   it("stops reading ahead when an Engram continuation makes no progress", async () => {
     const first = page("First", "c1"); first.page!.total = 2;
-    // The continuation returns the same cursor and no new rows: valid, but
-    // not progress. The chain stops instead of re-reading it to the cap.
+    // An unchanged cursor and no new rows pauses until an explicit retry.
     const stalled = page("First", "c1"); stalled.page!.items = []; stalled.page!.total = 2; stalled.page!.shownBefore = 1;
     vi.mocked(readProjectWork).mockResolvedValueOnce(first).mockResolvedValue(stalled);
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
@@ -354,9 +350,9 @@ describe("WorkPanel", () => {
     await act(async () => {});
     expect(readProjectWork).toHaveBeenCalledTimes(2);
     expect(readProjectWork).toHaveBeenLastCalledWith("p-one", expect.any(Object), expect.any(AbortSignal), { after: "c1", readerId: "host:reader" });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("no progress");
     expect(screen.getByText(/1 of 2 Engram items loaded; 1 visible/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Load more work" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
   });
 
   it("keeps a selected kind visible when a refreshed snapshot no longer has it", async () => {
@@ -408,7 +404,8 @@ describe("WorkPanel", () => {
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     const goal = (await screen.findByRole("button", { name: "tm-root.1 — Blocked child" })).closest("li")!;
     expect(screen.getByText("Blocked chains · 1 goal")).toBeInTheDocument();
-    expect(within(goal).getByRole("button", { name: "tm-free — Ready bug" })).toBeInTheDocument();
+    expect(goal).toHaveAttribute("aria-level", "1");
+    expect(screen.getByRole("button", { name: "tm-free — Ready bug" }).closest("li")).toHaveAttribute("aria-level", "2");
     expect(within(goal).getByText("1 satisfied · not loaded")).toBeInTheDocument();
     expect(within(goal).queryByText(/waits for \d+ not loaded/)).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Dependency tree" })).toBeInTheDocument();
@@ -427,8 +424,9 @@ describe("WorkPanel", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Kind (loaded rows)" }), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Hierarchy" }));
     const parent = screen.getByRole("button", { name: "tm-root — Root epic" }).closest("li")!;
-    expect(within(parent).getByRole("button", { name: "tm-root.1 — Blocked child" })).toBeInTheDocument();
-    expect(within(parent).queryByRole("button", { name: "tm-free — Ready bug" })).not.toBeInTheDocument();
+    expect(parent).toHaveAttribute("aria-level", "1");
+    expect(screen.getByRole("button", { name: "tm-root.1 — Blocked child" }).closest("li")).toHaveAttribute("aria-level", "2");
+    expect(screen.getByRole("button", { name: "tm-free — Ready bug" }).closest("li")).toHaveAttribute("aria-level", "1");
     expect(screen.getByText(/3 roots/)).toBeInTheDocument();
     expect(readProjectWork).toHaveBeenCalledTimes(1);
   });

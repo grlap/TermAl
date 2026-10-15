@@ -319,12 +319,15 @@ context generation on `next` or `memories` (the host asserts it, and on
 is not an evaluator, on a runtime the host itself gave the tracker's server. An
 evaluator is briefed to call no tracker tool and its gate admits none.
 
-The other vendors differ today, and both differences are tracked as their own
-work. A read-only Kimi child's gate (`kimi_read_only.rs`) admits Bash reads and
+The other vendors differ today; the Kimi difference is tracked as its own work.
+A read-only Kimi child's gate (`kimi_read_only.rs`) admits Bash reads and
 the TermAl result tools only, so it refuses every tracker tool, reads included.
-A Codex child runs with approval policy `never`, under which Codex puts no
-tracker call to the host: its reads work, and no host gate stands between it
-and a tracker write.
+A read-only Codex child runs with approval policy `never`, under which Codex
+puts no tracker call to the host. Instead the host starts that child's tracker
+server with `--read-only` and enables and approves only the five read tools
+named above (`next`, `ls`, `search`, `show`, `memories`), so the tracker's own
+read-only mode, not a host gate, judges their arguments;
+`src/tests/codex_read_only_tracker.rs` covers it.
 
 ## Value To Parent Agents
 

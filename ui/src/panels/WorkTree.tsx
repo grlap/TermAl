@@ -2,19 +2,21 @@
 // expand/collapse state per node path and memoises the forest per row set;
 // does not build the forest (see work-tree.ts), fetch, or decide which
 // relation the caller shows.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useWorkWindow, type WorkViewport } from "./use-work-window";
 import type { WorkItem } from "../work-visualizer-api";
-import { MAX_TREE_DEPTH, buildDependencyForest, buildHierarchyForest, type WorkTreeNode } from "./work-tree";
-import { WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer } from "./WorkRow";
+import { MAX_TREE_DEPTH, buildDependencyForest, buildHierarchyForest, workItemKey, type WorkTreeNode } from "./work-tree";
+import { WorkRowUpdated, WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer } from "./WorkRow";
 import { WorkLabelChips } from "./WorkLabels";
 
 export type WorkTreeMode = "dependencies" | "hierarchy";
 
-export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, renderDetails, onHideSelection }: {
+export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, renderDetails, onHideSelection, viewport }: {
   rows: readonly WorkItem[]; universe: readonly WorkItem[]; mode: WorkTreeMode; selection: WorkSelection | null;
   onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void;
   onLabel?: (label: string) => void;
   renderDetails?: WorkDetailsRenderer; onHideSelection?: () => void;
+  viewport?: WorkViewport;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const forest = useMemo(
@@ -35,6 +37,26 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, r
   // dead end.
   const [pendingReveal, setPendingReveal] = useState<string | null>(null);
   const section = useRef<HTMLElement | null>(null);
+  const entries = useMemo(() => {
+    const result: { key: string; node?: WorkTreeNode; depth: number; heading?: string }[] = [];
+    const append = (roots: WorkTreeNode[]) => {
+      const pending = roots.map(node => ({ node, depth: 0 })).reverse();
+      while (pending.length) {
+        const entry = pending.pop()!;
+        result.push({ ...entry, key: workItemKey(entry.node.item) });
+        if (!collapsed.has(entry.node.key)) for (let i = entry.node.children.length - 1; i >= 0; i--)
+          pending.push({ node: entry.node.children[i], depth: entry.depth + 1 });
+      }
+    };
+    result.push({ key: "@roots", depth: 0, heading: mode === "dependencies"
+      ? `Blocked chains · ${forest.roots.length} ${forest.roots.length === 1 ? "goal" : "goals"}` : `${forest.roots.length} ${forest.roots.length === 1 ? "root" : "roots"} · nested = subtask of` });
+    append(forest.roots);
+    if (mode === "dependencies") { result.push({ key: "@loose", depth: 0, heading: `No visible dependency links · ${forest.loose.length} items` }); append(forest.loose); }
+    return result;
+  }, [forest, collapsed, mode]);
+  const keys = useMemo(() => entries.map(entry => entry.key), [entries]);
+  const selectedKey = entries.find(entry => entry.node && isSelectedWorkItem(selection, entry.node.item))?.key;
+  const window = useWorkWindow(keys, viewport, selectedKey);
   const reveal = (itemKeys: readonly string[]) => {
     const target = itemKeys.map(key => forest.placedAt.get(key)).find((nodeKey): nodeKey is string => !!nodeKey);
     if (!target) return;
@@ -52,14 +74,20 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, r
       const title = row.querySelector<HTMLButtonElement>(".work-node-row > .work-node-main > .work-row-title");
       title?.focus();
       title?.scrollIntoView?.({ block: "nearest" });
-      break;
+      setPendingReveal(null);
+      return;
     }
-    setPendingReveal(null);
-  }, [pendingReveal]);
-  const renderNode = (node: WorkTreeNode) => {
+    const entry = entries.find(entry => entry.node?.key === pendingReveal);
+    if (entry) window.reveal(entry.key);
+  }, [pendingReveal, window.indices]);
+  const renderNode = (node: WorkTreeNode, depth = 0) => {
     const open = !collapsed.has(node.key);
     const allSatisfied = node.children.length > 0 && node.children.every(child => child.satisfied === true);
-    return <li key={node.key} data-node-key={node.key} className={`work-node${node.item.lifecycle === "completed" ? " is-completed" : ""}`}>
+    return <li key={workItemKey(node.item)} data-node-key={node.key} ref={viewport ? window.rowRef(workItemKey(node.item)) : undefined}
+      role={viewport ? "treeitem" : undefined} aria-level={viewport ? depth + 1 : undefined}
+      aria-expanded={viewport && node.children.length ? open : undefined}
+      style={viewport ? { paddingInlineStart: `${depth * 1.4}rem`, paddingBottom: 6 } : undefined}
+      className={`work-node${node.item.lifecycle === "completed" ? " is-completed" : ""}`}>
       <div className="work-node-heading">
           {node.children.length > 0
             ? <button type="button" className="work-node-toggle" aria-expanded={open}
@@ -97,17 +125,26 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, r
         </span>}
         </div>
       </div>
-      <WorkLabelChips item={node.item} onLabel={onLabel} />
+      <div className="work-row-secondary"><WorkLabelChips item={node.item} onLabel={onLabel} /><WorkRowUpdated item={node.item} /></div>
         </div>
       </div>
       {renderDetails?.(node.item)}
-      {node.children.length > 0 && open && <>
+      {node.children.length > 0 && open && viewport && mode === "dependencies" && <p className="work-tree-relation">{allSatisfied ? "all prerequisites satisfied" : "waits for"}</p>}
+      {node.children.length > 0 && open && !viewport && <>
         {mode === "dependencies" && <p className="work-tree-relation">{allSatisfied ? "all prerequisites satisfied" : "waits for"}</p>}
         <ul data-relation={mode} data-satisfied={allSatisfied ? "true" : undefined}>{node.children.map(renderNode)}</ul>
       </>}
     </li>;
   };
-  return <section ref={section} className="work-tree" aria-label={mode === "dependencies" ? "Dependency tree" : "Hierarchy tree"}>
+  return <section ref={node => { section.current = node; window.content(node); }} className="work-tree" aria-label={mode === "dependencies" ? "Dependency tree" : "Hierarchy tree"}>
+    {viewport ? <ul role="tree" data-relation={mode}>
+      {window.indices.map((index, position) => <Fragment key={entries[index].key}>
+        {window.before(position) > 0 && <li aria-hidden="true" style={{ height: window.before(position) }} />}
+        {entries[index].node ? renderNode(entries[index].node!, entries[index].depth)
+          : <li role="presentation" ref={window.rowRef(entries[index].key)}><p className="work-tree-group">{entries[index].heading}</p></li>}
+      </Fragment>)}
+      {window.after > 0 && <li aria-hidden="true" style={{ height: window.after }} />}
+    </ul> : <>
     {mode === "dependencies" ? <>
       <p className="work-tree-group">Blocked chains · {forest.roots.length} {forest.roots.length === 1 ? "goal" : "goals"}</p>
       {forest.roots.length === 0 && <p className="work-panel-caption">No blocking relations among the visible rows.</p>}
@@ -117,6 +154,7 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, r
     </> : <>
       <p className="work-tree-group">{forest.roots.length} {forest.roots.length === 1 ? "root" : "roots"} · nested = subtask of · blocking relations live in the Dependencies view</p>
       <ul data-relation="hierarchy">{forest.roots.map(renderNode)}</ul>
+    </>}
     </>}
   </section>;
 }

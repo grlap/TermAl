@@ -617,7 +617,7 @@ fn home_fixture_parent_environment_does_not_reach_delayed_powershell_startup() {
                             Instant::now() < deadline,
                             "owned consumer never reached the barrier"
                         );
-                        std::thread::yield_now();
+                        std::thread::park_timeout(Duration::from_millis(1));
                     }
                     Err(error) => panic!("consumer barrier accept: {error}"),
                 }

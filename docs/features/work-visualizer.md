@@ -97,7 +97,12 @@ retains each source's CLI semantics. Paging adds matching rows and label
 options; no local label action starts a source read. Empty labels, if emitted,
 are displayed explicitly as `(empty label)`, not treated as Unlabelled.
 
-Kind/label filtering and sorting apply to loaded rows only. Selecting a row opens its
+Kind, label and lifecycle filtering and sorting apply to loaded rows only.
+Lifecycle defaults to Open; Closed includes completed, cancelled and superseded
+work. The existing Updated sort orders those rows newest first. Ready and
+Blocked source filters exclude ended work even when all lifecycles are fetched.
+Each row shows muted Last updated metadata beside its labels, in the viewer's
+local time, with the exact source timestamp in its title. Selecting a row opens its
 details beside the list: Engram details need the list's reader key.
 Only the active pane tab is mounted, so activating the Work tab again after
 another tab is a refresh: it starts fresh reads and resets filters, selection
@@ -220,9 +225,8 @@ as instructions, or render it as HTML.
 Verified by Engram::Codex on `d0182e7`, recorded in the comments on `tm-m6r1`.
 
 List: `engram --home ABS --project-file ABS work --actor-id {developer}/termal
---session-id termal-work-view ls --verbose --json --limit 20` — open work
-only; `--all` (completed, cancelled, superseded) is deliberately not passed,
-so the default view contains open work.
+--session-id termal-work-view ls --all --verbose --json --limit 200` — all
+lifecycles are fetched; the loaded-row lifecycle filter defaults to Open.
 Verbose rows contain `work` and a separate readiness overlay. Compact output
 truncates titles and is not a replacement for the verbose model.
 
@@ -244,11 +248,13 @@ a fresh read, never merge generations. A byte-limited page can have zero rows,
 `more=true` and no cursor: show the hint, never automatically retry in a loop.
 Engram fits every receipt into 12 KiB, so a verbose page holds about a dozen
 rows however large `--limit` is (it accepts up to 1 000). The UI therefore
-follows the continuation cursor on its own after each page until it holds
-200 Engram rows or the source has no more, at most 40 pages per generation,
-with a progress status meanwhile; "Load more work" continues past that. A
-page without a cursor, an error, or a dropped generation stops it at once.
-Client-side sorting and kind filtering are explicitly limited to loaded rows;
+follows the continuation cursor automatically and serially to the end, with
+one request in flight and no cumulative row or page cap. A progress status
+updates after every page. A page without a cursor, an error, or a dropped
+generation stops the chain. A failed page offers Retry for the same cursor;
+there is no automatic retry loop. The four row presentations use a bounded,
+measured window, preserving the visible row, selection and focus while pages
+append. Client-side sorting and presentation filters apply to loaded rows;
 the source total is not a filtered bug count.
 
 Details use `show REF --notes --gates --json`. Notes windows have their own
@@ -319,7 +325,7 @@ reader has its own read cut; conflicting observations mean unknown. Until
 proven, render a label without a link.
 
 Response Board pins of a Work table query and verified holder-to-session jumps
-are the remaining 1b items. Closed items are not listed by default (Engram `ls` without `--all`); an
-explicit closed-history view would be a separate read with its own cap.
+are the remaining 1b items. Closed work uses the existing lifecycle filter
+and Updated sort over the same automatically loaded list.
 
 The [Test Runs](./test-runs.md) tab follows this tab's pattern.
