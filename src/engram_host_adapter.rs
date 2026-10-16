@@ -2655,6 +2655,10 @@ struct EngramSessionState {
     /// its record after writes the old one saw. In memory only; cleared with
     /// `running_command_keys`.
     withheld_command_keys: BTreeSet<String>,
+    /// Running commands already given an uncredited-check notice. Separate
+    /// from withholding: invalidating a check need not publish a notice.
+    /// In memory only; cleared with `running_command_keys`.
+    uncredited_command_notice_keys: BTreeSet<String>,
     /// Checks a turn boundary closed with outcome Unknown because no end was
     /// reported for them, newest last, so an end reported later is told to
     /// the holder once (`engram_close_unended_checks`). Bounded
@@ -2869,6 +2873,7 @@ impl Default for EngramSessionState {
             workdir_worktree: None,
             capture_workers: Arc::default(),
             withheld_command_keys: BTreeSet::new(),
+            uncredited_command_notice_keys: BTreeSet::new(),
             unended_check_closures: std::collections::VecDeque::new(),
             next_turn_check_sequence: 0,
             shell_directory: None,
@@ -6938,6 +6943,7 @@ impl AppState {
                 record.engram.active_turn_checks.clear();
                 record.engram.running_command_keys.clear();
                 record.engram.withheld_command_keys.clear();
+                record.engram.uncredited_command_notice_keys.clear();
                 record.engram.next_turn_check_sequence = 0;
                 if let Some(prepared) = record
                     .queued_prompts

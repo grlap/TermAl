@@ -1851,7 +1851,7 @@ impl AppState {
                         )
                     })
                 });
-        let withheld_line = other_claim_line.or_else(|| {
+        let withheld_line = other_claim_line.map(EngramUncreditedLine::Placement).or_else(|| {
             if !mediated {
                 None
             } else if let Some(check) = recognised.as_ref() {
@@ -1937,9 +1937,9 @@ impl AppState {
             );
         }
         if disposition == ClaudeObservationDisposition::Current
-            && let Some(line) = withheld_line
+            && let Some(EngramUncreditedLine::Placement(line)) = withheld_line.as_ref()
         {
-            record.engram.set_pending_source_root_line(line);
+            record.engram.set_pending_source_root_line(line.clone());
         }
         // A disabled declaration is told once for each content it has.
         if disposition == ClaudeObservationDisposition::Current
@@ -2083,19 +2083,22 @@ impl AppState {
         engram_mark_own_checks_for_command(record, key, &worktrees, reads_only, !fresh, "started");
         if fresh {
             record.engram.withheld_command_keys.remove(key);
+            record.engram.uncredited_command_notice_keys.remove(key);
         }
         let engram = &mut record.engram;
         // Reset belongs to a genuinely new command. Keep its notice marker
         // afterward so repeated starts/descriptions cannot re-announce it.
+        // Placement feedback never withholds later admission: a runtime may
+        // report the valid directory on a later start of the same command.
+        let argument_refusal = withheld_line.and_then(EngramUncreditedLine::into_arguments);
         if mediated
             && diagnostics_enabled
             && record.runtime.runtime_token() == runtime
             && record.active_turn_generation == turn_generation
             && record.session.workdir == workdir
-            && let Some(line) = unsupported_focused
-            && engram.withheld_command_keys.insert(key.to_owned())
         {
-            engram.set_pending_source_root_line(line);
+            engram
+                .set_pending_uncredited_command_line(key, argument_refusal.or(unsupported_focused));
         }
         let started = engram
             .active_turn_checks
@@ -2142,6 +2145,7 @@ impl AppState {
         let workers = record.engram.capture_workers.clone();
         if workers.load(std::sync::atomic::Ordering::SeqCst) >= ENGRAM_CAPTURE_WORKER_LIMIT {
             if record.engram.withheld_command_keys.insert(key.to_owned()) {
+                record.engram.uncredited_command_notice_keys.insert(key.to_owned());
                 engram_publish_check_notice(
                     session_id,
                     &mut record.engram,
@@ -2167,6 +2171,7 @@ impl AppState {
                 .position(|check| check.end.is_some())
             else {
                 if record.engram.withheld_command_keys.insert(key.to_owned()) {
+                    record.engram.uncredited_command_notice_keys.insert(key.to_owned());
                     engram_publish_check_notice(
                         session_id,
                         &mut record.engram,
@@ -2263,7 +2268,7 @@ impl AppState {
         // The check the key started, where its shell is and where the command
         // may run, read under a brief lock, so what the description names can
         // be resolved on the file system off it.
-        let (runtime, position, running, started) = {
+        let (runtime, turn_generation, feedback, position, running, started) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -2272,6 +2277,26 @@ impl AppState {
             let engram = &record.engram;
             (
                 record.runtime.runtime_token(),
+                record.active_turn_generation,
+                (engram.work_binding.is_some()
+                    && engram.active_grant_id.is_some()
+                    && engram.running_command_keys.contains_key(key))
+                .then(|| {
+                    (
+                        record.session.workdir.clone(),
+                        engram_command_directories(record, key, cwd),
+                        engram
+                            .active_turn_source_root
+                            .as_ref()
+                            .map(|root| (PathBuf::from(&root.root), root.common_dir_key.clone())),
+                        Self::engram_session_has_child_binding_shape_locked(&inner, session_id),
+                        cwd.is_some()
+                            || engram
+                                .running_command_keys
+                                .get(key)
+                                .is_some_and(Option::is_some),
+                    )
+                }),
                 engram_shell_position(record, key),
                 engram
                     .running_command_worktrees
@@ -2320,14 +2345,15 @@ impl AppState {
         let worktrees = running.map(|(workdir, places)| {
             engram_command_worktrees(&workdir, &places, ran, loss.as_ref())
         });
-        let stands = started
-            .as_ref()
-            .map(|(_, command, declared, target, workdir, directories, credit_root)| {
+        let stands = started.as_ref().map(
+            |(_, command, declared, target, workdir, directories, credit_root)| {
                 // A declared check is named again by the declared route, the
                 // way it was recognised (`engram_declared_candidate`); it
                 // keeps the binding its start made.
                 let named = match ran {
-                    Some(ran) if *declared => engram_declared_candidate(ran).map(|(named, _)| named),
+                    Some(ran) if *declared => {
+                        engram_declared_candidate(ran).map(|(named, _)| named)
+                    }
                     Some(ran) => engram_check_command(ran),
                     None => Some(command.clone()),
                 };
@@ -2343,12 +2369,46 @@ impl AppState {
                         )
                         .is_some_and(|now| now == *target)
                 })
-            });
+            },
+        );
+        // Descriptions may first reveal a refused test, but cannot start a
+        // check: its begin snapshot would be after the command's writes.
+        // Admission and remedy classification share the start path's readers,
+        // including their filesystem work, entirely outside the state lock.
+        let argument_refusal = feedback.as_ref().and_then(
+            |(workdir, directories, credit_root, child, reports_directory)| {
+                let check = ran.and_then(engram_check_command)?;
+                let credit = credit_root
+                    .as_ref()
+                    .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str()));
+                if engram_check_worktree_from(
+                    &check,
+                    FsPath::new(workdir),
+                    directories.as_deref(),
+                    credit,
+                )
+                .is_some()
+                {
+                    return None;
+                }
+                engram_uncredited_test_line(
+                    &check,
+                    None,
+                    workdir,
+                    directories.as_deref(),
+                    credit,
+                    *child,
+                    *reports_directory,
+                )
+                .and_then(EngramUncreditedLine::into_arguments)
+            },
+        );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
         let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
+        let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -2378,13 +2438,20 @@ impl AppState {
             *remembered = Some(cwd.to_owned());
         }
         if disposition == ClaudeObservationDisposition::Current
+            && diagnostics_enabled
+            && record.runtime.runtime_token() == runtime
+            && record.active_turn_generation == turn_generation
+            && feedback
+                .as_ref()
+                .is_some_and(|(workdir, ..)| *workdir == record.session.workdir)
             && record.engram.work_binding.is_some()
             && record.engram.active_grant_id.is_some()
             && record.engram.running_command_keys.contains_key(key)
-            && let Some(line) = ran.and_then(engram_unsupported_focused_line)
-            && record.engram.withheld_command_keys.insert(key.to_owned())
         {
-            record.engram.set_pending_source_root_line(line);
+            record.engram.set_pending_uncredited_command_line(
+                key,
+                argument_refusal.or_else(|| ran.and_then(engram_unsupported_focused_line)),
+            );
         }
         if let (Some((sequence, _, _, _, workdir, _, _)), Some(stands)) = (started, stands)
             && !(stands && workdir == record.session.workdir)
@@ -2573,6 +2640,7 @@ impl AppState {
             record.engram.running_command_keys.remove(key);
             engram_forget_running_codex_test(&mut record.engram, key);
             record.engram.withheld_command_keys.remove(key);
+            record.engram.uncredited_command_notice_keys.remove(key);
             record
                 .engram
                 .running_command_worktrees
@@ -2714,6 +2782,7 @@ impl AppState {
             }
             engram.running_command_keys.remove(key);
             engram.withheld_command_keys.remove(key);
+            engram.uncredited_command_notice_keys.remove(key);
             engram
                 .running_command_worktrees
                 .retain(|(running, _)| running != key);

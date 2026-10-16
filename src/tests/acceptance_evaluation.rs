@@ -17,6 +17,9 @@ mod sighting;
 #[path = "acceptance_evaluation_omissions.rs"]
 mod omissions;
 
+#[path = "acceptance_evaluation_unread_wording.rs"]
+mod unread_wording;
+
 #[path = "acceptance_evaluation_bindings.rs"]
 mod bindings;
 

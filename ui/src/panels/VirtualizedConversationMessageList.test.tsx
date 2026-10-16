@@ -38,6 +38,7 @@ import {
 } from "../deferred-render";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+  MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
@@ -3293,6 +3294,95 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       expect(harness.scrollWrites).toContain(480);
     } finally {
+      harness.restore();
+    }
+  });
+
+  it("restores the measured bottom exactly once after a renewed scroll cooldown", async () => {
+    // A page measurement at the attached bottom during the user-scroll
+    // cooldown defers its bottom restoration. Input that renews the cooldown
+    // before the deferred retry fires must neither restore early nor lose the
+    // retry: it re-arms against the latest input and restores exactly once.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    let measuredSlotHeight = 180;
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 400,
+      messages: makeTextMessages(3),
+      scrollHeight: () => 500 + (measuredSlotHeight - 180),
+      slotHeight: () => measuredSlotHeight,
+      tailFollowIntent: true,
+    });
+    // Every bottom restoration first asks the owning pane to repin; with no
+    // pane in this fixture it then writes the bottom itself. Count the
+    // requests, since a restoration onto an unchanged position writes nothing.
+    let bottomRestores = 0;
+    const countBottomRestore = () => {
+      bottomRestores += 1;
+    };
+    harness.scrollNode.addEventListener(
+      MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+      countBottomRestore,
+    );
+    const advance = async (ms: number) => {
+      await act(async () => {
+        vi.advanceTimersByTime(ms);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const slot = harness.container.querySelector(".virtualized-message-slot");
+      expect(slot).not.toBeNull();
+      expect(harness.resizeCallbacks.has(slot!)).toBe(true);
+
+      // A downward wheel at the attached bottom cannot move the viewport: it
+      // keeps bottom authority and starts the measurement cooldown.
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: 48 });
+      });
+      const restoresBeforeMeasurement = bottomRestores;
+
+      // The measured page grows by 40 px; its new physical bottom is 440.
+      measuredSlotHeight = 220;
+      await act(async () => {
+        harness.resizeCallbacks.get(slot!)?.(
+          [] as unknown as ResizeObserverEntry[],
+          {} as ResizeObserver,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(bottomRestores).toBe(restoresBeforeMeasurement);
+
+      const halfCooldown = VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS / 2;
+      await advance(halfCooldown);
+      // The reader is at the new physical bottom, so another downward wheel
+      // there cannot move the viewport either; it only renews the cooldown.
+      harness.setScrollTop(440);
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: 48 });
+      });
+      // The original retry deadline passes inside the renewed cooldown.
+      await advance(halfCooldown + 1);
+      expect(bottomRestores).toBe(restoresBeforeMeasurement);
+
+      await advance(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+      expect(bottomRestores).toBe(restoresBeforeMeasurement + 1);
+      expect(harness.scrollTop).toBe(440);
+
+      await advance(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS * 3);
+      expect(bottomRestores).toBe(restoresBeforeMeasurement + 1);
+    } finally {
+      harness.scrollNode.removeEventListener(
+        MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+        countBottomRestore,
+      );
       harness.restore();
     }
   });

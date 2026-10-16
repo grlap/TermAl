@@ -309,6 +309,11 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         continue
     }
     $request = $line | ConvertFrom-Json
+    $rootRead = Join-Path $engramHome 'root-lifecycle-read.json'
+    if ($request.operation -eq "named_root_read" -and (Test-Path -LiteralPath $rootRead)) {
+        Write-Result ([IO.File]::ReadAllText($rootRead) | ConvertFrom-Json)
+        continue
+    }
     if ($request.operation -eq "session_bind" -and $request.assurance -ne "turn_gated") {
         Write-ControlError "invalid_assurance" "fixture requires turn_gated assurance"
         continue

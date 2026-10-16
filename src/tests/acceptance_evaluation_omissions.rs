@@ -4,23 +4,56 @@
 // parent module's deterministic reader fixtures; no tracker process is run.
 use super::*;
 
+/// How far below the brief limit the sized contract's floor sits: far less
+/// than the omission inventory takes, so the contract fits only once that
+/// inventory gives way.
+const CONTRACT_SLACK_BYTES: usize = 64;
+
+/// The floor and the limit an "acceptance contract is too large" refusal
+/// reports. The request path's limit is below the brief cap: it keeps room
+/// for what it adds around the brief.
+fn refused_floor_and_limit(message: &str) -> (usize, usize) {
+    let number_after = |marker: &str| {
+        message
+            .split(marker)
+            .nth(1)
+            .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+            .and_then(|bytes| bytes.parse().ok())
+            .unwrap_or_else(|| panic!("not a contract refusal: {message}"))
+    };
+    (number_after("the brief is "), number_after("against a limit of "))
+}
+
+/// The criterion length that holds a brief's floor the slack below its
+/// limit, from the refusal for a `probe`-byte criterion: the floor grows
+/// byte for byte with a one-line ASCII criterion.
+fn fitting_criterion_len(probe: usize, message: &str) -> usize {
+    let (floor, limit) = refused_floor_and_limit(message);
+    assert!(floor > limit, "a refusal reports a floor above its limit: {message}");
+    probe - (floor - (limit - CONTRACT_SLACK_BYTES))
+}
+
 #[test]
 fn acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused() {
     for mode in ["independent_session", "same_session"] {
         for with_continuation in [false, true] {
-            let (state, project, parent, root) = fixture();
-            install_store(&state, &project, &root);
-            let criterion = "c".repeat(if with_continuation { 60_000 } else { 62_000 });
-            let mut full = full_receipt();
-            full["work"]["acceptance"] = json!([criterion, "second criterion stays whole"]);
-            let bare = parse_acceptance_evaluation_task(show_receipt(None), full.clone()).unwrap();
-            if mode == "same_session" {
-                build_same_session_acceptance_brief(&bare, None, MAX_ACCEPTANCE_BRIEF_BYTES)
-                    .expect("the complete contract fits without the omission inventory");
-            } else {
-                build_acceptance_evaluator_brief(&bare, "/repo", MAX_ACCEPTANCE_BRIEF_BYTES)
-                    .expect("the complete contract fits without the omission inventory");
-            }
+            let contract = |criterion: &str| {
+                let mut full = full_receipt();
+                full["work"]["acceptance"] = json!([criterion, "second criterion stays whole"]);
+                full
+            };
+            let bare_brief = |criterion: &str| {
+                let bare =
+                    parse_acceptance_evaluation_task(show_receipt(None), contract(criterion))
+                        .unwrap();
+                if mode == "same_session" {
+                    build_same_session_acceptance_brief(&bare, None, MAX_ACCEPTANCE_BRIEF_BYTES)
+                        .map(|_| ())
+                } else {
+                    build_acceptance_evaluator_brief(&bare, "/repo", MAX_ACCEPTANCE_BRIEF_BYTES)
+                        .map(|_| ())
+                }
+            };
             let token = format!("captured-cursor:{}", "x".repeat(8_000));
             let mut show = show_receipt(None);
             show["notes"] = json!(
@@ -37,34 +70,54 @@ fn acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused() 
                 show["notes_window"] = json!({"older": 7, "after": token,
                     "read_cut": {"project_position": 42}});
             }
-            let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-                if args.iter().any(|arg| arg == "inspect") {
-                    Ok(evidence_selection::canonical_core_receipt())
-                } else if args.first().map(String::as_str) == Some("control-policy") {
-                    Ok(policy_receipt(Some(&[mode])))
-                } else if args.iter().any(|arg| arg == "held") {
-                    Ok(json!({"items": [], "omitted": 0}))
-                } else if args.iter().any(|arg| arg == "--full") {
-                    Ok(full.clone())
-                } else {
-                    Ok(show.clone())
-                }
-            };
-            let wire = serde_json::to_value(
+            // One request on a fresh fixture, with the omission inventory.
+            let request = |criterion: &str| {
+                let (state, project, parent, root) = fixture();
+                install_store(&state, &project, &root);
+                let full = contract(criterion);
+                let show = show.clone();
+                let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
+                    if args.iter().any(|arg| arg == "inspect") {
+                        Ok(evidence_selection::canonical_core_receipt())
+                    } else if args.first().map(String::as_str) == Some("control-policy") {
+                        Ok(policy_receipt(Some(&[mode])))
+                    } else if args.iter().any(|arg| arg == "held") {
+                        Ok(json!({"items": [], "omitted": 0}))
+                    } else if args.iter().any(|arg| arg == "--full") {
+                        Ok(full.clone())
+                    } else {
+                        Ok(show.clone())
+                    }
+                };
                 state
                     .request_acceptance_evaluation_with_runner(
                         &parent,
                         evaluation_request(Some(Agent::Codex)),
                         reader,
                     )
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "{mode}, continuation={with_continuation}: {}",
-                            error.message
-                        )
-                    }),
-            )
-            .unwrap();
+                    .map(|response| serde_json::to_value(response).unwrap())
+            };
+            // Size the criterion from the floors the builder itself reports
+            // for a contract too large to fit, so that the instructions'
+            // own length is never hard-coded here. One refusal of an
+            // oversized criterion gives the size; the second attempt must fit.
+            let size = |attempt: &dyn Fn(&str) -> std::result::Result<(), ApiError>| {
+                let probe = MAX_ACCEPTANCE_BRIEF_BYTES;
+                let refusal = attempt(&"c".repeat(probe))
+                    .expect_err("a criterion as long as the brief cap is refused");
+                fitting_criterion_len(probe, &refusal.message)
+            };
+            let criterion = "c".repeat(
+                size(&|criterion: &str| request(criterion).map(|_| ())).min(size(&bare_brief)),
+            );
+            bare_brief(&criterion)
+                .expect("the complete contract fits without the omission inventory");
+            let wire = request(&criterion).unwrap_or_else(|error| {
+                panic!(
+                    "{mode}, continuation={with_continuation}: {}",
+                    error.message
+                )
+            });
             let prompt = if mode == "same_session" {
                 wire["brief"].as_str().unwrap()
             } else {

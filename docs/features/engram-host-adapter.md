@@ -3315,8 +3315,10 @@ session to name it.
 The evaluator must distinguish evidence **not shown** from proof absent on
 the item. If its verdict depends on omitted evidence, it keeps the existing
 `insufficient-evidence` verdict but says "not shown" in its rationale, naming
-the known locator or captured continuation. It may not infer the missing
-proof or treat a visibility limit as a failed criterion.
+the known locator. It names unread evidence by its read cut and paging reason
+where the brief shows them and never copies the continuation, which can be
+longer than the rationale limit allows. It may not infer the missing proof or
+treat a visibility limit as a failed criterion.
 Only when the complete criteria do not fit with no context left is the request
 refused, with `409` "the acceptance contract is too large to brief an
 evaluator", which states the bytes the criteria take and the limit. Non-ASCII

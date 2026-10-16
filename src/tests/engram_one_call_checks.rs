@@ -1043,22 +1043,27 @@ fn a_one_call_line_elsewhere_or_to_a_missing_directory_gets_no_credit() {
 }
 
 #[test]
-fn a_one_call_test_whose_argument_leads_out_gets_no_check_and_no_line() {
-    // In the root, but testing a manifest outside it: no check, as for any
-    // test, and nothing about its line to tell.
+fn a_one_call_test_with_an_argument_outside_the_worktree_gets_a_refusal_line() {
+    // The command is in the named root, but its manifest argument leads out:
+    // no check is kept and the agent is told why the arguments were refused.
     for kind in PATH_KINDS {
         let turn = CheckedTurn::start(&format!("one-call-leads-out{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
-        start_without_directory(
-            &turn,
-            "leads-out",
-            &format!("pushd \"{root}\" && cargo test --manifest-path ../../elsewhere/Cargo.toml"),
-        );
+        let test_command = "cargo test --manifest-path ../../elsewhere/Cargo.toml";
+        let command = format!("pushd \"{root}\" && {test_command}");
+        start_without_directory(&turn, "leads-out", &command);
         assert!(kept_checks(&turn).is_empty(), "{:?}", kept_checks(&turn));
         let line = take_pending_line(&turn);
         if readable {
-            assert_eq!(line, None);
+            let line = line.expect("the agent is told why the test gets no credit");
+            assert!(line.contains(&format!("{test_command:?}")), "{line}");
+            assert!(
+                line.contains("an argument names a path outside the measured worktree"),
+                "{line}"
+            );
+            assert!(line.contains("no Test record will follow"), "{line}");
+            assert_eq!(take_pending_line(&turn), None, "one refusal line is emitted");
         } else {
             let line = line.expect("the agent is told why the test gets no credit");
             assert!(

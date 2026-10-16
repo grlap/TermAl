@@ -447,6 +447,14 @@ fn acknowledge_engram_opening_diagnostic_locked(
 /// (`EngramSessionState::set_pending_source_root_line`).
 const ENGRAM_UNCREDITED_TEST_LINE_PREFIX: &str = "[TermAl] A recognised test";
 
+/// Build admission refusals share the check-feedback slot, not root guidance.
+const ENGRAM_UNCREDITED_BUILD_LINE_PREFIX: &str = "[TermAl] A recognised build";
+
+fn engram_is_uncredited_check_line(line: &str) -> bool {
+    line.starts_with(ENGRAM_UNCREDITED_TEST_LINE_PREFIX)
+        || line.starts_with(ENGRAM_UNCREDITED_BUILD_LINE_PREFIX)
+}
+
 impl EngramSessionState {
     fn set_opening_diagnostic(
         &mut self,
@@ -467,6 +475,17 @@ impl EngramSessionState {
         }
     }
 
+    /// Starts and descriptions share one publication marker for the command.
+    /// Placement-only guidance leaves that marker free for later admission.
+    fn set_pending_uncredited_command_line(&mut self, key: &str, line: Option<String>) {
+        if let Some(line) = line {
+            self.withheld_command_keys.insert(key.to_owned());
+            if self.uncredited_command_notice_keys.insert(key.to_owned()) {
+                self.set_pending_source_root_line(line);
+            }
+        }
+    }
+
     /// Adds a host line for the agent's next prompt about where its turns on
     /// claimed work are measured. Lines not yet delivered are kept, so a
     /// later one (a withheld test) does not hide an earlier one (a bind); a
@@ -478,8 +497,8 @@ impl EngramSessionState {
     /// acceptance does not take it, or an older line would end the next
     /// prompt's lines. The lines are kept one per text line, so a line break
     /// inside one (a path may hold one on Linux and macOS) becomes a space.
-    /// A line about a test that got no check replaces an earlier one still
-    /// pending, so a run of such tests never evicts a bind or name line.
+    /// Feedback about an uncredited test or build replaces earlier check
+    /// feedback, so a run of refused checks never evicts a bind or name line.
     fn set_pending_source_root_line(&mut self, line: String) {
         let line = line.replace(['\r', '\n'], " ");
         let mut lines = self
@@ -487,7 +506,7 @@ impl EngramSessionState {
             .as_deref()
             .map(|pending| pending.lines().map(str::to_owned).collect::<Vec<_>>())
             .unwrap_or_default();
-        let uncredited = line.starts_with(ENGRAM_UNCREDITED_TEST_LINE_PREFIX);
+        let uncredited = engram_is_uncredited_check_line(&line);
         // Lines about a check's credit merge into one, so several of them
         // never push a bind or name line out. One a prompt in flight carries
         // is left as it is, so its delivery takes it out when the runtime
@@ -512,7 +531,7 @@ impl EngramSessionState {
         };
         lines.retain(|pending| {
             *pending != line
-                && !(uncredited && pending.starts_with(ENGRAM_UNCREDITED_TEST_LINE_PREFIX))
+                && !(uncredited && engram_is_uncredited_check_line(pending))
         });
         if let Some((delivered, _)) = self.source_root_line_delivery.as_mut() {
             *delivered = delivered

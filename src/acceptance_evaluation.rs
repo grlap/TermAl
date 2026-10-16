@@ -1562,15 +1562,23 @@ fn acceptance_same_session_cut_notice_with_detail(
     let boundary = acceptance_brief_unread_boundary_with_detail(cuts, detail)
         .map(|line| format!(" {line}"))
         .unwrap_or_default();
+    // Unread records alone leave nothing read to list: say only the boundary.
+    let read = if cuts.left_out.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " The host read {} not carried in this brief ({}).",
+            acceptance_entry_count(cuts.left_out.len()),
+            if detail == AcceptanceOmissionDetail::Full {
+                acceptance_brief_locator_list(&cuts.left_out)
+            } else {
+                "locator names not shown to fit the brief".to_owned()
+            },
+        )
+    };
     Some(format!(
-        "This brief for `{}` does not carry every evidence body whole. Read the recorded evidence with your own permitted `show --notes --gates` tools before judging it. The host read {} not carried in this brief ({}).{boundary}",
+        "This brief for `{}` does not carry every evidence body whole. Read the recorded evidence with your own permitted `show --notes --gates` tools before judging it.{read}{boundary}",
         acceptance_brief_text(work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
-        acceptance_entry_count(cuts.left_out.len()),
-        if detail == AcceptanceOmissionDetail::Full {
-            acceptance_brief_locator_list(&cuts.left_out)
-        } else {
-            "locator names not shown to fit the brief".to_owned()
-        },
     ))
 }
 
@@ -1882,8 +1890,9 @@ Where a verdict depends on it, give insufficient-evidence and name that\n  \
 locator in the rationale; never infer what the missing part says.\n\
 - Evidence not shown does not establish that proof is absent on the item.\n  \
 Where a verdict depends on omitted evidence, say 'not shown' in the rationale\n  \
-and name the known locator or captured continuation; unknown unread locators\n  \
-must stay unknown. Keep the insufficient-evidence verdict; do not invent a\n  \
+and name the known locator; name unread evidence by its read cut and paging\n  \
+reason where the brief shows them, never by copying its continuation; unknown\n  \
+unread locators must stay unknown. Keep the insufficient-evidence verdict; do not invent a\n  \
 new verdict or infer missing proof.\n\
 - The rationale states what you checked and what you found, in one or two\n  \
 sentences on a single line.\n\
@@ -2078,7 +2087,7 @@ what you found. A pass must cite at least one evidence locator from `show {work_
 {verifications}\
 {criterion_evidence}\
 Evidence not shown in this brief: {omissions}\n\
-Omitted evidence does not establish that proof is absent on the item; say 'not shown' in the rationale with the known locator or continuation if it was not read.",
+Omitted evidence does not establish that proof is absent on the item; say 'not shown' in the rationale with the known locator if it was not read, and name unread evidence by its read cut and paging reason where the brief shows them, never by copying its continuation.",
         work_ref = acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         criteria = acceptance_brief_criteria(task),
         acceptance_basis = task.acceptance_basis,

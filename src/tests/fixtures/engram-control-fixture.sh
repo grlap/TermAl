@@ -344,6 +344,10 @@ esac
 printf '%s\n' 'termal-engram-control-fixture-ready'
 
 while IFS= read -r line; do
+  if [ "$(json_field "$line" operation)" = named_root_read ] && [ -f "$engram_home/root-lifecycle-read.json" ]; then
+    printf '{"status":"ok","result":%s}\n' "$(cat "$engram_home/root-lifecycle-read.json")"
+    continue
+  fi
   mode=$(tr -d '\r\n' < "$project_file")
   case "$mode" in
     fixture-eof)

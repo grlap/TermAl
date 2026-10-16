@@ -206,7 +206,9 @@ impl EngramControlTransport for ProcessEngramControlTransport {
 
         let process = self.process_for(connection)?;
         if started_at.elapsed() >= timeout {
-            self.discard_process(&connection.session_id, &process);
+            // This request sent no frame. Leave the registered process for a
+            // later request with a fresh budget; repeated cold starts could
+            // otherwise prevent bounded lifecycle reads from ever progressing.
             return Err(EngramTransportError::deadline(
                 "Engram admission budget exhausted during process startup",
             ));

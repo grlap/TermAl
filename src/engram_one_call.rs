@@ -285,6 +285,22 @@ fn engram_one_call_template(check: &EngramCheckCommand, measured_in: &FsPath) ->
     })
 }
 
+/// Placement feedback permits later admission when a runtime supplies cwd;
+/// argument refusals retain the once-per-command withholding marker.
+enum EngramUncreditedLine {
+    Placement(String),
+    Arguments(String),
+}
+
+impl EngramUncreditedLine {
+    fn into_arguments(self) -> Option<String> {
+        match self {
+            Self::Arguments(line) => Some(line),
+            Self::Placement(_) => None,
+        }
+    }
+}
+
 /// The host line for a recognised test of a mediated turn that gets no
 /// check, told once before the agent's next prompt, finished or not, with a
 /// remedy that counts: the test ran after another command on its line, or
@@ -293,9 +309,8 @@ fn engram_one_call_template(check: &EngramCheckCommand, measured_in: &FsPath) ->
 /// than the one the turn is measured in; or TermAl cannot confirm it did not,
 /// because a shell that reports no directory may be back in the session's
 /// workdir (`places`, as its target was judged), or cannot be placed. `None`
-/// when none of these holds: a one-call line whose directory does not exist
-/// never ran its test, and one inside the worktree got no check for another
-/// reason (an argument that leads out) that is not its line's.
+/// when a one-call line's directory does not exist. If placement is valid,
+/// the refused check's shell expression or arguments still need a reason.
 /// `reports_directory` says whether the runtime reported where the command
 /// runs, one of the facts its remedy follows from (`EngramRemedyFacts`). A
 /// network path is never resolved here, on the runtime's event reader, since
@@ -309,7 +324,7 @@ fn engram_uncredited_test_line(
     credit_root: Option<(&FsPath, &str)>,
     child: bool,
     reports_directory: bool,
-) -> Option<String> {
+) -> Option<EngramUncreditedLine> {
     if engram_network_path(workdir) {
         return None;
     }
@@ -349,10 +364,8 @@ fn engram_uncredited_test_line(
                 EngramUnconfirmedReason::OneCallGitBashDir { test_alone }
             }
         };
-        return Some(engram_source_root_unconfirmed_line(
-            &measured_text,
-            reason,
-            facts,
+        return Some(EngramUncreditedLine::Placement(
+            engram_source_root_unconfirmed_line(&measured_text, reason, facts),
         ));
     }
     // A one-call line started in its own directory, if its `pushd` ran at
@@ -363,15 +376,25 @@ fn engram_uncredited_test_line(
             return None;
         }
         let ran_in = engram_worktree_root_path(FsPath::new(&directory));
-        return (engram_exact_path_key(&ran_in) != measured_key).then(|| {
-            engram_source_root_withheld_line(&ran_in, &measured_text, named, child, template)
+        return Some(if engram_exact_path_key(&ran_in) != measured_key {
+            EngramUncreditedLine::Placement(engram_source_root_withheld_line(
+                &ran_in,
+                &measured_text,
+                named,
+                child,
+                template,
+            ))
+        } else {
+            EngramUncreditedLine::Arguments(engram_uncredited_arguments_line(check))
         });
     }
     let Some(places) = places else {
-        return Some(engram_source_root_unconfirmed_line(
-            &measured_text,
-            EngramUnconfirmedReason::ShellUnknown,
-            facts,
+        return Some(EngramUncreditedLine::Placement(
+            engram_source_root_unconfirmed_line(
+                &measured_text,
+                EngramUnconfirmedReason::ShellUnknown,
+                facts,
+            ),
         ));
     };
     let started_in = places
@@ -396,12 +419,8 @@ fn engram_uncredited_test_line(
     // TermAl cannot confirm where it ran.
     let last = roots.last()?;
     if engram_exact_path_key(last) != measured_key {
-        return Some(engram_source_root_withheld_line(
-            last,
-            &measured_text,
-            named,
-            child,
-            template,
+        return Some(EngramUncreditedLine::Placement(
+            engram_source_root_withheld_line(last, &measured_text, named, child, template),
         ));
     }
     roots
@@ -409,10 +428,42 @@ fn engram_uncredited_test_line(
         .zip(&started_in)
         .find(|(root, _)| engram_exact_path_key(root) != measured_key)
         .map(|(_, place)| {
-            engram_source_root_unconfirmed_line(
+            EngramUncreditedLine::Placement(engram_source_root_unconfirmed_line(
                 &measured_text,
                 EngramUnconfirmedReason::ShellMayReturn(place),
                 facts,
-            )
+            ))
         })
+        .or_else(|| {
+            Some(EngramUncreditedLine::Arguments(
+                engram_uncredited_arguments_line(check),
+            ))
+        })
+}
+
+/// A recognized check placed inside its root was refused by argument guards.
+/// Feedback explains that refusal; it never changes what the guards admit.
+fn engram_uncredited_arguments_line(check: &EngramCheckCommand) -> String {
+    let (reason, remedy) = if engram_has_unquoted_expression(engram_first_command(
+        &check.normalized,
+    )) {
+        (
+            "unquoted shell expression or escape",
+            "Quote literal patterns and arguments, then run the check again in the worktree where this turn is measured.",
+        )
+    } else {
+        (
+            "an argument names a path outside the measured worktree or contains unsupported expansion syntax ($, %, ! or a leading ~), even if quoted",
+            "Avoid those expansion characters and use paths inside the worktree where this turn is measured.",
+        )
+    };
+    let command = engram_truncate_utf8(&check.normalized, ENGRAM_CHECK_REF_MAX_BYTES);
+    let record = match check.kind {
+        EngramVerificationKind::Test => "Test",
+        EngramVerificationKind::Build => "Build",
+    };
+    format!(
+        "[TermAl] A recognised {} command {command:?} was refused: {reason}; no {record} record will follow. {remedy}",
+        check.kind.label(),
+    )
 }

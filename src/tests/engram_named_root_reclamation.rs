@@ -18,6 +18,10 @@ mod eligibility {
     include!("engram_named_root_reclamation_eligibility.rs");
 }
 
+mod retry {
+    include!("engram_named_root_reclamation_retry.rs");
+}
+
 fn settled_root(label: &str, proof_kind: &str) -> (ClaimedRoot, EngramWorkSourceRoot) {
     let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);

@@ -19,6 +19,47 @@ use super::super::phase_sync::TEST_FIXTURE_TREE_PIDS_ENV;
 use super::*;
 
 #[test]
+fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
+    let temp_root = TestTempRoot::create("engram-control-startup-budget");
+    let project_file = temp_root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-stateful-idempotency\n").unwrap();
+    let connection = EngramConnectionConfig {
+        binary_path: real_engram_control_fixture_path(),
+        project_file,
+        home: temp_root.path().to_path_buf(),
+        project_root: temp_root.path().to_path_buf(),
+        actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
+        session_id: "engram-fixture-startup-budget".to_owned(),
+    };
+    let transport = real_process_fixture_transport(temp_root.path());
+    let expired = EngramControlRequest::SessionBind {
+        external_ref: format!("termal:{}", connection.session_id),
+        title: "Unsent expired intent".to_owned(),
+        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
+        mediated_effects: vec![EngramEffect::Observe],
+        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
+        work_binding: None,
+        idempotency_key: "startup-budget-bind".to_owned(),
+    };
+    // Zero remaining time deterministically selects the post-startup,
+    // pre-dispatch deadline branch, independently of process startup speed.
+    let error = transport.request(&connection, &expired, Duration::ZERO).unwrap_err();
+    assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
+    assert!(error.message.contains("budget exhausted during process startup"));
+    let prepared = transport.processes.lock().unwrap()
+        .get(&connection.session_id).cloned()
+        .expect("an unsent request must leave the prepared process available to a later pass");
+    assert!(prepared.process.try_wait().unwrap().is_none());
+    // A changed intent under the same key would conflict if the expired
+    // request had reached Engram. A fresh budget sends only this later intent.
+    let (token, _) = process_fixture_bind(&transport, &connection, "startup-budget-bind");
+    assert!(!token.is_empty());
+    assert!(Arc::ptr_eq(&prepared, &transport.process_for(&connection).unwrap()));
+    transport.shutdown_session(&connection.session_id);
+}
+
+#[test]
 fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
     let temp_root = TestTempRoot::create("engram-control-fixture");
     let project_file = temp_root.path().join(".engram-project");

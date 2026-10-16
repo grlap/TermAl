@@ -6,6 +6,9 @@ use super::*;
 #[path = "engram_focused_launcher_notice.rs"]
 mod launcher_notice;
 
+#[path = "engram_refused_admission.rs"]
+mod refused_admission;
+
 const NODE_TEST: &str = "node scripts/test-launcher.mjs focused -- node --test --test-name-pattern \"selected case\" fixture.test.mjs";
 
 #[test]
