@@ -6,10 +6,17 @@
 import { Fragment, useMemo } from "react";
 import { useWorkWindow, type WorkViewport } from "./use-work-window";
 import type { WorkItem } from "../work-visualizer-api";
-import { WORK_SORT_COLUMNS, nextWorkSort, type WorkSort } from "./work-sort";
+import { WORK_SORT_COLUMNS, nextWorkSort, type WorkSort, type WorkSortKey } from "./work-sort";
 import { WorkTime } from "./work-time";
 import { WorkRowUpdated, WorkRowButton, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer } from "./WorkRow";
 import { WorkLabelChips } from "./WorkLabels";
+
+// Virtual rows must share one column layout: mounted content cannot change
+// widths and invalidate the heights of rows that have already been measured.
+const COLUMN_WIDTHS: Record<WorkSortKey, string> = {
+  priority: "5%", title: "27%", source: "6%", kind: "6%", lifecycle: "7%",
+  availability: "8%", waitsFor: "16%", assignment: "10%", updated: "15%",
+};
 
 export function WorkTable({ rows, selection, onSelect, sort, onSortChange, onLabel, renderDetails, viewport }: {
   rows: readonly WorkItem[]; selection: WorkSelection | null;
@@ -24,7 +31,9 @@ export function WorkTable({ rows, selection, onSelect, sort, onSortChange, onLab
   const window = useWorkWindow(keys, viewport, keys[selected]);
   const spacer = (height: number) => height > 0 && <tbody aria-hidden="true"><tr><td colSpan={WORK_SORT_COLUMNS.length} style={{ height, padding: 0, border: 0 }} /></tr></tbody>;
   return <div ref={window.content} className="work-table-scroll" role="region" tabIndex={0} aria-label="Work table scroll area">
-    <table className="work-table"><caption>Work items</caption><thead><tr>
+    <table className="work-table"><caption>Work items</caption>
+      <colgroup>{WORK_SORT_COLUMNS.map(column => <col key={column.key} style={{ width: COLUMN_WIDTHS[column.key] }} />)}</colgroup>
+      <thead><tr>
       {WORK_SORT_COLUMNS.map(column => {
         const direction = sort?.key === column.key ? sort.direction : null;
         return <th key={column.key} scope="col" aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}>

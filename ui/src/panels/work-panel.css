@@ -85,15 +85,15 @@ button.work-tree-relation { background: none; border: 0; padding: 0; cursor: poi
 
 .work-table-scroll { overflow: auto; max-width: 100%; container-type: inline-size; }
 .work-table-details-content { position: sticky; left: 0; width: calc(100cqi - 0.8rem); max-width: 100%; }
-.work-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.work-table { width: 100%; min-width: 72rem; table-layout: fixed; border-collapse: collapse; font-size: 0.85rem; }
 .work-table th, .work-table td { text-align: left; vertical-align: top; padding: 0.4rem; border-bottom: 1px solid var(--line); }
+.work-table td { overflow-wrap: anywhere; }
 .work-table th { white-space: nowrap; }
 /* A header is a real button (keyboard reachable, focus ring kept); the sorted column is marked. */
 .work-table-sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer; text-align: left; }
 .work-table th[aria-sort="ascending"] .work-table-sort, .work-table th[aria-sort="descending"] .work-table-sort { text-decoration: underline; text-underline-offset: 0.2em; }
 .work-sort-direction { align-self: end; }
 .work-table-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.work-table td:nth-child(2) { min-width: 14rem; overflow-wrap: anywhere; }
 .work-table small { display: block; }
 .work-item-details { border: 1px solid var(--line); background: var(--surface-card); border-radius: 0.4rem; padding: 0.65rem; overflow-wrap: anywhere; }
 .work-node > .work-item-details, .work-label-group > ul > li > .work-item-details { margin: 0.4rem 0 0.65rem; }

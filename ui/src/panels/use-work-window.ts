@@ -6,6 +6,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject }
 export type WorkViewport = RefObject<HTMLDivElement | null>;
 export const WORK_WINDOW_ROWS = 60;
 const ESTIMATE = 96;
+// Compare geometry at browser layout precision, without changing user scrolls.
+const layoutPixel = (value: number) => Math.round(value * 64) / 64;
 
 export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, selectedKey?: string) {
   const content = useRef<HTMLElement | null>(null);
@@ -16,6 +18,7 @@ export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, 
   const measuredWidth = useRef<number>();
   const [revision, setRevision] = useState(0);
   const [view, setView] = useState({ top: 0, height: 600 });
+  const reportedView = useRef(view);
   const [focused, setFocused] = useState<string>();
   const enabled = !!viewport && keys.length > WORK_WINDOW_ROWS;
   const offsets = useMemo(() => {
@@ -23,26 +26,39 @@ export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, 
     for (const key of keys) result.push(result[result.length - 1] + (heights.current.get(key) ?? ESTIMATE));
     return result;
   }, [keys, revision]);
+  const layout = useRef({ keys, offsets, enabled });
+  // The long-lived scroll/resize listeners use the latest committed offsets.
+  useLayoutEffect(() => { layout.current = { keys, offsets, enabled }; });
   const anchor = useRef<{ key: string; top: number }>();
   const pendingReveal = useRef<string>();
   const origin = () => {
     const root = viewport?.current, element = content.current;
     return root && element ? element.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop : 0;
   };
-  const capture = () => {
+  const visibleRow = () => {
     const root = viewport?.current;
     if (!root) return;
     const top = root.getBoundingClientRect().top;
     const visible = [...nodes.current].map(([key, node]) => ({ key, rect: node.getBoundingClientRect() }))
       .filter(({ rect }) => rect.height > 0 && rect.bottom > top && rect.top < top + (root.clientHeight || 600))
       .sort((a, b) => a.rect.top - b.rect.top)[0];
-    anchor.current = visible ? { key: visible.key, top: visible.rect.top - top } : undefined;
+    return visible ? { key: visible.key, top: visible.rect.top - top } : undefined;
   };
+  const capture = () => { anchor.current = visibleRow(); };
   const read = () => {
     const root = viewport?.current;
     if (!root) return;
-    const next = { top: Math.max(0, root.scrollTop - origin()), height: root.clientHeight || 600 };
-    setView(old => old.top === next.top && old.height === next.height ? old : next);
+    const visible = visibleRow();
+    const index = visible ? layout.current.keys.indexOf(visible.key) : -1;
+    // DOM spacers include estimated heights. Project the visible row into
+    // that same coordinate system, so restoring its position cannot select
+    // a different window merely because mounted rows have real heights.
+    const top = layout.current.enabled && visible && index >= 0
+      ? layout.current.offsets[index] - visible.top : root.scrollTop - origin();
+    const next = { top: layoutPixel(Math.max(0, top)), height: root.clientHeight || 600 };
+    if (reportedView.current.top === next.top && reportedView.current.height === next.height) return;
+    reportedView.current = next;
+    setView(next);
   };
   const firstAt = (positions: readonly number[], top: number) => {
     let low = 0, high = positions.length - 1;
@@ -52,13 +68,27 @@ export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, 
   useLayoutEffect(() => {
     const root = viewport?.current;
     if (!root) return;
+    if (!enabled) {
+      // Keep the real prefix before crossing the windowing threshold, even
+      // when an appended page arrives before ResizeObserver's first delivery.
+      let changed = false;
+      for (const [key, node] of nodes.current) {
+        const height = layoutPixel(node.getBoundingClientRect().height);
+        if (height > 0 && heights.current.get(key) !== height) { heights.current.set(key, height); changed = true; }
+      }
+      if (changed) setRevision(value => value + 1);
+    }
     const target = pendingReveal.current && nodes.current.get(pendingReveal.current);
     if (target) {
-      root.scrollTop += target.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      // Consume before read schedules the render; reveal is a one-shot action.
       pendingReveal.current = undefined;
-    } else {
+      root.scrollTop += target.getBoundingClientRect().top - root.getBoundingClientRect().top;
+    } else if (!pendingReveal.current) {
       const saved = anchor.current, node = saved && nodes.current.get(saved.key);
-      if (saved && node) root.scrollTop += node.getBoundingClientRect().top - root.getBoundingClientRect().top - saved.top;
+      if (saved && node) {
+        const delta = layoutPixel(node.getBoundingClientRect().top - root.getBoundingClientRect().top - saved.top);
+        if (delta) root.scrollTop += delta;
+      }
     }
     read();
     capture();
@@ -76,13 +106,13 @@ export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, 
     if (typeof ResizeObserver !== "undefined") {
       observer.current = new ResizeObserver(entries => {
         let changed = false;
-        const width = root.getBoundingClientRect().width;
+        const width = layoutPixel(root.getBoundingClientRect().width);
         const resized = measuredWidth.current !== undefined && measuredWidth.current !== width;
         measuredWidth.current = width;
         if (resized) { heights.current.clear(); changed = true; }
         for (const node of resized ? nodes.current.values() : entries.map(entry => entry.target as HTMLElement)) {
           const key = node.dataset.workWindowKey;
-          const height = node.getBoundingClientRect().height;
+          const height = layoutPixel(node.getBoundingClientRect().height);
           if (key && height > 0 && heights.current.get(key) !== height) { heights.current.set(key, height); changed = true; }
         }
         if (changed) setRevision(value => value + 1);
