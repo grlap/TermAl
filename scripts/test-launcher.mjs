@@ -269,23 +269,65 @@ export function categoryRequiredFiles(root = repository) {
   ];
 }
 
-export function liveStage(platform = process.platform, env = process.env) {
+// A live test is named by its full libtest path, as `--list` prints it: the
+// suite's tests sit in nested modules, so no prefix is assumed. Validated
+// names are plain words joined by `::` and need no shell quoting.
+const liveTestPath = /^[a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)+$/u;
+
+/**
+ * The named tests of a pinned live run, validated before any run directory
+ * exists: each a full test path inside the root_recovery_live suite, with no
+ * repeats. No names selects the whole suite.
+ */
+export function liveTestNames(names) {
+  const selected = [];
+  for (const name of names) {
+    if (!liveTestPath.test(name)) {
+      throw new Error(`live test name must be a full libtest path (words of a-z, 0-9 and _ joined by ::): ${name}`);
+    }
+    if (!name.split("::").slice(0, -1).includes("root_recovery_live")) {
+      throw new Error(`live test name is outside the root_recovery_live suite: ${name}`);
+    }
+    if (selected.includes(name)) throw new Error(`live test name given twice: ${name}`);
+    selected.push(name);
+  }
+  return selected;
+}
+
+export function liveStage(platform = process.platform, env = process.env, names = []) {
   const command = platform === "win32" ? windowsGitBash(env) : "sh";
-  const liveArgs = [
-    "--bin",
-    "termal",
-    "root_recovery_live",
-    "--",
-    "--ignored",
-    "--test-threads=1",
-  ];
+  // The whole suite is selected by its module name; named tests by their
+  // exact paths, so a name that matches nothing runs nothing.
+  const liveArgs = names.length
+    ? ["--bin", "termal", "--", "--ignored", "--exact", "--test-threads=1", ...names]
+    : ["--bin", "termal", "root_recovery_live", "--", "--ignored", "--test-threads=1"];
   return {
     name: "engram-live",
     command,
     args: platform === "win32"
       ? ["-c", `exec scripts/test-rust.sh ${liveArgs.join(" ")}`]
       : ["scripts/test-rust.sh", ...liveArgs],
+    ...(names.length ? { liveTests: [...names] } : {}),
   };
+}
+
+/**
+ * The named tests a filtered live stage's log shows no result for, read
+ * from libtest's per-test lines, or every name when the counts do not cover
+ * exactly the named tests. An empty list means each named test ran once.
+ */
+export function missingLiveTests(names, log) {
+  const counts = focusedTestCounts(log);
+  const ran = new Set();
+  for (const raw of log.split(/\r?\n/u)) {
+    // eslint-disable-next-line no-control-regex
+    const plain = raw.replace(/\u001b\[[0-9;?]*[A-Za-z]/gu, "").trim();
+    const line = /^test (\S+) \.\.\. (?:ok|FAILED)\b/u.exec(plain);
+    if (line) ran.add(line[1]);
+  }
+  const missing = names.filter((name) => !ran.has(name));
+  if (missing.length) return missing;
+  return counts && counts.passed + counts.failed === names.length ? [] : [...names];
 }
 
 function executable(command, cwd, env) {
@@ -400,7 +442,11 @@ export async function createRun({
     started: request.started,
     preflight: [],
     ...(scope ? { scope } : {}),
-    stages: (stages ?? []).map(({ name }) => ({ name, state: "unrun" })),
+    stages: (stages ?? []).map(({ name, liveTests }) => ({
+      name,
+      state: "unrun",
+      ...(liveTests?.length ? { liveTests: [...liveTests] } : {}),
+    })),
   });
   onRunCreated?.(runDir);
   try {
@@ -812,6 +858,20 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
         const counts = focusedTestCounts(readFileSync(entry.log, "utf8"));
         if (counts) entry.tests = counts;
       }
+      // A filtered live stage passes only when every named test ran: an
+      // exact filter that matched nothing still exits 0.
+      if (stage.liveTests?.length) {
+        const log = existsSync(entry.log) ? readFileSync(entry.log, "utf8") : "";
+        entry.liveTests = [...stage.liveTests];
+        const counts = focusedTestCounts(log);
+        if (counts) entry.tests = counts;
+        const missing = missingLiveTests(stage.liveTests, log);
+        if (missing.length) {
+          entry.state = "failed";
+          const reason = `named live tests did not run: ${missing.join(", ")}`;
+          entry.error = entry.error ? `${entry.error}; ${reason}` : reason;
+        }
+      }
       if (stage.uiProjects !== undefined) {
         entry.accounting = await accountUiProjects(request.root, stage, report);
         // A project that failed, did not run, ran out of order or cannot be
@@ -861,6 +921,8 @@ export async function summarize(runDir) {
   if (result.scope?.kind === "category") {
     lines.push(`scope: category ${result.scope.category} (Vitest project ${result.scope.project}): ${result.scope.label ?? partialCheckLabel}`);
   }
+  const liveTests = result.stages?.find((stage) => stage.liveTests?.length)?.liveTests;
+  if (liveTests) lines.push(`live tests: ${liveTests.join(" ")}`);
   const investigation = result.failureInvestigation ??
     (terminal && result.state === "failed" ? failureInvestigation(runDir) : undefined);
   if (investigation) {
@@ -1267,7 +1329,7 @@ async function main(args) {
     return;
   }
   if (!["full", "focused", "live", "category"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS...] | category NAME [--notify SESSION] [--detach] | summary|notify|recover RUN_DIR");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] | summary|notify|recover RUN_DIR");
   }
   // A category is resolved, or refused, before any run directory exists.
   let category;
@@ -1285,9 +1347,11 @@ async function main(args) {
   }
   if (mode === "full" && options.rest.length) throw new Error("full takes no command");
   if (mode === "focused" && !options.rest.length) throw new Error("focused requires -- COMMAND ARGS");
-  if (mode === "live" && (options.rest.length || !options.liveBinary || !options.liveSha256)) {
-    throw new Error("live requires --engram-binary ABSOLUTE --engram-sha256 SHA256 and takes no command");
+  if (mode === "live" && (!options.liveBinary || !options.liveSha256)) {
+    throw new Error("live requires --engram-binary ABSOLUTE --engram-sha256 SHA256, optionally followed by -- LIVE_TEST_PATH...");
   }
+  // Named live tests are refused before any run directory exists.
+  const liveTests = mode === "live" ? liveTestNames(options.rest) : [];
   if (mode !== "live" && (options.liveBinary || options.liveSha256)) {
     throw new Error("Engram pin options are valid only in live mode");
   }
@@ -1297,7 +1361,7 @@ async function main(args) {
   const stages = mode === "full"
     ? requiredStages()
     : mode === "live"
-      ? [liveStage()]
+      ? [liveStage(process.platform, process.env, liveTests)]
       : mode === "category"
         ? [categoryStage(category)]
         : [{ name: "focused", command: options.rest[0], args: options.rest.slice(1) }];

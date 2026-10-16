@@ -32,6 +32,8 @@ import {
   helperTestArgs,
   helperTestFiles,
   liveStage,
+  liveTestNames,
+  missingLiveTests,
   notifyRun,
   RENAME_SHARING_BUDGET_MS,
   RENAME_SHARING_FIRST_BACKOFF_MS,
@@ -591,6 +593,122 @@ test("pinned live execution receives explicit Cargo, binary, and SHA without run
     assert.equal(result.state, "passed");
     assert.equal(result.liveEngram.observedSha256, expectedSha256);
     assert.equal(result.stages[0].command[0], process.execPath);
+  });
+});
+
+// The suite's tests sit in nested modules; the witness is named by its full
+// path, exactly as `cargo test -- --list` prints it.
+const liveWitness = "tests::engram_host_adapter::root_recovery_live::named_root_completion_live::" +
+  "recovered_claim_check_in_a_newly_named_root_completes_without_an_edit";
+const liveSibling = "tests::engram_host_adapter::root_recovery_live::live_root_real_policy_refusal_never_begins_or_delivers";
+const libtestOutput = (ran, filteredOut = 12) => [
+  `running ${ran.length} test${ran.length === 1 ? "" : "s"}`,
+  ...ran.map((name) => `test ${name} ... ok`),
+  "",
+  `test result: ok. ${ran.length} passed; 0 failed; 0 ignored; 0 measured; ${filteredOut} filtered out; finished in 0.10s`,
+].join("\n");
+const liveRun = (names, ran) => ({
+  name: "engram-live",
+  command: process.execPath,
+  args: ["-e", `process.stdout.write(${JSON.stringify(libtestOutput(ran))})`],
+  liveTests: names,
+});
+
+test("whole-suite live keeps its argv; named live tests run exactly, by full path", () => {
+  for (const platform of ["linux", "win32"]) {
+    const env = { ...process.env, ProgramFiles: "C:\\Program Files" };
+    const whole = liveStage(platform, env);
+    const named = liveStage(platform, env, [liveWitness, liveSibling]);
+    const wholeArgs = ["--bin", "termal", "root_recovery_live", "--", "--ignored", "--test-threads=1"];
+    const namedArgs = ["--bin", "termal", "--", "--ignored", "--exact", "--test-threads=1", liveWitness, liveSibling];
+    assert.equal(whole.name, "engram-live");
+    assert.equal(named.name, "engram-live");
+    assert.equal(named.command, whole.command);
+    assert.equal("liveTests" in whole, false);
+    assert.deepEqual(named.liveTests, [liveWitness, liveSibling]);
+    if (platform === "win32") {
+      assert.deepEqual(whole.args, ["-c", `exec scripts/test-rust.sh ${wholeArgs.join(" ")}`]);
+      assert.deepEqual(named.args, ["-c", `exec scripts/test-rust.sh ${namedArgs.join(" ")}`]);
+    } else {
+      assert.deepEqual(whole.args, ["scripts/test-rust.sh", ...wholeArgs]);
+      assert.deepEqual(named.args, ["scripts/test-rust.sh", ...namedArgs]);
+    }
+  }
+});
+
+test("live test names are full paths inside the suite, each named once", () => {
+  assert.deepEqual(liveTestNames([]), []);
+  assert.deepEqual(liveTestNames([liveWitness, liveSibling]), [liveWitness, liveSibling]);
+  for (const [name, reason] of [
+    ["recovered_claim_check_in_a_newly_named_root_completes_without_an_edit", /full libtest path/u],
+    ["tests::engram_root_recovery_live", /outside the root_recovery_live suite/u],
+    ["tests::engram_host_adapter::root_recovery_live", /outside the root_recovery_live suite/u],
+    ["tests::engram_host_adapter::turn_checks::a_check", /outside the root_recovery_live suite/u],
+    ["Tests::root_recovery_live::a_check", /full libtest path/u],
+    ["--list", /full libtest path/u],
+    ["tests::root_recovery_live::a;rm", /full libtest path/u],
+    ["tests::root_recovery_live::", /full libtest path/u],
+  ]) {
+    assert.throws(() => liveTestNames([name]), reason, name);
+  }
+  assert.throws(() => liveTestNames([liveWitness, liveWitness]), /given twice/u);
+});
+
+test("a named live test with no result line, or a count that does not cover the names, is missing", () => {
+  assert.deepEqual(missingLiveTests([liveWitness], libtestOutput([liveWitness])), []);
+  assert.deepEqual(missingLiveTests([liveWitness], `\u001b[0m${libtestOutput([liveWitness])}`), []);
+  assert.deepEqual(missingLiveTests([liveWitness], libtestOutput([])), [liveWitness]);
+  assert.deepEqual(missingLiveTests([liveWitness, liveSibling], libtestOutput([liveSibling])), [liveWitness]);
+  // A result line without libtest's own count does not prove the run.
+  assert.deepEqual(missingLiveTests([liveWitness], `test ${liveWitness} ... ok\n`), [liveWitness]);
+  assert.deepEqual(missingLiveTests([liveWitness], ""), [liveWitness]);
+});
+
+test("a filtered live run passes only when every named test ran, and records the names", async (t) => {
+  await repository(t, async (root, env) => {
+    const names = [liveWitness, liveSibling];
+    const allRan = await createRun({ root, stages: [liveRun(names, names)] }, env);
+    assert.deepEqual(json(join(allRan, "request.json")).stages[0].liveTests, names);
+    assert.deepEqual(json(join(allRan, "results.json")).stages[0].liveTests, names);
+    const passed = await executeRun(allRan, env);
+    assert.equal(passed.state, "passed");
+    assert.equal(passed.exitCode, 0);
+    assert.deepEqual(passed.stages[0].liveTests, names);
+    assert.deepEqual(passed.stages[0].tests, { runner: "cargo-libtest", passed: 2, failed: 0, ignored: 0 });
+    const passedSummary = await summarize(allRan);
+    assert.match(passedSummary, /^PASS /mu);
+    assert.ok(passedSummary.includes(`live tests: ${liveWitness} ${liveSibling}`), passedSummary);
+
+    const noneRan = await createRun({ root, stages: [liveRun(names, [])] }, env);
+    const zero = await executeRun(noneRan, env);
+    assert.equal(zero.state, "failed");
+    assert.equal(zero.exitCode, 1);
+    assert.equal(zero.stages[0].code, 0);
+    assert.equal(zero.stages[0].error, `named live tests did not run: ${liveWitness}, ${liveSibling}`);
+    const zeroSummary = await summarize(noneRan);
+    assert.match(zeroSummary, /^FAIL /mu);
+    assert.ok(zeroSummary.includes("engram-live: failed"), zeroSummary);
+    assert.ok(zeroSummary.includes(`named live tests did not run: ${liveWitness}`), zeroSummary);
+
+    const oneRan = await createRun({ root, stages: [liveRun(names, [liveSibling])] }, env);
+    const short = await executeRun(oneRan, env);
+    assert.equal(short.state, "failed");
+    assert.equal(short.stages[0].error, `named live tests did not run: ${liveWitness}`);
+  });
+});
+
+test("a whole-suite live stage is judged by its exit alone, as before", async (t) => {
+  await repository(t, async (root, env) => {
+    const runDir = await createRun({
+      root,
+      stages: [{ ...liveRun([], []), liveTests: undefined }],
+    }, env);
+    assert.equal("liveTests" in json(join(runDir, "results.json")).stages[0], false);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "passed");
+    assert.equal("liveTests" in result.stages[0], false);
+    assert.equal("tests" in result.stages[0], false);
+    assert.equal((await summarize(runDir)).includes("live tests:"), false);
   });
 });
 

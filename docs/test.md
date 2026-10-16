@@ -270,6 +270,25 @@ The binary path, fingerprint, executable probe, native Cargo and Git Bash are
 verified before the ignored live stage starts. A mismatch is a terminal failed
 run with the stage unrun; required live checks are never silently skipped.
 
+To run only some of the live tests under the same pin, name them after `--`:
+
+```bash
+node scripts/test-launcher.mjs live --engram-binary C:/absolute/engram.exe --engram-sha256 SHA256 -- tests::engram_host_adapter::root_recovery_live::named_root_completion_live::recovered_claim_check_in_a_newly_named_root_completes_without_an_edit
+```
+
+Each name is the test's full libtest path, as `cargo test --bin termal --
+--ignored --list` prints it. The live suite's tests sit in nested modules, so
+no module prefix is assumed. A name must lie inside the `root_recovery_live`
+module. A malformed or repeated name is refused before any run directory
+exists. The named tests run with `--ignored --exact --test-threads=1`, after the
+same verification as the whole suite. The stage passes only when libtest
+reports a result for every named test and its counts cover exactly those tests.
+A name that matches nothing fails the run, which names the tests that did not
+run, so a filter never passes having run no tests. The request, results and
+summary (`live tests: …`) record the names. With no names the stage runs the
+whole suite exactly as before. The host recognizes a live run only in the
+foreground: a detached `live` run is not credited.
+
 The Rust wrapper raises the inherited Unix file-descriptor soft limit toward
 4096 and defaults libtest to four threads. This prevents FD-heavy SQLite,
 HTTP, and runtime fixtures from intermittently exhausting macOS's common
