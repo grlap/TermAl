@@ -35,6 +35,25 @@ describe("createControlPanelSectionLauncherTab", () => {
 });
 
 describe("buildControlSurfaceSessionListState", () => {
+  it("counts and filters errors within the visible project scope before search", () => {
+    const project = { id: "project-1", name: "Project", rootPath: "/repo" };
+    const sessions = [
+      createSession({ id: "refused", name: "Provider refused", projectId: project.id, status: "error" }),
+      createSession({ id: "host-error", name: "Host failed", projectId: project.id, status: "error" }),
+      createSession({ id: "idle", projectId: project.id }),
+      createSession({ id: "other-project", projectId: "project-2", status: "error" }),
+      createSession({ id: "child", projectId: project.id, status: "error", parentDelegationId: "delegation-1" }),
+    ];
+    const state = buildControlSurfaceSessionListState(sessions, project, "error", "");
+    expect(state.filteredSessions.map(({ id }) => id)).toEqual(["refused", "host-error"]);
+    expect(state.sessionFilterCounts).toEqual({
+      all: 3, working: 0, asking: 0, completed: 1, error: 2,
+    });
+    const searched = buildControlSurfaceSessionListState(sessions, project, "error", "Provider");
+    expect(searched.filteredSessions.map(({ id }) => id)).toEqual(["refused"]);
+    expect(searched.sessionFilterCounts).toEqual(state.sessionFilterCounts);
+  });
+
   it("separates definite session-list matches from unloaded transcript state", () => {
     const project: Project = {
       id: "project-1",

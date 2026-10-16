@@ -1,6 +1,6 @@
 import type { Session } from "./types";
 
-export type SessionListFilter = "all" | "working" | "asking" | "completed";
+export type SessionListFilter = "all" | "working" | "asking" | "completed" | "error";
 
 export type SessionListFilterCounts = Record<SessionListFilter, number>;
 
@@ -22,6 +22,8 @@ export function matchesSessionListFilter(session: Session, filter: SessionListFi
       return session.status === "approval";
     case "completed":
       return session.status === "idle";
+    case "error":
+      return session.status === "error";
     case "all":
     default:
       return true;
@@ -45,6 +47,7 @@ export function countSessionsByFilter(sessions: Session[]): SessionListFilterCou
     working: 0,
     asking: 0,
     completed: 0,
+    error: 0,
   };
 
   for (const session of sessions) {
@@ -60,6 +63,7 @@ export function countSessionsByFilter(sessions: Session[]): SessionListFilterCou
         counts.completed += 1;
         break;
       case "error":
+        counts.error += 1;
         break;
     }
   }

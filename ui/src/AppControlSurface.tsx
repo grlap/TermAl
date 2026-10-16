@@ -371,6 +371,10 @@ export function AppControlSurface({
       const searchResult = controlSurfaceSessionListSearchResults.get(
         session.id,
       );
+      const showErrorReason = controlSurfaceSessionListFilter === "error";
+      const preview = showErrorReason
+        ? session.preview
+        : (searchResult?.snippet ?? session.preview);
 
       return (
         <div
@@ -444,10 +448,10 @@ export function AppControlSurface({
                 ) : null}
               </div>
               <div
-                className={`session-preview${searchResult ? " session-preview-search-result" : ""}`}
-                title={searchResult?.snippet ?? session.preview}
+                className={`session-preview${showErrorReason ? " session-preview-error" : searchResult ? " session-preview-search-result" : ""}`}
+                title={preview}
               >
-                {searchResult?.snippet ?? session.preview}
+                {preview}
               </div>
             </div>
           </button>
@@ -1322,6 +1326,22 @@ export function AppControlSurface({
                     }
                   >
                     Completed ({controlSurfaceSessionFilterCounts.completed})
+                  </button>
+                  <button
+                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "error" ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      if (standaloneControlSurfaceTabId) {
+                        updateStandaloneControlSurfaceViewState({
+                          sessionListFilter: "error",
+                        });
+                      } else {
+                        setSessionListFilter("error");
+                      }
+                    }}
+                    aria-pressed={controlSurfaceSessionListFilter === "error"}
+                  >
+                    Error ({controlSurfaceSessionFilterCounts.error})
                   </button>
                 </div>
               </section>

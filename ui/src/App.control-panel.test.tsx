@@ -441,6 +441,80 @@ describe("App control panel - helpers and compact coverage", () => {
     );
   });
 
+  it.each(["docked", "standalone"] as const)(
+    "filters error sessions and preserves their reason in the %s session list",
+    async (surfaceKind) => {
+      const reason = "Provider refused this request: cybersecurity policy.";
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [
+              makeSession("refused", { name: "Provider refusal", status: "error", preview: reason }),
+              makeSession("host-error", { name: "Host failure", status: "error", preview: "Runtime channel closed." }),
+              makeSession("active", { name: "Working session", status: "active" }),
+              makeSession("stopping", { name: "Stopping session", status: "stopping" }),
+              makeSession("approval", { name: "Asking session", status: "approval" }),
+              makeSession("idle", { name: "Completed session", status: "idle" }),
+              makeSession("child", { name: "Hidden child", status: "error", parentDelegationId: "delegation-1" }),
+            ],
+          });
+        }
+        throw new Error(`Unexpected fetch: ${String(input)}`);
+      }));
+
+      await withFallbackStateHarness(async ({ eventSource }) => {
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+        if (surfaceKind === "standalone") {
+          await clickAndSettle(screen.getByRole("button", { name: "Open tab" }));
+        }
+        const surfaces = document.querySelectorAll<HTMLElement>(".control-panel-section-sessions");
+        const surface = surfaces[surfaces.length - 1];
+        if (!surface) throw new Error("Session surface not found");
+        const list = within(surface);
+        const rowNames = () => Array.from(surface.querySelectorAll(".session-row strong"))
+          .map((element) => element.textContent);
+        for (const label of ["No filter (6)", "Working (2)", "Asking (1)", "Completed (1)", "Error (2)"]) {
+          expect(list.getByRole("button", { name: label })).toBeInTheDocument();
+        }
+        expect(rowNames()).not.toContain("Hidden child");
+        await clickAndSettle(list.getByRole("button", { name: "Error (2)" }));
+        expect(list.getByRole("button", { name: "Error (2)" })).toHaveAttribute("aria-pressed", "true");
+        expect(rowNames().sort()).toEqual(["Host failure", "Provider refusal"]);
+        expect(list.getByText(reason)).toHaveClass("session-preview-error");
+        expect(list.getByText(reason)).toHaveAttribute("title", reason);
+
+        fireEvent.change(list.getByRole("searchbox", { name: "Search sessions" }), {
+          target: { value: "Provider" },
+        });
+        await settleAsyncUi();
+        expect(rowNames()).toEqual(["Provider refusal"]);
+        expect(list.getByText(reason)).toBeInTheDocument();
+        expect(list.getByRole("button", { name: "Error (2)" })).toBeInTheDocument();
+        if (surfaceKind === "standalone" && surfaces.length > 1) {
+          expect(within(surfaces[0]).getByRole("button", { name: "No filter (6)" }))
+            .toHaveAttribute("aria-pressed", "true");
+        }
+        fireEvent.change(list.getByRole("searchbox", { name: "Search sessions" }), {
+          target: { value: "" },
+        });
+        await settleAsyncUi();
+        await clickAndSettle(list.getByRole("button", { name: "Completed (1)" }));
+        expect(rowNames()).toEqual(["Completed session"]);
+        await clickAndSettle(list.getByRole("button", { name: "Working (2)" }));
+        expect(rowNames().sort()).toEqual(["Stopping session", "Working session"]);
+        await clickAndSettle(list.getByRole("button", { name: "Asking (1)" }));
+        expect(rowNames()).toEqual(["Asking session"]);
+        await clickAndSettle(list.getByRole("button", { name: "No filter (6)" }));
+        expect(rowNames()).toHaveLength(6);
+      });
+    },
+  );
+
   it("filters sessions from the control panel project selector", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;

@@ -35,16 +35,25 @@ describe("session list filters", () => {
     createSession("error", "error"),
   ];
 
+  it("reports zero errors when the list is empty or contains only other statuses", () => {
+    expect(countSessionsByFilter([])).toEqual({
+      all: 0, working: 0, asking: 0, completed: 0, error: 0,
+    });
+    expect(countSessionsByFilter(sessions.slice(0, 4)).error).toBe(0);
+    expect(filterSessionsByListFilter(sessions.slice(0, 4), "error")).toEqual([]);
+  });
+
   it("counts sessions by requested filter buckets", () => {
     expect(countSessionsByFilter(sessions)).toEqual({
       all: 5,
       working: 2,
       asking: 1,
       completed: 1,
+      error: 1,
     });
   });
 
-  it("keeps error sessions in no-filter results but excludes them from status buckets", () => {
+  it("keeps error sessions in no-filter results and their own status bucket", () => {
     expect(filterSessionsByListFilter(sessions, "all").map((session) => session.id)).toEqual([
       "active",
       "stopping",
@@ -62,6 +71,9 @@ describe("session list filters", () => {
     expect(
       filterSessionsByListFilter(sessions, "completed").map((session) => session.id),
     ).toEqual(["idle"]);
+    expect(
+      filterSessionsByListFilter(sessions, "error").map((session) => session.id),
+    ).toEqual(["error"]);
   });
 
   it("omits delegated child sessions from default session lists", () => {
