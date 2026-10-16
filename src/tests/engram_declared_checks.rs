@@ -110,6 +110,73 @@ fn a_declared_command_with_a_passing_trx_is_reported_as_test_evidence() {
     );
 }
 
+/// Another Git repository beside the turn's, as the directory a runtime
+/// reports for a command of the session that runs there.
+fn elsewhere_repository(turn: &CheckedTurn, label: &str) -> String {
+    let other = turn
+        .root
+        .parent()
+        .expect("the project has a parent")
+        .join(format!("{label}-elsewhere"));
+    fs::create_dir_all(&other).expect("the other repository creates");
+    run_git_test_command(&other, &["init", "--quiet"]);
+    fs::canonicalize(&other)
+        .expect("the other repository canonicalizes")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// What overlapped the turn's only check, as its holder is told.
+fn declared_overlap_cause(turn: &CheckedTurn) -> Option<String> {
+    turn.record(|record| record.engram.active_turn_checks[0].overlap_cause.clone())
+}
+
+#[test]
+fn a_declared_check_is_marked_by_an_own_command_that_runs_in_another_worktree() {
+    // A declared check's verdict is read from a Git-ignored artifact no
+    // snapshot sees. A command of the session placed in another worktree may
+    // still write that artifact by path, so it marks the declared check,
+    // where an ordinary check in this worktree is left as it was.
+    let turn = CheckedTurn::start("declared-elsewhere-writer", true);
+    declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
+    let elsewhere = elsewhere_repository(&turn, "declared-elsewhere-writer");
+    let copy = "cp -f passing.trx results.trx";
+    turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {
+        turn.recorder()
+            .command_started_in("copy", copy, Some(copy), Some(&elsewhere))
+            .expect("the command elsewhere should record");
+        write_artifact(&turn, PASSING_TRX);
+    });
+    let digest = &sha256_hex("copy".as_bytes())[..12];
+    assert_eq!(
+        declared_overlap_cause(&turn),
+        Some(format!("another command of this session (key {digest}) started"))
+    );
+}
+
+#[test]
+fn a_declared_check_started_beside_an_own_writer_in_another_worktree_is_marked() {
+    // The same holds for a command of the session still running elsewhere
+    // when the declared check starts.
+    let turn = CheckedTurn::start("declared-elsewhere-running", true);
+    declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
+    let elsewhere = elsewhere_repository(&turn, "declared-elsewhere-running");
+    let watch = "npm run watch";
+    turn.recorder()
+        .command_started_in("watch", watch, Some(watch), Some(&elsewhere))
+        .expect("the earlier command should record");
+    turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {
+        write_artifact(&turn, PASSING_TRX);
+    });
+    let digest = &sha256_hex("watch".as_bytes())[..12];
+    assert_eq!(
+        declared_overlap_cause(&turn),
+        Some(format!(
+            "another command of this session (key {digest}) was still running"
+        ))
+    );
+}
+
 #[test]
 fn a_declared_run_whose_trx_records_a_failure_is_reported_failed_even_at_exit_0() {
     let turn = CheckedTurn::start("declared-fail", true);

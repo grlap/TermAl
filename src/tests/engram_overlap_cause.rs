@@ -2,9 +2,12 @@
 // is told it did: another session in a turn counts only where it may write,
 // a session whose worktree was not yet resolved is resolved before it is
 // counted, a read-only delegation child never counts, and the refusal names
-// the session or command that made it. Does not own the carried gate's other
-// refusals (src/tests/engram_carried_checks.rs, whose fixture and helpers
-// this child module uses) or the in-turn check tests
+// the session or command that made it. Another command of the holder's own
+// session overlaps its open check only where it may write: one that only
+// reads, or one placed in another worktree, leaves the check as it was.
+// Does not own the carried gate's other refusals
+// (src/tests/engram_carried_checks.rs, whose fixture and helpers this child
+// module uses) or the other in-turn check tests
 // (src/tests/engram_turn_checks.rs). New module.
 use super::*;
 
@@ -295,9 +298,13 @@ fn a_withheld_check_line_names_what_overlapped_it() {
         cause: None,
         overlap_cause: overlap_cause.map(str::to_owned),
     };
-    let line = engram_withheld_check_line(&withheld(Some("its own command k started")));
+    let line = engram_withheld_check_line(&withheld(Some(
+        "another command of this session (key k) started",
+    )));
     assert!(
-        line.contains("reached its worktree while it ran (its own command k started)."),
+        line.contains(
+            "reached its worktree while it ran (another command of this session (key k) started)."
+        ),
         "{line}"
     );
     // A check nothing named keeps the reason alone.
@@ -335,7 +342,9 @@ fn a_launch_beside_a_command_of_its_own_still_running_names_that_command() {
         .expect("the holder should be told");
     let digest = &sha256_hex(keyed_by_line.as_bytes())[..12];
     assert!(
-        line.contains(&format!("its own command (key {digest}) was still running"))
+        line.contains(&format!(
+            "another command of this session (key {digest}) was still running"
+        ))
             && !line.contains("sentinel-secret-7731"),
         "{line}"
     );
@@ -370,8 +379,290 @@ fn an_own_command_starting_under_an_open_check_is_named_by_digest_only() {
         .expect("the check names what overlapped it");
     let digest = &sha256_hex(keyed_by_line.as_bytes())[..12];
     assert!(
-        cause == format!("its own command (key {digest}) started")
+        cause == format!("another command of this session (key {digest}) started")
             && !cause.contains("sentinel-secret-9902"),
         "{cause}"
+    );
+}
+
+/// Starts another command of the holder, `git status` keyed `other`, running
+/// in `worktree` as a runtime that reports its directory says: one that may
+/// write there, since such a runtime's line is not read as Bash. The carried
+/// gate's tests use it for a command that overlaps a launch.
+pub(super) fn start_other_command_in(turn: &CheckedTurn, worktree: &FsPath) {
+    let cwd = reported_directory(worktree);
+    turn.recorder()
+        .command_started_in("other", "git status", Some("git status"), Some(&cwd))
+        .expect("the other command should record");
+}
+
+#[test]
+fn a_launch_beside_an_own_command_running_in_another_worktree_is_carried() {
+    // The opposite of the refused launches above: the holder's command runs
+    // in the main checkout, where it cannot write under the gate in the named
+    // root, so the gate is carried and not overlapped.
+    let (turn, worktree) = named_turn("overlap-own-elsewhere-launch");
+    turn.recorder()
+        .command_started("other", "git status")
+        .expect("the other command should record");
+    launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
+    assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
+    assert_eq!(
+        turn.record(|record| {
+            let carried = &record.engram.carried_checks[0].check;
+            (carried.overlapped, carried.overlap_cause.clone())
+        }),
+        (false, None)
+    );
+}
+
+#[test]
+fn a_repeated_start_that_first_places_an_own_command_in_the_checks_root_marks_it() {
+    // An ACP runtime starts a call more than once (its tool call, then the
+    // update that puts it in progress) and may give where it runs only in a
+    // later one. Placed in the session's workdir at its first start, the
+    // command marks nothing; its later start in the check's root marks the
+    // check there.
+    let (turn, worktree) = named_turn("own-command-repeated-start");
+    start_check_in(&turn, &worktree);
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started_in("edit", "touch notes.txt", Some("touch notes.txt"), None)
+        .expect("the first start should record");
+    assert_eq!(check_overlap(&turn), (false, None));
+    let here = reported_directory(&worktree);
+    recorder
+        .command_started_in("edit", "touch notes.txt", Some("touch notes.txt"), Some(&here))
+        .expect("the repeated start should record");
+    let digest = &sha256_hex("edit".as_bytes())[..12];
+    assert_eq!(
+        check_overlap(&turn),
+        (
+            true,
+            Some(format!("another command of this session (key {digest}) started"))
+        )
+    );
+}
+
+#[test]
+fn a_repeated_start_of_the_checks_own_command_leaves_it_unmarked() {
+    // The check's own command, started again in the same place (ACP's
+    // pending, then in progress), does not overlap itself.
+    let (turn, worktree) = named_turn("own-command-own-repeat");
+    start_check_in(&turn, &worktree);
+    let here = reported_directory(&worktree);
+    turn.recorder()
+        .command_started_in("check", SIZE_TEST, Some(SIZE_TEST), Some(&here))
+        .expect("the repeated start should record");
+    assert_eq!(
+        turn.record(|record| record.engram.active_turn_checks.len()),
+        1,
+        "the check still stands"
+    );
+    assert_eq!(check_overlap(&turn), (false, None));
+}
+
+/// The directory a runtime that reports one gives for `worktree`.
+fn reported_directory(worktree: &FsPath) -> String {
+    fs::canonicalize(worktree)
+        .expect("the worktree canonicalizes")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Starts the in-turn check `check` in `worktree`, as a runtime that reports
+/// the directory does, and waits for its opening snapshot.
+fn start_check_in(turn: &CheckedTurn, worktree: &FsPath) {
+    let cwd = reported_directory(worktree);
+    turn.recorder()
+        .command_started_in("check", SIZE_TEST, Some(SIZE_TEST), Some(&cwd))
+        .expect("the check should record");
+    turn.wait_for_snapshots();
+}
+
+/// Starts the in-turn check `check` in `worktree` in the one-call form a
+/// Claude session uses, its runtime reporting no directory, and waits for
+/// its opening snapshot. Its `pushd` stays pending while it runs.
+fn start_one_call_check_in(turn: &CheckedTurn, worktree: &FsPath) {
+    let root = engram_source_root_display(&reported_directory(worktree));
+    let line = format!("pushd \"{root}\" && {SIZE_TEST}");
+    turn.recorder()
+        .command_started("check", &line)
+        .expect("the check should record");
+    turn.wait_for_snapshots();
+    assert_eq!(
+        turn.record(|record| record.engram.active_turn_checks.len()),
+        1,
+        "the one-call form starts a check"
+    );
+}
+
+/// Whether the turn's only check is overlapped, and what it names.
+fn check_overlap(turn: &CheckedTurn) -> (bool, Option<String>) {
+    turn.record(|record| {
+        let check = &record.engram.active_turn_checks[0];
+        (check.overlapped, check.overlap_cause.clone())
+    })
+}
+
+#[test]
+fn an_own_command_placed_in_another_worktree_leaves_an_open_check_unmarked() {
+    // A command of the holder that runs in the main checkout, not the named
+    // root the check runs in, cannot write under it: a search or a read of
+    // the docs while a focused run goes on.
+    let (turn, worktree) = named_turn("own-command-elsewhere");
+    start_check_in(&turn, &worktree);
+    let elsewhere = reported_directory(&turn.root);
+    for (key, line) in [("search", "rg overlap src"), ("write", "touch notes.txt")] {
+        turn.recorder()
+            .command_started_in(key, line, Some(line), Some(&elsewhere))
+            .expect("the command elsewhere should record");
+    }
+    assert_eq!(check_overlap(&turn), (false, None));
+    // A command of the holder in the check's own root still marks it, and is
+    // named as another command of the session.
+    let here = reported_directory(&worktree);
+    turn.recorder()
+        .command_started_in("write-here", "touch notes.txt", Some("touch notes.txt"), Some(&here))
+        .expect("the command here should record");
+    let digest = &sha256_hex("write-here".as_bytes())[..12];
+    assert_eq!(
+        check_overlap(&turn),
+        (
+            true,
+            Some(format!("another command of this session (key {digest}) started"))
+        )
+    );
+}
+
+#[test]
+fn an_own_command_said_later_to_run_in_the_checks_root_marks_it() {
+    // Placed elsewhere at its start, a command later said to run in the
+    // check's root may write there from then on.
+    let (turn, worktree) = named_turn("own-command-described-here");
+    start_check_in(&turn, &worktree);
+    let elsewhere = reported_directory(&turn.root);
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started_in("watch", "npm run watch", Some("npm run watch"), Some(&elsewhere))
+        .expect("the command should record");
+    assert_eq!(check_overlap(&turn), (false, None));
+    let here = reported_directory(&worktree);
+    recorder
+        .command_described("watch", Some("npm run watch"), Some(&here))
+        .expect("the description should record");
+    let digest = &sha256_hex("watch".as_bytes())[..12];
+    assert_eq!(
+        check_overlap(&turn),
+        (
+            true,
+            Some(format!("another command of this session (key {digest}) runs there"))
+        )
+    );
+}
+
+#[test]
+fn an_own_read_only_command_leaves_an_open_check_unmarked() {
+    // A Claude session's line is read as Bash: a status, a log or a file read
+    // writes nothing, wherever its shell is. While the check's `pushd` is
+    // pending TermAl cannot place the session's next command, so one that
+    // may write still marks the check.
+    let (turn, worktree) = named_turn("own-command-reads");
+    turn.record_mut(|record| record.session.agent = Agent::Claude);
+    start_one_call_check_in(&turn, &worktree);
+    let mut recorder = turn.recorder();
+    for (key, line) in [
+        ("status", "git status --short"),
+        ("log", "git log --oneline -5"),
+        ("read", "cat README.md"),
+    ] {
+        recorder
+            .command_started(key, line)
+            .expect("the read should record");
+        recorder
+            .command_completed_with_exit(
+                key,
+                line,
+                "",
+                CommandStatus::Success,
+                EngramCommandExit::ReportedSuccess,
+            )
+            .expect("the read should end");
+    }
+    assert_eq!(check_overlap(&turn), (false, None));
+    recorder
+        .command_started("write", "touch notes.txt")
+        .expect("the write should record");
+    let digest = &sha256_hex("write".as_bytes())[..12];
+    assert_eq!(
+        check_overlap(&turn),
+        (
+            true,
+            Some(format!("another command of this session (key {digest}) started"))
+        )
+    );
+}
+
+#[test]
+fn a_check_started_beside_an_own_command_that_cannot_write_there_is_unmarked() {
+    // Still running when the check starts, a read of the holder's, or a
+    // command of its placed in another worktree, overlaps nothing.
+    let (turn, worktree) = named_turn("own-running-elsewhere");
+    let elsewhere = reported_directory(&turn.root);
+    turn.recorder()
+        .command_started_in("watch", "npm run watch", Some("npm run watch"), Some(&elsewhere))
+        .expect("the earlier command should record");
+    start_check_in(&turn, &worktree);
+    assert_eq!(check_overlap(&turn), (false, None));
+
+    let (turn, worktree) = named_turn("own-running-read");
+    turn.record_mut(|record| record.session.agent = Agent::Claude);
+    turn.recorder()
+        .command_started("follow", "git log --oneline -5")
+        .expect("the earlier read should record");
+    start_one_call_check_in(&turn, &worktree);
+    assert_eq!(check_overlap(&turn), (false, None));
+}
+
+#[test]
+fn a_parallel_own_command_that_cds_into_another_worktree_leaves_a_one_call_check_unmarked() {
+    // A Claude session runs two Bash calls side by side: one `cd`s into
+    // another worktree and writes there, still running as the other starts a
+    // one-call test in the named root. Placed where its shell was (the
+    // workdir) and where its `cd` leads, the first cannot write under the
+    // check.
+    let (turn, worktree) = named_turn("own-parallel-cd-elsewhere");
+    turn.record_mut(|record| record.session.agent = Agent::Claude);
+    let elsewhere = sibling_worktree(&turn, "own-parallel-cd-elsewhere-sibling");
+    let other = engram_source_root_display(&reported_directory(&elsewhere));
+    let write = format!("cd \"{other}\" && touch out.txt");
+    turn.recorder()
+        .command_started("write-elsewhere", &write)
+        .expect("the parallel call should record");
+    start_one_call_check_in(&turn, &worktree);
+    assert_eq!(check_overlap(&turn), (false, None));
+}
+
+#[test]
+fn a_check_started_beside_an_own_command_never_placed_is_marked() {
+    // A running command whose places were not kept (past the limit TermAl
+    // keeps, say) may write anywhere: it still marks a check that starts.
+    let (turn, worktree) = named_turn("own-running-unplaced");
+    turn.record_mut(|record| {
+        record
+            .engram
+            .running_command_keys
+            .insert("unplaced".to_owned(), None);
+    });
+    start_check_in(&turn, &worktree);
+    let digest = &sha256_hex("unplaced".as_bytes())[..12];
+    assert_eq!(
+        check_overlap(&turn),
+        (
+            true,
+            Some(format!(
+                "another command of this session (key {digest}) was still running"
+            ))
+        )
     );
 }

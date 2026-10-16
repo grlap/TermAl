@@ -383,16 +383,19 @@ struct EngramTurnCheck {
     /// runtimes' approval modes are not sandboxes, so they have none.
     sandbox: Option<String>,
     start_basis: Arc<EngramBasisCapture>,
-    /// Another command or a file edit from the same agent, or another
-    /// writable session in the same worktree, overlapped the check while it
-    /// was open to writes (`open_to_writes`), so its snapshots may have read
-    /// content it did not test: its outcome is unknown. Set when the overlap
-    /// happens, never reconstructed later.
+    /// Another command of the same agent that may write in the check's
+    /// worktree (`engram_mark_own_checks_for_command`; not one that only
+    /// reads or runs in another worktree), a file edit from the same agent,
+    /// or another writable session in the same worktree, overlapped the check
+    /// while it was open to writes (`open_to_writes`), so its snapshots may
+    /// have read content it did not test: its outcome is unknown. Set when the
+    /// overlap happens, never reconstructed later.
     overlapped: bool,
     /// What overlapped it first, as the holder is told
-    /// (`EngramTurnCheck::note_overlap`): its own command still running, a
-    /// session that may write where it ran and why that session matched, or
-    /// a write TermAl made there. `None` when nothing named it.
+    /// (`EngramTurnCheck::note_overlap`): another command of this session
+    /// that started, ran there or was still running, a session that may write
+    /// where it ran and why that session matched, or a write TermAl made
+    /// there. `None` when nothing named it.
     overlap_cause: Option<String>,
     /// Why Claude work with no verified completion fenced it, stored when it
     /// was fenced (`claude_outstanding_work.rs`): the reason a successful run
@@ -635,12 +638,76 @@ fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
     )
 }
 
-/// The session's own command `key`, as a cause names it: by a digest of the
-/// key, never the key itself, since a runtime that gives no id keys a
+/// Another command `key` of the check's session, as a cause names it: never
+/// the check's own command, which cannot overlap itself, and by a digest of
+/// the key, never the key itself, since a runtime that gives no id keys a
 /// command by its whole line (`codex_app_requests.rs`), which can carry a
 /// secret.
-fn engram_own_command_label(key: &str) -> String {
-    format!("its own command (key {})", &sha256_hex(key.as_bytes())[..12])
+fn engram_session_command_label(key: &str) -> String {
+    format!(
+        "another command of this session (key {})",
+        &sha256_hex(key.as_bytes())[..12]
+    )
+}
+
+/// Marks as overlapped every check of `record` still open to writes that
+/// the session's command `key` may write under: a command that only reads
+/// writes nowhere, and one placed in other worktrees cannot reach an
+/// ordinary check's root (`engram_worktrees_may_hold`, as for another
+/// session's command). A declared check is judged from a Git-ignored
+/// artifact no snapshot sees, which a command placed elsewhere may still
+/// write by path, so any command that may write marks it. With
+/// `running_own`, the check `key` itself runs is left alone: a command does
+/// not overlap its own check. `did` says what the command did, as its cause
+/// tells it.
+fn engram_mark_own_checks_for_command(
+    record: &mut SessionRecord,
+    key: &str,
+    worktrees: &[Option<String>],
+    reads_only: bool,
+    running_own: bool,
+    did: &str,
+) {
+    if reads_only {
+        return;
+    }
+    for check in &mut record.engram.active_turn_checks {
+        if running_own && check.key == key && check.end.is_none() {
+            continue;
+        }
+        if check.open_to_writes()
+            && (check.declared.is_some()
+                || engram_worktrees_may_hold(worktrees, &engram_path_key(&check.target.root)))
+        {
+            check.note_overlap(|| format!("{} {did}", engram_session_command_label(key)));
+        }
+    }
+}
+
+/// Whether the session's running command `key` may write under a check in
+/// the worktree with key `root`, by the places kept for it
+/// (`engram_note_command_worktrees`: none for one that only reads, at least
+/// one otherwise). A command whose places were not kept may write anywhere.
+/// For a `declared` check, whose artifact a command placed elsewhere may
+/// write by path, any command that may write at all may write under it.
+fn engram_running_command_may_write_in(
+    record: &SessionRecord,
+    key: &str,
+    root: &str,
+    declared: bool,
+) -> bool {
+    record
+        .engram
+        .running_command_worktrees
+        .iter()
+        .find(|(running, _)| running == key)
+        .is_none_or(|(_, worktrees)| {
+            if declared {
+                !worktrees.is_empty()
+            } else {
+                engram_worktrees_may_hold(worktrees, root)
+            }
+        })
 }
 
 /// What overlapped a check, as the parenthesis its holder's line ends its
@@ -1524,10 +1591,11 @@ impl AppState {
     /// runtime says runs, when it says, and `cwd` where, when it says. While
     /// a mediated turn runs on claimed work, a recognised test of the
     /// session's own worktree (`engram_check_worktree`) starts a check, with
-    /// its source snapshot taken at once on its own thread, and any command
-    /// marks the checks still open to writes as overlapped: it may write
-    /// under them. Outside such a turn there is nothing to report and
-    /// nothing is kept.
+    /// its source snapshot taken at once on its own thread, and a command
+    /// that may write in a check's worktree marks that check, while still
+    /// open to writes, as overlapped (`engram_mark_own_checks_for_command`):
+    /// one that only reads, or runs in another worktree, does not. Outside
+    /// such a turn there is nothing to report and nothing is kept.
     ///
     /// A runtime may start the same command more than once (ACP reports
     /// pending, then in progress), giving what it runs or where only in one
@@ -1910,7 +1978,7 @@ impl AppState {
                     check.note_overlap(|| {
                         format!(
                             "{}, which its grant does not take, started",
-                            engram_own_command_label(key)
+                            engram_session_command_label(key)
                         )
                     });
                 }
@@ -1971,39 +2039,52 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
         let current_runtime = record.runtime.runtime_token();
-        let engram = &mut record.engram;
-        // A Codex test of the session still running in the check's worktree
-        // since its turn closed, carried or not, runs alongside it as a
-        // command of its turn would (`engram_carried_running_key`).
-        let others_running = engram
-            .running_command_keys
-            .keys()
-            .find(|running| running.as_str() != key)
-            .cloned()
-            .or_else(|| {
-                target.as_ref().and_then(|(_, _, target)| {
+        // Another command of the session still running may write under a
+        // check this command starts, where it may write at all. A Codex test
+        // of the session still running in the check's worktree since its turn
+        // closed, carried or not, runs alongside it as a command of its turn
+        // would (`engram_carried_running_key`).
+        let starts_declared = declared.is_some();
+        let others_running = target.as_ref().and_then(|(_, _, target)| {
+            let root = engram_path_key(&target.root);
+            record
+                .engram
+                .running_command_keys
+                .keys()
+                .find(|running| {
+                    running.as_str() != key
+                        && engram_running_command_may_write_in(
+                            record,
+                            running,
+                            &root,
+                            starts_declared,
+                        )
+                })
+                .cloned()
+                .or_else(|| {
                     engram_carried_running_key(
-                        &*engram,
+                        &record.engram,
                         current_runtime.as_ref(),
-                        &engram_path_key(&target.root),
+                        &root,
                         key,
                     )
                 })
-            });
-        let fresh = engram
+        });
+        let fresh = record
+            .engram
             .running_command_keys
             .insert(key.to_owned(), reported)
             .is_none();
+        // A new command, even one reusing an earlier command's key, may write
+        // under every check still open where it may write. A repeated start
+        // (ACP's pending, then in progress) may give where it runs only now:
+        // it marks what that place reaches, but never the check the command
+        // itself runs.
+        engram_mark_own_checks_for_command(record, key, &worktrees, reads_only, !fresh, "started");
         if fresh {
-            // A new command, even one reusing an earlier command's key, may
-            // write under every check still open.
-            for check in &mut engram.active_turn_checks {
-                if check.open_to_writes() {
-                    check.note_overlap(|| format!("{} started", engram_own_command_label(key)));
-                }
-            }
-            engram.withheld_command_keys.remove(key);
+            record.engram.withheld_command_keys.remove(key);
         }
+        let engram = &mut record.engram;
         // Reset belongs to a genuinely new command. Keep its notice marker
         // afterward so repeated starts/descriptions cannot re-announce it.
         if mediated
@@ -2118,7 +2199,7 @@ impl AppState {
         // What overlapped it from its start, told in this order. Restricting
         // Claude work is told as its own cause (`fenced_by_outstanding`).
         let overlap_cause = others_running
-            .map(|running| format!("{} was still running", engram_own_command_label(&running)))
+            .map(|running| format!("{} was still running", engram_session_command_label(&running)))
             .or(other_writer)
             .or_else(|| {
                 named_late.then(|| "its command was named a test only by a later start".to_owned())
@@ -2324,8 +2405,9 @@ impl AppState {
                 .any(|(running, _)| running == key)
         {
             // It may write where it is now said to run, under a check
-            // another session has open there (unless it ended meanwhile), and
-            // under a carried check of its own session.
+            // another session has open there (unless it ended meanwhile),
+            // under a carried check of its own session, and under another
+            // check of its own turn.
             let (worktrees, unplaced) = engram_place_command_worktrees(record, worktrees);
             engram_fence_carried_for_own_command(record, &worktrees, ran);
             let reads_only = engram_session_command_reads_only(record, ran);
@@ -2338,6 +2420,7 @@ impl AppState {
                     worktrees.clone()
                 },
             );
+            engram_mark_own_checks_for_command(record, key, &worktrees, reads_only, true, "runs there");
             let placed = !reads_only && record.claude_outstanding.holds(key);
             if placed {
                 record.claude_outstanding.place(key, &worktrees);

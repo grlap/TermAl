@@ -1754,8 +1754,16 @@ reports.
   runs (its revision covers that), and the agent's shell decides which
   program a name finds.
 - **Overlap.** A check is open to writes from its start until both its
-  snapshots are taken. It is unknown when, while it is open, another command
-  or a file edit from the same agent is reported, or another writable
+  snapshots are taken. It is unknown when, while it is open, a file edit
+  from the same agent is reported, or another command of the same agent
+  that may write in its worktree (by the places below; a Claude line read
+  as Bash that only reads writes nowhere) starts, or is later said to run
+  there (for a declared check, whose Git-ignored artifact a command may
+  write by path, any command of the agent that may write counts, wherever
+  it runs; for an ordinary check, a write by path from another worktree,
+  such as `git -C` or `--manifest-path`, is covered only by the source
+  snapshots, which see a lasting change to a tracked file), or another
+  writable
   session in the same worktree (any subdirectory of it, however its path is
   spelled) starts a turn or reports a command or an edit; or when such a
   session is in a turn as the check starts or ends. A session's command
@@ -2055,7 +2063,8 @@ its launch (`src/engram_carried_checks.rs`).
   written counts, and what that session then runs or edits is reported as it
   happens. That holds once the gate is carried. At the launch presence still
   counts: a launch made while another writable session is in a turn in that
-  worktree, or while another command of the holder is running, is not
+  worktree, or while another command of the holder that may write there is
+  running (not one that only reads or runs in another worktree), is not
   carried (above), which is what covers a command that session started
   before the launch and whose end says nothing. An ordinary check of a turn,
   open for one command, keeps the wider rule (a writable session in a turn

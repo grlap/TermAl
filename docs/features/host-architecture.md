@@ -214,10 +214,20 @@ change twelve existing source files: the last two call sites above
   (`EngramTurnCheck::open_to_writes`, `engram_turn_checks.rs:800`). Readiness
   is set by the capture's own thread, outside the state lock.
 - A check is overlapped at its start when another command of the session
-  runs, when another writable session is in a turn in the same worktree, or
-  when the root was named after work began (`:1121`,
-  `engram_other_writer_cause`, which also names the session and why it
-  matched). The refusal or withheld line ends with that cause.
+  that may write in its worktree runs (one that only reads, or is placed in
+  another worktree, does not count; the same holds for a command that
+  starts, or is later said to run there, while the check is open:
+  `engram_mark_own_checks_for_command`), when another writable session is in
+  a turn in the same worktree, or when the root was named after work began
+  (`engram_other_writer_cause`, which also names the session and why it
+  matched). The refusal or withheld line ends with that cause. Where a
+  command may write is where it runs and where its `cd` leads
+  (`engram_command_worktrees`): a write it makes by path into another
+  worktree is not seen, for the session's own commands as for another
+  session's; the check's source snapshots still see a tracked change, not a
+  transient or Git-ignored one. A declared check, judged from a Git-ignored
+  artifact, is therefore marked by any command of its session that may
+  write, wherever it runs.
 - A worktree the host could not name counts as every worktree
   (`engram_worktrees_may_hold`, `:725`).
 - Marks that arrive while the checkpoint waits for snapshots off the lock are

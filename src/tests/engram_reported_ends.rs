@@ -798,8 +798,8 @@ fn a_check_started_while_a_carried_test_still_runs_is_overlapped_by_it() {
     let carried = &sha256_hex(ITEM.as_bytes())[..12];
     assert!(
         line.contains(&format!(
-            "reached its worktree while it ran (its own command (key {carried}) was still \
-             running)"
+            "reached its worktree while it ran (another command of this session (key \
+             {carried}) was still running)"
         )),
         "{line}"
     );
@@ -1048,7 +1048,8 @@ fn a_refused_carried_test_still_overlaps_later_checks_until_its_end() {
     assert_carried_at_close(&turn);
     let running = &sha256_hex(ITEM.as_bytes())[..12];
     let overlapped_by_it = format!(
-        "reached its worktree while it ran (its own command (key {running}) was still running)"
+        "reached its worktree while it ran (another command of this session (key {running}) \
+         was still running)"
     );
 
     let checkpoint = passing_test_checkpoint(&turn, &worktree, "exec-b");
@@ -1134,7 +1135,9 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
     let running = &sha256_hex(ITEM.as_bytes())[..12];
     let line = holder_line(&turn);
     assert!(
-        line.contains(&format!("its own command (key {running}) was still running")),
+        line.contains(&format!(
+            "another command of this session (key {running}) was still running"
+        )),
         "{line}"
     );
 }
@@ -1201,7 +1204,9 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
     let line = holder_line(&turn);
     let named = &sha256_hex(ITEM.as_bytes())[..12];
     assert!(
-        line.contains(&format!("its own command (key {named}) was still running")),
+        line.contains(&format!(
+            "another command of this session (key {named}) was still running"
+        )),
         "{line}"
     );
 }

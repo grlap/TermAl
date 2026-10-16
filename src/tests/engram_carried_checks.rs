@@ -1628,11 +1628,9 @@ fn a_launch_outside_a_named_root_or_beside_another_command_is_not_carried() {
     );
     assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
 
-    // Another command running as it launched.
+    // Another command running in its worktree as it launched.
     let (turn, worktree) = named_turn("carried-beside");
-    turn.recorder()
-        .command_started("other", "git status")
-        .expect("the other command should record");
+    overlap_cause::start_other_command_in(&turn, &worktree);
     launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
     assert_dropped_at_launch(&turn, "another command or another writable session");
 }
@@ -3018,9 +3016,7 @@ fn a_launch_after_one_refused_for_an_overlap_is_refused_as_ambiguous() {
     // which the next launch in the worktree must not take.
     let (turn, worktree) = named_turn("carried-after-refused");
     let mut recorder = turn.recorder();
-    recorder
-        .command_started("other", "git status")
-        .expect("the other command should record");
+    overlap_cause::start_other_command_in(&turn, &worktree);
     launch_detached(&turn, &worktree, "first");
     assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
     recorder
@@ -3126,9 +3122,7 @@ fn a_relaunch_after_the_stated_wait_is_carried_unambiguously() {
     // for, two minutes on, is carried as the holder's own.
     let (turn, worktree) = named_turn("carried-remedy");
     let mut recorder = turn.recorder();
-    recorder
-        .command_started("other", "git status")
-        .expect("the other command should record");
+    overlap_cause::start_other_command_in(&turn, &worktree);
     launch_detached(&turn, &worktree, "first");
     recorder
         .command_completed_with_exit(
