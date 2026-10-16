@@ -295,6 +295,7 @@ fn defer_codex_reviewer_mcp_finish(
     session: &str,
     token: &RuntimeToken,
     thread: Option<&str>,
+    generation: u64,
     gate: &mut Option<String>,
     error: Option<String>,
 ) -> bool {
@@ -304,6 +305,9 @@ fn defer_codex_reviewer_mcp_finish(
     let Some(mut scope) = codex_reviewer_mcp_scope_with_stop(state, session, thread, runtime, false, true) else {
         return false;
     };
+    if scope.generation != generation {
+        return false;
+    }
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
         if inner

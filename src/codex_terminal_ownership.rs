@@ -14,11 +14,16 @@ struct DeferredCodexTerminal {
     bytes: usize,
 }
 
+fn shared_codex_error_is_retryable(payload: &Value) -> bool {
+    let error = payload.get("error").unwrap_or(payload);
+    is_retryable_connectivity_error(payload)
+        || (is_typed_provider_capacity(error) && codex_error_will_retry(payload))
+}
+
 fn codex_terminal_notification(method: &str, message: &Value) -> bool {
     method == "turn/completed"
         || (method == "error"
-            && !is_retryable_connectivity_error(message.get("params").unwrap_or(message))
-            && !codex_error_will_retry(message.get("params").unwrap_or(message)))
+            && !shared_codex_error_is_retryable(message.get("params").unwrap_or(message)))
 }
 
 fn codex_turn_is_retired(shared: &SharedCodexSessionState, turn_id: &str) -> bool {
@@ -185,11 +190,14 @@ fn apply_owned_shared_codex_notification(
     state: &AppState,
     session_id: &str,
     runtime: &RuntimeToken,
-    sessions: &SharedCodexSessionMap,
     thread_sessions: &SharedCodexThreadMap,
     shared: &mut SharedCodexSessionState,
-) -> Result<()> {
-    if codex_terminal_notification(method, message) {
+) -> Result<Option<SharedCodexTerminalEffect>> {
+    let terminal = codex_terminal_notification(method, message);
+    let identity = terminal
+        .then(|| SharedCodexTerminalIdentity::capture(state, session_id, runtime, shared))
+        .flatten();
+    if terminal {
         let id = shared_codex_event_turn_id(message)
             .map(str::to_owned)
             .or_else(|| shared.turn_id.clone());
@@ -208,10 +216,10 @@ fn apply_owned_shared_codex_notification(
         completed_turn_id,
         turn_started,
         turn_state,
-        reviewer_mcp_gate,
         ..
     } = shared;
     let mut recorder = BorrowedSessionRecorder::new(state, session_id, recorder);
+    let mut effect = None;
     handle_shared_codex_app_server_notification(
         method,
         message,
@@ -219,7 +227,6 @@ fn apply_owned_shared_codex_notification(
         session_id,
         runtime,
         *active_turn_generation,
-        sessions,
         thread_id,
         turn_id,
         completed_turn_id,
@@ -230,6 +237,16 @@ fn apply_owned_shared_codex_notification(
         turn_state,
         thread_sessions,
         &mut recorder,
-        reviewer_mcp_gate,
-    )
+        &mut effect,
+    )?;
+    match (identity, effect) {
+        (Some(owner), Some(outcome)) => Ok(Some(SharedCodexTerminalEffect { owner, outcome })),
+        (None, Some(_)) => {
+            eprintln!(
+                "runtime state warning> refusing Codex terminal continuation for session `{session_id}`: runtime or turn owner changed"
+            );
+            Ok(None)
+        }
+        (_, None) => Ok(None),
+    }
 }

@@ -880,6 +880,9 @@ struct PendingCodexThreadSetup {
 /// Tracks shared Codex session state.
 #[derive(Default)]
 struct SharedCodexSessionState {
+    // A replacement attachment can reuse the runtime, thread and turn ids.
+    // Retain allocation identity while an off-lock terminal action is pending.
+    attachment: Arc<()>,
     reviewer_mcp_setup_started: Option<std::time::Instant>,
     reviewer_mcp_failure: Option<String>,
     reviewer_mcp_gate: Option<String>,
@@ -919,7 +922,7 @@ const SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES: usize = 5;
 
 #[derive(Clone)]
 struct SharedCodexCompletedTurnCleanup {
-    session_id: String,
+    owner: SharedCodexTerminalIdentity,
     completed_turn_id: String,
     due_at: std::time::Instant,
 }
@@ -951,9 +954,13 @@ impl SharedCodexSessions {
         self.inner.try_lock()
     }
 
-    fn schedule_completed_turn_cleanup(&self, session_id: &str, completed_turn_id: &str) {
+    fn schedule_completed_turn_cleanup(
+        &self,
+        owner: SharedCodexTerminalIdentity,
+        completed_turn_id: &str,
+    ) {
         let _ = self.cleanup_tx.send(SharedCodexCompletedTurnCleanup {
-            session_id: session_id.to_owned(),
+            owner,
             completed_turn_id: completed_turn_id.to_owned(),
             due_at: std::time::Instant::now() + SHARED_CODEX_COMPLETED_TURN_GRACE_PERIOD,
         });

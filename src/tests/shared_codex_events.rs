@@ -4539,6 +4539,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
             session_id.clone(),
             SharedCodexSessionState {
                 pending_thread_setup: Some(test_pending_codex_thread_setup("thread-start-1")),
+                attachment: Arc::default(),
                 reviewer_mcp_setup_started: None,
                 reviewer_mcp_failure: None,
                 reviewer_mcp_gate: None,
@@ -4863,6 +4864,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
             session_id.clone(),
             SharedCodexSessionState {
                 pending_thread_setup: Some(test_pending_codex_thread_setup("thread-start-1")),
+                attachment: Arc::default(),
                 reviewer_mcp_setup_started: None,
                 reviewer_mcp_failure: None,
                 reviewer_mcp_gate: None,

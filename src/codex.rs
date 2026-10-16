@@ -2191,6 +2191,7 @@ fn handle_shared_codex_start_turn_inner(
         match result {
             Ok(turn_result) => {
                 let mut watchdog_cancel_rx = None;
+                let mut terminal_effect = None;
                 {
                     let mut sessions = wait_sessions
                         .lock()
@@ -2257,18 +2258,25 @@ fn handle_shared_codex_start_turn_inner(
                     }
                     if let Some(terminal) = deferred_terminal {
                         let method = terminal.get("method").and_then(Value::as_str).unwrap_or("");
-                        if let Err(error) = apply_owned_shared_codex_notification(
+                        match apply_owned_shared_codex_notification(
                             method,
                             &terminal,
                             &wait_state,
                             &wait_session_id,
                             &RuntimeToken::Codex(wait_runtime_id.clone()),
-                            &wait_sessions,
                             &wait_thread_sessions,
                             session_state,
                         ) {
-                            eprintln!("runtime state warning> deferred Codex terminal: {error:#}");
+                            Ok(effect) => terminal_effect = effect,
+                            Err(error) => {
+                                eprintln!("runtime state warning> deferred Codex terminal: {error:#}");
+                            }
                         }
+                    }
+                }
+                if let Some(effect) = terminal_effect {
+                    if let Err(error) = effect.apply(&wait_state, &wait_sessions) {
+                        eprintln!("runtime state warning> deferred Codex terminal: {error:#}");
                     }
                 }
 

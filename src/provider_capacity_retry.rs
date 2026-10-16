@@ -195,6 +195,30 @@ impl AppState {
         }
     }
 
+    fn cancel_provider_capacity_retry_if_runtime_and_generation_match(
+        &self,
+        session_id: &str,
+        runtime: &RuntimeToken,
+        generation: u64,
+    ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        let record = &mut inner.sessions[index];
+        if !record.runtime.matches_runtime_token(runtime)
+            || record.active_turn_generation != generation
+        {
+            return;
+        }
+        if clear_provider_capacity_retry(record) {
+            inner.stamp_session_at_index(index);
+            if let Err(error) = self.commit_locked(&mut inner) {
+                eprintln!("capacity> failed persisting cancellation: {error:#}");
+            }
+        }
+    }
+
     // Arm before generic terminal handling so its queue drain cannot start a
     // successor. Finalize only if that exact owner survived terminal handling.
     fn prepare_provider_capacity_failure(

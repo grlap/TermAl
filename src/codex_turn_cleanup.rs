@@ -126,10 +126,11 @@ fn run_due_shared_codex_completed_turn_cleanups(
         }
 
         let cleanup = pending.swap_remove(index);
-        let Some(session_state) = sessions.get_mut(&cleanup.session_id) else {
+        let Some(session_state) = sessions.get_mut(&cleanup.owner.session_id) else {
             continue;
         };
-        if session_state.turn_id.is_some()
+        if !cleanup.owner.matches_attachment(session_state)
+            || session_state.turn_id.is_some()
             || session_state.completed_turn_id.as_deref() != Some(&cleanup.completed_turn_id)
         {
             continue;
@@ -313,10 +314,10 @@ fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionS
 /// clear the turn state after a short grace period.
 fn schedule_shared_codex_completed_turn_cleanup(
     sessions: &SharedCodexSessionMap,
-    session_id: &str,
+    owner: SharedCodexTerminalIdentity,
     completed_turn_id: &str,
 ) {
-    sessions.schedule_completed_turn_cleanup(session_id, completed_turn_id);
+    sessions.schedule_completed_turn_cleanup(owner, completed_turn_id);
 }
 
 /// Returns `true` when an error chain contains a `session ... not

@@ -636,17 +636,16 @@ fn handle_shared_codex_app_server_message(
         return handle_codex_app_server_request(method, message, &mut recorder);
     }
 
-    apply_owned_shared_codex_notification(
+    let effect = apply_owned_shared_codex_notification(
         method,
         message,
         state,
         &session_id,
         &runtime_token,
-        sessions,
         thread_sessions,
         session_state,
     )?;
-    if let Some(terminal) = deferred_terminal {
+    let deferred_effect = if let Some(terminal) = deferred_terminal {
         let terminal_method = terminal.get("method").and_then(Value::as_str).unwrap_or("");
         apply_owned_shared_codex_notification(
             terminal_method,
@@ -654,10 +653,15 @@ fn handle_shared_codex_app_server_message(
             state,
             &session_id,
             &runtime_token,
-            sessions,
             thread_sessions,
             session_state,
-        )?;
+        )?
+    } else {
+        None
+    };
+    drop(shared_sessions);
+    for effect in effect.into_iter().chain(deferred_effect) {
+        effect.apply(state, sessions)?;
     }
     Ok(())
 }
@@ -678,7 +682,6 @@ fn handle_shared_codex_app_server_notification(
     session_id: &str,
     runtime_token: &RuntimeToken,
     runtime_generation: Option<u64>,
-    sessions: &SharedCodexSessionMap,
     session_thread_id: &mut Option<String>,
     turn_id: &mut Option<String>,
     completed_turn_id: &mut Option<String>,
@@ -689,7 +692,7 @@ fn handle_shared_codex_app_server_notification(
     turn_state: &mut CodexTurnState,
     thread_sessions: &SharedCodexThreadMap,
     recorder: &mut impl TurnRecorder,
-    reviewer_mcp_gate: &mut Option<String>,
+    terminal_effect: &mut Option<SharedCodexTerminalOutcome>,
 ) -> Result<()> {
     match method {
         "thread/started" => {
@@ -882,11 +885,7 @@ fn handle_shared_codex_app_server_notification(
                         pending_turn_start_request_id.as_deref(),
                         Some("error"),
                     );
-                    let capacity = state.prepare_provider_capacity_failure(
-                        session_id, runtime_token, runtime_generation, true, error,
-                        turn_state.remote_compaction_progressed,
-                    );
-                    if capacity.is_none() { state.cancel_provider_capacity_retry(session_id); }
+                    let compacted = turn_state.remote_compaction_progressed;
                     *turn_id = None;
                     *completed_turn_id = None;
                     *turn_started = false;
@@ -901,32 +900,13 @@ fn handle_shared_codex_app_server_notification(
                     // Codex received the prompt: a receipted delivery is
                     // accepted before the failure settles the turn, which
                     // would otherwise leave it unknown (prompt_delivery.rs).
-                    state.settle_prompt_delivery_of_runtime_turn(
-                        session_id,
-                        runtime_token,
-                        None,
-                        PromptDeliveryOutcome::Accepted,
-                    );
-                    if defer_codex_reviewer_mcp_finish(
-                        state,
-                        sessions,
-                        session_id,
-                        runtime_token,
-                        session_thread_id.as_deref(),
-                        reviewer_mcp_gate,
-                        Some(summarize_error(error)),
-                    ) {
-                        return Ok(());
-                    }
-                    state.fail_turn_if_runtime_matches_and_report(
-                        session_id,
-                        runtime_token,
-                        if typed_capacity { runtime_generation } else { None },
-                        &summarize_error(error),
-                    )?;
-                    if let Some(nonce) = capacity {
-                        state.finish_provider_capacity_failure(session_id, &nonce)?;
-                    }
+                    *terminal_effect = Some(SharedCodexTerminalOutcome::Failed {
+                        error: error.clone(),
+                        detail: summarize_error(error),
+                        confirmed_terminal: true,
+                        accept_delivery: true,
+                        compacted,
+                    });
                     return Ok(());
                 }
             }
@@ -958,25 +938,9 @@ fn handle_shared_codex_app_server_notification(
             // final must replace the existing bubble
             // in place rather than appending a second message. The cleanup worker
             // or the next turn/started event clears this recorder state.
-            if !defer_codex_reviewer_mcp_finish(
-                state,
-                sessions,
-                session_id,
-                runtime_token,
-                session_thread_id.as_deref(),
-                reviewer_mcp_gate,
-                None,
-            ) {
-                state.cancel_provider_capacity_retry(session_id);
-                state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
-            }
-            if let Some(completed_turn_id) = completed_turn_id.as_deref() {
-                schedule_shared_codex_completed_turn_cleanup(
-                    sessions,
-                    session_id,
-                    completed_turn_id,
-                );
-            }
+            *terminal_effect = Some(SharedCodexTerminalOutcome::Completed {
+                turn_id: completed_turn_id.clone(),
+            });
         }
         "item/started" => {
             let event_turn_id = shared_codex_event_turn_id(message);
@@ -1184,17 +1148,11 @@ fn handle_shared_codex_app_server_notification(
                 return Ok(());
             }
 
-            if is_retryable_connectivity_error(payload)
-                || (is_typed_provider_capacity(error) && codex_error_will_retry(payload))
-            {
+            if shared_codex_error_is_retryable(payload) {
                 state.note_turn_retry_if_runtime_matches(session_id, runtime_token, &detail)?;
             } else {
-                let capacity = state.prepare_provider_capacity_failure(
-                    session_id, runtime_token, runtime_generation,
-                    *turn_started && event_turn_id.is_some(), error,
-                    turn_state.remote_compaction_progressed,
-                );
-                if capacity.is_none() { state.cancel_provider_capacity_retry(session_id); }
+                let confirmed_terminal = *turn_started && event_turn_id.is_some();
+                let compacted = turn_state.remote_compaction_progressed;
                 *turn_id = None;
                 *completed_turn_id = None;
                 *turn_started = false;
@@ -1205,24 +1163,10 @@ fn handle_shared_codex_app_server_notification(
                 );
                 clear_codex_turn_state(turn_state);
                 recorder.reset_turn_state()?;
-                if defer_codex_reviewer_mcp_finish(
-                    state,
-                    sessions,
-                    session_id,
-                    runtime_token,
-                    session_thread_id.as_deref(),
-                    reviewer_mcp_gate,
-                    Some(detail.clone()),
-                ) {
-                    return Ok(());
-                }
-                state.fail_turn_if_runtime_matches_and_report(
-                    session_id, runtime_token,
-                    if typed_capacity { runtime_generation } else { None }, &detail,
-                )?;
-                if let Some(nonce) = capacity {
-                    state.finish_provider_capacity_failure(session_id, &nonce)?;
-                }
+                *terminal_effect = Some(SharedCodexTerminalOutcome::Failed {
+                    error: error.clone(), detail, confirmed_terminal,
+                    accept_delivery: false, compacted,
+                });
             }
         }
         "codex/event/item_completed" => {
