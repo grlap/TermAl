@@ -2,11 +2,44 @@
 // Owns the held host acknowledgement and execution barriers; it does not own
 // registration, run indexing, credit, or restart policy in the product.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import test from "node:test";
 import { createRun, executeRun, startDetachedRun } from "./test-launcher.mjs";
+import { validateRunRegistration } from "./test-run-registration.mjs";
+
+function registrationRootSpelling(t, root, spelling) {
+  if (spelling === "original") return root;
+  const canonical = realpathSync.native(root);
+  if (spelling === "short-name") {
+    if (process.platform !== "win32") {
+      t.skip("Windows 8.3 short-name witness requires Windows; directory alias is tested separately");
+      return;
+    }
+    const short = execFileSync(process.env.ComSpec ?? "cmd.exe", [
+      "/d", "/v:off", "/c", "for %I in (.) do @echo %~fsI",
+    ], {
+      encoding: "utf8", windowsHide: true,
+      cwd: canonical,
+    }).trim();
+    assert.ok(short, "the native short-path query must return a path");
+    if (short.toLowerCase() === canonical.toLowerCase()) {
+      t.skip("This test volume supplies no distinct Windows 8.3 spelling; directory alias is tested separately");
+      return;
+    }
+    assert.equal(realpathSync.native(short), canonical);
+    t.diagnostic(`Windows 8.3 witness: ${short} -> ${canonical}`);
+    return short;
+  }
+  // Git ignores this alias under .git; it must not enter the source fingerprint.
+  const alias = join(root, ".git", "registration directory alias");
+  symlinkSync(canonical, alias, process.platform === "win32" ? "junction" : "dir");
+  assert.notEqual(alias, canonical, "the witness must use different path spellings");
+  assert.equal(realpathSync.native(alias), canonical);
+  return alias;
+}
 
 function barrier() {
   let release;
@@ -135,9 +168,160 @@ async function refusedLaunch(root, env, detached, workerExit) {
 
 export function registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit }) {
   for (const detached of [false, true]) {
-    test(`host registration is acknowledged before the first ${detached ? "detached full" : "foreground focused"} stage`, async (t) => {
+    const fixture = detached ? isolatedDetachedRepository : repository;
+    const mode = detached ? "detached" : "foreground";
+    for (const field of ["runDir", "worktree"]) {
+      for (const spelling of ["directory-alias", "short-name"]) {
+      test(`host registration ${mode} accepts ${spelling} in query ${field}`, async (t) => {
+        await fixture(t, async (root, originalEnv) => {
+          const canonical = realpathSync.native(root);
+          const alias = registrationRootSpelling(t, root, spelling);
+          if (!alias) return;
+          const executed = join(root, ".git", "registration-path-executed");
+          await registrationHost(async (host) => {
+            const env = { ...originalEnv, TERMAL_BASE_URL: host.url };
+            const runDir = await createRun({
+              root: field === "worktree" ? alias : canonical,
+              detached, full: detached, scope: detached ? undefined : "focused",
+              stages: [stage("registration-path-witness", `require('node:fs').appendFileSync(${JSON.stringify(executed)}, 'once\\n')`)],
+              ...(detached ? { notifyTo: "fixture-coordinator" } : {}),
+            }, env);
+            assert.equal(host.requests.length, 1);
+            assert.equal(host.queries.length, 1);
+            assert.equal(existsSync(executed), false);
+            if (detached) {
+              assert.deepEqual(await workerExit(await startDetachedRun(runDir, env)), { code: 0, signal: null });
+            } else {
+              assert.equal((await executeRun(runDir, env)).state, "passed");
+            }
+            assert.equal(host.requests.length, 1, "fresh worker validation must not repeat the POST");
+            assert.equal(host.queries.length, 2);
+            assert.equal(readFileSync(executed, "utf8"), "once\n");
+          }, { autoAcknowledge: true, queryTransform: (run) => ({
+            ...run,
+            [field]: field === "worktree" ? canonical
+              : join(alias, relative(canonical, realpathSync.native(run.runDir))),
+          }) });
+        });
+      });
+      }
+
+      for (const unavailable of [false, true]) {
+        test(`host registration ${mode} refuses a ${unavailable ? "missing" : "different existing"} query ${field}`, async (t) => {
+          await fixture(t, async (root, originalEnv) => {
+            const different = join(root, "different registration directory");
+            if (!unavailable) mkdirSync(different);
+            await registrationHost(async (host) => {
+              await refusedLaunch(root, { ...originalEnv, TERMAL_BASE_URL: host.url }, detached, workerExit);
+              assert.equal(host.requests.length, 1);
+              assert.equal(host.queries.length, 1);
+            }, { autoAcknowledge: true, queryTransform: (run) => ({ ...run, [field]: different }) });
+          });
+        });
+      }
+    }
+
+    for (const spelling of ["directory-alias", "short-name"]) {
+    test(`host registration ${mode} accepts ${spelling} in the worker receipt`, async (t) => {
+      await fixture(t, async (root, originalEnv) => {
+        const canonical = realpathSync.native(root);
+        const alias = registrationRootSpelling(t, root, spelling);
+        if (!alias) return;
+        const executed = join(root, ".git", "registration-receipt-executed");
+        await registrationHost(async (host) => {
+          const env = { ...originalEnv, TERMAL_BASE_URL: host.url };
+          const runDir = await createRun({ root, detached, full: detached, scope: detached ? undefined : "focused",
+            stages: [stage("registration-path-witness", `require('node:fs').appendFileSync(${JSON.stringify(executed)}, 'once\\n')`)],
+            ...(detached ? { notifyTo: "fixture-coordinator" } : {}),
+          }, env);
+          const requestPath = join(runDir, "request.json");
+          const request = JSON.parse(readFileSync(requestPath, "utf8"));
+          const originalReceipt = request.registration;
+          request.registration = { ...originalReceipt,
+            runDirectory: join(alias, relative(canonical, realpathSync.native(runDir))),
+          };
+          assert.notEqual(request.registration.runDirectory, originalReceipt.runDirectory);
+          assert.equal(realpathSync.native(request.registration.runDirectory), realpathSync.native(runDir));
+          writeFileSync(requestPath, JSON.stringify(request));
+          assert.equal(existsSync(executed), false);
+          if (detached) {
+            assert.deepEqual(await workerExit(await startDetachedRun(runDir, env)), { code: 0, signal: null });
+          } else {
+            assert.equal((await executeRun(runDir, env)).state, "passed");
+          }
+          assert.equal(host.requests.length, 1);
+          assert.equal(host.queries.length, 2, "the alias must still cross fresh host validation");
+          assert.equal(readFileSync(executed, "utf8"), "once\n");
+        }, { autoAcknowledge: true });
+      });
+    });
+    }
+
+    for (const unavailable of [false, true]) {
+      test(`host registration ${mode} refuses a ${unavailable ? "missing" : "different existing"} worker receipt path`, async (t) => {
+        await fixture(t, async (root, originalEnv) => {
+          await registrationHost(async (host) => {
+            const env = { ...originalEnv, TERMAL_BASE_URL: host.url };
+            const executed = join(root, "stage-after-registration-error");
+            const runDir = await createRun({ root, detached, full: detached, needsCargo: true,
+              stages: [stage("registration-path-witness", `require('node:fs').writeFileSync(${JSON.stringify(executed)}, 'ran')`)],
+              ...(detached ? { notifyTo: "fixture-coordinator" } : {}),
+            }, env);
+            const different = join(root, "different receipt directory");
+            if (!unavailable) mkdirSync(different);
+            const requestPath = join(runDir, "request.json");
+            const request = JSON.parse(readFileSync(requestPath, "utf8"));
+            request.registration = { ...request.registration, runDirectory: different };
+            writeFileSync(requestPath, JSON.stringify(request));
+            if (detached) {
+              await assert.rejects(startDetachedRun(runDir, env), /registration/iu);
+            } else {
+              const result = await executeRun(runDir, env);
+              assert.equal(result.state, "failed");
+              assert.match(result.error, /registration/iu);
+            }
+            assert.equal(host.requests.length, 1);
+            assert.equal(host.queries.length, 1, "the bad receipt must be refused before a fresh query");
+            assert.equal(existsSync(executed), false);
+            assert.equal(existsSync(join(root, "target")), false);
+            const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+            assert.deepEqual(result.preflight, []);
+            assert.ok(result.stages.every(({ state }) => state === "unrun"));
+          }, { autoAcknowledge: true });
+        });
+      });
+    }
+  }
+
+  test("host registration refuses two matching unavailable path spellings at worker validation", async (t) => {
+    await repository(t, async (root, originalEnv) => {
+      let unavailable;
+      await registrationHost(async (host) => {
+        const env = { ...originalEnv, TERMAL_BASE_URL: host.url };
+        const runDir = await createRun({ root, needsCargo: true,
+          stages: [stage("registration-path-witness")],
+        }, env);
+        const request = JSON.parse(readFileSync(join(runDir, "request.json"), "utf8"));
+        unavailable = join(root, "missing registration directory");
+        request.registration = { ...request.registration, runDirectory: unavailable };
+        await assert.rejects(validateRunRegistration(request, env, unavailable), /registration/iu);
+        assert.equal(host.requests.length, 1);
+        assert.equal(existsSync(join(root, "target")), false);
+        const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+        assert.deepEqual(result.preflight, []);
+        assert.ok(result.stages.every(({ state }) => state === "unrun"));
+      }, { autoAcknowledge: true,
+        queryTransform: (run) => unavailable ? { ...run, runDir: unavailable } : run });
+    });
+  });
+
+  for (const detached of [false, true]) {
+    for (const spelling of ["original", "directory-alias", "short-name"]) {
+    test(`host registration is acknowledged before the first ${detached ? "detached full" : "foreground focused"} stage${spelling === "original" ? "" : ` through ${spelling}`}`, async (t) => {
       const fixture = detached ? isolatedDetachedRepository : repository;
       await fixture(t, async (root, originalEnv) => {
+        root = registrationRootSpelling(t, root, spelling);
+        if (!root) return;
         await registrationHost(async (host) => {
           const env = { ...originalEnv, TERMAL_BASE_URL: host.url, TERMAL_SESSION_ID: "fixture-owner" };
           const acknowledged = join(root, ".git", "registration-acknowledged");
@@ -199,7 +383,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             host.acknowledge();
             const outcome = await finished;
             assert.equal(outcome.error, undefined, outcome.error?.stack);
-            assert.equal(outcome.runDir, runDir);
+            assert.equal(realpathSync.native(outcome.runDir), realpathSync.native(runDir));
             assert.equal(readFileSync(executed, "utf8"), "once\n");
             assert.equal(host.requests.length, 1, "worker handoff must not register a second run");
           } finally {
@@ -209,6 +393,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
         });
       });
     });
+    }
 
     for (const refused of [
       { label: "refused acknowledgement", status: 409, registered: false },

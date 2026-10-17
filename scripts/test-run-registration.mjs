@@ -1,7 +1,7 @@
 // Split from the launch boundary in scripts/test-launcher.mjs. Owns the
 // bounded host registration handshake, not execution, credit or restart policy.
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
 
 const contextVariables = ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"];
 const registrationBudgetMs = 8_000;
@@ -25,8 +25,13 @@ function requestIdentity(request) {
 }
 
 function pathIdentity(path) {
-  if (typeof path !== "string" || !path) return undefined;
-  const key = resolve(path).replace(/^\\\\\?\\/u, "").replaceAll("\\", "/");
+  if (typeof path !== "string" || !path) {
+    throw new Error("registration error: missing or malformed registration path");
+  }
+  let canonical;
+  try { canonical = realpathSync.native(path); }
+  catch { throw new Error("registration error: registration path is unavailable or inaccessible"); }
+  const key = canonical.replace(/^\\\\\?\\/u, "").replaceAll("\\", "/");
   return process.platform === "win32" ? key.toLowerCase() : key;
 }
 
