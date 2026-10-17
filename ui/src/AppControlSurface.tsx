@@ -1290,8 +1290,9 @@ export function AppControlSurface({
                       }
                     }}
                     aria-pressed={controlSurfaceSessionListFilter === "working"}
+                    title="Active or stopping top-level sessions in the selected project scope. Background test runs are counted separately in Test Runs."
                   >
-                    Working ({controlSurfaceSessionFilterCounts.working})
+                    Working sessions ({controlSurfaceSessionFilterCounts.working})
                   </button>
                   <button
                     className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "asking" ? "selected" : ""}`}

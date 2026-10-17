@@ -458,6 +458,7 @@ describe("App control panel - helpers and compact coverage", () => {
               makeSession("approval", { name: "Asking session", status: "approval" }),
               makeSession("idle", { name: "Completed session", status: "idle" }),
               makeSession("child", { name: "Hidden child", status: "error", parentDelegationId: "delegation-1" }),
+              makeSession("active-child", { name: "Hidden working child", status: "active", parentDelegationId: "delegation-2" }),
             ],
           });
         }
@@ -478,10 +479,15 @@ describe("App control panel - helpers and compact coverage", () => {
         const list = within(surface);
         const rowNames = () => Array.from(surface.querySelectorAll(".session-row strong"))
           .map((element) => element.textContent);
-        for (const label of ["No filter (6)", "Working (2)", "Asking (1)", "Completed (1)", "Error (2)"]) {
+        for (const label of ["No filter (6)", "Working sessions (2)", "Asking (1)", "Completed (1)", "Error (2)"]) {
           expect(list.getByRole("button", { name: label })).toBeInTheDocument();
         }
+        expect(list.getByRole("button", { name: "Working sessions (2)" })).toHaveAttribute(
+          "title",
+          "Active or stopping top-level sessions in the selected project scope. Background test runs are counted separately in Test Runs.",
+        );
         expect(rowNames()).not.toContain("Hidden child");
+        expect(rowNames()).not.toContain("Hidden working child");
         await clickAndSettle(list.getByRole("button", { name: "Error (2)" }));
         expect(list.getByRole("button", { name: "Error (2)" })).toHaveAttribute("aria-pressed", "true");
         expect(rowNames().sort()).toEqual(["Host failure", "Provider refusal"]);
@@ -505,7 +511,8 @@ describe("App control panel - helpers and compact coverage", () => {
         await settleAsyncUi();
         await clickAndSettle(list.getByRole("button", { name: "Completed (1)" }));
         expect(rowNames()).toEqual(["Completed session"]);
-        await clickAndSettle(list.getByRole("button", { name: "Working (2)" }));
+        await clickAndSettle(list.getByRole("button", { name: "Working sessions (2)" }));
+        expect(list.getByRole("button", { name: "Working sessions (2)" })).toHaveAttribute("aria-pressed", "true");
         expect(rowNames().sort()).toEqual(["Stopping session", "Working session"]);
         await clickAndSettle(list.getByRole("button", { name: "Asking (1)" }));
         expect(rowNames()).toEqual(["Asking session"]);
@@ -543,6 +550,7 @@ describe("App control panel - helpers and compact coverage", () => {
                 name: "Web Session",
                 projectId: "project-web",
                 workdir: "/projects/web",
+                status: "active",
               }),
             ],
           });
@@ -580,12 +588,14 @@ describe("App control panel - helpers and compact coverage", () => {
         expect(
           screen.getByRole("combobox", { name: "Project" }),
         ).toHaveTextContent("All projects");
+        expect(screen.getByRole("button", { name: "Working sessions (1)" })).toBeInTheDocument();
 
         await selectComboboxOption("Project", /^API$/i);
 
         await waitFor(() => {
           expect(screen.getByText("No sessions in API.")).toBeInTheDocument();
         });
+        expect(screen.getByRole("button", { name: "Working sessions (0)" })).toBeInTheDocument();
 
         await clickAndSettle(
           await screen.findByRole("button", { name: "Files" }),

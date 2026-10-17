@@ -78,11 +78,24 @@ describe("App test-run badge", () => {
     });
   });
 
-  it("removes the global header chip even while evidence is at risk", async () => {
+  it("distinguishes zero working sessions from a running detached test", async () => {
     await withVerifiedNoReactActWarnings(async () => {
-      await renderRuns([makeTestRun({ restartWouldVoidEvidence: true })]);
+      await renderRuns([
+        makeTestRun({ detached: true, restartWouldVoidEvidence: true }),
+        makeTestRun({ runId: "finished", state: "passed" }),
+        makeTestRun({ runId: "failed", state: "failed" }),
+        makeTestRun({ runId: "unknown", state: "unknown" }),
+      ]);
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      expect(screen.getByRole("button", { name: "Working sessions (0)" })).toBeVisible();
+      expect(railButton()).toHaveAccessibleName("Open Test Runs (1 active run)");
+      expect(within(railButton()).getByText("1")).toBeVisible();
       expect(screen.queryByRole("button", { name: /^Tests:/ })).not.toBeInTheDocument();
       expect(document.querySelector(".test-runs-global-status")).toBeNull();
+      await clickAndSettle(railButton());
+      const row = within(screen.getByLabelText("Discovered runs"))
+        .getByRole("button", { name: /test-one/ });
+      expect(row).toHaveTextContent("running");
     });
   });
 
