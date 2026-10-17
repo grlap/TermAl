@@ -752,6 +752,7 @@ include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_budget.rs");
 include!("engram_host_adapter.rs");
+include!("engram_control_non_application.rs");
 include!("engram_session_authority.rs");
 include!("engram_causal_failure.rs");
 include!("engram_causal_publication.rs");

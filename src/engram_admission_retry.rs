@@ -27,7 +27,8 @@
 /// The Degraded card codes whose park enters the automatic schedule. With no
 /// grant begun, replaying the retained intent is the reconciliation; on a
 /// begin-unknown head the same codes schedule its exact begin replay.
-/// The same list is the Retry arm of `engram_admission_disposition`.
+/// The Retry arm and scheduler share `engram_admission_code_retries`, which
+/// also accepts producer-certified non-application through its classifier.
 /// A prepared begin whose acknowledgement is pending enters it too: its
 /// attempt acknowledges that same begin again and sends it
 /// (`engram_begin_preparation_retry.rs`).
@@ -241,7 +242,7 @@ fn schedule_engram_admission_retry_locked(
             || engram_begin_reconstruction_pending(record).is_some());
     let (Some(code), Some(authority), Some(fingerprint), Some(prompt_id)) = (
         code.filter(|code| {
-            ENGRAM_ADMISSION_RETRY_CODES.contains(code)
+            engram_admission_code_retries(code)
                 || (begin_replay && *code == ENGRAM_BEGIN_REPLAY_CODE)
                 || (begin_reconstruct && *code == ENGRAM_BEGIN_RECONSTRUCT_CODE)
         })

@@ -597,7 +597,7 @@ function EngramControlCard({ message }: { message: EngramControlMessage }) {
           </p>
           <p className="support-copy">{message.causalFailure.message}</p>
           <p className="support-copy">
-            Boundary: {message.causalFailure.boundary} · Attempt: {message.causalFailure.attemptId ?? "unavailable"} · Remote application: {message.causalFailure.remoteApplication === "refused" ? "request refused (prior application not determined)" : message.causalFailure.remoteApplication === "not_started" ? "this request did not start (prior application not determined)" : "unknown"}
+            Boundary: {message.causalFailure.boundary} · Attempt: {message.causalFailure.attemptId ?? "unavailable"} · Remote application: {message.causalFailure.remoteApplication === "refused" ? "request refused (prior application not determined)" : message.causalFailure.remoteApplication === "not_started" ? "this request did not start (prior application not determined)" : message.causalFailure.remoteApplication === "not_applied" ? "this invocation committed no changes (prior application not determined)" : "unknown"}
           </p>
           <p className="support-copy">
             Control process: {message.causalFailure.controlProcess?.identity ?? "unavailable"} · Exit state: {message.causalFailure.controlProcess?.exitState ?? "unavailable"}

@@ -4829,3 +4829,6 @@ mod declared_checks;
 // file does not grow further.
 #[path = "engram_unended_closures.rs"]
 mod unended_closures;
+
+#[path = "engram_checkpoint_non_application.rs"]
+mod checkpoint_non_application;

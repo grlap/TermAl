@@ -942,7 +942,7 @@ export type EngramControlMessage = BaseMessage & {
     message: string;
     boundary: string;
     attemptId?: string | null;
-    remoteApplication: "unknown" | "not_started" | "refused";
+    remoteApplication: "unknown" | "not_started" | "not_applied" | "refused";
     continuationReason: string;
     continuationId?: string | null;
     turnGeneration?: number | null;

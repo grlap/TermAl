@@ -2584,6 +2584,9 @@ struct EngramAdmissionAttempt {
 
 #[derive(Clone, Debug)]
 struct EngramSessionState {
+    /// Exact live close retained after an invocation-local no-change reply.
+    /// Never reconstructed from a card or used to infer a prior receipt.
+    retained_checkpoint: Option<EngramRetainedCheckpoint>,
     admission_in_progress: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// The queue head the admission in `admission_in_progress` captured,
     /// when that admission is a queued prompt's. In memory only.
@@ -2924,6 +2927,7 @@ impl Default for EngramSessionState {
             opening_diagnostic: None,
             source_root_notices: Vec::new(),
             active_turn_report: None,
+            retained_checkpoint: None,
             active_turn_report_fallback: None,
             active_turn_grant_mutates: None,
             uncertain_grant_id: None,
@@ -4684,6 +4688,23 @@ impl AppState {
         turn_outcome: Option<EngramExecutionOutcome>,
         project_reset_owner_generation: Option<u64>,
     ) -> EngramCheckpointOutcome {
+        self.checkpoint_engram_turn_with_budget_off_lock(
+            session_id, purpose, runtime_token, active_turn_generation,
+            next_intent, turn_outcome, project_reset_owner_generation, None,
+        )
+    }
+
+    fn checkpoint_engram_turn_with_budget_off_lock(
+        &self,
+        session_id: &str,
+        purpose: EngramCheckpointPurpose,
+        runtime_token: Option<&RuntimeToken>,
+        active_turn_generation: Option<u64>,
+        next_intent: EngramNextIntent,
+        turn_outcome: Option<EngramExecutionOutcome>,
+        project_reset_owner_generation: Option<u64>,
+        timeout_limit: Option<Duration>,
+    ) -> EngramCheckpointOutcome {
         // A carried gate whose run ended since the index last looked is read
         // now, so this checkpoint can settle it (`engram_carried_checks.rs`);
         // a session with none to read waits on no poll.
@@ -5017,19 +5038,29 @@ impl AppState {
             };
             (grant_id, target, report, EngramQueuedAdmissionOwner::capture(&inner.sessions[index]))
         };
-        let (grant_id, target, report, continuation_owner) = snapshot;
+        let (grant_id, target, mut report, continuation_owner) = snapshot;
         let checkpoint_authority = target.as_ref().map(engram_abort_authority);
-        let checkpoint_request = target.as_ref().and_then(|target| target.routing_token.as_ref())
+        let retained = target.as_ref().and_then(|target| self.retained_engram_checkpoint(target))
+            .filter(|retained| retained.error.kind != EngramTransportErrorKind::Remote
+                || retained.error.invocation_application() == EngramInvocationApplication::CertifiedNotApplied);
+        let mut next_intent = next_intent;
+        if let Some(EngramRetainedCheckpoint { request: EngramControlRequest::TurnCheckpoint {
+            next_intent: retained_intent, report: retained_report, .. }, .. }) = &retained {
+            next_intent = *retained_intent;
+            report = retained_report.clone();
+        }
+        let checkpoint_request = retained.map(|retained| retained.request).or_else(|| target.as_ref().and_then(|target| target.routing_token.as_ref())
             .map(|routing_token| EngramControlRequest::TurnCheckpoint {
                 routing_token: routing_token.clone(), grant_id: grant_id.clone(), next_intent,
                 report: report.clone(),
                 idempotency_key: engram_checkpoint_idempotency_key(format!("termal-checkpoint:{}:{}:{}", session_id, grant_id, next_intent.as_idempotency_component()), &report),
-            });
+            }));
         // The wait for an owed close and the checkpoint call share one call
         // bound, so the checkpoint window teardown waits on stays one call
         // long, and the card's latency includes the wait.
         let started_at = std::time::Instant::now();
         let call_timeout = target.as_ref().map(|target| target.settings.call_timeout()).unwrap_or_default();
+        let call_timeout = timeout_limit.map_or(call_timeout, |limit| call_timeout.min(limit));
         // A close that became owed is confirmed stored before the checkpoint
         // that may account it, within at most half the bound. If that cannot
         // be confirmed (an uncertain acknowledgement, a failed write or
@@ -5048,7 +5079,7 @@ impl AppState {
         }
         let checkpoint_timeout = call_timeout.saturating_sub(started_at.elapsed());
         let mut checkpoint_refused = None;
-        let outcome = match target {
+        let outcome = match &target {
             Some(target) => match checkpoint_request.as_ref() {
                 Some(request) => target
                     .adapter
@@ -5074,10 +5105,12 @@ impl AppState {
                         }
                         EngramTurnCheckpointResponse::Refuse { code } => {
                             checkpoint_refused = Some(code.clone());
-                            Err(EngramTransportError::remote(EngramControlErrorBody {
-                                code,
+                            let mut error = EngramTransportError::remote(EngramControlErrorBody {
+                                code: code.clone(),
                                 message: "Engram refused the turn checkpoint".to_owned(),
-                            }))
+                            });
+                            error.causal_failure = Some(EngramCausalFailure::request_refusal(request, &code));
+                            Err(error)
                         }
                     }),
                 None => Err(EngramTransportError::transport(
@@ -5109,12 +5142,38 @@ impl AppState {
                 cause.turn_generation = Some(owner.active_turn_generation);
             }
         }
+        // Retain the complete operation while the same binding/grant still
+        // owns it. A subsequent unknown failure keeps its request for status
+        // reconciliation, but cannot authorize another automatic replay.
+        if let (Some(target), Some(request), Err(error)) = (&target, &checkpoint_request, &outcome) {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(session_id) {
+                let current = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, false)
+                    .ok().flatten();
+                if current.as_ref().is_some_and(|current| {
+                    engram_abort_authority(current) == engram_abort_authority(target)
+                        && current.routing_token == target.routing_token
+                        && current.active_grant_id.as_deref() == Some(grant_id.as_str())
+                        && current.work_binding == target.work_binding
+                }) {
+                    let record = &mut inner.sessions[index];
+                    if error.invocation_application() == EngramInvocationApplication::CertifiedNotApplied
+                        || record.engram.retained_checkpoint.as_ref().is_some_and(|retained| retained.matches(target)) {
+                        record.engram.retained_checkpoint = Some(EngramRetainedCheckpoint {
+                            authority: engram_abort_authority(target), work_binding: target.work_binding.clone(),
+                            request: request.clone(), error: error.clone(),
+                        });
+                    }
+                }
+            }
+        }
         match &outcome {
             Ok(()) => self.record_engram_transport_success(session_id),
             Err(error) => self.record_engram_transport_failure(session_id, error),
         }
         if let Err(error) = &outcome
             && error.kind == EngramTransportErrorKind::Remote
+            && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
             && !report.is_empty()
         {
             self.forget_refused_engram_turn_report(session_id, &grant_id, error.code.as_deref());
@@ -5237,6 +5296,7 @@ impl AppState {
                 .engram
                 .clear_checkpoint_if_owned_by(project_reset_owner_generation);
             if decision == EngramControlCardDecision::Grant {
+                record.engram.retained_checkpoint = None;
                 // Acknowledged: the continuity anchor moves to where this
                 // turn left the workspace (`engram_turn_continuity.rs`).
                 advance_engram_continuity_anchor(record, session_id, grant_id);
@@ -7731,7 +7791,11 @@ impl AppState {
                         // grant closes bare.
                         let report =
                             self.cached_engram_turn_report(&target.connection.session_id, grant_id);
-                        let checkpoint_request = EngramControlRequest::TurnCheckpoint {
+                        let checkpoint_request = self.retained_engram_checkpoint(&target)
+                            .filter(|retained| retained.error.kind != EngramTransportErrorKind::Remote
+                                || retained.error.invocation_application() == EngramInvocationApplication::CertifiedNotApplied)
+                            .map(|retained| retained.request)
+                            .unwrap_or_else(|| EngramControlRequest::TurnCheckpoint {
                             routing_token: routing_token.clone(),
                             grant_id: grant_id.to_owned(),
                             next_intent: EngramNextIntent::Wait,
@@ -7743,7 +7807,7 @@ impl AppState {
                                 ),
                                 &report,
                             ),
-                        };
+                        });
                         let checkpoint = target
                             .adapter
                             .request(
@@ -8248,6 +8312,7 @@ impl AppState {
         }
         record.engram.active_grant_id = None;
         record.engram.uncertain_grant_id = None;
+        record.engram.retained_checkpoint = None;
         self.persist_internal_locked(&inner).map_err(|error| {
             EngramTransportError::transport(format!(
                 "failed persisting stale Engram binding cleanup: {error:#}"
@@ -8320,6 +8385,15 @@ impl AppState {
             return Ok(None);
         };
         target.admission_started_at = started_at;
+        if self.retry_certified_engram_checkpoint(&target, owner, started_at)? {
+            // Wait preserves the binding; a successfully replayed Exit has
+            // deliberately closed it and requests the normal fresh bind.
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            target = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                .map_err(EngramTransportError::local_state)?
+                .ok_or_else(|| EngramTransportError::local_state("Checkpoint continuation lost its binding"))?;
+            target.admission_started_at = started_at;
+        }
         if started_at.is_some()
             && self.restore_queued_engram_target(
                 &mut target,
@@ -8440,12 +8514,14 @@ impl AppState {
                 let code = self.engram_failure_card_code(&intent.session_id, &error);
                 let bind_proof = bind_phase_proof.and_then(|proof| {
                     (!error.disables_session()
-                        && matches!(
-                            error.kind,
-                            EngramTransportErrorKind::Deadline
-                                | EngramTransportErrorKind::Transport
-                                | EngramTransportErrorKind::Backoff
-                        ))
+                        && (error.invocation_application()
+                            == EngramInvocationApplication::CertifiedNotApplied
+                            || matches!(
+                                error.kind,
+                                EngramTransportErrorKind::Deadline
+                                    | EngramTransportErrorKind::Transport
+                                    | EngramTransportErrorKind::Backoff
+                            )))
                     .then(|| {
                         self.finish_engram_bind_retry_proof(intent, admission_owner.as_ref(), proof)
                     })
@@ -8866,7 +8942,8 @@ impl AppState {
 
     fn record_engram_transport_failure(&self, session_id: &str, error: &EngramTransportError) {
         // Local binding integrity is not evidence about the transport's health.
-        if error.kind == EngramTransportErrorKind::LocalState {
+        if error.kind == EngramTransportErrorKind::LocalState
+            || error.invocation_application() == EngramInvocationApplication::CertifiedNotApplied {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -8929,7 +9006,8 @@ impl AppState {
         // A late reply belongs to the captured queue head. It must not poison
         // a successor's circuit/backoff state after cancellation supersedes
         // that owner.
-        if error.kind == EngramTransportErrorKind::LocalState {
+        if error.kind == EngramTransportErrorKind::LocalState
+            || error.invocation_application() == EngramInvocationApplication::CertifiedNotApplied {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");

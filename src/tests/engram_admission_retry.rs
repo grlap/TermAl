@@ -2524,3 +2524,6 @@ mod begin_unknown_recovery;
 
 #[path = "engram_begin_replay.rs"]
 mod begin_replay;
+
+#[path = "engram_control_non_application.rs"]
+mod control_non_application;

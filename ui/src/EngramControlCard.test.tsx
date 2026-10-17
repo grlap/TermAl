@@ -55,6 +55,16 @@ describe("EngramControlCard", () => {
     expect(screen.getByText(/Operator paused this continuation/)).toBeInTheDocument();
   });
 
+  it.each(["control_request_expired", "control_store_busy"])("scopes %s non-application to this invocation", (code) => {
+    renderEngramCard({ ...causalMessage, causalFailure: {
+      ...causalMessage.causalFailure!, failureClass: "remote", originalCode: code, remoteApplication: "not_applied",
+    } });
+    expect(screen.getByText(/Remote application:/)).toHaveTextContent(
+      "this invocation committed no changes (prior application not determined)",
+    );
+    expect(screen.queryByText(/this request did not start/)).not.toBeInTheDocument();
+  });
+
   it("names a withheld begin's code and boundary when its cause is not published", () => {
     renderEngramCard({
       ...causalMessage,

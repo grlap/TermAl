@@ -808,6 +808,8 @@ impl AppState {
     /// costs at most this turn's evidence, and nothing when the refusal is
     /// about the grant's state after an earlier attempt was accepted. A lost
     /// or timed-out call is not an answer; its report is kept for the retry.
+    /// A certified no-change reply also keeps it: admission or allowance
+    /// expiry did not reject the payload, which the same request must replay.
     fn forget_refused_engram_turn_report(
         &self,
         session_id: &str,
@@ -860,6 +862,7 @@ fn engram_recovery_checkpoint_refusal(
     match checkpoint {
         Err(error)
             if error.kind == EngramTransportErrorKind::Remote
+                && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
                 && !engram_grant_was_issued_but_not_begun(error) =>
         {
             Some(error.code.as_deref())

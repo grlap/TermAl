@@ -19,6 +19,8 @@ enum EngramCausalFailureClass {
 enum EngramRemoteApplication {
     Unknown,
     NotStarted,
+    /// This invocation committed no changes; earlier same-key attempts may have.
+    NotApplied,
     Refused,
 }
 
@@ -191,7 +193,11 @@ impl EngramCausalFailure {
             message: engram_causal_text(&error.message, secrets),
             boundary: "TermAl host → Engram control".to_owned(),
             attempt_id: attempt.map(|key| engram_causal_text(key, secrets)),
-            remote_application: if error.process_never_started {
+            remote_application: if error.invocation_application()
+                == EngramInvocationApplication::CertifiedNotApplied
+            {
+                EngramRemoteApplication::NotApplied
+            } else if error.process_never_started {
                 EngramRemoteApplication::NotStarted
             } else {
                 EngramRemoteApplication::Unknown

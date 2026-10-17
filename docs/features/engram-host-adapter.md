@@ -2376,6 +2376,18 @@ public Stop, `deliveryUnknown` for any other interruption, and
 
 ### Automatic re-admission of a parked admission
 
+Remote `control_request_expired` and `control_store_busy` replies certify that
+**this invocation committed no changes**. The causal card calls this
+`not_applied`; it does not say the process never started or determine whether
+an earlier attempt applied. Admission retries the retained operation and key.
+A closing checkpoint keeps its entire request, including its report and
+Wait/Exit intent, and the next admission replays it before evaluating another
+turn on the same valid binding. These replies do not arm a fresh bind. A
+successful Exit or a subsequently expired binding still follows the existing
+binding reconciliation rules. Local deadlines remain `deadline_exceeded`
+with unknown application, and COMMIT or rollback failures remain
+`storage_error` with unknown application.
+
 An admission whose outcome is unknown before any grant was begun parks its
 retained prompt (Authorization timeout and retained prompts, above): an
 evaluate that missed its deadline or lost its transport after the request was

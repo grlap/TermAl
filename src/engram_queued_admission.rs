@@ -100,7 +100,7 @@ fn engram_admission_disposition(card: &EngramControlCard) -> EngramAdmissionDisp
         EngramControlCardDecision::Grant => EngramAdmissionDisposition::Ready,
         EngramControlCardDecision::Degraded => match card.refusal_code.as_deref() {
             Some("control_disabled") => EngramAdmissionDisposition::Reject,
-            Some(code) if ENGRAM_ADMISSION_RETRY_CODES.contains(&code) => {
+            Some(code) if engram_admission_code_retries(code) => {
                 EngramAdmissionDisposition::Retry
             }
             // Protocol/store faults and local persistence/ownership failures
@@ -881,7 +881,7 @@ impl AppState {
                         && card
                             .causal_failure
                             .as_ref()
-                            .is_some_and(engram_cause_leaves_begin_unknown),
+                            .is_some_and(engram_cause_allows_begin_replay),
                 )),
                 _ => None,
             });
@@ -903,7 +903,8 @@ impl AppState {
             })
             .unwrap_or(false);
         interrupted |= begin_binding_lost;
-        // A begin whose outcome is unknown, whatever card code its failure
+        // A begin whose outcome is unknown, or whose latest invocation was
+        // certified not applied, whatever card code its failure
         // carried, is the exact replay's to settle (`engram_begin_replay.rs`)
         // while its durable prepared begin stands and control is not disabled.
         let begin_unknown = decision.as_ref().is_some_and(|(_, _, _, unknown)| *unknown)
