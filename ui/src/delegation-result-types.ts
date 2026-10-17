@@ -13,6 +13,9 @@ import type {
 export type DelegationResultPacket = {
   delegationId: string;
   childSessionId: string;
+  baseRevision?: string;
+  worktreePath?: string;
+  workerOutputUnavailable?: boolean;
   status: DelegationStatus;
   summary: string;
   findings: DelegationFinding[];

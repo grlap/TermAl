@@ -63,15 +63,26 @@ fn engram_node_focused_other_commands_do_not_become_tests() {
 /// count parser on that output. Both subprocesses finish before this guard
 /// drops; NODE_TEST_CONTEXT from a parent Node runner cannot change the child.
 fn native_node_counts(reporter: &str, source: &str, expected_exit: i32) -> (Value, String) {
+    native_node_counts_with_force_exit(reporter, source, expected_exit, false)
+}
+
+fn native_node_counts_with_force_exit(
+    reporter: &str,
+    source: &str,
+    expected_exit: i32,
+    force_exit: bool,
+) -> (Value, String) {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let root = TestTempRoot::create("termal-node-count-producer");
     fs::write(root.join("fixture.test.mjs"), source).unwrap();
-    let output = crate::host_command::Command::new("node")
-        .args([
-            "--test",
-            &format!("--test-reporter={reporter}"),
-            "fixture.test.mjs",
-        ])
+    let mut command = crate::host_command::Command::new("node");
+    command.arg("--test");
+    if force_exit {
+        command.arg("--test-force-exit");
+    }
+    let output = command
+        .arg(format!("--test-reporter={reporter}"))
+        .arg("fixture.test.mjs")
         .env_remove("NODE_TEST_CONTEXT")
         .current_dir(root.path())
         .output()
@@ -833,3 +844,6 @@ fn engram_node_no_claim_starts_no_test_and_stale_feedback_is_suppressed() {
         None
     );
 }
+
+#[path = "engram_focused_node_force_exit.rs"]
+mod force_exit;

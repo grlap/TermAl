@@ -33,6 +33,12 @@ fn engram_focused_node_words(program: &str, args: &[String]) -> Option<Vec<Strin
             if files {
                 return None;
             }
+            // Standalone runner control; preserve it in argv without consuming
+            // a value or changing how the validated terminal counts are read.
+            if arg == "--test-force-exit" {
+                index += 1;
+                continue;
+            }
             let (option, inline) = arg
                 .split_once('=')
                 .map_or((arg.as_str(), None), |(option, value)| {

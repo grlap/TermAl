@@ -1064,6 +1064,15 @@ function delegationResultPacket(
     revision: metadata.revision,
     serverInstanceId: metadata.serverInstanceId,
   };
+  if (result.baseRevision !== undefined) {
+    packet.baseRevision = result.baseRevision;
+  }
+  if (result.worktreePath !== undefined) {
+    packet.worktreePath = result.worktreePath;
+  }
+  if (result.workerOutputUnavailable !== undefined) {
+    packet.workerOutputUnavailable = result.workerOutputUnavailable;
+  }
   // Same rule as the status summary: present only for an evaluator.
   if (metadata.acceptanceEvaluation) {
     packet.acceptanceEvaluation = metadata.acceptanceEvaluation;

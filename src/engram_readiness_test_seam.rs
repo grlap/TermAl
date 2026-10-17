@@ -16,6 +16,9 @@
 //   against the product's wall clock: a launch would fail the test at once.
 //   Held alone, it reproduces, without depending on load, the failure a
 //   stalled machine causes in such a test.
+//   Doctor-tree fixtures with an explicit deadline-arm registration apply
+//   this fault after their readiness handshake, at the measured phase's
+//   first observation; their separate startup guard remains bounded.
 //
 // What it does not own: the readiness budget (ENGRAM_READINESS_TIMEOUT is the
 // product's and unchanged), any receipt other than the `fixture-ready` one,

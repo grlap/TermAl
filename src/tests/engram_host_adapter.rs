@@ -17167,76 +17167,8 @@ fn doctor_output_collection_deadline_does_not_require_eof() {
     assert!(started.elapsed() < DEADLOCK_GUARD);
 }
 
-fn check_doctor_descendant_deadline(mode: &str) {
-    let root = TestTempRoot::create("termal-doctor-descendant");
-    let (project_file, ready) = prepare_engram_control_process_tree_fixture(&root, mode);
-    let fixture = FsPath::new(env!("CARGO_MANIFEST_DIR")).join(if cfg!(windows) {
-        "src/tests/fixtures/engram-doctor-pipe-fixture.ps1"
-    } else {
-        "src/tests/fixtures/engram-doctor-pipe-fixture.sh"
-    });
-    let home = root.path().to_path_buf();
-    let (sender, receiver) = mpsc::channel();
-    let started = std::time::Instant::now();
-    let worker = std::thread::spawn(move || {
-        let result = run_engram_doctor_result_within(
-            &fixture,
-            &project_file,
-            &home,
-            &home,
-            Duration::from_secs(5),
-            &home,
-        );
-        let _ = sender.send(result.map(|report| report.healthy));
-    });
-    // Acquires a process handle while the descendant is alive and keeps its
-    // lifetime socket open. Dropping it releases an escaped Unix descendant.
-    let descendant = ready.wait();
-    // Read while the descendant is parked, so its launching process is alive.
-    #[cfg(windows)]
-    let fixture_parent = engram_fixture_descendant_parent(&descendant);
-    let result = receiver.recv_timeout(DEADLOCK_GUARD);
-    if result.is_err() {
-        drop(descendant);
-        let _ = worker.join();
-        panic!("doctor did not return while its descendant held the pipe");
-    }
-    let error = result
-        .unwrap()
-        .expect_err("an incomplete doctor must not report success");
-    assert!(started.elapsed() < DEADLOCK_GUARD);
-    if mode == "doctor-tree-exit" {
-        assert!(
-            error.message.contains("output collection exceeded"),
-            "{}",
-            error.message
-        );
-        #[cfg(windows)]
-        assert_engram_control_descendant_was_terminated(&descendant, "doctor output deadline");
-        // Unix cleanup after reap deliberately does not signal a reused PGID.
-    } else {
-        assert!(
-            error.message.contains("enablement deadline"),
-            "{}",
-            error.message
-        );
-        assert_engram_control_descendant_was_terminated(&descendant, "doctor process deadline");
-    }
-    #[cfg(windows)]
-    assert_engram_fixture_teardown_covers_its_parent(&descendant, fixture_parent);
-    drop(descendant);
-    worker.join().expect("doctor worker should finish");
-}
-
-#[test]
-fn doctor_deadline_covers_a_pipe_held_after_direct_child_exit() {
-    check_doctor_descendant_deadline("doctor-tree-exit");
-}
-
-#[test]
-fn doctor_deadline_terminates_a_live_process_tree() {
-    check_doctor_descendant_deadline("doctor-tree-hang");
-}
+#[path = "engram_doctor_deadline.rs"]
+mod doctor_deadline;
 
 fn large_doctor_fixture_path() -> PathBuf {
     if cfg!(windows) {

@@ -88,16 +88,16 @@ describe("WorkPanel", () => {
     expect(screen.getByRole("button", { name: "w-94643039d5a7 — Visible task" })).toHaveTextContent("w-94643039d5a7 — Visible task");
   });
 
-  it("keeps the chosen view and sort across source-filter submissions", async () => {
+  it("keeps the chosen view and sort across local-filter submissions", async () => {
     vi.mocked(readProjectWork).mockResolvedValue(page());
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "w-one — Visible task" });
     showTable();
     fireEvent.change(screen.getByRole("combobox", { name: "Sort (loaded rows)" }), { target: { value: "title" } });
-    // Applying source filters starts a new read generation; the presentation
-    // choices are not part of it.
+    // Submitting display filters keeps the existing snapshot and presentation.
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(readProjectWork).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+    expect(readProjectWork).toHaveBeenCalledTimes(1);
     await screen.findByRole("button", { name: "w-one — Visible task" });
     expect(screen.getByRole("button", { name: "Table", pressed: true })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Work table scroll area" })).toBeInTheDocument();
@@ -181,13 +181,13 @@ describe("WorkPanel", () => {
     expect(screen.queryByText(/No work items match/)).not.toBeInTheDocument();
   });
 
-  it("retries unchanged filters after an error and aborts the previous request", async () => {
+  it("Refresh starts a new generation after an error and aborts the previous request", async () => {
     vi.mocked(readProjectWork).mockRejectedValueOnce(new ApiRequestError("request-failed", "Work reads busy", { status: 429 }))
       .mockResolvedValueOnce(page("Retried"));
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("alert");
     const firstSignal = vi.mocked(readProjectWork).mock.calls[0][2];
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh work" }));
     await screen.findByRole("button", { name: "w-one — Retried" });
     expect(firstSignal.aborted).toBe(true);
     expect(readProjectWork).toHaveBeenCalledTimes(2);
@@ -511,7 +511,7 @@ describe("WorkPanel", () => {
     expect(title).toHaveFocus();
   });
 
-  it.each(["Hierarchy", "Table", "Labels"])("closes details on a switch to %s without stealing the view button's focus", async view => {
+  it.each(["Hierarchy", "Table", "Labels"])("keeps visible details on a switch to %s without stealing the view button's focus", async view => {
     vi.mocked(readProjectWork).mockResolvedValue(page());
     vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
       notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
@@ -521,12 +521,15 @@ describe("WorkPanel", () => {
     const control = screen.getByRole("button", { name: view });
     control.focus();
     fireEvent.click(control);
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary")).toBeInTheDocument();
     expect(control).toHaveFocus();
-    // The destination must not briefly mount details and issue another read.
-    expect(readWorkDetail).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Dependencies" }));
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    // Presentation changes retain the list; details use the same reader.
+    expect(readProjectWork).toHaveBeenCalledTimes(1);
+    const back = screen.getByRole("button", { name: "Dependencies" });
+    back.focus();
+    fireEvent.click(back);
+    expect(screen.getByRole("complementary")).toBeInTheDocument();
+    expect(back).toHaveFocus();
   });
 
   it("keeps focus on the Kind control when its filter removes the expanded item", async () => {
@@ -609,18 +612,19 @@ describe("WorkPanel", () => {
     expect(screen.getByText(/engram: error/)).toBeInTheDocument();
   });
 
-  it("applies source filters only on submit and labels local filtering as loaded-row filtering", async () => {
+  it("applies search locally on submit and labels filtering as loaded-row filtering", async () => {
     vi.mocked(readProjectWork).mockResolvedValue(page());
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "w-one — Visible task" });
     fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "a query" } });
     expect(readProjectWork).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(readProjectWork).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: /Visible task/ })).not.toBeInTheDocument();
     fireEvent.change(await screen.findByRole("combobox", { name: "Kind (loaded rows)" }), { target: { value: "task" } });
     expect(screen.queryByRole("button", { name: /Visible task/ })).not.toBeInTheDocument();
     expect(screen.getByText(/1 of 1 Engram items loaded; 0 visible/)).toBeInTheDocument();
-    expect(readProjectWork).toHaveBeenCalledTimes(2);
+    expect(readProjectWork).toHaveBeenCalledTimes(1);
   });
 
   it("renders receipt text as inert data and reads details only on demand", async () => {

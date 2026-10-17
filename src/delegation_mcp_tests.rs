@@ -542,7 +542,12 @@ fn delegation_mcp_result_tool_switches_to_paged_output_when_requested() {
     let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
         assert_eq!(request.method, "GET");
         if request.path.ends_with("/result") {
-            return (200, json!({ "result": { "summary": "compact" } }));
+            return (200, json!({ "result": {
+                "summary": "compact",
+                "baseRevision": "1234567890abcdef1234567890abcdef12345678",
+                "worktreePath": "C:/workspace/worker",
+                "notes": ["Child-reported native test outcome: unavailable; not host-recorded verification."],
+            } }));
         }
         assert_eq!(
             request.path,
@@ -567,6 +572,9 @@ fn delegation_mcp_result_tool_switches_to_paged_output_when_requested() {
         .tool_get_session_result(json!({ "delegationId": "delegation-large" }))
         .expect("compact result should succeed");
     assert_eq!(compact["result"]["summary"], "compact");
+    assert_eq!(compact["result"]["baseRevision"], "1234567890abcdef1234567890abcdef12345678");
+    assert_eq!(compact["result"]["worktreePath"], "C:/workspace/worker");
+    assert_eq!(compact["result"]["notes"][0], "Child-reported native test outcome: unavailable; not host-recorded verification.");
 
     let page = bridge
         .tool_get_session_result(json!({

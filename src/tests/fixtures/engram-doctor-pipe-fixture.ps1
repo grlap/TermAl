@@ -6,6 +6,12 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     if ($args[$i] -eq "--project-file") { $projectFile = $args[$i + 1] }
     if ($args[$i] -eq "--home") { $engramHome = $args[$i + 1] }
 }
+# Optional test-owned startup barrier; normal deadline fixtures have none.
+$startupGate = Join-Path $engramHome "work-context-gate.cmd"
+if (Test-Path -LiteralPath $startupGate) {
+    & $startupGate > $null
+    if ($LASTEXITCODE -ne 0) { throw "doctor startup gate failed" }
+}
 # The tree's processes work in the test's temp root: each names itself so the
 # test can wait for all of them before it removes that root
 # (TEST_FIXTURE_TREE_PIDS_ENV in src/tests/phase_sync.rs).

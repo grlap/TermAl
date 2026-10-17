@@ -10,6 +10,10 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
+# Optional test-owned startup barrier; normal deadline fixtures have none.
+if [ -f "$engram_home/work-context-gate.sh" ]; then
+  sh "$engram_home/work-context-gate.sh" > /dev/null
+fi
 ready_pipe="$engram_home/doctor-ready.pipe"
 mkfifo "$ready_pipe"
 # Only stderr is inherited: stdout is a readiness handshake, not doctor JSON.

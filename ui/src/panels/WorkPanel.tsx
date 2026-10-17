@@ -1,7 +1,7 @@
 // New Work surface (workspace tab). Owns independent project selection, the
 // view switch and the loaded Engram row presentation. Does not
 // edit trackers, infer holder identity, or run suggestions.
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Project } from "../types";
 import type { WorkFilters, WorkItem } from "../work-visualizer-api";
 import { useWorkList } from "./use-work-list";
@@ -14,7 +14,8 @@ import { WorkTree } from "./WorkTree";
 import { WorkLabels } from "./WorkLabels";
 import { WorkMemories } from "./WorkMemories";
 import { WorkLabelPicker } from "./WorkLabelPicker";
-import { matchesWorkLabels, type WorkLabelMode } from "./work-labels";
+import { groupWorkLabels, matchesWorkLabels, type WorkLabelMode } from "./work-labels";
+import { matchesWorkDisplayFilters, workSourceKey } from "./work-display-filters";
 import { WorkPaging } from "./WorkPaging";
 import "./work-panel.css";
 
@@ -37,7 +38,7 @@ export function WorkPanel({ projects, focusedProjectId }: { projects: readonly P
       try { localStorage.setItem(PROJECT_KEY, e.target.value); } catch { /* Selection remains usable in memory. */ }
     }}>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
     <p className="work-panel-caption">Read-only work visualizer · Engram. No task edits, claims, or automatic enablement.</p>
-    {projectId ? <WorkProjectView key={projectId} projectId={projectId} /> : <p>No project available. Add a project to inspect its work sources.</p>}
+    {projectId ? <WorkProjectView key={workSourceKey(projects.find(project => project.id === projectId)!)} projectId={projectId} /> : <p>No project available. Add a project to inspect its work sources.</p>}
   </section>;
 }
 
@@ -49,50 +50,64 @@ const VIEWS: { id: WorkView; label: string }[] = [
 const DEFAULT_KINDS = ["task", "bug", "feature", "epic", "chore", "research"];
 
 function WorkProjectView({ projectId }: { projectId: string }) {
+  const searchHint = useId();
   const [draft, setDraft] = useState<WorkFilters>({ search: "", label: "", availability: "" });
   const [filters, setFilters] = useState(draft);
-  const [submission, setSubmission] = useState(0);
-  // Presentation choices outlive a read generation: applying source filters
-  // remounts the results below, and the chosen view and sort must survive it.
-  const [view, setView] = useState<WorkView>("dependencies");
+  const [view, setView] = useState<Exclude<WorkView, "memories">>("dependencies");
+  const [memories, setMemories] = useState(false);
   const [sort, setSort] = useState<WorkSort | null>(null);
-  function submit(event: FormEvent) { event.preventDefault(); setFilters({ ...draft }); setSubmission(value => value + 1); }
+  function submit(event: FormEvent) { event.preventDefault(); setFilters({ ...draft }); }
   return <>
     <div className="work-view-switch" role="group" aria-label="Work view">
-      {VIEWS.map(option => <button key={option.id} type="button" aria-pressed={view === option.id} onClick={() => setView(option.id)}>{option.label}</button>)}
+      {VIEWS.map(option => <button key={option.id} type="button" aria-pressed={(memories ? "memories" : view) === option.id} onClick={() => {
+        setMemories(option.id === "memories");
+        if (option.id !== "memories") setView(option.id);
+      }}>{option.label}</button>)}
     </div>
-    {view === "memories" ? <WorkMemories projectId={projectId} /> : <>
+    {memories && <WorkMemories projectId={projectId} />}
+    <div className="work-results" hidden={memories}>
     <form className="work-panel-filters" onSubmit={submit}>
-      <label>Search <input value={draft.search} onChange={e => setDraft({ ...draft, search: e.target.value })} /></label>
-      <label>Label (source filter) <input value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} /></label>
+      <label>Search <input aria-describedby={searchHint} value={draft.search} onChange={e => setDraft({ ...draft, search: e.target.value })} /></label>
+      <label>Label (loaded rows) <input value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} /></label>
       <label>Availability <select value={draft.availability} onChange={e => setDraft({ ...draft, availability: e.target.value })}>
         <option value="">All</option><option value="ready">Ready</option><option value="blocked">Blocked</option>
       </select></label>
       <button type="submit">Apply filters</button>
-      {filters.availability && <small>Ready and Blocked source filters include only open work.</small>}
+      {filters.availability && <small>Ready and Blocked include only open work.</small>}
     </form>
-    <WorkResults key={`${submission}:${JSON.stringify(filters)}`} projectId={projectId} filters={filters}
-      view={view} sort={sort} onSortChange={setSort} />
-    </>}
+    <p id={searchHint} className="work-panel-caption">Search matches loaded IDs, titles, labels and assignment, ignoring case. It does not search notes, gates or outcomes.</p>
+    <WorkResults projectId={projectId} filters={filters}
+      view={view} active={!memories} sort={sort} onSortChange={setSort} />
+    </div>
   </>;
 }
 
-function WorkResults({ projectId, filters, view, sort, onSortChange }: {
+function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
   projectId: string; filters: WorkFilters; view: Exclude<WorkView, "memories">;
-  sort: WorkSort | null; onSortChange: (sort: WorkSort | null) => void;
+  active: boolean; sort: WorkSort | null; onSortChange: (sort: WorkSort | null) => void;
 }) {
-  const { result, busy, error, needsReload, reload, retry } = useWorkList(projectId, filters);
-  // The kind filter is per read generation: its options come from the loaded
-  // rows, which a new generation replaces.
+  const { result, busy, error, needsReload, reload, retry } = useWorkList(projectId);
   const [kind, setKind] = useState("");
   const [lifecycle, setLifecycle] = useState("open");
   const [labels, setLabels] = useState<string[]>([]);
   const [labelMode, setLabelMode] = useState<WorkLabelMode>("any");
   const filterLabel = (label: string) => { setLabels([label]); setLabelMode("any"); };
   const [selection, setSelection] = useState<(WorkSelection & { view: WorkView }) | null>(null);
-  const visibleSelection = selection?.view === view ? selection : null;
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const focusNewSelection = useRef(false);
+  useEffect(() => { focusNewSelection.current = false; });
   const listContainer = useRef<HTMLDivElement | null>(null);
+  const scrollPosition = useRef(0);
+  // Child windows may restore a row anchor when rows reorder. A display
+  // action keeps the viewport position instead, bounded by browser geometry.
+  useLayoutEffect(() => {
+    const viewport = listContainer.current;
+    if (!active || !viewport) return;
+    viewport.scrollTop = scrollPosition.current;
+    // Windows captured their row anchors before this parent layout effect.
+    // Recapture now, before a child layout pass can reapply the old anchor.
+    viewport.dispatchEvent(new Event("scroll"));
+  }, [filters, kind, lifecycle, labels, labelMode, sort, view, active]);
   const page = result?.page;
   // Stable row identity lets the tree memoise its forest across selection and
   // collapse re-renders.
@@ -106,9 +121,13 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   );
   // One sort model serves the control below and the table headers; it orders
   // loaded rows only and never touches the sources' pages or identities.
-  const rows = useMemo(() => sortWorkRows(loaded.filter(row => (!kind || row.kind === kind)
+  const rows = useMemo(() => sortWorkRows(loaded.filter(row => matchesWorkDisplayFilters(row, filters) && (!kind || row.kind === kind)
     && (!lifecycle || (lifecycle === "closed" ? ["completed", "cancelled", "superseded"].includes(row.lifecycle) : row.lifecycle === lifecycle))
-    && matchesWorkLabels(row, labels, labelMode)), sort), [loaded, kind, lifecycle, labels, labelMode, sort]);
+    && matchesWorkLabels(row, labels, labelMode)), sort), [loaded, filters, kind, lifecycle, labels, labelMode, sort]);
+  const selectedItem = selection && rows.find(row => row.source === selection.source && row.shortRef === selection.ref);
+  const visibleSelection = selectedItem && selection ? { ...selection, group: view === "labels"
+    ? selection.view === view ? selection.group : groupWorkLabels([selectedItem])[0]?.key
+    : undefined } : null;
   const total = page?.total ?? 0;
   const loadedSummary = [
     page && `${page.items.length} of ${page.total} Engram items loaded`,
@@ -116,6 +135,7 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   const select = (item: WorkItem, trigger: HTMLButtonElement, group?: string) => {
     if (detailTrigger.current === trigger && selection) { closeDetails(); return; }
     detailTrigger.current = trigger;
+    focusNewSelection.current = true;
     setSelection({ source: item.source, ref: item.shortRef, group, view });
   };
   const hideSelection = () => { setSelection(null); detailTrigger.current = null; };
@@ -126,9 +146,8 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
     hideSelection();
     if (trigger?.isConnected) trigger.focus(); else listContainer.current?.focus();
   };
-  // Details belong to the clicked occurrence and presentation view. Never
-  // mount the previous view's details in the new view: their focus effect
-  // would steal focus from the view switch just before they are removed.
+  // Keep a visible logical selection across presentation changes, adopting
+  // its new occurrence without moving focus from the display control.
   const readerId = result?.readerId ?? null;
   useEffect(() => {
     if (!selection || (visibleSelection && readerId && detailTrigger.current?.isConnected)) return;
@@ -137,7 +156,7 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
     if (visibleSelection && readerId && rows.some(item => item.source === selection.source && item.shortRef === selection.ref)) {
       const replacement = [...listContainer.current?.querySelectorAll<HTMLButtonElement>("[data-work-ref]") ?? []].find(button =>
         button.dataset.workRef === selection.ref && button.dataset.workSource === selection.source
-        && button.closest<HTMLElement>("[data-work-group]")?.dataset.workGroup === selection.group);
+        && button.closest<HTMLElement>("[data-work-group]")?.dataset.workGroup === visibleSelection.group);
       if (replacement) { detailTrigger.current = replacement; return; }
     }
     const trigger = detailTrigger.current;
@@ -150,7 +169,7 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   });
   const renderDetails = (item: WorkItem, group?: string) => visibleSelection && readerId
     && visibleSelection.source === item.source && visibleSelection.ref === item.shortRef && visibleSelection.group === group
-    ? <WorkItemDetails key={`${readerId}:${visibleSelection.ref}`} projectId={projectId} workRef={visibleSelection.ref} readerId={readerId} onClose={closeDetails} />
+    ? <WorkItemDetails key={`${readerId}:${visibleSelection.ref}`} projectId={projectId} workRef={visibleSelection.ref} readerId={readerId} onClose={closeDetails} autoFocus={focusNewSelection.current} />
     : null;
   return <>
     <div className="work-panel-actions">
@@ -185,14 +204,14 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
       <p>{loadedSummary}; {rows.length} visible. Filters and sorting (the control above or a table header) apply only to loaded rows.</p>
       <p className="work-panel-caption">Read completed: <WorkTime value={result.observedAt} />. Refresh for current data.</p>
       <div className="work-panel-body">
-        <div className="work-panel-list" ref={listContainer} tabIndex={0} role="region" aria-label="Work list">
+        <div className="work-panel-list" ref={listContainer} onScroll={event => { if (active) scrollPosition.current = event.currentTarget.scrollTop; }} tabIndex={0} role="region" aria-label="Work list">
           {view === "table"
             ? <WorkTable viewport={listContainer} rows={rows} selection={visibleSelection} onSelect={select} sort={sort} onSortChange={onSortChange} onLabel={filterLabel} renderDetails={renderDetails} />
             : view === "labels" ? <WorkLabels viewport={listContainer} rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />
               : <WorkTree key={view} viewport={listContainer} rows={rows} universe={loaded} mode={view} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />}
           {rows.length === 0 && <p>{result.sources.some(source => source.state === "error")
             ? "No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view."
-            : total === 0 ? "No work items match the source filters." : "No matching rows in the loaded page(s). More source items may exist."}</p>}
+            : total === 0 ? "No work items in this snapshot." : "No matching rows in the loaded page(s). More source items may exist."}</p>}
           <WorkPaging page={page} busy={busy} error={error} />
         </div>
       </div>

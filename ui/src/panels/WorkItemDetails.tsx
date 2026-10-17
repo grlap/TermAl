@@ -6,8 +6,8 @@ import { readWorkDetail, type WorkDetailResponse } from "../work-visualizer-api"
 import { WorkTime } from "./work-time";
 import { WorkDetailsHeader } from "./WorkDetailsHeader";
 
-export function WorkItemDetails({ projectId, workRef, readerId, onClose }: {
-  projectId: string; workRef: string; readerId: string; onClose: () => void;
+export function WorkItemDetails({ projectId, workRef, readerId, onClose, autoFocus = true }: {
+  projectId: string; workRef: string; readerId: string; onClose: () => void; autoFocus?: boolean;
 }) {
   const [data, setData] = useState<WorkDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,9 +19,10 @@ export function WorkItemDetails({ projectId, workRef, readerId, onClose }: {
   const panel = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    if (!autoFocus) return;
     panel.current?.focus();
     panel.current?.scrollIntoView?.({ block: "nearest" });
-  }, [projectId, workRef, readerId]);
+  }, [projectId, workRef, readerId, autoFocus]);
 
   async function load(controller: AbortController, more: boolean) {
     if (locked.current || controller.signal.aborted) return;

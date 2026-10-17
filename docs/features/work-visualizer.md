@@ -24,8 +24,10 @@ single-state model and its assumptions about holder identities and zero writes.
 ### Current implementation boundary
 
 The implemented scope is 1a, the tree half of 1b and retained project memories, all with **explicit refresh**, not a live activity subscription. Project
-changes and submitted filters start fresh reads; source markers and integration
-settings are rechecked on every read. Automatic refresh on file/activity
+and source configuration changes start fresh reads; source markers and integration
+settings are rechecked on every read. Display filters and sorting reuse the
+retained full-set snapshot, including across a trip to Memories and back. Refresh
+or recovery from a changed list starts a new snapshot. Automatic refresh on file/activity
 changes, the decision/live-holder badge, Response Board pins, holder-to-session
 navigation remain follow-ups. The Memories view reads retained project memories
 from Engram (see below). Details show holder labels
@@ -53,17 +55,16 @@ The tab offers five views, all read-only; the task views share the loaded Engram
   stack and the promised root always exists. A
   prerequisite that is not visible is disclosed as a count, never invented:
   "waits for N not loaded" (unsatisfied), "N satisfied · not loaded" and "N hidden by
-  filter" (loaded but excluded by a kind or label filter). Satisfied prerequisites
+  filter" (loaded but excluded by a display filter). Satisfied prerequisites
   are marked. Rows with no visible blocking relation, including rows whose
   only prerequisites are not visible, are listed flat under "No visible
   dependency links". Edges come only from Engram’s `blocked_by` receipt, never inferred from titles or hierarchy.
 - **Hierarchy**: parent on top, subtasks nested (Engram `parent_id` — never the dotted id spelling). A child whose parent
-  is loaded but hidden by a kind or label filter is shown as a root with "parent
+  is loaded but hidden by a display filter is shown as a root with "parent
   hidden by filter"; a parent that was never loaded is not disclosed, the
   same rule as the dependency counts. Blocking relations never appear here;
   the two relations are deliberately separate trees.
-  Neither tree is virtualised; Engram paging bounds the
-  rendered size.
+  Both trees use a bounded, measured window while all pages load serially.
 - **Labels**: collapsible, flat groups for each label, followed by Unlabelled.
   A multi-label item appears in each matching group, but the visible count
   counts items only once. Groups do not imply hierarchy or dependencies.
@@ -89,18 +90,25 @@ Labels appear as clickable chips in all four views. Clicking a chip selects
 that exact label in the **Labels (loaded rows)** picker. Its searchable
 checkboxes support **Any label** (union) and **All labels** (intersection),
 removable selections and Clear labels. Counts describe the loaded snapshot
-before local kind/label filtering, not the entire tracker. Selection remains
-visible at zero count after refresh; a project or source-filter change resets
-it. Labels are exact, case-sensitive strings, including commas. The separate
-**Label (source filter)** input still queries beyond the loaded pages and
-retains each source's CLI semantics. Paging adds matching rows and label
-options; no local label action starts a source read. Empty labels, if emitted,
-are displayed explicitly as `(empty label)`, not treated as Unlabelled.
+before display filtering, not the entire tracker. Selection remains
+visible at zero count after refresh; project or source configuration changes
+reset it. Labels are exact, case-sensitive strings, including commas. The
+separate **Label (loaded rows)** input applies one exact label on submission.
+Paging adds rows and label options without restarting when a filter changes.
+Empty labels, if emitted, are displayed explicitly as `(empty label)`, not
+regarded as Unlabelled.
 
-Kind, label and lifecycle filtering and sorting apply to loaded rows only.
+All task filters and sorting apply to retained rows only and issue no list read.
+Search is a case-insensitive substring match within each loaded ID, reference,
+title, label or assignment. It does not search note, gate or outcome text, unlike
+Engram's server-side search. Search, exact label and availability apply on
+**Apply filters**; kind, lifecycle, label-picker and sorting controls apply
+immediately. Visible selection and scroll position survive display changes
+(subject to the browser's scroll extent when fewer rows remain).
 Lifecycle defaults to Open; Closed includes completed, cancelled and superseded
-work. The existing Updated sort orders those rows newest first. Ready and
-Blocked source filters exclude ended work even when all lifecycles are fetched.
+work. All also includes Proposed. The existing Updated sort orders rows newest
+first. Ready and Blocked include only open work. Only explicit Refresh, a
+project/source identity change or changed-list recovery replaces the snapshot.
 Each row shows muted Last updated metadata beside its labels, in the viewer's
 local time, with the exact source timestamp in its title. Selecting a row opens its
 details beside the list: Engram details need the list's reader key.

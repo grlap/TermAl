@@ -2456,7 +2456,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_get_session_result",
-                "description": "Get the compact result packet for a completed parent-scoped TermAl delegation. For the authoritative untruncated child output, pass outputOffset (start with 0) and outputLimit (256-8192 bytes), then use each nextOffsetBytes value as outputOffset until complete is true.",
+                "description": "Get the compact result packet for a completed parent-scoped TermAl delegation. Worker results include the host-recorded base/worktree and child-reported handoff/test Notes; command statuses and child claims are not host-recorded verification. For the authoritative untruncated child output, pass outputOffset (start with 0) and outputLimit (256-8192 bytes), then use each nextOffsetBytes value as outputOffset until complete is true.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["delegationId"],

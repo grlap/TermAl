@@ -3,6 +3,9 @@
 // Does not fake a fence completion or start a production persistence thread.
 use super::*;
 
+#[path = "test_run_observation_publication.rs"]
+mod observation_publication;
+
 #[test]
 fn registration_ack_waits_for_the_actual_background_sqlite_commit() {
     let mut fixture = FenceFixture::new();

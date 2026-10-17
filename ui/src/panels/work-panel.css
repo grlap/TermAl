@@ -3,6 +3,7 @@
 .message-stack.work-panel-stack { padding: 0; overflow: hidden; }
 .message-stack.work-panel-stack > .work-panel { flex: 1 1 0; min-height: 0; width: 100%; }
 .work-panel p { margin: 0; overflow-wrap: anywhere; }
+.work-results:not([hidden]) { display: contents; }
 .work-panel label { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
 .work-panel input, .work-panel select, .work-panel button { font: inherit; color: var(--ink); background: var(--paper-strong); border: 1px solid var(--line); border-radius: var(--button-radius-tight); padding: 0.35rem 0.5rem; }
 .work-panel input, .work-panel select { max-width: 100%; min-width: 0; }

@@ -1017,16 +1017,14 @@ export function useAppWorkspaceLayout(
     }
 
     pendingFetchedWorkspaceLayoutRef.current = null;
-    if (ignoreFetchedWorkspaceLayoutRef.current) {
-      if (!storagePauseRef.current) applyFetchedPreferences(pendingFetchedWorkspaceLayout, false);
-      workspaceLayoutLoadPendingRef.current = false;
-      setIsWorkspaceLayoutReady(true);
-      finishWorkspaceLayoutStorageRecovery();
-      return;
-    }
-
     try {
-      applyFetchedWorkspaceLayout(pendingFetchedWorkspaceLayout);
+      if (ignoreFetchedWorkspaceLayoutRef.current) {
+        // Ignoring the server tree does not prove local recovery is safe.
+        preservePausedWorkspaceLayout();
+        if (!storagePauseRef.current) applyFetchedPreferences(pendingFetchedWorkspaceLayout, false);
+      } else {
+        applyFetchedWorkspaceLayout(pendingFetchedWorkspaceLayout);
+      }
     } catch (error) {
       if (!(error instanceof WorkspaceLayoutStorageReadError) && !(error instanceof WorkspaceLayoutStorageWriteError)) throw error;
       pauseWorkspaceLayoutStorage(error.message);
@@ -1035,7 +1033,8 @@ export function useAppWorkspaceLayout(
     workspaceLayoutLoadPendingRef.current = false;
     setIsWorkspaceLayoutReady(true);
     finishWorkspaceLayoutStorageRecovery();
-  }, [applyFetchedPreferences, applyFetchedWorkspaceLayout, hasSessions, isSessionStateReady]);
+  }, [applyFetchedPreferences, applyFetchedWorkspaceLayout, hasSessions, isSessionStateReady,
+    preservePausedWorkspaceLayout]);
 
   useEffect(() => {
     if (!isWorkspaceLayoutReady || !isSessionStateReady) {

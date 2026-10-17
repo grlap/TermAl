@@ -195,19 +195,19 @@ describe("Work serial paging", () => {
     expect(readProjectWork).toHaveBeenCalledTimes(60);
   });
 
-  it.each(["Search", "Label (source filter)", "Availability"])("resets paging on %s and rejects the old continuation", async name => {
-    const old = deferred<WorkListResponse>();
-    vi.mocked(readProjectWork).mockResolvedValueOnce(page()).mockReturnValueOnce(old.promise).mockResolvedValueOnce(page(0, 20, "new-"));
+  it.each(["Search", "Label (loaded rows)", "Availability"])("keeps the pending continuation across %s changes", async name => {
+    const next = deferred<WorkListResponse>();
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page()).mockReturnValueOnce(next.promise);
     mount(); await loaded(20);
     const signal = vi.mocked(readProjectWork).mock.calls[1][2];
-    fireEvent.change(screen.getByLabelText(name), { target: { value: name === "Availability" ? "ready" : "changed" } });
+    fireEvent.change(screen.getByLabelText(name), { target: { value: name === "Availability" ? "ready" : name === "Search" ? "Task 2" : "topic" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await screen.findByRole("button", { name: "new-0 — Task 0" });
-    expect(signal.aborted).toBe(true);
-    await act(async () => old.resolve(page(20)));
-    expect(screen.queryByRole("button", { name: "item-20 — Task 20" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Work list" }).scrollTop).toBe(0);
-    expect(readProjectWork).toHaveBeenCalledTimes(3);
-    expect(vi.mocked(readProjectWork).mock.calls[2][3]).toBeUndefined();
+    expect(signal.aborted).toBe(false);
+    expect(readProjectWork).toHaveBeenCalledTimes(2);
+    await act(async () => next.resolve(page(20)));
+    await loaded(40);
+    expect(screen.getByRole("button", { name: "item-20 — Task 20" })).toBeInTheDocument();
+    if (name === "Search") expect(screen.queryByRole("button", { name: "item-0 — Task 0" })).not.toBeInTheDocument();
+    expect(readProjectWork).toHaveBeenCalledTimes(2);
   });
 });

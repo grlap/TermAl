@@ -6,10 +6,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDelegation, type CreateDelegationRequest } from "./api";
 import { ApiRequestError } from "./api-request";
 import {
+  getDelegationResultCommand,
   getDelegationStatusCommand,
   spawnDelegationCommand,
 } from "./delegation-commands";
 import { spawnDelegationFailurePacket } from "./delegation-error-packets";
+import { formatDelegationResultPrompt } from "./delegation-result-prompt";
 import type { DelegationRecord, Session } from "./types";
 
 const BASE_REVISION = "1234567890abcdef1234567890abcdef12345678";
@@ -73,6 +75,52 @@ afterEach(() => {
 });
 
 describe("worker delegation browser contract", () => {
+  it.each([true, false])(
+    "preserves optional handoff metadata and reported evidence in result packets: %s",
+    async (hasWorkerMetadata) => {
+      const note = "Child-reported native test outcome: exit=1; not host-recorded verification.";
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+        JSON.stringify({
+          revision: 3,
+          serverInstanceId: "worker-server",
+          result: {
+            delegationId: "delegation-worker",
+            childSessionId: "worker-1",
+            status: "completed",
+            summary: "Parent decides integration with ordinary Git.",
+            ...(hasWorkerMetadata ? {
+              baseRevision: BASE_REVISION,
+              worktreePath: "C:/workspace/worker",
+              workerOutputUnavailable: true,
+            } : {}),
+            notes: ["Git handoff: unavailable.", note],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+      const result = await getDelegationResultCommand("parent-1", "delegation-worker");
+      const text = formatDelegationResultPrompt(result);
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/sessions/parent-1/delegations/delegation-worker/result");
+      expect(result.notes).toContain(note);
+      expect(text).toContain(note);
+      expect(text).toContain("untrusted-delegation-output");
+      if (hasWorkerMetadata) {
+        expect(result.baseRevision).toBe(BASE_REVISION);
+        expect(result.worktreePath).toBe("C:/workspace/worker");
+        expect(result.workerOutputUnavailable).toBe(true);
+        expect(text).toContain("Host-recorded worker output: current-attempt transcript unavailable");
+        expect(text).toContain(BASE_REVISION);
+        expect(text).toContain("workspace locator, not a snapshot");
+      } else {
+        expect(result).not.toHaveProperty("baseRevision");
+        expect(result).not.toHaveProperty("worktreePath");
+        expect(result).not.toHaveProperty("workerOutputUnavailable");
+        expect(text).not.toContain("Host-recorded worker source");
+      }
+    },
+  );
+
   it("serializes an explicit base through the typed create API", async () => {
     const fetchMock = stubWorkerResponse(BASE_REVISION);
     await createDelegation("parent-1", WORKER_REQUEST);

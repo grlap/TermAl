@@ -1108,12 +1108,21 @@ impl AppState {
             if !delegation_is_terminal(delegation.status) || delegation.result.is_none() {
                 return Err(ApiError::conflict("delegation result is not available yet"));
             }
-            let transcript_output = inner
-                .find_session_index(&delegation.child_session_id)
-                .and_then(|child_index| inner.sessions.get(child_index))
-                .and_then(|child| {
-                    delegation_child_authoritative_output(&child.session, delegation.status)
-                });
+            let unavailable_worker_output = delegation.mode == DelegationMode::Worker
+                && delegation
+                    .result
+                    .as_ref()
+                    .is_some_and(|result| result.worker_output_unavailable == Some(true));
+            let transcript_output = if unavailable_worker_output {
+                None
+            } else {
+                inner
+                    .find_session_index(&delegation.child_session_id)
+                    .and_then(|child_index| inner.sessions.get(child_index))
+                    .and_then(|child| {
+                        delegation_child_authoritative_output(&child.session, delegation.status)
+                    })
+            };
             let (output, summary_fallback) = match transcript_output {
                 Some(output) => (output, false),
                 None => (
@@ -2524,6 +2533,10 @@ Final answer requirements:\n\
         write_policy,
         record.prompt,
     );
+    if record.mode == DelegationMode::Worker {
+        prompt.push_str("\n\n");
+        prompt.push_str(&worker_handoff_prompt(record));
+    }
     if record.mode == DelegationMode::Reviewer {
         prompt.push_str("\n\n");
         prompt.push_str(DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS.trim());
@@ -3120,6 +3133,15 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         notes
     );
     if let Some(result) = result.filter(|result| {
+        result.base_revision.is_some() || result.worktree_path.is_some()
+    }) {
+        section.push_str(&format!(
+            "\n\nHost-recorded worker source (workspace locator, not a snapshot):\nBase revision: `{}`\nWorktree path: `{}`",
+            result.base_revision.as_deref().unwrap_or("unavailable"),
+            result.worktree_path.as_deref().unwrap_or("unavailable"),
+        ));
+    }
+    if let Some(result) = result.filter(|result| {
         !result.observed_workspace_changes.is_empty()
             || result.observed_workspace_changes_omitted > 0
     }) {
@@ -3427,6 +3449,9 @@ fn refresh_delegation_from_child_locked(
                     ));
                 }
                 let mut result = DelegationResult {
+                    base_revision: None,
+                    worktree_path: None,
+                    worker_output_unavailable: None,
                     reviewer_mcp_observations: Vec::new(),
                     delegation_id: delegation.id.clone(),
                     child_session_id: delegation.child_session_id.clone(),
@@ -3478,6 +3503,9 @@ fn refresh_delegation_from_child_locked(
                 });
             }
             let mut result = DelegationResult {
+                base_revision: None,
+                worktree_path: None,
+                worker_output_unavailable: None,
                 reviewer_mcp_observations: Vec::new(),
                 delegation_id: delegation.id.clone(),
                 child_session_id: delegation.child_session_id.clone(),
@@ -3861,6 +3889,9 @@ fn mark_delegation_failed_locked(
         })
         .unwrap_or_default();
     let mut result = DelegationResult {
+        base_revision: None,
+        worktree_path: None,
+        worker_output_unavailable: None,
         reviewer_mcp_observations: Vec::new(),
         delegation_id: delegation.id.clone(),
         child_session_id: delegation.child_session_id.clone(),
@@ -3919,6 +3950,9 @@ fn mark_delegation_canceled_locked(
     let raw_summary = reason.as_deref().unwrap_or("Delegation canceled.");
     let public_summary = compact_delegation_public_summary(raw_summary);
     let mut result = DelegationResult {
+        base_revision: None,
+        worktree_path: None,
+        worker_output_unavailable: None,
         reviewer_mcp_observations: Vec::new(),
         delegation_id: delegation.id.clone(),
         child_session_id: delegation.child_session_id.clone(),
@@ -5044,6 +5078,10 @@ fn record_delegation_workspace_observations(
     result: &mut DelegationResult,
 ) {
     result.reviewer_mcp_observations = delegation.attempt.reviewer_mcp_observations.clone();
+    if delegation.mode == DelegationMode::Worker {
+        record_worker_handoff(inner, delegation, result);
+        return;
+    }
     if delegation.write_policy != DelegationWritePolicy::ReadOnly {
         return;
     }

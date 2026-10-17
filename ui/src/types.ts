@@ -636,6 +636,11 @@ export type DelegationCommandResult = {
 export type DelegationResult = {
   delegationId: string;
   childSessionId: string;
+  /** Host-recorded worker source basis; a workspace locator is not a snapshot. */
+  baseRevision?: string;
+  worktreePath?: string;
+  /** Host-owned attribution; true means no current-attempt transcript is available. */
+  workerOutputUnavailable?: boolean;
   status: DelegationStatus;
   summary: string;
   findings?: DelegationFinding[];

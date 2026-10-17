@@ -105,6 +105,19 @@ impl AppState {
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
+        let committed = self.commit_persisted_delta_locked_with_dispatch(inner)?;
+        self.publish_state_locked(inner);
+        Ok(committed)
+    }
+
+    /// Preserves the full commit's persistence disposition and housekeeping
+    /// without building a global snapshot. Publication stays with the caller
+    /// under this same lock. A failed persistence attempt still consumes its
+    /// revision, which a narrow caller can use to expose that factual failure.
+    fn commit_persisted_delta_locked_with_dispatch(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<(u64, PersistDispatch)> {
         inner.retain_hidden_source_observation_sessions();
         let (revision, dispatch) = self.bump_revision_and_persist_locked_with_dispatch(inner)?;
         // Dirty settings markers arise only when the disconnected-channel
@@ -122,7 +135,6 @@ impl AppState {
             // regardless of which later commit supplied the retry.
             inner.remote_delta_persist_dirty = false;
         }
-        self.publish_state_locked(inner);
         Ok((revision, dispatch))
     }
 

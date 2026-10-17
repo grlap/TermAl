@@ -13,6 +13,9 @@ import type { DelegationResultPacket } from "./delegation-result-types";
 export type DelegationPromptResult = Pick<
   DelegationResultPacket,
   | "childSessionId"
+  | "baseRevision"
+  | "worktreePath"
+  | "workerOutputUnavailable"
   | "status"
   | "summary"
   | "findings"
@@ -87,6 +90,20 @@ export function formatDelegationResultPrompt(result: DelegationPromptResult) {
     normalizeMultiline(result.summary, "No summary provided."),
   ];
   const findings = result.findings ?? [];
+  if (result.workerOutputUnavailable === true) {
+    bodySections.push(
+      "",
+      "Host-recorded worker output: current-attempt transcript unavailable.",
+    );
+  }
+  if (result.baseRevision !== undefined || result.worktreePath !== undefined) {
+    bodySections.push(
+      "",
+      "Host-recorded worker source (workspace locator, not a snapshot):",
+      `Base revision: ${result.baseRevision ?? "unavailable"}`,
+      `Worktree path: ${result.worktreePath ?? "unavailable"}`,
+    );
+  }
   if (findings.length > 0) {
     bodySections.push("", "Findings:", ...findings.map(formatFinding));
   }

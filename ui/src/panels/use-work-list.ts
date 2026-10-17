@@ -1,8 +1,8 @@
 // New Work list lifetime and pagination owner. Does not render rows or change
-// source data. Abort plus generation fencing rejects late project/filter reads.
+// source data. Display filters never own or restart a loading generation.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../api-request";
-import { readProjectWork, type WorkFilters, type WorkListResponse } from "../work-visualizer-api";
+import { readProjectWork, type WorkListResponse } from "../work-visualizer-api";
 
 export type WorkListResult = WorkListResponse;
 
@@ -15,7 +15,7 @@ function withoutEngramGeneration(previous: WorkListResult | null, message: strin
   };
 }
 
-export function useWorkList(projectId: string, filters: WorkFilters) {
+export function useWorkList(projectId: string) {
   const [result, setResult] = useState<WorkListResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -23,7 +23,6 @@ export function useWorkList(projectId: string, filters: WorkFilters) {
   const [refresh, setRefresh] = useState(0);
   const owner = useRef<{ controller: AbortController; busy: boolean; failed: boolean } | null>(null);
   const current = useRef<WorkListResult | null>(null);
-  const { search, label, availability } = filters;
 
   const load = useCallback(async (identity: NonNullable<typeof owner.current>, more: boolean, retry = false) => {
     if (identity.busy || identity.controller.signal.aborted || (identity.failed && !retry)) return;
@@ -31,7 +30,7 @@ export function useWorkList(projectId: string, filters: WorkFilters) {
     if (more && (!previous?.page?.more || !previous.page.after || !previous.readerId)) return;
     identity.busy = true; identity.failed = false; setBusy(true); setError(null);
     try {
-      let next: WorkListResult = await readProjectWork(projectId, { search, label, availability }, identity.controller.signal,
+      let next: WorkListResult = await readProjectWork(projectId, { search: "", label: "", availability: "" }, identity.controller.signal,
         more ? { after: previous!.page!.after!, readerId: previous!.readerId! } : undefined);
       if (owner.current !== identity || identity.controller.signal.aborted) return;
       if (more) {
@@ -68,7 +67,7 @@ export function useWorkList(projectId: string, filters: WorkFilters) {
       identity.busy = false;
       if (owner.current === identity && !identity.controller.signal.aborted) setBusy(false);
     }
-  }, [projectId, search, label, availability]);
+  }, [projectId]);
 
   useEffect(() => {
     const identity = { controller: new AbortController(), busy: false, failed: false };

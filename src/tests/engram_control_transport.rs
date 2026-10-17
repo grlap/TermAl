@@ -581,14 +581,19 @@ impl EngramDescendantReady {
             "control descendant started and process probe acquired",
         )
     }
+
+    /// Unblocks the fixture listener when no descendant will be launched.
+    pub(super) fn cancel_pending(&self) {
+        if let Ok(mut stream) = std::net::TcpStream::connect(self.address) {
+            let _ = stream.write_all(&0_u32.to_be_bytes());
+        }
+    }
 }
 
 impl Drop for EngramDescendantReady {
     fn drop(&mut self) {
         // Unblock accept if startup failed before a descendant connected.
-        if let Ok(mut stream) = std::net::TcpStream::connect(self.address) {
-            let _ = stream.write_all(&0_u32.to_be_bytes());
-        }
+        self.cancel_pending();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }

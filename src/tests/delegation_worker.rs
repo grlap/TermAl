@@ -5,19 +5,19 @@
 use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::*;
 
-struct WorkerFixture {
-    state: AppState,
-    input_rx: mpsc::Receiver<CodexRuntimeCommand>,
-    parent: String,
-    source: PathBuf,
-    worktree: PathBuf,
+pub(super) struct WorkerFixture {
+    pub(super) state: AppState,
+    pub(super) input_rx: mpsc::Receiver<CodexRuntimeCommand>,
+    pub(super) parent: String,
+    pub(super) source: PathBuf,
+    pub(super) worktree: PathBuf,
     base: String,
     tip: String,
     _root: TestTempRoot,
 }
 
 impl WorkerFixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let _placement = TestTempRootDirectoryScope::repository_local();
         let root = TestTempRoot::create("delegation-worker");
         let source = root.path().join("source");
@@ -65,7 +65,7 @@ impl WorkerFixture {
         }
     }
 
-    fn isolated_policy(&self, base: Option<&str>) -> Value {
+    pub(super) fn isolated_policy(&self, base: Option<&str>) -> Value {
         let mut policy = json!({
             "kind": "isolatedWorktree",
             "ownedPaths": [],
@@ -77,7 +77,7 @@ impl WorkerFixture {
         policy
     }
 
-    async fn spawn(&self, mode: &str, policy: Value) -> (StatusCode, Value) {
+    pub(super) async fn spawn(&self, mode: &str, policy: Value) -> (StatusCode, Value) {
         let response = app_router(self.state.clone())
             .oneshot(
                 Request::builder()

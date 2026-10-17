@@ -394,6 +394,13 @@ fn run_engram_diagnostic_args_until(
     doctor_timeout: Duration,
     host_workdir: &FsPath,
 ) -> std::result::Result<std::process::Output, ApiError> {
+    // Only registered test fixtures separate startup from the measured budget.
+    // These bindings are absent from production builds.
+    #[cfg(test)]
+    let fixture_deadline = test_engram_doctor_deadline_state(home, diagnostic);
+    #[cfg(test)]
+    let deadline =
+        test_engram_doctor_fixture_startup_deadline(fixture_deadline.as_deref(), deadline);
     if std::time::Instant::now() >= deadline {
         return Err(ApiError::bad_request(format!(
             "Engram {diagnostic} exceeded the {} second enablement deadline before process launch",
@@ -485,10 +492,25 @@ fn run_engram_diagnostic_args_until(
     })?;
     let stdout_reader = start_engram_doctor_reader(stdout, "stdout");
     let stderr_reader = start_engram_doctor_reader(stderr, "stderr");
-    // Test seam: a registered home's launch has outlasted its budget the
-    // moment it resumes, whether or not the child has already exited (on
-    // Unix it is not held suspended). Same cleanup and error as the expiry
-    // branch below (src/engram_readiness_test_seam.rs).
+    // The real fixture must publish descendant/probe readiness before its
+    // test-only budget is armed. No registry lock is held while waiting.
+    #[cfg(test)]
+    let deadline = match test_engram_doctor_fixture_armed_deadline(
+        fixture_deadline.as_deref(),
+        deadline,
+        doctor_timeout,
+    ) {
+        Ok(deadline) => deadline,
+        Err(error) => {
+            stop_engram_doctor_before_reap(&process_tree, &process);
+            wait_for_test_engram_expired_child(&process);
+            return Err(error);
+        }
+    };
+    // Test seam: a registered launch outlasted its budget upon resumption
+    // (or, for armed doctor-tree fixtures, at the first measured observation).
+    // Apply the same cleanup/error even if the child has already exited;
+    // Unix does not suspend it (src/engram_readiness_test_seam.rs).
     #[cfg(test)]
     if test_engram_diagnostic_launch_expired(home) {
         stop_engram_doctor_before_reap(&process_tree, &process);

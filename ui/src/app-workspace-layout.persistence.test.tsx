@@ -409,7 +409,7 @@ it("retries unchanged storage-paused hydration and still restores the server lay
 
 // Stateful recovery fixtures exercise both the rendered tree and the eventual
 // PUT. Merely checking that an adoption setter was skipped misses prune effects.
-function recoveryFixture(sessionReady = true) {
+function recoveryFixture(sessionReady = true, storageBlocked = true) {
   const params = paramsForLocalWorkspace();
   const available = [makeSession("session-1"), makeSession("session-2")];
   params.sessionsRef.current = sessionReady ? available : [];
@@ -418,7 +418,7 @@ function recoveryFixture(sessionReady = true) {
   } } as api.WorkspaceLayoutResponse;
   const fetchLayout = vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue(response);
   const read = window.localStorage.getItem.bind(window.localStorage);
-  let blocked = true;
+  let blocked = storageBlocked;
   vi.spyOn(window.localStorage, "getItem").mockImplementation((key) => {
     if (blocked && key.endsWith(`:${params.workspaceViewId}`)) throw new Error("Blocked recovery read");
     return read(key);
@@ -429,7 +429,8 @@ function recoveryFixture(sessionReady = true) {
       sessions: ready ? available : [], isSessionStateReady: ready });
     return { ...state, current, setCurrent };
   }, { initialProps: { ready: sessionReady } });
-  return { params, available, response, fetchLayout, hook, unblock: () => { blocked = false; } };
+  return { params, available, response, fetchLayout, hook,
+    unblock: () => { blocked = false; }, block: () => { blocked = true; } };
 }
 
 function addRecoveryTab(current: WorkspaceState) {
@@ -462,6 +463,99 @@ it.each([false, true])("preserves edits throughout a retry including deferred ad
   expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(f.params.workspaceViewId,
     expect.objectContaining({ workspace: edited }), undefined);
   expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+});
+
+it.each(["read", "write"] as const)("keeps ignored deferred recovery paused after a storage %s failure", async (failure) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture(false);
+  await act(async () => {});
+  expect(f.hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  f.unblock();
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(true);
+  expect(f.hook.result.current.workspaceLayoutLoadPendingRef.current).toBe(true);
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
+
+  // Model the manual-layout ownership contract used by split resizing while
+  // the fetched layout is waiting for session metadata.
+  act(() => {
+    f.hook.result.current.ignoreFetchedWorkspaceLayoutRef.current = true;
+    f.hook.result.current.setCurrent(addRecoveryTab);
+  });
+  const edited = f.hook.result.current.current;
+  const write = window.localStorage.setItem.bind(window.localStorage);
+  const writes = vi.spyOn(window.localStorage, "setItem").mockImplementation((key, value) => {
+    if (failure === "write" && key.endsWith(`:${f.params.workspaceViewId}`)) {
+      throw new DOMException("No storage space", "QuotaExceededError");
+    }
+    write(key, value);
+  });
+  if (failure === "read") f.block();
+  f.params.sessionsRef.current = f.available;
+  f.hook.rerender({ ready: true });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  act(() => window.dispatchEvent(new Event("pagehide")));
+
+  expect.soft(f.hook.result.current.current).toEqual(edited);
+  expect.soft(f.hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  expect.soft(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect.soft(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  expect.soft(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  if (failure === "read") {
+    expect.soft(writes.mock.calls.filter(([key]) => key.endsWith(`:${f.params.workspaceViewId}`))).toEqual([]);
+  }
+
+  f.unblock();
+  writes.mockRestore();
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(f.hook.result.current.current).toEqual(edited);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(api.saveWorkspaceLayout).toHaveBeenCalledOnce();
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(f.params.workspaceViewId,
+    expect.objectContaining({ workspace: edited }), undefined);
+  expect(createInitialWorkspaceBootstrap(f.params.workspaceViewId).workspace).toEqual(edited);
+});
+
+it.each([false, true])("completes ignored deferred hydration with manual layout ownership (recovery=%s)", async (recovery) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture(false, recovery);
+  f.response.layout.controlPanelSide = "right";
+  f.response.layout.fontSizePx = 22;
+  await act(async () => {});
+  if (recovery) {
+    expect(f.hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+    f.unblock();
+    act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+    await act(async () => {});
+  }
+  expect(f.hook.result.current.workspaceLayoutLoadPendingRef.current).toBe(true);
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  act(() => {
+    f.hook.result.current.ignoreFetchedWorkspaceLayoutRef.current = true;
+    f.hook.result.current.setCurrent(addRecoveryTab);
+  });
+  const edited = f.hook.result.current.current;
+  f.params.sessionsRef.current = f.available;
+  f.hook.rerender({ ready: true });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+
+  expect(f.hook.result.current.current).toEqual(edited);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(f.params.setControlPanelSide).not.toHaveBeenCalled();
+  if (recovery) {
+    expect(f.params.setPreferences.setFontSizePx).not.toHaveBeenCalled();
+  } else {
+    expect(f.params.setPreferences.setFontSizePx).toHaveBeenCalledWith(22);
+  }
+  expect(api.saveWorkspaceLayout).toHaveBeenCalledOnce();
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(f.params.workspaceViewId,
+    expect.objectContaining({ workspace: edited, controlPanelSide: "left" }), undefined);
 });
 
 it.each([false, true])("keeps failed adoption writes paused and can recover (deferred=%s)", async (deferred) => {

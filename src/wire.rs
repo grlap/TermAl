@@ -1413,6 +1413,15 @@ impl<'de> serde::Deserialize<'de> for DelegationWritePolicy {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResult {
+    /// Host-recorded worker source metadata, not a child claim or diff snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    worktree_path: Option<String>,
+    /// Host-owned Worker transcript attribution. True means there is no
+    /// attributable current-attempt transcript; absent on legacy results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    worker_output_unavailable: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reviewer_mcp_observations: Vec<CodexReviewerMcpObservation>,
     delegation_id: String,
@@ -2092,8 +2101,8 @@ struct DelegationResultOutputResponse {
     next_offset_bytes: Option<usize>,
     total_bytes: usize,
     complete: bool,
-    /// True only when the child transcript no longer contains an assistant
-    /// candidate and the compact result summary had to be used instead.
+    /// True when no current-attempt assistant output can be attributed and
+    /// the compact result summary had to be used instead.
     summary_fallback: bool,
     #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,

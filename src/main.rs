@@ -794,6 +794,8 @@ include!("engram_readiness.rs");
 #[cfg(test)]
 include!("engram_readiness_test_seam.rs");
 #[cfg(test)]
+include!("engram_doctor_deadline_test_seam.rs");
+#[cfg(test)]
 include!("engram_test_child_temp.rs");
 #[cfg(test)]
 include!("terminal_test_child_temp.rs");
@@ -923,6 +925,7 @@ include!("state_boot.rs");
 include!("state_inner.rs");
 include!("delegations.rs");
 include!("delegation_worker.rs");
+include!("delegation_worker_handoff.rs");
 include!("delegation_attempt_state.rs");
 include!("delegation_followup_admission.rs");
 include!("delegation_result_parser.rs");
