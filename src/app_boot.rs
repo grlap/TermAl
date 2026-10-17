@@ -894,5 +894,10 @@ impl AppState {
             eprintln!("orchestrator> failed resuming pending transitions: {err:#}");
         }
         self.dispatch_orphaned_workflow_prompts();
+        // The handoff watchdog starts only after the boot reconcile above, so
+        // its first pass cannot race it; that first pass is the ledger's own
+        // boot reconcile (a changed claim, a lost offer prompt).
+        #[cfg(not(test))]
+        self.spawn_handoff_watchdog();
     }
 }

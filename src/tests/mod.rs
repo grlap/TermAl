@@ -110,6 +110,7 @@ mod persist;
 mod persist_delta;
 mod persist_fence;
 mod queued_prompt_durability;
+mod handoffs;
 mod prompt_delivery;
 mod prompt_delivery_codex_write;
 mod project_creation_races;
