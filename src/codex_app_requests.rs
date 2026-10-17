@@ -38,6 +38,59 @@ struct DescribedCodexApprovalRequest {
     pending: CodexPendingApproval,
 }
 
+/// Codex marks its own tool-call permission prompts explicitly. An empty
+/// server form alone is not permission to answer a genuine elicitation.
+fn codex_mcp_request_is_tool_approval(request: &McpElicitationRequestPayload) -> bool {
+    let McpElicitationRequestMode::Form {
+        meta: Some(meta),
+        requested_schema,
+        ..
+    } = &request.mode
+    else {
+        return false;
+    };
+    meta.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
+        && requested_schema.as_object().is_some_and(|schema| {
+            schema.keys().all(|key| {
+                matches!(
+                    key.as_str(),
+                    "type" | "properties" | "required" | "additionalProperties" | "$schema"
+                )
+            })
+        })
+        && requested_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_some_and(|properties| properties.is_empty())
+        && requested_schema
+            .get("required")
+            .is_none_or(|required| required.as_array().is_some_and(|fields| fields.is_empty()))
+        && validate_codex_mcp_elicitation_form_content(request, json!({})).is_ok()
+}
+
+fn parse_codex_mcp_tool_approval(
+    method: &str,
+    message: &Value,
+) -> Option<(Value, McpElicitationRequestPayload)> {
+    if method != "mcpServer/elicitation/request" {
+        return None;
+    }
+    let request =
+        serde_json::from_value::<McpElicitationRequestPayload>(message.get("params")?.clone())
+            .ok()?;
+    if !codex_mcp_request_is_tool_approval(&request) {
+        return None;
+    }
+    Some((message.get("id")?.clone(), request))
+}
+
+fn codex_mcp_tool_approval_result(action: McpElicitationAction) -> Value {
+    // No persist/session/always selection: host policy applies to one call.
+    json!({ "action": action, "content": if action == McpElicitationAction::Accept {
+        Some(json!({}))
+    } else { None } })
+}
+
 /// Parses the three Codex approval request shapes shared by the interactive
 /// recorder path and TermAl's AutoApprove response path. Non-approval methods
 /// return `None` without inspecting their payload.

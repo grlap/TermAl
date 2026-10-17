@@ -31,6 +31,39 @@
 use super::*;
 
 #[test]
+fn repl_codex_auto_approve_answers_only_tagged_empty_mcp_approvals() {
+    let message = json!({"id":"repl-mcp", "params":{
+        "threadId":"repl-thread", "serverName":"routine-tools", "mode":"form",
+        "message":"Approve call?", "requestedSchema":{"type":"object","properties":{}},
+        "_meta":{"codex_approval_kind":"mcp_tool_call", "persist":["session","always"]}
+    }});
+    let mut recorder = TestRecorder::default();
+    let mut writer = Vec::new();
+    handle_repl_codex_app_server_request(
+        "mcpServer/elicitation/request",
+        &message,
+        &mut writer,
+        &mut recorder,
+        CodexApprovalPolicy::AutoApprove,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&writer).unwrap(),
+        json!({
+            "jsonrpc":"2.0", "id":"repl-mcp", "result":{"action":"accept","content":{}}
+        })
+    );
+    assert!(recorder.texts.is_empty());
+    let mut genuine = message.clone();
+    genuine["params"].as_object_mut().unwrap().remove("_meta");
+    assert!(parse_codex_mcp_tool_approval("mcpServer/elicitation/request", &genuine).is_none());
+    genuine["params"]["_meta"] = message["params"]["_meta"].clone();
+    genuine["params"]["requestedSchema"] = json!({"type":"object",
+        "properties":{"answer":{"type":"string"}}});
+    assert!(parse_codex_mcp_tool_approval("mcpServer/elicitation/request", &genuine).is_none());
+}
+
+#[test]
 fn repl_codex_auto_approve_answers_without_prompting_or_recording_a_card() {
     let mut recorder = TestRecorder::default();
     let mut writer = Vec::new();

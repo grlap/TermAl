@@ -127,27 +127,77 @@ is introduced.
 
 ## Approval policy ownership
 
-Codex's `never` policy is native: Codex decides not to emit approval requests.
-TermAl's `auto-approve` policy is intentionally different. It is persisted and
-shown as its own session setting, but TermAl sends native `on-request` at
-`thread/start` / `thread/resume` and `turn/start` so the app-server emits the
-request. The shared event router then immediately answers only these methods:
+Codex's approval setting and TermAl's host approval policy are separate.
+Host `auto-approve` is persisted and displayed as its own setting, and sends
+native `on-request` at `thread/start`, `thread/resume` and `turn/start`. Codex
+still requests permission; TermAl decides and answers it. Native `never` is not
+the implementation of host AutoApprove: it can deny an action rather than
+offering the host an approval decision. Its existing behavior is unchanged.
+
+Command, file and permissions approvals, including sandbox-escalation requests,
+continue to receive the host's existing decisions. The new behavior is that
+tagged routine MCP permissions are also answered, not that sandbox permissions
+are suppressed or widened. The shared event router handles these methods under
+the current host policy:
 
 - `item/commandExecution/requestApproval`
 - `item/fileChange/requestApproval`
 - `item/permissions/requestApproval`
+- `mcpServer/elicitation/request` **only** for form-mode requests explicitly
+  tagged `_meta.codex_approval_kind = "mcp_tool_call"`, with an empty approval
+  schema that validates empty content. An empty unmarked form is not a tool
+  approval. Unknown markers, URL elicitations and forms with input fields are
+  not automatically answered.
 
 The response is the ordinary one-turn acceptance shape (`accept`, or requested
-permissions with `scope: "turn"`). The active turn's recorded policy is
-authoritative; changing the next-turn setting while a turn is running cannot
-change its behavior. No pending approval or transcript card is created for an
-automatic response. User input, MCP elicitation, and generic app-server requests
-continue through their interactive handlers.
+permissions with `scope: "turn"`); a tool permission receives
+`{"action":"accept","content":{}}`, without a session/always persistence
+selection. The host reads the current session policy at request time, for
+ordinary approvals and routine MCP permissions. Switching to AutoApprove
+mid-turn enables automatic answers immediately; switching back to `on-request`
+or `never` stops them immediately. Native parameters already sent at `turn/start`
+are not changed: their next-turn contract remains intact. No pending approval
+or transcript card is created for an
+automatic response. Genuine user input, form/URL elicitation and generic
+app-server requests continue through their interactive handlers. The REPL uses
+the same routine-tool classifier.
 
-Read-only delegation authority is checked under the same state lock as the active
+A pending next-turn runtime reset does not cancel approval requests in the
+still-current turn: routine MCP and ordinary approvals use the current host
+policy. Stop, unresolved turn ownership and stale runtimes remain guards;
+routine MCP replies additionally require Active/Approval status and available
+runtime projection.
+
+Read-only delegation authority is checked under the same state lock as the current
 approval policy. It overrides AutoApprove and produces the ordinary decline shape
-for all three request kinds. This is the write guard on platforms where a
+for ordinary approval kinds and `decline` for non-exempt MCP permissions.
+Existing narrow, backend-authorized delegation control-plane exceptions remain
+unchanged. This is the write guard on platforms where a
 read-only reviewer may intentionally use a permissive native sandbox.
+
+### Recovering an already pending routine tool permission
+
+An operator can explicitly select or reselect
+`auto-approve` through `POST /api/sessions/{id}/settings` with
+`{"approvalPolicy":"auto-approve"}`. This applies host policy to that session's
+currently pending, tagged routine tool approvals from a live `on-request`,
+`untrusted` or `on-failure` turn, or repeats the same sweep for AutoApprove.
+Genuine forms and user questions remain pending. Replies are once per live
+request; the resolved audit cards are persisted and published as message updates.
+Stop/reset, unresolved ownership, attachment, thread/turn and generation guards
+still apply; a failed response handoff does not mark a request resolved.
+Subsequent requests in that same turn use the current host policy too, so no
+reselection is needed for each new routine call. Native turn parameters are
+not replaced. A turn begun under `never` is
+not eligible for this sweep.
+
+This is explicit recovery consent, not a startup sweep: selecting `never`,
+editing another setting, or merely loading a saved `auto-approve` setting does
+not answer pending requests. Native runtime settings still take effect on the
+**next turn**, so changing a setting alone does not reconfigure an already
+running Codex turn. No live sessions are switched automatically by this change.
+Pending requests and their runtime do not survive a host restart; recovering
+requests from an older host process is outside this live-transition path.
 
 ## Two identities: process vs attachment
 

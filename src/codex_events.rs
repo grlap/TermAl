@@ -155,43 +155,80 @@ fn try_auto_respond_delegation_control_plane_request(
     Ok(true)
 }
 
-/// Answers Codex's three approval request methods when the active turn is
-/// running under TermAl's AutoApprove policy. Read-only delegation children
-/// fail closed with the same decline payloads used by the interactive path;
-/// all other request families remain interactive.
+fn codex_approval_ownership_held(record: &SessionRecord) -> bool {
+    record.runtime_stop_in_progress || record.codex_terminal_identity_unresolved
+}
+
+/// Answers ordinary approvals and explicitly tagged routine MCP permissions
+/// under the current host policy. Genuine input remains interactive. Keep the
+/// policy/delegation/Stop decision and response handoff under one state lock.
 fn try_auto_respond_codex_approval_request(
     method: &str,
     message: &Value,
     state: &AppState,
     session_id: &str,
+    expected_runtime_id: Option<&str>,
+    shared_terminal_identity_unresolved: bool,
     input_tx: &Sender<CodexRuntimeCommand>,
 ) -> Result<bool> {
-    let Some(described) = parse_codex_approval_request(method, message)? else {
-        return Ok(false);
-    };
-    let Some((approval_policy, read_only_delegation)) =
-        state.active_codex_approval_context(session_id)?
-    else {
-        return Ok(false);
-    };
-    if approval_policy != CodexApprovalPolicy::AutoApprove {
+    let described = parse_codex_approval_request(method, message)?;
+    let mcp = parse_codex_mcp_tool_approval(method, message);
+    if described.is_none() && mcp.is_none() {
         return Ok(false);
     }
-
-    let decision = if read_only_delegation {
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let Some(index) = inner.find_visible_session_index(session_id) else {
+        return Ok(false);
+    };
+    let record = &inner.sessions[index];
+    if record.codex_approval_policy != CodexApprovalPolicy::AutoApprove {
+        return Ok(false);
+    }
+    let read_only_delegation =
+        read_only_session_delegation_block_locked(&inner, Some(session_id)).is_some();
+    let unavailable = codex_approval_ownership_held(record)
+        || shared_terminal_identity_unresolved
+        || expected_runtime_id.is_some_and(|id| {
+            !record
+                .runtime
+                .matches_runtime_token(&RuntimeToken::Codex(id.to_owned()))
+        })
+        // A next-turn reset does not revoke current ordinary or MCP approvals.
+        // Only actual lifecycle/ownership unavailability prevents the answer.
+        || (mcp.is_some()
+            && (!record.runtime_projection_allowed()
+                || !matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Approval
+                )));
+    let decision = if read_only_delegation || unavailable {
         ApprovalDecision::Rejected
     } else {
         ApprovalDecision::Accepted
     };
-    let result = codex_approval_result(&described.pending.kind, decision);
-    let request_id = described.pending.request_id;
+    let (request_id, result) = if let Some(described) = described {
+        (
+            described.pending.request_id,
+            codex_approval_result(&described.pending.kind, decision),
+        )
+    } else {
+        let (request_id, _) = mcp.expect("classified MCP permission");
+        let action = if unavailable {
+            McpElicitationAction::Cancel
+        } else if read_only_delegation {
+            McpElicitationAction::Decline
+        } else {
+            McpElicitationAction::Accept
+        };
+        (request_id, codex_mcp_tool_approval_result(action))
+    };
     eprintln!(
         "shared-codex auto-approval> session={} kind={} request_id={} decision={}",
         session_id,
         method,
         request_id,
-        if read_only_delegation {
-            "declined-read-only"
+        if read_only_delegation || unavailable {
+            "declined"
         } else {
             "accepted"
         },
@@ -522,6 +559,7 @@ fn handle_shared_codex_app_server_message(
         turn_id,
         completed_turn_id,
         turn_started,
+        terminal_identity_unresolved,
         turn_state,
         reviewer_mcp_gate: _,
         ..
@@ -630,7 +668,15 @@ fn handle_shared_codex_app_server_message(
         )? {
             return Ok(());
         }
-        if try_auto_respond_codex_approval_request(method, message, state, &session_id, input_tx)? {
+        if try_auto_respond_codex_approval_request(
+            method,
+            message,
+            state,
+            &session_id,
+            Some(runtime_id),
+            *terminal_identity_unresolved,
+            input_tx,
+        )? {
             return Ok(());
         }
         return handle_codex_app_server_request(method, message, &mut recorder);

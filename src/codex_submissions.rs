@@ -275,6 +275,193 @@ fn interaction_message_update_parts(
 }
 
 impl AppState {
+    /// Explicit AutoApprove selection can answer a live prompting turn's
+    /// existing routine tool requests, without changing that turn's policy.
+    /// Never run this on startup or in response to an incidental settings edit.
+    fn recover_codex_mcp_tool_approvals(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<Option<StateResponse>, ApiError> {
+        let handle = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_visible_session_index(session_id) else {
+                return Ok(None);
+            };
+            let record = &inner.sessions[index];
+            if record.session.approval_policy != Some(CodexApprovalPolicy::AutoApprove)
+                || !record
+                    .pending_codex_mcp_elicitations
+                    .values()
+                    .any(|pending| codex_mcp_request_is_tool_approval(&pending.request))
+            {
+                return Ok(None);
+            }
+            match &record.runtime {
+                SessionRuntime::Codex(handle) => handle.clone(),
+                _ => return Ok(None),
+            }
+        };
+        let Some(shared) = handle.shared_session.as_ref() else {
+            return Ok(None);
+        };
+        // Same order as the event router: shared sessions before StateInner.
+        // Hold both through each nonblocking response handoff and card update,
+        // so Stop, replacement and a manual response cannot race the decision.
+        let shared_sessions = shared
+            .runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let Some(turn) = shared_sessions.get(session_id) else {
+            return Ok(None);
+        };
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_visible_session_index(session_id) else {
+            return Ok(None);
+        };
+        let record = &inner.sessions[index];
+        let current_attachment = matches!(&record.runtime, SessionRuntime::Codex(current)
+            if current.runtime_id == handle.runtime_id
+                && Arc::ptr_eq(&current.process, &handle.process)
+                && current.shared_session.as_ref().is_some_and(|current_shared|
+                    current_shared.session_id == session_id
+                        && Arc::ptr_eq(&current_shared.runtime.sessions, &shared.runtime.sessions)));
+        if !current_attachment
+            || codex_approval_ownership_held(record)
+            || record.runtime_reset_required
+            || !record.runtime_projection_allowed()
+            || !matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            )
+            || record.session.approval_policy != Some(CodexApprovalPolicy::AutoApprove)
+            || !matches!(
+                record.active_codex_approval_policy,
+                Some(
+                    CodexApprovalPolicy::AutoApprove
+                        | CodexApprovalPolicy::OnRequest
+                        | CodexApprovalPolicy::Untrusted
+                        | CodexApprovalPolicy::OnFailure
+                )
+            )
+            || turn.terminal_identity_unresolved
+            || !turn.turn_started
+            || turn.turn_id.is_none()
+            || turn.thread_id.is_none()
+            || turn.thread_id != record.external_session_id
+            || turn.active_turn_generation != Some(record.active_turn_generation)
+        {
+            return Ok(None);
+        }
+        let read_only =
+            read_only_session_delegation_block_locked(&inner, Some(session_id)).is_some();
+        let mut pending: Vec<_> = record
+            .pending_codex_mcp_elicitations
+            .iter()
+            .filter(|(_, pending)| {
+                codex_mcp_request_is_tool_approval(&pending.request)
+                    && Some(&pending.request.thread_id) == turn.thread_id.as_ref()
+                    && pending.request.turn_id.as_ref() == turn.turn_id.as_ref()
+            })
+            .map(|(id, pending)| (id.clone(), pending.clone()))
+            .collect();
+        pending.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut changed = false;
+        for (message_id, pending) in pending {
+            let allowed_exception =
+                delegation_control_plane_capability_for_codex_elicitation(&pending.request)
+                    .is_some_and(|capability| {
+                        delegation_control_plane_capability_allowed_locked(
+                            &inner, session_id, capability,
+                        )
+                    });
+            let action = if read_only && !allowed_exception {
+                McpElicitationAction::Decline
+            } else {
+                McpElicitationAction::Accept
+            };
+            let record = &mut inner.sessions[index];
+            let Some(local_index) = message_index_on_record(record, &message_id) else {
+                continue;
+            };
+            if !matches!(record.session.messages.get(local_index),
+                Some(Message::McpElicitationRequest { state: InteractionRequestState::Pending,
+                    request, .. }) if request == &pending.request)
+            {
+                continue;
+            }
+            handle
+                .input_tx
+                .send(CodexRuntimeCommand::JsonRpcResponse {
+                    response: CodexJsonRpcResponseCommand {
+                        request_id: pending.request_id,
+                        payload: CodexJsonRpcResponsePayload::Result(
+                            codex_mcp_tool_approval_result(action),
+                        ),
+                    },
+                })
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "policy saved, but pending MCP approval could not be delivered: {err}"
+                    ))
+                })?;
+            let record = inner.session_mut_by_index(index).expect("current session");
+            let content = (action == McpElicitationAction::Accept).then(|| json!({}));
+            set_mcp_elicitation_request_state_on_record(
+                record,
+                &message_id,
+                InteractionRequestState::Submitted,
+                Some(action),
+                content,
+            )
+            .map_err(|_| ApiError::internal("pending MCP card changed"))?;
+            record.pending_codex_mcp_elicitations.remove(&message_id);
+            sync_session_interaction_state(
+                record,
+                mcp_elicitation_request_preview_text(
+                    record.session.agent.name(),
+                    InteractionRequestState::Submitted,
+                    Some(action),
+                ),
+            );
+            let (message, message_count, preview, status, stamp) =
+                interaction_message_update_parts(record, local_index, &message_id);
+            let message_index = global_message_index(record, local_index);
+            let session_seq = record.next_body_delta_seq(&message_id);
+            let revision = self
+                .commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist recovered MCP approval: {err:#}"))
+                })?;
+            self.publish_delta_locked(
+                &inner,
+                DeltaEvent::MessageUpdated {
+                    revision,
+                    session_id: session_id.to_owned(),
+                    message_id,
+                    message_index,
+                    message_count,
+                    message,
+                    preview,
+                    status,
+                    session_mutation_stamp: Some(stamp),
+                    session_seq: Some(session_seq),
+                    body_seq_epoch: Some(self.server_instance_id.clone()),
+                },
+            );
+            changed = true;
+        }
+        drop(inner);
+        drop(shared_sessions);
+        if !changed {
+            return Ok(None);
+        }
+        if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+            eprintln!("state warning> failed to refresh delegation after MCP recovery: {err:#}");
+        }
+        Ok(Some(self.summary_snapshot()))
+    }
+
     /// Commits an interaction-card edit and publishes its replacement delta.
     /// The closure must return the in-bounds index of `message_id` after
     /// mutation; violating that contract panics because it is an internal
@@ -828,24 +1015,40 @@ impl AppState {
             (handle, pending, normalized_content)
         };
 
-        handle
-            .input_tx
-            .send(CodexRuntimeCommand::JsonRpcResponse {
-                response: CodexJsonRpcResponseCommand {
-                    request_id: pending.request_id.clone(),
-                    payload: CodexJsonRpcResponsePayload::Result(json!({
-                        "action": action,
-                        "content": normalized_content
-                    })),
-                },
-            })
-            .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to deliver MCP elicitation response to Codex: {err}"
-                ))
-            })?;
-
         self.commit_interaction_message_update(session_id, message_id, |record| {
+            // A recovery action or a second operator submission may have won
+            // since validation. Claim the still-live request and hand off its
+            // one response under the same lock that removes the pending entry.
+            if !record
+                .pending_codex_mcp_elicitations
+                .get(message_id)
+                .is_some_and(|current| {
+                    current.request_id == pending.request_id && current.request == pending.request
+                })
+                || !matches!(&record.runtime, SessionRuntime::Codex(current)
+                    if current.runtime_id == handle.runtime_id
+                        && Arc::ptr_eq(&current.process, &handle.process))
+                || record.runtime_stop_in_progress
+            {
+                return Err(ApiError::conflict(
+                    "MCP elicitation request is no longer live",
+                ));
+            }
+            handle
+                .input_tx
+                .send(CodexRuntimeCommand::JsonRpcResponse {
+                    response: CodexJsonRpcResponseCommand {
+                        request_id: pending.request_id.clone(),
+                        payload: CodexJsonRpcResponsePayload::Result(json!({
+                            "action": action, "content": normalized_content,
+                        })),
+                    },
+                })
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to deliver MCP elicitation response to Codex: {err}"
+                    ))
+                })?;
             let message_index = set_mcp_elicitation_request_state_on_record(
                 record,
                 message_id,

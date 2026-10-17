@@ -4019,17 +4019,383 @@ fn codex_auto_approve_maps_to_native_on_request() {
     );
 }
 
-#[test]
-fn codex_auto_approve_accepts_all_approval_kinds_without_pending_cards() {
+fn codex_auto_approve_mcp_request(tool: &str) -> Value {
+    json!({
+        "id": tool,
+        "method": "mcpServer/elicitation/request",
+        "params": {
+            "threadId": "auto-approve-thread",
+            "turnId": "auto-approve-turn",
+            "serverName": "routine-tools",
+            "mode": "form",
+            "message": "Approve tool call?",
+            "requestedSchema": { "type": "object", "properties": {} },
+            "_meta": {
+                "codex_approval_kind": "mcp_tool_call",
+                "persist": ["session", "always"],
+                "tool_description": tool,
+                "tool_params": {}
+            }
+        }
+    })
+}
+
+fn exercise_codex_auto_approve_mcp_route(read_only: bool, guard: Option<&str>) {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    // The active turn owns the decision even if the mutable next-turn setting
-    // has already changed.
+    if read_only {
+        install_read_only_codex_delegation(&state, &session_id);
+    }
+    let (runtime, input_rx, process) = test_shared_codex_runtime("auto-approve-mcp-route");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[index];
+        record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        record.session.status = SessionStatus::Active;
+        record.active_codex_approval_policy = Some(CodexApprovalPolicy::AutoApprove);
+        record.codex_approval_policy = CodexApprovalPolicy::AutoApprove;
+        record.session.approval_policy = Some(CodexApprovalPolicy::AutoApprove);
+        record.runtime_reset_required = matches!(
+            guard,
+            Some("next-turn-reset" | "reset-stop" | "reset-unresolved" | "shared-unresolved")
+        );
+        record.runtime_stop_in_progress = guard == Some("reset-stop");
+    }
+    runtime.sessions.lock().unwrap().insert(
+        session_id.clone(),
+        SharedCodexSessionState {
+            thread_id: Some("auto-approve-thread".to_owned()),
+            turn_id: Some("auto-approve-turn".to_owned()),
+            turn_started: true,
+            active_turn_generation: Some(0),
+            ..SharedCodexSessionState::default()
+        },
+    );
+    runtime
+        .thread_sessions
+        .lock()
+        .unwrap()
+        .insert("auto-approve-thread".to_owned(), session_id.clone());
+    let pending: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    if matches!(guard, Some("unresolved" | "reset-unresolved")) {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        let turn = sessions.get_mut(&session_id).unwrap();
+        // Exercise the real ownership hold with the id-less request shape
+        // that the router still associates with the current started turn.
+        turn.turn_id = None;
+        hold_unresolved_codex_terminal(
+            &state,
+            &session_id,
+            &RuntimeToken::Codex(runtime.runtime_id.clone()),
+            turn,
+        )
+        .unwrap();
+    }
+    if guard == Some("shared-unresolved") {
+        // Defensive parity: model the shared hold independently of its record
+        // mirror. This is a guard vector, not proof of a live generation race.
+        runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .get_mut(&session_id)
+            .unwrap()
+            .terminal_identity_unresolved = true;
+        let inner = state.inner.lock().unwrap();
+        let record_held = inner.sessions[inner.find_session_index(&session_id).unwrap()]
+            .codex_terminal_identity_unresolved;
+        drop(inner);
+        assert!(
+            !record_held,
+            "this case must exercise the shared flag alone"
+        );
+    }
+    if guard == Some("next-turn-reset") {
+        for (method, mut request, expected_id, expected_result) in codex_auto_approval_requests() {
+            request["method"] = json!(method);
+            request["params"]["threadId"] = json!("auto-approve-thread");
+            request["params"]["turnId"] = json!("auto-approve-turn");
+            handle_shared_codex_app_server_message(
+                &request,
+                &state,
+                &runtime.runtime_id,
+                &pending,
+                &runtime.sessions,
+                &runtime.thread_sessions,
+                &runtime.input_tx,
+            )
+            .unwrap();
+            assert!(
+                matches!(input_rx.try_recv(),
+                    Ok(CodexRuntimeCommand::JsonRpcResponse { response })
+                        if response.request_id == expected_id
+                            && response.payload == CodexJsonRpcResponsePayload::Result(expected_result)
+                ),
+                "a next-turn reset must not revoke the running turn's ordinary approvals"
+            );
+            assert!(input_rx.try_recv().is_err());
+        }
+    }
+    for tool in [
+        "termal_read_mailbox",
+        "termal_acknowledge_mailbox",
+        "termal_send_to_session",
+        "termal_spawn_session",
+        "engram_note",
+    ] {
+        let mut request = codex_auto_approve_mcp_request(tool);
+        if matches!(guard, Some("unresolved" | "reset-unresolved")) {
+            request["params"].as_object_mut().unwrap().remove("turnId");
+        }
+        handle_shared_codex_app_server_message(
+            &request,
+            &state,
+            &runtime.runtime_id,
+            &pending,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &runtime.input_tx,
+        )
+        .unwrap();
+        let response = input_rx.try_recv();
+        assert!(
+            matches!(response,
+                Ok(CodexRuntimeCommand::JsonRpcResponse {
+                    response: CodexJsonRpcResponseCommand {
+                        request_id, payload: CodexJsonRpcResponsePayload::Result(result),
+                    },
+                }) if request_id == json!(tool) && result == if matches!(guard, Some("unresolved" | "reset-stop" | "reset-unresolved" | "shared-unresolved")) {
+                    json!({"action":"cancel","content":null})
+                } else if read_only {
+                    json!({"action":"decline","content":null})
+                } else {
+                    json!({"action":"accept","content":{}})
+                }
+            ),
+            "routine tool must receive exactly one policy response: {tool}"
+        );
+        assert!(
+            input_rx.try_recv().is_err(),
+            "no persistent or duplicate grant"
+        );
+    }
+    let (status, messages, pending_count) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        (
+            record.session.status,
+            record.session.messages.clone(),
+            record.pending_codex_mcp_elicitations.len(),
+        )
+    };
+    assert_eq!(status, SessionStatus::Active);
+    assert!(messages.is_empty());
+    assert_eq!(pending_count, 0);
+    if matches!(guard, Some("unresolved" | "reset-unresolved")) {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        let held = record.codex_terminal_identity_unresolved;
+        let preview = record.session.preview.clone();
+        drop(inner);
+        assert!(held);
+        assert!(preview.contains("Stop before resuming"));
+    }
+    if guard == Some("next-turn-reset") {
+        let inner = state.inner.lock().unwrap();
+        let reset =
+            inner.sessions[inner.find_session_index(&session_id).unwrap()].runtime_reset_required;
+        drop(inner);
+        assert!(
+            reset,
+            "answering this turn must not clear next-turn rotation"
+        );
+    }
+    if guard == Some("policy-switch") {
+        state
+            .update_session_settings(
+                &session_id,
+                serde_json::from_value(json!({"approvalPolicy":"on-request"})).unwrap(),
+            )
+            .unwrap();
+        handle_shared_codex_app_server_message(
+            &codex_auto_approve_mcp_request("after-switch"),
+            &state,
+            &runtime.runtime_id,
+            &pending,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &runtime.input_tx,
+        )
+        .unwrap();
+        assert!(
+            input_rx.try_recv().is_err(),
+            "switching off host AutoApprove stops replies immediately"
+        );
+        let (turn_policy, prompt_pending) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+            (
+                record.active_codex_approval_policy,
+                record
+                    .pending_codex_mcp_elicitations
+                    .values()
+                    .any(|p| p.request_id == json!("after-switch")),
+            )
+        };
+        assert_eq!(
+            turn_policy,
+            Some(CodexApprovalPolicy::AutoApprove),
+            "native turn parameters remain unchanged"
+        );
+        assert!(prompt_pending);
+    }
+}
+
+#[test]
+fn codex_auto_approve_routes_routine_mcp_calls_without_parking() {
+    exercise_codex_auto_approve_mcp_route(false, None);
+}
+
+#[test]
+fn codex_auto_approve_routes_read_only_mcp_calls_to_decline() {
+    exercise_codex_auto_approve_mcp_route(true, None);
+}
+
+#[test]
+fn codex_auto_approve_router_respects_unresolved_turn_hold() {
+    for guard in [
+        "unresolved",
+        "reset-stop",
+        "reset-unresolved",
+        "shared-unresolved",
+    ] {
+        exercise_codex_auto_approve_mcp_route(false, Some(guard));
+    }
+}
+
+#[test]
+fn codex_auto_approve_current_turn_approvals_survive_next_turn_reset() {
+    exercise_codex_auto_approve_mcp_route(false, Some("next-turn-reset"));
+}
+
+#[test]
+fn codex_auto_approve_switching_host_policy_off_stops_later_replies() {
+    exercise_codex_auto_approve_mcp_route(false, Some("policy-switch"));
+}
+
+#[test]
+fn codex_auto_approve_preserves_genuine_mcp_questions_and_never_policy() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
     set_active_codex_approval_policy(
         &state,
         &session_id,
         CodexApprovalPolicy::AutoApprove,
+        CodexApprovalPolicy::AutoApprove,
+    );
+    let (tx, rx) = mpsc::channel();
+    let routine = codex_auto_approve_mcp_request("routine");
+    let mut unmarked = routine.clone();
+    unmarked["params"].as_object_mut().unwrap().remove("_meta");
+    let mut unknown = routine.clone();
+    unknown["params"]["_meta"]["codex_approval_kind"] = json!("other");
+    let mut question = routine.clone();
+    question["params"]["requestedSchema"] = json!({"type":"object",
+        "properties":{"answer":{"type":"string"}},"required":["answer"]});
+    let mut optional_question = question.clone();
+    optional_question["params"]["requestedSchema"]["required"] = json!([]);
+    let mut url = routine.clone();
+    url["params"]["mode"] = json!("url");
+    url["params"]["url"] = json!("https://example.test/consent");
+    url["params"]["elicitationId"] = json!("consent");
+    for request in [unmarked, unknown, question, optional_question, url] {
+        assert!(
+            !try_auto_respond_codex_approval_request(
+                "mcpServer/elicitation/request",
+                &request,
+                &state,
+                &session_id,
+                None,
+                false,
+                &tx,
+            )
+            .unwrap(),
+            "genuine input must remain interactive"
+        );
+    }
+    set_active_codex_approval_policy(
+        &state,
+        &session_id,
+        CodexApprovalPolicy::AutoApprove,
+        CodexApprovalPolicy::Never,
+    );
+    assert!(
+        !try_auto_respond_codex_approval_request(
+            "mcpServer/elicitation/request",
+            &routine,
+            &state,
+            &session_id,
+            None,
+            false,
+            &tx,
+        )
+        .unwrap(),
+        "the current Never policy must not auto-answer"
+    );
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn codex_auto_approve_closed_response_channel_is_not_success() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    set_active_codex_approval_policy(
+        &state,
+        &session_id,
+        CodexApprovalPolicy::AutoApprove,
+        CodexApprovalPolicy::AutoApprove,
+    );
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    let (tx, rx) = mpsc::channel();
+    drop(rx);
+    assert!(
+        try_auto_respond_codex_approval_request(
+            "mcpServer/elicitation/request",
+            &codex_auto_approve_mcp_request("mailbox"),
+            &state,
+            &session_id,
+            None,
+            false,
+            &tx
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn codex_auto_approve_accepts_all_approval_kinds_without_pending_cards() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    // Host decisions use the current policy even when the native turn began
+    // with an interactive policy. The captured native parameters stay intact.
+    set_active_codex_approval_policy(
+        &state,
+        &session_id,
         CodexApprovalPolicy::OnRequest,
+        CodexApprovalPolicy::AutoApprove,
     );
     let (input_tx, input_rx) = mpsc::channel();
 
@@ -4040,6 +4406,8 @@ fn codex_auto_approve_accepts_all_approval_kinds_without_pending_cards() {
                 &request,
                 &state,
                 &session_id,
+                None,
+                false,
                 &input_tx,
             )
             .expect("AutoApprove request should be classified")
@@ -4083,6 +4451,8 @@ fn codex_auto_approve_declines_all_approval_kinds_for_read_only_delegations() {
                 &request,
                 &state,
                 &session_id,
+                None,
+                false,
                 &input_tx,
             )
             .expect("read-only AutoApprove request should be classified")
@@ -4113,14 +4483,14 @@ fn codex_auto_approve_declines_all_approval_kinds_for_read_only_delegations() {
 }
 
 #[test]
-fn codex_auto_approve_leaves_non_approval_requests_and_next_turn_settings_alone() {
+fn codex_auto_approve_obeys_current_host_policy_and_leaves_non_approval_requests_alone() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     set_active_codex_approval_policy(
         &state,
         &session_id,
-        CodexApprovalPolicy::OnRequest,
         CodexApprovalPolicy::AutoApprove,
+        CodexApprovalPolicy::OnRequest,
     );
     let (input_tx, input_rx) = mpsc::channel();
     let command_request = &codex_auto_approval_requests()[0];
@@ -4130,9 +4500,11 @@ fn codex_auto_approve_leaves_non_approval_requests_and_next_turn_settings_alone(
             &command_request.1,
             &state,
             &session_id,
+            None,
+            false,
             &input_tx,
         )
-        .expect("current turn should remain interactive")
+        .expect("the current OnRequest host policy must stay interactive")
     );
 
     for (method, request) in [
@@ -4152,6 +4524,8 @@ fn codex_auto_approve_leaves_non_approval_requests_and_next_turn_settings_alone(
                 &request,
                 &state,
                 &session_id,
+                None,
+                false,
                 &input_tx,
             )
             .expect("non-approval request should remain interactive")

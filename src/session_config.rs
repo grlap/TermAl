@@ -83,6 +83,10 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_session_settings(session_id, request);
         }
+        // Selecting the host policy is explicit consent to recover its old
+        // routine permission prompts, not to answer forms or user questions.
+        let recover_mcp_approvals =
+            request.approval_policy == Some(CodexApprovalPolicy::AutoApprove);
         self.ensure_read_only_delegation_allows_session_write_action(
             Some(session_id),
             "session settings updates",
@@ -785,6 +789,11 @@ impl AppState {
         let snapshot = self.snapshot_from_inner(&inner);
         drop(inner);
 
+        if recover_mcp_approvals
+            && let Some(recovered) = self.recover_codex_mcp_tool_approvals(session_id)?
+        {
+            return Ok(recovered);
+        }
         if let Some((handle, model)) = claude_model_update {
             let _ = handle.input_tx.send(ClaudeRuntimeCommand::SetModel(model));
         }

@@ -846,8 +846,8 @@ enum CodexApprovalPolicy {
     Untrusted,
     OnFailure,
     OnRequest,
-    /// TermAl answers Codex approval requests automatically while leaving
-    /// user-input, elicitation, and generic app requests interactive.
+    /// Host policy, independent of native Codex approval prompting. Routine
+    /// tool approvals are automatic; genuine input remains interactive.
     AutoApprove,
     Never,
 }

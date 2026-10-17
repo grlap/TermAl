@@ -380,6 +380,17 @@ fn handle_repl_codex_app_server_request(
         .ok_or_else(|| anyhow!("Codex app-server request missing params"))?;
 
     if approval_policy == CodexApprovalPolicy::AutoApprove {
+        if let Some((request_id, _)) = parse_codex_mcp_tool_approval(method, message) {
+            return write_codex_json_rpc_message(
+                writer,
+                &codex_json_rpc_response_message(&CodexJsonRpcResponseCommand {
+                    request_id,
+                    payload: CodexJsonRpcResponsePayload::Result(codex_mcp_tool_approval_result(
+                        McpElicitationAction::Accept,
+                    )),
+                }),
+            );
+        }
         if let Some(described) = parse_codex_approval_request(method, message)? {
             let result = codex_approval_result(&described.pending.kind, ApprovalDecision::Accepted);
             eprintln!(

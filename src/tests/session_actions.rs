@@ -6,6 +6,449 @@
 // Split from: src/tests/review.rs.
 
 use super::*;
+
+#[tokio::test]
+async fn codex_auto_approve_explicit_transition_and_reselection_recovers_live_tool_prompts() {
+    for policy in [
+        CodexApprovalPolicy::OnRequest,
+        CodexApprovalPolicy::Untrusted,
+        CodexApprovalPolicy::OnFailure,
+    ] {
+        exercise_codex_auto_approve_recovery(None, policy).await;
+    }
+}
+
+#[tokio::test]
+async fn codex_auto_approve_recovery_respects_stop_reset_and_turn_currency() {
+    for guard in ["stop", "reset", "generation", "turn", "never-policy"] {
+        exercise_codex_auto_approve_recovery(Some(guard), CodexApprovalPolicy::OnRequest).await;
+    }
+}
+
+#[tokio::test]
+async fn codex_auto_approve_recovery_respects_unresolved_turn_hold() {
+    exercise_codex_auto_approve_recovery(Some("unresolved"), CodexApprovalPolicy::OnRequest).await;
+}
+
+async fn exercise_codex_auto_approve_recovery(guard: Option<&str>, policy: CodexApprovalPolicy) {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) = test_shared_codex_runtime("mcp-policy-recovery");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[index];
+        record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        record.session.status = SessionStatus::Active;
+        record.active_codex_approval_policy = Some(policy);
+        record.codex_approval_policy = policy;
+        record.session.approval_policy = Some(policy);
+    }
+    state
+        .set_external_session_id(&session_id, "recovery-thread".to_owned())
+        .unwrap();
+    runtime.sessions.lock().unwrap().insert(
+        session_id.clone(),
+        SharedCodexSessionState {
+            thread_id: Some("recovery-thread".to_owned()),
+            turn_id: Some("recovery-turn".to_owned()),
+            turn_started: true,
+            active_turn_generation: Some(0),
+            ..SharedCodexSessionState::default()
+        },
+    );
+    runtime
+        .thread_sessions
+        .lock()
+        .unwrap()
+        .insert("recovery-thread".to_owned(), session_id.clone());
+    let pending: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    for request_id in ["mailbox", "tracker", "genuine-form"] {
+        let mut params = json!({
+            "threadId":"recovery-thread", "turnId":"recovery-turn",
+            "serverName":"routine-tools", "mode":"form", "message":"Tool approval",
+            "requestedSchema":{"type":"object","properties":{}},
+            "_meta":{"codex_approval_kind":"mcp_tool_call", "persist":["session","always"]}
+        });
+        if request_id == "genuine-form" {
+            params.as_object_mut().unwrap().remove("_meta");
+            params["requestedSchema"] = json!({"type":"object",
+                "properties":{"answer":{"type":"string"}}, "required":["answer"]});
+        }
+        handle_shared_codex_app_server_message(
+            &json!({"id":request_id, "method":"mcpServer/elicitation/request", "params":params}),
+            &state,
+            &runtime.runtime_id,
+            &pending,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &runtime.input_tx,
+        )
+        .unwrap();
+    }
+    handle_shared_codex_app_server_message(
+        &json!({
+            "id":"genuine-question", "method":"item/tool/requestUserInput",
+            "params":{"threadId":"recovery-thread", "turnId":"recovery-turn", "questions":[{
+                "id":"answer", "header":"Choice", "question":"What should happen?"
+            }]}
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+    assert!(
+        input_rx.try_recv().is_err(),
+        "prompting policy must not answer automatically"
+    );
+    let initial_counts = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        (
+            record.pending_codex_mcp_elicitations.len(),
+            record.pending_codex_user_inputs.len(),
+        )
+    };
+    assert_eq!(
+        initial_counts,
+        (3, 1),
+        "the router must create the real pending cards"
+    );
+    let app = app_router(state.clone());
+    // Changing the rollback setting or an unrelated setting is not consent.
+    for payload in [
+        json!({"approvalPolicy":"never"}),
+        json!({"name":"Recovery target"}),
+    ] {
+        let (status, _): (StatusCode, StateResponse) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{session_id}/settings"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(input_rx.try_recv().is_err());
+    }
+    let mut delta_rx = state.subscribe_delta_events();
+    if let Some(guard) = guard {
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session_id).unwrap();
+            let record = &mut inner.sessions[index];
+            match guard {
+                "stop" => record.runtime_stop_in_progress = true,
+                "reset" => record.runtime_reset_required = true,
+                "generation" => record.active_turn_generation += 1,
+                "never-policy" => {
+                    record.active_codex_approval_policy = Some(CodexApprovalPolicy::Never)
+                }
+                "turn" | "unresolved" => {}
+                _ => unreachable!(),
+            }
+        }
+        if guard == "turn" {
+            runtime
+                .sessions
+                .lock()
+                .unwrap()
+                .get_mut(&session_id)
+                .unwrap()
+                .turn_id = Some("successor".to_owned());
+        }
+        if guard == "unresolved" {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            hold_unresolved_codex_terminal(
+                &state,
+                &session_id,
+                &RuntimeToken::Codex(runtime.runtime_id.clone()),
+                sessions.get_mut(&session_id).unwrap(),
+            )
+            .unwrap();
+        }
+        let (status, _): (StatusCode, StateResponse) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{session_id}/settings"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"approvalPolicy":"auto-approve"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            input_rx.try_recv().is_err(),
+            "guard {guard} must prevent acceptance"
+        );
+        let (mcp, questions) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+            (
+                record.pending_codex_mcp_elicitations.len(),
+                record.pending_codex_user_inputs.len(),
+            )
+        };
+        assert_eq!((mcp, questions), (3, 1));
+        return;
+    }
+    for attempt in 0..2 {
+        let (status, response): (StatusCode, StateResponse) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{session_id}/settings"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"approvalPolicy":"auto-approve"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let mut response_ids = Vec::new();
+        while let Ok(command) = input_rx.try_recv() {
+            match command {
+                CodexRuntimeCommand::JsonRpcResponse { response } => {
+                    assert_eq!(
+                        response.payload,
+                        CodexJsonRpcResponsePayload::Result(
+                            json!({"action":"accept","content":{}})
+                        )
+                    );
+                    response_ids.push(response.request_id);
+                }
+                _ => panic!("recovery must not dispatch another turn or change runtime settings"),
+            }
+        }
+        response_ids.sort_by_key(Value::to_string);
+        assert_eq!(
+            response_ids,
+            if attempt == 0 {
+                vec![json!("mailbox"), json!("tracker")]
+            } else {
+                vec![]
+            },
+            "explicit action recovers each current tool prompt once"
+        );
+        let (mcp_pending, questions_pending, submitted) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+            (
+                record.pending_codex_mcp_elicitations.len(),
+                record.pending_codex_user_inputs.len(),
+                record
+                    .session
+                    .messages
+                    .iter()
+                    .filter(|message| {
+                        matches!(
+                            message,
+                            Message::McpElicitationRequest {
+                                state: InteractionRequestState::Submitted,
+                                submitted_action: Some(McpElicitationAction::Accept),
+                                ..
+                            }
+                        )
+                    })
+                    .count(),
+            )
+        };
+        assert_eq!((mcp_pending, questions_pending, submitted), (1, 1, 2));
+        assert_eq!(
+            response
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .status,
+            SessionStatus::Approval,
+            "genuine questions must remain pending"
+        );
+    }
+    let mut updated = 0;
+    while let Ok(event) = delta_rx.try_recv() {
+        if matches!(
+            serde_json::from_str::<DeltaEvent>(&event).unwrap(),
+            DeltaEvent::MessageUpdated {
+                message: Message::McpElicitationRequest {
+                    state: InteractionRequestState::Submitted,
+                    ..
+                },
+                ..
+            }
+        ) {
+            updated += 1;
+        }
+    }
+    assert_eq!(updated, 2, "recovery publishes the resolved audit cards");
+    // The host uses its current policy for later requests in the same turn;
+    // the captured native turn policy does not need to be rewritten.
+    let later_request = json!({"id":"later-routine", "method":"mcpServer/elicitation/request", "params":{
+        "threadId":"recovery-thread", "turnId":"recovery-turn",
+        "serverName":"routine-tools", "mode":"form", "message":"Tool approval",
+        "requestedSchema":{"type":"object","properties":{}},
+        "_meta":{"codex_approval_kind":"mcp_tool_call"}
+    }});
+    handle_shared_codex_app_server_message(
+        &later_request,
+        &state,
+        &runtime.runtime_id,
+        &pending,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+    assert!(
+        matches!(input_rx.try_recv(),
+            Ok(CodexRuntimeCommand::JsonRpcResponse { response })
+                if response.request_id == json!("later-routine")
+                    && response.payload == CodexJsonRpcResponsePayload::Result(json!({"action":"accept", "content":{}}))
+        ),
+        "the new host policy must answer later routine requests in this same turn"
+    );
+    assert!(input_rx.try_recv().is_err());
+    let (active_policy, later_is_pending) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        (
+            record.active_codex_approval_policy,
+            record
+                .pending_codex_mcp_elicitations
+                .values()
+                .any(|p| p.request_id == json!("later-routine")),
+        )
+    };
+    assert_eq!(active_policy, Some(policy));
+    assert!(!later_is_pending);
+    let (status, _): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/settings"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"approvalPolicy":"on-request"}"#))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let mut after_reverse = later_request;
+    after_reverse["id"] = json!("after-reverse");
+    handle_shared_codex_app_server_message(
+        &after_reverse,
+        &state,
+        &runtime.runtime_id,
+        &pending,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+    assert!(
+        input_rx.try_recv().is_err(),
+        "switching the host policy back must stop auto-answers immediately"
+    );
+    let reverse_is_pending = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        record
+            .pending_codex_mcp_elicitations
+            .values()
+            .any(|p| p.request_id == json!("after-reverse"))
+    };
+    assert!(reverse_is_pending);
+}
+
+#[tokio::test]
+async fn codex_auto_approve_creation_and_settings_keep_host_and_native_policies_separate() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    for policy in [CodexApprovalPolicy::AutoApprove, CodexApprovalPolicy::Never] {
+        let body = serde_json::to_vec(&json!({
+            "agent":Agent::Codex, "approvalPolicy":policy,
+            "workdir":state.test_temp_root.as_ref().expect("fixture temp root").path().to_string_lossy()
+        }))
+        .unwrap();
+        let (status, created): (StatusCode, CreateSessionResponse) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(created.session.approval_policy, Some(policy));
+        assert_eq!(
+            policy.as_cli_value(),
+            if policy == CodexApprovalPolicy::AutoApprove {
+                "on-request"
+            } else {
+                "never"
+            }
+        );
+        for next in [CodexApprovalPolicy::Never, CodexApprovalPolicy::AutoApprove] {
+            let (status, response): (StatusCode, StateResponse) = request_json(
+                &app,
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/sessions/{}/settings", created.session_id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({"approvalPolicy":next})).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(
+                response
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == created.session_id)
+                    .unwrap()
+                    .approval_policy,
+                Some(next)
+            );
+            let (configured, active) = {
+                let inner = state.inner.lock().unwrap();
+                let record =
+                    &inner.sessions[inner.find_session_index(&created.session_id).unwrap()];
+                (
+                    record.codex_approval_policy,
+                    record.active_codex_approval_policy,
+                )
+            };
+            assert_eq!(configured, next);
+            assert_eq!(active, None, "settings do not fabricate a running turn");
+            assert_eq!(
+                configured.as_cli_value(),
+                if next == CodexApprovalPolicy::AutoApprove {
+                    "on-request"
+                } else {
+                    "never"
+                }
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn update_session_settings_route_updates_session_name() {
     let state = test_app_state();

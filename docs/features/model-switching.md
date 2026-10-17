@@ -48,13 +48,25 @@ palette.
 - Model options come from Codex app-server `model/list`.
 - Model, sandbox, approval policy, reasoning effort, and Fast mode are all
   session-scoped.
-- Those settings apply on the next Codex prompt.
+- Native Codex parameters apply on the next prompt. The host's approval-answer
+  decision uses the current session policy immediately, including mid-turn.
 - `auto-approve` is a TermAl-managed approval policy, distinct from Codex's
-  native `never`. TermAl starts the Codex turn with native `on-request` and
-  immediately accepts command-execution, file-change, and permissions approval
-  requests. Structured user input, MCP elicitation, and generic app-server
-  requests remain interactive. An active read-only delegation always wins over
-  AutoApprove and receives the normal decline response instead of an approval.
+  native setting. Codex keeps native `on-request`; TermAl answers its approval
+  requests, including explicitly tagged, empty-schema routine MCP tool
+  permissions, without persistent grants. Command, file and permissions
+  approvals retain their existing behavior. Read-only delegation guards decline
+  non-exempt requests. Genuine forms, URL elicitations, user questions and
+  generic app-server requests stay interactive. Native `never` is not the
+  implementation of host AutoApprove and retains its existing behavior.
+- Explicitly selecting `auto-approve` also answers live pending routine MCP
+  approvals from an `on-request`, `untrusted` or `on-failure` turn. Reselecting
+  it repeats the same idempotent sweep. Genuine questions stay pending. Later
+  routine requests in the same turn are auto-answered under the current host
+  policy; switching back to `on-request` stops auto-answers immediately. Native
+  turn parameters are not rewritten. `never`, unrelated settings edits and
+  startup never implicitly approve pending requests. Live requests
+  do not survive a host restart. Native settings otherwise remain next-turn-only.
+  See [approval policy ownership](shared-codex-app-server.md#approval-policy-ownership).
 - Fast mode appears only when the active model's `model/list` entry advertises
   the Fast service tier. TermAl sends the exact tier id advertised by the
   catalog; Standard sends an explicit null so a previously sticky tier is
