@@ -231,6 +231,7 @@ fn delegation_write_policy_accepts_only_the_canonical_tagged_shape() {
     assert_eq!(
         isolated,
         DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: vec!["src".to_owned()],
             worktree_path: Some("C:/tmp/delegation-worktree".to_owned()),
         }
@@ -244,6 +245,7 @@ fn delegation_write_policy_accepts_only_the_canonical_tagged_shape() {
     assert_eq!(
         isolated_without_path,
         DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: Vec::new(),
             worktree_path: None,
         }
@@ -258,10 +260,12 @@ fn delegation_write_policy_round_trips_serialized_variants() {
             owned_paths: vec!["src".to_owned(), "ui/src".to_owned()],
         },
         DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: vec!["src".to_owned()],
             worktree_path: Some("/tmp/termal-delegation-worktree".to_owned()),
         },
         DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: Vec::new(),
             worktree_path: None,
         },

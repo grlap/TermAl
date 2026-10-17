@@ -21,6 +21,7 @@ import type {
   DelegationTurnDelivery,
   DelegationResult,
   DelegationSummary,
+  DelegationWritePolicy,
   GeminiApprovalMode,
   ImageAttachment,
   InstructionSearchResponse,
@@ -514,15 +515,7 @@ export type CreateDelegationRequest = {
   /** Defaults to reviewer mode when omitted. */
   mode?: "reviewer" | "explorer" | "worker";
   /** Defaults to read-only delegation when omitted. */
-  writePolicy?:
-    | { kind: "readOnly" }
-    | { kind: "sharedWorktree"; ownedPaths: string[] }
-    | {
-        kind: "isolatedWorktree";
-        ownedPaths: string[];
-        /** Backend generates a TermAl-owned worktree path when omitted. */
-        worktreePath?: string;
-      };
+  writePolicy?: DelegationWritePolicy;
 };
 
 export type AbortableRequestOptions = {

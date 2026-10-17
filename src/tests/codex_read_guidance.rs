@@ -34,6 +34,7 @@ fn delegation_record(agent: Agent, write_policy: DelegationWritePolicy) -> Deleg
         result: None,
         submitted_review_result: None,
         post_submission_transport_error: None,
+        base_revision: None,
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
@@ -98,6 +99,7 @@ fn no_other_delegation_gets_the_native_source_read_guidance() {
             delegation_record(
                 Agent::Codex,
                 DelegationWritePolicy::IsolatedWorktree {
+                    base: None,
                     owned_paths: vec!["src".to_owned()],
                     worktree_path: None,
                 },

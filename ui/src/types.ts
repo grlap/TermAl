@@ -618,6 +618,7 @@ export type DelegationWritePolicy =
       kind: "isolatedWorktree";
       ownedPaths: string[];
       worktreePath?: string;
+      base?: string;
     };
 
 export type DelegationFinding = {
@@ -666,6 +667,7 @@ export type DelegationRecord = {
   agent: AgentType;
   model?: string | null;
   writePolicy: DelegationWritePolicy;
+  baseRevision?: string;
   createdAt: string;
   startedAt?: string | null;
   completedAt?: string | null;

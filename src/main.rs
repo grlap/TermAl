@@ -922,6 +922,7 @@ include!("session_body_sequence.rs");
 include!("state_boot.rs");
 include!("state_inner.rs");
 include!("delegations.rs");
+include!("delegation_worker.rs");
 include!("delegation_attempt_state.rs");
 include!("delegation_followup_admission.rs");
 include!("delegation_result_parser.rs");

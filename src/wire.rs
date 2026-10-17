@@ -1342,9 +1342,8 @@ struct DelegationTurnDelivery {
     detail: Option<String>,
 }
 
-/// Delegated child write policy. Backend support currently accepts
-/// `ReadOnly` and reviewer-safe `IsolatedWorktree`; `SharedWorktree`
-/// remains a future worker policy.
+/// Delegated child write policy. Workers require `IsolatedWorktree`;
+/// `SharedWorktree` remains deferred.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
@@ -1361,6 +1360,8 @@ enum DelegationWritePolicy {
         owned_paths: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         worktree_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
     },
 }
 
@@ -1388,6 +1389,7 @@ impl<'de> serde::Deserialize<'de> for DelegationWritePolicy {
             IsolatedWorktree {
                 owned_paths: Vec<String>,
                 worktree_path: Option<String>,
+                base: Option<String>,
             },
         }
 
@@ -1397,9 +1399,11 @@ impl<'de> serde::Deserialize<'de> for DelegationWritePolicy {
             WirePolicy::IsolatedWorktree {
                 owned_paths,
                 worktree_path,
+                base,
             } => Self::IsolatedWorktree {
                 owned_paths,
                 worktree_path,
+                base,
             },
         })
     }
@@ -1849,6 +1853,9 @@ struct DelegationRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model: Option<String>,
     write_policy: DelegationWritePolicy,
+    /// Immutable commit used to create a worker workspace; absent on legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_revision: Option<String>,
     created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     started_at: Option<String>,
@@ -1939,6 +1946,8 @@ struct DelegationSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model: Option<String>,
     write_policy: DelegationWritePolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_revision: Option<String>,
     created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     started_at: Option<String>,
@@ -1989,7 +1998,7 @@ struct DelegationStateSummary {
     acceptance_evaluation_allowed: bool,
 }
 
-/// Request payload for creating a Phase 1 read-only delegation.
+/// Request payload for creating a delegation.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateDelegationRequest {

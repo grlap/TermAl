@@ -3908,6 +3908,7 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
             result: None,
             submitted_review_result: None,
             post_submission_transport_error: None,
+            base_revision: None,
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,

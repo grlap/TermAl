@@ -1138,6 +1138,7 @@ fn parse_agent_command_delegation_write_policy(
     match value.as_str() {
         "readOnly" => Ok(DelegationWritePolicy::ReadOnly),
         "isolatedWorktree" => Ok(DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: Vec::new(),
             worktree_path: None,
         }),

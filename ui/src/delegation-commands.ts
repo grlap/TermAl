@@ -1087,6 +1087,9 @@ function delegationSummary(record: DelegationRecord): DelegationSummary {
     completedAt: record.completedAt ?? null,
     reviewResultRequired: record.reviewResultRequired,
   };
+  if (record.baseRevision !== undefined) {
+    summary.baseRevision = record.baseRevision;
+  }
   if (record.acceptanceEvaluation) {
     summary.acceptanceEvaluation = record.acceptanceEvaluation;
   }

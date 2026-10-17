@@ -4333,6 +4333,7 @@ fn link_engram_mcp_test_descendant(
         result: None,
         submitted_review_result: None,
         post_submission_transport_error: None,
+        base_revision: None,
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
@@ -11253,6 +11254,7 @@ fn reset_fenced_begin_finishes_once_while_runtime_stop_is_still_gated() {
                 model: None,
                 mode: Some(DelegationMode::Explorer),
                 write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                    base: None,
                     owned_paths: Vec::new(),
                     worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
                 }),
@@ -11554,6 +11556,7 @@ fn nested_child_inherits_engram_project_through_an_isolated_parent_chain() {
             .find(|delegation| delegation.child_session_id == isolated_id)
             .expect("first-level delegation should exist");
         delegation.write_policy = DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: Vec::new(),
             worktree_path: Some(
                 root.join("isolated-worktree")
@@ -16719,6 +16722,7 @@ fn failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery() {
                 model: None,
                 mode: Some(DelegationMode::Explorer),
                 write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                    base: None,
                     owned_paths: Vec::new(),
                     worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
                 }),

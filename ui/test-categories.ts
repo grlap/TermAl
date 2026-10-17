@@ -224,6 +224,7 @@ export const DOM_TS_TEST_FILES: readonly string[] = [
   "src/browser-platform.test.ts",
   "src/clipboard.test.ts",
   "src/delegation-commands.test.ts",
+  "src/delegation-worker.test.ts",
   "src/dialog-backdrop-dismiss.test.ts",
   "src/live-updates.test.ts",
   "src/mermaid-render.test.ts",

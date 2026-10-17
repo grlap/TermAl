@@ -63,6 +63,7 @@ mod delegation_review_results;
 mod delegation_support;
 mod delegation_validation;
 mod delegation_wait;
+mod delegation_worker;
 mod delegations;
 mod engram_authority_fence_phases;
 mod engram_authority_fixture;

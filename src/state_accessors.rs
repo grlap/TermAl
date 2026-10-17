@@ -457,6 +457,7 @@ mod visible_session_hydration_error_tests {
             result: None,
             submitted_review_result: None,
             post_submission_transport_error: None,
+            base_revision: None,
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,

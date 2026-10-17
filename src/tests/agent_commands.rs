@@ -2711,6 +2711,7 @@ fn resolver_metadata_uses_cached_frontmatter_snapshot_without_disk_reread() {
             mode: Some(DelegationMode::Reviewer),
             title: Some("Review cached frontmatter.".to_owned()),
             write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                base: None,
                 owned_paths: Vec::new(),
                 worktree_path: None,
             }),

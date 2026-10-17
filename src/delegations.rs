@@ -77,6 +77,7 @@ struct PreparedIsolatedWorktree {
     child_cwd: String,
     source_repo_root: String,
     worktree_root: String,
+    base_revision: Option<String>,
 }
 
 struct IsolatedWorktreeCleanupGuard {
@@ -456,12 +457,6 @@ impl AppState {
             )));
         }
         let mode = request.mode.unwrap_or(DelegationMode::Reviewer);
-        if mode == DelegationMode::Worker {
-            return Err(ApiError::from_status(
-                StatusCode::NOT_IMPLEMENTED,
-                "worker delegations are not implemented in Phase 1",
-            ));
-        }
         let requested_write_policy = request
             .write_policy
             .unwrap_or(DelegationWritePolicy::ReadOnly);
@@ -489,6 +484,7 @@ impl AppState {
                 "sharedWorktree delegation write policy is not implemented yet",
             ));
         }
+        validate_worker_write_policy(mode, &requested_write_policy)?;
         let delegation_id = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner.next_delegation_id()
@@ -602,11 +598,12 @@ impl AppState {
         }
 
         let mut isolated_worktree_cleanup_guard: Option<IsolatedWorktreeCleanupGuard> = None;
-        let (cwd, child_project_id, write_policy) = match requested_write_policy {
+        let (cwd, child_project_id, write_policy, base_revision) = match requested_write_policy {
             DelegationWritePolicy::ReadOnly => (
                 source_cwd.clone(),
                 parent_project_id.clone(),
                 DelegationWritePolicy::ReadOnly,
+                None,
             ),
             DelegationWritePolicy::SharedWorktree { .. } => unreachable!(
                 "sharedWorktree policy should be rejected before workspace preparation"
@@ -614,12 +611,15 @@ impl AppState {
             DelegationWritePolicy::IsolatedWorktree {
                 owned_paths,
                 worktree_path,
+                base,
             } => {
                 let prepared = prepare_isolated_delegation_worktree(
                     &source_cwd,
                     worktree_path.as_deref(),
                     &self.default_workdir,
                     &delegation_id,
+                    (mode == DelegationMode::Worker)
+                        .then_some(base.as_deref().unwrap_or("HEAD")),
                 )?;
                 isolated_worktree_cleanup_guard = Some(IsolatedWorktreeCleanupGuard::new(
                     FsPath::new(&prepared.source_repo_root),
@@ -631,7 +631,9 @@ impl AppState {
                     DelegationWritePolicy::IsolatedWorktree {
                         owned_paths,
                         worktree_path: Some(prepared.worktree_root),
+                        base,
                     },
+                    prepared.base_revision,
                 )
             }
         };
@@ -733,6 +735,7 @@ impl AppState {
             agent: child_session.agent,
             model: Some(child_session.model.clone()),
             write_policy,
+            base_revision,
             created_at: now.clone(),
             started_at: Some(now),
             completed_at: None,
@@ -2639,6 +2642,10 @@ fn configure_delegation_child_prompt_settings(
     mode: DelegationMode,
     write_policy: &DelegationWritePolicy,
 ) {
+    if mode == DelegationMode::Worker {
+        configure_worker_prompt_settings(child_record);
+        return;
+    }
     if child_record.session.agent.supports_codex_prompt_settings() {
         child_record.codex_approval_policy = CodexApprovalPolicy::Never;
         child_record.codex_sandbox_mode = delegation_codex_sandbox_mode(write_policy);
@@ -3159,6 +3166,7 @@ fn delegation_prompt_write_policy(write_policy: &DelegationWritePolicy) -> Strin
         DelegationWritePolicy::IsolatedWorktree {
             owned_paths,
             worktree_path,
+            ..
         } => {
             let worktree_path = worktree_path.as_deref().unwrap_or("(pending)");
             let owned_paths = if owned_paths.is_empty() {
@@ -4244,6 +4252,7 @@ fn prepare_isolated_delegation_worktree(
     requested_worktree_path: Option<&str>,
     default_workdir: &str,
     delegation_id: &str,
+    worker_base: Option<&str>,
 ) -> Result<PreparedIsolatedWorktree, ApiError> {
     if let Some(path) = requested_worktree_path {
         validate_delegation_cwd_input(path)?;
@@ -4290,6 +4299,14 @@ fn prepare_isolated_delegation_worktree(
     }
 
     ensure_isolated_worktree_target_available(&worktree_root)?;
+    if let Some(base) = worker_base {
+        return prepare_committed_worker_worktree(
+            &source_repo_root,
+            &worktree_root,
+            &relative_cwd,
+            base,
+        );
+    }
     let staged_patch = git_repo_output(
         &source_repo_root,
         &["diff", "--cached", "--binary"],
@@ -4308,7 +4325,7 @@ fn prepare_isolated_delegation_worktree(
     validate_isolated_worktree_no_untracked_files(&untracked_files)?;
     validate_isolated_worktree_patch_size(&staged_patch, &unstaged_patch)?;
 
-    create_detached_git_worktree(&source_repo_root, &worktree_root)?;
+    create_detached_git_worktree(&source_repo_root, &worktree_root, "HEAD")?;
     let mut cleanup_guard = IsolatedWorktreeCleanupGuard::new(&source_repo_root, &worktree_root);
     if git_patch_has_content(&staged_patch) {
         run_git_repo_command_with_input(
@@ -4333,6 +4350,7 @@ fn prepare_isolated_delegation_worktree(
         child_cwd: child_cwd.to_string_lossy().into_owned(),
         source_repo_root: source_repo_root.to_string_lossy().into_owned(),
         worktree_root: worktree_root.to_string_lossy().into_owned(),
+        base_revision: None,
     })
 }
 
@@ -4383,6 +4401,7 @@ fn ensure_isolated_worktree_target_available(worktree_root: &FsPath) -> Result<(
 fn create_detached_git_worktree(
     source_repo_root: &FsPath,
     worktree_root: &FsPath,
+    revision: &str,
 ) -> Result<(), ApiError> {
     let parent = worktree_root.parent().ok_or_else(|| {
         ApiError::bad_request(format!(
@@ -4400,9 +4419,9 @@ fn create_detached_git_worktree(
     let output = git_command()
         .arg("-C")
         .arg(source_repo_root)
-        .args(["worktree", "add", "--detach"])
+        .args(["worktree", "add", "--detach", "--"])
         .arg(worktree_root)
-        .arg("HEAD")
+        .arg(revision)
         .output()
         .map_err(|err| ApiError::internal(format!("failed to create git worktree: {err}")))?;
     if output.status.success() {
@@ -5152,6 +5171,7 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
         agent: record.agent,
         model: record.model.clone(),
         write_policy: record.write_policy.clone(),
+        base_revision: record.base_revision.clone(),
         created_at: record.created_at.clone(),
         started_at: record.started_at.clone(),
         completed_at: record.completed_at.clone(),

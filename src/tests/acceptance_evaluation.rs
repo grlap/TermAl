@@ -201,6 +201,7 @@ fn install_evaluator_delegation(
         result: None,
         submitted_review_result: None,
         post_submission_transport_error: None,
+        base_revision: None,
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
@@ -1344,6 +1345,7 @@ fn acceptance_submit_refuses_callers_without_authority_before_running() {
     set(&|record| record.status = DelegationStatus::Running);
     set(&|record| {
         record.write_policy = DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: vec![],
             worktree_path: None,
         }

@@ -42,6 +42,7 @@ pub(super) fn install_required_review_delegation(
         result: None,
         submitted_review_result: None,
         post_submission_transport_error: None,
+        base_revision: None,
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,

@@ -245,6 +245,7 @@ fn the_read_only_gate_wins_over_the_session_policy() {
             result: None,
             submitted_review_result: None,
             post_submission_transport_error: None,
+            base_revision: None,
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,
@@ -557,6 +558,7 @@ fn a_delegation_child_never_inherits_auto_approve_or_a_non_default_mode() {
         &mut record,
         DelegationMode::Explorer,
         &DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: vec![],
             worktree_path: None,
         },

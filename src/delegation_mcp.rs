@@ -2352,7 +2352,7 @@ fn tool_requires_delegation_child(name: &str) -> bool {
 
 fn delegation_write_policy_input_schema() -> Value {
     json!({
-        "description": "OpenCode rejects readOnly. Use isolatedWorktree for OpenCode delegation sessions.",
+        "description": "Worker mode requires isolatedWorktree and starts from committed base (default HEAD), without copying parent dirt. Other modes retain their existing workspace behavior. sharedWorktree is deferred. OpenCode rejects readOnly.",
         "oneOf": [
             {
                 "type": "object",
@@ -2386,7 +2386,11 @@ fn delegation_write_policy_input_schema() -> Value {
                         "minItems": 1,
                         "items": { "type": "string" }
                     },
-                    "worktreePath": { "type": ["string", "null"] }
+                    "worktreePath": { "type": ["string", "null"] },
+                    "base": {
+                        "type": ["string", "null"],
+                        "description": "Worker-only Git ref or commit, default HEAD. Resolved once to an unambiguous commit stored as baseRevision."
+                    }
                 }
             }
         ]
@@ -2422,7 +2426,7 @@ fn mcp_tools_list_result() -> Value {
                         "mode": {
                             "type": "string",
                             "enum": ["reviewer", "explorer", "worker"],
-                            "description": "Defaults to reviewer when omitted. Reviewer mode requires a Claude, Codex or Kimi agent; other ACP agents should pass explorer instead."
+                            "description": "Defaults to reviewer when omitted. Reviewer mode requires Claude, Codex or Kimi; other ACP agents should pass explorer for inspection. Worker mode requires isolatedWorktree and starts a writable child at writePolicy.base (default HEAD); workspace separation is not containment."
                         },
                         "writePolicy": write_policy_input_schema,
                         "includeSession": {

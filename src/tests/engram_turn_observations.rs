@@ -263,6 +263,7 @@ fn start_mediated_turn_with_script(
             // A worktree needs a repository with a commit to branch from.
             init_git_repository(&root);
             DelegationWritePolicy::IsolatedWorktree {
+                base: None,
                 owned_paths: vec!["src".to_owned()],
                 worktree_path: Some(
                     temp_root

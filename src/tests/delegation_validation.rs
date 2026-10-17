@@ -413,12 +413,12 @@ async fn delegation_route_rejects_worker_and_shared_worktree_policy() {
             .unwrap(),
     )
     .await;
-    assert_eq!(worker_status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(worker_status, StatusCode::BAD_REQUEST);
     assert!(
         worker_body["error"]
             .as_str()
             .unwrap()
-            .contains("worker delegations are not implemented")
+            .contains("worker mode requires writePolicy `isolatedWorktree`")
     );
 
     let (policy_status, policy_body): (StatusCode, Value) = request_json(

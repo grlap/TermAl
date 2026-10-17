@@ -2707,6 +2707,7 @@ fn remote_delegation_delta_advances_revision_without_local_record() {
     let state = test_app_state();
     let remote = local_replay_test_remote();
     let delegation = DelegationSummary {
+        base_revision: None,
         id: "remote-delegation-1".to_owned(),
         parent_session_id: "remote-parent-session".to_owned(),
         child_session_id: "remote-child-session".to_owned(),

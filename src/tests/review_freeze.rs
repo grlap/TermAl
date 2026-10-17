@@ -625,6 +625,7 @@ fn review_freeze_claude_authority_uses_the_requested_capability() {
             owned_paths: vec![],
         },
         DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: vec![],
             worktree_path: None,
         },

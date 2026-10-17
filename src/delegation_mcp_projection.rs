@@ -30,6 +30,7 @@ fn compact_mcp_spawn_result(response: Value) -> Value {
             "agent",
             "model",
             "writePolicy",
+            "baseRevision",
             "createdAt",
             "startedAt",
             "completedAt",

@@ -51,6 +51,7 @@ fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
         result: None,
         submitted_review_result: None,
         post_submission_transport_error: None,
+        base_revision: None,
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
@@ -132,6 +133,7 @@ fn claude_non_read_only_delegation_child_keeps_app_default_approval_mode_and_eff
             owned_paths: vec!["src".to_owned()],
         },
         DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: vec!["src".to_owned()],
             worktree_path: Some(
                 test_temp_dir()
@@ -1999,6 +2001,7 @@ fn delegation_workspace_observations_preserve_writing_policies_and_legacy_result
             owned_paths: vec!["src".to_owned()],
         },
         DelegationWritePolicy::IsolatedWorktree {
+            base: None,
             owned_paths: vec!["src".to_owned()],
             worktree_path: Some(".tmp/isolated".to_owned()),
         },
@@ -2227,6 +2230,7 @@ fn isolated_worktree_delegation_materializes_dirty_state_and_uses_workspace_writ
                 model: None,
                 mode: Some(DelegationMode::Reviewer),
                 write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                    base: None,
                     owned_paths: vec!["README.md".to_owned()],
                     worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
                 }),
@@ -2420,6 +2424,7 @@ fn isolated_worktree_setup_failure_does_not_leave_worktree() {
             model: None,
             mode: Some(DelegationMode::Explorer),
             write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                base: None,
                 owned_paths: vec!["README.md".to_owned()],
                 worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
             }),
@@ -2512,6 +2517,7 @@ fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
             model: None,
             mode: Some(DelegationMode::Reviewer),
             write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                base: None,
                 owned_paths: vec!["README.md".to_owned()],
                 worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
             }),
@@ -2577,6 +2583,7 @@ fn isolated_worktree_rejects_untracked_files_without_leaving_worktree() {
             model: None,
             mode: Some(DelegationMode::Reviewer),
             write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                base: None,
                 owned_paths: vec!["README.md".to_owned()],
                 worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
             }),
@@ -2689,6 +2696,7 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
             result: None,
             submitted_review_result: None,
             post_submission_transport_error: None,
+            base_revision: None,
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,
