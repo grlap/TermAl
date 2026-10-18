@@ -12,6 +12,9 @@ mod connect_durability;
 #[path = "federation_settlement.rs"]
 mod settlement;
 
+#[path = "federation_mailbox_pressure.rs"]
+mod mailbox_pressure;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_production_monitor_recovers_remote_incarnation_loss() {
     let mut fixture = Fixture::new().await;

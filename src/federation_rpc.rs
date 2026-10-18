@@ -13,6 +13,7 @@ enum FederationRpcRoute {
     Hello(String),
     OpenLink(FederationOpenLink),
     Health(FederationLinkLease),
+    Mailbox(FederationLinkLease, FederationMailboxRequest),
 }
 
 impl FederationRpcClient {
@@ -45,10 +46,17 @@ impl FederationRpcClient {
             FederationRpcRoute::Hello(_) => "/federation/v1/hello",
             FederationRpcRoute::OpenLink(_) => "/federation/v1/link",
             FederationRpcRoute::Health(_) => "/federation/v1/health",
+            FederationRpcRoute::Mailbox(_,_) => "/federation/v1/mailbox",
         };
         let url = format!("http://{}{path}", self.address);
         let mut request = match &route {
             FederationRpcRoute::OpenLink(body) => self.client.post(url).json(body),
+            FederationRpcRoute::Mailbox(_,body) => {
+                if serde_json::to_vec(body).map_err(|_|ApiError::bad_request("invalid mailbox request"))?.len() > FEDERATION_MAILBOX_REQUEST_BYTES {
+                    return Err(ApiError::from_status(StatusCode::PAYLOAD_TOO_LARGE,"central mailbox request exceeds negotiated size"));
+                }
+                self.client.post(url).json(body)
+            }
             _ => self.client.get(url),
         }
         .header(
@@ -70,17 +78,23 @@ impl FederationRpcClient {
                 request = request.header(FEDERATION_INCARNATION_HEADER, &body.incarnation)
             }
             FederationRpcRoute::Health(_) => {}
+            FederationRpcRoute::Mailbox(_,_) => {}
         }
         if let FederationRpcRoute::Health(lease) = &route {
             lease.with_incarnation(|| Ok(()))?;
             request = request.header(FEDERATION_INCARNATION_HEADER, &lease.incarnation);
         }
+        if let Some(lease) = route.mailbox_lease() {
+            lease.with_incarnation(||Ok(()))?;
+            request = request.header(FEDERATION_INCARNATION_HEADER,&lease.incarnation);
+        }
         // Network awaits occur after all global/channel locks have been released.
         let mut response = request
             .send()
             .await
-            .map_err(|_| federation_transport_unavailable())?;
+            .map_err(|_| route.response_failure(federation_transport_unavailable()))?;
         if !response.status().is_success() {
+            if route.mailbox_lease().is_some() { return Err(federation_mailbox_rpc_error(response.status())); }
             return Err(match response.status() {
                 StatusCode::CONFLICT => federation_stale_link(),
                 StatusCode::LOCKED => ApiError::from_status(
@@ -102,18 +116,26 @@ impl FederationRpcClient {
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|_| federation_transport_unavailable())?
+            .map_err(|_| route.response_failure(federation_transport_unavailable()))?
         {
-            if chunk.len() > 64 * 1024_usize - bytes.len() {
-                return Err(ApiError::bad_gateway(
+            if chunk.len() > route.response_limit().saturating_sub(bytes.len()) {
+                return Err(route.response_failure(ApiError::bad_gateway(
                     "federation response exceeds protocol limit",
-                ));
+                )));
+            }
+            if route.mailbox_lease().is_some() && bytes.capacity() < bytes.len()+chunk.len() {
+                let capacity=bytes.capacity().saturating_mul(2).max(bytes.len()+chunk.len()).min(route.response_limit());
+                bytes.try_reserve_exact(capacity-bytes.len()).map_err(|_|route.response_failure(ApiError::from_status(
+                    StatusCode::SERVICE_UNAVAILABLE,"central mailbox response allocation unavailable")))?;
             }
             bytes.extend_from_slice(&chunk);
         }
         let decoded = serde_json::from_slice(&bytes)
-            .map_err(|_| ApiError::bad_gateway("invalid federation response"))?;
-        (self.ensure_current)()?;
+            .map_err(|_| route.response_failure(ApiError::bad_gateway("invalid federation response")))?;
+        (self.ensure_current)().map_err(|error| route.response_failure(error))?;
+        if let Some(lease) = route.mailbox_lease() {
+            lease.with_incarnation(||Ok(())).map_err(|error| route.response_failure(error))?;
+        }
         if let FederationRpcRoute::Health(lease) = &route {
             lease.with_incarnation(|| Ok(()))?;
         }

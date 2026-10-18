@@ -1171,6 +1171,8 @@ struct AppState {
     agent_readiness_refresh_lock: Arc<Mutex<()>>,
     /// Owns SSH-backed remote connections and their event bridges.
     remote_registry: Arc<RemoteRegistry>,
+    /// Runtime-only handles; the supervisor owns insert/remove and shutdown.
+    federation_peer_handles: FederationPeerHandles,
     /// Tracks the newest `_sseFallback` revision already recovered per remote
     /// so duplicate or older fallback events do not trigger redundant
     /// blocking `/api/state` fetches.
@@ -1890,6 +1892,9 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
 /// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
+    /// Explicit domain participation; never inferred from a name or local id.
+    federation_mailbox_binding: Option<FederationMailboxBinding>,
+    federation_native_creation_id: String,
     /// Starts at zero when loaded; never persisted across server instances.
     body_sequence: SessionBodySequence,
     /// Process-local barrier; persisted Archived state handles restart/resume.

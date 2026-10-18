@@ -146,6 +146,7 @@ impl AppState {
         mailbox_id: &str,
         processed_through: u64,
     ) -> Result<bool> {
+        let Some(storage_key)=self.local_mailbox_storage_key(session_id) else { return Ok(false); };
         let covered: Vec<(String, String, u64)> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -179,7 +180,7 @@ impl AppState {
             // prompt id and boundary are rechecked under the state lock.
             let Some(boundary) =
                 self.mailbox_store
-                    .mailbox_wake_boundary(session_id, mailbox_id, &message_id)?
+                    .mailbox_wake_boundary(&storage_key, mailbox_id, &message_id)?
             else {
                 continue;
             };

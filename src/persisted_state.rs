@@ -454,6 +454,10 @@ fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    federation_mailbox_binding: Option<FederationMailboxBinding>,
+    #[serde(default = "new_federation_native_creation_id")]
+    federation_native_creation_id: String,
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
@@ -614,6 +618,8 @@ impl PersistedSessionRecord {
 
         Self {
             active_codex_approval_policy: record.active_codex_approval_policy,
+            federation_mailbox_binding: record.federation_mailbox_binding.clone(),
+            federation_native_creation_id: record.federation_native_creation_id.clone(),
             active_codex_reasoning_effort: record.active_codex_reasoning_effort,
             active_codex_sandbox_mode: record.active_codex_sandbox_mode,
             codex_approval_policy: record.codex_approval_policy,
@@ -705,6 +711,8 @@ impl PersistedSessionRecord {
             })
             .collect();
         let mut record = SessionRecord {
+            federation_mailbox_binding: self.federation_mailbox_binding,
+            federation_native_creation_id: self.federation_native_creation_id,
             codex_delegation_release: None,
             active_codex_approval_policy: self.active_codex_approval_policy,
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,

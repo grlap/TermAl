@@ -13,6 +13,9 @@ struct FederationListenerState {
 struct FederationAuthenticatedPeer {
     // Selected exclusively by the dedicated listener, never by a request id.
     lease: Option<FederationLinkLease>,
+    // A mailbox blocking worker may outlive the HTTP response. Its clone owns
+    // the same admitted slot until storage work actually settles.
+    mailbox_permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
 fn federation_router(
@@ -27,11 +30,12 @@ fn federation_router(
         .route("/federation/v1/hello", get(federation_hello))
         .route("/federation/v1/link", post(federation_open_link))
         .route("/federation/v1/health", get(federation_health))
+        .layer(DefaultBodyLimit::max(4096))
+        .merge(federation_mailbox_routes())
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             federation_authenticate,
         ))
-        .layer(DefaultBodyLimit::max(4096))
         .with_state(state)
 }
 
@@ -67,7 +71,9 @@ async fn federation_authenticate(
         .map_err(|_| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
     authority.ensure_expected(&state.channel.snapshot)?;
     (state.ensure_current)()?;
-    let _permit = state.channel.bound.try_acquire()?;
+    let permit = Arc::new(state.channel.bound.try_acquire()?);
+    let mailbox_request = request.method() == axum::http::Method::POST
+        && request.uri().path() == "/federation/v1/mailbox";
     let mut incarnations = request
         .headers()
         .get_all(FEDERATION_INCARNATION_HEADER)
@@ -92,10 +98,19 @@ async fn federation_authenticate(
         .extensions_mut()
         .insert(FederationAuthenticatedPeer {
             lease: lease.clone(),
+            mailbox_permit: mailbox_request.then(|| permit.clone()),
         });
     let response = match tokio::time::timeout(Duration::from_secs(5), next.run(request)).await {
         Ok(response) => response,
         Err(_) => {
+            if mailbox_request {
+                // Store contention is not a failed liveness handshake. The
+                // original operation may still commit: retry its exact key.
+                return Err(ApiError::from_status(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "central mailbox request deadline reached; outcome may be unknown; retry the original request and idempotency key",
+                ));
+            }
             state.channel.invalidate_if_current(&FederationLinkLease {
                 channel: state.channel.clone(),
                 incarnation: request_incarnation,

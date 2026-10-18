@@ -734,6 +734,9 @@ struct Session {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StateSessionSummary {
+    /// Display/routing hint only; every domain operation validates its binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mailbox_participant_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     body_seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

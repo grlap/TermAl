@@ -81,17 +81,6 @@ mod engram_recovery_validation;
 // fixture they share.
 mod engram_source_roots;
 mod evaluator_tool_access;
-mod federation_bootstrap;
-mod federation_bounds;
-mod federation_credentials;
-mod federation_enrollment;
-mod federation_link;
-mod federation_listener_io;
-mod federation_loopback;
-mod federation_registry;
-mod federation_rpc;
-mod federation_runtime;
-mod federation_ssh;
 mod file_changes;
 mod git;
 mod home_fixture;
@@ -130,6 +119,25 @@ mod projects;
 mod provider_capacity_retry;
 mod read_only_refusal_rules;
 mod remote;
+mod federation_bootstrap;
+mod federation_registry;
+mod federation_mailbox_protocol;
+mod federation_mailboxes;
+mod federation_mailbox_process;
+mod federation_mailbox_child;
+mod federation_mailbox_loopback;
+mod federation_mailbox_authority;
+mod federation_mailbox_boundaries;
+mod federation_mailbox_timeout;
+mod federation_ssh;
+mod federation_runtime;
+mod federation_rpc;
+mod federation_loopback;
+mod federation_listener_io;
+mod federation_link;
+mod federation_enrollment;
+mod federation_credentials;
+mod federation_bounds;
 mod remote_authority_races;
 mod remote_delta_replay;
 mod remote_hydration;
@@ -898,6 +906,7 @@ fn test_app_state() -> AppState {
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
+        federation_peer_handles: FederationPeerHandles::default(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         remote_delta_replay_cache: Arc::new(Mutex::new(RemoteDeltaReplayCache::default())),
         remote_delta_hydrations_in_flight: Arc::new(Mutex::new(HashSet::new())),
@@ -1419,6 +1428,7 @@ fn sample_remote_orchestrator_state(
 
 fn test_state_session_summary_from_session(session: &Session) -> StateSessionSummary {
     StateSessionSummary {
+        mailbox_participant_id: None,
         body_seq: session.body_seq,
         body_seq_epoch: session.body_seq_epoch.clone(),
         opencode_approval_mode: session.opencode_approval_mode,

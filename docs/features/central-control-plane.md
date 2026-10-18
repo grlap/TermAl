@@ -2,11 +2,12 @@
 
 ## Status
 
-The M1 foundation implements durable host identity, registry membership,
-capacity reservations and explicit placement. The local operator surface below
-configures that foundation. Cross-host mailbox delivery and native remote
-execution remain later slices: mailbox eligibility is local-only, and remote
-execution runs through the executor proxies of
+The disabled-by-default foundations implement durable host identity, registry
+membership, capacity reservations and explicit placement. The local operator
+surface below configures that foundation. Explicitly bound domain participants
+use the central mailbox protocol described below; unbound sessions keep
+local-only mailbox behavior. Native remote execution remains a later slice;
+executor proxies remain the separate mechanism in
 [Project-scoped remotes](project-scoped-remotes.md). The rollout below lands
 each slice with its own tests, review and gate; enabling it on real machines
 is a separate, explicit operator step.
@@ -17,6 +18,74 @@ mailboxes as local sessions and remote servers relayed coordination through a
 configured upstream, leaving remote participants second-class; see
 [Durable agent mailboxes — Planned remote access](agent-mailboxes.md#planned-remote-access)
 for how that page now points here.
+
+## Foundation mailbox protocol
+
+Protocol version 1, schema `1`, uses the authenticated domain-only
+`/federation/v1/mailbox` route over the [federation link](federation-link.md).
+The bridge and CLI keep calling their local host. A bound satellite session's
+send, creation, directory, list, page read, exact-message read and receipt-only
+acknowledgement relay to the central host; its local store never supplies them.
+Unavailable central reads and sends fail with a retryable `503`, with no local
+queue, cached response or fabricated append receipt.
+
+Participation is explicit. A central native session joins through
+`POST /api/sessions/{id}/mailboxes/domain`; a satellite's host installs the
+central placement binding against its exact native creation identity. Names
+and `Host::Name` aliases are discovery only. The central directory returns
+qualified ids and refuses ambiguous aliases; creation identity, placement
+generation and central authority epoch fence mailbox membership and receipts.
+An old binding cannot attach to a recreated native session.
+
+Binding never moves existing local mail. An explicit central-native join or
+satellite binding install refuses a session with any standalone mailbox history
+(`409`, with the count and mailbox ids); use a fresh session instead. A refused
+session keeps its existing local reads and acknowledgements. Writer admission
+serializes binding against standalone sends, and standalone sends refuse bound
+participants. Rejoining an already-bound central-native session changes nothing.
+Domain routes require a directory-returned qualified `sessionId` or a unique
+`Host::Name` alias for native ids; bare `session-N` references remain local-only.
+An exact canonical id takes precedence over display aliases, and a missing or
+stale canonical id never falls back to a display name.
+
+`GET /api/sessions/{id}/mailboxes/participants` reads the current central
+participant directory. `POST /api/sessions/{id}/mailboxes/create`, with
+`targetSessionId`, gets or creates the central pair mailbox, including an empty
+one. Session summaries expose optional `mailboxParticipantId` for explicitly
+bound native sessions. Ordinary mailbox routes use that binding automatically;
+a disabled or stale binding refuses access rather than reverting to local mail.
+
+`GET /api/sessions/{id}/mailboxes/protocol` reports the central identity,
+versions and limits: 256 KiB bodies, 4 KiB per metadata field, sanitized
+160-character names, at most 200 messages per page, a 2 MiB encoded request
+and a 320 MiB encoded response ceiling. The last ceiling covers the existing
+maximum page with worst-case JSON escaping; it does not increase body or page
+limits. Link negotiation and health keep their smaller transport bounds.
+At four in-flight mailbox calls, this permits up to 1.25 GiB of encoded
+response buffers per peer, before JSON decoding and stored response values.
+The accumulator checks escaped wire bytes before extending and caps its
+reservation growth at the negotiated bound. This is an explicit mailbox
+resource allowance, separate from L1's small negotiation and health messages.
+
+Authenticated mailbox requests retain the existing five-second listener
+deadline. A deadline returns retryable `503` without invalidating the peer link;
+the outcome may be unknown, so mutation retries keep the original idempotency
+key. A canceled request's blocking storage work retains its admitted RPC slot
+until it settles. Link negotiation and health retain their liveness timeout
+and exact-incarnation invalidation behavior. A health probe refused with `429`
+reports admission pressure: both monitors retain the current link without
+recording a successful probe or resetting reconnect backoff.
+
+A central deadline, lost transport response or unusable success response may
+follow a committed append. The satellite preserves an explicit unknown-outcome
+signal through the local API and bridge. Retry the original request with the
+same idempotency key; an unavailable response never proves that C did not commit.
+
+This foundation synchronously returns the central append result and existing
+exact-intent idempotency. The sender intent registry arrives with M3. Remote
+wakes arrive with M4: until then a remote recipient's append truthfully reports
+`durableButNotWoken`, with its cause visible in message details. Central native
+recipients keep local wake, unread and acknowledgement behavior.
 
 ## Model in one paragraph
 

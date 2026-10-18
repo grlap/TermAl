@@ -373,6 +373,7 @@ export type OrchestratorInstance = {
 
 export type Session = {
   id: string;
+  mailboxParticipantId?: string;
   name: string;
   emoji: string;
   agent: AgentType;
@@ -817,6 +818,7 @@ export type MailboxMessage = {
   stateStamp?: string | null;
   body: string;
   notificationState: string;
+  notificationCause?: string | null;
 };
 
 export type PendingPrompt = {

@@ -514,6 +514,10 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .route("/api/sessions/{id}/messages", post(send_message))
         .route("/api/sessions/{id}/mailboxes", get(list_mailboxes))
+        .route("/api/sessions/{id}/mailboxes/protocol", get(negotiate_federation_mailboxes))
+        .route("/api/sessions/{id}/mailboxes/domain", post(join_federation_mailboxes))
+        .route("/api/sessions/{id}/mailboxes/participants", get(list_federation_mailbox_participants))
+        .route("/api/sessions/{id}/mailboxes/create", post(get_or_create_federation_mailbox))
         .route(
             "/api/sessions/{id}/mailboxes/send",
             post(send_mailbox_message),
@@ -754,6 +758,18 @@ impl Mode {
 include!("process_limits.rs");
 include!("remote_authority.rs");
 include!("federation_identity.rs");
+include!("federation_mailbox_protocol.rs");
+include!("federation_mailbox_directory.rs");
+include!("federation_mailbox_identity.rs");
+include!("federation_mailbox_bindings.rs");
+include!("federation_mailbox_namespace.rs");
+include!("federation_mailbox_authority.rs");
+include!("federation_mailbox_operations.rs");
+include!("federation_mailbox_routes.rs");
+include!("federation_mailbox_store.rs");
+include!("federation_mailbox_rpc.rs");
+include!("federation_mailbox_bridge.rs");
+include!("mailbox_append_wake.rs");
 include!("federation_registry.rs");
 include!("federation_snapshots.rs");
 include!("federation_mutations.rs");

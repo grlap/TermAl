@@ -40,6 +40,28 @@ describe("MailboxPanel", () => {
     vi.mocked(readMailbox).mockReset();
   });
 
+  it("shows why a remote message was stored without a wake", async () => {
+    vi.mocked(listMailboxes).mockResolvedValue([
+      { id: "mailbox-1", participants: [], latestSequence: 1, unreadCount: 1 },
+    ]);
+    vi.mocked(readMailbox).mockResolvedValue([
+      {
+        ...message(1),
+        notificationState: "durableButNotWoken",
+        notificationCause: "remote wake delivery arrives with M4",
+      },
+    ]);
+    const { container } = render(
+      <MailboxPanel mailboxId="mailbox-1" sessionId="session-codex" />,
+    );
+    await screen.findByText("#1");
+    const row = container.querySelector(".mailbox-thread-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button"));
+    expect(
+      screen.getByText("durableButNotWoken · remote wake delivery arrives with M4"),
+    ).toBeTruthy();
+  });
+
   it("renders newest-first pages with honest lagging-cursor state and never acknowledges", async () => {
     vi.mocked(listMailboxes).mockResolvedValue([
       {

@@ -1478,7 +1478,7 @@ impl TermalDelegationMcpBridge {
             serde_json::from_value(response).context("mailbox read response shape was invalid")?;
         Ok(json!({
             "mailboxId": mailbox_id,
-            "messages": mcp_mailbox_messages(&range.messages, &self.serving_session_id)?,
+            "messages": mcp_mailbox_messages(&range.messages, range.reader_session_id.as_deref().unwrap_or(&self.serving_session_id))?,
             "afterSequence": range.after_sequence,
             "processedThrough": range.processed_through,
             "receipt": range.receipt,
@@ -1551,6 +1551,7 @@ impl TermalDelegationMcpBridge {
     /// delegation-child, hidden, remote-proxy, and nonexistent targets. Names still require
     /// the live root-session inventory for case-insensitive and ambiguity-aware resolution.
     fn resolve_session_reference(&self, reference: &str) -> Result<String> {
+        if reference.starts_with("domain-session-") { return Ok(reference.to_owned()); }
         if reference.starts_with("session-") {
             if reference == self.serving_session_id {
                 bail!(
@@ -1562,6 +1563,9 @@ impl TermalDelegationMcpBridge {
         }
 
         let state = self.get_json("/api/state")?;
+        if let Some(participants) = self.domain_mailbox_participants(&state)? {
+            return resolve_domain_mailbox_reference(&participants,reference,&self.serving_session_id);
+        }
         let delegation_child_ids = delegation_child_session_ids(&state);
         let sessions = state
             .get("sessions")
@@ -1622,6 +1626,9 @@ impl TermalDelegationMcpBridge {
         // Peer discovery: resolve a session by name to its id for termal_send_to_session.
         // /api/state is metadata-only (no transcripts), so this is a cheap summary read.
         let state = self.get_json("/api/state")?;
+        if let Some(participants) = self.domain_mailbox_participants(&state)? {
+            return Ok(json!({"sessions":participants}));
+        }
         let delegation_child_ids = delegation_child_session_ids(&state);
         let sessions = state
             .get("sessions")

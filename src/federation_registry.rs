@@ -146,6 +146,10 @@ impl FederationPeerRecord {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationState {
+    /// C's participant directory is authority metadata, never mailbox history.
+    /// Satellites keep this empty; their per-session binding has routing only.
+    #[serde(default)]
+    mailbox_directory: BTreeMap<String, FederationMailboxParticipant>,
     #[serde(default)]
     local: Option<FederationHostIdentity>,
     #[serde(default)]
@@ -178,6 +182,12 @@ fn federation_next_generation(generation: u64) -> Result<u64, ApiError> {
 
 impl FederationState {
     fn validate(&self) -> Result<()> {
+        for (key, participant) in &self.mailbox_directory {
+            participant.validate().map_err(|_| anyhow!("invalid persisted mailbox participant"))?;
+            if key != &participant.session_id {
+                return Err(anyhow!("invalid persisted mailbox directory key"));
+            }
+        }
         let mut central_ports = BTreeSet::new();
         let mut creation_ids = BTreeSet::new();
         for (id, record) in &self.peers {

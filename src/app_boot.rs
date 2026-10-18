@@ -781,6 +781,7 @@ impl AppState {
             test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),
             agent_readiness_cache,
             agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
+            federation_peer_handles: FederationPeerHandles::default(),
             remote_registry: Arc::new(
                 std::thread::spawn(RemoteRegistry::new)
                     .join()

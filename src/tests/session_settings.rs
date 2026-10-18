@@ -778,6 +778,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
+        federation_peer_handles: FederationPeerHandles::default(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         remote_delta_replay_cache: Arc::new(Mutex::new(RemoteDeltaReplayCache::default())),
         remote_delta_hydrations_in_flight: Arc::new(Mutex::new(HashSet::new())),

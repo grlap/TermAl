@@ -2167,6 +2167,10 @@ impl AppState {
                     }
                     None => MessageSource::peer(source_id.to_owned(), source_name),
                 }
+            }).or_else(|| {
+                let mailbox=request.source_mailbox.clone()?;
+                let participant=inner.federation.mailbox_directory.get(source_id)?;
+                Some(MessageSource::mailbox(source_id.to_owned(),participant.name.clone(),mailbox))
             })
         });
         // Only a genuine user turn replaces automatic capacity recovery.

@@ -76,7 +76,10 @@ async fn federation_central_monitor(
             };
             match health {
                 Ok(()) => retry.reset(),
-                Err(error) if error.status == StatusCode::LOCKED => {}
+                // Admission pressure is not evidence that the transport died.
+                // Retain this lease without stamping success or resetting retry.
+                Err(error) if matches!(error.status,
+                    StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) => {}
                 Err(error) if error.status == StatusCode::CONFLICT => {
                     if client.channel.current_authority().is_err() {
                         continue;
@@ -139,7 +142,8 @@ async fn federation_satellite_monitor(
             };
             match outcome {
                 Ok(()) => retry.reset(),
-                Err(error) if error.status == StatusCode::LOCKED => {}
+                Err(error) if matches!(error.status,
+                    StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) => {}
                 Err(_) => {
                     if client.channel.current_authority().is_err() {
                         continue;

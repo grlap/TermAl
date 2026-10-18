@@ -13,6 +13,13 @@ struct FederationPeerHandle {
 type FederationPeerHandles = Arc<Mutex<HashMap<String, Arc<FederationPeerHandle>>>>;
 type FederationQuarantinedPeers = Arc<Mutex<HashSet<String>>>;
 
+impl AppState {
+    fn federation_peer_handle(&self, host: &str) -> Option<Arc<FederationPeerHandle>> {
+        self.federation_peer_handles
+            .lock().expect("federation registry mutex poisoned").get(host).cloned()
+    }
+}
+
 struct FederationWorker {
     basis: Arc<FederationTransportBasis>,
     stop: tokio::sync::watch::Sender<bool>,
@@ -51,7 +58,7 @@ fn start_federation_runtime(app: AppState) -> FederationRuntime {
 }
 
 fn start_federation_runtime_with_io(app: AppState, io: FederationRuntimeIo) -> FederationRuntime {
-    let peers = FederationPeerHandles::default();
+    let peers = app.federation_peer_handles.clone();
     let quarantined = FederationQuarantinedPeers::default();
     let (stop, stop_rx) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(federation_supervise(

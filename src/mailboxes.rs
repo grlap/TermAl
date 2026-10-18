@@ -40,6 +40,8 @@ struct MailboxSummary {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct MailboxMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    notification_cause: Option<String>,
     id: String,
     mailbox_id: String,
     sequence: u64,
@@ -91,6 +93,8 @@ struct MailboxIdempotencyRecord {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct MailboxAppendReceipt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    notification_cause: Option<String>,
     mailbox_id: String,
     message_id: String,
     sequence: u64,
@@ -104,6 +108,8 @@ struct MailboxAppendReceipt {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MailboxReadResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reader_session_id: Option<String>,
     messages: Vec<MailboxMessage>,
     after_sequence: u64,
     processed_through: u64,
@@ -403,6 +409,9 @@ impl AppState {
         }
         let (sender_name, target_name) =
             self.mailbox_peer_names(sender_session_id, &request.target_session_id)?;
+        let creations = self.standalone_mailbox_creations([
+            sender_session_id, &request.target_session_id,
+        ])?;
         self.ensure_mailbox_session_active(sender_session_id)?;
         self.ensure_mailbox_session_active(&request.target_session_id)?;
         let input = MailboxAppendInput {
@@ -417,151 +426,11 @@ impl AppState {
         };
         let appended = self
             .mailbox_store
-            .append(&input)
+            .append_authorized(&input, || self.authorize_standalone_mailbox(
+                [sender_session_id, &input.target_session_id], &creations,
+            ))
             .map_err(mailbox_api_error)?;
-        let MailboxAppendResult {
-            mut receipt,
-            finalization: _dispatch_finalization,
-        } = appended;
-        if receipt.duplicate {
-            return Ok(receipt);
-        }
-
-        // This post-commit probe controls wake delivery only. It must never
-        // mutate participant authorization: only deliberate session deletion
-        // owns `left_at`.
-        let (_, target_still_active) =
-            self.mailbox_participants_still_active(sender_session_id, &input.target_session_id);
-        if !target_still_active {
-            if let Err(err) = self
-                .mailbox_store
-                .record_initial_dispatch_outcome(&receipt.message_id, "durableButNotWoken")
-            {
-                eprintln!(
-                    "mailbox> message {} committed, but failed finalizing its durable receipt: {err:#}",
-                    receipt.message_id
-                );
-            }
-            return Ok(receipt);
-        }
-
-        let notification_text = mailbox_notification_text(
-            &receipt.mailbox_id,
-            receipt.unread_depth,
-            receipt.sequence,
-            &sender_name,
-            input.topic.as_deref(),
-        );
-        let notification_request = SendMessageRequest {
-            text: notification_text,
-            expanded_text: None,
-            attachments: Vec::new(),
-            source_session_id: Some(sender_session_id.to_owned()),
-            source_mailbox: Some(MailboxMessageSource {
-                mailbox_id: receipt.mailbox_id.clone(),
-                message_id: receipt.message_id.clone(),
-                sequence: receipt.sequence,
-                unread_count: receipt.unread_depth,
-            }),
-        };
-
-        let disposition = match self.dispatch_turn(&input.target_session_id, notification_request) {
-            Ok(DispatchTurnResult::Dispatched(dispatch)) => {
-                match deliver_turn_dispatch(self, dispatch) {
-                    TurnDispatchDeliveryOutcome::Delivered
-                    | TurnDispatchDeliveryOutcome::Scheduled => Some("deliveredToIdleSession"),
-                    TurnDispatchDeliveryOutcome::Rejected(err) => {
-                        eprintln!(
-                            "mailbox> failed waking target session `{}` for mailbox `{}` message `{}` ({}): {}",
-                            input.target_session_id,
-                            receipt.mailbox_id,
-                            receipt.message_id,
-                            err.status,
-                            err.message
-                        );
-                        None
-                    }
-                    TurnDispatchDeliveryOutcome::Held { error } => {
-                        if let Some(error) = error {
-                            eprintln!(
-                                "mailbox> held wake for target session `{}` mailbox `{}` message `{}` after persistence uncertainty ({}): {}",
-                                input.target_session_id,
-                                receipt.mailbox_id,
-                                receipt.message_id,
-                                error.status,
-                                error.message
-                            );
-                        }
-                        None
-                    }
-                    TurnDispatchDeliveryOutcome::Superseded => None,
-                }
-            }
-            Ok(DispatchTurnResult::DispatchedAfterQueue(dispatch)) => {
-                match deliver_turn_dispatch(self, dispatch) {
-                    TurnDispatchDeliveryOutcome::Delivered
-                    | TurnDispatchDeliveryOutcome::Scheduled => Some("queuedBehindActiveTurn"),
-                    TurnDispatchDeliveryOutcome::Rejected(err) => {
-                        eprintln!(
-                            "mailbox> failed waking queued target session `{}` for mailbox `{}` message `{}` ({}): {}",
-                            input.target_session_id,
-                            receipt.mailbox_id,
-                            receipt.message_id,
-                            err.status,
-                            err.message
-                        );
-                        None
-                    }
-                    TurnDispatchDeliveryOutcome::Held { error } => {
-                        if let Some(error) = error {
-                            eprintln!(
-                                "mailbox> held queued wake for target session `{}` mailbox `{}` message `{}` after persistence uncertainty ({}): {}",
-                                input.target_session_id,
-                                receipt.mailbox_id,
-                                receipt.message_id,
-                                error.status,
-                                error.message
-                            );
-                        }
-                        None
-                    }
-                    TurnDispatchDeliveryOutcome::Superseded => None,
-                }
-            }
-            Ok(DispatchTurnResult::Queued) => {
-                Some(self.mailbox_queued_wake_disposition(&input.target_session_id))
-            }
-            Err(err) => {
-                eprintln!(
-                    "mailbox> failed dispatching wake to target session `{}` for mailbox `{}` message `{}` ({}): {}",
-                    input.target_session_id,
-                    receipt.mailbox_id,
-                    receipt.message_id,
-                    err.status,
-                    err.message
-                );
-                None
-            }
-        };
-        let disposition = disposition.unwrap_or("durableButNotWoken");
-        match self
-            .mailbox_store
-            .record_initial_dispatch_outcome(&receipt.message_id, disposition)
-        {
-            Ok(MailboxDispatchOutcomeRecord::Recorded { .. }) => {
-                receipt.notification_disposition = disposition.to_owned();
-            }
-            Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized { dispatch_outcome }) => {
-                receipt.notification_disposition = dispatch_outcome;
-            }
-            Err(err) => {
-                eprintln!(
-                    "mailbox> failed recording `{disposition}` for message `{}`: {err:#}",
-                    receipt.message_id
-                );
-            }
-        }
-        Ok(receipt)
+        self.finish_mailbox_append_and_notify(sender_session_id, &input.target_session_id, &input, appended)
     }
 
     /// The disposition of a mailbox wake that was queued rather than started:
@@ -654,9 +523,10 @@ impl AppState {
         session_id: &str,
         recovery: MailboxWakeupRecovery,
     ) -> Result<bool> {
+        let Some(storage_key)=self.local_mailbox_storage_key(session_id) else { return Ok(false); };
         let wakeups = self
             .mailbox_store
-            .wakeups_for_session(session_id, recovery)?;
+            .wakeups_for_session(&storage_key, recovery)?;
         self.queue_mailbox_wakeups_for_session(session_id, wakeups, recovery)
     }
 
@@ -664,8 +534,9 @@ impl AppState {
         &self,
         notification: &MailboxNotificationDelivery,
     ) -> Result<bool> {
+        let Some(storage_key)=self.local_mailbox_storage_key(&notification.session_id) else { return Ok(false); };
         let Some(wakeup) = self.mailbox_store.unread_wakeup_for_mailbox_through(
-            &notification.session_id,
+            &storage_key,
             &notification.mailbox_id,
             notification.through_sequence,
         )?
@@ -680,7 +551,7 @@ impl AppState {
         )?;
         if outcome.accepted {
             self.mailbox_store.mark_failed_delivery_recovered_through(
-                &notification.session_id,
+                &storage_key,
                 &notification.mailbox_id,
                 notification.through_sequence,
             )?;
@@ -706,6 +577,7 @@ impl AppState {
         recovery: MailboxWakeupRecovery,
         promote_existing_to_front: bool,
     ) -> Result<MailboxWakeQueueOutcome> {
+        let Some(storage_key)=self.local_mailbox_storage_key(session_id) else { return Ok(MailboxWakeQueueOutcome::default()); };
         if wakeups.is_empty() {
             return Ok(MailboxWakeQueueOutcome::default());
         }
@@ -875,7 +747,7 @@ impl AppState {
         drop(inner);
         for (mailbox_id, sequence) in recovered_through {
             self.mailbox_store.mark_notifications_recovered_through(
-                session_id,
+                &storage_key,
                 &mailbox_id,
                 sequence,
                 recovery,
@@ -918,6 +790,7 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> Result<Option<FrontMailboxRevalidation>> {
+        let Some(storage_key)=self.local_mailbox_storage_key(session_id) else { return Ok(None); };
         let Some(head) = ({
             let inner = self.inner.lock().expect("state mutex poisoned");
             // An entry enqueued with a durability prerequisite keeps the
@@ -947,11 +820,11 @@ impl AppState {
         };
         let wakeup = self
             .mailbox_store
-            .unread_wakeup_for_mailbox(session_id, &head.mailbox_id)?;
+            .unread_wakeup_for_mailbox(&storage_key, &head.mailbox_id)?;
         let boundary = match wakeup {
             Some(_) => None,
             None => self.mailbox_store.mailbox_wake_boundary(
-                session_id,
+                &storage_key,
                 &head.mailbox_id,
                 &head.message_id,
             )?,
@@ -1132,8 +1005,11 @@ impl AppState {
     }
 
     fn mark_mailbox_notification_delivered(&self, notification: &MailboxNotificationDelivery) {
+        let Some(storage_key) = self.local_mailbox_storage_key(&notification.session_id) else {
+            return;
+        };
         if let Err(err) = self.mailbox_store.mark_notifications_delivered_through(
-            &notification.session_id,
+            &storage_key,
             &notification.mailbox_id,
             notification.through_sequence,
         ) {
@@ -1170,6 +1046,15 @@ async fn send_mailbox_message(
     State(state): State<AppState>,
     Json(request): Json<SendMailboxMessageRequest>,
 ) -> Result<(StatusCode, Json<MailboxAppendReceipt>), ApiError> {
+    if state.federation_mailbox_actor_if_bound(&sender_session_id)?.is_some() {
+        if request.class.as_deref().is_some_and(|class| class != "routine") {
+            return Err(ApiError::bad_request("durable mailboxes currently support only class `routine`"));
+        }
+        let receipt = state.federation_mailbox_operation(&sender_session_id,FederationMailboxOperation::Send {
+            target:request.target_session_id,message:request.message,key:request.idempotency_key,
+            topic:request.topic,state_stamp:request.state_stamp }).await?;
+        return Ok((StatusCode::ACCEPTED,Json(receipt)));
+    }
     let receipt = run_blocking_api(move || {
         state.append_mailbox_message_and_notify(&sender_session_id, request)
     })
@@ -1194,6 +1079,9 @@ async fn list_mailboxes(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
+    if state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
+        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::List).await.map(Json);
+    }
     let summaries = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
         state
@@ -1210,6 +1098,10 @@ async fn read_mailbox(
     State(state): State<AppState>,
     Json(request): Json<ReadMailboxRequest>,
 ) -> Result<Json<MailboxReadResponse>, ApiError> {
+    if state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
+        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::Read {
+            mailbox_id,after_sequence:request.after_sequence,limit:request.limit,issue_receipt:request.issue_receipt }).await.map(Json);
+    }
     let messages = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
         state
@@ -1231,6 +1123,9 @@ async fn read_mailbox_message(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<MailboxMessage>, ApiError> {
+    if state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
+        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::ReadMessage { message_id }).await.map(Json);
+    }
     let message = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
         state
@@ -1247,6 +1142,12 @@ async fn acknowledge_mailbox(
     State(state): State<AppState>,
     Json(request): Json<AcknowledgeMailboxRequest>,
 ) -> Result<Json<MailboxSummary>, ApiError> {
+    if state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
+        let (Some(receipt),None,None) = (request.receipt,request.expected_processed_through,request.processed_through) else {
+            return Err(ApiError::bad_request("central domain acknowledgement requires only the unchanged issued receipt"));
+        };
+        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::Acknowledge { mailbox_id,receipt }).await.map(Json);
+    }
     let summary = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
         match (
@@ -1590,6 +1491,10 @@ impl MailboxStore {
     }
 
     fn append(&self, input: &MailboxAppendInput) -> Result<MailboxAppendResult> {
+        self.append_authorized(input, || Ok(()))
+    }
+
+    fn append_authorized<G>(&self, input: &MailboxAppendInput, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
         validate_mailbox_append_input(input)?;
         let write_guard = self.lock_writer("waiting to begin mailbox append")?;
         let mut connection = self.connection()?;
@@ -1618,11 +1523,13 @@ impl MailboxStore {
                 &existing.mailbox_id,
                 &input.sender_session_id,
             )?;
+            let authority = authorize()?;
             transaction.commit().map_err(|err| {
                 mailbox_sqlite_write_error("finishing duplicate mailbox lookup", err)
             })?;
             // Lock order: a duplicate may wait on dispatch finalization only after
             // releasing both SQLite resources and the shared writer-admission guard.
+            drop(authority);
             drop(connection);
             drop(write_guard);
             let notification_disposition = match existing.dispatch_outcome {
@@ -1631,6 +1538,7 @@ impl MailboxStore {
             };
             return Ok(MailboxAppendResult {
                 receipt: MailboxAppendReceipt {
+                    notification_cause: None,
                     mailbox_id: existing.mailbox_id,
                     message_id: existing.message_id,
                     sequence: existing.sequence,
@@ -1775,6 +1683,7 @@ impl MailboxStore {
         // lookup after commit, and no claim that this snapshot fences later sends.
         let sender_processed_through =
             mailbox_processed_through(&transaction, &mailbox_id, &input.sender_session_id)?;
+        let authority = authorize()?;
         self.register_pending_dispatch_outcome(&message_id);
         let finalization = MailboxDispatchFinalizationGuard {
             dispatch_finalization: self.dispatch_finalization.clone(),
@@ -1783,10 +1692,12 @@ impl MailboxStore {
         if let Err(err) = transaction.commit() {
             return Err(mailbox_sqlite_write_error("committing mailbox append", err));
         }
+        drop(authority);
         drop(write_guard);
 
         Ok(MailboxAppendResult {
             receipt: MailboxAppendReceipt {
+                notification_cause: None,
                 mailbox_id,
                 message_id,
                 sequence,
@@ -2323,6 +2234,13 @@ impl MailboxStore {
         limit: u64,
         issue_receipt: bool,
     ) -> Result<MailboxReadResponse> {
+        self.read_range_authorized(session_id, mailbox_id, after_sequence, limit, issue_receipt, || Ok(()))
+    }
+
+    fn read_range_authorized<G>(
+        &self, session_id: &str, mailbox_id: &str, after_sequence: Option<u64>,
+        limit: u64, issue_receipt: bool, authorize: impl FnOnce() -> Result<G>,
+    ) -> Result<MailboxReadResponse> {
         let limit = limit.clamp(1, 200);
         let _write_guard = if issue_receipt {
             Some(self.lock_writer("recording mailbox page issuance")?)
@@ -2394,10 +2312,12 @@ impl MailboxStore {
         } else {
             None
         };
+        let _authority = authorize()?;
         transaction
             .commit()
             .map_err(|err| mailbox_sqlite_write_error("committing mailbox page issuance", err))?;
         Ok(MailboxReadResponse {
+            reader_session_id: None,
             messages,
             after_sequence,
             processed_through,
@@ -2465,8 +2385,16 @@ impl MailboxStore {
         session_id: &str,
         mailbox_id: &str,
         receipt: Option<&str>,
-        mut expected_processed_through: u64,
-        mut processed_through: u64,
+        expected_processed_through: u64,
+        processed_through: u64,
+    ) -> Result<MailboxSummary> {
+        self.acknowledge_authorized(session_id, mailbox_id, receipt, expected_processed_through, processed_through, || Ok(()))
+    }
+
+    fn acknowledge_authorized<G>(
+        &self, session_id: &str, mailbox_id: &str, receipt: Option<&str>,
+        mut expected_processed_through: u64, mut processed_through: u64,
+        authorize: impl FnOnce() -> Result<G>,
     ) -> Result<MailboxSummary> {
         if processed_through < expected_processed_through {
             return Err(mailbox_store_error(
@@ -2616,6 +2544,7 @@ impl MailboxStore {
                     "mailbox not found while acknowledging",
                 )
             })?;
+        let _authority = authorize()?;
         transaction
             .commit()
             .map_err(|err| mailbox_sqlite_write_error("committing mailbox acknowledgement", err))?;
@@ -2769,6 +2698,7 @@ fn mailbox_message_for_idempotency_key(
 
 fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailboxMessage> {
     Ok(MailboxMessage {
+        notification_cause: None,
         id: row.get(0)?,
         mailbox_id: row.get(1)?,
         sequence: row.get(2)?,
@@ -2791,9 +2721,17 @@ fn mailbox_summaries_for_session(
     connection: &rusqlite::Connection,
     session_id: &str,
 ) -> Result<Vec<MailboxSummary>> {
+    mailbox_summaries_for_session_with_empty(connection, session_id, false)
+}
+
+fn mailbox_summaries_for_session_with_empty(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    include_empty: bool,
+) -> Result<Vec<MailboxSummary>> {
     let mut statement = connection
         .prepare(
-            "SELECT m.id, latest.sequence,
+            "SELECT m.id, COALESCE(latest.sequence, 0),
                     (
                       SELECT COUNT(*)
                       FROM mailbox_messages unread
@@ -2806,7 +2744,7 @@ fn mailbox_summaries_for_session(
              FROM mailboxes m
              JOIN mailbox_participants mine
                ON mine.mailbox_id = m.id AND mine.session_id = ?1
-             JOIN mailbox_messages latest
+             LEFT JOIN mailbox_messages latest
                ON latest.mailbox_id = m.id
               AND latest.sequence = (
                 SELECT MAX(candidate.sequence)
@@ -2814,13 +2752,13 @@ fn mailbox_summaries_for_session(
                 WHERE candidate.mailbox_id = m.id
                   AND COALESCE(candidate.topic, '') != ?2
               )
-             WHERE mine.left_at IS NULL
+             WHERE mine.left_at IS NULL AND (?3 OR latest.id IS NOT NULL)
              ORDER BY COALESCE(latest.created_at, m.created_at) DESC, m.id",
         )
         .context("failed to prepare mailbox summary query")?;
     let rows = statement
         .query_map(
-            rusqlite::params![session_id, DELEGATION_REVIEW_RESULT_TOPIC],
+            rusqlite::params![session_id, DELEGATION_REVIEW_RESULT_TOPIC, include_empty],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

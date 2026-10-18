@@ -413,7 +413,12 @@ export function MailboxPanel({
                       </div>
                       <div>
                         <dt>Wake state</dt>
-                        <dd>{message.notificationState}</dd>
+                        <dd>
+                          {message.notificationState}
+                          {message.notificationCause
+                            ? ` · ${message.notificationCause}`
+                            : null}
+                        </dd>
                       </div>
                       <div>
                         <dt>State stamp</dt>

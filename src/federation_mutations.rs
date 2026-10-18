@@ -144,6 +144,11 @@ impl AppState {
                 .as_ref()
                 .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
             settings.validate(local)?;
+            if !domain.mailbox_directory.is_empty()
+                && (current.role != settings.role || current.central != settings.central)
+            {
+                return Err(ApiError::conflict("a participant directory requires explicit authority migration before role replacement"));
+            }
             if settings.role == FederationRole::Satellite
                 && domain.peers.values().any(|peer| {
                     peer.membership != FederationMembershipState::Revoked

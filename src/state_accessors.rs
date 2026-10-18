@@ -237,6 +237,7 @@ mod visible_session_hydration_error_tests {
             .expect("local session should be created")
             .session_id;
         let remote_session = StateSessionSummary {
+            mailbox_participant_id: None,
             body_seq: None,
             body_seq_epoch: None,
             id: "remote-session-1".to_owned(),
@@ -729,6 +730,7 @@ impl AppState {
     ) -> StateSessionSummary {
         let session = &record.session;
         let mut summary = StateSessionSummary {
+            mailbox_participant_id: record.federation_mailbox_binding.as_ref().map(FederationMailboxBinding::participant_key),
             id: session.id.clone(),
             name: session.name.clone(),
             emoji: session.emoji.clone(),

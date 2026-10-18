@@ -193,13 +193,18 @@ impl std::error::Error for TermalDelegationUnknownOutcome {}
 /// Whether `err` leaves a call's outcome unknown: the request may have
 /// reached the server (a transport failure), or the server answered success
 /// with a body the bridge could not read. A refusal the server answered
-/// (`TermalDelegationApiError`) is a known outcome.
+/// (`TermalDelegationApiError`) is a known outcome unless the central mailbox
+/// relay explicitly reports that its already-started operation is uncertain.
 fn termal_delegation_outcome_is_unknown(err: &anyhow::Error) -> bool {
     err.downcast_ref::<TermalDelegationTransportError>()
         .is_some()
         || err
             .downcast_ref::<TermalDelegationResponseError>()
             .is_some()
+        || err.downcast_ref::<TermalDelegationApiError>().is_some_and(|error| {
+            error.status.is_server_error() && error.message.split(';')
+                .any(|clause| clause.trim() == FEDERATION_MAILBOX_UNKNOWN_OUTCOME)
+        })
 }
 
 /// `message`, which embeds `err`, as a `TermalDelegationUnknownOutcome`.
