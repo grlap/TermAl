@@ -1,0 +1,425 @@
+# Central control plane, satellite hosts and cross-host mailboxes
+
+## Status
+
+Design contract, not shipped behavior. Nothing here is implemented yet: today
+mailbox eligibility is local-only, and remote execution runs only through the
+executor proxies of [Project-scoped remotes](project-scoped-remotes.md). The
+rollout below lands it slice by slice, each with its own tests, review and
+gate; enabling it on real machines is a separate, explicit operator step.
+
+This brief is the accepted cross-host design in the repository's own words. It
+replaces the earlier plan, in which remote-backed proxy records joined
+mailboxes as local sessions and remote servers relayed coordination through a
+configured upstream, leaving remote participants second-class; see
+[Durable agent mailboxes — Planned remote access](agent-mailboxes.md#planned-remote-access)
+for how that page now points here.
+
+## Model in one paragraph
+
+One explicitly configured **central TermAl host** is the control plane for a
+coordination domain: it is authoritative for the domain's session identity,
+placement and lifecycle admission, and it is the only home of every mailbox in
+the domain. Any number of **satellite hosts** — macOS, Linux or Windows — are
+enrolled with it. Satellites run their sessions natively and take part in
+coordination through the central host's API, carried directly machine to
+machine over OpenSSH. The topology is hub and spoke: there is no
+satellite-to-satellite link, no mailbox replica and no storage replication
+anywhere in the domain. Engram is not part of this control plane: it stays
+decentralized, and its tasks meet through the shared Git remote.
+
+## Terms
+
+- **Host.** One TermAl installation with its own `termal.sqlite`,
+  `coordination.sqlite`, sessions and coordinator. A host is an installation
+  and its store, not a process: a boot is one generation of it.
+- **Central TermAl host** (C). The hub for sessions and mailboxes, one per
+  coordination domain. It is configured explicitly; it is never a hard-coded
+  hostname, and the design is not tied to one platform.
+- **Satellite host.** A spoke that runs native sessions and reaches mailboxes
+  and coordinated session control only through C's API.
+- **Coordination domain.** One central host and the satellites enrolled with
+  it.
+- **Standalone host.** An installation outside any domain. It keeps today's
+  local behavior, and joins a domain only by explicit enrollment; nothing ever
+  adopts its sessions silently.
+- **Qualified identity.** Participants are addressed as `host_id/session_id`
+  and named `Host::Name`. Labels and names are display and discovery aliases;
+  routing always uses exact qualified ids, and an ambiguous name at send time
+  is an error.
+- **Shared Git remote.** Engram's meeting point for task planning; it is not an
+  authority, and it is not part of this control plane.
+
+## Topology: hub and spoke
+
+- One central host, N satellites. Nothing fixes the number of satellites:
+  adding another satellite of an already supported platform is configuration
+  plus a successful onboarding verification, never a code change. A platform
+  that is not yet supported needs its own platform lane first (see the
+  rollout).
+- No satellite mesh: satellites never link to, route through or own anything on
+  each other. A conversation between two satellites goes through C.
+- No storage replication: no mailbox is ever duplicated, mirrored or merged,
+  and no host keeps a copy of another host's store.
+- Satellites are independent machines and execution environments, not
+  independent authorities. There is never a second authority for the same
+  session or mailbox, no election and no timeout-based failover. Changing which
+  host is central is an explicit operator migration, outside this design.
+- Executor proxies stay a different kind. A project bound to an SSH remote
+  (see [Project-scoped remotes](project-scoped-remotes.md)) keeps routing as it
+  does today; enrolling a host in a domain never converts an executor-proxy
+  session, and an SSH executor binding never proves domain membership.
+
+## Protocol: the TermAl API over OpenSSH
+
+The application protocol between hosts is the TermAl HTTP API. It runs
+directly machine to machine, never through the UI, a browser or a human relay:
+
+- C opens one OpenSSH session to each satellite (batch mode, verified host
+  key, keepalive). It carries HTTP both ways: a local forward for C's calls to
+  the satellite and a reverse forward for the satellite's calls to C, both
+  bound to loopback.
+- The forwarded listener serves only the domain routes, never the general
+  local API. Every request carries the pair capability minted at enrollment;
+  the receiving host identifies the caller by that capability and that
+  channel, never by a host id written in the payload.
+- C calls a satellite only to deliver wakes, check liveness and run the
+  coordinated session commands below. Everything else flows from the
+  satellite to C.
+- Per link: at most four RPCs in flight, exponential backoff with jitter from
+  one second to five minutes, no tight polling, and no network I/O while the
+  global state lock is held.
+- Protocol version, schema and size limits are negotiated explicitly. Today's
+  mailbox limits apply unchanged (body 256 KiB, topic and `stateStamp` 4 KiB
+  each, display names 160 characters).
+- Mutual TLS between hosts and per-request signing are later slices; the
+  pilot authenticates with the pair capability over OpenSSH.
+
+An agent's MCP bridge and CLI keep talking to their own host. That host serves
+the call itself when it is C, and relays it to C otherwise; a relay route holds
+no mailbox state.
+
+## Mailboxes: one canonical store at the central host
+
+Every operation of today's mailbox contract
+([Durable agent mailboxes](agent-mailboxes.md)) keeps its meaning, operation
+for operation: get-or-create, send, list, read a page (C issues the receipt),
+read an exact message, acknowledge, plus a C-initiated wake to the
+participant's host that raises the ordinary session wake (metadata only, never
+the body).
+
+- **Storage exists only at C.** A satellite serves list, read, read-message and
+  acknowledgement only by calling C. There is no local fallback, no cache
+  serving, no offline read and no local SQLite replica of any mailbox.
+- **What a satellite keeps.** Per mailbox and local participant, routing
+  fields only: C's host id and authority epoch and the qualified participant
+  id. It holds no sequence, cursor, message or receipt, and nothing it keeps is
+  ever returned as mailbox content.
+- **Receipts and cursors.** A page receipt is issued only by C and is bound to
+  the mailbox, the participant's host, the participant, C's authority epoch
+  and the issued range, so a receipt from another host or epoch is refused.
+  Acknowledgement is a compare-and-swap at C with the unchanged receipt; no
+  numeric boundaries cross hosts. A later receipt cannot skip an earlier
+  unacknowledged page, and a send never leaps over unread inbound messages.
+- **One mailbox per pair.** A canonical participant-pair key deduplicates
+  get-or-create at C: two opposite first sends at the same moment still create
+  exactly one mailbox and one membership record.
+- **The sender outbox is retry state only.** Each sender host keeps a durable
+  intent registry for its own unconfirmed sends, keyed by sender session and
+  idempotency key across every target, so a reused key with a different
+  target or body conflicts before any network call. The registry is written
+  before the first RPC. It is never a copy of a mailbox, never listed as
+  mailbox content and never consulted for list, read, acknowledgement or
+  cursor. After a send is confirmed or terminally refused, its payload may be
+  removed; only minimal key, digest, target and outcome metadata stays, for
+  idempotency.
+- **Exactly once where it can be.** C deduplicates by sender host, sender
+  session and idempotency key with a digest of the content: the same key and
+  digest return the original message (`duplicate=true`), and the same key with
+  different content is a conflict. Append, dedup row and wake obligation commit
+  in one transaction at C. Transport is at least once and the canonical append
+  is exactly once; agent processing makes no exactly-once claim.
+- **Intent states are shown as they are.** An outbox intent is queued,
+  possibly sent (outcome unknown), committed (with C's message id and
+  sequence), refused or abandoned (an explicit, locally authorized act whose
+  outcome is preserved). A queued or unknown intent is never shown as a
+  successful send receipt, and a client retrieves a pending intent by its key
+  instead of creating a new one. At most 1,000 pending intents and 64 MiB per
+  sender host; beyond that a send is refused visibly, never silently evicted.
+- **Outcomes never expire; cancellation is serialized at C.** The outcome of
+  every committed, refused, cancelled or abandoned intent (key, digest, target,
+  final state) stays authoritative for the lifetime of the sender's namespace,
+  until that namespace is retired whole (the session is deleted, or the host is
+  re-enrolled under a new epoch), and the namespace is permanently fenced after
+  retirement. Only retry payloads and diagnostics may be removed. Any
+  cancellation needs a terminal tombstone for that key serialized at C, because
+  a negative lookup at C is not proof that a send was never made; the first
+  version may refuse to cancel possibly-sent intents. A cancelled intent ends in
+  the abandoned state above and is shown as abandoned, with its outcome. A
+  delayed first send after a cancellation can therefore never append a message
+  that was believed cancelled.
+- **Ordering.** One dense sequence per mailbox. Nothing is promised across
+  mailboxes or hosts, and wall-clock time never orders or expires anything.
+
+Three receipts stay distinct and none proves more than its own step: C's append
+receipt proves a durable append; a satellite's wake acceptance proves durable
+local wake admission; a processed-through receipt proves a cursor advanced over
+a correctly issued page. None of them proves comprehension, task completion or
+Engram verification.
+
+## Identity, enrollment and authority
+
+- **Host identity.** Each host has a `host_id` (a UUID minted once and kept in
+  `termal.sqlite`), an enrollment epoch (for a satellite) or an authority epoch
+  (for C), and a link incarnation per boot. An ordinary reboot changes only the
+  incarnation. Re-enrollment, a key or capability change, or a restore or
+  clone that cannot prove continuity changes the epoch; then every older
+  in-flight operation, receipt and capability is refused, and old pending
+  operations are quarantined for explicit reconciliation.
+- **Enrollment** is an explicit operator act. It exchanges host ids, SSH host
+  keys and the pair capability (a random secret bound to that satellite and C,
+  kept in protected local credential storage on both).
+- **Session identity.** For a coordinated session, C allocates a creation
+  identity that is never reused and binds it to one enrolled satellite and one
+  runtime placement. A session deleted and recreated under the same name
+  inherits no cursor, unread mail, pending command or access.
+- **Central session control.** C may create, prompt and stop sessions on a
+  satellite through the enrolled link, as project-scoped remote proxying already
+  does today. The satellite still checks its own local safety and admission
+  rules before applying a command, and keeps its process handles and journals as
+  local operational state, never as a second coordination store. Restarting,
+  installing or configuring a satellite host stays the operator's act. A local
+  emergency stop is always available and grants no authority to start a
+  replacement.
+- **Authority.** A host acts only for its own sessions. The sender of a request
+  is the authenticated peer (by capability and channel) plus the session that
+  peer asserts, never a value written in the payload. Eligibility — a visible
+  root session native to an enrolled host, not a delegation child — is judged
+  by the session's own host and validated by C on every operation. Removing a
+  participant or revoking a satellite fences future admission but cannot undo
+  what was already accepted, cannot stop a disconnected process, and never
+  rewrites history.
+- **Fencing.** Every cross-host request carries the host id, the epoch and the
+  link incarnation, and the receiving host validates them against its
+  registry. An operation captures C's authority epoch, the satellite's
+  enrollment epoch, the session's creation identity and placement generation,
+  and the link incarnation before any off-lock transport, and validates them
+  again adjacent to the central commit and again adjacent to the local runtime
+  apply; a sender's preflight check alone is not enough. A stale one is refused
+  with the same retryable `409` used for remote-lease ABA today, and is never
+  retargeted to another host. A stale central epoch, a revoked or re-enrolled
+  satellite, an address that changes and changes back, a recreated name, a
+  replaced placement and a delayed response are all fenced cases.
+- **Trust.** The pilot covers one operator's explicitly enrolled machines,
+  with loopback-only forwards. Transport authentication proves which enrolled
+  host sent a request, not that a reported result is true. Multi-user trust
+  needs its own access-control and threat design.
+
+## The satellite registry: membership and capacity
+
+C keeps one registry entry per satellite: its host id and enrollment epoch,
+platform (OS and architecture), transport endpoint, references to its pinned
+host key and pair capability (never the secrets themselves), its verified
+protocol, binary and toolchain identity (TermAl build hash and schema version),
+declared limits (maximum concurrent sessions, build and gate slots) with current
+allocations, its lifecycle state, and last-observed liveness. The protocol,
+binary and toolchain identity is verified at onboarding and again on every
+reconnect; a changed identity or execution profile removes placement
+eligibility until the satellite is verified again. That per-reconnect check is
+the identity check only; the full onboarding checklist re-runs when the
+verification basis changes (see the next section).
+
+- Membership, state and placement changes serialize at C.
+- A registry entry creates no executable session and grants no stop, start,
+  configuration or approval power beyond the central session control described
+  above.
+
+| State | Meaning |
+| --- | --- |
+| Enrolled | Record created; not verified; no placement. |
+| Verified | The onboarding checklist passed; still not accepting placement. |
+| Active | Explicitly activated: link up, accepting new placement. |
+| Draining | No new placement; already admitted sessions finish, report and reconcile. |
+| Revoked | Future admission under the old identity refused; history and uncertain outcomes kept for reconciliation. |
+
+- Only an Active satellite whose verification matches its current enrollment
+  epoch, endpoint, host key, protocol and execution profile accepts new
+  placement. A change to any of these removes eligibility until the satellite
+  is verified again.
+- Admission reserves capacity atomically with the placement, so two
+  concurrent admissions cannot both take the last slot, and repeating an
+  admission key recovers its original reservation. A reservation outlives an
+  uncertain launch or stop and a disconnection until it is reconciled with its
+  runtime owner; stale liveness or a timeout never releases it.
+- Declared limits are ceilings, not grants: today's disk and gate constraints
+  stay independent admission limits that registry capacity cannot override.
+- The registry has no fixed roster and no hard-coded count. Choosing among
+  eligible satellites, balancing and preemption are a later scheduler design
+  that builds on this registry; this design defines none of it.
+
+## Onboarding a satellite
+
+Onboarding has two parts:
+
+1. **Operator setup.** The operator's own acts on the satellite: an OpenSSH
+   server, the account, the key, the TermAl binary. Then C's configuration of
+   the satellite's registry entry.
+2. **Automated verification.** C runs a checklist within that setup:
+   reachability; host-key match; pair-capability exchange; compatible TermAl
+   version and schema; qualified identity; authenticated RPC in both
+   directions through the local and reverse forwards on the domain routes;
+   wake delivery to an isolated probe session with its own recorded outcome;
+   platform, path and process-supervisor probes in that session; and refusal on
+   a mismatched identity, version or capability.
+
+Reachability alone, or an SSH shell exiting with zero, proves nothing. A passed
+checklist is bound to the full configuration and identity of the entry and
+moves it to Verified; an incomplete or failed one leaves it Enrolled, and it
+can never become Active silently. The checklist runs again after any change to
+that basis, and on reconnect after an epoch change.
+
+Engram's own onboarding check (an Engram binary and automated Git exchange on
+that platform) is a separately recorded step, run only for a host with Engram
+sync enabled. It gates that host's Engram sync readiness, never TermAl
+membership or activation: a TermAl-only satellite activates without it.
+
+## When the central host is unreachable
+
+- Work already admitted on a satellite may continue under its existing local
+  rules, and the local emergency stop stays available.
+- Central session control and authoritative mailbox list, read and
+  acknowledgement are unavailable: they fail with a retryable `503`, and there
+  is no offline read.
+- No new central admission, no timeout reassignment, no alternate executor and
+  no replacement session.
+- A sender's own new sends may queue durably and are shown as outbox status,
+  separately from mailbox history. They never get a substitute home, a
+  fabricated sequence or a local success receipt.
+- C shows a disconnected satellite's work as unknown or last observed, never as
+  stopped merely because time passed. One satellite losing C affects only that
+  satellite; the others and C continue.
+
+On reconnection the satellite first authenticates the same C authority epoch,
+reconciles its pending keys, and then replays its exact intents. A lost reply
+after a commit returns the same result on retry; a failed wake after a commit
+stays committed as `durableButNotWoken` and is restored by the recovery pass.
+An unknown runtime effect stays unknown until it is resolved where it ran; a
+negative lookup or a timeout never licenses a second start. Revoked or
+epoch-mismatched traffic is held for explicit reconciliation, never readdressed.
+
+Wake and command obligations on a satellite:
+
+- The satellite persists a deduplicated wake or command obligation before it
+  reports the obligation accepted. Received, queued, runtime-accepted and
+  processed stay separate states, each visible.
+- Duplicate transport events cannot create duplicate queue entries, and an
+  acknowledgement preserves an already accepted continuation.
+- Boot on either host recovers its intent and wake or command journals.
+  Obligations have visible pending, delivered and abandoned states and bounded
+  retry; an offline peer does not block unrelated local work.
+- A disk-full or quota failure before local durability fails visibly, and a
+  stale wake-state report cannot regress a later state.
+
+## Observability
+
+Every response, log line and UI row carries C's id and authority epoch, the
+mailbox and message ids and sequence, the sender's intent key and digest, the
+link incarnation and a trace id; transport errors disclose no credentials or
+bodies by default. The
+UI shows three things separately and never conflates them: whether C is
+reachable and serving authoritative reads; the local runtime status of
+admitted work (last observed by C); and the session's own outbox (pending
+versus committed, wake queued, held or unreachable, recipient processed-through).
+The registry view shows each satellite's state, platform, capacity in use and
+last-observed liveness, with credentials redacted.
+
+## Engram boundary
+
+TermAl mailboxes carry ordinary coordination only; they carry no task-sync protocol.
+
+This is the second of the four sentences of the boundary shared with Engram's
+sync design, quoted whole:
+
+> Git carries configured typed task planning documents and explicitly eligible
+> shared notes. TermAl mailboxes carry ordinary coordination only; they carry no
+> task-sync protocol. Local claims, grants, runtime state, delivery cursors,
+> native verification/evaluation records and native completion seals are not
+> imported by task sync. A mailbox receipt is not an import receipt or
+> execution authority.
+
+- TermAl owns mailbox addressing, authentication, delivery, retry and
+  deduplication, wake eligibility and ordinary conversations. Its receipts
+  describe mailbox behavior only.
+- Engram is decentralized: each host has its own store, and task planning meets
+  through the shared Git remote (push, fetch, merge) followed by Engram's own
+  import on each host. Disconnected hosts may take up the same task in
+  parallel; that is an accepted product choice.
+- Nothing in this protocol carries Engram claims, grants, import receipts or
+  completion seals, and no native evaluation, seal or check record crosses as
+  local verification. Disclosed result text, opaque identifiers and evidence
+  references may cross only as attributed observations. A message such as
+  "pushed commit X" coordinates agents but has no task-sync meaning: it
+  triggers no import and acknowledges no task application. A mailbox
+  acknowledgement never settles Engram's import reconciliation or grants
+  authority.
+- Engram's origin identity is Engram's own; any association between an Engram
+  origin and a TermAl host is local display configuration, grants no authority
+  and never travels on the mailbox wire.
+- The mailbox work and Engram's Git task sync proceed independently: neither
+  depends on the other.
+
+## Never crosses hosts as authority
+
+SQLite stores or files; private scratch; credentials, SSH keys and coordinator
+tokens; usable claim or grant tokens; retained prompts or session authority;
+another host's execution or delivery cursors as a receiver checkpoint; native
+evaluation, seal and check records as local verification; source-root bindings;
+delegation children; Engram claims, grants, import receipts and completion
+seals.
+
+## Rollout: the slice map
+
+Every code slice runs fail-first tests on one machine with two TermAl processes
+and a fake link, plus the repository's focused tests, full gate and an
+independent review pair. Enabling the feature on real machines and restarting a
+host stay separate from accepting a slice.
+
+| Slice | Delivers |
+| --- | --- |
+| D0 | This brief. |
+| M1 | Central-domain identity and configuration, the satellite registry with its membership and capacity model, enrollment records and explicit session placement — feature disabled. |
+| L1 | The host-to-central OpenSSH link: one C-initiated session per satellite with local and reverse forwards, the domain-only listener and pair-capability channel binding. |
+| O1 | Onboarding: the operator's setup and C's automated verification checklist, moving an entry to Verified. |
+| M2 | Central mailbox routing, directory and protocol conformance: every operation goes to C; opposite first sends make one mailbox; an outage never yields another owner or cached reads. |
+| M3 | Atomic central append, dedup and wake obligation, plus the sender intent registry, proven across crash cuts, lost replies, conflicting retries, bounded queues and a cancellation followed by garbage collection and a delayed first send; authoritative outcomes survive restart for the namespace lifetime. |
+| M4 | Satellite wake and command journals, receipt-only acknowledgement and recovery, including C or a satellite restarting at every persistence cut. |
+| M5 | One central host with one, then two satellites: the same agent APIs on every host and one central authority, including satellite-to-satellite conversation through C. |
+| P (platform lanes) | One lane per satellite platform — transport, process supervisor and paths — for macOS first, then Linux and Windows, each verified by the O1 checklist. A Windows satellite needs an OpenSSH server on that host. |
+| M6 | A bounded operator pilot: the central host plus a Mac satellite onboarded by configuration and the checklist, with exact build identities, delivery, wake and processing verified separately, and a reconnect, restart and disable matrix that preserves uncertain operations. Disabling drains or freezes pending intents visibly and preserves logs, cursors and dedup; rollback never discards unknown schema or outbox data. |
+
+M1's registry and O1 are platform-neutral prerequisites of M5 and M6; M6 depends
+on the macOS lane. A satellite of a platform without a verified lane cannot
+become Active, and a real pilot proves only the platform and build combination
+it measured. Until M6 passes, the operator relay stays the fallback for
+cross-host coordination.
+
+## Open questions (defaults apply)
+
+- **Peer authentication.** Default: the pair capability over OpenSSH;
+  per-request signing with a host key pair is a later slice.
+- **Central session control.** Default: C may create, prompt and stop sessions
+  on satellites, as described above.
+- **Satellite capacity.** The operator sets each satellite's declared limits at
+  onboarding; the design fixes no number.
+- **Cancellation state.** The design names cancellation among the terminal
+  outcomes without listing it as its own intent state. Default: a cancelled
+  intent is recorded and shown as abandoned, with its outcome preserved.
+
+## Related
+
+- [Durable agent mailboxes](agent-mailboxes.md): today's mailbox contract,
+  which every host keeps operation for operation.
+- [Project-scoped remotes](project-scoped-remotes.md): the SSH executor-proxy
+  routing that stays a distinct kind.
+- [Engram host adapter](engram-host-adapter.md): each host's own local Engram
+  integration.

@@ -119,12 +119,15 @@ Session-scoped routes resolve the session's remote mapping:
 - Codex thread actions
 - agent-command discovery
 
-Planned coordination routing (mailboxes and boards) will remain
-control-plane-owned instead of following project or session routing. It is not
-implemented yet: current mailbox eligibility is local-only and rejects
-remote-backed proxies. See
-[Durable agent mailboxes — Planned remote access](agent-mailboxes.md#planned-remote-access)
-for the future placement rule, relay transport, and recovery semantics.
+Planned cross-host coordination does not follow project or session routing.
+It is designed separately in
+[Central control plane, satellite hosts and cross-host mailboxes](central-control-plane.md):
+one central TermAl host is the only home of every mailbox in its domain, and
+enrolled satellite hosts run native sessions and reach it through its API over
+OpenSSH. The remote-backed proxy sessions described here stay a distinct
+executor-proxy kind; enrolling a host never converts them, and an executor
+binding never proves domain membership. None of this is implemented yet:
+current mailbox eligibility is local-only and rejects remote-backed proxies.
 
 The UI passes canonical local project/session ids. Remote-native ids stay inside
 the backend mapping layer.
@@ -241,7 +244,9 @@ operations.
 - Browser connections directly to remote servers
 - Multi-user collaboration semantics (planned single-user cross-machine mailbox
   coordination remains in scope — see
-  [Durable agent mailboxes — Planned remote access](agent-mailboxes.md#planned-remote-access))
-- Relay-hosted auth and machine registration
+  [Central control plane, satellite hosts and cross-host mailboxes](central-control-plane.md))
+- Relay-hosted auth and machine registration for executor remotes (enrolling
+  satellite hosts in a coordination domain is the separate design in
+  [Central control plane, satellite hosts and cross-host mailboxes](central-control-plane.md))
 - Cross-remote session migration
 - A global merged filesystem or git workspace across remotes

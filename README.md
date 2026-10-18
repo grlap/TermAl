@@ -467,6 +467,7 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
   - [Conversation overview map](docs/features/conversation-overview-map.md) — the one-call minimap
   - [Virtualized transcripts](docs/features/session-virtualized-transcript.md) — bounded paging for huge sessions
   - [Project-scoped remotes](docs/features/project-scoped-remotes.md) — remote binding at project level
+  - [Central control plane](docs/features/central-control-plane.md) — planned design: central host, satellite hosts, cross-host mailboxes
 
 ## License
 

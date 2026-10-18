@@ -414,64 +414,40 @@ Legacy numeric acknowledgement remains a forward-only compare-and-swap:
 
 ## Planned remote access
 
-Mailboxes are control-plane state with exactly one durable authority. A
-mailbox is never duplicated, mirrored, or merged across machines: it lives in
-the `coordination.sqlite` of the control-plane host that accepted its first
-send, and every later operation — list, read, acknowledgement, recovery —
-happens against that one store.
+Cross-host mailboxes are designed in
+[Central control plane, satellite hosts and cross-host mailboxes](central-control-plane.md),
+which is the authoritative contract; this section only summarizes how it relates
+to the shipped mailbox contract above. It is a design contract, not shipped
+behavior: today mailbox eligibility is local-only, and remote-backed proxy
+sessions are rejected.
 
-For the planned deployment shape — one control-plane host (the server the
-browser talks to) plus SSH-attached executor remotes described in
-[Project-scoped remotes](project-scoped-remotes.md) — that rule will resolve to:
-**all mailboxes live on the control-plane host**. Remote-backed sessions are
-local proxy records with local ids on that host, so participation,
-dense sequencing, idempotency, wake recovery, and the compare-and-swap cursor
-contract are unchanged; participant rows simply reference root sessions whose
-runtimes execute elsewhere.
+- **One home.** One explicitly configured central TermAl host is the only home
+  of every mailbox in its coordination domain. A mailbox is never duplicated,
+  mirrored or merged, and no host keeps a replica: satellite hosts serve list,
+  read, exact-message read and acknowledgement only by calling the central host
+  over the enrolled link, with no local fallback and no offline read.
+- **Same contract.** Participants on satellite hosts are first-class: every
+  operation of this document keeps its meaning, operation for operation, with
+  page receipts issued by the central host and acknowledgement as a
+  receipt-only compare-and-swap there. Participants are addressed by qualified
+  `host_id/session_id`.
+- **Outbox is retry state only.** A sender's host keeps its own unconfirmed
+  sends durably for retry; that outbox is never a copy of a mailbox and never
+  answers list, read, acknowledgement or cursor.
+- **Executor proxies stay a distinct kind.** Remote-backed proxy sessions of
+  [Project-scoped remotes](project-scoped-remotes.md) are never conflated with
+  native sessions, and enrolling a host never converts them; today's
+  executor-proxy path is unchanged until a separately scoped slice says
+  otherwise.
+- **Trust.** The pilot stays inside the single-user trust model: one operator's
+  explicitly enrolled machines over that operator's OpenSSH. If mailboxes ever
+  cross a user boundary, the diagnostic normalization requirement at the end of
+  this document applies: missing, self and ineligible target failures must
+  collapse into one generic error.
 
-This section is a design contract, not shipped behavior. Today mailbox
-eligibility remains local-only and remote-backed proxies are rejected. The
-eligibility and relay changes below must land together before this section can
-be promoted to the runtime contract.
-
-What remote participation changes:
-
-- **Eligibility.** Root eligibility extends from local root sessions to
-  control-plane-visible root sessions, including remote-backed proxy records.
-  Delegation children remain excluded on every host. The list, read,
-  exact-message-read, and acknowledgement routes keep rejecting hidden
-  sessions and delegation children with `400`; they stop rejecting
-  remote-backed roots.
-- **Wakes.** A wake targeting a remote-backed participant travels the existing
-  session-scoped proxy route used for ordinary prompts. Wake delivery remains
-  best-effort metadata: if the remote is unreachable, the message stays
-  committed with `durableButNotWoken` and the receipt says so. Reconnecting a
-  remote runs the same recovery pass boot performs, restoring never-woken
-  wakes for that remote's proxy participants.
-- **Reads and acknowledgements from the remote side.** The agent's MCP bridge
-  keeps talking to its own local server. A remote server configured with a
-  coordination upstream relays mailbox and board routes verbatim to the
-  control-plane host instead of serving them from its own store, and holds no
-  mailbox state for relayed traffic. The control-plane host provides the
-  upstream address when it establishes the SSH connection, as a reverse
-  forward of its API port; managed startup passes that upstream to the remote
-  server. A remote server without an upstream — a standalone machine used
-  directly — keeps serving its own local mailboxes. The placement rule, not
-  special cases, decides which store owns a mailbox.
-- **Authority.** Relayed coordination requests carry the same pinned
-  remote-lease semantics as other proxied routes; a retired or replaced
-  connection rejects in-flight relays with the standard retryable `409`
-  instead of retargeting them.
-- **Trust.** This stays inside the single-user trust model: one operator's
-  machines over that operator's SSH. It is not multi-user federation. If
-  mailboxes ever cross a user boundary, the diagnostic normalization
-  requirement at the end of this document applies: missing, self, and
-  ineligible target failures must collapse into one generic error.
-
-Out of scope: hub-to-hub federation (two full control planes exchanging
-mailboxes), replication, and offline merge. A mailbox has one home; a machine
-that cannot reach it reads nothing and sends nothing until connectivity
-returns.
+A host that cannot reach the central host reads nothing; its own new sends may
+queue durably as outbox status, never as mailbox history. Out of scope:
+federation between independent control planes, replication and offline merge.
 
 ## Foundation scope
 

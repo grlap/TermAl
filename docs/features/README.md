@@ -37,6 +37,7 @@ design decisions, and future plans.
 
 ## Planned Or Exploratory Briefs
 
+- [Central Control Plane, Satellite Hosts And Cross-Host Mailboxes](./central-control-plane.md)
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Agent Delegation Sessions](./agent-delegation-sessions.md)
 - [Conversation Overview Map](./conversation-overview-map.md)
