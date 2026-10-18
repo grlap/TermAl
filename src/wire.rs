@@ -105,6 +105,9 @@ enum ApiErrorKind {
     /// Callers must report the error without terminalizing delegated work.
     RetainedQueuedPromotionPersistenceUnknown,
     RemoteConnectionUnavailable,
+    /// An owned federation SSH child could not be proven reaped. Never start
+    /// another process for that pair until explicit operator reconciliation.
+    FederationSshCleanupUnknown,
     /// A fresh evaluator's first brief was not acknowledged as durable, so its
     /// delegation was retired before any turn and the request may be repeated.
     AcceptanceEvaluationFirstBriefUnacknowledged,

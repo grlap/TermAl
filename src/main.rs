@@ -168,6 +168,7 @@ async fn run_server() -> Result<()> {
     // base URL, while health and state routes begin serving without waiting for
     // Engram CLI work-binding calls.
     let _post_listen_boot_worker = state.start_post_listen_boot()?;
+    let federation_runtime = start_federation_runtime(state.clone());
 
     println!("TermAl backend");
     println!("listening: http://{bound}");
@@ -207,6 +208,7 @@ async fn run_server() -> Result<()> {
         .with_graceful_shutdown(graceful_shutdown_future)
         .await
         .context("backend server failed");
+    federation_runtime.shutdown().await;
     #[cfg(not(test))]
     shutdown_state.stop_telegram_relay_runtime();
 
@@ -760,6 +762,22 @@ include!("persist_federation.rs");
 include!("persist_federation_image.rs");
 include!("remote.rs");
 include!("remote_ssh.rs");
+include!("federation_ssh.rs");
+include!("federation_bounds.rs");
+include!("federation_basis.rs");
+include!("federation_link.rs");
+include!("federation_protocol.rs");
+include!("federation_channel_authority.rs");
+include!("federation_listener.rs");
+include!("federation_listener_io.rs");
+include!("federation_rpc.rs");
+include!("federation_credentials.rs");
+include!("federation_process.rs");
+include!("federation_runtime_io.rs");
+include!("federation_recovery.rs");
+include!("federation_runtime.rs");
+include!("federation_peer.rs");
+include!("federation_monitor.rs");
 include!("remote_terminal.rs");
 include!("remote_routes.rs");
 include!("remote_delta_apply.rs");

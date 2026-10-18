@@ -1032,6 +1032,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
         Some(
             ApiErrorKind::LocalSessionMissing
             | ApiErrorKind::RemoteConnectionUnavailable
+            | ApiErrorKind::FederationSshCleanupUnknown
             | ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown
             | ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged,
         ) => None,

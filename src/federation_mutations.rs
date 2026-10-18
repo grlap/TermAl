@@ -17,6 +17,24 @@ impl AppState {
         reset_continuity: bool,
         update: impl FnOnce(&mut FederationState, &mut FederationSettings) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
+        self.mutate_federation_with_install_receipt(
+            reset_continuity,
+            update,
+            |_| {},
+            EngramBudgetClock::Real,
+        )
+    }
+
+    // The receipt accounts for this exact in-memory installation even when
+    // dispatch or its durability fence fails. It grants no current authority.
+    // The callback may only capture the value, never perform IO or take locks.
+    fn mutate_federation_with_install_receipt<T>(
+        &self,
+        reset_continuity: bool,
+        update: impl FnOnce(&mut FederationState, &mut FederationSettings) -> Result<T, ApiError>,
+        on_install: impl FnOnce(&T),
+        clock: EngramBudgetClock,
+    ) -> Result<T, ApiError> {
         let (value, image, dispatch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if !inner.federation_durable || (inner.federation_continuity_lost && !reset_continuity)
@@ -39,6 +57,7 @@ impl AppState {
             inner.federation = candidate;
             inner.preferences.federation = settings;
             inner.federation_durable = false;
+            on_install(&value);
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
             let dispatch = self
                 .persist_internal_locked_with_dispatch(&inner)
@@ -47,7 +66,7 @@ impl AppState {
                 })?;
             (value, image, dispatch)
         };
-        self.finish_federation_durability(&image, dispatch)?;
+        self.finish_federation_durability_with_clock(&image, dispatch, clock)?;
         if reset_continuity {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if federation_persist_image(&PersistedState::metadata_from_inner(&inner)) != image {
@@ -58,15 +77,19 @@ impl AppState {
         Ok(value)
     }
 
-    fn finish_federation_durability(
+    fn finish_federation_durability_with_clock(
         &self,
         image: &Value,
         dispatch: PersistDispatch,
+        clock: EngramBudgetClock,
     ) -> Result<(), ApiError> {
         if matches!(dispatch, PersistDispatch::BackgroundQueued) {
-            let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            let (fence, waiter) =
-                PersistFence::new(PersistFenceTarget::Federation(image.clone()), deadline);
+            let deadline = clock.now() + Duration::from_secs(5);
+            let (fence, waiter) = PersistFence::new_with_clock(
+                PersistFenceTarget::Federation(image.clone()),
+                deadline,
+                clock,
+            );
             self.persist_tx
                 .send(PersistRequest::Fence(Box::new(fence)))
                 .map_err(|_| {
@@ -92,6 +115,15 @@ impl AppState {
     /// An unresolved prior write can be re-confirmed; no new placement or
     /// version is minted while recovering its exact durability disposition.
     fn reconcile_federation_durability(&self) -> Result<(), ApiError> {
+        self.reconcile_federation_durability_with_clock(EngramBudgetClock::Real)
+    }
+
+    // Tests supply the existing scripted clock only for controlled success.
+    // Production recovery always uses the real clock and unchanged deadline.
+    fn reconcile_federation_durability_with_clock(
+        &self,
+        clock: EngramBudgetClock,
+    ) -> Result<(), ApiError> {
         let (image, dispatch) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
@@ -102,7 +134,7 @@ impl AppState {
                 })?;
             (image, dispatch)
         };
-        self.finish_federation_durability(&image, dispatch)
+        self.finish_federation_durability_with_clock(&image, dispatch, clock)
     }
 
     fn configure_federation(&self, settings: FederationSettings) -> Result<(), ApiError> {

@@ -48,6 +48,33 @@ impl AppState {
         expected: &FederationPeerSnapshot,
         incarnation: String,
     ) -> Result<FederationPeerSnapshot, ApiError> {
+        self.federation_peer_connected_owned(expected, incarnation, &mut None)
+    }
+
+    // The installed record receipt survives durability errors for the owning
+    // channel's accounting. A runtime link is published only after durability.
+    fn federation_peer_connected_owned(
+        &self,
+        expected: &FederationPeerSnapshot,
+        incarnation: String,
+        installed: &mut Option<FederationPeerSnapshot>,
+    ) -> Result<FederationPeerSnapshot, ApiError> {
+        self.federation_peer_connected_owned_with_clock(
+            expected,
+            incarnation,
+            installed,
+            EngramBudgetClock::Real,
+        )
+    }
+
+    fn federation_peer_connected_owned_with_clock(
+        &self,
+        expected: &FederationPeerSnapshot,
+        incarnation: String,
+        installed: &mut Option<FederationPeerSnapshot>,
+        clock: EngramBudgetClock,
+    ) -> Result<FederationPeerSnapshot, ApiError> {
+        *installed = None;
         if Uuid::parse_str(&incarnation)
             .ok()
             .filter(|id| !id.is_nil())
@@ -58,36 +85,51 @@ impl AppState {
             return Err(ApiError::bad_request("invalid federation link incarnation"));
         }
         self.ensure_federation_peer_current(expected)?;
-        self.mutate_federation(|domain, _| {
-            let peer = domain
-                .peers
-                .get_mut(&expected.peer.host_id)
-                .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-            if peer.record_generation != expected.record_generation {
-                return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
-            }
-            if domain.links.get(&peer.identity.host_id) != Some(&incarnation) {
-                peer.record_generation = federation_next_generation(peer.record_generation)?;
-                peer.transport_generation = federation_next_generation(peer.transport_generation)?;
-                peer.verification = None;
-                if peer.membership != FederationMembershipState::Draining {
-                    peer.membership = FederationMembershipState::Enrolled;
+        let updated = self.mutate_federation_with_install_receipt(
+            false,
+            |domain, _| {
+                let peer = domain
+                    .peers
+                    .get_mut(&expected.peer.host_id)
+                    .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+                if peer.record_generation != expected.record_generation {
+                    return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
                 }
-                peer.last_observed = Some(FederationLiveness {
-                    link_incarnation: incarnation.clone(),
-                    last_successful_rpc: None,
-                    last_successful_wake: None,
-                });
-                domain
-                    .links
-                    .insert(peer.identity.host_id.clone(), incarnation);
-            }
-            let mut updated = expected.clone();
-            updated.record_generation = peer.record_generation;
-            updated.transport_generation = peer.transport_generation;
-            updated.membership = peer.membership;
-            Ok(updated)
-        })
+                if domain.links.get(&peer.identity.host_id) != Some(&incarnation) {
+                    peer.record_generation = federation_next_generation(peer.record_generation)?;
+                    peer.transport_generation =
+                        federation_next_generation(peer.transport_generation)?;
+                    peer.verification = None;
+                    if peer.membership != FederationMembershipState::Draining {
+                        peer.membership = FederationMembershipState::Enrolled;
+                    }
+                    peer.last_observed = Some(FederationLiveness {
+                        link_incarnation: incarnation.clone(),
+                        last_successful_rpc: None,
+                        last_successful_wake: None,
+                    });
+                    // The prior channel is no longer authoritative for this
+                    // record. Do not publish the new UUID before its record commits.
+                    domain.links.remove(&peer.identity.host_id);
+                }
+                let mut updated = expected.clone();
+                updated.record_generation = peer.record_generation;
+                updated.transport_generation = peer.transport_generation;
+                updated.membership = peer.membership;
+                Ok(updated)
+            },
+            |updated| *installed = Some(updated.clone()),
+            clock,
+        )?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        // A concurrent mutation may have superseded this returned record
+        // after its fence settled. Never publish into a successor's basis.
+        self.ensure_federation_peer_current_locked(&inner, &updated)?;
+        inner
+            .federation
+            .links
+            .insert(expected.peer.host_id.clone(), incarnation);
+        Ok(updated)
     }
 
     fn verify_federation_peer(

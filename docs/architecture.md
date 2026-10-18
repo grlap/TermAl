@@ -161,6 +161,11 @@ to local or remote TermAl servers over SSH-managed tunnels. The settings-owned
 routing-authority, request-lease, retirement, and conflict contracts are
 documented in [Project-Scoped Remotes](features/project-scoped-remotes.md#routing-authority-and-endpoint-replacement).
 
+**Federation foundation:** The disabled-by-default [federation link](features/federation-link.md)
+connects a central TermAl host and enrolled satellite hosts through a separate
+OpenSSH session and dedicated federation-only loopback listeners per pair.
+Its capability and incarnation fences do not grant placement or local API access.
+
 **Delegation status:** Phase 1 supports local read-only child delegation
 sessions and local `isolatedWorktree` child delegation sessions. Worker mode,
 `sharedWorktree`, and remote-backed delegation requests are well-formed but
