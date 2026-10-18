@@ -30,6 +30,7 @@ fn federation_router(
         .route("/federation/v1/hello", get(federation_hello))
         .route("/federation/v1/link", post(federation_open_link))
         .route("/federation/v1/health", get(federation_health))
+        .merge(federation_onboarding_routes())
         .layer(DefaultBodyLimit::max(4096))
         .merge(federation_mailbox_routes())
         .route_layer(axum::middleware::from_fn_with_state(

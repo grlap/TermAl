@@ -70,6 +70,7 @@ const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 /// Starts the backend entrypoint.
 #[tokio::main]
 async fn main() {
+    capture_federation_process_image();
     configure_process_open_file_limit();
     ignore_sigpipe();
     if let Err(err) = run().await {
@@ -294,6 +295,18 @@ fn app_router_with_acceptance_policy_limiter(
 
     Router::new()
         .route("/api/health", get(health))
+        .route(
+            "/api/federation/peers/{id}/enroll",
+            post(enroll_federation_satellite),
+        )
+        .route(
+            "/api/federation/peers/{id}/verify",
+            post(verify_federation_satellite_route),
+        )
+        .route(
+            "/api/federation/peers/{id}/verification",
+            get(get_federation_onboarding_report),
+        )
         .route("/api/file", get(read_file).put(write_file))
         .route("/api/fs", get(read_directory))
         .route("/api/git/status", get(read_git_status))
@@ -399,7 +412,10 @@ fn app_router_with_acceptance_policy_limiter(
             get(get_project_work_detail),
         )
         .route("/api/test-runs", get(get_test_runs))
-        .route("/api/sessions/{id}/test-runs", post(register_session_test_run))
+        .route(
+            "/api/sessions/{id}/test-runs",
+            post(register_session_test_run),
+        )
         .route("/api/test-runs/{run_id}", get(get_test_run))
         .route(
             "/api/test-runs/{run_id}/stages/{stage}/log",
@@ -771,6 +787,16 @@ include!("federation_mailbox_rpc.rs");
 include!("federation_mailbox_bridge.rs");
 include!("mailbox_append_wake.rs");
 include!("federation_registry.rs");
+include!("federation_onboarding_record.rs");
+include!("federation_onboarding_protocol.rs");
+include!("federation_onboarding_store.rs");
+include!("federation_onboarding_archive.rs");
+include!("federation_onboarding_probe.rs");
+include!("federation_image_identity.rs");
+include!("federation_onboarding_engram.rs");
+include!("federation_onboarding_routes.rs");
+include!("federation_onboarding_verify.rs");
+include!("federation_onboarding_api.rs");
 include!("federation_snapshots.rs");
 include!("federation_mutations.rs");
 include!("federation_membership.rs");

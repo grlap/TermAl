@@ -4,7 +4,17 @@
 // Staged domain APIs are consumed by the separately landed transport/operator slices.
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
-    fn enroll_federation_peer(&self, mut peer: FederationPeerRecord) -> Result<(), ApiError> {
+    fn enroll_federation_peer(&self, peer: FederationPeerRecord) -> Result<(), ApiError> {
+        self.enroll_federation_peer_with(peer, |_, _| Ok(()))
+    }
+
+    // The callback edits only this cloned candidate; it cannot perform I/O,
+    // re-enter AppState or dispatch a second mutation. Error installs nothing.
+    fn enroll_federation_peer_with(
+        &self,
+        mut peer: FederationPeerRecord,
+        configure: impl FnOnce(&mut FederationState, &FederationPeerRecord) -> Result<(), ApiError>,
+    ) -> Result<(), ApiError> {
         self.mutate_federation(|domain, settings| {
             if !settings.enabled
                 || settings.role == FederationRole::Standalone
@@ -38,8 +48,8 @@ impl AppState {
             peer.verification = None;
             peer.validate()?;
             domain.links.remove(&id);
-            domain.peers.insert(id, peer);
-            Ok(())
+            domain.peers.insert(id, peer.clone());
+            configure(domain, &peer)
         })
     }
 
@@ -137,6 +147,17 @@ impl AppState {
         expected: &FederationPeerSnapshot,
         checks: FederationVerificationChecks,
     ) -> Result<(), ApiError> {
+        self.verify_federation_peer_with(expected, checks, |_| Ok(()))
+    }
+
+    // Report finalization shares the proof's exact candidate and content fence.
+    // The callback must preserve its peer/link/proof and Draining admission hold.
+    fn verify_federation_peer_with(
+        &self,
+        expected: &FederationPeerSnapshot,
+        checks: FederationVerificationChecks,
+        finish: impl FnOnce(&mut FederationState) -> Result<(), ApiError>,
+    ) -> Result<(), ApiError> {
         self.ensure_federation_peer_current(expected)?;
         self.mutate_federation(|domain, _| {
             let peer = domain
@@ -167,7 +188,7 @@ impl AppState {
                 peer.membership = FederationMembershipState::Verified;
             }
             peer.record_generation = federation_next_generation(peer.record_generation)?;
-            Ok(())
+            finish(domain)
         })
     }
 

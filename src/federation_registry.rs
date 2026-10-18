@@ -162,6 +162,8 @@ struct FederationState {
     peers: BTreeMap<String, FederationPeerRecord>,
     #[serde(default)]
     placements: BTreeMap<String, FederationPlacement>,
+    #[serde(default)]
+    onboarding: FederationOnboardingData,
     /// A reboot never reloads a live connection from persisted liveness.
     #[serde(skip)]
     links: BTreeMap<String, String>,

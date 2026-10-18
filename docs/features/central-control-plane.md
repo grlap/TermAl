@@ -536,6 +536,9 @@ cross-host coordination.
 
 ## Related
 
+- [Satellite onboarding](satellite-onboarding.md): operator setup, the named
+  verification checklist and the independent Engram readiness step.
+
 - [Durable agent mailboxes](agent-mailboxes.md): today's mailbox contract,
   which every host keeps operation for operation.
 - [Project-scoped remotes](project-scoped-remotes.md): the SSH executor-proxy

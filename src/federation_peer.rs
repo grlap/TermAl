@@ -51,7 +51,18 @@ async fn federation_serve_peer(
     };
     let client = FederationRpcClient::new(forward_port, channel.clone(), ensure_current.clone())?;
     let (listener_stop, listener_stop_rx) = tokio::sync::watch::channel(false);
-    let router = federation_router(channel.clone(), ensure_current);
+    let directory = app
+        .persistence_path
+        .parent()
+        .ok_or_else(federation_transport_unavailable)?
+        .to_path_buf();
+    let router = federation_router(channel.clone(), ensure_current).layer(axum::Extension(
+        FederationOnboardingHost {
+            app: app.clone(),
+            rpc: client.clone(),
+            io: FederationOnboardingIo::local(directory),
+        },
+    ));
     let server = tokio::spawn(serve_federation_listener(
         listener,
         router,
