@@ -116,14 +116,47 @@ async fn get_test_runs(
 async fn get_test_run(
     State(state): State<AppState>,
     AxumPath(run_id): AxumPath<String>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<TestRunDetailResponse>, ApiError> {
+    let mut diagnostics = TestRunRegistrationDiagnostics::new(&state.server_instance_id);
+    diagnostics.method = "GET";
+    diagnostics.correlate(&headers);
+    // Ordinary UI/API detail reads keep their existing error envelope and do
+    // not emit a registration trace. The launcher's confirmation supplies
+    // only a bounded, validated correlation nonce, never authority.
+    diagnostics.enabled = diagnostics.operation_id != "unavailable";
+    let result = get_test_run_observed(state, &run_id, &mut diagnostics).await;
+    match result {
+        Err(mut error) => {
+            if diagnostics.enabled {
+                diagnostics.report(&run_id, &mut error);
+            }
+            Err(error)
+        }
+        Ok(response) => {
+            if diagnostics.enabled {
+                diagnostics.enter("get_response_ready");
+                eprintln!("[termal] test run query completed: {}", diagnostics.fields(&run_id, "query_complete", 200));
+            }
+            Ok(response)
+        }
+    }
+}
+
+async fn get_test_run_observed(
+    state: AppState,
+    run_id: &str,
+    diagnostics: &mut TestRunRegistrationDiagnostics,
+) -> Result<Json<TestRunDetailResponse>, ApiError> {
+    diagnostics.enter("get_retained_lookup");
     {
-        let inner = state.inner.lock().expect("state mutex poisoned");
+        let inner = diagnostics.lock(&state.inner);
         if let Some(row) = inner.test_run_compacted.values().find(|row| {
             test_run_compact_is_installed(&inner, row)
                 && (row.compacted || inner.test_runs.find(&row.summary.run_id).is_none())
                 && test_run_summary_ids(&row.summary).any(|id| id == run_id)
         }) {
+            diagnostics.request_digest = row.request_identity.clone();
             return Ok(Json(TestRunDetailResponse {
                 run: test_run_summaries_locked(&inner)
                     .into_iter()
@@ -143,25 +176,51 @@ async fn get_test_run(
             }));
         }
     }
-    if let Some(run) = state.test_run_summaries(None).into_iter().find(|run| run.run_id == run_id && run.run_dir.is_empty()) {
+    diagnostics.enter("get_global_summary");
+    let summaries = {
+        let inner = diagnostics.lock(&state.inner);
+        test_run_summaries_locked(&inner)
+    };
+    if let Some(run) = summaries.into_iter().find(|run| run.run_id == run_id && run.run_dir.is_empty()) {
         return Ok(Json(TestRunDetailResponse { run, detail: TestRunDetail {
             limitations: Some("Host-observed provider execution; no launcher artifact directory was reported.".to_owned()),
             ..TestRunDetail::default()
         } }));
     }
-    let Some((run, run_dir)) = state.test_run_entry(&run_id) else {
-        let run = state.test_run_summaries(None).into_iter().find(|run| run.run_id == run_id)
+    diagnostics.enter("get_indexed_entry");
+    let entry = {
+        let inner = diagnostics.lock(&state.inner);
+        diagnostics.request_digest = inner.test_runs.find(run_id)
+            .and_then(|entry| entry.disk.request_identity.clone());
+        test_run_entry_locked(&inner, run_id)
+    };
+    let Some((run, run_dir)) = entry else {
+        diagnostics.enter("get_fallback_summary");
+        let summaries = {
+            let inner = diagnostics.lock(&state.inner);
+            test_run_summaries_locked(&inner)
+        };
+        let run = summaries.into_iter().find(|run| run.run_id == run_id)
             .ok_or_else(|| ApiError::not_found("unknown test run"))?;
         return Ok(Json(TestRunDetailResponse { run, detail: TestRunDetail {
             limitations: Some("The durable registration is retained; current launcher artifacts are unavailable.".to_owned()),
             ..TestRunDetail::default()
         } }));
     };
+    diagnostics.enter("get_detail_dispatch");
+    let dispatched_at = std::time::Instant::now();
+    let correlation = diagnostics.enabled.then(|| format!("runId={}; operationId={}; attemptId={}; serverInstance={}",
+        test_run_diagnostic_id(run_id), diagnostics.operation_id,
+        diagnostics.attempt_id, diagnostics.server_instance));
     run_blocking_api(move || {
-        Ok(Json(TestRunDetailResponse {
-            run,
-            detail: test_run_detail(&run_dir)?,
-        }))
+        let started = std::time::Instant::now();
+        let detail = test_run_detail(&run_dir);
+        if let Some(correlation) = correlation {
+            eprintln!("[termal] test run query detail: {correlation}; phase=get_detail_read; blockingQueueMs={}; phaseElapsedMs={}; category={}",
+                started.duration_since(dispatched_at).as_millis(), started.elapsed().as_millis(),
+                if detail.is_ok() { "read_complete" } else { "read_failed" });
+        }
+        Ok(Json(TestRunDetailResponse { run, detail: detail? }))
     })
     .await
 }

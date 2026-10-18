@@ -179,6 +179,17 @@ immutable request and host visibility before preflight. Registration failure
 ends the launch with a nonzero result and an explicit error. Ambiguous lost POST
 replies permit a bounded retry with the same identity; definitive refusals,
 malformed replies and unconfirmed queries never admit execution.
+Registration diagnostics distinguish POST/GET headers, body reads and identity
+validation, retain known HTTP status through error-body read or cancellation
+failure, and include a bounded host reason when available. The same operation
+nonce and attempt ordinal correlate launcher and host diagnostics; the run id
+and request digest identify the immutable input. Host diagnostics include phase elapsed
+time, StateInner acquisition/hold time, and available fence progress/error.
+The original shared 8 s client budget and 5 s host fence budget still apply.
+Host phase traces are transient (16 completed phases and 8 lock observations,
+with error JSON detail capped at 2048 bytes); launcher errors remain in the run
+results. These diagnostics do not prove COMMIT, settlement or a safe restart,
+and host stderr alone does not provide retained history after a lost response.
 Only an invocation with none of `TERMAL_BASE_URL`, `TERMAL_SESSION_ID` and
 `TERMAL_CLI` may run standalone and print `UNTRACKED RUN_ID` with a reason.
 A partial context cannot downgrade to standalone. The `RUN` receipt identifies

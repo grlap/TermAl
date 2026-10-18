@@ -94,6 +94,141 @@ fn registration_ack_waits_for_the_actual_background_sqlite_commit() {
     );
 }
 
+#[tokio::test]
+async fn registration_fence_failures_report_the_actual_phase_and_writer_progress() {
+    for (phase, fault, category, progress) in [
+        (
+            "queued",
+            PersistFenceError::Deadline,
+            "deadline",
+            "queued for the writer",
+        ),
+        (
+            "accepted",
+            PersistFenceError::WorkerStopped,
+            "worker_stopped",
+            "accepted, awaiting a writer tick",
+        ),
+        (
+            "in-tick",
+            PersistFenceError::WriteFailed("fixture write refused".to_owned()),
+            "persist_write_failed",
+            "in a writer tick",
+        ),
+    ] {
+        let mut fixture = FenceFixture::new();
+        let mut state = test_app_state();
+        let root = fixture.root.path().join("registration-diagnostic-project");
+        fs::create_dir_all(&root).unwrap();
+        run_git_test_command(&root, &["init", "--quiet"]);
+        let project = create_test_project(&state, &root, "Registration diagnostics");
+        let session = create_test_project_session(&state, Agent::Codex, &project, &root);
+        let run_id = format!("test-registration-diagnostic-{phase}");
+        let directory = root.join(".git/review-runs").join(&run_id);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("request.json"),
+            json!({
+                "runId": run_id, "root": test_run_display_path(&root), "owner": session,
+                "full": true, "stages": [{"name":"rust-tests"}],
+                "started": engram_command_started_at(), "creatorPid": std::process::id()
+            })
+            .to_string(),
+        )
+        .unwrap();
+        state.persist_tx = fixture.tx.clone();
+        state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
+        fixture.inner = state.inner.clone();
+        let request = RegisterTestRunRequest {
+            run_id: run_id.clone(),
+            run_directory: test_run_display_path(&directory),
+        };
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let worker = {
+            let state = state.clone();
+            let session = session.clone();
+            std::thread::spawn(move || {
+                TEST_TEST_RUN_REGISTRATION_FENCE_SENT.with(|slot| {
+                    *slot.borrow_mut() = Some(Box::new(move || ready_tx.send(()).unwrap()));
+                });
+                reply_tx
+                    .send(state.register_test_run(&session, request))
+                    .unwrap();
+            })
+        };
+        ready_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
+        fixture.receive(false);
+        let PersistRequest::Fence(fence) =
+            fixture.rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap()
+        else {
+            panic!("the actual registration fence must follow its Delta");
+        };
+        assert!(matches!(
+            fence.target,
+            PersistFenceTarget::TestRunRegistration(_)
+        ));
+        assert!(matches!(
+            reply_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        let exact_fence_error = format!("{fault:?}");
+        if phase == "queued" {
+            // Leave this exact fence unaccepted, as when an earlier tick owns
+            // the writer. Resolve the boundary, not a wall-clock sleep.
+            fence.finish(Err(fault));
+        } else {
+            fixture.batch.accept(PersistRequest::Fence(fence));
+            if phase == "in-tick" {
+                fixture.batch.mark_in_tick();
+            }
+            fixture.batch.pending[0].finish(Err(fault));
+        }
+        let Err(error) = reply_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap() else {
+            panic!("a failed fence cannot acknowledge a registration");
+        };
+        worker.join().unwrap();
+        assert!(
+            !state
+                .inner
+                .lock()
+                .unwrap()
+                .test_runs
+                .registered
+                .contains(&run_id)
+        );
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        let message = body["error"].as_str().unwrap();
+        assert!(message.contains("phase=durability_wait"), "{message}");
+        assert!(
+            message.contains(&format!("category={category}")),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!("writerProgress={progress}")),
+            "{message}"
+        );
+        assert!(
+            message.contains("elapsedMs=") && message.contains("phaseElapsedMs="),
+            "{message}"
+        );
+        assert!(message.contains(&format!("runId={run_id}")), "{message}");
+        assert!(message.contains("attemptId="), "{message}");
+        assert!(message.contains("stateInnerWaitMs="), "{message}");
+        assert!(message.contains("stateInnerHoldMs="), "{message}");
+        assert!(
+            message.contains(&format!("fenceError={exact_fence_error}")),
+            "{message}"
+        );
+        assert!(!message.contains('\n') && message.len() <= 2048);
+    }
+}
+
 #[test]
 fn test_run_compaction_keeps_full_detail_until_its_exact_proof_reaches_sqlite() {
     let mut fixture = FenceFixture::new();

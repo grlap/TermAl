@@ -51,6 +51,7 @@ async function registrationHost(callback, {
   status = 201, registered = true, autoAcknowledge = false,
   acknowledgement, rawAcknowledgement, queryStatus = 200, queryTransform,
   loseFirstReply = false, loseAllReplies = false,
+  errorReason,
 } = {}) {
   const received = barrier();
   const acknowledge = barrier();
@@ -72,7 +73,8 @@ async function registrationHost(callback, {
           detached: saved.request.detached, registrationState: "registered", trackingDurability: "durable",
           trackingProvenances: ["launcherRegistered"],
         } : undefined;
-        response.end(JSON.stringify({ run: queryTransform ? queryTransform(run) : run }));
+        response.end(JSON.stringify(errorReason && queryStatus >= 400
+          ? { error: errorReason } : { run: queryTransform ? queryTransform(run) : run }));
         return;
       }
       let body = "";
@@ -95,8 +97,9 @@ async function registrationHost(callback, {
       const normalAck = {
         contract: "termal-durable-test-run-registration", version: 1, runId: record.body.runId, registered,
       };
-      response.end(rawAcknowledgement ?? JSON.stringify(typeof acknowledgement === "function"
-        ? acknowledgement(normalAck) : acknowledgement ?? normalAck));
+      response.end(rawAcknowledgement ?? JSON.stringify(errorReason && status >= 400
+        ? { error: errorReason } : typeof acknowledgement === "function"
+          ? acknowledgement(normalAck) : acknowledgement ?? normalAck));
     } catch (error) {
       received.release({ error });
       response.writeHead(400);
@@ -167,6 +170,154 @@ async function refusedLaunch(root, env, detached, workerExit) {
 }
 
 export function registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit }) {
+  async function registrationFailure(root, env) {
+    let runDir;
+    let failure;
+    try {
+      await createRun({ root, full: false, scope: "focused", needsCargo: true,
+        onRunCreated: (directory) => { runDir = directory; },
+        stages: [stage("focused", "throw new Error('registration failure admitted execution')")],
+      }, env);
+    } catch (error) { failure = error; }
+    assert.ok(failure, "registration must fail before any execution");
+    assertNoExecution(root, runDir);
+    failure.registrationRunId = JSON.parse(readFileSync(join(runDir, "request.json"), "utf8")).runId;
+    return failure;
+  }
+
+  function assertDiagnostic(failure, method, phase, category, status) {
+    assert.match(failure.message, new RegExp(`phase=${method.toLowerCase()}_${phase}(?:;|$)`, "u"));
+    assert.match(failure.message, new RegExp(`category=${category}(?:;|$)`, "u"));
+    assert.ok(failure.message.includes(`runId=${failure.registrationRunId}`), failure.message);
+    assert.match(failure.message, /attempt=[12](?:;|$)/u);
+    assert.ok(failure.message.includes(`httpStatus=${status}`), failure.message);
+    assert.ok(failure.message.length <= 2048, "the complete diagnostic remains bounded");
+    assert.doesNotMatch(failure.message, /[\r\n]/u);
+  }
+
+  for (const phase of ["POST", "GET"]) {
+    for (const fault of ["abort", "transport"]) {
+      test(`registration diagnostics distinguish ${phase} ${fault} before execution`, async (t) => {
+        await repository(t, async (root, originalEnv) => {
+          await registrationHost(async (host) => {
+            const originalFetch = globalThis.fetch;
+            let faults = 0;
+            t.mock.method(globalThis, "fetch", (url, options = {}) => {
+              const method = options.method ?? "GET";
+              if (method !== phase) return originalFetch(url, options);
+              faults += 1;
+              if (fault === "abort") {
+                // A real fetch abort, without sleeping through the budget.
+                return originalFetch(url, { ...options, signal: AbortSignal.abort() });
+              }
+              return Promise.reject(new TypeError("fixture transport failure", { cause: { code: "ECONNRESET" } }));
+            });
+            const failure = await registrationFailure(root, { ...originalEnv, TERMAL_BASE_URL: host.url });
+            assert.match(failure.message, new RegExp(`${phase} send ${fault === "abort" ? "aborted" : "transport failure"}`, "u"));
+            assertDiagnostic(failure, phase, "headers", fault === "abort" ? "aborted" : "transport_failure", "unavailable");
+            assert.equal(faults, phase === "POST" ? 2 : 1, "existing immutable POST retry bound is unchanged");
+            if (phase === "GET") assert.equal(host.requests.length, 1, "a query failure cannot retry POST");
+            t.mock.restoreAll();
+          }, { autoAcknowledge: true });
+        });
+      });
+    }
+
+    test(`registration diagnostics retain ${phase} HTTP status and bounded host reason`, async (t) => {
+      await repository(t, async (root, env) => {
+        await registrationHost(async (host) => {
+          const failure = await registrationFailure(root, { ...env, TERMAL_BASE_URL: host.url });
+          assert.match(failure.message, new RegExp(`${phase} HTTP 500`, "u"));
+          assert.match(failure.message, /category=deadline; writerProgress=queued/u);
+          assertDiagnostic(failure, phase, "body", "http_error", 500);
+          assert.ok(failure.message.length < 1400, "error detail remains bounded");
+          assert.doesNotMatch(failure.message, /[\r\n]/u);
+          assert.equal(host.requests.length, 1, "HTTP refusal is definitive and cannot retry POST");
+        }, { autoAcknowledge: true, ...(phase === "POST" ? { status: 500 } : { queryStatus: 500 }),
+          errorReason: `phase=durability_wait; category=deadline; writerProgress=queued\n${"x".repeat(2048)}` });
+      });
+    });
+
+    for (const fault of ["abort", "transport", "malformed", "oversized", "identity"]) {
+      test(`registration diagnostics retain ${phase} body or identity failure without admission: ${fault}`, async (t) => {
+        await repository(t, async (root, env) => {
+          await registrationHost(async (host) => {
+            const originalFetch = globalThis.fetch;
+            let faults = 0;
+            t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+              const response = await originalFetch(url, options);
+              if ((options.method ?? "GET") !== phase) return response;
+              faults += 1;
+              if (fault === "identity") {
+                const body = await response.json();
+                if (phase === "POST") body.runId = "test-wrong-registration-identity";
+                else body.run.runId = "test-wrong-registration-identity";
+                return new Response(JSON.stringify(body), { status: response.status });
+              }
+              await response.body.cancel();
+              if (fault === "malformed") return new Response("{", { status: response.status });
+              if (fault === "oversized") return new Response("x".repeat(65_537), { status: response.status });
+              // Headers came from the real private server; fail the native
+              // body stream at the next boundary without waiting out 8 seconds.
+              const body = new ReadableStream({ start(controller) {
+                controller.error(fault === "abort" ? new DOMException("fixture body aborted", "AbortError")
+                  : new TypeError("fixture body transport", { cause: { code: "ECONNRESET" } }));
+              } });
+              return new Response(body, { status: response.status });
+            });
+            const failure = await registrationFailure(root, { ...env, TERMAL_BASE_URL: host.url });
+            const category = { abort: "aborted", transport: "transport_failure", malformed: "malformed_response",
+              oversized: "oversized_response", identity: "identity_mismatch" }[fault];
+            assertDiagnostic(failure, phase, fault === "identity" ? (phase === "POST" ? "validation" : "identity") : "body",
+              category, phase === "POST" ? 201 : 200);
+            const attempts = phase === "POST" && ["abort", "transport"].includes(fault) ? 2 : 1;
+            assert.equal(faults, attempts, "only existing ambiguous POST loss may retry");
+            assert.equal(host.requests.length, attempts, "a failed GET never repeats POST");
+            assert.ok(host.requests.every((entry) => entry.rawBody === host.requests[0].rawBody), "retries retain exact request bytes");
+            assert.equal(host.queries.length, phase === "POST" ? 0 : 1);
+            t.mock.restoreAll();
+          }, { autoAcknowledge: true });
+        });
+      });
+    }
+
+    for (const fault of ["abort", "transport", "malformed", "oversized", "cancel"]) {
+      test(`registration diagnostics keep known ${phase} HTTP status when error body fails: ${fault}`, async (t) => {
+        await repository(t, async (root, env) => {
+          await registrationHost(async (host) => {
+            const originalFetch = globalThis.fetch;
+            t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+              const response = await originalFetch(url, options);
+              if ((options.method ?? "GET") !== phase) return response;
+              await response.body.cancel();
+              let body;
+              if (fault === "abort" || fault === "transport") {
+                body = new ReadableStream({ start(controller) {
+                  controller.error(fault === "abort" ? new DOMException("fixture error body aborted", "AbortError")
+                    : new TypeError("fixture error body transport", { cause: { code: "ECONNRESET" } }));
+                } });
+              } else if (fault === "cancel") {
+                // Early bounded-read exit invokes cancel; its failure must not
+                // replace the already received HTTP refusal.
+                body = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(65_537)); },
+                  cancel() { throw new TypeError("fixture cancel failed"); } });
+              } else body = fault === "malformed" ? "{" : "x".repeat(65_537);
+              return new Response(body, { status: response.status });
+            });
+            const failure = await registrationFailure(root, { ...env, TERMAL_BASE_URL: host.url });
+            assertDiagnostic(failure, phase, "body", "http_error", 500);
+            assert.match(failure.message, new RegExp(`${phase} HTTP 500`, "u"));
+            assert.match(failure.message, /host reason unavailable/u);
+            assert.equal(host.requests.length, 1, "known HTTP refusal is never retried, even when reading or cancelling fails");
+            assert.equal(host.queries.length, phase === "POST" ? 0 : 1);
+            t.mock.restoreAll();
+          }, { autoAcknowledge: true, ...(phase === "POST" ? { status: 500 } : { queryStatus: 500 }),
+            errorReason: "fixture host refusal" });
+        });
+      });
+    }
+  }
+
   for (const detached of [false, true]) {
     const fixture = detached ? isolatedDetachedRepository : repository;
     const mode = detached ? "detached" : "foreground";

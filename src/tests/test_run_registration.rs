@@ -417,15 +417,30 @@ fn registration_persistence_failure_is_not_acknowledged_as_durable() {
     let failing_path = fixture.root.join("not-a-state-file");
     fs::create_dir(&failing_path).unwrap();
     fixture.state.persistence_path = Arc::new(failing_path);
+    let Err(error) = fixture.state.register_test_run(
+        &session,
+        registration_request("test-registration-write-failure", &directory),
+    ) else {
+        panic!("failed persistence must not acknowledge registration");
+    };
     assert!(
-        fixture
-            .state
-            .register_test_run(
-                &session,
-                registration_request("test-registration-write-failure", &directory)
-            )
-            .is_err()
+        error.message.contains("phase=persist_enqueue"),
+        "{}",
+        error.message
     );
+    assert!(
+        error.message.contains("category=persist_write_failed"),
+        "{}",
+        error.message
+    );
+    for detail in [
+        "runId=test-registration-write-failure",
+        "attemptId=",
+        "stateInnerWaitMs=",
+        "stateInnerHoldMs=",
+    ] {
+        assert!(error.message.contains(detail), "{}", error.message);
+    }
     let summary = fixture.summary("test-registration-write-failure");
     assert_eq!(
         summary.registration.registration_state.as_deref(),

@@ -902,9 +902,7 @@ impl AppState {
     /// The indexed run `run_id` and its directory.
     fn test_run_entry(&self, run_id: &str) -> Option<(TestRunSummary, PathBuf)> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let entry = inner.test_runs.find(run_id)?;
-        let summary = test_run_summaries_locked(&inner).into_iter().find(|run| run.run_id == run_id)?;
-        Some((summary, entry.disk.run_dir.clone()))
+        test_run_entry_locked(&inner, run_id)
     }
 
     /// Indexed runs, optionally for one project, in list order.
@@ -986,4 +984,12 @@ impl AppState {
             eprintln!("test runs> failed to start the run index: {err}");
         }
     }
+}
+
+// Shared by ordinary lookups and the timed HTTP lookup; diagnostic callers
+// keep exactly the same summary selection under the same StateInner guard.
+fn test_run_entry_locked(inner: &StateInner, run_id: &str) -> Option<(TestRunSummary, PathBuf)> {
+    let entry = inner.test_runs.find(run_id)?;
+    let summary = test_run_summaries_locked(inner).into_iter().find(|run| run.run_id == run_id)?;
+    Some((summary, entry.disk.run_dir.clone()))
 }

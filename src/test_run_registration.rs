@@ -1,5 +1,6 @@
 // Registration boundary beside src/test_runs.rs and src/test_runs_api.rs.
-// Owns durable launch identity and acknowledgement; does not execute tests,
+// Owns durable launch identity, acknowledgement and bounded POST/GET diagnostic
+// spans; does not execute tests,
 // mint verification credit, settle tracker work, or authorize a restart.
 
 #[cfg(test)]
@@ -102,6 +103,184 @@ struct RegisterTestRunResponse {
     registered: bool,
 }
 
+// Diagnostics never decide durability or admission. Keep the existing error
+// status and JSON envelope, with bounded, single-line phase information.
+// Per operation: at most 16 completed phases and 8 lock observations; response
+// detail is capped at 2048 bytes. These are transient observations, not the
+// parent's retained diagnostic history or a durability/settlement authority.
+fn test_run_diagnostic_id(value: &str) -> String {
+    value.chars().filter(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_')).take(128).collect()
+}
+
+struct TestRunRegistrationDiagnostics {
+    started: std::time::Instant,
+    phase_started: std::time::Instant,
+    phase: &'static str,
+    category: Option<&'static str>,
+    cause: Option<String>,
+    fence_error: Option<String>,
+    writer_progress: Option<String>,
+    attempt_id: String,
+    operation_id: String,
+    attempt_ordinal: String,
+    server_instance: String,
+    method: &'static str,
+    enabled: bool,
+    request_digest: Option<String>,
+    lock_timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
+    spans: Vec<(&'static str, Duration, Duration)>,
+    fence_deadline: Option<std::time::Instant>,
+    durability_confirmed: bool,
+    published: bool,
+    failure_phase: Option<(&'static str, Duration)>,
+}
+
+impl TestRunRegistrationDiagnostics {
+    fn new(server_instance: &str) -> Self {
+        let started = std::time::Instant::now();
+        Self {
+            started,
+            phase_started: started,
+            phase: "validate_request",
+            category: None,
+            cause: None,
+            fence_error: None,
+            writer_progress: None,
+            attempt_id: Uuid::new_v4().to_string(),
+            operation_id: "unavailable".to_owned(),
+            attempt_ordinal: "unavailable".to_owned(),
+            server_instance: test_run_truncate(server_instance, 64),
+            method: "POST",
+            enabled: true,
+            request_digest: None,
+            lock_timings: Arc::new(Mutex::new(TestRunRegistrationLockTimings::default())),
+            spans: Vec::with_capacity(16),
+            fence_deadline: None,
+            durability_confirmed: false,
+            published: false,
+            failure_phase: None,
+        }
+    }
+
+    fn enter(&mut self, phase: &'static str) {
+        if self.spans.len() < 16 {
+            self.spans.push((self.phase, self.phase_started.duration_since(self.started), self.phase_started.elapsed()));
+        }
+        self.phase = phase;
+        self.phase_started = std::time::Instant::now();
+    }
+
+    fn correlate(&mut self, headers: &axum::http::HeaderMap) {
+        self.operation_id = headers.get("x-termal-registration-operation")
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty() && value.len() <= 64
+                && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+            .unwrap_or("unavailable").to_owned();
+        self.attempt_ordinal = headers.get("x-termal-registration-attempt")
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| matches!(*value, "1" | "2"))
+            .unwrap_or("unavailable").to_owned();
+    }
+
+    fn lock<'a>(&self, state: &'a StateMutex<StateInner>) -> TestRunRegistrationGuard<'a> {
+        TestRunRegistrationGuard {
+            guard: state.lock().expect("state mutex poisoned"),
+            timings: Arc::clone(&self.lock_timings),
+            phase: self.phase,
+        }
+    }
+
+    fn fields(&self, run_id: &str, category: &str, status: u16) -> String {
+        let lock_timings = self.lock_timings.lock().expect("registration timing mutex poisoned");
+        let waited = lock_timings.waited;
+        let held = lock_timings.held;
+        let locks = lock_timings.observations.iter().map(|(phase, wait, hold)| {
+            format!("{phase}:{}/{}", wait.as_millis(), hold.as_millis())
+        }).collect::<Vec<_>>().join(",");
+        let (phase, phase_elapsed) = self.failure_phase.unwrap_or((self.phase, self.phase_started.elapsed()));
+        let mut spans = self.spans.iter().map(|(phase, start, elapsed)| {
+            format!("{phase}:{}-{}", start.as_millis(), (*start + *elapsed).as_millis())
+        }).collect::<Vec<_>>().join(",");
+        spans.push_str(&format!(",{}:{}-{}", self.phase,
+            self.phase_started.duration_since(self.started).as_millis(), self.started.elapsed().as_millis()));
+        let fields = format!(
+            "phase={phase}; category={category}; elapsedMs={}; phaseElapsedMs={}; stateInnerWaitMs={}; stateInnerHoldMs={}; writerProgress={}; fenceError={}; attemptId={}; runId={}; operationId={}; attempt={}; serverInstance={}; method={}; httpStatus={status}; requestDigest={}; fenceBudgetMs={}; fenceRemainingMs={}; durabilityConfirmed={}; published={}; locks={}; spans={}",
+            self.started.elapsed().as_millis(), phase_elapsed.as_millis(),
+            waited.as_millis(), held.as_millis(), self.writer_progress.as_deref().unwrap_or("not_waiting"),
+            test_run_truncate(self.fence_error.as_deref().unwrap_or("none"), 256).replace(['\r', '\n'], " "),
+            self.attempt_id, test_run_diagnostic_id(run_id),
+            self.operation_id, self.attempt_ordinal, self.server_instance, self.method,
+            self.request_digest.as_deref().unwrap_or("unavailable"),
+            if self.method == "POST" { "5000" } else { "not_applicable" },
+            self.fence_deadline.map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()).as_millis().to_string()).unwrap_or_else(|| "not_started".to_owned()),
+            self.durability_confirmed, self.published, test_run_truncate(&locks, 384), test_run_truncate(&spans, 640),
+        );
+        test_run_truncate(&fields, 1600)
+    }
+
+    fn report(&self, run_id: &str, error: &mut ApiError) {
+        let category = self.category.unwrap_or(if error.status.is_client_error() {
+            "request_refused"
+        } else {
+            "handler_failure"
+        });
+        let message = format!("{}; {}", test_run_truncate(&error.message, 384), self.fields(run_id, category, error.status.as_u16()));
+        error.message = test_run_truncate(&message, 2048)
+            .replace('\r', " ")
+            .replace('\n', " ");
+        eprintln!(
+            "[termal] test run {} failed run={}: {}; cause={}",
+            self.method,
+            test_run_diagnostic_id(run_id),
+            error.message,
+            test_run_truncate(self.cause.as_deref().unwrap_or("none"), 2048)
+                .replace('\r', " ")
+                .replace('\n', " "),
+        );
+    }
+}
+
+// Reuse the existing StateMutex acquisition measurements. Only accumulate
+// durations while held; formatting and reporting happen after guard release.
+#[derive(Default)]
+struct TestRunRegistrationLockTimings {
+    waited: Duration,
+    held: Duration,
+    observations: Vec<(&'static str, Duration, Duration)>,
+}
+
+struct TestRunRegistrationGuard<'a> {
+    guard: StateMutexGuard<'a, StateInner>,
+    timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
+    phase: &'static str,
+}
+
+impl std::ops::Deref for TestRunRegistrationGuard<'_> {
+    type Target = StateInner;
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
+impl std::ops::DerefMut for TestRunRegistrationGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard
+    }
+}
+
+impl Drop for TestRunRegistrationGuard<'_> {
+    fn drop(&mut self) {
+        let mut timings = self.timings.lock().expect("registration timing mutex poisoned");
+        let waited = self.guard.waited;
+        let held = self.guard.acquired_at.elapsed();
+        timings.waited += waited;
+        timings.held += held;
+        if timings.observations.len() < 8 {
+            timings.observations.push((self.phase, waited, held));
+        }
+    }
+}
+
 fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
     let fields = [
         "runId",
@@ -129,26 +308,45 @@ fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
 }
 
 impl AppState {
+    #[cfg(test)]
     fn register_test_run(
         &self,
         session_id: &str,
         request: RegisterTestRunRequest,
     ) -> Result<RegisterTestRunResponse, ApiError> {
+        self.register_test_run_with_diagnostics(session_id, request, TestRunRegistrationDiagnostics::new(&self.server_instance_id))
+    }
+
+    fn register_test_run_with_diagnostics(
+        &self,
+        session_id: &str,
+        request: RegisterTestRunRequest,
+        mut diagnostics: TestRunRegistrationDiagnostics,
+    ) -> Result<RegisterTestRunResponse, ApiError> {
         let run_id = request.run_id.clone();
-        let result = self.register_test_run_inner(session_id, request);
+        diagnostics.enter("validate_request");
+        let mut result = self.register_test_run_inner(session_id, request, &mut diagnostics);
         if result.is_err() {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            diagnostics.failure_phase = Some((diagnostics.phase, diagnostics.phase_started.elapsed()));
+            diagnostics.enter("failure_publication");
+            let mut inner = diagnostics.lock(&self.inner);
             if !inner.test_runs.registered.contains(&run_id)
                 && inner
                     .test_run_registrations
                     .get(&run_id)
                     .is_some_and(|row| row.initiating_session_id == session_id)
             {
-                inner.test_runs.registration_failures.insert(run_id);
+                inner.test_runs.registration_failures.insert(run_id.clone());
                 if self.commit_delta_locked(&mut inner).is_ok() {
                     self.publish_state_locked(&inner);
                 }
             }
+        }
+        if let Err(error) = &mut result {
+            diagnostics.report(&run_id, error);
+        } else {
+            diagnostics.enter("response_ready");
+            eprintln!("[termal] test run registration confirmed: {}", diagnostics.fields(&run_id, "confirmed", 201));
         }
         result
     }
@@ -157,6 +355,7 @@ impl AppState {
         &self,
         session_id: &str,
         request: RegisterTestRunRequest,
+        diagnostics: &mut TestRunRegistrationDiagnostics,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         if !request.run_id.starts_with("test-")
             || request.run_id.len() > 128
@@ -170,8 +369,9 @@ impl AppState {
                 "invalid test run registration locator",
             ));
         }
+        diagnostics.enter("resolve_project");
         let project_root = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+            let inner = diagnostics.lock(&self.inner);
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("test run initiating session is unavailable"))?;
@@ -185,8 +385,10 @@ impl AppState {
             project.root_path.clone()
         };
         // Canonicalization and artifact reads stay outside StateInner.
+        diagnostics.enter("canonicalize_directory");
         let run_directory = fs::canonicalize(&request.run_directory)
             .map_err(|_| ApiError::bad_request("test run directory is unavailable"))?;
+        diagnostics.enter("allowed_directory_scan");
         let common = test_runs_git_common_dir(FsPath::new(&project_root)).ok_or_else(|| {
             ApiError::bad_request("test run project Git directory is unavailable")
         })?;
@@ -203,6 +405,7 @@ impl AppState {
                 "test run directory is outside this project's run directories",
             ));
         }
+        diagnostics.enter("parse_request");
         let TestRunJson::Parsed(value, _, _) =
             test_run_read_json(&run_directory.join("request.json"))
         else {
@@ -217,17 +420,21 @@ impl AppState {
                 "test run identity or initiating session does not match",
             ));
         }
+        diagnostics.enter("index_request");
         let disk = TestRunDisk::read(&run_directory, None)
             .ok_or_else(|| ApiError::bad_request("test run request cannot be indexed"))?;
         let request_identity = test_run_registration_identity(&value)?;
+        diagnostics.request_digest = Some(request_identity.clone());
         if disk.request_identity.as_ref() != Some(&request_identity) {
             return Err(ApiError::conflict(
                 "test run request changed during registration",
             ));
         }
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        diagnostics.fence_deadline = Some(deadline);
+        diagnostics.enter("capture_registration");
         let (expected, dispatch) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let mut inner = diagnostics.lock(&self.inner);
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::conflict("test run initiating session changed"))?;
@@ -296,6 +503,8 @@ impl AppState {
                         ));
                     }
                     if test_run_compact_is_installed(&inner, compacted) {
+                        diagnostics.durability_confirmed = true;
+                        diagnostics.published = true;
                         return Ok(RegisterTestRunResponse {
                             contract: "termal-durable-test-run-registration",
                             version: 1,
@@ -322,12 +531,22 @@ impl AppState {
                     .insert(request.run_id.clone(), registration.clone());
                 registration
             };
+            diagnostics.enter("persist_enqueue");
             let dispatch = self
                 .persist_internal_locked_with_dispatch(&inner)
-                .map_err(|_| ApiError::internal("test run registration persistence failed"))?;
+                .map_err(|error| {
+                    diagnostics.category = Some("persist_write_failed");
+                    diagnostics.cause = Some(format!("{error:#}"));
+                    ApiError::internal("test run registration persistence failed")
+                })?;
             (expected, dispatch)
         };
+        diagnostics.writer_progress = Some(match dispatch {
+            PersistDispatch::BackgroundQueued => "background Delta queued".to_owned(),
+            PersistDispatch::Synchronous => "synchronous write confirmed".to_owned(),
+        });
         if matches!(dispatch, PersistDispatch::BackgroundQueued) {
+            diagnostics.enter("durability_fence_send");
             let (fence, waiter) = PersistFence::new(
                 PersistFenceTarget::TestRunRegistration(expected.clone()),
                 deadline,
@@ -335,6 +554,7 @@ impl AppState {
             self.persist_tx
                 .send(PersistRequest::Fence(Box::new(fence)))
                 .map_err(|_| {
+                    diagnostics.category = Some("worker_unavailable");
                     ApiError::internal("test run registration persistence is unavailable")
                 })?;
             #[cfg(test)]
@@ -343,15 +563,39 @@ impl AppState {
                     step();
                 }
             });
-            waiter
-                .wait_until(deadline)
-                .ok_or_else(|| {
-                    ApiError::internal("test run registration durability is unresolved")
-                })?
-                .map_err(|_| ApiError::internal("test run registration durability failed"))?;
+            diagnostics.enter("durability_wait");
+            match waiter.wait_until(deadline) {
+                Some(Ok(())) => {
+                    diagnostics.writer_progress = Some(waiter.progress().describe());
+                }
+                Some(Err(error)) => {
+                    diagnostics.category = Some(match &error {
+                        PersistFenceError::Deadline => "deadline",
+                        PersistFenceError::WriteFailed(_) => "persist_write_failed",
+                        PersistFenceError::Shutdown => "worker_shutdown",
+                        PersistFenceError::WorkerStopped => "worker_stopped",
+                        PersistFenceError::Superseded => "superseded",
+                    });
+                    diagnostics.cause = Some(format!("{error:?}"));
+                    diagnostics.fence_error = Some(format!("{error:?}"));
+                    diagnostics.writer_progress = Some(waiter.progress().describe());
+                    return Err(ApiError::internal(
+                        "test run registration durability failed",
+                    ));
+                }
+                None => {
+                    diagnostics.category = Some("unresolved");
+                    diagnostics.writer_progress = Some(waiter.progress().describe());
+                    return Err(ApiError::internal(
+                        "test run registration durability is unresolved",
+                    ));
+                }
+            }
         }
+        diagnostics.durability_confirmed = true;
+        diagnostics.enter("publish_registration");
         {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let mut inner = diagnostics.lock(&self.inner);
             if inner.test_run_registrations.get(&request.run_id) != Some(&expected) {
                 return Err(ApiError::conflict(
                     "test run registration changed before acknowledgement",
@@ -362,13 +606,17 @@ impl AppState {
                 .test_runs
                 .registration_failures
                 .remove(&request.run_id);
+            diagnostics.published = true;
         }
+        diagnostics.enter("refresh_index");
         self.refresh_test_runs();
-        let inner = self.inner.lock().expect("state mutex poisoned");
+        diagnostics.enter("query_confirmation");
+        let inner = diagnostics.lock(&self.inner);
         if !inner.test_runs.find(&request.run_id).is_some_and(|entry| {
             test_run_path_key(&entry.summary.run_dir) == test_run_path_key(&expected.run_directory)
                 && entry.disk.request_identity.as_ref() == Some(&expected.request_identity)
         }) {
+            diagnostics.category = Some("query_unavailable");
             return Err(ApiError::internal(
                 "durable test run registration is not available in the host query",
             ));
@@ -576,10 +824,21 @@ fn test_run_registered_fallback(inner: &StateInner, row: &TestRunRegistration) -
 async fn register_session_test_run(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     request: Result<Json<RegisterTestRunRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<RegisterTestRunResponse>), ApiError> {
     let Json(request) =
         request.map_err(|error| api_json_rejection("test run registration", error))?;
-    let response = run_blocking_api(move || state.register_test_run(&session_id, request)).await?;
+    // This span begins at handler entry, after Axum's body extraction. It is
+    // deliberately not labelled as network arrival or request-body time.
+    let dispatched_at = std::time::Instant::now();
+    let response = run_blocking_api(move || {
+        let mut diagnostics = TestRunRegistrationDiagnostics::new(&state.server_instance_id);
+        diagnostics.started = dispatched_at;
+        diagnostics.phase_started = dispatched_at;
+        diagnostics.phase = "blocking_dispatch";
+        diagnostics.correlate(&headers);
+        state.register_test_run_with_diagnostics(&session_id, request, diagnostics)
+    }).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
