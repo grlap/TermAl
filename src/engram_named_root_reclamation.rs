@@ -167,6 +167,25 @@ struct EngramNamedRootRetirementNotice {
     published: bool,
     #[serde(default)]
     delivered: bool,
+    /// The authority transition that removed the selection: the only owner
+    /// a removal can happen under. An operator's canonical release credits a
+    /// retirement to itself only when this is its own transition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<String>,
+}
+
+/// The retirement notice of exactly `root` made under the authority
+/// transition `owner`, if one exists.
+fn engram_named_root_retired_by<'a>(
+    inner: &'a StateInner,
+    root: &EngramWorkSourceRoot,
+    owner: &str,
+) -> Option<&'a EngramNamedRootRetirementNotice> {
+    inner
+        .engram_work_naming_history
+        .iter()
+        .flat_map(|history| &history.retirements)
+        .find(|notice| notice.selection == *root && notice.owner.as_deref() == Some(owner))
 }
 
 fn engram_named_root_capacity(inner: &StateInner) -> usize {
@@ -175,6 +194,8 @@ fn engram_named_root_capacity(inner: &StateInner) -> usize {
             .filter(|notice| !notice.published
                 && !inner.engram_work_source_roots.contains(&notice.selection))
             .count()
+        // An operator release reserves its slot until the writer commits it.
+        + engram_named_root_unacknowledged_releases(inner)
 }
 
 /// Marks the work's retirement notices published and returns their stderr
@@ -266,6 +287,7 @@ fn engram_retire_exact_root_locked(
     else { return; };
     // Keep exact proof/history with the removal, before the complete-image
     // fence. No success, capacity release or notice delivery precedes its ACK.
+    let owner = history.transition.as_ref().map(|transition| transition.id.clone());
     history.retirements.push(EngramNamedRootRetirementNotice {
         id: Uuid::new_v4().to_string(), selection: root.clone(), binding: binding.clone(),
         read: proof.clone(),
@@ -274,7 +296,7 @@ fn engram_retire_exact_root_locked(
             format!("{} / {}", root.store.database_path.display(), root.store.project_id),
             root.short_ref, root.work_id, root.root, root.generation,
             reason, proof.read_cut.feed.id, proof.read_cut.position),
-        published: false, delivered: false,
+        published: false, delivered: false, owner,
     });
     inner.engram_work_source_roots.remove(index);
 }
@@ -373,24 +395,12 @@ impl AppState {
 
     fn engram_root_capacity_refusal(&self) -> ApiError {
         let scheduled = self.schedule_engram_root_reclamation(true);
+        let now = self.engram_budget_clock().now();
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let retained = inner.engram_work_source_roots.iter().map(|root| {
-            let reason = if !engram_root_reclamation_reader_exists(&inner, &root.store) {
-                format!("no eligible reader for store {}", root.store.project_id)
-            } else if engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-                .is_none_or(|journal| journal.read_binding.is_none()) {
-                "no retained canonical run association".to_owned()
-            } else if engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-                .is_some_and(|journal| journal.pending.is_some()) {
-                "pending producer intent belongs to its existing owner".to_owned()
-            } else {
-                inner.engram_work_naming_history.iter()
-                    .find(|history| history.store == root.store && history.work_id == root.work_id)
-                    .and_then(|history| history.recovery_reason.clone())
-                    .unwrap_or_else(|| "no acknowledged obsolete-binding proof; live or unknown entries remain retained".to_owned())
-            };
-            format!("{} / {} generation {}: {}", root.store.project_id, root.short_ref, root.generation, reason)
-        }).collect::<Vec<_>>().join("; ");
+        // One row per retained root (engram_named_root_release.rs), so an
+        // operator can route an own-clear or an audited release.
+        let retained = engram_named_root_status_locked(&inner, now).iter()
+            .map(engram_named_root_status_line).collect::<Vec<_>>().join(" | ");
         ApiError::conflict(format!("TermAl retains at most {} named source roots globally; {}. No slot release or successful retry is promised. Unacknowledged retirements still reserve capacity. Retained: {}",
             ENGRAM_WORK_SOURCE_ROOT_LIMIT, scheduled, retained))
     }
@@ -400,6 +410,21 @@ impl AppState {
         root: &EngramWorkSourceRoot,
         route: &EngramRootReclamationRoute,
         deadline: std::time::Instant,
+    ) -> Result<bool, ApiError> {
+        self.recover_one_engram_root_traced_until(root, route, deadline, &mut |_: &str| {})
+    }
+
+    /// `recover_one_engram_root_until`, telling `on_prepared` the id of the
+    /// authority transition it prepared, before that owner can remove
+    /// anything. A retirement notice names the transition that removed its
+    /// selection, so the caller can tell its own retirement from another
+    /// owner's. Not called when an older publication obligation is retried.
+    fn recover_one_engram_root_traced_until(
+        &self,
+        root: &EngramWorkSourceRoot,
+        route: &EngramRootReclamationRoute,
+        deadline: std::time::Instant,
+        on_prepared: &mut dyn FnMut(&str),
     ) -> Result<bool, ApiError> {
         let (binding, journal_snapshot, pending_publication) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -447,6 +472,7 @@ impl AppState {
             self.publish_engram_authority_image_until(&root.store, &owner, deadline)?;
         } else {
             let owner = self.prepare_engram_authority_until(&root.store, &binding, deadline)?;
+            on_prepared(&owner.id);
             {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 if !inner.engram_work_source_roots.contains(root)

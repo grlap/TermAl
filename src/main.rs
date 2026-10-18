@@ -483,6 +483,11 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/engram-source-root",
             post(name_engram_source_root),
         )
+        .route("/api/engram/named-roots", get(list_engram_named_roots))
+        .route(
+            "/api/engram/named-roots/release",
+            post(release_engram_named_root),
+        )
         .route(
             "/api/sessions/{id}/markers",
             get(list_session_markers).post(create_session_marker),
@@ -897,6 +902,7 @@ include!("engram_source_roots.rs");
 include!("engram_named_root_binding.rs");
 include!("engram_root_authority.rs");
 include!("engram_named_root_reclamation.rs");
+include!("engram_named_root_release.rs");
 #[cfg(test)]
 include!("engram_named_root_test_transport.rs");
 include!("bounded_read_process.rs");

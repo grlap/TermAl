@@ -40,6 +40,8 @@ struct PersistedState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_work_naming_history: Vec<EngramWorkNamingHistory>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_named_root_release_audit: Vec<EngramNamedRootReleaseAudit>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_source_sightings: Vec<EngramSourceSightingOwner>,
     #[serde(
         default,
@@ -110,6 +112,7 @@ impl PersistedState {
             engram_work_source_roots: inner.engram_work_source_roots.clone(),
             engram_named_root_journal: inner.engram_named_root_journal.clone(),
             engram_work_naming_history: inner.engram_work_naming_history.clone(),
+            engram_named_root_release_audit: inner.engram_named_root_release_audit.clone(),
             engram_source_sightings: inner.engram_source_sightings.clone(),
             engram_source_root_generation: inner.engram_source_root_generation,
             pending_coordination_scope_deletions: inner
@@ -168,6 +171,7 @@ impl PersistedState {
             engram_work_source_roots: self.engram_work_source_roots.clone(),
             engram_named_root_journal: self.engram_named_root_journal.clone(),
             engram_work_naming_history: self.engram_work_naming_history.clone(),
+            engram_named_root_release_audit: self.engram_named_root_release_audit.clone(),
             engram_source_sightings: self.engram_source_sightings.clone(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.clone(),
@@ -224,6 +228,39 @@ impl PersistedState {
             .collect();
         let mut preferences = self.preferences;
         preferences.remotes = validate_persisted_remote_configs(preferences.remotes)?;
+        // A restored release record was committed, so it reserves no slot;
+        // one whose root is still retained recorded an intent whose release
+        // never happened (a crash before the canonical retirement), so it is
+        // dropped rather than read as done. A canonical record is kept only
+        // if a retirement notice of its selection names its own transition:
+        // otherwise another owner retired it. One whose retirement is
+        // committed but not yet published stays pending, so the identical
+        // request still resumes and publishes it; its unpublished
+        // retirement reserves the slot meanwhile.
+        let engram_named_root_release_audit = self
+            .engram_named_root_release_audit
+            .into_iter()
+            .filter(|record| !self.engram_work_source_roots.contains(&record.selection))
+            .filter_map(|record| {
+                if record.route != EngramNamedRootReleaseRoute::Canonical.label() {
+                    return Some(EngramNamedRootReleaseAudit { acknowledged: true, ..record });
+                }
+                let owner = record.authority_owner.as_deref()?;
+                let published = self
+                    .engram_work_naming_history
+                    .iter()
+                    .flat_map(|history| &history.retirements)
+                    .find(|notice| {
+                        notice.selection == record.selection
+                            && notice.owner.as_deref() == Some(owner)
+                    })?
+                    .published;
+                Some(EngramNamedRootReleaseAudit {
+                    acknowledged: record.acknowledged || published,
+                    ..record
+                })
+            })
+            .collect();
         let mut inner = StateInner {
             federation: self.federation,
             federation_durable: true,
@@ -253,6 +290,7 @@ impl PersistedState {
             engram_work_source_roots: self.engram_work_source_roots,
             engram_named_root_journal: self.engram_named_root_journal,
             engram_work_naming_history: self.engram_work_naming_history,
+            engram_named_root_release_audit,
             engram_source_sightings: self.engram_source_sightings,
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),

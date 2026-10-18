@@ -1438,6 +1438,27 @@ happens elsewhere. The agent therefore names the item's worktree once with
   neither asks it to re-name nor forces a control or provider wake. This is
   distinct from current-claim SelectionLoss instructions, whose existing
   suppression and acknowledgement rules remain unchanged.
+
+  An operator can see and release retained entries through the host API
+  ([`GET /api/engram/named-roots` and
+  `POST /api/engram/named-roots/release`](../architecture.md)). The status rows,
+  which a full table's refusal also lists, give each entry's naming session (or
+  `gone`), its claim binding, its canonical association, its reclamation state
+  and its item lifecycle. A release names the exact selection and a required
+  reason. An entry with a canonical association is released only on the same
+  canonical proof the automatic pass uses. An entry without one is released
+  only when no session holds its claim, no naming event is pending, and its
+  naming session is gone or quiet. Each release is recorded in an audit
+  before it takes effect. An operator release keeps its slot reserved until the
+  writer confirms the removal and its record. A canonical release frees its
+  slot only once its retirement is published. A canonical release is credited
+  only for a retirement its own authority transition made: each retirement
+  notice names the transition that removed the entry. If another owner, such
+  as the automatic pass, retires the entry meanwhile, the release's record is
+  withdrawn, including on restore. A failed release that already
+  removed the entry is resumed by a repeated request for the same selection,
+  which keeps the original reason and requester. No producer event is
+  created.
 - **Sighting provenance.** Source bases carry `source_root_generation` and
   `source_root_state` together (`named` or `ended`), including sightings in the
   ordinary workdir after an end. A capture retains its workspace identity;

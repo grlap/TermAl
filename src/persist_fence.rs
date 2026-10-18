@@ -15,6 +15,10 @@ enum PersistFenceTarget {
     EngramCausalCard { session_id: String, message_id: String, content: Value },
     EngramRecovery { session_id: String, content: Value },
     EngramWorkAuthority(Box<EngramAuthorityImage>),
+    /// An operator release of a retained named root: its audit record and
+    /// the removal of its selection, both in the committed metadata
+    /// (`engram_named_root_release.rs`).
+    EngramNamedRootRelease(Box<EngramNamedRootReleaseAudit>),
     EngramAdmission {
         session_id: String,
         content: Value,
@@ -66,6 +70,9 @@ impl PersistFenceTarget {
         match self {
             Self::Federation(_) => false,
             Self::EngramWorkAuthority(image) => image.matches_metadata(&delta.metadata),
+            Self::EngramNamedRootRelease(audit) => {
+                engram_named_root_release_in_metadata(audit, &delta.metadata)
+            }
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
             Self::EngramCausalCard { .. } | Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
@@ -183,6 +190,20 @@ impl PersistFenceTarget {
                 // this same writer connection; a quarantined row cannot ACK.
                 Self::EngramAdmission { session_id: session_id.clone(), content: admission.clone() }
                     .is_already_durable(connection)
+            }
+            Self::EngramNamedRootRelease(audit) => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM app_state WHERE key = ?1",
+                        [SQLITE_METADATA_KEY],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
+                let metadata: PersistedState = serde_json::from_str(&stored)?;
+                Ok(engram_named_root_release_in_metadata(audit, &metadata))
             }
             Self::EngramWorkAuthority(image) => {
                 let stored: Option<String> = connection
