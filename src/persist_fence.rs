@@ -10,6 +10,7 @@ delegation admission, provider delivery, SQL schema, or HTTP response policy.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone)]
 enum PersistFenceTarget {
+    Federation(Value),
     ProviderCapacityRecovery { session_id: String, content: Value },
     EngramCausalCard { session_id: String, message_id: String, content: Value },
     EngramRecovery { session_id: String, content: Value },
@@ -63,6 +64,7 @@ enum PersistFenceTarget {
 impl PersistFenceTarget {
     fn is_in_delta(&self, delta: &PersistDelta) -> bool {
         match self {
+            Self::Federation(_) => false,
             Self::EngramWorkAuthority(image) => image.matches_metadata(&delta.metadata),
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
@@ -107,6 +109,9 @@ impl PersistFenceTarget {
     /// not open another connection or treat row existence as proof.
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         match self {
+            Self::Federation(expected) => {
+                federation_committed_image_matches(connection, expected)
+            }
             Self::EngramCausalCard { session_id, message_id, content } => {
                 let stored: Option<String> = connection.query_row(
                     "SELECT value_json FROM messages WHERE session_id = ?1 AND message_id = ?2",

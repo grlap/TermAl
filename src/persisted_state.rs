@@ -20,6 +20,8 @@
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedState {
+    #[serde(default)]
+    federation: FederationState,
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
     codex: CodexState,
     #[serde(default)]
@@ -95,6 +97,7 @@ impl PersistedState {
     /// path.
     fn metadata_from_inner(inner: &StateInner) -> Self {
         Self {
+            federation: inner.federation.clone(),
             codex: inner.codex.clone(),
             preferences: inner.preferences.clone(),
             revision: inner.revision,
@@ -154,6 +157,7 @@ impl PersistedState {
     /// updating both.
     fn metadata_only(&self) -> Self {
         Self {
+            federation: self.federation.clone(),
             codex: self.codex.clone(),
             preferences: self.preferences.clone(),
             revision: self.revision,
@@ -221,6 +225,9 @@ impl PersistedState {
         let mut preferences = self.preferences;
         preferences.remotes = validate_persisted_remote_configs(preferences.remotes)?;
         let mut inner = StateInner {
+            federation: self.federation,
+            federation_durable: true,
+            federation_continuity_lost: false,
             codex: self.codex,
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
             engram_budget_clock: EngramBudgetClock::default(),

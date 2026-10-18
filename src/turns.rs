@@ -397,6 +397,8 @@ impl RemoteConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppPreferences {
+    #[serde(default)]
+    federation: FederationSettings,
     #[serde(default = "default_model_preference")]
     default_codex_model: String,
     #[serde(default = "default_codex_sandbox_mode")]
@@ -492,6 +494,7 @@ impl Default for AppPreferences {
     /// Builds the default value.
     fn default() -> Self {
         Self {
+            federation: FederationSettings::default(),
             default_codex_model: default_model_preference(),
             default_codex_sandbox_mode: default_codex_sandbox_mode(),
             default_codex_approval_policy: default_codex_approval_policy(),

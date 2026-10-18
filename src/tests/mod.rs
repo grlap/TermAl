@@ -117,6 +117,8 @@ mod projects;
 mod provider_capacity_retry;
 mod read_only_refusal_rules;
 mod remote;
+mod federation_bootstrap;
+mod federation_registry;
 mod remote_authority_races;
 mod remote_delta_replay;
 mod remote_hydration;

@@ -424,9 +424,10 @@ impl AppState {
     ) -> Result<Self> {
         // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
-        let (loaded_state, boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
+        let (loaded_state, mut boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
         let mut inner =
             loaded_state.unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
+        prepare_federation_boot(&mut inner, &persistence_path, &mut boot_persistence_connection)?;
         let host_workdir = engram_host_workdir(&persistence_path)?;
         inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(host_workdir.clone()));
         #[cfg(test)]

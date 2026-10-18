@@ -1473,6 +1473,9 @@ impl EngramProjectResetFences {
 
 /// Represents state inner.
 struct StateInner {
+    federation: FederationState,
+    federation_durable: bool,
+    federation_continuity_lost: bool,
     codex: CodexState,
     /// Process/runtime side of the optional Engram host adapter. Callers may
     /// clone this handle while holding `inner`, but must release the state
@@ -1665,6 +1668,9 @@ impl StateInner {
     /// Creates a new instance.
     fn new() -> Self {
         Self {
+            federation: FederationState::default(),
+            federation_durable: false,
+            federation_continuity_lost: false,
             codex: CodexState::default(),
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
             engram_budget_clock: EngramBudgetClock::default(),

@@ -736,6 +736,15 @@ impl Mode {
 
 include!("process_limits.rs");
 include!("remote_authority.rs");
+include!("federation_identity.rs");
+include!("federation_registry.rs");
+include!("federation_snapshots.rs");
+include!("federation_mutations.rs");
+include!("federation_membership.rs");
+include!("federation_views.rs");
+include!("federation_placement.rs");
+include!("persist_federation.rs");
+include!("persist_federation_image.rs");
 include!("remote.rs");
 include!("remote_ssh.rs");
 include!("remote_terminal.rs");

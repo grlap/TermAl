@@ -1004,9 +1004,10 @@ fn load_state_from_sqlite_with_connection(
     persisted.quarantined_persisted_session_ids = quarantined_session_ids;
     persisted.quarantined_persisted_delegation_ids = quarantined_delegation_ids;
     persisted.delegations = delegation_records;
-    let inner = persisted
+    let mut inner = persisted
         .into_inner()
         .with_context(|| format!("failed to validate state from `{}`", path.display()))?;
+    bind_loaded_federation(&mut inner, &connection, path)?;
     Ok((Some(inner), connection))
 }
 
@@ -1198,6 +1199,7 @@ fn persist_state_parts_via_connection(
             path.display()
         )
     })?;
+    write_federation_host_generation(&tx, metadata)?;
     tx.execute(
         "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
@@ -1248,6 +1250,7 @@ fn persist_state_parts_via_connection(
     }
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
+    verify_federation_write(connection, metadata)?;
     drop(write_guard);
     // Keep post-commit redirection and owner-only permission verification
     // fatal. The chmod helper itself honors
@@ -1504,6 +1507,7 @@ fn write_persist_delta_statements(
     serialized_sessions: &[SerializedPersistedSession],
     serialized_delegations: Vec<(&str, String)>,
 ) -> Result<()> {
+    write_federation_host_generation(tx, &delta.metadata)?;
     tx.execute(
         "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
