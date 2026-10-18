@@ -5,8 +5,10 @@ root coding sessions. It creates an idle session; assignment and execution are
 separate steps. This page records the existing API and the coordinator procedure
 approved by Greg on 2026-10-13. It does not change repository authority rules.
 
-Related: [Agent delegation sessions](agent-delegation-sessions.md) and
-[Architecture](../architecture.md).
+Related: [Agent delegation sessions](agent-delegation-sessions.md),
+[Architecture](../architecture.md) and
+[Supervised Pilot Onboarding](supervised-pilot-onboarding.md), whose supervisor
+steps create a colleague's root session in a project.
 
 ## Choosing a route
 

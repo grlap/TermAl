@@ -1,5 +1,9 @@
 # Engram Host Adapter
 
+Related: [Supervised pilot onboarding](supervised-pilot-onboarding.md) (the
+settings a colleague's machine uses for the first supervised pilot: Base
+enabled, turn-gated control off).
+
 ## Status and product tiers
 
 The local Engram integration has two independent tiers:

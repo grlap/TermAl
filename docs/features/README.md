@@ -50,4 +50,5 @@ design decisions, and future plans.
 - [Engram Host Adapter](./engram-host-adapter.md)
 - [Test Runs](./test-runs.md)
 - [Declared Test Commands](declared-test-commands.md): declare a repository's test commands and have TermAl judge them from TRX or JUnit result files (planned).
+- [Supervised Pilot Onboarding](./supervised-pilot-onboarding.md): the operating guide for the first supervised one-colleague pilot of Engram + TermAl on Windows (install, connect Engram, declare dotnet tests, daily workflow, stuck states, risk boundaries, evidence before inviting).
 - [Host Architecture](./host-architecture.md)

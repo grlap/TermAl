@@ -117,6 +117,9 @@ native exit code separately; exit zero cannot override a failing TRX. A restart 
 lost provider runtime marks an unfinished observation unknown and records the
 monitoring gap. The registry adds no process scanner or tracker poller.
 
+Related: [Supervised Pilot Onboarding](supervised-pilot-onboarding.md), which
+says what a pilot colleague sees of test runs and declared commands per tier.
+
 **Status:**
 - **Slice 1:** shipped (7f3c32c, with the PID-reuse fix in b77f1fa).
 - **Slice 2:** approved by Greg (2026-09-25) and in implementation.
