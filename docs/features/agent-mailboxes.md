@@ -17,6 +17,8 @@ Stop restoration rules described by the
 Agents whose MCP configuration is locked can drive the same send, read and
 acknowledge operations from the shell through the
 [coordination CLI](coordination-cli.md), which reuses the MCP bridge contracts.
+A next step that must proceed even when its coordinator misses a wake is
+recorded in the [handoff ledger](handoffs.md) instead.
 
 ## Delivery contract
 

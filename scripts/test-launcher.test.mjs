@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
+import fs, {
   chmodSync,
   closeSync,
   copyFileSync,
@@ -20,14 +20,17 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   categoryRequiredFiles,
   categoryStage,
   createRun,
   diagnostics,
+  diskSpacePreflight,
+  DISK_SPACE_WARNING_BYTES,
   ensureCargoTargetDirectory,
   executeRun,
+  FULL_GATE_DISK_FLOOR_BYTES,
   HELPER_TEST_HANG_GUARD_MS,
   helperTestArgs,
   helperTestFiles,
@@ -69,6 +72,20 @@ const stage = (name, source = "") => ({
 });
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
 const logPath = (runDir, entry) => isAbsolute(entry.log) ? entry.log : join(runDir, entry.log);
+const GiB = 1024n ** 3n;
+const capacity = (bytes) => ({ bavail: bytes, bsize: 1n });
+
+// Only isolated fixture processes get this filesystem observation. The outer
+// maintained gate reads real capacity; there is no supported override flag.
+function writeDiskCapacityFixture(root, bytes = 200n * GiB) {
+  const path = join(root, ".git", "disk-capacity-fixture.mjs");
+  writeFileSync(path, [
+    "import fs from 'node:fs';",
+    bytes === null ? "fs.statfsSync = () => { throw new Error('fixture unavailable'); };"
+      : `fs.statfsSync = () => ({ bavail: ${bytes}n, bsize: 1n });`,
+  ].join("\n"));
+  return pathToFileURL(path).href;
+}
 
 // The tests wait for their processes by events (exit, close, readiness, a
 // barrier file), never by a deadline: a slow host makes them slower, not
@@ -131,6 +148,8 @@ async function repository(t, callback, sourceEnv = fixtureEnv, directory = testT
     cwd: root,
     env,
   });
+  t.mock.method(fs, "statfsSync", () => capacity(200n * GiB));
+  env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --import=${writeDiskCapacityFixture(root)}`.trim();
   await withHostedRegistrationFixture(root, env, (hostedEnv) => callback(root, hostedEnv));
 }
 
@@ -161,6 +180,182 @@ async function isolatedDetachedRepository(t, callback) {
 }
 
 registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit });
+
+test("disk space native filesystem smoke reports capacity without imposing a threshold", () => {
+  const root = realpathSync(projectRoot);
+  const result = diskSpacePreflight({ root, full: false },
+    join(root, ".tmp", "disk-capacity-smoke", "not-created"), {});
+  for (const entry of result.locations) {
+    assert.notEqual(entry.state, "unknown", JSON.stringify(entry));
+    assert.match(entry.availableBytes, /^\d+$/u);
+    assert.ok(existsSync(entry.measuredPath));
+  }
+  assert.equal(result.error, undefined, "even zero available bytes is only a warning for this smoke test");
+});
+
+for (const platform of ["win32", "linux"]) {
+  for (const name of ["cargo_target_dir", "cArGo_BuIlD_tArGeT_dIr"]) {
+    test(`disk space Cargo environment casing: ${platform} ${name}`, () => {
+      const root = realpathSync(projectRoot);
+      const alternate = join(root, "alternate-output-volume");
+      const paths = [];
+      const report = diskSpacePreflight({ root, full: true, needsCargo: true }, root,
+        { [name]: alternate }, {
+          platform,
+          statfs: (path) => {
+            paths.push(path);
+            return capacity((path === alternate ? 49n : 200n) * GiB);
+          },
+        });
+      assert.equal(paths.includes(alternate), platform === "win32");
+      assert.equal(Boolean(report.error), platform === "win32");
+      if (platform === "win32") {
+        assert.equal(report.locations.find(({ path }) => path === alternate).state, "low");
+      }
+    });
+  }
+}
+
+test("disk space uses the Windows child-process winner for duplicate Cargo environment keys", () => {
+  const root = realpathSync(projectRoot);
+  const selected = join(root, "selected-output-volume");
+  const discarded = join(root, "discarded-output-volume");
+  const report = diskSpacePreflight({ root, full: true, needsCargo: true }, root,
+    { cargo_target_dir: discarded, CARGO_TARGET_DIR: selected }, {
+      platform: "win32",
+      statfs: (path) => capacity((path === selected ? 49n : 200n) * GiB),
+    });
+  assert.match(report.error, /full gate refused/u);
+  assert.ok(report.locations.some(({ path, state }) => path === selected && state === "low"));
+  assert.equal(report.locations.some(({ path }) => path === discarded), false);
+});
+
+for (const [label, bytes, expected] of [
+  ["below floor", 50n * GiB - 1n, "low"],
+  ["exact floor", 50n * GiB, "warning"],
+  ["below warning", 100n * GiB - 1n, "warning"],
+  ["exact warning", 100n * GiB, "ok"],
+  ["above safe integer range", 2n ** 60n, "ok"],
+]) {
+  test(`disk space preflight boundaries: ${label}`, () => {
+    const root = projectRoot;
+    const result = diskSpacePreflight({ root, full: true }, root, {}, {
+      statfs: (path, options) => {
+        assert.equal(path, root);
+        assert.deepEqual(options, { bigint: true });
+        // bfree is deliberately ample: only caller-available blocks count.
+        return { bsize: 1n, bavail: bytes, bfree: 1000n * GiB };
+      },
+    });
+    assert.equal(result.locations[0].state, expected);
+    assert.equal(result.locations[0].availableBytes, String(bytes));
+    assert.equal(Boolean(result.error), expected === "low");
+    assert.equal(result.warnings.length, expected === "ok" ? 0 : 1);
+    assert.equal(result.warningThresholdBytes, String(DISK_SPACE_WARNING_BYTES));
+    assert.equal(result.fullGateFloorBytes, String(FULL_GATE_DISK_FLOOR_BYTES));
+    assert.doesNotThrow(() => JSON.stringify(result));
+  });
+}
+
+test("disk space preflight measures missing Cargo paths at their existing ancestor and checks metadata separately", () => {
+  const root = realpathSync(projectRoot);
+  const missing = join(root, "new-output", "target");
+  const metadata = join(root, ".git");
+  const calls = [];
+  const result = diskSpacePreflight({ root, full: true, needsCargo: true }, metadata,
+    { CARGO_TARGET_DIR: missing, CARGO_BUILD_TARGET_DIR: "build-output" }, {
+      statfs: (path) => {
+        calls.push(path);
+        if ([missing, dirname(missing), join(root, "build-output")].includes(path)) {
+          throw Object.assign(new Error("not created"), { code: "ENOENT" });
+        }
+        return { bavail: path === metadata ? 49n * GiB / 4096n : 200n * GiB / 4096n, bsize: 4096n };
+      },
+    });
+  assert.deepEqual(result.locations.map(({ measuredPath }) => measuredPath), [root, metadata, root, root]);
+  assert.equal(result.locations[1].state, "low");
+  assert.equal(result.locations[1].availableBytes, String(49n * GiB));
+  assert.match(result.error, /full gate refused/u);
+  assert.ok(calls.includes(missing));
+});
+
+for (const [label, statfs] of [
+  ["unavailable", () => { throw Object.assign(new Error("PRIVATE details"), { code: "EACCES" }); }],
+  ["negative blocks", () => ({ bavail: -1n, bsize: 4096n })],
+  ["zero block size", () => ({ bavail: 1n, bsize: 0n })],
+  ["non-BigInt blocks", () => ({ bavail: Number.NaN, bsize: 4096n })],
+]) {
+  test(`disk space preflight refuses unknown full-gate capacity: ${label}`, () => {
+    const result = diskSpacePreflight({ root: projectRoot, full: true }, projectRoot, {}, { statfs });
+    assert.equal(result.locations[0].state, "unknown");
+    assert.equal(result.locations[0].reason, label === "unavailable" ? "EACCES" : "invalid-capacity");
+    assert.match(result.error, /unknown capacity/u);
+    assert.match(result.warnings[0], /could not be established/u);
+    assert.doesNotMatch(result.warnings[0], /clean inactive/u);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE/u);
+  });
+}
+
+for (const detached of [false, true]) {
+  for (const unavailable of [false, true]) {
+    test(`disk space refusal leaves ${detached ? "detached" : "foreground"} full gate unrun: ${unavailable ? "unknown" : "below floor"}`, async (t) => {
+      await isolatedDetachedRepository(t, async (root, env, notificationMarker) => {
+        const marker = join(root, ".git", "must-not-run");
+        const runDir = await createRun({ root, full: true, detached, needsCargo: true,
+          stages: [stage("rust-tests", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`)],
+          ...(detached ? { notifyTo: "fixture-coordinator" } : {}),
+        }, env);
+        const statfs = () => {
+          if (unavailable) throw new Error("unavailable");
+          return capacity(49n * GiB);
+        };
+        if (detached) {
+          // The real detached worker gets a native-fs fixture, not an env bypass.
+          writeDiskCapacityFixture(root, unavailable ? null : 49n * GiB);
+          const worker = await startDetachedRun(runDir, env);
+          assert.deepEqual(await workerExit(worker), { code: 1, signal: null });
+          const notifications = readFileSync(notificationMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+          assert.equal(notifications.length, 1);
+          assert.match(notifications[0].body, /^FAIL /u);
+          assert.match(notifications[0].body, /disk-space preflight/u);
+          assert.match(readFileSync(join(runDir, "launcher.log"), "utf8"), /Disk space:/u);
+        } else {
+          t.mock.method(console, "error", () => {});
+          await executeRun(runDir, env, { diskSpace: { statfs } });
+        }
+        const result = json(join(runDir, "results.json"));
+        assert.equal(result.state, "failed");
+        assert.equal(result.exitCode, 1);
+        assert.ok(result.ended);
+        assert.equal(result.failureInvestigation.status, "required");
+        assert.match(result.error, /disk-space preflight/u);
+        assert.ok(result.diskSpace.locations.every(({ state }) => state === (unavailable ? "unknown" : "low")));
+        assert.equal(json(join(runDir, "request.json")).registration.state, "registered");
+        assert.deepEqual(result.preflight, [], "no Cargo executable probe may run");
+        assert.deepEqual(result.stages.map(({ state }) => state), ["unrun"]);
+        assert.equal(existsSync(join(root, "target")), false);
+        assert.equal(existsSync(marker), false);
+        assert.match(await summarize(runDir), /Disk space:/u);
+      });
+    });
+  }
+}
+
+test("disk space warning permits the exact full-gate floor and does not block a focused run", async (t) => {
+  await repository(t, async (root, env) => {
+    const warnings = [];
+    t.mock.method(console, "error", (message) => warnings.push(message));
+    for (const [full, bytes] of [[true, 50n * GiB], [false, 1n]]) {
+      const runDir = await createRun({ root, full, stages: [stage("fixture")] }, env);
+      const result = await executeRun(runDir, env, { diskSpace: { statfs: () => capacity(bytes) } });
+      assert.equal(result.state, "passed");
+      assert.equal(result.diskSpace.error, undefined);
+      assert.ok(result.diskSpace.warnings.length > 0);
+      assert.match(await summarize(runDir), /warning below 100 GiB/u);
+    }
+    assert.ok(warnings.length > 0);
+  });
+});
 
 test("required stages preserve the TermAl five-gate order and direct JavaScript entrypoints", () => {
   for (const platform of ["win32", "linux"]) {

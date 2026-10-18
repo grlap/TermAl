@@ -852,6 +852,35 @@ fn test_run_observation_summary(
     summary
 }
 
+// Whether command observation `row` is exactly associated with launcher run
+// `run`: same owner and worktree, an artifact naming this run and its
+// directory, and a positive terminal-digest or immutable-request match. Also
+// used by the handoff ledger to find a run's credited observations.
+fn test_run_observation_matches_run(
+    inner: &StateInner,
+    run: &TestRunSummary,
+    disk: Option<&TestRunDisk>,
+    row: &TestRunCommandObservation,
+) -> bool {
+    row.artifact.as_ref().is_some_and(|artifact| {
+        run.owner_session_id == row.summary.owner_session_id
+            && test_run_path_key(&run.worktree) == test_run_path_key(&row.summary.worktree)
+            && artifact.run_id == run.run_id
+            && test_run_path_key(&artifact.run_directory) == test_run_path_key(&run.run_dir)
+            && if let Some(digest) = &artifact.terminal_digest {
+                test_run_terminal_digest_matches(run.detail_version.as_deref(), digest)
+            } else {
+                artifact.request_identity.as_ref().is_some_and(|identity| {
+                    disk.is_some_and(|disk| disk.request_identity.as_ref() == Some(identity))
+                        || (disk.is_none()
+                            && inner.test_run_compacted.get(&run.run_id).is_some_and(
+                                |retained| retained.request_identity.as_ref() == Some(identity),
+                            ))
+                })
+            }
+    })
+}
+
 // Shared by the scanner's SSE summary and fresh API/snapshot projection.
 // Only positive immutable-request or terminal-digest matches suppress an
 // observation row. All inputs here are already read; no filesystem I/O.
@@ -864,26 +893,7 @@ fn test_run_enrich_artifact_summary(
     let associations: Vec<_> = inner
         .test_run_observations
         .values()
-        .filter(|row| {
-            row.artifact.as_ref().is_some_and(|artifact| {
-                run.owner_session_id == row.summary.owner_session_id
-                    && test_run_path_key(&run.worktree) == test_run_path_key(&row.summary.worktree)
-                    && artifact.run_id == run.run_id
-                    && test_run_path_key(&artifact.run_directory) == test_run_path_key(&run.run_dir)
-                    && if let Some(digest) = &artifact.terminal_digest {
-                        test_run_terminal_digest_matches(run.detail_version.as_deref(), digest)
-                    } else {
-                        artifact.request_identity.as_ref().is_some_and(|identity| {
-                            disk.is_some_and(|disk| {
-                                disk.request_identity.as_ref() == Some(identity)
-                            }) || (disk.is_none()
-                                && inner.test_run_compacted.get(&run.run_id).is_some_and(
-                                    |retained| retained.request_identity.as_ref() == Some(identity),
-                                ))
-                        })
-                    }
-            })
-        })
+        .filter(|row| test_run_observation_matches_run(inner, run, disk, row))
         .collect();
     if associations.is_empty() {
         return merged;

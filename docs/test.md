@@ -71,6 +71,58 @@ Vitest use their JavaScript entrypoints rather than `.cmd` shims. All commands,
 working directories and required files are preflighted, and a missing
 prerequisite leaves every stage explicitly unrun.
 
+### Disk space and worktree build-output retention
+
+After registration, before Cargo bootstrap or any stage, the launcher checks
+space available to the current user on the filesystems containing the worktree,
+run artifacts and Cargo output directories selected by `CARGO_TARGET_DIR` or
+`CARGO_BUILD_TARGET_DIR` (otherwise `target/`). A missing output directory is
+checked through its nearest existing ancestor; this creates no directories.
+Cargo configuration files can select other output locations: their operator
+must check those filesystems separately before granting a build window.
+Cargo's download/cache directory (`CARGO_HOME`, or its default), the product
+test temporary directory (`TERMAL_TEST_USER_TEMP`, or the OS temporary
+directory), and other subprocess-specific output locations are also outside
+this check. The coordinator checks their capacity separately before granting
+a build window, especially when they are on another volume.
+
+The launcher warns below **100 GiB**. A **full gate refuses to start below
+50 GiB**, or when available space cannot be established, at any checked
+location. Exactly 50 GiB is allowed with a warning; exactly 100 GiB needs no
+warning. A refusal saves a failed run with every stage unrun and names the
+capacity problem in its summary. Focused runs warn but are not blocked by this
+floor. The `live` and `category` modes also warn without this full-gate floor;
+`live` can compile Cargo output, so the coordinator must check its build
+headroom before granting that run. Foreground and detached workers use the same check. The observation is
+not a reservation: other processes can consume space after the check. There
+is no supported override flag, automatic cleanup or automatic retry. An
+unknown observation includes a safe reason token (never the filesystem error
+message); resolve that query failure before running a full gate. A low-space
+refusal is a resource condition: preserve it, arrange eligible cleanup in a
+build window, then request a fresh run rather than retrying unchanged.
+
+The Merger, or the project coordinator, removes a landed or released
+worktree's `target/` in the next agreed build window, after its checks and
+evidence have settled. The coordinator also sweeps these eligible worktrees
+at each build-window handoff; idle build output must not be retained merely
+because the worktree remains. Keep output needed for an open investigation
+only with a concrete retention reason and end condition recorded on that work.
+
+Before each removal, verify that no active claim, running check, build or
+process uses that output. Resolve the repository root, worktree and target to
+absolute paths; require the worktree to be inside this repository's `.tmp/`
+and the target to be exactly its `target/` child. Check path-component
+boundaries, not just a textual prefix. Refuse symlinks, junctions or other
+reparse points in the path or anywhere beneath the deletion target. Inspect
+the final resolved path before recursive deletion, and remove only that
+explicit target with non-interactive filesystem operations. Never remove
+the main checkout's `target/`, a running executable, active worktree output
+or run evidence. Bulk deletion waits while either project's gate runs.
+Leave any ineligible output untouched and report the exception to the
+coordinator for a separate plan within the repository-folder safety rules.
+Record the removed paths and recovered space in the tracker. The launcher
+only reports capacity; it never deletes build output.
+
 For an authorized focused check, pass an argument array after `--`:
 
 ```bash

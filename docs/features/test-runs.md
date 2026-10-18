@@ -1144,3 +1144,5 @@ and a run that has left the index shows "not indexed" and no elapsed time.
   follows.
 - [Host Architecture](./host-architecture.md): the proposed execution record,
   in which a launcher run is one kind of execution.
+- [Handoff Ledger](./handoffs.md): a recorded next step the host offers its
+  owner when a run ends or is credited, with no wake needed.

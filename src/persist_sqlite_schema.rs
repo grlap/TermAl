@@ -404,6 +404,7 @@ fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Re
              `{prompt_history_storage_version}`, expected `{SQLITE_PROMPT_HISTORY_STORAGE_VERSION}`"
         )));
     }
+    validate_optional_federation_host_identity(connection)?;
     Ok(())
 }
 
@@ -442,6 +443,7 @@ fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> 
             ],
         )
         .context("failed to record SQLite prompt-history storage authority")?;
+    seed_federation_host_identity(&transaction)?;
     transaction
         .commit()
         .context("failed to commit current state schema initialization")?;
@@ -479,6 +481,7 @@ fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) 
     ensure_sqlite_response_board_schema(connection)?;
     backfill_missing_sqlite_session_overviews(connection)?;
     validate_sqlite_state_table_columns(connection, CURRENT_SQLITE_STATE_TABLE_COLUMNS, false)?;
+    ensure_federation_host_identity(connection)?;
     Ok(())
 }
 

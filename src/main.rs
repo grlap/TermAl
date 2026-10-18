@@ -446,6 +446,19 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/test-run-waits",
             post(create_test_run_wait),
         )
+        .route("/api/handoffs", get(get_handoffs))
+        .route(
+            "/api/sessions/{id}/handoffs",
+            post(register_session_handoff),
+        )
+        .route(
+            "/api/sessions/{id}/handoffs/{handoff_id}/accept",
+            post(accept_session_handoff),
+        )
+        .route(
+            "/api/sessions/{id}/handoffs/{handoff_id}/complete",
+            post(complete_session_handoff),
+        )
         .route(
             "/api/sessions/{id}/engram-source-root",
             post(name_engram_source_root),
@@ -736,6 +749,15 @@ impl Mode {
 
 include!("process_limits.rs");
 include!("remote_authority.rs");
+include!("federation_identity.rs");
+include!("federation_registry.rs");
+include!("federation_snapshots.rs");
+include!("federation_mutations.rs");
+include!("federation_membership.rs");
+include!("federation_views.rs");
+include!("federation_placement.rs");
+include!("persist_federation.rs");
+include!("persist_federation_image.rs");
 include!("remote.rs");
 include!("remote_ssh.rs");
 include!("remote_terminal.rs");
@@ -849,6 +871,7 @@ include!("session_runtime.rs");
 include!("runtime_process_tree.rs");
 include!("session_interaction.rs");
 include!("queued_prompt_durability.rs");
+include!("handoffs.rs");
 include!("prompt_delivery.rs");
 include!("engram_queued_admission.rs");
 include!("engram_abort_retry.rs");

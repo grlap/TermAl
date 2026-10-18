@@ -2,7 +2,7 @@
 // One execution, durable logs, one completion. Notification retries never run tests.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
+import fs, {
   constants,
   accessSync,
   closeSync,
@@ -498,7 +498,8 @@ const cacheDirectoryTag = [
 // elsewhere (CARGO_TARGET_DIR, CARGO_BUILD_TARGET_DIR), one that exists, and
 // one Git does not ignore are left as they are. Returns whether it made one.
 export function ensureCargoTargetDirectory(root, env = process.env) {
-  if (env.CARGO_TARGET_DIR || env.CARGO_BUILD_TARGET_DIR) return false;
+  if (cargoOutputEnvironment(env, "CARGO_TARGET_DIR") ||
+      cargoOutputEnvironment(env, "CARGO_BUILD_TARGET_DIR")) return false;
   const target = join(root, "target");
   if (existsSync(target)) return false;
   const ignored = spawnSync("git", ["check-ignore", "--quiet", "target/"], {
@@ -514,6 +515,82 @@ export function ensureCargoTargetDirectory(root, env = process.env) {
     if (error.code !== "EEXIST") throw error;
   }
   return true;
+}
+
+const gibibyte = 1024n ** 3n;
+export const DISK_SPACE_WARNING_BYTES = 100n * gibibyte;
+export const FULL_GATE_DISK_FLOOR_BYTES = 50n * gibibyte;
+
+// Match Node's native child environment: Windows keeps the first sorted key
+// among case-insensitive duplicates; POSIX preserves case-sensitive names.
+function cargoOutputEnvironment(env, name, platform = process.platform) {
+  if (platform !== "win32") return env[name];
+  const key = Object.keys(env).sort().find((entry) => entry.toUpperCase() === name);
+  return key === undefined ? undefined : env[key];
+}
+
+const diskErrorCodes = new Set(["EACCES", "EPERM", "ENOSYS", "ENOTSUP", "ENOENT", "ENOTDIR", "EINVAL", "EIO"]);
+
+// statfs follows the filesystem containing the path. For a not-yet-created
+// output directory, inspect its nearest existing ancestor without creating it.
+// Dependency injection is for fixtures; the CLI always uses the native reader.
+export function diskSpacePreflight(request, runDir, env = process.env, {
+  statfs = (path, options) => fs.statfsSync(path, options),
+  platform = process.platform,
+} = {}) {
+  const paths = [request.root, runDir];
+  if (request.needsCargo) {
+    const target = cargoOutputEnvironment(env, "CARGO_TARGET_DIR", platform);
+    const buildTarget = cargoOutputEnvironment(env, "CARGO_BUILD_TARGET_DIR", platform);
+    paths.push(resolve(request.root, target || "target"));
+    if (buildTarget) paths.push(resolve(request.root, buildTarget));
+  }
+  const locations = [...new Set(paths)].map((path) => {
+    let measuredPath = path;
+    try {
+      let stats;
+      for (;;) {
+        try {
+          stats = statfs(measuredPath, { bigint: true });
+          break;
+        } catch (error) {
+          const parent = dirname(measuredPath);
+          if (error.code !== "ENOENT" || parent === measuredPath) throw error;
+          measuredPath = parent;
+        }
+      }
+      if (typeof stats.bavail !== "bigint" || stats.bavail < 0n ||
+          typeof stats.bsize !== "bigint" || stats.bsize <= 0n) {
+        throw Object.assign(new Error("invalid filesystem capacity"), { code: "INVALID_CAPACITY" });
+      }
+      const available = stats.bavail * stats.bsize;
+      return { path, measuredPath, availableBytes: String(available),
+        state: available < FULL_GATE_DISK_FLOOR_BYTES ? "low"
+          : available < DISK_SPACE_WARNING_BYTES ? "warning" : "ok" };
+    } catch (error) {
+      const reason = error?.code === "INVALID_CAPACITY" ? "invalid-capacity"
+        : diskErrorCodes.has(error?.code) ? error.code
+          : error instanceof TypeError ? "statfs-unavailable" : "statfs-error";
+      return { path, measuredPath, state: "unknown", reason };
+    }
+  });
+  const messages = locations.filter(({ state }) => state !== "ok").map((entry) => {
+    const tenths = entry.availableBytes === undefined ? undefined : BigInt(entry.availableBytes) * 10n / gibibyte;
+    const capacity = entry.state === "unknown" ? `free space could not be established (${entry.reason})`
+      : `${tenths / 10n}.${tenths % 10n} GiB available`;
+    const remedy = entry.state === "unknown" ? "Resolve the filesystem capacity query failure before a full gate."
+      : "Ask the coordinator to clean inactive worktree build output in a build window.";
+    return `Disk space: ${entry.path}: ${capacity}; warning below 100 GiB, full-gate minimum 50 GiB. ${remedy}`;
+  });
+  return {
+    checkedAt: new Date().toISOString(),
+    warningThresholdBytes: String(DISK_SPACE_WARNING_BYTES),
+    fullGateFloorBytes: String(FULL_GATE_DISK_FLOOR_BYTES),
+    locations,
+    warnings: messages,
+    ...(request.full && locations.some(({ state }) => ["low", "unknown"].includes(state))
+      ? { error: "full gate refused by disk-space preflight: need at least 50 GiB available at every checked location; unknown capacity is not sufficient" } : {}),
+  };
 }
 
 export async function runCommand(command, args, { cwd, env, log }) {
@@ -686,7 +763,7 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
   return failed;
 }
 
-export async function executeRun(runDir, env = process.env, { onReady } = {}) {
+export async function executeRun(runDir, env = process.env, { onReady, diskSpace } = {}) {
   // Exclusive admission: an interrupted run is not a retryable test command.
   closeSync(openSync(join(runDir, "execution.lock"), "wx"));
   const resultPath = join(runDir, "results.json");
@@ -748,6 +825,10 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
     result.preflight = [];
     save(resultPath, result);
     await onReady?.();
+    result.diskSpace = diskSpacePreflight(request, runDir, childEnv, diskSpace);
+    save(resultPath, result);
+    for (const warning of result.diskSpace.warnings) console.error(warning);
+    if (result.diskSpace.error) throw new Error(result.diskSpace.error);
     for (const path of request.prerequisiteFiles ?? []) requiredFile(path);
     let cargo;
     if (request.needsCargo) {
@@ -930,6 +1011,7 @@ export async function summarize(runDir) {
     lines.push(investigation.retryPolicy);
   }
   if (result.error) lines.push(`runner: ${result.error.slice(0, diagnosticLimit)}`);
+  lines.push(...(result.diskSpace?.warnings ?? []));
   let remaining = 6000;
   // Failure excerpts get first use of the shared budget; earlier successful
   // commands may emit warnings but must not crowd out the actual failure.
