@@ -317,6 +317,8 @@ fn app_router_with_acceptance_policy_limiter(
                 .delete(delete_workspace_layout),
         )
         .route("/api/settings", post(update_app_settings))
+        .route("/api/federation", get(get_federation))
+        .route("/api/federation/settings", post(update_federation_settings))
         .route("/api/engram/settings", patch(update_engram_host_settings))
         .route("/api/remotes/{id}/register", post(register_remote_termal))
         .route("/api/remotes/{id}/upgrade", post(upgrade_remote_termal))
@@ -757,6 +759,7 @@ include!("federation_snapshots.rs");
 include!("federation_mutations.rs");
 include!("federation_membership.rs");
 include!("federation_views.rs");
+include!("federation_operator.rs");
 include!("federation_placement.rs");
 include!("persist_federation.rs");
 include!("persist_federation_image.rs");

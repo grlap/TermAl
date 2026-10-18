@@ -384,3 +384,6 @@ mod disconnect;
 
 #[path = "federation_roles.rs"]
 mod roles;
+
+#[path = "federation_operator.rs"]
+mod operator;

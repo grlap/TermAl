@@ -372,6 +372,8 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
 | DELETE | `/api/workspaces/{id}` (200) -> `WorkspaceLayoutsResponse` | Delete a persisted workspace layout and return the remaining layout summaries |
 | POST | `/api/settings` | Update app-wide preferences and remote config |
+| GET | `/api/federation` | Local operator registry view: enabled/role, local and central host identity, durability/continuity, peer membership and retained capacity. No configuration change. |
+| POST | `/api/federation/settings` | Local operator replacement `{enabled, role, central}` for Central/Standalone configuration through M1's version/content-fenced durable write. Central binding must equal this host's full identity; disable with the same central role/identity to retain reservations. 400 invalid transition or Satellite role; 409 stale authority or unresolved-placement role replacement; 422 malformed/unknown fields; 500 unresolved persistence. See [federation operator configuration](features/central-control-plane.md#local-operator-configuration). |
 | POST | `/api/remotes/{id}/register` | Register an existing checkout on an SSH remote for TermAl lifecycle actions. Verifies the remote checkout/tooling and writes `~/.termal/remote-install.json`; returns capped stdout/stderr. |
 | POST | `/api/remotes/{id}/upgrade` | Build and install TermAl on a registered SSH remote by running `git pull --ff-only` and `cargo build --release --bin termal`, then copying the release binary to `~/.termal/bin/termal`; returns capped stdout/stderr. |
 | GET | `/api/orchestrators/templates` | List orchestrator templates |

@@ -2,11 +2,14 @@
 
 ## Status
 
-Design contract, not shipped behavior. Nothing here is implemented yet: today
-mailbox eligibility is local-only, and remote execution runs only through the
-executor proxies of [Project-scoped remotes](project-scoped-remotes.md). The
-rollout below lands it slice by slice, each with its own tests, review and
-gate; enabling it on real machines is a separate, explicit operator step.
+The M1 foundation implements durable host identity, registry membership,
+capacity reservations and explicit placement. The local operator surface below
+configures that foundation. Cross-host mailbox delivery and native remote
+execution remain later slices: mailbox eligibility is local-only, and remote
+execution runs through the executor proxies of
+[Project-scoped remotes](project-scoped-remotes.md). The rollout below lands
+each slice with its own tests, review and gate; enabling it on real machines
+is a separate, explicit operator step.
 
 This brief is the accepted cross-host design in the repository's own words. It
 replaces the earlier plan, in which remote-backed proxy records joined
@@ -49,6 +52,53 @@ decentralized, and its tasks meet through the shared Git remote.
   is an error.
 - **Shared Git remote.** Engram's meeting point for task planning; it is not an
   authority, and it is not part of this control plane.
+
+## Local operator configuration
+
+`GET /api/federation` reports the current `enabled`, `role`, `local` and
+`central` values, `trackingDurability`, continuity/quarantine status, and the
+peer registry with declared and allocated capacity. Host identities use
+`{hostId, hostGeneration}`. Reading does not enable federation, create peers,
+release reservations or change the store. This is a local operator API, not a
+domain transport or satellite enrollment endpoint.
+
+To enable this host as central, first read its identity, then send
+`POST /api/federation/settings` with:
+
+```json
+{
+  "enabled": true,
+  "role": "central",
+  "central": {"hostId": "<local.hostId>", "hostGeneration": 1}
+}
+```
+
+Copy both identity fields from the current read; the example generation is not
+a constant. The setter requires `enabled` and `role`, rejects unknown fields,
+and validates the complete central identity against this host. It calls the
+existing domain configuration path: the mutation advances the domain version,
+invalidates old link verification when settings change, and confirms the exact
+content through the state writer before returning success. Its JSON response
+is the current registry view. Verify `enabled: true`, `role: "central"`, the
+matching `local`/`central` identities, and `trackingDurability: "durable"`.
+The setting persists across restart; enabling never mints a new host identity.
+
+Disable through the same POST with `enabled: false`, retaining `role:
+"central"` and the same `central` identity. This holds domain admission and
+invalidates links without deleting peers, existing local sessions, mailbox
+history or unresolved reservations. Returning to `role: "standalone"` requires
+`enabled: false, central: null`; M1 refuses role replacement while unresolved
+placements remain. Satellite configuration and enrollment are separate
+workflows and are refused by this setter.
+
+Malformed JSON, unknown fields and missing required fields return 422;
+well-formed invalid settings return 400. Existing authority/placement conflicts
+return 409. A 500 persistence failure is an unresolved outcome: the attempted
+settings may already be visible in memory, but admission remains held and the
+read view reports `trackingDurability: "unresolved"`. Do not interpret that
+view as a durable enable or assume the failed request rolled back. Resolve
+the persistence failure through the existing durability recovery path before
+another configuration attempt. Never edit the live database as a workaround.
 
 ## Topology: hub and spoke
 
