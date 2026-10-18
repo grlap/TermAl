@@ -353,6 +353,112 @@ fn a_registered_handoff_survives_a_restart_and_is_offered_after_it() {
     restarted.shutdown_persist_blocking();
 }
 
+/// A completed handoff is completed exactly once and stays so across a
+/// restart: an identical retry returns the original completion and changes
+/// nothing, a conflicting completion is refused, and after the restart the
+/// record, its completion evidence and its history are all still there,
+/// the same retry rules hold, and nothing is offered again.
+#[test]
+fn a_completed_handoff_keeps_its_evidence_and_history_across_a_restart() {
+    let fixture = Fixture::new("completed-restart");
+    let handoff = fixture.register("completed-restart");
+    fixture.tick(at(0), HandoffPrerequisiteOutcome::Met);
+    received_prompt(&fixture.primary_prompts, "the offer");
+    let fence = fixture
+        .state
+        .accept_handoff(&fixture.primary, &handoff.handoff_id, 1)
+        .expect("the primary accepts")
+        .accept_fence
+        .expect("acceptance returns a fence");
+    let evidence = json!({ "prepared": "landing package", "commit": "abc123" });
+    let completed = fixture
+        .state
+        .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, evidence.clone())
+        .expect("the owner completes it");
+    let retried = fixture
+        .state
+        .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, evidence.clone())
+        .expect("an identical retry returns the original completion");
+    assert_eq!(retried.version, completed.version, "an identical retry changes nothing");
+    assert_eq!(retried.history, completed.history, "an identical retry adds no history");
+    assert!(
+        fixture
+            .state
+            .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, json!({ "other": true }))
+            .is_err(),
+        "a conflicting completion is refused"
+    );
+    let before = fixture.record(&handoff.handoff_id);
+    assert_eq!(before.state, HandoffState::Completed);
+    assert_eq!(before.version, completed.version, "the refused completion changed nothing");
+
+    let paths = fixture.paths.clone();
+    fixture.state.shutdown_persist_blocking();
+    drop(fixture.state);
+    let restarted = boot(&paths);
+    let after = restarted
+        .list_handoffs_at(at(600))
+        .expect("the list reads after the restart")
+        .into_iter()
+        .find(|view| view.record.handoff_id == handoff.handoff_id)
+        .expect("the completed handoff survives the restart")
+        .record;
+    assert_eq!(after.state, HandoffState::Completed, "still completed");
+    assert_eq!(after.completion.as_ref(), Some(&evidence), "the completion evidence is kept");
+    assert_eq!(after.accepted_by, before.accepted_by, "the accepted owner is kept");
+    assert_eq!(after.version, before.version, "the version is kept");
+    assert_eq!(after.history, before.history, "the full history is kept");
+    assert!(
+        after.history.iter().any(|entry| entry.event.starts_with("completed by")),
+        "the history records the completion"
+    );
+
+    let again = restarted
+        .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, evidence.clone())
+        .expect("an identical retry after the restart returns the original completion");
+    assert_eq!(again.version, before.version, "and changes nothing");
+    assert!(
+        restarted
+            .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, json!({ "late": true }))
+            .is_err(),
+        "a conflicting completion after the restart is refused"
+    );
+    let report = restarted.handoff_watchdog_tick_with(at(900), &|_| HandoffPrerequisiteOutcome::Met);
+    assert!(report.offered.is_empty(), "a completed handoff is never offered again");
+    restarted.shutdown_persist_blocking();
+}
+
+/// Every ledger write is a compare-and-swap on the row's version: a write
+/// built from a record another writer has since moved on is refused and
+/// leaves the stored row exactly as it was, while a write built from the
+/// current version lands.
+#[test]
+fn a_stale_ledger_write_is_refused_by_the_version_compare_and_swap() {
+    let fixture = Fixture::new("cas");
+    let handoff = fixture.register("cas");
+    let stale_base = fixture.record(&handoff.handoff_id);
+    // Another writer moves the row on: the watchdog readies and offers it.
+    fixture.tick(at(0), HandoffPrerequisiteOutcome::Met);
+    let current = fixture.record(&handoff.handoff_id);
+    assert!(current.version > stale_base.version, "the row moved on");
+
+    let path = fixture.state.persistence_path.clone();
+    let mut stale = stale_base.next(at(1), "a write built from the old version");
+    stale.state = HandoffState::Completed;
+    let written = with_handoff_writer(&path, |connection| cas_handoff_on(connection, &stale))
+        .expect("the compare-and-swap runs");
+    assert!(!written, "a write from a stale version is refused");
+    let after = fixture.record(&handoff.handoff_id);
+    assert_eq!(after, current, "the refused write left the row exactly as it was");
+
+    let fresh = current.next(at(2), "a write built from the current version");
+    let written = with_handoff_writer(&path, |connection| cas_handoff_on(connection, &fresh))
+        .expect("the compare-and-swap runs");
+    assert!(written, "a write from the current version lands");
+    assert_eq!(fixture.record(&handoff.handoff_id).version, fresh.version);
+    fixture.state.shutdown_persist_blocking();
+}
+
 /// The acceptance clock starts at delivery: an offer queued behind the
 /// owner's running turn for five minutes is waiting, not overdue, never goes
 /// to the recovery owner, and is accepted by the primary once delivered.
