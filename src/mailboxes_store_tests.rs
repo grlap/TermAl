@@ -376,7 +376,11 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
             .connection()
             .unwrap()
             .execute_batch(
-                "DROP TABLE mailbox_read_pages;
+                "DROP TABLE federation_mailbox_wake_obligations;
+             DROP TABLE federation_mailbox_dedup;
+             DROP TABLE federation_mailbox_intents;
+             DROP TABLE federation_mailbox_retired_namespaces;
+             DROP TABLE mailbox_read_pages;
              UPDATE meta SET value = '1' WHERE key = 'coordination_schema_version';",
             )
             .unwrap();

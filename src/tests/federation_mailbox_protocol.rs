@@ -38,7 +38,9 @@ async fn central_negotiation_reports_authority_schema_and_unchanged_mailbox_limi
     assert_eq!(body["limits"]["metadataBytes"], 4096);
     assert_eq!(body["limits"]["displayNameChars"], 160);
     assert_eq!(body["receiptOnlyAcknowledgement"], true);
-    assert_eq!(body["senderIntentRegistry"], false);
+    // Sender retry intents are available; remote wake delivery remains a
+    // separate capability, and the existing mailbox limits stay unchanged.
+    assert_eq!(body["senderIntentRegistry"], true);
     assert_eq!(body["remoteWakeDelivery"], false);
 }
 

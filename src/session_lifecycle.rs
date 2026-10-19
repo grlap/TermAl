@@ -160,6 +160,12 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
+        let federation_creation = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            federation_mailbox_root_locked(&inner, session_id).ok()
+                .filter(|record| record.federation_mailbox_binding.is_some())
+                .map(|record| record.federation_native_creation_id.clone())
+        };
         let engram_session_ids_to_terminate = self.prepare_source_observation_delete(session_id, true)?;
         for terminating_session_id in &engram_session_ids_to_terminate {
             self.checkpoint_engram_turn_off_lock(
@@ -250,6 +256,11 @@ impl AppState {
             )
         };
 
+        if let Some(creation) = federation_creation {
+            if let Err(error) = self.mailbox_store.retire_federation_intent_owner(session_id, &creation) {
+                eprintln!("mailbox cleanup> sender namespace retirement pending: {error:#}");
+            }
+        }
         if let Err(err) = self.mailbox_store.mark_session_left(session_id) {
             eprintln!(
                 "mailbox cleanup> failed to mark deleted session `{session_id}` as left: {err:#}"

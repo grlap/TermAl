@@ -81,11 +81,78 @@ follow a committed append. The satellite preserves an explicit unknown-outcome
 signal through the local API and bridge. Retry the original request with the
 same idempotency key; an unavailable response never proves that C did not commit.
 
-This foundation synchronously returns the central append result and existing
-exact-intent idempotency. The sender intent registry arrives with M3. Remote
+Domain sends first persist a sender-local delivery intent. They return a send
+receipt only after the central append is confirmed and its outcome is retained
+locally. The central append, canonical digest outcome and durable wake obligation
+commit in one SQLite transaction. Remote
 wakes arrive with M4: until then a remote recipient's append truthfully reports
 `durableButNotWoken`, with its cause visible in message details. Central native
 recipients keep local wake, unread and acknowledgement behavior.
+
+The negotiated `senderIntentRegistry` flag describes the central host, including
+when a satellite forwards its protocol response. An authenticated central that
+advertises `false` causes a visible `409` refusal before a new intent consumes
+quota. Transport unavailability can still admit bounded sender-local queued
+intents under the existing exact native creation, binding and domain authority,
+even without an earlier successful negotiation. This is `localIntentDurable`,
+never a receipt or an append attempt. Stale, revoked or unauthenticated authority
+is not treated as an outage. Exact send and cancellation dispatch always require
+affirmative capability evidence fenced to the actual current authenticated link;
+there is no fallback to the older send operation. A reconnect requires fresh
+negotiation. Upgrade the central before using durable sender intents.
+
+If a never-attempted queue later meets a central without this capability, a
+writer-serialized local refusal releases its pending quota and preserves the
+terminal key and digest. Its status is `refused`, with `refusalSource: "sender"`
+and `refusalReason: "centralCapabilityUnsupported"`; this is not a central-issued
+receipt or tombstone. An already `appendOutcomeUnknown` intent stays unresolved
+and keeps its quota: a later capability refusal cannot prove non-commit.
+
+The sender registry is a retry outbox, never a mailbox replica. A pending
+`localIntentDurable` or `appendOutcomeUnknown` row has no canonical message id,
+sequence, read receipt or mailbox cursor. Its bound is global to the sender
+host: at most 1,000 pending intents and 64 MiB of encoded retry payload across
+all sessions and targets. Exhaustion refuses a new intent without evicting an
+ambiguous outcome. The key namespace includes the qualified sender creation
+and authority epoch and spans every target. The versioned digest binds exact
+sender and recipient bindings, the key, UTF-8 body and optional metadata;
+display aliases and link incarnations do not change it.
+
+Sender-local API routes are `POST /api/sessions/{id}/mailbox-intents` to prepare
+without sending, `GET /api/sessions/{id}/mailbox-intents/{key}` for status, and
+`POST` on that key's `/retry`, `/cancel` and `/gc` routes. Status belongs to the
+native root session's exact creation and stays locally readable while its
+federation authority is held. The prepare request may include an optional full
+`targetBinding` descriptor with
+the ordinary message fields. Its `targetSessionId` must equal that binding's
+canonical participant key and its central identity and authority epoch must match
+the server-derived sender binding. This permits a first offline prepare without
+directory discovery; the descriptor is caller-supplied routing input, not proof
+the recipient exists. With the field omitted, a fresh target still requires
+central directory resolution. Ordinary send rejects `targetBinding`; the field
+belongs only to preparation. It never installs a binding or creates directory
+authority, and C validates the captured exact recipient at dispatch. A retry
+replays the captured binding and bytes and never retargets an alias.
+Central first replays an existing committed,
+refused or abandoned outcome under current sender authority, even if the
+recipient has since retired. A temporary recipient link or authority hold
+is not a permanent refusal: only definitive native-creation retirement or
+the exact completed remote placement can be fenced through a new refusal
+commit. If local outcome retention fails after a confirmed append, the error
+states that C committed and asks for an exact retry to recover that receipt.
+Canonical ids take precedence over display aliases; missing canonical ids
+and bare native ids return `404` without alias fallback on satellites too.
+A never-attempted intent can be cancelled only by
+a serialized central tombstone. Possibly sent intents visibly refuse
+cancellation; a negative lookup cannot prove that a delayed first send is
+impossible. Terminal `homeCommitted`, `refused` or `abandoned` rows may discard
+retry payload while retaining identity, digest, target and outcome. Namespace
+retirement and central tombstones have no time-based expiry. These routes are
+disabled with the M1 federation setting. Standalone mailbox behavior is unchanged.
+
+Coordination schema version 3 upgrades exact versions 1 and 2 atomically,
+preserving messages, cursors and version-2 read receipts. Unknown or modified
+schema objects still refuse opening; no mailbox data is inferred from intents.
 
 ## Model in one paragraph
 

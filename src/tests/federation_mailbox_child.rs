@@ -50,19 +50,12 @@ fn satellite_child() {
     let snapshot = app
         .federation_peer_snapshot(&config.central.host_id)
         .unwrap();
-    let connected = app
+    let peer = app
         .federation_peer_connected(&snapshot, config.incarnation.clone())
         .unwrap();
-    app.verify_federation_peer(&connected, federation_registry::checks())
-        .unwrap();
-    let verified = app
-        .federation_peer_snapshot(&config.central.host_id)
-        .unwrap();
-    app.transition_federation_peer(&verified, FederationMembershipState::Active)
-        .unwrap();
-    let peer = app
-        .federation_peer_snapshot(&config.central.host_id)
-        .unwrap();
+    // Production records an accepted central link as Enrolled on the satellite.
+    // Verification and activation belong to the central's satellite record.
+    assert_eq!(peer.membership, FederationMembershipState::Enrolled);
     app.install_federation_mailbox_binding(&peer, config.binding.clone(), &native.creation)
         .unwrap();
     let channel = FederationChannel::for_app(
@@ -108,6 +101,26 @@ fn satellite_child() {
     for line in lines {
         let command: Value = serde_json::from_str(&line.unwrap()).unwrap();
         let response = match command["command"].as_str().unwrap() {
+            "inspectCentral" => {
+                let peer = app.federation_peer_snapshot(&config.central.host_id).unwrap();
+                json!({"membership":peer.membership})
+            }
+            "revokeCentral" => {
+                let peer = app.federation_peer_snapshot(&config.central.host_id).unwrap();
+                app.transition_federation_peer(&peer, FederationMembershipState::Revoked).unwrap();
+                json!({"revoked":true})
+            }
+            "inspectIntents" => {
+                let connection = app.mailbox_store.connection().unwrap();
+                let (count, bytes): (u64, u64) = connection.query_row(
+                    "SELECT COUNT(*),COALESCE(SUM(payload_bytes),0) FROM federation_mailbox_intents
+                     WHERE state IN ('localIntentDurable','appendOutcomeUnknown')",
+                    [], |row| Ok((row.get(0)?, row.get(1)?)),
+                ).unwrap();
+                json!({"pending":count,"bytes":bytes,
+                    "total":connection.query_row("SELECT COUNT(*) FROM federation_mailbox_intents",
+                        [],|row|row.get::<_,u64>(0)).unwrap()})
+            }
             "inspect" => {
                 let directory = app.inner.lock().unwrap().federation.mailbox_directory.len();
                 let connection = app.mailbox_store.connection().unwrap();

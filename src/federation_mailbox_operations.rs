@@ -1,5 +1,5 @@
 // Owns central execution of typed mailbox operations and truthful outcomes.
-// Does not relay requests or create a sender outbox/remote wake journal. New
+// Does not relay requests or drain the durable remote wake obligations. New
 // application layer over the qualified directory and existing mailbox store.
 
 impl AppState {
@@ -105,47 +105,31 @@ impl AppState {
                         "mailbox target must be another participant",
                     ));
                 }
-                authority.target = Some(target.clone());
-                let input = MailboxAppendInput {
-                    sender_session_id: participant.session_id.clone(),
-                    sender_name: participant.name,
-                    target_session_id: target.session_id.clone(),
-                    target_name: target.name,
-                    body: message,
-                    idempotency_key: key,
+                let delivery = FederationDelivery {
+                    version: 1,
+                    sender: participant.binding.clone(),
+                    target: target.binding.clone(),
+                    key,
+                    message,
                     topic,
                     state_stamp,
                 };
-                let appended = self
-                    .mailbox_store
-                    .append_authorized(&input, || authority.lock())
+                self.execute_federation_delivery(central, participant, target, delivery, authority)
+            }
+            FederationMailboxOperation::SendExact { delivery } => {
+                self.execute_exact_federation_delivery(central, participant, delivery, authority)
+            }
+            FederationMailboxOperation::CancelExact { delivery } => {
+                delivery.validate()?;
+                if delivery.sender != participant.binding {
+                    return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+                }
+                self.mailbox_store.cancel_federation_delivery(&delivery, || authority.lock())
                     .map_err(mailbox_api_error)?;
-                if target.binding.identity.host_id == central.host_id {
-                    let receipt = self.finish_mailbox_append_and_notify(
-                        &participant.session_id,
-                        &target.binding.identity.session_id,
-                        &input,
-                        appended,
-                    )?;
-                    return federation_mailbox_response(central, &receipt);
-                }
-                let MailboxAppendResult {
-                    mut receipt,
-                    finalization,
-                } = appended;
-                if !receipt.duplicate {
-                    if let Err(error) = self
-                        .mailbox_store
-                        .record_initial_dispatch_outcome(&receipt.message_id, "durableButNotWoken")
-                    {
-                        eprintln!("central mailbox message {} committed; dispatch outcome recording failed: {error:#}", receipt.message_id);
-                    }
-                }
-                drop(finalization);
-                if target.binding.identity.host_id != central.host_id {
-                    receipt.notification_cause = Some(FEDERATION_REMOTE_WAKE_CAUSE.to_owned());
-                }
-                federation_mailbox_response(central, &receipt)
+                federation_mailbox_response(central, &FederationDeliveryTerminal {
+                    state: FederationDeliveryTerminalState::Abandoned,
+                    canonical_digest: delivery.digest(),
+                })
             }
             FederationMailboxOperation::List => {
                 let rows = self
@@ -219,6 +203,38 @@ impl AppState {
                 federation_mailbox_response(central, &summary)
             }
         }
+    }
+
+    fn execute_federation_delivery(
+        &self,
+        central: FederationHostIdentity,
+        participant: FederationMailboxParticipant,
+        target: FederationMailboxParticipant,
+        delivery: FederationDelivery,
+        mut authority: FederationMailboxAuthority,
+    ) -> Result<FederationMailboxResponse, ApiError> {
+        delivery.validate()?;
+        authority.target = Some(target.clone());
+        let input = delivery.input(participant.name.clone(), target.name.clone());
+        let appended = self.mailbox_store
+            .append_with_delivery(&input, Some(&delivery), || authority.lock())
+            .map_err(mailbox_api_error)?;
+        if target.binding.identity.host_id == central.host_id {
+            let receipt = self.finish_mailbox_append_and_notify(
+                &participant.session_id, &target.binding.identity.session_id, &input, appended)?;
+            return federation_mailbox_response(central, &receipt);
+        }
+        let MailboxAppendResult { mut receipt, finalization } = appended;
+        if !receipt.duplicate {
+            if let Err(error) = self.mailbox_store
+                .record_initial_dispatch_outcome(&receipt.message_id, "durableButNotWoken")
+            {
+                eprintln!("central mailbox message {} committed; dispatch outcome recording failed: {error:#}", receipt.message_id);
+            }
+        }
+        drop(finalization);
+        receipt.notification_cause = Some(FEDERATION_REMOTE_WAKE_CAUSE.to_owned());
+        federation_mailbox_response(central, &receipt)
     }
 
     fn federation_mailbox_message_cause(&self, message: &mut MailboxMessage) {

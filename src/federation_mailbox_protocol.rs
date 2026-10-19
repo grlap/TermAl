@@ -1,5 +1,5 @@
 // Owns the versioned central-mailbox operation contract and existing limits.
-// Does not authenticate channels, store mail, or queue sender intents. New
+// Does not authenticate channels or store mail and sender retry intents. New
 // domain protocol beside mailboxes.rs; standalone mailbox APIs stay unchanged.
 
 const FEDERATION_MAILBOX_SCHEMA_VERSION: &str = "1";
@@ -107,6 +107,12 @@ enum FederationMailboxOperation {
         topic: Option<String>,
         state_stamp: Option<String>,
     },
+    SendExact {
+        delivery: FederationDelivery,
+    },
+    CancelExact {
+        delivery: FederationDelivery,
+    },
     List,
     Read {
         mailbox_id: String,
@@ -170,7 +176,7 @@ fn federation_mailbox_protocol(central: FederationHostIdentity) -> FederationMai
             response_bytes: FEDERATION_MAILBOX_RESPONSE_BYTES,
         },
         receipt_only_acknowledgement: true,
-        sender_intent_registry: false,
+        sender_intent_registry: true,
         remote_wake_delivery: false,
         remote_wake_cause: FEDERATION_REMOTE_WAKE_CAUSE.to_owned(),
     }
@@ -179,7 +185,7 @@ fn federation_mailbox_protocol(central: FederationHostIdentity) -> FederationMai
 fn federation_mailbox_unavailable() -> ApiError {
     ApiError::from_status(
         StatusCode::SERVICE_UNAVAILABLE,
-        "central TermAl host unavailable; retry the same request; no local mailbox result or sender queue was created",
+        "central TermAl host unavailable; no canonical result is known; inspect sender intent status and retry the exact delivery",
     )
 }
 

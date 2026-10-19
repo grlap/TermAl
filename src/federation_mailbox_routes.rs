@@ -1,5 +1,5 @@
 // Owns the local agent/API facade and authenticated domain-only mailbox route.
-// Does not persist mailbox data on a satellite or retry application mutations.
+// Does not persist mailbox data on a satellite or automatically retry mutations.
 // New routing beside mailboxes.rs; the bridge/CLI still use their own host.
 
 async fn negotiate_federation_mailboxes(
@@ -59,6 +59,46 @@ impl AppState {
         session: &str,
         operation: FederationMailboxOperation,
     ) -> Result<T, ApiError> {
+        if let FederationMailboxOperation::Send { .. } = &operation {
+            let delivery = self.prepare_federation_delivery(session, operation).await?;
+            let value = self.send_prepared_federation_delivery(session, delivery).await?;
+            return serde_json::from_value(serde_json::to_value(value)
+                .map_err(|_| ApiError::internal("delivery response encoding failed"))?)
+                .map_err(|_| ApiError::bad_gateway("invalid delivery response schema"));
+        }
+        self.dispatch_federation_mailbox_operation(session, operation).await
+    }
+
+    async fn dispatch_federation_mailbox_operation<T: DeserializeOwned>(
+        &self,
+        session: &str,
+        operation: FederationMailboxOperation,
+    ) -> Result<T, ApiError> {
+        if matches!(&operation, FederationMailboxOperation::SendExact { .. }
+            | FederationMailboxOperation::CancelExact { .. }) {
+            let capability = self.negotiate_federation_delivery_capability(session).await?;
+            if !capability.supported {
+                let delivery = match &operation {
+                    FederationMailboxOperation::SendExact { delivery }
+                    | FederationMailboxOperation::CancelExact { delivery } => delivery,
+                    _ => unreachable!("exact operation checked above"),
+                };
+                return Err(self.refuse_unsupported_federation_delivery(session, delivery, capability).await?);
+            }
+            return self.dispatch_federation_delivery_operation(session, operation, &capability).await;
+        }
+        self.dispatch_federation_mailbox_operation_with_capability(session, operation, None)
+            .await.map(|(value, _)| value)
+    }
+
+    // Return the lease that authenticated this response, rather than selecting
+    // a second link when a caller later uses negotiated capability evidence.
+    async fn dispatch_federation_mailbox_operation_with_capability<T: DeserializeOwned>(
+        &self,
+        session: &str,
+        operation: FederationMailboxOperation,
+        capability: Option<&FederationDeliveryCapability>,
+    ) -> Result<(T, Option<FederationLinkLease>), ApiError> {
         let (settings, actor) = {
             let actor = self.federation_mailbox_actor(session)?;
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -77,6 +117,10 @@ impl AppState {
         let central = settings
             .central
             .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+        if capability.is_some_and(|proof| proof.central != central
+            || (proof.lease.is_some() != (settings.role == FederationRole::Satellite))) {
+            return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+        }
         let expected = actor.as_ref().map(|actor| actor.binding.clone());
         let request = FederationMailboxRequest {
             protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
@@ -85,20 +129,27 @@ impl AppState {
             actor,
             operation,
         };
-        let response: FederationMailboxResponse = if settings.role == FederationRole::Central {
+        let (response, lease): (FederationMailboxResponse, _) = if settings.role == FederationRole::Central {
             let app = self.clone();
-            run_blocking_api(move || app.execute_federation_mailbox(request, None)).await?
+            (run_blocking_api(move || app.execute_federation_mailbox(request, None)).await?, None)
         } else {
             let peer = self
                 .federation_peer_handle(&central.host_id)
                 .ok_or_else(federation_mailbox_unavailable)?;
-            let lease = peer
-                .channel
-                .current_lease()
-                .map_err(|_| federation_mailbox_unavailable())?;
-            peer.rpc
-                .request(FederationRpcRoute::Mailbox(lease, request))
-                .await?
+            let lease = if let Some(proof) = capability {
+                let lease = proof.lease.as_ref()
+                    .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+                if !Arc::ptr_eq(&lease.channel.state, &peer.channel.state) {
+                    return Err(federation_stale_link());
+                }
+                lease.with_current(self, |_, _| Ok(()))?;
+                lease.clone()
+            } else {
+                peer.channel.current_lease().map_err(|_| federation_mailbox_unavailable())?
+            };
+            let response = peer.rpc
+                .request(FederationRpcRoute::Mailbox(lease.clone(), request)).await?;
+            (response, Some(lease))
         };
         if response.protocol_version != FEDERATION_MAILBOX_WIRE_VERSION
             || response.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION
@@ -116,6 +167,7 @@ impl AppState {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
         serde_json::from_value(response.value)
+            .map(|value| (value, lease))
             .map_err(|_| ApiError::bad_gateway("invalid central mailbox response schema"))
     }
 }

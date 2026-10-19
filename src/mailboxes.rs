@@ -199,6 +199,7 @@ enum MailboxStoreErrorKind {
     Conflict,
     NotFound,
     Retryable,
+    Capacity,
 }
 
 #[derive(Debug)]
@@ -1044,8 +1045,9 @@ fn mailbox_notification_text(
 async fn send_mailbox_message(
     AxumPath(sender_session_id): AxumPath<String>,
     State(state): State<AppState>,
-    Json(request): Json<SendMailboxMessageRequest>,
+    Json(request): Json<SendMailboxApiRequest>,
 ) -> Result<(StatusCode, Json<MailboxAppendReceipt>), ApiError> {
+    let request = request.message;
     if state.federation_mailbox_actor_if_bound(&sender_session_id)?.is_some() {
         if request.class.as_deref().is_some_and(|class| class != "routine") {
             return Err(ApiError::bad_request("durable mailboxes currently support only class `routine`"));
@@ -1202,6 +1204,8 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 mailbox_error.message.clone(),
             ),
+            MailboxStoreErrorKind::Capacity => ApiError::from_status(
+                StatusCode::TOO_MANY_REQUESTS, mailbox_error.message.clone()),
         };
     }
     ApiError::internal(format!("mailbox operation failed: {err:#}"))
@@ -1495,10 +1499,17 @@ impl MailboxStore {
     }
 
     fn append_authorized<G>(&self, input: &MailboxAppendInput, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
+        self.append_with_delivery(input, None, authorize)
+    }
+
+    fn append_with_delivery<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
         validate_mailbox_append_input(input)?;
         let write_guard = self.lock_writer("waiting to begin mailbox append")?;
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "beginning mailbox append")?;
+        if let Some(delivery) = delivery {
+            federation_delivery_check_central(&transaction, delivery)?;
+        }
 
         if let Some(existing) = mailbox_message_for_idempotency_key(
             &transaction,
@@ -1523,6 +1534,9 @@ impl MailboxStore {
                 &existing.mailbox_id,
                 &input.sender_session_id,
             )?;
+            if let Some(delivery) = delivery {
+                federation_delivery_commit_central(&transaction, delivery, &existing.message_id, existing.sequence)?;
+            }
             let authority = authorize()?;
             transaction.commit().map_err(|err| {
                 mailbox_sqlite_write_error("finishing duplicate mailbox lookup", err)
@@ -1683,6 +1697,11 @@ impl MailboxStore {
         // lookup after commit, and no claim that this snapshot fences later sends.
         let sender_processed_through =
             mailbox_processed_through(&transaction, &mailbox_id, &input.sender_session_id)?;
+        if let Some(delivery) = delivery {
+            federation_delivery_commit_central(&transaction, delivery, &message_id, sequence)?;
+            #[cfg(test)]
+            federation_delivery_test_cut("beforeCentralCommit");
+        }
         let authority = authorize()?;
         self.register_pending_dispatch_outcome(&message_id);
         let finalization = MailboxDispatchFinalizationGuard {

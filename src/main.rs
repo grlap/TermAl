@@ -538,6 +538,11 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/sessions/{id}/mailboxes/protocol", get(negotiate_federation_mailboxes))
         .route("/api/sessions/{id}/mailboxes/domain", post(join_federation_mailboxes))
         .route("/api/sessions/{id}/mailboxes/participants", get(list_federation_mailbox_participants))
+        .route("/api/sessions/{id}/mailbox-intents", post(prepare_federation_intent_route))
+        .route("/api/sessions/{id}/mailbox-intents/{key}", get(get_federation_intent_route))
+        .route("/api/sessions/{id}/mailbox-intents/{key}/retry", post(retry_federation_intent_route))
+        .route("/api/sessions/{id}/mailbox-intents/{key}/cancel", post(cancel_federation_intent_route))
+        .route("/api/sessions/{id}/mailbox-intents/{key}/gc", post(gc_federation_intent_route))
         .route("/api/sessions/{id}/mailboxes/create", post(get_or_create_federation_mailbox))
         .route(
             "/api/sessions/{id}/mailboxes/send",
@@ -780,6 +785,11 @@ include!("process_limits.rs");
 include!("remote_authority.rs");
 include!("federation_identity.rs");
 include!("federation_mailbox_protocol.rs");
+include!("federation_delivery_schema.rs");
+include!("federation_delivery.rs");
+include!("federation_delivery_replay.rs");
+include!("federation_delivery_intents.rs");
+include!("federation_delivery_routes.rs");
 include!("federation_mailbox_directory.rs");
 include!("federation_mailbox_identity.rs");
 include!("federation_mailbox_bindings.rs");
