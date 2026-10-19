@@ -1459,6 +1459,32 @@ happens elsewhere. The agent therefore names the item's worktree once with
   removed the entry is resumed by a repeated request for the same selection,
   which keeps the original reason and requester. No producer event is
   created.
+
+  Capacity rules keep the table from filling with entries nobody can use.
+  The automatic pass also retires an entry when Engram's read shows its claim
+  closed: released or completed, or, while no session holds a binding for
+  that claim, lapsed more than two hours ago (at once if its naming session is
+  gone). A later fence is not closure: a holder that recovers its own lapsed
+  claim gets a new fence under the same claim, and a re-name that keeps the
+  generation keeps the recorded fence. An active, unexpired claim is live and
+  keeps its entry, even while no session is focused on it. Within the same
+  flight, scheduled on its own when only such work is due, an audited
+  automatic release (route `automatic`) disposes of an entry without a
+  canonical association whose path no longer exists, whose item is completed
+  or cancelled (read through the Work host reader, a bounded number per
+  pass), or whose naming session is gone with no session holding its claim,
+  and of any entry whose claim Engram's read refuses as no longer its run's
+  claim. An entry removed by a claim rule or as claim-refused also retires its
+  claim journal (unbound, or displaced by the run's newer claim), so that
+  history leaves at the next compaction even while Engram still shows the
+  binding. An entry it examines and keeps is left alone for a while. The same
+  pass confirms again any release the writer has not acknowledged, so a
+  reserved slot is freed without a restart. A naming session can release its own entry, even
+  mid-turn, with `termal_release_named_root`
+  ([`POST /api/sessions/{id}/engram-named-root-release`](../architecture.md)).
+  Every release takes the reclamation pass's single flight first, waiting up
+  to ten seconds for a running pass, and answers a failure before its own
+  removal as a conflict stating that nothing was applied.
 - **Sighting provenance.** Source bases carry `source_root_generation` and
   `source_root_state` together (`named` or `ended`), including sightings in the
   ordinary workdir after an end. A capture retains its workspace identity;

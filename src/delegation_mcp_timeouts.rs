@@ -69,6 +69,9 @@ delegation_long_calls! {
     /// Bounded as a whole by the naming budget, so a failure the bridge reports
     /// never leaves a name the server kept.
     SourceRootNaming,
+    /// Waits out a running reclamation pass, then the release's authority
+    /// budget and the writer's confirmation and acknowledgement.
+    NamedRootRelease,
     /// The server watches its checker child for the freeze budget and a grace.
     ReviewFreeze,
     /// Recovers the child's thread, then delivers its re-armed turn.
@@ -92,6 +95,11 @@ impl DelegationLongCall {
             }
             Self::EvaluationSubmit => acceptance_evaluation_submit_budget(),
             Self::SourceRootNaming => ENGRAM_SOURCE_ROOT_NAMING_BUDGET,
+            Self::NamedRootRelease => {
+                ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT
+                    + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET
+                    + ENGRAM_NAMED_ROOT_RELEASE_PERSIST_BUDGET * 2
+            }
             Self::ReviewFreeze => REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE,
             Self::Followup => termal_delegation_followup_recovery_allowance() + turn_delivery,
             Self::MailboxSend => turn_delivery,

@@ -508,6 +508,8 @@ fn exchange_engram_control_frame(
     let envelope: EngramControlResponse = engram_decode_slice(&response, "invalid Engram response")?;
     match envelope {
         EngramControlResponse::Ok { result } => Ok(result),
-        EngramControlResponse::Error { error } => Err(EngramTransportError::remote(error)),
+        EngramControlResponse::Error { error } => {
+            Err(EngramTransportError::remote(error.into_body()))
+        }
     }
 }

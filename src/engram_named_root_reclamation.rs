@@ -14,6 +14,13 @@ struct EngramRootReclamationSchedule {
     last_store: Option<EngramAuthorityStoreKey>,
     next_due: Option<std::time::Instant>,
     cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
+    /// Claims whose canonical read Engram refused as no longer their run's
+    /// claim (engram_named_root_capacity.rs): runtime only, so a restart
+    /// reads them again before any disposition.
+    refused_claims: Vec<(EngramAuthorityStoreKey, String)>,
+    /// Roots the disposition pass examined and kept, until when it leaves
+    /// them alone (engram_named_root_capacity.rs).
+    disposition_cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -279,7 +286,22 @@ fn engram_retire_exact_root_locked(
     binding: &EngramControlWorkBinding,
     proof: &EngramNamedRootReadResponse,
 ) {
-    let Some(reason) = engram_root_retirement_reason(root, proof) else { return; };
+    // A run fact first; otherwise the read claim's own state
+    // (engram_named_root_capacity.rs) may show the claim closed, judging a
+    // lapse only while no session holds a binding for it.
+    let naming_session_present = engram_named_root_session_present(inner, &root.named_by_session);
+    // A naming session kept aside at restore may still hold the claim, and
+    // its binding cannot be read meanwhile: it counts as holding it, as the
+    // disposition and operator routes treat it.
+    let claim_held = engram_named_root_claim_holder(inner, root).is_some()
+        || inner.quarantined_persisted_session_ids.contains(&root.named_by_session);
+    let run_reason = engram_root_retirement_reason(root, proof);
+    let claim_reason = run_reason.is_none().then(|| {
+        engram_root_claim_retirement_reason(
+            root, proof, chrono::Utc::now(), naming_session_present, claim_held,
+        )
+    }).flatten();
+    let Some(reason) = run_reason.or(claim_reason) else { return; };
     let Some(index) = inner.engram_work_source_roots.iter().position(|current| current == root)
     else { return; };
     let Some(history) = inner.engram_work_naming_history.iter_mut()
@@ -299,6 +321,11 @@ fn engram_retire_exact_root_locked(
         published: false, delivered: false, owner,
     });
     inner.engram_work_source_roots.remove(index);
+    // Engram may still show this binding Bound (a lapsed claim's open run),
+    // which would keep its journal forever; the claim itself is closed.
+    if claim_reason.is_some() {
+        engram_named_root_retire_claim_journal_locked(inner, root, EngramRootRetirement::Unbound);
+    }
 }
 
 fn acknowledge_engram_root_retirements_locked(
@@ -331,7 +358,9 @@ impl AppState {
                 return "the recurring pass is not due yet";
             }
             let plan = engram_root_reclamation_plan_locked(&inner, now);
-            if plan.is_empty() {
+            // A disposition that is due runs in the same flight even when no
+            // canonical read is planned (engram_named_root_capacity.rs).
+            if plan.is_empty() && !engram_named_root_disposition_due_locked(&inner, now) {
                 inner.engram_root_reclamation.next_due = Some(now + ENGRAM_ROOT_RECLAMATION_BUDGET);
                 return "no eligible reclamation pass was scheduled";
             }
@@ -388,6 +417,14 @@ impl AppState {
                 task.root.store.project_id, task.root.work_id, task.root.generation, task.route,
                 match outcome { Ok(true) => "retired".to_owned(), Ok(false) => "retained by canonical authority".to_owned(), Err(error) => format!("retained: {}", error.message) }));
         }
+        // Inside the same flight: legacy and claim-refused roots by their
+        // recorded rule, reading an item's tracker lifecycle through the Work
+        // host reader when it decides (engram_named_root_capacity.rs).
+        // Its budget runs from this pass's start, so the whole flight stays
+        // within a release's wait for it.
+        self.run_engram_named_root_disposition_pass(started, &|root| {
+            self.read_engram_named_root_item_lifecycle(root)
+        });
         engram_root_reclamation_emit(self, &format!(
             "engram> named-root reclamation pass attempted={} limit={} elapsed_ms={}",
             attempted, ENGRAM_ROOT_RECLAMATION_READ_LIMIT, clock.now().saturating_duration_since(started).as_millis()));

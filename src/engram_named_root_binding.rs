@@ -61,6 +61,26 @@ struct EngramNamedRootReadResponse {
     named_root: EngramNamedRootState,
     latest_event: Option<EngramNamedRootReadEvent>,
     read_cut: EngramNamedRootReadPosition,
+    /// The read claim's own state (engram_named_root_capacity.rs). Older
+    /// Engram builds do not send it; its absence proves nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    claim: Option<EngramNamedRootReadClaim>,
+}
+
+/// The claim a named-root read is for, as Engram holds it: `state` is
+/// `active`, `released` or `completed`; an active claim past `expires_at`
+/// has lapsed; `fence` advances when a lapsed claim is recovered.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct EngramNamedRootReadClaim {
+    state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    holder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fence: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

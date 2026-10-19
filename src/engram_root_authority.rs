@@ -944,6 +944,15 @@ impl AppState {
                     self.read_engram_authority_fact_until(target, &binding, deadline - reserve)
                 });
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            // Engram refusing the read because a newer claim replaced this one
+            // is the disposition pass's proof (engram_named_root_capacity.rs).
+            if result
+                .as_ref()
+                .err()
+                .is_some_and(|error| engram_named_root_read_refusal_closes_claim(&error.message))
+            {
+                engram_named_root_record_refused_claim_locked(&mut inner, store, &binding.claim_id);
+            }
             let selection_current = inner.engram_work_source_roots.iter()
                 .filter(|root| &root.store == store && root.work_id == binding.work_id
                     && root.claim_id == binding.claim_id).cloned().collect::<Vec<_>>();

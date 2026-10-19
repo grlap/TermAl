@@ -139,7 +139,11 @@ fn engram_named_root_reclamation_text(
     root: &EngramWorkSourceRoot,
     now: std::time::Instant,
 ) -> String {
-    let status = if !engram_root_reclamation_reader_exists(inner, &root.store) {
+    // A root without a canonical association needs no canonical reader: the
+    // same flight's disposition decides it by rule.
+    let status = if engram_named_root_association(inner, root).is_none() {
+        engram_named_root_disposition_text(inner, root, now)
+    } else if !engram_root_reclamation_reader_exists(inner, &root.store) {
         format!("skipped: no eligible reader for store {}", root.store.project_id)
     } else if let Some((_, until)) = inner
         .engram_root_reclamation
@@ -155,10 +159,6 @@ fn engram_named_root_reclamation_text(
         .is_some_and(|journal| journal.pending.is_some())
     {
         "skipped: a pending naming event belongs to its existing owner".to_owned()
-    } else if engram_named_root_association(inner, root).is_none() {
-        "skipped: the automatic pass cannot read a root with no retained canonical run association; \
-         release it explicitly"
-            .to_owned()
     } else {
         match engram_named_root_current_owner(inner, root) {
             Some(owner) if !engram_root_reclamation_idle_owner(inner, &owner) => {
@@ -270,15 +270,17 @@ fn engram_named_root_release_audit(inner: &StateInner) -> Vec<EngramNamedRootRel
     inner.engram_named_root_release_audit.clone()
 }
 
-/// How many slots operator releases not yet acknowledged by the writer still
-/// reserve: their removal is in memory only until it commits.
+/// How many slots releases not yet acknowledged by the writer still reserve:
+/// an operator, own or automatic release removes its root in memory only
+/// until it commits. A canonical one is reserved by its unpublished
+/// retirement instead.
 fn engram_named_root_unacknowledged_releases(inner: &StateInner) -> usize {
     inner
         .engram_named_root_release_audit
         .iter()
         .filter(|record| {
             !record.acknowledged
-                && record.route == EngramNamedRootReleaseRoute::Operator.label()
+                && record.route != EngramNamedRootReleaseRoute::Canonical.label()
                 && !inner.engram_work_source_roots.contains(&record.selection)
         })
         .count()
@@ -357,11 +359,15 @@ fn engram_named_root_release_text(field: &str, text: &str) -> Result<(), ApiErro
 /// Which release `root` may take now, or why it must stay: never one whose
 /// claim a session holds, or whose claim has a pending naming event; a root
 /// with a canonical run association goes through the canonical authority;
-/// one without (which neither the automatic pass nor an own-clear can read)
-/// may be released by the operator once its naming session is gone or quiet.
-fn engram_named_root_release_route(
+/// one without (which the canonical pass and an own-clear cannot read) may be
+/// released by the operator once its naming session is gone or quiet.
+/// `own_session` names the caller when it releases its own root: its own turn
+/// is not the busy state the operator route waits out for another session's
+/// root.
+fn engram_named_root_release_route_for(
     inner: &StateInner,
     root: &EngramWorkSourceRoot,
+    own_session: Option<&str>,
 ) -> Result<EngramNamedRootReleaseRoute, ApiError> {
     if let Some(holder) = engram_named_root_claim_holder(inner, root) {
         return Err(ApiError::conflict(format!(
@@ -393,7 +399,8 @@ fn engram_named_root_release_route(
             root.named_by_session
         )));
     }
-    if let Some(index) = inner.find_session_index(&root.named_by_session)
+    if own_session != Some(root.named_by_session.as_str())
+        && let Some(index) = inner.find_session_index(&root.named_by_session)
         && !engram_named_root_session_quiet(&inner.sessions[index])
     {
         return Err(ApiError::conflict(format!(
@@ -463,7 +470,8 @@ impl AppState {
         pending: EngramNamedRootReleaseAudit,
     ) -> Result<EngramNamedRootReleaseResponse, ApiError> {
         if pending.route == EngramNamedRootReleaseRoute::Canonical.label() {
-            let deadline = self.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_BUDGET;
+            let deadline =
+                self.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
             self.recover_engram_authority_candidate_until(
                 &pending.selection.store,
                 &pending.selection.work_id,
@@ -643,6 +651,22 @@ impl AppState {
         requested_by: Option<&str>,
         request: EngramNamedRootReleaseRequest,
     ) -> Result<EngramNamedRootReleaseResponse, ApiError> {
+        self.release_engram_named_root_as(requested_by, None, request)
+    }
+
+    /// `release_engram_named_root`, where `own_session` is set when the
+    /// caller is the root's naming session releasing its own root
+    /// (engram_named_root_capacity.rs): its own turn does not hold the
+    /// release back, and the audit records route `own`. Every release takes
+    /// the single reclamation flight first, so it never races the automatic
+    /// pass, and answers a failure before its own removal as a definitive
+    /// conflict with nothing applied.
+    fn release_engram_named_root_as(
+        &self,
+        requested_by: Option<&str>,
+        own_session: Option<&str>,
+        request: EngramNamedRootReleaseRequest,
+    ) -> Result<EngramNamedRootReleaseResponse, ApiError> {
         let reason = request.reason.trim().to_owned();
         if reason.is_empty() {
             return Err(ApiError::bad_request(
@@ -672,16 +696,23 @@ impl AppState {
                     .cloned();
                 drop(inner);
                 return match pending {
-                    Some(pending) => self.resume_engram_named_root_release(pending),
+                    Some(pending) => {
+                        // A resume finishes the same retirement, so it takes
+                        // the flight as the release itself did.
+                        let _flight = self.acquire_engram_named_root_release_flight()?;
+                        self.resume_engram_named_root_release(pending)
+                    }
                     None => Err(ApiError::conflict(
                         "the named selection is no longer retained exactly (store, work, \
                          claim, generation and root must all match). Nothing was released",
                     )),
                 };
             };
-            let route = engram_named_root_release_route(&inner, &root)?;
+            let route = engram_named_root_release_route_for(&inner, &root, own_session)?;
             (root, route)
         };
+        // Held until this release returns; a running pass is waited out.
+        let _flight = self.acquire_engram_named_root_release_flight()?;
         let lifecycle;
         let audit;
         match route {
@@ -701,7 +732,7 @@ impl AppState {
                         .map_err(|error| ApiError::internal(error.to_string()))?;
                 }
                 let deadline =
-                    self.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_BUDGET;
+                    self.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
                 // The transition this release prepares is recorded on its
                 // intent before that owner can remove anything, so the image
                 // that commits a removal by it also commits the link.
@@ -775,7 +806,15 @@ impl AppState {
                                  was released by this request",
                             ));
                         }
-                        outcome?;
+                        if let Err(error) = outcome {
+                            // Nothing this release did was applied: say so,
+                            // never an unknown outcome.
+                            return Err(ApiError::conflict(format!(
+                                "the release was not applied: {}; the root is still retained. \
+                                 Retry the same request",
+                                error.message
+                            )));
+                        }
                         return Err(ApiError::conflict(format!(
                             "the canonical authority keeps this root: {why}. Nothing was released"
                         )));
@@ -793,7 +832,7 @@ impl AppState {
                          was released",
                     ));
                 };
-                if engram_named_root_release_route(&inner, &root)?
+                if engram_named_root_release_route_for(&inner, &root, own_session)?
                     != EngramNamedRootReleaseRoute::Operator
                 {
                     return Err(ApiError::conflict(
@@ -805,7 +844,12 @@ impl AppState {
                 // Removed in memory, but its slot stays reserved by the
                 // unacknowledged record until the writer commits both.
                 inner.engram_work_source_roots.remove(index);
-                audit = engram_named_root_release_record(&root, route, &reason, requested_by, &lifecycle);
+                let mut record =
+                    engram_named_root_release_record(&root, route, &reason, requested_by, &lifecycle);
+                if own_session.is_some() {
+                    record.route = ENGRAM_NAMED_ROOT_OWN_ROUTE.to_owned();
+                }
+                audit = record;
                 engram_named_root_record_release_locked(&mut inner, audit.clone());
                 self.commit_engram_root_locked(&mut inner)
                     .map_err(|error| ApiError::internal(error.to_string()))?;
@@ -829,14 +873,11 @@ impl AppState {
         engram_root_reclamation_emit(self, &engram_named_root_release_line(&audit));
         Ok(EngramNamedRootReleaseResponse {
             released: true,
-            route: route.label().to_owned(),
+            route: audit.route.clone(),
             notice: format!(
                 "Released named source root {} ({}) generation {} by the {} route; no producer \
                  event was created.",
-                root.short_ref,
-                root.work_id,
-                root.generation,
-                route.label()
+                root.short_ref, root.work_id, root.generation, audit.route
             ),
         })
     }
@@ -851,10 +892,27 @@ async fn list_engram_named_roots(
 
 async fn release_engram_named_root(
     State(state): State<AppState>,
-    request: Result<Json<EngramNamedRootReleaseRequest>, JsonRejection>,
+    body: Result<Json<Value>, JsonRejection>,
 ) -> Result<Json<EngramNamedRootReleaseResponse>, ApiError> {
-    let Json(request) =
-        request.map_err(|rejection| api_json_rejection("named-root release request", rejection))?;
+    let Json(body) =
+        body.map_err(|rejection| api_json_rejection("named-root release request", rejection))?;
+    // One answer names every missing or mistyped field.
+    let missing = engram_named_root_release_missing_fields(&body);
+    if !missing.is_empty() {
+        return Err(ApiError::from_status(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "named-root release request is missing or has invalid fields: {}",
+                missing.join(", ")
+            ),
+        ));
+    }
+    let request: EngramNamedRootReleaseRequest = serde_json::from_value(body).map_err(|error| {
+        ApiError::from_status(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("invalid named-root release request: {error}"),
+        )
+    })?;
     let response = run_blocking_api(move || {
         let requested_by = request.requested_by.clone();
         state.release_engram_named_root(requested_by.as_deref(), request)

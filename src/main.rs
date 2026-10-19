@@ -483,6 +483,10 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/engram-source-root",
             post(name_engram_source_root),
         )
+        .route(
+            "/api/sessions/{id}/engram-named-root-release",
+            post(release_own_engram_named_root_route),
+        )
         .route("/api/engram/named-roots", get(list_engram_named_roots))
         .route(
             "/api/engram/named-roots/release",
@@ -904,6 +908,7 @@ include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
 include!("delegation_mcp_source_root.rs");
+include!("delegation_mcp_named_root_release.rs");
 include!("delegation_mcp_timeouts.rs");
 include!("delegation_mcp_review_freeze.rs");
 include!("review_freeze.rs");
@@ -913,6 +918,7 @@ include!("engram_named_root_binding.rs");
 include!("engram_root_authority.rs");
 include!("engram_named_root_reclamation.rs");
 include!("engram_named_root_release.rs");
+include!("engram_named_root_capacity.rs");
 #[cfg(test)]
 include!("engram_named_root_test_transport.rs");
 include!("bounded_read_process.rs");

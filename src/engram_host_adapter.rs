@@ -793,13 +793,37 @@ struct EngramExecutionSourceBasis {
 #[serde(tag = "status", rename_all = "snake_case")]
 enum EngramControlResponse {
     Ok { result: Value },
-    Error { error: EngramControlErrorBody },
+    Error { error: EngramControlErrorWire },
 }
 
 #[derive(Clone, Debug, Deserialize)]
 struct EngramControlErrorBody {
     code: String,
     message: String,
+}
+
+/// An error as Engram sends it. Newer builds add a typed `reason` beside
+/// `code` (for example why a named-root read was refused); it is kept in the
+/// message, so every reader of the error sees it and older builds read as
+/// before.
+#[derive(Clone, Debug, Deserialize)]
+struct EngramControlErrorWire {
+    code: String,
+    message: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+impl EngramControlErrorWire {
+    fn into_body(self) -> EngramControlErrorBody {
+        let message = match self.reason {
+            Some(reason) if !reason.trim().is_empty() => {
+                format!("{} (reason: {})", self.message, reason.trim())
+            }
+            _ => self.message,
+        };
+        EngramControlErrorBody { code: self.code, message }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

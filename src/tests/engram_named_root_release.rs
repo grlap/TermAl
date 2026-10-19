@@ -91,7 +91,10 @@ fn each_retained_root_shows_its_naming_session_association_reclamation_and_lifec
     assert_eq!(stale.naming_session_state, "gone");
     assert_eq!(stale.claim_binding, "none");
     assert!(stale.association.contains("no retained canonical run association"), "{stale:#?}");
-    assert!(stale.reclamation.starts_with("skipped"), "{stale:#?}");
+    // No canonical reader is needed: the disposition pass releases a root
+    // without an association whose naming session is gone.
+    assert!(stale.reclamation.starts_with("disposition"), "{stale:#?}");
+    assert!(stale.reclamation.contains("naming session is gone"), "{stale:#?}");
     assert_eq!(stale.lifecycle, "unknown (not read)");
 
     // The read-only view serves the same rows.
@@ -479,7 +482,7 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
     assert!(audit(&claimed).is_empty(), "the intent is withdrawn");
 
     // After the removal: the candidate image (removal and intent) committed,
-    // then the publication ran out of its budget.
+    // then the publication ran out of the release's own authority budget.
     let (claimed, entry) = settled_root("release-canonical-authority-fails", "completed");
     let clock = claimed.state.engram_budget_clock();
     let expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -489,7 +492,7 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
             if phase == "before_publication"
                 && !hook_expired.swap(true, std::sync::atomic::Ordering::SeqCst)
             {
-                clock.advance(ENGRAM_ROOT_RECLAMATION_BUDGET + Duration::from_secs(1));
+                clock.advance(ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET + Duration::from_secs(1));
             }
         }));
     let result = claimed

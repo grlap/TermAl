@@ -26,6 +26,10 @@ mod release {
     include!("engram_named_root_release.rs");
 }
 
+mod capacity {
+    include!("engram_named_root_capacity.rs");
+}
+
 fn settled_root(label: &str, proof_kind: &str) -> (ClaimedRoot, EngramWorkSourceRoot) {
     let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let tree = add_claimed_root_worktree(&claimed.root);

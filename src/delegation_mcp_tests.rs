@@ -422,6 +422,7 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_resume_after_delegations",
             "termal_resume_after_test_runs",
             "termal_name_source_root",
+            "termal_release_named_root",
             "termal_followup_session",
             "termal_evaluate_acceptance",
             "termal_review_freeze_check",

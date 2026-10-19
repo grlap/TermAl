@@ -288,6 +288,16 @@ fn shared_codex_terminal_reset_child() {
     );
     let reset = mode != "plain";
     let fixture = Fixture::new(reset, true);
+    // This child process exits as soon as the test returns, which ends any
+    // production continuation still holding an AppState clone without its
+    // Drop: the fixture's temp root would then outlive the run. Its removal
+    // receipt is sent only once the last holder has released it.
+    let cleaned = fixture
+        .state
+        .test_temp_root
+        .as_ref()
+        .expect("fixture temp root")
+        .observe_cleanup();
     eprintln!("terminal-reset: delivering {mode} to queued reset");
     if mode.starts_with("response-") || mode.starts_with("start-") {
         let response = fixture.arm_response();
@@ -312,6 +322,14 @@ fn shared_codex_terminal_reset_child() {
         fixture.event(fixture.terminal(&mode));
     }
     fixture.assert_successor(reset);
+    // Dropping the fixture releases everything a continuation can wait on
+    // (state, runtime, command receiver, parked process); then wait for the
+    // root to be removed before the process may exit.
+    drop(fixture);
+    cleaned
+        .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
+        .expect("the fixture temp root's last holder released it")
+        .expect("the fixture temp root was removed");
 }
 
 #[test]
