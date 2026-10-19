@@ -153,6 +153,8 @@ mod federation_mailbox_delivery_capability;
 mod federation_mailbox_delivery_process;
 mod federation_mailbox_delivery_crash;
 mod federation_delivery_schema;
+mod federation_executor_journal;
+mod federation_executor_store;
 mod federation_ssh;
 mod federation_runtime;
 mod federation_rpc;

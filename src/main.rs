@@ -799,6 +799,8 @@ include!("remote_authority.rs");
 include!("federation_identity.rs");
 include!("federation_mailbox_protocol.rs");
 include!("federation_delivery_schema.rs");
+include!("federation_executor_schema.rs");
+include!("federation_executor_journal.rs");
 include!("federation_delivery.rs");
 include!("federation_delivery_replay.rs");
 include!("federation_delivery_intents.rs");

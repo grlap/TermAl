@@ -376,7 +376,8 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
             .connection()
             .unwrap()
             .execute_batch(
-                "DROP TABLE federation_mailbox_wake_obligations;
+                "DROP TABLE federation_executor_operations;
+             DROP TABLE federation_mailbox_wake_obligations;
              DROP TABLE federation_mailbox_dedup;
              DROP TABLE federation_mailbox_intents;
              DROP TABLE federation_mailbox_retired_namespaces;
