@@ -209,6 +209,52 @@ in Engram::Advisor's session, recorded verbatim):
   coordinators choose (as above); the landing report says whether running
   sessions need the new build, with its build hash and reason. Nothing is
   installed outside the repository.
+- Test refs for remote runs (Greg, 2026-10-19: "tak, Opus moze wypychac"; a
+  test ref is a merge-ready patch, not scratch; Mac and Windows gates carry
+  equal weight). As an exception to the previous bullet, to give a remote
+  runner an exact input, the integration owner (as of 2026-10-19:
+  Termal::Opus2) may commit a merge-ready input tree and push it as
+  `refs/heads/test/<item>-<fingerprint8>`, where `<item>` is the item's
+  short work ref and `<fingerprint8>` is the first eight hex digits of the
+  frozen input's review-freeze fingerprint. Only a merge-ready input is
+  pushed: every required review is complete with no outstanding
+  Medium-or-higher finding, and a fresh focused compile and tests covering
+  its changes and new tests have passed on that exact input. Before
+  committing, the integration owner (as of 2026-10-19: Termal::Opus2)
+  records on the item, beside the freeze fingerprint and while that
+  fingerprint still verifies, the tree id of the complete frozen input,
+  including any untracked files it contains. The commit's parent is the
+  master commit the input was frozen on, its tree is that recorded tree id,
+  and its message names the fingerprint and nothing else. The commit is
+  created detached, and no local branch adopts it. The integration owner (as
+  of 2026-10-19: Termal::Opus2) pushes only that commit, to origin, with the
+  explicit refspec `<commit>:refs/heads/test/<item>-<fingerprint8>`: never
+  master or another branch, another remote, a force-push, rebase or merge,
+  and never a ref whose tree differs from the recorded tree id. The runner
+  fetches the ref into its own clone, checks the commit out in a fresh
+  worktree whose index and tracked files equal that commit and which holds
+  no untracked files, records that state, runs the standard launcher, and
+  requires that the commit's tree id equals the tree id recorded before the
+  push and that its own review-freeze fingerprint is the same before and
+  after its run. The runner pushes nothing back; it returns its evidence
+  through the existing channels, never through Git. A focused run on a test
+  ref is evidence only. A full gate run by the standard launcher on the
+  exact test ref counts as the landing gate for that tree on any host, with
+  the same weight as one run on Windows, when its results record the same
+  fingerprint before and after and that result has been imported on the host
+  that evaluates and lands the change as a recognized check record bound to
+  the recorded tree id; it gates only a landing whose master commit has that
+  tree id, and until then it is evidence only. A change that touches
+  Windows-only code or tests also needs the relevant gate on Windows. In
+  this remote flow, reviews finish before the push and the gate runs on the
+  pushed ref, so review and gate never run in parallel on an unpublished
+  candidate; a failed remote gate sends the input back to its owner, like
+  any failed gate. Landing still follows the standing approval on master,
+  including installing a binary built from that exact tree. The integration
+  owner (as of 2026-10-19: Termal::Opus2) deletes the ref once the run's
+  evidence is recorded, and at the latest when the input's items close, and
+  records the push and the deletion (commit id, tree id, fingerprint, times)
+  on the item. This grants no other commit, push, install or restart.
 - Use explicit paths only: never `git add -A` or `git add -u`.
 - Do not amend, rebase or force-push. Commit message bodies (below the
   subject line) must not contain tracker ids (Engram ids, or Beads ids
