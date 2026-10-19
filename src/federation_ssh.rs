@@ -51,7 +51,7 @@ fn federation_ssh_command_args(
     } else {
         path.to_owned()
     };
-    let mut args: Vec<String> = ["-F", "none", "-N", "-T", "-a", "-x"]
+    let mut args: Vec<String> = ["-F", "none", "-T", "-a", "-x"]
         .into_iter()
         .map(str::to_owned)
         .collect();
@@ -59,6 +59,7 @@ fn federation_ssh_command_args(
         "BatchMode=yes",
         "StrictHostKeyChecking=yes",
         "ExitOnForwardFailure=yes",
+        "ClearAllForwardings=no",
         "ServerAliveInterval=15",
         "ServerAliveCountMax=3",
         "GatewayPorts=no",
@@ -92,6 +93,8 @@ fn federation_ssh_command_args(
             "127.0.0.1:{}:127.0.0.1:{}",
             forwards.reverse_forward_port, forwards.central_listener_port
         ),
+        "-W".to_owned(),
+        format!("127.0.0.1:{}", forwards.satellite_listener_port),
         "--".to_owned(),
         remote_ssh_target(remote)?,
     ]);

@@ -53,7 +53,7 @@ impl ReferenceFixture {
                 operation: FederationMailboxOperation::Register,
             }, Some(proof.channel.current_lease().unwrap())).unwrap();
         }
-        // This is the actual owned channel that completed hello/open/health,
+        // This is the actual owned channel that completed mutual proof/health,
         // not a replacement transport or a fabricated successful proof client.
         assert!(proof.central.federation_peer_handles.lock().unwrap().insert(
             proof.binding.identity.host_id.clone(),

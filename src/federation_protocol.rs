@@ -1,28 +1,6 @@
 // Owns federation wire envelopes and their asserted-identity comparisons.
 // Does not select peers or grant authority. Split from federation_link.rs.
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationHello {
-    protocol_version: u16,
-    server_instance_id: String,
-    challenge: String,
-    host_id: String,
-    host_generation: u64,
-    enrollment_generation: u64,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationOpenLink {
-    protocol_version: u16,
-    receiver_instance_id: String,
-    challenge: String,
-    incarnation: String,
-    central: FederationHostIdentity,
-    enrollment_generation: u64,
-}
-
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationRequestAuthority {

@@ -58,6 +58,7 @@ pub(super) struct Pair {
     pub(super) rpc: FederationRpcClient,
     pub(super) lease: FederationLinkLease,
     pub(super) satellite_channel: FederationChannel,
+    proof: Option<super::federation_control_fixture::Attested>,
     stops: Vec<tokio::sync::watch::Sender<bool>>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -71,6 +72,19 @@ impl Pair {
         central: AppState,
         satellite_io: FederationOnboardingIo,
         central_io: FederationOnboardingIo,
+    ) -> Self {
+        Self::initialize(central, satellite_io, central_io, true).await
+    }
+
+    pub(super) async fn unattested(central: AppState) -> Self {
+        Self::initialize(central, io(), io(), false).await
+    }
+
+    async fn initialize(
+        central: AppState,
+        satellite_io: FederationOnboardingIo,
+        central_io: FederationOnboardingIo,
+        attest: bool,
     ) -> Self {
         let central_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let satellite_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -166,11 +180,25 @@ impl Pair {
         central.federation_peer_handles.lock().unwrap().insert(
             id.clone(),
             Arc::new(FederationPeerHandle {
-                channel,
+                channel: channel.clone(),
                 rpc: rpc.clone(),
             }),
         );
-        let lease = rpc.open_link().await.unwrap();
+        let proof = if attest {
+            Some(super::federation_control_fixture::attest(&channel, &satellite_channel).await)
+        } else {
+            None
+        };
+        let lease = if attest {
+            rpc.open_link().await.unwrap()
+        } else {
+            // An empty placeholder is deliberately unusable: the fresh
+            // wrong-key case must never fabricate an installed incarnation.
+            FederationLinkLease {
+                channel,
+                incarnation: String::new(),
+            }
+        };
         Self {
             central,
             satellite,
@@ -178,6 +206,7 @@ impl Pair {
             rpc,
             lease,
             satellite_channel,
+            proof,
             stops,
             tasks,
         }
@@ -185,6 +214,16 @@ impl Pair {
 
     pub(super) async fn verify(&self) -> Result<FederationOnboardingReport, ApiError> {
         verify_federation_satellite(self.central.clone(), self.id.clone()).await
+    }
+
+    pub(super) async fn reconnect(&mut self) {
+        self.lease.channel.invalidate();
+        self.satellite_channel.invalidate();
+        self.proof = Some(
+            super::federation_control_fixture::attest(&self.lease.channel, &self.satellite_channel)
+                .await,
+        );
+        self.lease = self.rpc.open_link().await.unwrap();
     }
 
     pub(super) async fn finish(mut self) {

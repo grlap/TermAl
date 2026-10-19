@@ -11,6 +11,7 @@ async fn federation_shutdown_cancels_four_incomplete_header_connections() {
     let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
     let connections = Arc::new(tokio::sync::Semaphore::new(4));
     let listener = FederationSocketListener {
+        control: None,
         listener,
         connections: connections.clone(),
         stop: stop_rx.clone(),
@@ -50,24 +51,21 @@ async fn federation_shutdown_cancels_four_incomplete_header_connections() {
 async fn federation_incomplete_authenticated_body_has_a_request_deadline() {
     let central = channel(FederationRole::Central, 'a');
     let satellite = channel(FederationRole::Satellite, 'a');
+    let _proof = super::federation_control_fixture::attest(&central, &satellite).await;
     let bound = satellite.bound.clone();
     let stream = async_stream::stream! {
         yield Ok::<_, std::io::Error>("{");
         std::future::pending::<()>().await;
     };
-    let request = Request::builder()
-        .method("POST")
-        .uri("/federation/v1/link")
-        .header("content-type", "application/json")
-        .header(FEDERATION_CAPABILITY_HEADER, "a".repeat(64))
-        .header(
-            FEDERATION_AUTHORITY_HEADER,
-            serde_json::to_string(&FederationRequestAuthority::outgoing(&central.snapshot))
-                .unwrap(),
-        )
-        .header(FEDERATION_INCARNATION_HEADER, Uuid::new_v4().to_string())
-        .body(Body::from_stream(stream))
-        .unwrap();
+    let mut request = super::federation_control_fixture::signed(
+        &central,
+        1,
+        "GET",
+        "/federation/v1/health",
+        Default::default(),
+        b"{}",
+    );
+    *request.body_mut() = Body::from_stream(stream);
     let response = tokio::time::timeout(
         phase_sync::DEADLOCK_GUARD,
         federation_router(satellite, allowed()).oneshot(request),

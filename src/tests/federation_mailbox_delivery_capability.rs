@@ -1,7 +1,7 @@
 // Owns mixed-build capability admission over the real satellite API and store.
 // Does not claim rolling-upgrade interoperability or weaken authenticated RPC.
 // The central boundary reproduces the older capability and unknown variants.
-use super::federation_mailbox_process::{Configuration, Satellite};
+use super::federation_mailbox_process::Satellite;
 use super::*;
 
 struct CapabilityPair {
@@ -22,20 +22,10 @@ struct CapabilityPair {
 async fn capability_pair(supported: bool) -> CapabilityPair {
     let central = federation_mailboxes::central_store();
     let (_, target) = federation_mailboxes::local_participant(&central, "Target");
-    let (mut satellite, native) = tokio::task::spawn_blocking(Satellite::spawn).await.unwrap();
-    let mut record = federation_registry::peer(48001);
-    record.identity = native.host.clone();
-    let peer = federation_registry::active(&central, record.clone());
-    let placement = central.reserve_federation_placement(
-        &peer, "capability-satellite".to_owned(), native.session.clone(), 0, 0,
-    ).unwrap();
-    let binding = FederationMailboxBinding {
-        central: peer.local.clone(), identity: placement.identity.clone(),
-        placement_generation: placement.placement_generation,
-    };
-    let channel = FederationChannel::for_app(peer.clone(),
-        FederationPairCapability::new("a".repeat(64)).unwrap(), central.clone());
-    channel.activate(placement.link_incarnation.clone());
+    let (satellite, native) = tokio::task::spawn_blocking(Satellite::spawn).await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (record, channel) = federation_mailbox_native_link::channel(&central, &native, port);
     let check = channel.clone();
     let unsupported = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = unsupported.clone();
@@ -45,7 +35,11 @@ async fn capability_pair(supported: bool) -> CapabilityPair {
     let drop_response = lose_reply.clone();
     let unavailable = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let outage = unavailable.clone();
-    let router = federation_router(channel, Arc::new(move || check.current_authority().map(|_| ())))
+    // Model application capability/refusal BEFORE the production middleware
+    // signs it. Rewriting an already-signed response would test MAC tampering.
+    let state = FederationListenerState { channel: channel.clone(),
+        ensure_current: Arc::new(move || check.current_authority().map(|_| ())) };
+    let router = federation_mailbox_routes()
         .layer(axum::middleware::from_fn(move |request: axum::extract::Request,
             next: axum::middleware::Next| {
             let observed = observed.clone();
@@ -87,22 +81,22 @@ async fn capability_pair(supported: bool) -> CapabilityPair {
                 response.value["senderIntentRegistry"] = json!(advertised.load(std::sync::atomic::Ordering::SeqCst));
                 Json(response).into_response()
             }
-        }));
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+        }))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), federation_authenticate))
+        .with_state(state);
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let server = tokio::spawn(async move {
         axum::serve(listener, router).with_graceful_shutdown(async move {
             federation_wait_stop(&mut stopped).await
         }).await.unwrap();
     });
-    let config = Configuration { central: peer.local, record, binding,
-        incarnation: placement.link_incarnation, port };
-    let (next, satellite_port) = tokio::task::spawn_blocking(move || {
-        let port = satellite.configure(&config);
-        (satellite, port)
-    }).await.unwrap();
-    let satellite = next;
+    let (satellite, satellite_port, control) = federation_mailbox_native_link::bind(
+        &central, &channel, satellite, &native, record, port,
+    ).await;
+    let server = tokio::spawn(async move {
+        server.await.unwrap();
+        control.finish().await;
+    });
     let client = reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
         .timeout(phase_sync::DEADLOCK_GUARD).build().unwrap();
     let base = format!("http://127.0.0.1:{satellite_port}/api/sessions/{}", native.session);

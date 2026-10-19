@@ -1,7 +1,8 @@
 // Owns authenticated read-only native-binding proof contract regressions.
 // Does not provision SSH, install bindings over RPC, create references or prove
 // live onboarding. Pre-existing bindings/checklists below are fixture setup;
-// hello/open/health and the proof requests use the actual domain HTTP listener.
+// mutual proof uses production attestation over duplex IO; health and binding
+// proof requests use the actual MAC-authenticated domain HTTP listener.
 use super::*;
 
 mod references;
@@ -56,6 +57,8 @@ struct Fixture {
     native_creation: String,
     binding: FederationMailboxBinding,
     channel: FederationChannel,
+    satellite_channel: FederationChannel,
+    attested: Mutex<Option<federation_control_fixture::Attested>>,
     rpc: FederationRpcClient,
     client: reqwest::Client,
 }
@@ -104,7 +107,7 @@ impl Fixture {
         );
         let check = satellite_channel.clone();
         let server = DomainServer::start(wrap(federation_router(
-            satellite_channel,
+            satellite_channel.clone(),
             Arc::new(move || check.current_authority().map(|_| ())),
         ))).await;
         let channel = FederationChannel::for_app(
@@ -118,9 +121,10 @@ impl Fixture {
             channel.clone(),
             Arc::new(move || check.current_authority().map(|_| ())),
         ).unwrap();
-        // The real L1 hello/open path owns and records this incarnation on both
-        // hosts. No test activate(), copied lease or replacement channel.
-        let lease = rpc.open_link().await.unwrap();
+        // Real mutual proof owns and durably records both incarnations. Keep
+        // its exact cleanup guards; no activate() or replacement channel.
+        let attested = federation_control_fixture::attest(&channel, &satellite_channel).await;
+        let lease = channel.current_lease().unwrap();
         rpc.health(&lease).await.unwrap();
         for (app, peer_id) in [
             (&central, &satellite_host.host_id),
@@ -154,26 +158,25 @@ impl Fixture {
             .redirect(reqwest::redirect::Policy::none())
             .timeout(phase_sync::DEADLOCK_GUARD)
             .build().unwrap();
-        Self { server, central, satellite, native, native_creation, binding, channel, rpc, client }
+        Self { server, central, satellite, native, native_creation, binding, channel,
+            satellite_channel, attested: Mutex::new(Some(attested)), rpc, client }
     }
 
-    fn request(&self, path: &str) -> reqwest::RequestBuilder {
-        let lease = self.channel.current_lease().unwrap();
-        self.client.post(format!("http://127.0.0.1:{}{path}", self.server.port))
-            .header(FEDERATION_CAPABILITY_HEADER, "a".repeat(64))
-            .header(FEDERATION_AUTHORITY_HEADER,
-                serde_json::to_string(&FederationRequestAuthority::outgoing(
-                    &self.channel.snapshot,
-                )).unwrap())
-            .header(FEDERATION_INCARNATION_HEADER, &lease.incarnation)
+    async fn reconnect(&self) -> FederationLinkLease {
+        let proof = federation_control_fixture::attest(&self.channel, &self.satellite_channel).await;
+        let old = self.attested.lock().unwrap().replace(proof);
+        drop(old); // exact old guards cannot retire the newly installed proof
+        self.channel.current_lease().unwrap()
     }
 
-    async fn proof(&self, request_id: &str) -> reqwest::Response {
-        self.request(PROOF_PATH).json(&json!({
-            "protocolVersion":1,
-            "requestId":request_id,
-            "binding":self.binding,
-        })).send().await.unwrap()
+    async fn proof(&self, request_id: &str) -> Result<Value, ApiError> {
+        self.rpc.request(FederationRpcRoute::NativeBinding(
+            self.channel.current_lease().unwrap(),
+            FederationNativeBindingRequest {
+                protocol_version: 1, request_id: request_id.to_owned(),
+                binding: self.binding.clone(),
+            },
+        )).await
     }
 
     fn native_snapshot(&self) -> Value {
@@ -190,6 +193,7 @@ impl Fixture {
     }
 
     async fn finish(mut self) {
+        self.attested.lock().unwrap().take();
         self.server.finish().await;
     }
 }
@@ -216,11 +220,7 @@ async fn federation_native_binding_proof_reports_native_and_placement_identities
     let request_id = Uuid::new_v4().to_string();
     let response = fixture.proof(&request_id).await;
     assert_eq!(fixture.native_snapshot(), before, "proof read must not mutate native state");
-    // Assert transport status before parsing: an absent production operation is
-    // the intended RED, not a JSON decoder/setup failure on an empty 404 body.
-    assert_eq!(response.status(), StatusCode::OK,
-        "authenticated native-binding proof read is missing or refused");
-    let proof: Value = response.json().await.unwrap();
+    let proof = response.expect("authenticated native-binding proof read is missing or refused");
     assert_eq!(proof["protocolVersion"], 1);
     assert_eq!(proof["requestId"], request_id);
     assert_eq!(proof["central"], serde_json::to_value(&fixture.binding.central).unwrap());
@@ -242,7 +242,7 @@ async fn federation_native_binding_proof_missing_binding_is_not_send_side_opt_in
     let before = fixture.native_snapshot();
     let response = fixture.proof(&Uuid::new_v4().to_string()).await;
     assert_eq!(fixture.native_snapshot(), before, "proof lookup must not install a binding");
-    assert_eq!(response.status(), StatusCode::CONFLICT,
+    assert_eq!(response.err().expect("unbound native proof must refuse").status, StatusCode::CONFLICT,
         "an unbound native root must visibly refuse the proof contract");
     fixture.finish().await;
 }
@@ -264,7 +264,7 @@ async fn federation_native_binding_proof_recreated_raw_id_cannot_use_old_binding
     assert_eq!(before["binding"], Value::Null);
     let response = fixture.proof(&Uuid::new_v4().to_string()).await;
     assert_eq!(fixture.native_snapshot(), before, "old proof request cannot adopt successor");
-    assert_eq!(response.status(), StatusCode::CONFLICT,
+    assert_eq!(response.err().expect("recreated native proof must refuse").status, StatusCode::CONFLICT,
         "old placement binding cannot prove a recreated native root");
     fixture.finish().await;
 }

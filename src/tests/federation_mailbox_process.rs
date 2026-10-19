@@ -10,14 +10,13 @@ pub(super) struct NativeSession {
     pub host: FederationHostIdentity,
     pub session: String,
     pub creation: String,
+    pub control_port: u16,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(super) struct Configuration {
     pub central: FederationHostIdentity,
     pub record: FederationPeerRecord,
-    pub binding: FederationMailboxBinding,
-    pub incarnation: String,
     pub port: u16,
 }
 

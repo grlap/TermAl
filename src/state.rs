@@ -1478,6 +1478,7 @@ struct StateInner {
     federation: FederationState,
     federation_durable: bool,
     federation_continuity_lost: bool,
+    federation_attestation: HashMap<String, FederationAttestationObservation>,
     codex: CodexState,
     /// Process/runtime side of the optional Engram host adapter. Callers may
     /// clone this handle while holding `inner`, but must release the state
@@ -1676,6 +1677,7 @@ impl StateInner {
             federation: FederationState::default(),
             federation_durable: false,
             federation_continuity_lost: false,
+            federation_attestation: HashMap::new(),
             codex: CodexState::default(),
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
             engram_budget_clock: EngramBudgetClock::default(),

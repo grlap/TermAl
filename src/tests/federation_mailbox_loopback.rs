@@ -27,10 +27,89 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
     let central = federation_mailboxes::central_store();
     let (local, participant) = federation_mailboxes::local_participant(&central, "Central native");
     let (mut satellite, native) = tokio::task::spawn_blocking(Satellite::spawn).await.unwrap();
-    let mut record = federation_registry::peer(48001);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut record = federation_registry::peer(port);
     record.identity = native.host.clone();
     record.display_name = "Satellite".to_owned();
-    let peer = federation_registry::active(&central, record.clone());
+    record.endpoint.satellite_federation_port = native.control_port;
+    record.endpoint.satellite_reverse_forward_port = port;
+    central.enroll_federation_peer(record.clone()).unwrap();
+    let peer = central
+        .federation_peer_snapshot(&record.identity.host_id)
+        .unwrap();
+    let channel = FederationChannel::for_app(
+        peer.clone(),
+        FederationPairCapability::new("a".repeat(64)).unwrap(),
+        central.clone(),
+    );
+    let check = channel.clone();
+    let router = federation_router(
+        channel.clone(),
+        Arc::new(move || check.current_authority().map(|_| ())),
+    );
+    let (stop, mut stopped) = tokio::sync::watch::channel(false);
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async move { federation_wait_stop(&mut stopped).await })
+            .await
+            .unwrap();
+    });
+    let config = Configuration {
+        central: peer.local.clone(),
+        record,
+        port,
+    };
+    let (next, satellite_port) = tokio::task::spawn_blocking(move || {
+        let port = satellite.configure(&config);
+        (satellite, port)
+    })
+    .await
+    .unwrap();
+    satellite = next;
+    // C initiates the real control proof to the second process before either
+    // side verifies membership or attaches an application placement binding.
+    let mut control: FederationControlIo = Box::new(
+        tokio::net::TcpStream::connect(("127.0.0.1", native.control_port))
+            .await
+            .unwrap(),
+    );
+    let (context, guard) = tokio::time::timeout(
+        phase_sync::DEADLOCK_GUARD,
+        federation_attest_central(&channel, &mut control),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let (control_stop, control_rx) = tokio::sync::watch::channel(false);
+    let (ready, ready_rx) = tokio::sync::oneshot::channel();
+    let control_task = tokio::spawn(federation_control_central(
+        channel.clone(),
+        control,
+        context,
+        guard,
+        control_rx,
+        ready,
+    ));
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, ready_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    let connected = central
+        .federation_peer_snapshot(&peer.peer.host_id)
+        .unwrap();
+    central
+        .verify_federation_peer(&connected, federation_registry::checks())
+        .unwrap();
+    let verified = central
+        .federation_peer_snapshot(&peer.peer.host_id)
+        .unwrap();
+    central
+        .transition_federation_peer(&verified, FederationMembershipState::Active)
+        .unwrap();
+    let peer = central
+        .federation_peer_snapshot(&peer.peer.host_id)
+        .unwrap();
     let placement = central
         .reserve_federation_placement(
             &peer,
@@ -42,43 +121,18 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
         .unwrap();
     let binding = FederationMailboxBinding {
         central: peer.local.clone(),
-        identity: placement.identity.clone(),
+        identity: placement.identity,
         placement_generation: placement.placement_generation,
     };
-    let channel = FederationChannel::for_app(
-        peer.clone(),
-        FederationPairCapability::new("a".repeat(64)).unwrap(),
-        central.clone(),
-    );
-    channel.activate(placement.link_incarnation.clone());
-    let check = channel.clone();
-    let router = federation_router(
-        channel.clone(),
-        Arc::new(move || check.current_authority().map(|_| ())),
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let (stop, mut stopped) = tokio::sync::watch::channel(false);
-    let server = tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(async move { federation_wait_stop(&mut stopped).await })
-            .await
-            .unwrap();
-    });
-    let config = Configuration {
-        central: peer.local.clone(),
-        record,
-        binding: binding.clone(),
-        incarnation: placement.link_incarnation.clone(),
-        port,
-    };
-    let (next, satellite_port) = tokio::task::spawn_blocking(move || {
-        let port = satellite.configure(&config);
-        (satellite, port)
+    let child_binding = binding.clone();
+    let (next, bound) = tokio::task::spawn_blocking(move || {
+        let result = satellite.command(json!({"command":"bind", "binding":child_binding}));
+        (satellite, result)
     })
     .await
     .unwrap();
     satellite = next;
+    assert_eq!(bound, json!({"bound":true}));
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -282,6 +336,9 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
         json!({"status":409,"bound":false}),
         "old central install cannot bind a recreated native session"
     );
+    control_stop.send_replace(true);
+    // The outage phase may already have fenced this exact context.
+    let _ = control_task.await.unwrap();
     tokio::task::spawn_blocking(move || satellite.finish())
         .await
         .unwrap();

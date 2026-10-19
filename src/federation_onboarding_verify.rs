@@ -90,6 +90,15 @@ async fn verify_federation_satellite(
             "linkUnavailable",
         );
     }
+    if report.link_incarnation.is_empty()
+        && app.federation_observed_attestation_failure(&report.expected)
+    {
+        report.observe(
+            FederationOnboardingCheck::CapabilityExchange,
+            false,
+            "attestationFailed",
+        );
+    }
     let saved = report.clone();
     let expected = report.expected.clone();
     let complete = report.termal_complete();
@@ -137,7 +146,7 @@ async fn run_federation_onboarding_checks(
         },
     );
     // A recorded L1 lease is issued only after the pinned OpenSSH channel and
-    // the one-use pair-capability handshake have completed. Never infer these
+    // fresh mutual attestation have completed. Never infer these
     // checks from an unauthenticated TCP connection or a shell exit status.
     report.observe(
         Check::HostKey,

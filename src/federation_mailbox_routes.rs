@@ -209,8 +209,22 @@ async fn serve_federation_mailbox(
             federation_mailbox_central_locked(inner).map(|_| ())
         })?;
         let response = app.execute_federation_mailbox(request, Some(lease.clone()))?;
-        lease.with_current(&app, |inner, _| {
+        lease.channel.control.observe("mailboxExecuted", 0);
+        let current = lease.with_current(&app, |inner, _| {
             federation_mailbox_central_locked(inner).map(|_| ())
+        });
+        lease
+            .channel
+            .control
+            .observe("mailboxPostcheck", u64::from(current.is_err()));
+        // Execution has already returned a receipt. A failure observed here
+        // cannot prove refusal, even if authority settles before middleware
+        // revalidation. Preserve same-key recovery at this exact boundary.
+        current.map_err(|_| {
+            federation_mailbox_unknown_outcome(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "mailbox authority changed after execution",
+            )
         })?;
         Ok(response)
     })

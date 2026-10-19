@@ -70,7 +70,9 @@ fn federation_reply_apply_rejects_real_reenrollment_with_same_endpoint() {
 
 #[tokio::test]
 async fn federation_real_state_lock_is_free_while_rpc_waits_for_wire_reply() {
-    let (app, channel, lease) = linked_enrollment();
+    let (app, channel, _) = linked_enrollment();
+    let (satellite, _proof) = super::federation_control_fixture::establish(&channel).await;
+    let lease = channel.current_lease().unwrap();
     let health = FederationHealth {
         protocol_version: 1,
         host_id: channel.snapshot.peer.host_id.clone(),
@@ -97,6 +99,7 @@ async fn federation_real_state_lock_is_free_while_rpc_waits_for_wire_reply() {
             }
         }),
     );
+    let router = super::federation_control_fixture::authenticated_router(satellite, router);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
@@ -234,31 +237,29 @@ fn federation_local_disconnect_fences_current_placement_admission() {
 
 #[tokio::test]
 async fn federation_durable_hold_is_retryable_on_wire_without_losing_incarnation() {
-    let (app, channel, lease) = linked_enrollment();
+    let (app, channel, _) = linked_enrollment();
+    let (caller, _proof) = super::federation_control_fixture::establish(&channel).await;
+    let lease = channel.current_lease().unwrap();
     let checked = channel.clone();
     let router = federation_router(
         channel.clone(),
         Arc::new(move || checked.current_authority().map(|_| ())),
     );
-    let mut caller = channel.snapshot.clone();
-    std::mem::swap(&mut caller.local, &mut caller.peer);
-    let request = || {
-        Request::builder()
-            .uri("/federation/v1/health")
-            .header(FEDERATION_CAPABILITY_HEADER, "a".repeat(64))
-            .header(
-                FEDERATION_AUTHORITY_HEADER,
-                serde_json::to_string(&FederationRequestAuthority::outgoing(&caller)).unwrap(),
-            )
-            .header(FEDERATION_INCARNATION_HEADER, &lease.incarnation)
-            .body(Body::empty())
-            .unwrap()
+    let request = |counter| {
+        super::federation_control_fixture::signed(
+            &caller,
+            counter,
+            "GET",
+            "/federation/v1/health",
+            Default::default(),
+            &[],
+        )
     };
     app.inner.lock().unwrap().federation_durable = false;
-    let held = router.clone().oneshot(request()).await.unwrap().status();
+    let held = router.clone().oneshot(request(1)).await.unwrap().status();
     let retained = channel.current_lease().unwrap().incarnation;
     app.inner.lock().unwrap().federation_durable = true;
-    let settled = router.oneshot(request()).await.unwrap().status();
+    let settled = router.oneshot(request(2)).await.unwrap().status();
     assert_eq!(
         held,
         StatusCode::LOCKED,

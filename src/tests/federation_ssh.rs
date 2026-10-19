@@ -26,6 +26,30 @@ fn federation_forwards() -> FederationForwards {
 }
 
 #[test]
+fn federation_security_ssh_keeps_forwards_with_one_owned_stdio_control_stream() {
+    let args = federation_ssh_command_args(
+        &satellite_ssh_config(),
+        &federation_forwards(),
+        FsPath::new("known-hosts"),
+    )
+    .unwrap();
+    for pair in [
+        ["-W", "127.0.0.1:47102"],
+        ["-o", "ClearAllForwardings=no"],
+        ["-o", "ExitOnForwardFailure=yes"],
+        ["-L", "127.0.0.1:47101:127.0.0.1:47102"],
+        ["-R", "127.0.0.1:47103:127.0.0.1:47104"],
+        ["-F", "none"],
+        ["-o", "ControlMaster=no"],
+        ["-o", "ControlPath=none"],
+    ] {
+        assert!(args.windows(2).any(|actual| actual == pair), "{pair:?}");
+    }
+    assert!(!args.iter().any(|arg| ["-n", "-f"].contains(&arg.as_str())));
+    assert_eq!(args.iter().filter(|arg| *arg == "-W").count(), 1);
+}
+
+#[test]
 fn federation_ssh_uses_one_strict_batch_session_and_two_loopback_forwards() {
     let args = federation_ssh_command_args(
         &satellite_ssh_config(),
@@ -62,7 +86,11 @@ fn federation_ssh_uses_one_strict_batch_session_and_two_loopback_forwards() {
         args.windows(2)
             .any(|pair| pair == ["-R", "127.0.0.1:47103:127.0.0.1:47104"])
     );
-    assert!(args.iter().any(|arg| arg == "-N"));
+    assert!(!args.iter().any(|arg| arg == "-N"));
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["-W", "127.0.0.1:47102"])
+    );
     assert!(
         args.iter()
             .any(|arg| arg == "UserKnownHostsFile=.tmp/pair-known-hosts")

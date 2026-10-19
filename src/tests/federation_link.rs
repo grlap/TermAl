@@ -1,6 +1,7 @@
 // Owns one-machine federation channel/reconnect tests; no SSH or live stores.
 // New fixtures for the federation modules, not split from executor-proxy tests.
 
+use super::federation_control_fixture::{attest, signed};
 use super::*;
 
 pub(super) fn peer_snapshot(role: FederationRole) -> FederationPeerSnapshot {
@@ -51,12 +52,6 @@ pub(super) fn allowed() -> FederationAuthorityCheck {
     Arc::new(|| Ok(()))
 }
 
-fn caller_authority_for(role: FederationRole) -> String {
-    let mut snapshot = peer_snapshot(role);
-    std::mem::swap(&mut snapshot.local, &mut snapshot.peer);
-    serde_json::to_string(&FederationRequestAuthority::outgoing(&snapshot)).unwrap()
-}
-
 #[tokio::test]
 async fn federation_listener_rejects_missing_wrong_pair_and_duplicate_capabilities() {
     let router = federation_router(channel(FederationRole::Satellite, 'a'), allowed());
@@ -74,7 +69,7 @@ async fn federation_listener_rejects_missing_wrong_pair_and_duplicate_capabiliti
             .oneshot(request.body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response.status(), StatusCode::CONFLICT);
         let body = to_bytes(response.into_body(), 4096).await.unwrap();
         assert!(!String::from_utf8_lossy(&body).contains("pair-secret-reference"));
     }
@@ -86,15 +81,15 @@ async fn federation_listener_rejects_missing_wrong_pair_and_duplicate_capabiliti
         .unwrap();
     assert_eq!(
         router.oneshot(request).await.unwrap().status(),
-        StatusCode::FORBIDDEN
+        StatusCode::CONFLICT
     );
 }
 
 #[tokio::test]
 async fn federation_listener_never_mounts_general_api_or_payload_selected_identity() {
     let peer = channel(FederationRole::Satellite, 'a');
-    let incarnation = Uuid::new_v4().to_string();
-    peer.activate(incarnation.clone());
+    let central = channel(FederationRole::Central, 'a');
+    let _proof = attest(&central, &peer).await;
     let router = federation_router(peer, allowed());
     for path in [
         "/api/health",
@@ -114,16 +109,14 @@ async fn federation_listener_never_mounts_general_api_or_payload_selected_identi
             "{path}"
         );
     }
-    let request = Request::builder()
-        .uri("/federation/v1/health?hostId=attacker")
-        .header(FEDERATION_CAPABILITY_HEADER, "a".repeat(64))
-        .header(
-            FEDERATION_AUTHORITY_HEADER,
-            caller_authority_for(FederationRole::Satellite),
-        )
-        .header(FEDERATION_INCARNATION_HEADER, incarnation)
-        .body(Body::empty())
-        .unwrap();
+    let request = signed(
+        &central,
+        1,
+        "GET",
+        "/federation/v1/health?hostId=attacker",
+        Default::default(),
+        &[],
+    );
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let health: FederationHealth =
@@ -172,28 +165,19 @@ fn federation_delayed_failed_probe_cannot_invalidate_successor_link() {
     assert!(peer.current_lease().is_err());
 }
 
-#[test]
-fn federation_handshake_is_receiver_boot_bound_and_one_use() {
+#[tokio::test]
+async fn federation_handshake_creates_new_context_after_reconnect() {
+    let central = channel(FederationRole::Central, 'a');
     let satellite = channel(FederationRole::Satellite, 'a');
-    let hello = satellite.challenge();
-    let mut open = FederationOpenLink {
-        protocol_version: 1,
-        receiver_instance_id: hello.server_instance_id,
-        challenge: hello.challenge,
-        incarnation: Uuid::new_v4().to_string(),
-        central: satellite.snapshot.central.clone(),
-        enrollment_generation: 5,
-    };
-    let old = satellite.accept_link(&open).unwrap();
-    assert!(satellite.accept_link(&open).is_err());
-    let next = satellite.challenge();
-    open.challenge = next.challenge;
-    open.incarnation = Uuid::new_v4().to_string();
-    let current = satellite.accept_link(&open).unwrap();
+    let _old_proof = attest(&central, &satellite).await;
+    let old = satellite.current_lease().unwrap();
+    let _new_proof = attest(&central, &satellite).await;
+    let current = satellite.current_lease().unwrap();
+    assert_ne!(old.incarnation, current.incarnation);
     assert!(old.with_incarnation(|| Ok(())).is_err());
     current.with_incarnation(|| Ok(())).unwrap();
     let rebooted = channel(FederationRole::Satellite, 'a');
-    assert!(rebooted.accept_link(&open).is_err());
+    assert!(rebooted.lease(&current.incarnation).is_err());
 }
 
 #[tokio::test]
@@ -206,7 +190,7 @@ async fn federation_cross_channel_capability_cannot_authenticate_another_pair() 
         .unwrap();
     assert_eq!(
         router.oneshot(request).await.unwrap().status(),
-        StatusCode::FORBIDDEN
+        StatusCode::CONFLICT
     );
 }
 
@@ -221,33 +205,37 @@ async fn federation_listener_rechecks_enrollment_on_every_request() {
             Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY))
         }
     });
-    let router = federation_router(channel(FederationRole::Satellite, 'a'), check);
-    let request = || {
-        Request::builder()
-            .uri("/federation/v1/hello")
-            .header(
-                FEDERATION_AUTHORITY_HEADER,
-                caller_authority_for(FederationRole::Satellite),
-            )
-            .header(FEDERATION_INCARNATION_HEADER, Uuid::new_v4().to_string())
-            .header(FEDERATION_CAPABILITY_HEADER, "a".repeat(64))
-            .body(Body::empty())
-            .unwrap()
+    let central = channel(FederationRole::Central, 'a');
+    let satellite = channel(FederationRole::Satellite, 'a');
+    let _proof = attest(&central, &satellite).await;
+    let router = federation_router(satellite, check);
+    let request = |counter| {
+        signed(
+            &central,
+            counter,
+            "GET",
+            "/federation/v1/health",
+            Default::default(),
+            &[],
+        )
     };
     assert_eq!(
-        router.clone().oneshot(request()).await.unwrap().status(),
+        router.clone().oneshot(request(1)).await.unwrap().status(),
         StatusCode::OK
     );
     current.store(false, Ordering::SeqCst);
     assert_eq!(
-        router.oneshot(request()).await.unwrap().status(),
+        router.oneshot(request(2)).await.unwrap().status(),
         StatusCode::CONFLICT
     );
 }
 
 #[tokio::test]
 async fn federation_listener_rejects_asserted_alias_and_stale_epochs() {
-    let router = federation_router(channel(FederationRole::Satellite, 'a'), allowed());
+    let central = channel(FederationRole::Central, 'a');
+    let satellite = channel(FederationRole::Satellite, 'a');
+    let _proof = attest(&central, &satellite).await;
+    let router = federation_router(satellite, allowed());
     for mismatch in 0..4 {
         let snapshot = peer_snapshot(FederationRole::Central);
         let mut authority = FederationRequestAuthority::outgoing(&snapshot);
@@ -257,16 +245,19 @@ async fn federation_listener_rejects_asserted_alias_and_stale_epochs() {
             2 => authority.central.host_generation += 1,
             _ => authority.enrollment_generation += 1,
         }
-        let request = Request::builder()
-            .uri("/federation/v1/hello")
-            .header(FEDERATION_CAPABILITY_HEADER, "a".repeat(64))
-            .header(
-                FEDERATION_AUTHORITY_HEADER,
-                serde_json::to_string(&authority).unwrap(),
-            )
-            .header(FEDERATION_INCARNATION_HEADER, Uuid::new_v4().to_string())
-            .body(Body::empty())
-            .unwrap();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            FEDERATION_AUTHORITY_HEADER,
+            HeaderValue::from_str(&serde_json::to_string(&authority).unwrap()).unwrap(),
+        );
+        let request = signed(
+            &central,
+            mismatch + 1,
+            "GET",
+            "/federation/v1/health",
+            headers,
+            &[],
+        );
         assert_eq!(
             router.clone().oneshot(request).await.unwrap().status(),
             StatusCode::CONFLICT

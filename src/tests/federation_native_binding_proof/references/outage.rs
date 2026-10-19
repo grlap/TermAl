@@ -1,5 +1,5 @@
 // Owns loopback API/proof availability and retired-link recovery witnesses.
-// A stopped listener is not a stopped host. Only the explicit hello/open test
+// A stopped listener is not a stopped host. Only the explicit mutual-proof test
 // below claims a fresh incarnation; no supervisor, SSH or O1 probe is simulated.
 use super::*;
 use std::sync::atomic::AtomicUsize;
@@ -142,9 +142,9 @@ async fn federation_reference_outage_fresh_handshake_does_not_revive_stale_place
     assert!(fixture.proof.channel.current_lease().is_err());
     assert!(old_lease.with_incarnation(|| Ok(())).is_err());
 
-    // The actual hello/challenge/open/record-connected exchange creates a new
+    // The actual mutual-proof/durable-install exchange creates a new
     // lease over the existing owned router/channel; no activate() or lease copy.
-    let fresh = fixture.proof.rpc.open_link().await.unwrap();
+    let fresh = fixture.proof.reconnect().await;
     assert_ne!(fresh.incarnation, old_lease.incarnation);
     fixture.proof.rpc.health(&fresh).await.unwrap();
     assert!(fixture.proof.central.ensure_federation_placement_current(&old_placement).is_err(),

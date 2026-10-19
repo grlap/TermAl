@@ -14,6 +14,7 @@ enum Event {
 }
 
 struct FakeSsh {
+    control: Option<FederationControlIo>,
     stop: tokio::sync::watch::Sender<bool>,
     exited: mpsc::Receiver<()>,
     events: tokio::sync::mpsc::UnboundedSender<Event>,
@@ -21,6 +22,11 @@ struct FakeSsh {
 }
 
 impl FederationSshChild for FakeSsh {
+    fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
+        self.control.take().ok_or_else(|| {
+            ApiError::from_status(StatusCode::FORBIDDEN, "unproven federation transport")
+        })
+    }
     fn child_exited(&mut self) -> Result<bool, ApiError> {
         Ok(false)
     }
@@ -80,12 +86,13 @@ impl Fixture {
             FederationPairCapability::new("a".repeat(64)).unwrap(),
         );
         let router = federation_router(satellite.clone(), allowed());
-        let (satellite_stop, mut stop_rx) = tokio::sync::watch::channel(false);
-        let satellite_task = tokio::spawn(async move {
-            axum::serve(listener, router)
-                .with_graceful_shutdown(async move { federation_wait_stop(&mut stop_rx).await })
-                .await
-        });
+        let (satellite_stop, stop_rx) = tokio::sync::watch::channel(false);
+        let satellite_task = tokio::spawn(serve_federation_control_listener(
+            listener,
+            router,
+            stop_rx,
+            satellite.clone(),
+        ));
         let (events_tx, events) = tokio::sync::mpsc::unbounded_channel();
         let attempt_events = events_tx.clone();
         let read_events = events_tx.clone();
@@ -110,29 +117,31 @@ impl Fixture {
             })
         });
         let handle = tokio::runtime::Handle::current();
-        let reserved_forward_listener = Arc::new(Mutex::new(None::<std::net::TcpListener>));
-        let ssh_forward_listener = reserved_forward_listener.clone();
+        let forward_listener = Arc::new(Mutex::new(Some(
+            std::net::TcpListener::bind("127.0.0.1:0").unwrap(),
+        )));
+        let reserved_forward = forward_listener.clone();
         let ssh: FederationSshStarter = Arc::new(move |_, port, _| {
             let _entered = handle.enter();
-            let socket = match ssh_forward_listener.lock().unwrap().take() {
-                Some(socket) => {
-                    if socket.local_addr().unwrap().port() != port {
-                        return Err(ApiError::internal("fixture forward reservation mismatch"));
-                    }
-                    socket
-                }
-                None => std::net::TcpListener::bind(("127.0.0.1", port)).map_err(|error| {
-                    ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
-                        format!("fake SSH listener bind on port {port} failed: {error}"))
-                })?,
-            };
+            let socket = reserved_forward
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or_else(federation_transport_unavailable)?;
+            assert_eq!(
+                socket.local_addr().unwrap().port(),
+                port,
+                "handoff retains the selected socket"
+            );
             socket
                 .set_nonblocking(true)
-                .map_err(|error| ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
-                    format!("fake SSH listener nonblocking setup failed: {error}")))?;
-            let listener = TcpListener::from_std(socket).map_err(|error|
-                ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
-                    format!("fake SSH listener Tokio registration failed: {error}")))?;
+                .map_err(|_| federation_transport_unavailable())?;
+            let listener =
+                TcpListener::from_std(socket).map_err(|_| federation_transport_unavailable())?;
+            let control = std::net::TcpStream::connect(("127.0.0.1", satellite_port))
+                .map_err(|_| federation_transport_unavailable())?;
+            control.set_nonblocking(true).unwrap();
+            let control = tokio::net::TcpStream::from_std(control).unwrap();
             let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
             let (exit_tx, exited) = mpsc::channel();
             let forward_events = events_tx.clone();
@@ -149,6 +158,7 @@ impl Fixture {
                     let bytes = axum::body::to_bytes(body, 4096).await.unwrap();
                     let response = reqwest::Client::builder()
                         .no_proxy()
+                        .no_gzip()
                         .build()
                         .unwrap()
                         .request(
@@ -161,9 +171,10 @@ impl Fixture {
                         .await
                         .unwrap();
                     let status = response.status();
+                    let headers = response.headers().clone();
                     let body = response.bytes().await.unwrap();
                     let _ = events.send(Event::Response(path, status));
-                    (status, body).into_response()
+                    (status, headers, body).into_response()
                 }
             });
             handle.spawn(async move {
@@ -174,6 +185,7 @@ impl Fixture {
             });
             let _ = events_tx.send(Event::Started);
             Ok(Box::new(FakeSsh {
+                control: Some(Box::new(control)),
                 stop,
                 exited,
                 events: events_tx.clone(),
@@ -189,16 +201,23 @@ impl Fixture {
             fingerprint,
             fail_health,
             cleanup_unknown,
-            reserved_forward_listener,
             events,
+            reserved_forward_listener: forward_listener.clone(),
             satellite_stop,
             satellite_task,
             io: FederationRuntimeIo {
+                prepare_forward: None,
+                forward_listener: Some(forward_listener),
                 credentials,
                 ssh,
                 reconcile_interval: Duration::from_millis(20),
                 probe_interval: Duration::from_millis(20),
                 operation_timeout: Duration::from_secs(5),
+                control_interval: Duration::from_secs(15),
+                control_timeout: Duration::from_secs(45),
+                link_startup_timeout: FEDERATION_LINK_STARTUP_TIMEOUT,
+                attest_timeout: FEDERATION_ATTEST_TIMEOUT,
+                control_clock: FederationControlClock::default(),
                 attempt_finished: Arc::new(move |result| {
                     if let Err(error) = result {
                         let _ = attempt_events.send(Event::Attempt(error.status));
@@ -206,19 +225,17 @@ impl Fixture {
                 }),
                 reconciled: Arc::new(|_| {}),
                 connection_published: Arc::new(|| {}),
+                control_observed: Arc::new(|_, _| {}),
             },
         }
     }
 
     fn reserve_forward_listener(&self) -> u16 {
-        // Retain the exact OS-selected socket until fake SSH takes ownership;
-        // picking a number then dropping/rebinding would leave a port race.
-        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = socket.local_addr().unwrap().port();
         let mut reserved = self.reserved_forward_listener.lock().unwrap();
-        assert!(reserved.is_none(), "fixture already owns a forward listener");
-        *reserved = Some(socket);
-        port
+        if reserved.is_none() {
+            *reserved = Some(std::net::TcpListener::bind("127.0.0.1:0").unwrap());
+        }
+        reserved.as_ref().unwrap().local_addr().unwrap().port()
     }
 
     async fn event(&mut self, matches: impl Fn(&Event) -> bool) -> bool {

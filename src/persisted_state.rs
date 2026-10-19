@@ -265,6 +265,7 @@ impl PersistedState {
             federation: self.federation,
             federation_durable: true,
             federation_continuity_lost: false,
+            federation_attestation: HashMap::new(),
             codex: self.codex,
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
             engram_budget_clock: EngramBudgetClock::default(),

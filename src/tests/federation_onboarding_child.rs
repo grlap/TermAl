@@ -171,10 +171,10 @@ async fn federation_onboarding_satellite_child() {
             io: federation_onboarding_fixture::io(),
         },
     ));
-    let (stop, mut rx) = tokio::sync::watch::channel(false);
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let server_channel = channel.clone();
     let server = tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(async move { federation_wait_stop(&mut rx).await })
+        serve_federation_control_listener(listener, router, rx, server_channel)
             .await
             .unwrap();
     });

@@ -6,6 +6,9 @@ include!("federation_runtime_fixture.rs");
 #[path = "federation_worker_io.rs"]
 mod worker_io;
 
+#[path = "federation_forward_ownership.rs"]
+mod forward_ownership;
+
 #[path = "federation_connect_durability.rs"]
 mod connect_durability;
 
@@ -14,6 +17,9 @@ mod settlement;
 
 #[path = "federation_mailbox_pressure.rs"]
 mod mailbox_pressure;
+
+#[path = "federation_startup_budget.rs"]
+mod startup_budget;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_production_monitor_recovers_remote_incarnation_loss() {
@@ -36,7 +42,9 @@ async fn federation_production_monitor_recovers_remote_incarnation_loss() {
     // Models the satellite monitor's failed reverse probe or satellite-only
     // restart while the central's owned SSH child remains alive.
     fixture.satellite.invalidate();
-    let reopened = fixture.event(|e| matches!(e, Event::Response(path, status) if path.ends_with("link") && status.is_success())).await;
+    assert!(fixture.event(|e| matches!(e, Event::Reaped)).await);
+    assert!(fixture.event(|e| matches!(e, Event::Started)).await);
+    let reopened = fixture.event(|e| matches!(e, Event::Response(path, status) if path.ends_with("health") && status.is_success())).await;
     let successor = runtime
         .peer(&fixture.id)
         .and_then(|peer| peer.channel.current_lease().ok())
@@ -44,7 +52,7 @@ async fn federation_production_monitor_recovers_remote_incarnation_loss() {
     fixture.finish(runtime).await;
     assert!(
         reopened,
-        "central must re-handshake without waiting for SSH exit"
+        "central must replace the fenced owned stream and re-attest"
     );
     assert_ne!(successor.as_deref(), Some(old.as_str()));
 }
@@ -77,6 +85,8 @@ async fn federation_disabled_and_standalone_start_without_os_effects() {
     let ssh_touched = touched.clone();
     let (checked, mut checked_rx) = tokio::sync::mpsc::unbounded_channel();
     let io = FederationRuntimeIo {
+        prepare_forward: None,
+        forward_listener: None,
         credentials: Arc::new(move |_| {
             reader_touched.store(true, Ordering::SeqCst);
             Err(federation_credential_error())
@@ -88,11 +98,17 @@ async fn federation_disabled_and_standalone_start_without_os_effects() {
         reconcile_interval: Duration::from_millis(10),
         probe_interval: Duration::from_millis(10),
         operation_timeout: Duration::from_secs(5),
+        control_interval: Duration::from_secs(15),
+        control_timeout: Duration::from_secs(45),
+        link_startup_timeout: FEDERATION_LINK_STARTUP_TIMEOUT,
+        attest_timeout: FEDERATION_ATTEST_TIMEOUT,
+        control_clock: FederationControlClock::default(),
         attempt_finished: Arc::new(|_| {}),
         reconciled: Arc::new(move |count| {
             let _ = checked.send(count);
         }),
         connection_published: Arc::new(|| {}),
+        control_observed: Arc::new(|_, _| {}),
     };
     for state in [app, {
         let disabled = federation_registry::central();
@@ -123,6 +139,15 @@ async fn federation_disabled_and_standalone_start_without_os_effects() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_shutdown_closes_an_authenticated_incomplete_body() {
     let mut fixture = Fixture::new().await;
+    let (entered, entered_rx) = tokio::sync::oneshot::channel();
+    let entered = Arc::new(Mutex::new(Some(entered)));
+    fixture.io.control_observed = Arc::new(move |event, _| {
+        if event == "requestBody" {
+            if let Some(send) = entered.lock().unwrap().take() {
+                let _ = send.send(());
+            }
+        }
+    });
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
     assert!(fixture.event(|e| matches!(e, Event::Response(path, status) if path.ends_with("health") && status.is_success())).await);
     let peer = runtime.peer(&fixture.id).unwrap();
@@ -131,21 +156,28 @@ async fn federation_shutdown_closes_an_authenticated_incomplete_body() {
         peer.channel.snapshot.endpoint.central_federation_port,
     ))
     .unwrap();
-    let authority = serde_json::to_string(&FederationRequestAuthority::outgoing(
-        &fixture.satellite.snapshot,
-    ))
+    let request = super::federation_control_fixture::signed(
+        &fixture.satellite,
+        1,
+        "GET",
+        "/federation/v1/health",
+        Default::default(),
+        &[b'x'; 100],
+    );
+    write!(
+        stream,
+        "GET /federation/v1/health HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n"
+    )
     .unwrap();
-    write!(stream,
-        "POST /federation/v1/link HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n{FEDERATION_CAPABILITY_HEADER}: {}\r\n{FEDERATION_AUTHORITY_HEADER}: {authority}\r\n{FEDERATION_INCARNATION_HEADER}: {}\r\n\r\n{{",
-        "a".repeat(64), Uuid::new_v4()).unwrap();
+    for (name, value) in request.headers() {
+        write!(stream, "{name}: {}\r\n", value.to_str().unwrap()).unwrap();
+    }
+    write!(stream, "\r\nx").unwrap();
     stream.flush().unwrap();
-    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
-        while peer.channel.bound.permits.available_permits() == 4 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered_rx)
+        .await
+        .unwrap()
+        .unwrap();
     let mut shutdown = tokio::spawn(runtime.shutdown());
     // A deadlock guard, not a throughput assertion. Closing the caller below
     // also lets the RED implementation unwind without leaving a server alive.

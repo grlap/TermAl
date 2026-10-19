@@ -8,6 +8,7 @@ impl FederationChannel {
         app: AppState,
     ) -> Self {
         let mut channel = Self::new(snapshot, capability);
+        channel.server_instance_id = app.server_instance_id.clone();
         channel.app = Some(app);
         channel
     }
@@ -48,6 +49,7 @@ impl FederationChannel {
         })
     }
 
+    #[cfg(test)]
     async fn record_connected(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
         let expected = self.current_authority()?;
         let channel = self.clone();

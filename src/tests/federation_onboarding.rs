@@ -297,34 +297,54 @@ async fn federation_onboarding_disabled_has_no_probe_or_membership_effect() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_onboarding_capability_mismatch_is_named_and_cannot_verify() {
-    let pair = Pair::new(federation_registry::central(), io()).await;
-    let mut bad_rpc = pair.rpc.clone();
-    bad_rpc.channel.capability = FederationPairCapability::new("b".repeat(64)).unwrap();
-    pair.central.federation_peer_handles.lock().unwrap().insert(
-        pair.id.clone(),
-        Arc::new(FederationPeerHandle {
-            channel: pair.lease.channel.clone(),
-            rpc: bad_rpc,
-        }),
-    );
+    let pair = Pair::unattested(federation_registry::central()).await;
+    let mut wrong_key = pair.rpc.channel.clone();
+    wrong_key.capability = FederationPairCapability::new("b".repeat(64)).unwrap();
+    let (c, s) = tokio::io::duplex(FEDERATION_FRAME_LIMIT);
+    let mut c: FederationControlIo = Box::new(c);
+    let satellite = pair.satellite_channel.clone();
+    let satellite_proof = async move {
+        let mut s: FederationControlIo = Box::new(s);
+        let mut preface = vec![0; FEDERATION_CONTROL_PREFACE.len()];
+        tokio::io::AsyncReadExt::read_exact(&mut s, &mut preface)
+            .await
+            .unwrap();
+        assert_eq!(preface, FEDERATION_CONTROL_PREFACE);
+        federation_attest_satellite(&satellite, &mut s).await
+    };
+    let (central_proof, satellite_proof) =
+        tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
+            tokio::join!(
+                federation_attest_central(&wrong_key, &mut c),
+                satellite_proof
+            )
+        })
+        .await
+        .unwrap();
+    let no_context = pair.rpc.channel.security_context().is_err()
+        && pair.satellite_channel.security_context().is_err();
+    let no_rpc = pair.rpc.open_link().await.is_err();
     let report = pair.verify().await.unwrap();
+    let membership = pair
+        .central
+        .federation_peer_snapshot(&pair.id)
+        .unwrap()
+        .membership;
+    let no_sessions = pair.satellite.inner.lock().unwrap().sessions.is_empty();
+    pair.finish().await;
+    assert!(central_proof.is_err() && satellite_proof.is_err());
+    assert!(no_context && no_rpc && no_sessions);
     assert!(report.outcomes.iter().any(|check| check.check
         == FederationOnboardingCheck::CapabilityExchange
-        && !check.passed));
+        && !check.passed
+        && check.reason == "attestationFailed"));
     assert!(
         report
             .outcomes
             .iter()
             .any(|check| check.check == FederationOnboardingCheck::Reachability && !check.passed)
     );
-    assert_eq!(
-        pair.central
-            .federation_peer_snapshot(&pair.id)
-            .unwrap()
-            .membership,
-        FederationMembershipState::Enrolled
-    );
-    pair.finish().await;
+    assert_eq!(membership, FederationMembershipState::Enrolled);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -340,7 +360,7 @@ async fn federation_onboarding_domain_routes_reject_missing_capability_and_user_
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::CONFLICT);
     assert!(
         serde_json::from_value::<FederationProbeWakeRequest>(json!({
             "attemptId":Uuid::new_v4().to_string(), "sessionId":"user-session", "prompt":"run something",

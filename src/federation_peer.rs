@@ -37,6 +37,7 @@ async fn federation_serve_peer(
     let channel = FederationChannel::for_app(snapshot.clone(), credentials.capability, app.clone());
     let mut channel = channel;
     channel.basis = basis;
+    channel.control = FederationControlSettings::from_io(io);
     #[cfg(test)]
     {
         channel.connection_published = io.connection_published.clone();
@@ -45,6 +46,27 @@ async fn federation_serve_peer(
     let ensure_current: FederationAuthorityCheck =
         Arc::new(move || check_channel.current_authority().map(|_| ()));
     let forward_port = if snapshot.local_role == FederationRole::Central {
+        #[cfg(test)]
+        if let Some(prepare) = &io.prepare_forward {
+            prepare(snapshot)?
+        } else if let Some(reserved) = &io.forward_listener {
+            let mut socket = reserved.lock().unwrap();
+            if socket.is_none() {
+                *socket = Some(
+                    std::net::TcpListener::bind("127.0.0.1:0")
+                        .map_err(|_| federation_transport_unavailable())?,
+                );
+            }
+            socket
+                .as_ref()
+                .unwrap()
+                .local_addr()
+                .map_err(|_| federation_transport_unavailable())?
+                .port()
+        } else {
+            allocate_remote_forward_port()
+        }
+        #[cfg(not(test))]
         allocate_remote_forward_port()
     } else {
         snapshot.endpoint.satellite_reverse_forward_port
@@ -63,10 +85,11 @@ async fn federation_serve_peer(
             io: FederationOnboardingIo::local(directory),
         },
     ));
-    let server = tokio::spawn(serve_federation_listener(
+    let server = tokio::spawn(serve_federation_control_listener(
         listener,
         router,
         listener_stop_rx,
+        channel.clone(),
     ));
     peers
         .lock()

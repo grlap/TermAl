@@ -141,9 +141,7 @@ pub(super) fn accepted_probe(pair: &Pair) -> FederationProbeSession {
 async fn federation_onboarding_reconnect_can_verify_without_relaunching_old_accepted_probe() {
     let mut pair = Pair::new(federation_registry::central(), io()).await;
     let old = accepted_probe(&pair);
-    pair.lease.channel.invalidate();
-    pair.satellite_channel.invalidate();
-    pair.lease = pair.rpc.open_link().await.unwrap();
+    pair.reconnect().await;
     let report = pair.verify().await.unwrap();
     assert!(
         report.termal_complete(),

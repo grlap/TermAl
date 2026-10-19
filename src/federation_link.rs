@@ -1,6 +1,7 @@
 // Owns pair authentication and link-incarnation leases, not enrollment persistence.
 // New federation core alongside remote.rs; does not reuse executor-proxy authority.
 
+#[cfg(test)]
 const FEDERATION_CAPABILITY_HEADER: &str = "x-termal-pair-capability";
 const FEDERATION_INCARNATION_HEADER: &str = "x-termal-link-incarnation";
 const FEDERATION_AUTHORITY_HEADER: &str = "x-termal-peer-authority";
@@ -19,30 +20,15 @@ impl FederationPairCapability {
         }
         Ok(Self(Arc::new(secret)))
     }
-
-    fn matches(&self, supplied: &[u8]) -> bool {
-        let expected = Sha256::digest(self.0.as_bytes());
-        let actual = Sha256::digest(supplied);
-        expected
-            .iter()
-            .zip(actual.iter())
-            .fold(0_u8, |diff, (a, b)| diff | (a ^ b))
-            == 0
-    }
-
-    fn header_value(&self) -> Result<HeaderValue, ApiError> {
-        let mut value = HeaderValue::from_str(self.0.as_str())
-            .map_err(|_| ApiError::internal("invalid federation capability encoding"))?;
-        value.set_sensitive(true);
-        Ok(value)
-    }
 }
 
 #[derive(Default)]
 struct FederationLinkState {
     incarnation: Option<String>,
     recorded_incarnation: Option<String>,
-    challenge: Option<String>,
+    security: Option<Arc<FederationSecurityContext>>,
+    next_owner: u64,
+    installed_owner: u64,
 }
 
 #[derive(Clone)]
@@ -55,6 +41,9 @@ struct FederationChannel {
     state: Arc<Mutex<FederationLinkState>>,
     bound: FederationRpcBound,
     opening: Arc<tokio::sync::Mutex<()>>,
+    control_slots: Arc<tokio::sync::Semaphore>,
+    control_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    control: FederationControlSettings,
     // Controlled success fixtures share the fence's existing scripted clock.
     // This field cannot be configured by production settings or a request.
     #[cfg(test)]
@@ -77,6 +66,9 @@ impl FederationChannel {
             state: Arc::new(Mutex::new(FederationLinkState::default())),
             bound: FederationRpcBound::default(),
             opening: Arc::new(tokio::sync::Mutex::new(())),
+            control_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            control_tasks: Arc::default(),
+            control: FederationControlSettings::default(),
             #[cfg(test)]
             durability_clock: EngramBudgetClock::Real,
             #[cfg(test)]
@@ -86,51 +78,10 @@ impl FederationChannel {
         }
     }
 
-    fn challenge(&self) -> FederationHello {
-        let challenge = Uuid::new_v4().to_string();
-        self.state
-            .lock()
-            .expect("federation link mutex poisoned")
-            .challenge = Some(challenge.clone());
-        FederationHello {
-            protocol_version: FEDERATION_PROTOCOL_VERSION,
-            server_instance_id: self.server_instance_id.clone(),
-            challenge,
-            host_id: self.snapshot.local.host_id.clone(),
-            host_generation: self.snapshot.local.host_generation,
-            enrollment_generation: self.snapshot.enrollment_generation,
-        }
-    }
-
-    fn accept_link(&self, request: &FederationOpenLink) -> Result<FederationLinkLease, ApiError> {
-        if self.snapshot.local_role != FederationRole::Satellite
-            || request.protocol_version != FEDERATION_PROTOCOL_VERSION
-            || request.receiver_instance_id != self.server_instance_id
-            || request.central != self.snapshot.central
-            || request.enrollment_generation != self.snapshot.enrollment_generation
-            || Uuid::parse_str(&request.incarnation).is_err()
-        {
-            return Err(federation_stale_link());
-        }
-        let mut state = self.state.lock().expect("federation link mutex poisoned");
-        if state.challenge.as_deref() != Some(request.challenge.as_str()) {
-            return Err(federation_stale_link());
-        }
-        // Consume the one-use receiver challenge atomically with activation.
-        // A delayed open from a previous attempt cannot roll the link back.
-        self.retire_recorded(&mut state);
-        state.challenge = None;
-        state.incarnation = Some(request.incarnation.clone());
-        Ok(FederationLinkLease {
-            channel: self.clone(),
-            incarnation: request.incarnation.clone(),
-        })
-    }
-
+    #[cfg(test)]
     fn activate_pending(&self, incarnation: String) -> FederationLinkLease {
         let mut state = self.state.lock().expect("federation link mutex poisoned");
         self.retire_recorded(&mut state);
-        state.challenge = None;
         state.incarnation = Some(incarnation.clone());
         FederationLinkLease {
             channel: self.clone(),
@@ -152,7 +103,9 @@ impl FederationChannel {
         let mut state = self.state.lock().expect("federation link mutex poisoned");
         self.retire_recorded(&mut state);
         state.incarnation = None;
-        state.challenge = None;
+        if let Some(context) = state.security.take() {
+            context.retire();
+        }
     }
 
     fn invalidate_if_current(&self, lease: &FederationLinkLease) {
@@ -160,7 +113,9 @@ impl FederationChannel {
         if state.incarnation.as_deref() == Some(lease.incarnation.as_str()) {
             self.retire_recorded(&mut state);
             state.incarnation = None;
-            state.challenge = None;
+            if let Some(context) = state.security.take() {
+                context.retire();
+            }
         }
     }
 

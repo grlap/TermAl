@@ -1,42 +1,6 @@
 // Owns bounded central handshakes, health probes and exact SSH cleanup.
 // Does not change enrollment or retry application commands. Split from federation_peer.rs.
 
-async fn federation_establish_link(
-    client: &FederationRpcClient,
-    process: &mut dyn FederationSshChild,
-    stop: &mut tokio::sync::watch::Receiver<bool>,
-) -> Result<FederationLinkLease, ApiError> {
-    let startup = async {
-        let mut retry = FederationBackoff::default();
-        loop {
-            if process.child_exited()? {
-                return Err(federation_transport_unavailable());
-            }
-            match client.open_link().await {
-                Ok(lease) => return Ok(lease),
-                // A remote hold, incomplete bilateral enrollment, or busy
-                // handshake can settle without any local configuration change.
-                Err(error)
-                    if matches!(
-                        error.status,
-                        StatusCode::SERVICE_UNAVAILABLE
-                            | StatusCode::CONFLICT
-                            | StatusCode::FORBIDDEN
-                            | StatusCode::TOO_MANY_REQUESTS
-                            | StatusCode::LOCKED
-                    ) => {}
-                Err(error) => return Err(error),
-            }
-            tokio::time::sleep(retry.next_delay()).await;
-            retry.record_failure();
-        }
-    };
-    tokio::select! {
-        _ = federation_wait_stop(stop) => Err(federation_transport_unavailable()),
-        result = tokio::time::timeout(REMOTE_STARTUP_TIMEOUT, startup) => result.map_err(|_| federation_transport_unavailable())?,
-    }
-}
-
 async fn federation_central_monitor(
     snapshot: &FederationPeerSnapshot,
     client: &FederationRpcClient,
@@ -50,59 +14,71 @@ async fn federation_central_monitor(
 ) -> Result<(), ApiError> {
     let process_snapshot = snapshot.clone();
     let start = io.ssh.clone();
+    let started = tokio::time::Instant::now();
     let mut process = federation_os_operation(
         move || start(&process_snapshot, forward_port, &known_hosts),
         Some(stop),
         attempt.unresolved.clone(),
         io.operation_timeout,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        federation_attestation_error(
+            &client.channel,
+            None,
+            "startup",
+            "sshStartFailed",
+            error,
+            false,
+        )
+    })?;
     let outcome = async {
-        let mut lease = federation_establish_link(client, process.as_mut(), stop).await?;
-        loop {
+        let mut control = process.take_control_stream().map_err(|error| federation_attestation_error(
+            &client.channel, None, "startup", "controlStreamUnavailable", error, false))?;
+        let (context, guard) = tokio::select! {
+            _ = federation_wait_stop(stop) => return Ok(()),
+            result = federation_attest_central_started(&client.channel, &mut control, started) => result?,
+        };
+        let (control_stop, control_stop_rx) = tokio::sync::watch::channel(false);
+        let (ready, ready_rx) = tokio::sync::oneshot::channel();
+        let mut task = tokio::spawn(federation_control_central(client.channel.clone(), control, context, guard, control_stop_rx, ready));
+        let mut joined = false;
+        let outcome = async {
             tokio::select! {
                 _ = federation_wait_stop(stop) => return Ok(()),
-                _ = tokio::time::sleep(io.probe_interval) => {}
+                result = tokio::time::timeout(Duration::from_secs(5), ready_rx) => {
+                    result.map_err(|_| federation_transport_unavailable())?.map_err(|_| federation_transport_unavailable())?;
+                },
             }
-            if server.is_finished() || process.child_exited()? {
-                return Err(federation_transport_unavailable());
-            }
-            if client.channel.current_authority().is_err() {
-                continue;
-            }
-            let health = tokio::select! {
-                _ = federation_wait_stop(stop) => return Ok(()),
-                result = client.health(&lease) => result,
-            };
-            match health {
-                Ok(()) => retry.reset(),
-                // Admission pressure is not evidence that the transport died.
-                // Retain this lease without stamping success or resetting retry.
-                Err(error) if matches!(error.status,
-                    StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) => {}
-                Err(error) if error.status == StatusCode::CONFLICT => {
-                    if client.channel.current_authority().is_err() {
-                        continue;
-                    }
-                    // The local authority is current, so a peer-originated
-                    // stale link must not become a permanent parked worker.
-                    client.channel.invalidate_if_current(&lease);
-                    let delay = retry.next_delay();
-                    retry.record_failure();
-                    tokio::select! {
-                        _ = federation_wait_stop(stop) => return Ok(()),
-                        _ = tokio::time::sleep(delay) => {}
-                    }
-                    lease = federation_establish_link(client, process.as_mut(), stop).await?;
+            loop {
+                tokio::select! {
+                    _ = federation_wait_stop(stop) => return Ok(()),
+                    result = &mut task => {
+                        joined = true;
+                        return result.map_err(|_| federation_transport_unavailable())?;
+                    },
+                    _ = tokio::time::sleep(io.probe_interval) => {},
                 }
-                Err(error) => return Err(error),
+                if server.is_finished() || process.child_exited()? { return Err(federation_transport_unavailable()); }
+                if let Err(error) = client.channel.current_authority() {
+                    if error.status == StatusCode::LOCKED { continue; }
+                    return Err(error);
+                }
+                let lease = client.channel.current_lease()?;
+                match client.health(&lease).await {
+                    Ok(()) => retry.reset(),
+                    Err(error) if matches!(error.status, StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) => {},
+                    Err(error) => return Err(error),
+                }
             }
+        }.await;
+        control_stop.send_replace(true);
+        if !joined {
+            if let Err(error) = task.await { eprintln!("federation control task failed: {error}"); }
         }
-    }
-    .await;
+        outcome
+    }.await;
     client.channel.invalidate();
-    // Cleanup is given its own bound even when stop is already true. An
-    // unresolved owned child quarantines the peer rather than being replaced.
     if let Err(error) = federation_os_operation(
         move || process.shutdown(),
         None,
@@ -116,7 +92,6 @@ async fn federation_central_monitor(
     }
     outcome
 }
-
 async fn federation_satellite_monitor(
     client: &FederationRpcClient,
     stop: &mut tokio::sync::watch::Receiver<bool>,
@@ -142,14 +117,17 @@ async fn federation_satellite_monitor(
             };
             match outcome {
                 Ok(()) => retry.reset(),
-                Err(error) if matches!(error.status,
-                    StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) => {}
+                Err(error)
+                    if matches!(
+                        error.status,
+                        StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS
+                    ) => {}
                 Err(_) => {
                     if client.channel.current_authority().is_err() {
                         continue;
                     }
                     // Availability is withdrawn immediately, retaining the
-                    // listener so C can perform a fresh challenge handshake.
+                    // listener so C can establish a fresh owned control stream.
                     client.channel.invalidate_if_current(&lease);
                     retry.record_failure();
                 }

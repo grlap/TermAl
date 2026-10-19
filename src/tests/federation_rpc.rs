@@ -1,13 +1,15 @@
 // Owns delayed/misrouted reply tests for the real async federation client.
 // Does not use SSH or live host state. New transport tests, not a code split.
 
+use super::federation_control_fixture::{attest, authenticated_router, establish};
 use super::federation_link::{allowed, channel};
 use super::*;
 
 #[tokio::test]
 async fn federation_delayed_wire_reply_is_refused_after_reconnect() {
     let central = channel(FederationRole::Central, 'a');
-    let old = central.activate(Uuid::new_v4().to_string());
+    let (satellite, _proof) = establish(&central).await;
+    let old = central.current_lease().unwrap();
     let old_health = FederationHealth {
         protocol_version: 1,
         host_id: central.snapshot.peer.host_id.clone(),
@@ -28,10 +30,8 @@ async fn federation_delayed_wire_reply_is_refused_after_reconnect() {
             async move {
                 assert!(headers.contains_key(FEDERATION_AUTHORITY_HEADER));
                 assert!(headers.contains_key(FEDERATION_INCARNATION_HEADER));
-                assert_eq!(
-                    headers.get(FEDERATION_CAPABILITY_HEADER).unwrap(),
-                    "a".repeat(64).as_str()
-                );
+                assert!(!headers.contains_key(FEDERATION_CAPABILITY_HEADER));
+                assert!(headers.contains_key(FEDERATION_MAC_HEADER));
                 if let Some(entered) = entered.lock().unwrap().take() {
                     let _ = entered.send(());
                 }
@@ -40,6 +40,7 @@ async fn federation_delayed_wire_reply_is_refused_after_reconnect() {
             }
         }),
     );
+    let router = authenticated_router(satellite.clone(), router);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
@@ -56,11 +57,11 @@ async fn federation_delayed_wire_reply_is_refused_after_reconnect() {
         .unwrap()
         .unwrap();
     central.invalidate();
-    central.activate(Uuid::new_v4().to_string());
+    let _successor = attest(&central, &satellite).await;
     release.notify_one();
     assert_eq!(
         request.await.unwrap().unwrap_err().status,
-        StatusCode::CONFLICT
+        StatusCode::SERVICE_UNAVAILABLE
     );
     stop.send_replace(true);
     server.await.unwrap();
@@ -69,7 +70,8 @@ async fn federation_delayed_wire_reply_is_refused_after_reconnect() {
 #[tokio::test]
 async fn federation_redirect_does_not_forward_pair_credentials() {
     let central = channel(FederationRole::Central, 'a');
-    let lease = central.activate(Uuid::new_v4().to_string());
+    let (_satellite, _proof) = establish(&central).await;
+    let lease = central.current_lease().unwrap();
     let received = Arc::new(AtomicBool::new(false));
     let received_handler = received.clone();
     let health = FederationHealth {

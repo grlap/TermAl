@@ -13,8 +13,7 @@ struct FederationListenerState {
 struct FederationAuthenticatedPeer {
     // Selected exclusively by the dedicated listener, never by a request id.
     lease: Option<FederationLinkLease>,
-    // A mailbox blocking worker may outlive the HTTP response. Its clone owns
-    // the same admitted slot until storage work actually settles.
+    // A canceled mailbox handler retains its slot on the owned blocking job.
     mailbox_permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
@@ -27,14 +26,12 @@ fn federation_router(
         ensure_current,
     };
     Router::new()
-        .route("/federation/v1/hello", get(federation_hello))
-        .route("/federation/v1/link", post(federation_open_link))
         .route("/federation/v1/health", get(federation_health))
         .route("/federation/v1/mailbox/native-binding", post(serve_federation_native_binding))
         .merge(federation_onboarding_routes())
         .layer(DefaultBodyLimit::max(4096))
         .merge(federation_mailbox_routes())
-        .route_layer(axum::middleware::from_fn_with_state(
+        .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             federation_authenticate,
         ))
@@ -43,132 +40,14 @@ fn federation_router(
 
 async fn federation_authenticate(
     State(state): State<FederationListenerState>,
-    mut request: axum::extract::Request,
+    request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Result<Response, ApiError> {
-    let capabilities = request.headers().get_all(FEDERATION_CAPABILITY_HEADER);
-    let mut supplied = capabilities.iter();
-    let valid = supplied
-        .next()
-        .is_some_and(|value| state.channel.capability.matches(value.as_bytes()))
-        && supplied.next().is_none();
-    if !valid {
-        return Err(ApiError::from_status(
-            StatusCode::FORBIDDEN,
-            "federation pair authentication failed",
-        ));
+    if !request.uri().path().starts_with("/federation/v1/") {
+        return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    let mut authority_headers = request
-        .headers()
-        .get_all(FEDERATION_AUTHORITY_HEADER)
-        .iter();
-    let raw_authority = authority_headers
-        .next()
-        .filter(|value| value.as_bytes().len() <= 1024)
-        .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-    if authority_headers.next().is_some() {
-        return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
-    }
-    let authority: FederationRequestAuthority = serde_json::from_slice(raw_authority.as_bytes())
-        .map_err(|_| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-    authority.ensure_expected(&state.channel.snapshot)?;
-    (state.ensure_current)()?;
-    let permit = Arc::new(state.channel.bound.try_acquire()?);
-    let mailbox_request = request.method() == axum::http::Method::POST
-        && request.uri().path() == "/federation/v1/mailbox";
-    let mut incarnations = request
-        .headers()
-        .get_all(FEDERATION_INCARNATION_HEADER)
-        .iter();
-    let incarnation = incarnations
-        .next()
-        .and_then(|header| header.to_str().ok())
-        .ok_or_else(federation_stale_link)?;
-    if incarnations.next().is_some() || Uuid::parse_str(incarnation).is_err() {
-        return Err(federation_stale_link());
-    }
-    let request_incarnation = incarnation.to_owned();
-    let lease = if matches!(
-        request.uri().path(),
-        "/federation/v1/hello" | "/federation/v1/link"
-    ) {
-        None
-    } else {
-        Some(state.channel.lease(incarnation)?)
-    };
-    request
-        .extensions_mut()
-        .insert(FederationAuthenticatedPeer {
-            lease: lease.clone(),
-            mailbox_permit: mailbox_request.then(|| permit.clone()),
-        });
-    let response = match tokio::time::timeout(Duration::from_secs(5), next.run(request)).await {
-        Ok(response) => response,
-        Err(_) => {
-            if mailbox_request {
-                // Store contention is not a failed liveness handshake. The
-                // original operation may still commit: retry its exact key.
-                return Err(ApiError::from_status(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "central mailbox request deadline reached; outcome may be unknown; retry the original request and idempotency key",
-                ));
-            }
-            state.channel.invalidate_if_current(&FederationLinkLease {
-                channel: state.channel.clone(),
-                incarnation: request_incarnation,
-            });
-            let mut response = StatusCode::REQUEST_TIMEOUT.into_response();
-            response.headers_mut().insert(
-                axum::http::header::CONNECTION,
-                HeaderValue::from_static("close"),
-            );
-            return Ok(response);
-        }
-    };
-    (state.ensure_current)()?;
-    if let Some(lease) = lease {
-        lease.with_incarnation(|| Ok(()))?;
-    }
-    Ok(response)
+    federation_authenticate_message(state, request, next).await
 }
-
-async fn federation_hello(
-    State(state): State<FederationListenerState>,
-) -> Result<Json<FederationHello>, ApiError> {
-    (state.ensure_current)()?;
-    if state.channel.snapshot.local_role != FederationRole::Satellite {
-        return Err(federation_stale_link());
-    }
-    Ok(Json(state.channel.challenge()))
-}
-
-async fn federation_open_link(
-    State(state): State<FederationListenerState>,
-    headers: axum::http::HeaderMap,
-    Json(request): Json<FederationOpenLink>,
-) -> Result<Json<FederationHealth>, ApiError> {
-    let _opening = state.channel.opening.try_lock().map_err(|_| {
-        ApiError::from_status(
-            StatusCode::TOO_MANY_REQUESTS,
-            "federation link establishment already in progress",
-        )
-    })?;
-    (state.ensure_current)()?;
-    if headers
-        .get(FEDERATION_INCARNATION_HEADER)
-        .and_then(|header| header.to_str().ok())
-        != Some(request.incarnation.as_str())
-    {
-        return Err(federation_stale_link());
-    }
-    let lease = state.channel.accept_link(&request)?;
-    if let Err(error) = state.channel.record_connected(&lease).await {
-        state.channel.invalidate();
-        return Err(error);
-    }
-    federation_health_for(&lease).map(Json)
-}
-
 async fn federation_health(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
 ) -> Result<Json<FederationHealth>, ApiError> {

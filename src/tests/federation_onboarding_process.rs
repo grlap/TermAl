@@ -61,7 +61,32 @@ async fn federation_onboarding_two_process_fake_link_operator_verify() {
             rpc: rpc.clone(),
         }),
     );
-    rpc.open_link().await.unwrap();
+    let mut control: FederationControlIo = Box::new(
+        tokio::net::TcpStream::connect(("127.0.0.1", ready.port))
+            .await
+            .unwrap(),
+    );
+    let (context, guard) = tokio::time::timeout(
+        phase_sync::DEADLOCK_GUARD,
+        federation_attest_central(&channel, &mut control),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let (control_stop, control_rx) = tokio::sync::watch::channel(false);
+    let (control_ready, ready_rx) = tokio::sync::oneshot::channel();
+    let control_task = tokio::spawn(federation_control_central(
+        channel.clone(),
+        control,
+        context,
+        guard,
+        control_rx,
+        control_ready,
+    ));
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, ready_rx)
+        .await
+        .unwrap()
+        .unwrap();
     let response = app_router(app.clone())
         .oneshot(
             Request::builder()
@@ -93,6 +118,8 @@ async fn federation_onboarding_two_process_fake_link_operator_verify() {
             report.attempt_id
         );
     }
+    control_stop.send_replace(true);
+    control_task.await.unwrap().unwrap();
     tokio::task::spawn_blocking(move || child.finish())
         .await
         .unwrap();

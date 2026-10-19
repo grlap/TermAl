@@ -16,9 +16,11 @@ fn satellite_child() {
         ..base
     };
     let session = test_session_id(&app, Agent::Codex);
+    let control_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let native = {
         let inner = app.inner.lock().unwrap();
         NativeSession {
+            control_port: control_listener.local_addr().unwrap().port(),
             host: inner.federation.local.clone().unwrap(),
             session: session.clone(),
             creation: inner.sessions[inner.find_session_index(&session).unwrap()]
@@ -50,20 +52,11 @@ fn satellite_child() {
     let snapshot = app
         .federation_peer_snapshot(&config.central.host_id)
         .unwrap();
-    let peer = app
-        .federation_peer_connected(&snapshot, config.incarnation.clone())
-        .unwrap();
-    // Production records an accepted central link as Enrolled on the satellite.
-    // Verification and activation belong to the central's satellite record.
-    assert_eq!(peer.membership, FederationMembershipState::Enrolled);
-    app.install_federation_mailbox_binding(&peer, config.binding.clone(), &native.creation)
-        .unwrap();
     let channel = FederationChannel::for_app(
-        peer,
+        snapshot,
         FederationPairCapability::new("a".repeat(64)).unwrap(),
         app.clone(),
     );
-    channel.activate(config.incarnation);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -81,8 +74,22 @@ fn satellite_child() {
     };
     app.federation_peer_handles.lock().unwrap().insert(
         config.central.host_id.clone(),
-        Arc::new(FederationPeerHandle { channel, rpc }),
+        Arc::new(FederationPeerHandle {
+            channel: channel.clone(),
+            rpc,
+        }),
     );
+    let (control_stop, control_task) = runtime.block_on(async {
+        control_listener.set_nonblocking(true).unwrap();
+        let listener = TcpListener::from_std(control_listener).unwrap();
+        let router = federation_router(channel.clone(), federation_link::allowed());
+        let (stop, rx) = tokio::sync::watch::channel(false);
+        let channel = channel.clone();
+        let task = tokio::spawn(serve_federation_control_listener(
+            listener, router, rx, channel,
+        ));
+        (stop, task)
+    });
     let server_app = app.clone();
     let (stop, task, port) = runtime.block_on(async move {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -98,16 +105,22 @@ fn satellite_child() {
     });
     println!("M2_STARTED {port}");
     std::io::stdout().flush().unwrap();
+    let mut binding: Option<FederationMailboxBinding> = None;
     for line in lines {
         let command: Value = serde_json::from_str(&line.unwrap()).unwrap();
         let response = match command["command"].as_str().unwrap() {
             "inspectCentral" => {
-                let peer = app.federation_peer_snapshot(&config.central.host_id).unwrap();
+                let peer = app
+                    .federation_peer_snapshot(&config.central.host_id)
+                    .unwrap();
                 json!({"membership":peer.membership})
             }
             "revokeCentral" => {
-                let peer = app.federation_peer_snapshot(&config.central.host_id).unwrap();
-                app.transition_federation_peer(&peer, FederationMembershipState::Revoked).unwrap();
+                let peer = app
+                    .federation_peer_snapshot(&config.central.host_id)
+                    .unwrap();
+                app.transition_federation_peer(&peer, FederationMembershipState::Revoked)
+                    .unwrap();
                 json!({"revoked":true})
             }
             "inspectIntents" => {
@@ -120,6 +133,28 @@ fn satellite_child() {
                 json!({"pending":count,"bytes":bytes,
                     "total":connection.query_row("SELECT COUNT(*) FROM federation_mailbox_intents",
                         [],|row|row.get::<_,u64>(0)).unwrap()})
+            }
+            "bind" => {
+                let current = app
+                    .federation_peer_snapshot(&config.central.host_id)
+                    .unwrap();
+                // Production keeps the satellite's accepted central Enrolled.
+                // Verify/activate applies to the central's satellite record.
+                assert_eq!(current.membership, FederationMembershipState::Enrolled);
+                assert!(
+                    channel.current_lease().is_ok(),
+                    "real proof precedes placement binding"
+                );
+                let observed: FederationMailboxBinding =
+                    serde_json::from_value(command["binding"].clone()).unwrap();
+                app.install_federation_mailbox_binding(
+                    &current,
+                    observed.clone(),
+                    &native.creation,
+                )
+                .unwrap();
+                binding = Some(observed);
+                json!({"bound":true})
             }
             "inspect" => {
                 let directory = app.inner.lock().unwrap().federation.mailbox_directory.len();
@@ -141,7 +176,7 @@ fn satellite_child() {
                     .install_federation_mailbox_binding(
                         &app.federation_peer_snapshot(&config.central.host_id)
                             .unwrap(),
-                        config.binding.clone(),
+                        binding.as_ref().unwrap().clone(),
                         &native.creation,
                     )
                     .unwrap_err();
@@ -159,5 +194,7 @@ fn satellite_child() {
     }
     stop.send_replace(true);
     runtime.block_on(task).unwrap();
+    control_stop.send_replace(true);
+    runtime.block_on(control_task).unwrap().unwrap();
     app.federation_peer_handles.lock().unwrap().clear();
 }

@@ -1,7 +1,7 @@
 // Owns the two-process loopback proof of federation HTTP in both directions.
 // Does not launch real SSH, use live enrollment or open a live store. New tests.
 
-use super::federation_link::{allowed, channel};
+use super::federation_link::{allowed, peer_snapshot};
 use super::*;
 
 const CHILD_ROLE: &str = "TERMAL_TEST_FEDERATION_SATELLITE";
@@ -121,7 +121,15 @@ impl Drop for SatelliteProcess {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_two_process_loopback_bidirectional_and_reconnect() {
-    let central = channel(FederationRole::Central, 'a');
+    let (mut satellite, satellite_port) = tokio::task::spawn_blocking(SatelliteProcess::spawn)
+        .await
+        .unwrap();
+    let mut snapshot = peer_snapshot(FederationRole::Central);
+    snapshot.endpoint.satellite_federation_port = satellite_port;
+    let central = FederationChannel::new(
+        snapshot,
+        FederationPairCapability::new("a".repeat(64)).unwrap(),
+    );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let central_port = listener.local_addr().unwrap().port();
     let (server_stop, mut server_stop_rx) = tokio::sync::watch::channel(false);
@@ -134,9 +142,6 @@ async fn federation_two_process_loopback_bidirectional_and_reconnect() {
     });
     // The parent test binary is the central host; this exact libtest child is
     // the satellite host. Loopback sockets stand in for SSH's two forwards.
-    let (mut satellite, satellite_port) = tokio::task::spawn_blocking(SatelliteProcess::spawn)
-        .await
-        .unwrap();
     let wire = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -160,7 +165,7 @@ async fn federation_two_process_loopback_bidirectional_and_reconnect() {
                 .await
                 .unwrap()
                 .status(),
-            StatusCode::FORBIDDEN
+            StatusCode::CONFLICT
         );
         assert_eq!(
             wire.get(format!("http://127.0.0.1:{port}/federation/v1/health"))
@@ -169,10 +174,18 @@ async fn federation_two_process_loopback_bidirectional_and_reconnect() {
                 .await
                 .unwrap()
                 .status(),
-            StatusCode::FORBIDDEN
+            StatusCode::CONFLICT
         );
     }
     let rpc = FederationRpcClient::new(satellite_port, central.clone(), allowed()).unwrap();
+    let mut control: FederationControlIo = Box::new(
+        tokio::net::TcpStream::connect(("127.0.0.1", satellite_port))
+            .await
+            .unwrap(),
+    );
+    let (_, _old_guard) = federation_attest_central(&central, &mut control)
+        .await
+        .unwrap();
     let old = rpc.open_link().await.unwrap();
     rpc.health(&old).await.unwrap();
     let command = format!("reverse {central_port}");
@@ -192,7 +205,16 @@ async fn federation_two_process_loopback_bidirectional_and_reconnect() {
     .unwrap();
     satellite = next_satellite;
     assert_eq!(result, "held");
+    drop(control);
     central.invalidate();
+    let mut control: FederationControlIo = Box::new(
+        tokio::net::TcpStream::connect(("127.0.0.1", satellite_port))
+            .await
+            .unwrap(),
+    );
+    let (_, _new_guard) = federation_attest_central(&central, &mut control)
+        .await
+        .unwrap();
     let current = rpc.open_link().await.unwrap();
     assert_ne!(old.incarnation, current.incarnation);
     assert!(rpc.health(&old).await.is_err());
@@ -225,17 +247,22 @@ async fn federation_satellite_child() {
     if std::env::var(CHILD_ROLE).as_deref() != Ok("satellite") {
         return;
     }
-    let satellite = channel(FederationRole::Satellite, 'a');
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
+    let mut snapshot = peer_snapshot(FederationRole::Satellite);
+    snapshot.endpoint.satellite_federation_port = port;
+    let satellite = FederationChannel::new(
+        snapshot,
+        FederationPairCapability::new("a".repeat(64)).unwrap(),
+    );
+    let (stop, stop_rx) = tokio::sync::watch::channel(false);
     let router = federation_router(satellite.clone(), allowed());
-    let server = tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(async move { federation_wait_stop(&mut stop_rx).await })
-            .await
-            .unwrap();
-    });
+    let server = tokio::spawn(serve_federation_control_listener(
+        listener,
+        router,
+        stop_rx,
+        satellite.clone(),
+    ));
     println!("FDR_READY {port}");
     let mut held = None;
     loop {
@@ -280,5 +307,5 @@ async fn federation_satellite_child() {
     }
     satellite.invalidate();
     stop.send_replace(true);
-    server.await.unwrap();
+    server.await.unwrap().unwrap();
 }

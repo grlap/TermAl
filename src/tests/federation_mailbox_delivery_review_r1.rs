@@ -264,7 +264,7 @@ fn federation_delivery_review_r1_satellite_lookup_yields_before_shared_sqlite_mu
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_delivery_review_r1_satellite_prepare_api_preserves_qualified_identity_boundary() {
-    use super::federation_mailbox_process::{Configuration, Satellite};
+    use super::federation_mailbox_process::Satellite;
     let central = federation_mailboxes::central_store();
     // Leave session-1 unbound so the remote native id does not make the bare
     // central target ambiguous: this must reject even a UNIQUE native match.
@@ -273,35 +273,21 @@ async fn federation_delivery_review_r1_satellite_prepare_api_preserves_qualified
     federation_mailboxes::local_participant(&central, &target.session_id);
     let stale = format!("domain-session-{}", Uuid::new_v4());
     federation_mailboxes::local_participant(&central, &stale);
-    let (mut satellite, native) = tokio::task::spawn_blocking(Satellite::spawn).await.unwrap();
-    let mut record = federation_registry::peer(48001);
-    record.identity = native.host.clone();
-    let peer = federation_registry::active(&central, record.clone());
-    let placement = central.reserve_federation_placement(
-        &peer, "resolver-satellite".to_owned(), native.session.clone(), 0, 0,
-    ).unwrap();
-    let binding = FederationMailboxBinding { central: peer.local.clone(),
-        identity: placement.identity.clone(), placement_generation: placement.placement_generation };
-    let channel = FederationChannel::for_app(peer.clone(),
-        FederationPairCapability::new("a".repeat(64)).unwrap(), central.clone());
-    channel.activate(placement.link_incarnation.clone());
-    let check = channel.clone();
-    let router = federation_router(channel, Arc::new(move || check.current_authority().map(|_| ())));
+    let (satellite, native) = tokio::task::spawn_blocking(Satellite::spawn).await.unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    let (record, channel) = federation_mailbox_native_link::channel(&central, &native, port);
+    let check = channel.clone();
+    let router = federation_router(channel.clone(), Arc::new(move || check.current_authority().map(|_| ())));
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let server = tokio::spawn(async move {
         axum::serve(listener, router).with_graceful_shutdown(async move {
             federation_wait_stop(&mut stopped).await
         }).await.unwrap();
     });
-    let config = Configuration { central: peer.local, record, binding,
-        incarnation: placement.link_incarnation, port };
-    let (next, satellite_port) = tokio::task::spawn_blocking(move || {
-        let port = satellite.configure(&config);
-        (satellite, port)
-    }).await.unwrap();
-    let satellite = next;
+    let (satellite, satellite_port, control) = federation_mailbox_native_link::bind(
+        &central, &channel, satellite, &native, record, port,
+    ).await;
     let client = reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(10)).build().unwrap();
     let url = format!("http://127.0.0.1:{satellite_port}/api/sessions/{}/mailbox-intents", native.session);
@@ -322,6 +308,7 @@ async fn federation_delivery_review_r1_satellite_prepare_api_preserves_qualified
     tokio::task::spawn_blocking(move || satellite.finish()).await.unwrap();
     stop.send_replace(true);
     server.await.unwrap();
+    control.finish().await;
 }
 
 #[tokio::test]

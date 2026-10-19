@@ -3,9 +3,22 @@
 
 struct FederationSshProcess {
     child: Option<Child>,
+    input: Option<std::process::ChildStdin>,
+    output: Option<std::process::ChildStdout>,
 }
 
 impl FederationSshProcess {
+    fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
+        let input = self
+            .input
+            .take()
+            .ok_or_else(federation_transport_unavailable)?;
+        let output = self
+            .output
+            .take()
+            .ok_or_else(federation_transport_unavailable)?;
+        federation_stdio_control(input, output)
+    }
     fn child_exited(&mut self) -> Result<bool, ApiError> {
         match self.child.as_mut() {
             Some(child) => child
@@ -80,13 +93,19 @@ fn start_federation_ssh(
     let mut command = Command::new("ssh");
     command
         .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null());
     #[cfg(windows)]
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|_| federation_transport_unavailable())?;
-    Ok(FederationSshProcess { child: Some(child) })
+    let input = child.stdin.take();
+    let output = child.stdout.take();
+    Ok(FederationSshProcess {
+        child: Some(child),
+        input,
+        output,
+    })
 }

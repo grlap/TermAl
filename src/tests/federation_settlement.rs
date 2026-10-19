@@ -5,15 +5,15 @@ use super::*;
 struct ReleaseSettlement(Arc<(Mutex<bool>, std::sync::Condvar)>);
 impl Drop for ReleaseSettlement {
     fn drop(&mut self) {
-        *self.0 .0.lock().unwrap() = true;
-        self.0 .1.notify_all();
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_connect_cancelled_settlement_keeps_worker_material_and_retry() {
     let mut fixture = Fixture::new().await;
-    // Make this the satellite so the production HTTP handler's own deadline
+    // Make this the satellite so the production control handler's own deadline
     // cancels the opening caller, without stopping the per-peer worker.
     let mut record = fixture.app.inner.lock().unwrap().federation.peers[&fixture.id].clone();
     record.endpoint.satellite_federation_port = record.endpoint.central_federation_port;
@@ -36,7 +36,6 @@ async fn federation_connect_cancelled_settlement_keeps_worker_material_and_retry
         remote,
         FederationPairCapability::new("a".repeat(64)).unwrap(),
     );
-    let client = FederationRpcClient::new(local_port, central, allowed()).unwrap();
 
     let read_count = Arc::new(AtomicUsize::new(0));
     let reads = read_count.clone();
@@ -80,7 +79,15 @@ async fn federation_connect_cancelled_settlement_keeps_worker_material_and_retry
     })
     .await
     .unwrap();
-    let opening = tokio::spawn(async move { client.open_link().await });
+    let opening = tokio::spawn(async move {
+        let stream = tokio::net::TcpStream::connect(("127.0.0.1", local_port))
+            .await
+            .unwrap();
+        let mut control: FederationControlIo = Box::new(stream);
+        federation_attest_central(&central, &mut control)
+            .await
+            .map(|_| ())
+    });
     tokio::time::timeout(phase_sync::DEADLOCK_GUARD, published_rx)
         .await
         .unwrap()
@@ -102,7 +109,11 @@ async fn federation_connect_cancelled_settlement_keeps_worker_material_and_retry
         .unwrap()
         .unwrap();
     assert!(cancelled.is_err());
-    assert!(original.opening.try_lock().is_ok());
+    assert!(
+        original.opening.try_lock().is_err(),
+        "owned completion retains the installation mutex after caller cancellation"
+    );
+    assert!(original.basis.is_settling());
     let before = cycles.load(Ordering::SeqCst);
     tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
         while cycles.load(Ordering::SeqCst) < before + 3 {
@@ -128,6 +139,8 @@ async fn federation_connect_cancelled_settlement_keeps_worker_material_and_retry
     .await
     .unwrap();
     fixture.finish(runtime).await;
-    assert!(same_worker && retained_material,
-        "cancelled caller must not reset worker material/backoff while its exact completion is settling");
+    assert!(
+        same_worker && retained_material,
+        "cancelled caller must not reset worker material/backoff while its exact completion is settling"
+    );
 }
