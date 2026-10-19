@@ -85,11 +85,14 @@
 // api.rs can now stay focused on axum HTTP route handlers + the
 // `impl AppState` block.
 
-/// In-process-only classifier metadata for `ApiError`.
+/// In-process classifier metadata for `ApiError`.
 ///
-/// This enum is intentionally not serialized in HTTP error responses. Remote
-/// proxy decoding reconstructs an `ApiError` from status plus `{ error }`, so
-/// any caller that needs typed recovery must attach the kind locally.
+/// This enum is not serialized in HTTP error responses, with one exception:
+/// the local federation settings route (`federation_settings_refusal`) adds
+/// the stable code of its own federation kinds beside `error`. Remote proxy
+/// decoding reconstructs an `ApiError` from status plus `{ error }` (any such
+/// code is lost), so any caller that needs typed recovery must attach the kind
+/// locally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ApiErrorKind {
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -111,6 +114,30 @@ enum ApiErrorKind {
     /// A fresh evaluator's first brief was not acknowledged as durable, so its
     /// delegation was retired before any turn and the request may be repeated.
     AcceptanceEvaluationFirstBriefUnacknowledged,
+    /// Federation operator settings refusals. The settings route alone puts
+    /// their stable code beside `error` (`federation_operator_code`).
+    FederationExpectedVersionRequired,
+    FederationVersionConflict,
+    FederationCentralStale,
+    FederationCentralMismatch,
+    FederationInvalidBinding,
+    FederationBoundSessions,
+}
+
+impl ApiErrorKind {
+    /// The stable code the federation settings route reports for one of its
+    /// typed refusals; None for every other kind.
+    fn federation_operator_code(self) -> Option<&'static str> {
+        Some(match self {
+            Self::FederationExpectedVersionRequired => "federation_expected_version_required",
+            Self::FederationVersionConflict => "federation_version_conflict",
+            Self::FederationCentralStale => "federation_central_stale",
+            Self::FederationCentralMismatch => "federation_central_mismatch",
+            Self::FederationInvalidBinding => "federation_invalid_binding",
+            Self::FederationBoundSessions => "federation_bound_sessions",
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -118,7 +145,8 @@ struct ApiError {
     message: String,
     status: StatusCode,
     // In-process classifier metadata. `IntoResponse` intentionally omits this
-    // field, and remote proxy JSON decoding reconstructs `ApiError` with
+    // field (only the federation settings route maps its own kinds to a
+    // `code`), and remote proxy JSON decoding reconstructs `ApiError` with
     // `kind: None`; callers that need typed recovery must tag errors locally.
     kind: Option<ApiErrorKind>,
 }

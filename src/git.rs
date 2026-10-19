@@ -1034,7 +1034,13 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::FederationSshCleanupUnknown
             | ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown
-            | ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged,
+            | ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged
+            | ApiErrorKind::FederationExpectedVersionRequired
+            | ApiErrorKind::FederationVersionConflict
+            | ApiErrorKind::FederationCentralStale
+            | ApiErrorKind::FederationCentralMismatch
+            | ApiErrorKind::FederationInvalidBinding
+            | ApiErrorKind::FederationBoundSessions,
         ) => None,
         None if error.status.is_server_error() => {
             Some("Rendered Markdown is unavailable due to a read error.".to_owned())

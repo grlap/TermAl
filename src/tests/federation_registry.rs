@@ -387,3 +387,6 @@ mod roles;
 
 #[path = "federation_operator.rs"]
 mod operator;
+
+#[path = "federation_satellite_operator.rs"]
+mod satellite_operator;

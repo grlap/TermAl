@@ -192,8 +192,9 @@ decentralized, and its tasks meet through the shared Git remote.
 ## Local operator configuration
 
 `GET /api/federation` reports the current `enabled`, `role`, `local` and
-`central` values, `trackingDurability`, continuity/quarantine status, and the
-peer registry with declared and allocated capacity. Host identities use
+`central` values, the domain `version`, `trackingDurability`,
+continuity/quarantine status, the peer registry with declared and allocated
+capacity, and, on a satellite, a `satellite` block (below). Host identities use
 `{hostId, hostGeneration}`. Reading does not enable federation, create peers,
 release reservations or change the store. This is a local operator API, not a
 domain transport or satellite enrollment endpoint.
@@ -224,8 +225,60 @@ Disable through the same POST with `enabled: false`, retaining `role:
 invalidates links without deleting peers, existing local sessions, mailbox
 history or unresolved reservations. Returning to `role: "standalone"` requires
 `enabled: false, central: null`; M1 refuses role replacement while unresolved
-placements remain. Satellite configuration and enrollment are separate
-workflows and are refused by this setter.
+placements remain.
+
+### Configuring a satellite
+
+To make this host a satellite of a named central, read the central's own
+`GET /api/federation` and copy its `local` identity, read this host's
+`version`, and send to this host:
+
+```json
+{
+  "enabled": true,
+  "role": "satellite",
+  "central": {"hostId": "<central's local.hostId>", "hostGeneration": 3},
+  "expectedVersion": 12
+}
+```
+
+The same setter and domain path apply: the central identity is validated (a
+canonical host id that is not this host's, a generation of at least 1), the
+change is fenced on `expectedVersion` (required for any change from or to the
+satellite role, and honoured whenever it is given, so a central client of M1b
+keeps working without it), and the exact content is confirmed through the
+state writer before success. Verify `role: "satellite"`, the bound `central`,
+the advanced `version` and `trackingDurability: "durable"`. The binding
+persists across restart and never mints a new local identity.
+
+Disable with `enabled: false`, keeping `role: "satellite"` and the same
+`central`: it holds domain admission and invalidates the link, and keeps the
+central binding, its peer record, local sessions, mailbox history and domain
+mailbox bindings. Returning to standalone is a separate request,
+`{"enabled": false, "role": "standalone", "central": null, "expectedVersion":
+…}`. Local sessions and mailboxes without a domain binding behave the same in
+every state.
+
+The `satellite` block of the read view shows what an operator checks before
+the central runs [O1](satellite-onboarding.md): the bound `central`;
+`centralPeer` with `enrolled`, `membership`, `recordGeneration`,
+`transportGeneration`, `verificationCurrent`, `lastObserved` and
+`linkConnected`, which is true only while federation is enabled, durable,
+neither quarantined nor continuity-lost, and holds the current link to that
+central (never a past observation); and
+`boundSessions`, the local sessions holding a domain mailbox binding. It shows
+credential references only, never key material.
+
+A typed refusal carries a stable `code` beside `error`:
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| 400 | `federation_expected_version_required` | A satellite change names no `expectedVersion`. |
+| 409 | `federation_version_conflict` | The settings changed since the version read. The version also moves on every enrollment, connect and probe, so read it immediately before posting. |
+| 400 | `federation_invalid_binding` | The role and central do not fit, for example a central that is this host. |
+| 409 | `federation_central_stale` | An older generation of a central this host already knows: the bound one, or a retained peer record of it, revoked included. |
+| 409 | `federation_central_mismatch` | Another central, or a new generation of it, while a peer is enrolled under the old binding: revoke it first. |
+| 409 | `federation_bound_sessions` | On a satellite, local sessions hold a domain mailbox binding to the current central: the role or central cannot be replaced until those sessions are deleted or retired. No unbind workflow exists yet. |
 
 Malformed JSON, unknown fields and missing required fields return 422;
 well-formed invalid settings return 400. Existing authority/placement conflicts

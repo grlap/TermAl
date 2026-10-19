@@ -3,7 +3,7 @@
 // federation_registry.rs, sharing its isolated domain and peer fixtures.
 use super::*;
 
-async fn operator_request(
+pub(super) async fn operator_request(
     state: &AppState,
     method: &str,
     path: &str,
@@ -30,11 +30,11 @@ async fn operator_request(
     serde_json::from_slice(&bytes).expect("operator response should be JSON")
 }
 
-async fn operator_view(state: &AppState) -> Value {
+pub(super) async fn operator_view(state: &AppState) -> Value {
     operator_request(state, "GET", "/api/federation", None, StatusCode::OK).await
 }
 
-async fn operator_configure(state: &AppState, body: Value, expected: StatusCode) -> Value {
+pub(super) async fn operator_configure(state: &AppState, body: Value, expected: StatusCode) -> Value {
     operator_request(
         state,
         "POST",
@@ -49,13 +49,13 @@ fn central_settings(local: &Value, enabled: bool) -> Value {
     json!({"enabled": enabled, "role": "central", "central": local})
 }
 
-fn current_image(state: &AppState) -> Value {
+pub(super) fn current_image(state: &AppState) -> Value {
     federation_persist_image(&PersistedState::metadata_from_inner(
         &state.inner.lock().unwrap(),
     ))
 }
 
-struct OperatorPersistShutdown<'a>(&'a AppState);
+pub(super) struct OperatorPersistShutdown<'a>(pub(super) &'a AppState);
 
 impl Drop for OperatorPersistShutdown<'_> {
     fn drop(&mut self) {

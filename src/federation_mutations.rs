@@ -1,6 +1,167 @@
 // Owns content-fenced persistence, configuration and explicit continuity reset. Does not own credentials, transport or runtime execution.
 // Split from federation_registry.rs while implementing the new domain foundation.
 
+/// Who is configuring federation: the local operator route, whose satellite
+/// changes must name the version they were read at, or a domain caller.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FederationSettingsFence {
+    Operator,
+    Domain,
+}
+
+/// Facts about this host that a federation mutation may guard on, read under
+/// the same state lock as the candidate it installs.
+struct FederationMutationContext {
+    /// The central of each local session's domain mailbox binding.
+    bound_centrals: Vec<FederationHostIdentity>,
+}
+
+impl FederationMutationContext {
+    fn locked(inner: &StateInner) -> Self {
+        Self {
+            bound_centrals: inner
+                .sessions
+                .iter()
+                .filter_map(|record| record.federation_mailbox_binding.as_ref())
+                .map(|binding| binding.central.clone())
+                .collect(),
+        }
+    }
+
+    fn bound_to(&self, central: &FederationHostIdentity) -> usize {
+        self.bound_centrals.iter().filter(|bound| *bound == central).count()
+    }
+}
+
+/// Applies `settings` to the candidate domain under the mutation's lock, in
+/// order: the version fence; the role and central validation; a stale central
+/// (older than the bound one or a retained peer record of it); a satellite's
+/// sessions bound to its current central; the participant directory; peers
+/// enrolled under another central; unresolved placements. A change
+/// invalidates every link and verification.
+fn apply_federation_settings(
+    domain: &mut FederationState,
+    current: &mut FederationSettings,
+    context: &FederationMutationContext,
+    settings: FederationSettings,
+    expected_version: Option<u64>,
+    fence: FederationSettingsFence,
+) -> Result<(), ApiError> {
+    let satellite_change =
+        current.role == FederationRole::Satellite || settings.role == FederationRole::Satellite;
+    match expected_version {
+        None if fence == FederationSettingsFence::Operator && satellite_change => {
+            return Err(ApiError::bad_request(
+                "a satellite configuration names the expectedVersion it was read at",
+            )
+            .with_kind(ApiErrorKind::FederationExpectedVersionRequired));
+        }
+        Some(version) if version != domain.version => {
+            return Err(ApiError::conflict(format!(
+                "federation settings changed since version {version} (now {}); read them again",
+                domain.version
+            ))
+            .with_kind(ApiErrorKind::FederationVersionConflict));
+        }
+        _ => {}
+    }
+    let local = domain
+        .local
+        .as_ref()
+        .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+    settings
+        .validate(local)
+        .map_err(|error| error.with_kind(ApiErrorKind::FederationInvalidBinding))?;
+    let replaces = current.role != settings.role || current.central != settings.central;
+    if let (FederationRole::Satellite, Some(next)) = (settings.role, settings.central.as_ref()) {
+        // Stale against the highest generation of that central this host
+        // knows: the current binding, or any retained peer record of it,
+        // revoked included.
+        let known = [
+            current
+                .central
+                .as_ref()
+                .filter(|bound| current.role == FederationRole::Satellite && bound.host_id == next.host_id)
+                .map(|bound| bound.host_generation),
+            domain
+                .peers
+                .get(&next.host_id)
+                .map(|peer| peer.identity.host_generation),
+        ]
+        .into_iter()
+        .flatten()
+        .max();
+        if let Some(known) = known.filter(|known| next.host_generation < *known) {
+            return Err(ApiError::conflict(format!(
+                "central identity generation {} is older than generation {known} this host already knows",
+                next.host_generation
+            ))
+            .with_kind(ApiErrorKind::FederationCentralStale));
+        }
+    }
+    if let (FederationRole::Satellite, Some(bound)) = (current.role, current.central.as_ref()) {
+        let sessions = context.bound_to(bound);
+        if replaces && sessions > 0 {
+            return Err(ApiError::conflict(format!(
+                "{sessions} local session(s) hold a domain mailbox binding to the current central; \
+                 delete or retire them before replacing the role or the central (no unbind \
+                 workflow exists yet)"
+            ))
+            .with_kind(ApiErrorKind::FederationBoundSessions));
+        }
+    }
+    if !domain.mailbox_directory.is_empty() && replaces {
+        return Err(ApiError::conflict(
+            "a participant directory requires explicit authority migration before role replacement",
+        ));
+    }
+    if settings.role == FederationRole::Satellite
+        && domain.peers.values().any(|peer| {
+            peer.membership != FederationMembershipState::Revoked
+                && settings.central.as_ref() != Some(&peer.identity)
+        })
+    {
+        return Err(
+            ApiError::conflict("revoke incompatible peers before changing the central binding")
+                .with_kind(ApiErrorKind::FederationCentralMismatch),
+        );
+    }
+    if replaces
+        && domain
+            .placements
+            .values()
+            .any(|row| row.state != FederationPlacementState::Completed)
+    {
+        return Err(ApiError::conflict(
+            "unresolved placements prevent federation role replacement",
+        ));
+    }
+    if *current != settings {
+        domain.links.clear();
+        for peer in domain.peers.values_mut() {
+            peer.record_generation = federation_next_generation(peer.record_generation)?;
+            peer.transport_generation = federation_next_generation(peer.transport_generation)?;
+            peer.verification = None;
+            if peer.membership != FederationMembershipState::Revoked {
+                peer.membership = FederationMembershipState::Enrolled;
+            }
+        }
+    }
+    *current = settings;
+    Ok(())
+}
+
+/// Local sessions holding a domain mailbox binding to `central`.
+fn federation_bound_session_count(inner: &StateInner, central: &FederationHostIdentity) -> usize {
+    inner
+        .sessions
+        .iter()
+        .filter_map(|record| record.federation_mailbox_binding.as_ref())
+        .filter(|binding| &binding.central == central)
+        .count()
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
     /// Mutation visibility is conservative until this exact content is durable.
@@ -35,15 +196,38 @@ impl AppState {
         on_install: impl FnOnce(&T),
         clock: EngramBudgetClock,
     ) -> Result<T, ApiError> {
+        self.mutate_federation_core(
+            reset_continuity,
+            |domain, settings, _| update(domain, settings),
+            on_install,
+            clock,
+        )
+    }
+
+    // The one federation mutation path. `update` also sees facts about this
+    // host read under the same state lock as the candidate, so a guard on
+    // them cannot race a concurrent change.
+    fn mutate_federation_core<T>(
+        &self,
+        reset_continuity: bool,
+        update: impl FnOnce(
+            &mut FederationState,
+            &mut FederationSettings,
+            &FederationMutationContext,
+        ) -> Result<T, ApiError>,
+        on_install: impl FnOnce(&T),
+        clock: EngramBudgetClock,
+    ) -> Result<T, ApiError> {
         let (value, image, dispatch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if !inner.federation_durable || (inner.federation_continuity_lost && !reset_continuity)
             {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }
+            let context = FederationMutationContext::locked(&inner);
             let mut candidate = inner.federation.clone();
             let mut settings = inner.preferences.federation.clone();
-            let value = update(&mut candidate, &mut settings)?;
+            let value = update(&mut candidate, &mut settings, &context)?;
             settings.validate(
                 candidate
                     .local
@@ -138,52 +322,27 @@ impl AppState {
     }
 
     fn configure_federation(&self, settings: FederationSettings) -> Result<(), ApiError> {
-        self.mutate_federation(|domain, current| {
-            let local = domain
-                .local
-                .as_ref()
-                .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-            settings.validate(local)?;
-            if !domain.mailbox_directory.is_empty()
-                && (current.role != settings.role || current.central != settings.central)
-            {
-                return Err(ApiError::conflict("a participant directory requires explicit authority migration before role replacement"));
-            }
-            if settings.role == FederationRole::Satellite
-                && domain.peers.values().any(|peer| {
-                    peer.membership != FederationMembershipState::Revoked
-                        && settings.central.as_ref() != Some(&peer.identity)
-                })
-            {
-                return Err(ApiError::conflict(
-                    "revoke incompatible peers before changing the central binding",
-                ));
-            }
-            if (current.role != settings.role || current.central != settings.central)
-                && domain
-                    .placements
-                    .values()
-                    .any(|row| row.state != FederationPlacementState::Completed)
-            {
-                return Err(ApiError::conflict(
-                    "unresolved placements prevent federation role replacement",
-                ));
-            }
-            if *current != settings {
-                domain.links.clear();
-                for peer in domain.peers.values_mut() {
-                    peer.record_generation = federation_next_generation(peer.record_generation)?;
-                    peer.transport_generation =
-                        federation_next_generation(peer.transport_generation)?;
-                    peer.verification = None;
-                    if peer.membership != FederationMembershipState::Revoked {
-                        peer.membership = FederationMembershipState::Enrolled;
-                    }
-                }
-            }
-            *current = settings;
-            Ok(())
-        })
+        self.configure_federation_fenced(settings, None, FederationSettingsFence::Domain)
+    }
+
+    /// The domain configuration path, as the operator route and domain
+    /// callers share it. For the operator, a change from or to the satellite
+    /// role is fenced on the domain version the operator read; any change
+    /// that names a version is fenced on it.
+    fn configure_federation_fenced(
+        &self,
+        settings: FederationSettings,
+        expected_version: Option<u64>,
+        fence: FederationSettingsFence,
+    ) -> Result<(), ApiError> {
+        self.mutate_federation_core(
+            false,
+            |domain, current, context| {
+                apply_federation_settings(domain, current, context, settings, expected_version, fence)
+            },
+            |_| {},
+            EngramBudgetClock::Real,
+        )
     }
 
     /// Explicit local continuity reset, never an automatic clone takeover.

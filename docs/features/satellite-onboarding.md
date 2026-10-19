@@ -18,6 +18,24 @@ binary hash, OS, architecture, toolchain and capacity limits. Configure the
 satellite with the matching central host identity. Enrollment creates an
 Enrolled entry. Existing executor-proxy sessions are not adopted.
 
+The order, each step on the named host:
+
+1. On the central: read `GET /api/federation` and copy its `local` identity.
+2. On the satellite: configure it as a satellite of that central through
+   `POST /api/federation/settings` with its current `expectedVersion`
+   ([configuring a satellite](central-control-plane.md#configuring-a-satellite)).
+3. On the satellite: enroll the central as its peer with
+   `POST /api/federation/peers/{central}/enroll`; that record stays Enrolled
+   on the satellite.
+4. On the central: enroll the satellite (below).
+5. Let the normal L1 connector establish the current authenticated link; no
+   link record is written by hand.
+6. On the satellite: read `GET /api/federation` and check its `satellite`
+   block: the bound central, the central peer enrolled, and `linkConnected`.
+7. On the central: request verification (below).
+
+Settings and enrollment are not themselves proof of a link.
+
 ## Explicit verification
 
 The operator requests verification on the central TermAl host for that entry.
