@@ -42,6 +42,9 @@ async fn get_or_create_federation_mailbox(
     State(state): State<AppState>,
     Json(request): Json<CreateFederationMailboxRequest>,
 ) -> Result<Json<MailboxSummary>, ApiError> {
+    if !matches!(mailbox_reference_handle(&request.target_session_id), Ok(None)) {
+        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+    }
     state
         .federation_mailbox_operation(
             &session,
@@ -59,6 +62,13 @@ impl AppState {
         session: &str,
         operation: FederationMailboxOperation,
     ) -> Result<T, ApiError> {
+        if let FederationMailboxOperation::Send { target, .. }
+            | FederationMailboxOperation::GetOrCreate { target } = &operation
+        {
+            if !matches!(mailbox_reference_handle(target), Ok(None)) {
+                return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+            }
+        }
         if let FederationMailboxOperation::Send { .. } = &operation {
             let delivery = self.prepare_federation_delivery(session, operation).await?;
             let value = self.send_prepared_federation_delivery(session, delivery).await?;

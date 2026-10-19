@@ -542,6 +542,8 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .route("/api/sessions/{id}/messages", post(send_message))
         .route("/api/sessions/{id}/mailboxes", get(list_mailboxes))
+        .route("/api/sessions/{id}/mailbox-references", get(list_federation_mailbox_references).post(provision_federation_mailbox_reference))
+        .route("/api/sessions/{id}/mailbox-references/{reference}/resolve", get(resolve_federation_mailbox_reference))
         .route("/api/sessions/{id}/mailboxes/protocol", get(negotiate_federation_mailboxes))
         .route("/api/sessions/{id}/mailboxes/domain", post(join_federation_mailboxes))
         .route("/api/sessions/{id}/mailboxes/participants", get(list_federation_mailbox_participants))
@@ -812,6 +814,9 @@ include!("federation_mailbox_namespace.rs");
 include!("federation_mailbox_authority.rs");
 include!("federation_mailbox_operations.rs");
 include!("federation_mailbox_routes.rs");
+include!("federation_native_binding_proof.rs");
+include!("federation_mailbox_references.rs");
+include!("federation_mailbox_reference_routes.rs");
 include!("federation_mailbox_store.rs");
 include!("federation_mailbox_rpc.rs");
 include!("federation_mailbox_bridge.rs");
@@ -835,6 +840,7 @@ include!("federation_operator.rs");
 include!("federation_placement.rs");
 include!("persist_federation.rs");
 include!("persist_federation_image.rs");
+include!("persist_federation_reference_publication.rs");
 include!("remote.rs");
 include!("remote_ssh.rs");
 include!("federation_ssh.rs");

@@ -1,6 +1,27 @@
-// Owns domain participant discovery for the agent MCP/CLI facade.
+// Owns reserved-reference classification and domain participant discovery.
 // Does not cache directory content, authorize a caller, or serve offline reads.
 // Split from delegation_mcp.rs for the new central directory protocol.
+
+// ONE namespace boundary for every name -> principal resolver. Case and omitted
+// hyphens are folded only to recognize reserved spellings, never to authorize
+// them. Only the exact canonical UUID spelling may reach typed resolution.
+fn mailbox_reference_handle(reference: &str) -> Result<Option<String>> {
+    let reserved = reference.split(':').any(|part| {
+        let folded: String = part.trim().chars().filter(|ch| *ch != '-')
+            .map(|ch| ch.to_ascii_lowercase()).collect();
+        folded.starts_with("mailboxreference")
+    });
+    if !reserved {
+        return Ok(None);
+    }
+    let canonical = reference.strip_prefix("mailbox-reference-")
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .map(|id| format!("mailbox-reference-{id}"));
+    match canonical {
+        Some(canonical) if canonical == reference => Ok(Some(canonical)),
+        _ => bail!("reserved mailbox reference spelling; use its exact canonical handle or a principal id"),
+    }
+}
 
 impl TermalDelegationMcpBridge {
     fn domain_mailbox_participants(&self, state: &Value) -> Result<Option<Vec<Value>>> {
@@ -34,6 +55,9 @@ fn resolve_domain_mailbox_reference(
     reference: &str,
     local_session: &str,
 ) -> Result<String> {
+    if !matches!(mailbox_reference_handle(reference), Ok(None)) {
+        bail!("mailbox reference requires explicit typed resolution");
+    }
     if let Some(exact) = rows
         .iter()
         .find(|row| row["sessionId"].as_str() == Some(reference))

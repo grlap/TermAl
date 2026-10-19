@@ -155,6 +155,7 @@ mod federation_mailbox_delivery_crash;
 mod federation_delivery_schema;
 mod federation_executor_journal;
 mod federation_executor_store;
+mod federation_native_binding_proof;
 mod federation_ssh;
 mod federation_runtime;
 mod federation_rpc;

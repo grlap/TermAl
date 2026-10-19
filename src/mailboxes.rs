@@ -467,6 +467,9 @@ impl AppState {
         sender_session_id: &str,
         target_session_id: &str,
     ) -> std::result::Result<(String, String), ApiError> {
+        if !matches!(mailbox_reference_handle(target_session_id), Ok(None)) {
+            return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+        }
         let inner = self.inner.lock().expect("state mutex poisoned");
         let sender_index = inner
             .find_session_index(sender_session_id)
@@ -1048,6 +1051,9 @@ async fn send_mailbox_message(
     Json(request): Json<SendMailboxApiRequest>,
 ) -> Result<(StatusCode, Json<MailboxAppendReceipt>), ApiError> {
     let request = request.message;
+    if !matches!(mailbox_reference_handle(&request.target_session_id), Ok(None)) {
+        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+    }
     if state.federation_mailbox_actor_if_bound(&sender_session_id)?.is_some() {
         if request.class.as_deref().is_some_and(|class| class != "routine") {
             return Err(ApiError::bad_request("durable mailboxes currently support only class `routine`"));

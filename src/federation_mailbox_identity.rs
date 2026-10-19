@@ -95,6 +95,11 @@ fn resolve_federation_mailbox_participant_locked(
     inner: &StateInner,
     reference: &str,
 ) -> Result<FederationMailboxParticipant, ApiError> {
+    // Typed reference handles are resolved only by the reference facade, never
+    // reinterpreted as display aliases (which are case-insensitive).
+    if !matches!(mailbox_reference_handle(reference), Ok(None)) {
+        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+    }
     if let Some(exact) = inner.federation.mailbox_directory.get(reference) {
         return current_federation_mailbox_participant_locked(inner, exact)
             .ok_or_else(|| ApiError::not_found("qualified mailbox participant not found"));

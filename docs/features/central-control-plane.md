@@ -37,6 +37,12 @@ qualified ids and refuses ambiguous aliases; creation identity, placement
 generation and central authority epoch fence mailbox membership and receipts.
 An old binding cannot attach to a recreated native session.
 
+An already-bound satellite root can also be addressed through an explicit
+[federation mailbox reference](federation-mailbox-references.md). These fresh,
+caller-owned handles are mailbox-only locators, not executor proxies, native
+participants or permission to install a binding. Ordinary agent sends resolve
+them with fresh proof before using the canonical mailbox API.
+
 Binding never moves existing local mail. An explicit central-native join or
 satellite binding install refuses a session with any standalone mailbox history
 (`409`, with the count and mailbox ids); use a fresh session instead. A refused

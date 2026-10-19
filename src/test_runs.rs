@@ -307,6 +307,9 @@ fn test_run_rescan_due(
 /// without case, as the mailbox resolves `--to`.
 fn test_run_resolve_session(inner: &StateInner, reference: &str) -> Option<String> {
     let reference = reference.trim();
+    // A mailbox-only locator cannot become an owner/notification principal by
+    // matching a session's display name.
+    if !matches!(mailbox_reference_handle(reference), Ok(None)) { return None; }
     if let Some(index) = inner.find_session_index(reference) {
         return (!inner.sessions[index].hidden).then(|| reference.to_owned());
     }

@@ -156,6 +156,7 @@ fn bind_loaded_federation(
         .validate(&local)
         .map_err(|_| anyhow!("invalid persisted federation configuration"))?;
     inner.federation.validate()?;
+    restore_federation_reference_publications(inner, connection)?;
     if inner.federation_continuity_lost && inner.federation.admission_quarantine.is_none() {
         persist_detected_federation_quarantine(inner, connection, path)?;
     }

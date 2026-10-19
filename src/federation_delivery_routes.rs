@@ -168,6 +168,9 @@ impl AppState {
                 "delivery preparation requires a send",
             ));
         };
+        if !matches!(mailbox_reference_handle(&target), Ok(None)) {
+            return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+        }
         let actor = self
             .federation_mailbox_actor(session)?
             .ok_or_else(|| ApiError::conflict("session has no explicit central mailbox binding"))?;
@@ -439,6 +442,9 @@ fn resolve_federation_delivery_target(
     rows: &[FederationMailboxParticipant],
     reference: &str,
 ) -> Result<FederationMailboxParticipant, ApiError> {
+    if !matches!(mailbox_reference_handle(reference), Ok(None)) {
+        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+    }
     if let Some(exact) = rows.iter().find(|row| row.session_id == reference) {
         exact.validate()?;
         return Ok(exact.clone());

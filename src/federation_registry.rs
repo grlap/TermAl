@@ -146,6 +146,9 @@ impl FederationPeerRecord {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationState {
+    /// Mailbox-only locators, never native actors or executor routes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    mailbox_references: BTreeMap<String, FederationMailboxReference>,
     /// C's participant directory is authority metadata, never mailbox history.
     /// Satellites keep this empty; their per-session binding has routing only.
     #[serde(default)]
@@ -184,6 +187,12 @@ fn federation_next_generation(generation: u64) -> Result<u64, ApiError> {
 
 impl FederationState {
     fn validate(&self) -> Result<()> {
+        for (id, reference) in &self.mailbox_references {
+            reference.validate().map_err(|_| anyhow!("invalid persisted mailbox reference"))?;
+            if id != &reference.id {
+                return Err(anyhow!("invalid persisted mailbox reference key"));
+            }
+        }
         for (key, participant) in &self.mailbox_directory {
             participant.validate().map_err(|_| anyhow!("invalid persisted mailbox participant"))?;
             if key != &participant.session_id {

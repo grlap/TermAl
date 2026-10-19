@@ -1555,7 +1555,9 @@ impl TermalDelegationMcpBridge {
 
     /// Resolves a peer session reference (an id or a name) to a VALIDATED target id.
     ///
-    /// A value prefixed `session-` is a TermAl id; anything else is a session NAME matched
+    /// `mailbox-reference-` is reserved for typed federation mailbox handles and
+    /// resolves with fresh proof before sending the canonical participant id.
+    /// Other values prefixed `session-` are TermAl ids; remaining values are names matched
     /// case-insensitively via /api/state, across ALL projects (peer sessions frequently live
     /// in different projects). This is why a bare name — and the external Codex thread uuid
     /// shown in the UI — 404 without it. Ambiguous names and no match both return a guiding
@@ -1569,6 +1571,20 @@ impl TermalDelegationMcpBridge {
     /// delegation-child, hidden, remote-proxy, and nonexistent targets. Names still require
     /// the live root-session inventory for case-insensitive and ambiguity-aware resolution.
     fn resolve_session_reference(&self, reference: &str) -> Result<String> {
+        if let Some(handle) = mailbox_reference_handle(reference)? {
+            let value = self.get_json(&format!(
+                "/api/sessions/{}/mailbox-references/{handle}/resolve", self.serving_session_id,
+            ))?;
+            let participant = value["participantId"].as_str()
+                .filter(|id| id.starts_with("domain-session-"))
+                .ok_or_else(|| anyhow!("invalid mailbox reference resolution"))?;
+            if value["id"].as_str() != Some(handle.as_str())
+                || value["kind"] != "federationMailboxReference"
+            {
+                bail!("mailbox reference resolution identity mismatch");
+            }
+            return Ok(participant.to_owned());
+        }
         if reference.starts_with("domain-session-") {
             return Ok(reference.to_owned());
         }
@@ -2662,7 +2678,7 @@ fn mcp_tools_list_result() -> Value {
                     "type": "object",
                     "required": ["sessionId", "message", "idempotencyKey"],
                     "properties": {
-                        "sessionId": { "type": "string" },
+                        "sessionId": { "type": "string", "description": "TermAl id, case-insensitive session name, or typed federation mailbox-reference handle. The mailbox-reference- prefix is reserved for handles, which require fresh resolution and never grant executor access." },
                         "message": { "type": "string" },
                         "idempotencyKey": { "type": "string", "maxLength": 256 },
                         "topic": { "type": "string" },

@@ -15,6 +15,7 @@ enum FederationRpcRoute {
     Health(FederationLinkLease),
     Onboarding(FederationLinkLease, FederationOnboardingRpc),
     Mailbox(FederationLinkLease, FederationMailboxRequest),
+    NativeBinding(FederationLinkLease, FederationNativeBindingRequest),
 }
 
 impl FederationRpcClient {
@@ -49,11 +50,13 @@ impl FederationRpcClient {
             FederationRpcRoute::Health(_) => "/federation/v1/health",
             FederationRpcRoute::Onboarding(_, probe) => probe.path(),
             FederationRpcRoute::Mailbox(_,_) => "/federation/v1/mailbox",
+            FederationRpcRoute::NativeBinding(_, _) => "/federation/v1/mailbox/native-binding",
         };
         let url = format!("http://{}{path}", self.address);
         let mut request = match &route {
             FederationRpcRoute::OpenLink(body) => self.client.post(url).json(body),
             FederationRpcRoute::Onboarding(_, probe) => probe.request(&self.client, url),
+            FederationRpcRoute::NativeBinding(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::Mailbox(_,body) => {
                 if serde_json::to_vec(body).map_err(|_|ApiError::bad_request("invalid mailbox request"))?.len() > FEDERATION_MAILBOX_REQUEST_BYTES {
                     return Err(ApiError::from_status(StatusCode::PAYLOAD_TOO_LARGE,"central mailbox request exceeds negotiated size"));
@@ -82,8 +85,10 @@ impl FederationRpcClient {
             }
             FederationRpcRoute::Health(_) | FederationRpcRoute::Onboarding(_, _) => {}
             FederationRpcRoute::Mailbox(_,_) => {}
+            FederationRpcRoute::NativeBinding(_, _) => {}
         }
-        if let FederationRpcRoute::Health(lease) | FederationRpcRoute::Onboarding(lease, _) = &route {
+        if let FederationRpcRoute::Health(lease) | FederationRpcRoute::Onboarding(lease, _)
+            | FederationRpcRoute::NativeBinding(lease, _) = &route {
             lease.with_incarnation(|| Ok(()))?;
             request = request.header(FEDERATION_INCARNATION_HEADER, &lease.incarnation);
         }
@@ -139,7 +144,8 @@ impl FederationRpcClient {
         if let Some(lease) = route.mailbox_lease() {
             lease.with_incarnation(||Ok(())).map_err(|error| route.response_failure(error))?;
         }
-        if let FederationRpcRoute::Health(lease) | FederationRpcRoute::Onboarding(lease, _) = &route {
+        if let FederationRpcRoute::Health(lease) | FederationRpcRoute::Onboarding(lease, _)
+            | FederationRpcRoute::NativeBinding(lease, _) = &route {
             lease.with_incarnation(|| Ok(()))?;
         }
         Ok(decoded)

@@ -61,6 +61,9 @@ struct FederationChannel {
     durability_clock: EngramBudgetClock,
     #[cfg(test)]
     connection_published: Arc<dyn Fn() + Send + Sync>,
+    // Lost local commit acknowledgment fault, only after a REAL marker commit.
+    #[cfg(test)]
+    reference_publication_ack_lost: Arc<AtomicBool>,
 }
 
 impl FederationChannel {
@@ -78,6 +81,8 @@ impl FederationChannel {
             durability_clock: EngramBudgetClock::Real,
             #[cfg(test)]
             connection_published: Arc::new(|| {}),
+            #[cfg(test)]
+            reference_publication_ack_lost: Arc::new(AtomicBool::new(false)),
         }
     }
 
