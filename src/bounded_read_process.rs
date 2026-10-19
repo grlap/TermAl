@@ -30,6 +30,42 @@ fn run_bounded_read_command(
     }
 }
 
+// Fixed host-owned Git batch input only; no caller-controlled executable,
+// script, redirection, or scratch file. Pipe writers run beside pipe readers
+// and are released by the same deadline/tree cleanup as the ordinary read.
+fn run_bounded_read_input(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    input: Vec<u8>,
+) -> Result<std::process::Output> {
+    #[cfg(windows)]
+    {
+        command.piped_stdin();
+        run_bounded_read_windows_with_setup(command, deadline, output_limit, move |process| {
+            let mut stdin = process.take_stdin().context("batch stdin missing")?;
+            std::thread::Builder::new()
+                .name("review-batch-input".to_owned())
+                .spawn(move || {
+                    let _ = stdin.write_all(&input);
+                })
+                .context("batch input thread unavailable")?;
+            Ok(())
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        run_bounded_read_process_input(
+            command,
+            deadline,
+            output_limit,
+            false,
+            |_| Ok(()),
+            Some(input),
+        )
+    }
+}
+
 // Same private setup boundary as the legacy transport: tests can pin every
 // fixture identity and force leader exit before the supervisor observes it.
 #[cfg(windows)]
@@ -131,6 +167,25 @@ fn run_bounded_read_process_with_setup(
     own_tree: bool,
     before_observe: impl FnOnce(&Arc<SharedChild>) -> Result<()>,
 ) -> Result<std::process::Output> {
+    run_bounded_read_process_input(
+        command,
+        deadline,
+        output_limit,
+        own_tree,
+        before_observe,
+        None,
+    )
+}
+
+#[cfg(any(not(windows), test))]
+fn run_bounded_read_process_input(
+    command: &mut Command,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    own_tree: bool,
+    before_observe: impl FnOnce(&Arc<SharedChild>) -> Result<()>,
+    input: Option<Vec<u8>>,
+) -> Result<std::process::Output> {
     #[cfg(windows)]
     eprintln!(
         "windows launch> unavailable: legacy Command has opaque launch settings; using legacy job ownership"
@@ -148,7 +203,11 @@ fn run_bounded_read_process_with_setup(
         command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
     }
     command
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // new(Child) calls try_wait and can reap an already-exited leader. spawn
@@ -180,6 +239,15 @@ fn run_bounded_read_process_with_setup(
             tree.resume_after_attach(&process)?;
         }
         before_observe(&process)?;
+        if let Some(input) = input {
+            let mut stdin = process.take_stdin().context("batch stdin missing")?;
+            std::thread::Builder::new()
+                .name("review-batch-input".to_owned())
+                .spawn(move || {
+                    let _ = stdin.write_all(&input);
+                })
+                .context("batch input thread unavailable")?;
+        }
         loop {
             if read_child_has_exited(&process)? {
                 break;

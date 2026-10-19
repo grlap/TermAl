@@ -324,6 +324,9 @@ fn kimi_read_only_permission_decision(
         TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::ReviewFreeze)
         }
+        TERMAL_REVIEW_IDENTITY_QUALIFIED_TOOL_NAME => {
+            Some(DelegationControlPlaneCapability::ReviewIdentity)
+        }
         _ => None,
     };
     if title != "Bash" && capability.is_none() {
@@ -363,6 +366,13 @@ fn kimi_read_only_permission_decision(
             DelegationControlPlaneCapability::ReviewFreeze => {
                 serde_json::from_value::<ReviewFreezeRequest>(args.clone())
                     .is_ok_and(|request| request.validate().is_ok())
+            }
+            DelegationControlPlaneCapability::ReviewIdentity => {
+                serde_json::from_value::<ReviewIdentityRequest>(args.clone()).is_ok_and(|request| {
+                    request.operation == "check"
+                        && request.root.is_none()
+                        && request.validate().is_ok()
+                })
             }
             DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => false,
         };

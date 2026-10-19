@@ -2630,6 +2630,9 @@ fn delegation_control_plane_capability_allowed_locked(
         DelegationControlPlaneCapability::ReviewFreeze => {
             review_freeze_authority_locked(inner, child_session_id).is_ok()
         }
+        DelegationControlPlaneCapability::ReviewIdentity => {
+            review_freeze_authority_locked(inner, child_session_id).is_ok()
+        }
         DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => {
             acceptance_evaluation_submit_authority_locked(inner, child_session_id).is_ok()
         }
@@ -5232,6 +5235,8 @@ fn delegation_state_summary_from_record(record: &DelegationRecord) -> Delegation
         mode: record.mode,
         review_result_required: record.mode == DelegationMode::Reviewer,
         review_freeze_allowed: record.mode == DelegationMode::Reviewer
+            && matches!(record.write_policy, DelegationWritePolicy::ReadOnly),
+        review_identity_allowed: record.mode == DelegationMode::Reviewer
             && matches!(record.write_policy, DelegationWritePolicy::ReadOnly),
         acceptance_evaluation_allowed: record.mode == DelegationMode::Evaluator
             && matches!(record.write_policy, DelegationWritePolicy::ReadOnly)

@@ -112,6 +112,9 @@ async fn run() -> Result<()> {
         Mode::ReviewFreeze(args) => {
             tokio::task::spawn_blocking(move || review_freeze_mode(&args)).await?
         }
+        Mode::ReviewIdentity(args) => {
+            tokio::task::spawn_blocking(move || review_identity_mode(&args)).await?
+        }
         Mode::DelegationMcp {
             parent_session_id,
             base_url,
@@ -561,6 +564,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(verify_delegation_review_freeze),
         )
         .route(
+            "/api/sessions/{id}/review-identity",
+            post(review_identity_api),
+        )
+        .route(
             "/api/sessions/{id}/acceptance-evaluations",
             post(request_session_acceptance_evaluation),
         )
@@ -732,6 +739,7 @@ fn run_repl(agent: Agent) -> Result<()> {
 enum Mode {
     Server,
     ReviewFreeze(Vec<String>),
+    ReviewIdentity(Vec<String>),
     Repl {
         agent: Agent,
     },
@@ -754,6 +762,7 @@ impl Mode {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
             Some("review-freeze-check") => Ok(Self::ReviewFreeze(args)),
+            Some("review-identity") => Ok(Self::ReviewIdentity(args)),
             Some("sessions") | Some("mailbox") => {
                 Ok(Self::CoordinationCli(parse_coordination_cli_args(args)?))
             }
@@ -924,6 +933,12 @@ include!("engram_named_root_test_transport.rs");
 include!("bounded_read_process.rs");
 include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");
+include!("review_identity.rs");
+include!("review_identity_git.rs");
+include!("review_identity_inventory.rs");
+include!("review_identity_discovery.rs");
+include!("review_identity_fs.rs");
+include!("review_identity_api.rs");
 include!("acceptance_evaluation.rs");
 include!("acceptance_evaluation_attempts.rs");
 include!("acceptance_evaluation_refusal.rs");

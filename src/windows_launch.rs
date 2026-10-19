@@ -35,6 +35,7 @@ pub(crate) struct LaunchSpec {
     env: Vec<(OsString, Option<OsString>)>,
     cwd: Option<PathBuf>,
     flags: u32,
+    piped_stdin: bool,
 }
 
 impl LaunchSpec {
@@ -45,6 +46,7 @@ impl LaunchSpec {
             env: Vec::new(),
             cwd: None,
             flags: 0,
+            piped_stdin: false,
         }
     }
     pub(crate) fn arg(&mut self, arg: impl AsRef<OsStr>) -> &mut Self {
@@ -83,6 +85,10 @@ impl LaunchSpec {
     }
     pub(crate) fn creation_flags(&mut self, flags: u32) -> &mut Self {
         self.flags = flags;
+        self
+    }
+    pub(crate) fn piped_stdin(&mut self) -> &mut Self {
+        self.piped_stdin = true;
         self
     }
     pub(crate) fn get_program(&self) -> &OsStr {
@@ -158,10 +164,14 @@ pub(crate) struct WindowsChild {
     id: u32,
     stdout: Mutex<Option<PipeReader>>,
     stderr: Mutex<Option<PipeReader>>,
+    stdin: Mutex<Option<File>>,
     #[cfg(test)]
     deny_root_termination: std::sync::atomic::AtomicBool,
 }
 impl WindowsChild {
+    pub(crate) fn take_stdin(&self) -> Option<File> {
+        self.stdin.lock().unwrap().take()
+    }
     pub(crate) fn id(&self) -> u32 {
         self.id
     }
@@ -687,7 +697,7 @@ fn prepare_with_hook(
         lpSecurityDescriptor: null_mut(),
         bInheritHandle: 0,
     };
-    let stdin = owned(unsafe {
+    let null_stdin = owned(unsafe {
         CreateFileW(
             wide(OsStr::new("NUL"))?.as_ptr(),
             GENERIC_READ,
@@ -698,6 +708,12 @@ fn prepare_with_hook(
             null_mut(),
         )
     })?;
+    let (stdin, stdin_write) = if spec.piped_stdin {
+        let (read, write) = pipe(&security)?;
+        (OwnedHandle::from(read.0), Some(File::from(write)))
+    } else {
+        (null_stdin, None)
+    };
     let (stdout, stdout_write) = pipe(&security)?;
     let (stderr, stderr_write) = pipe(&security)?;
     let handles = [
@@ -854,6 +870,7 @@ fn prepare_with_hook(
         id: information.dwProcessId,
         stdout: Mutex::new(Some(stdout)),
         stderr: Mutex::new(Some(stderr)),
+        stdin: Mutex::new(stdin_write),
         #[cfg(test)]
         deny_root_termination: std::sync::atomic::AtomicBool::new(false),
     });

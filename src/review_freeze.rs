@@ -56,6 +56,10 @@ struct ReviewFreezeGit {
 
 impl ReviewFreezeGit {
     fn new(cwd: &FsPath) -> Result<Self> {
+        Self::new_with_deadline(cwd,None)
+    }
+
+    fn new_with_deadline(cwd: &FsPath, deadline: Option<std::time::Instant>) -> Result<Self> {
         let root = fs::canonicalize(cwd)?;
         // Never allow Windows' current-directory executable search, a relative
         // PATH entry, or a git shim supplied by the reviewed repository.
@@ -68,7 +72,7 @@ impl ReviewFreezeGit {
         let git = Self {
             root,
             binary,
-            deadline: std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
+            deadline: deadline.unwrap_or_else(||std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT),
         };
         let top = git.run(&["rev-parse", "--show-toplevel"], false)?;
         if fs::canonicalize(String::from_utf8(top)?.trim())? != git.root {

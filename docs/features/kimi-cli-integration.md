@@ -297,12 +297,19 @@ returns, and `allow_always` is never chosen.
   - the command passes the bash read-only checker that also gates Claude
     reviewers.
 - **TermAl result tools.**
-  `mcp__termal-delegation__termal_submit_review_result` and
-  `mcp__termal-delegation__termal_review_freeze_check` are approved once if
+  `mcp__termal-delegation__termal_submit_review_result`,
+  `mcp__termal-delegation__termal_review_freeze_check` and
+  `mcp__termal-delegation__termal_review_identity` are approved once if
   and only if:
   - the summary names the tool;
   - the arguments are a valid request for it;
   - the delegation holds that capability.
+
+  Review identity accepts only a validated `check` request with an independent
+  expected fingerprint and platform profile; a child cannot request `capture`
+  or supply a root. This describes the host's permission decision, not a live
+  Kimi execution witness. End-to-end passage through Kimi's runtime permission
+  gate remains separately unverified.
 
   Any other name is rejected, including a foreign alias and the
   acceptance-evaluation tool.
