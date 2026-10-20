@@ -53,6 +53,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
+  "scripts/test-launcher-git-path.test.mjs",
   "scripts/test-temp-root.test.mjs",
   "scripts/vitest-resource-preflight.test.mjs",
 ]);
@@ -377,6 +378,33 @@ async function sha256(path) {
   return hash.digest("hex");
 }
 
+// Keep artifacts in this worktree's administrative directory, including for
+// linked worktrees. Validate Git's one-line reply before creating any files;
+// older Git can echo an unsupported option while still exiting successfully.
+function gitRunDirectory(root, env) {
+  const git = spawnSync(
+    "git",
+    ["rev-parse", "--absolute-git-dir"],
+    { cwd: root, env, encoding: "utf8", windowsHide: true },
+  );
+  if (git.error || git.status !== 0) {
+    throw new Error(`cannot locate Git run directory: ${git.error?.message ?? git.stderr}`);
+  }
+  // Remove only the line terminator; spaces can belong to the directory name.
+  const directory = typeof git.stdout === "string" ? git.stdout.replace(/\r?\n$/u, "") : "";
+  if (!directory || !isAbsolute(directory) || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(directory)) {
+    throw new Error("cannot locate Git run directory: Git must return one nonempty absolute directory path");
+  }
+  let canonicalDirectory;
+  try {
+    canonicalDirectory = realpathSync.native(directory);
+    if (!statSync(canonicalDirectory).isDirectory()) throw new Error("not a directory");
+  } catch {
+    throw new Error("cannot locate Git run directory: Git administrative directory is unavailable or inaccessible");
+  }
+  return join(canonicalDirectory, "review-runs");
+}
+
 export async function createRun({
   root = repository,
   stages,
@@ -404,16 +432,9 @@ export async function createRun({
     validateRegistrationContext(env);
     throw error;
   }
-  const git = spawnSync(
-    "git",
-    ["rev-parse", "--path-format=absolute", "--git-path", "review-runs"],
-    { cwd: normalizedRoot, env: gitEnv, encoding: "utf8", windowsHide: true },
-  );
-  if (git.error || git.status !== 0) {
-    throw new Error(`cannot locate Git run directory: ${git.error?.message ?? git.stderr}`);
-  }
+  const runDirectory = gitRunDirectory(normalizedRoot, gitEnv);
   const runId = `test-${randomUUID()}`;
-  const runDir = join(git.stdout.trim(), runId);
+  const runDir = join(runDirectory, runId);
   mkdirSync(runDir, { recursive: true });
   const request = {
     runId,

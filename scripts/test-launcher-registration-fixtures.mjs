@@ -47,7 +47,7 @@ function barrier() {
   return { ready, release };
 }
 
-async function registrationHost(callback, {
+export async function registrationHost(callback, {
   status = 201, registered = true, autoAcknowledge = false,
   acknowledgement, rawAcknowledgement, queryStatus = 200, queryTransform,
   loseFirstReply = false, loseAllReplies = false,

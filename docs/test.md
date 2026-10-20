@@ -71,6 +71,32 @@ Vitest use their JavaScript entrypoints rather than `.cmd` shims. All commands,
 working directories and required files are preflighted, and a missing
 prerequisite leaves every stage explicitly unrun.
 
+### Git prerequisite and remote runners
+
+The launcher's minimum Git capability for locating run artifacts is
+`git rev-parse --absolute-git-dir`, already documented in
+[Git 2.13.7](https://git-scm.com/docs/git-rev-parse/2.13.7).
+It does not require Git 2.31's `--path-format` option or impose a numeric
+version gate. This capability requirement does not establish compatibility
+with every older Git version for every launcher stage.
+
+Git must return exactly one nonempty absolute path to an existing directory.
+The launcher canonicalizes that directory and appends `review-runs` in Node.
+For a linked worktree this is its own administrative Git directory, rather
+than the common Git directory. Empty, relative, multiline, option-echo or
+control-character output is refused with `cannot locate Git run directory`
+before any run directory is created or registered.
+
+On a remote runner, check Git from the actual agent process's environment
+and repository working directory. An interactive or SSH shell can select a
+different executable through `PATH`. These Node commands use the same Git
+lookup as the launcher; check both exits and the absolute directory reply:
+
+```bash
+node -e "const r=require('node:child_process').spawnSync('git',['--version'],{stdio:'inherit'}); if(r.error) console.error(r.error.message); process.exit(r.status ?? 1)"
+node -e "const r=require('node:child_process').spawnSync('git',['rev-parse','--absolute-git-dir'],{stdio:'inherit'}); if(r.error) console.error(r.error.message); process.exit(r.status ?? 1)"
+```
+
 ### Disk space and worktree build-output retention
 
 After registration, before Cargo bootstrap or any stage, the launcher checks
@@ -390,7 +416,7 @@ Paths are normalized lexically, not canonicalized through filesystem aliases;
 product and run directory components must not be symlinks or junctions.
 
 The review-integrity helper tests run on Linux, macOS, and Windows in CI: the
-same five maintained suites as the full gate's `fingerprint-tests` stage
+same maintained suites as the full gate's `fingerprint-tests` stage
 (`helperTestFiles` in `scripts/test-launcher.mjs`), which a launcher test keeps
 in step with the workflow.
 
