@@ -335,13 +335,22 @@ fn finish_read_process_tree(
         let _ = tree;
         // Do not use helpers that spawn a wait thread: this worker alone must
         // keep the leader unreaped through group termination.
-        let pgid = terminal_process_group_id(process.id(), "bounded read")?;
-        if pgid <= 0 {
-            bail!("bounded read process group must be positive");
-        }
+        let reap_state = if *reaped {
+            BoundedReadReapState::Reaped
+        } else {
+            BoundedReadReapState::Unreaped
+        };
+        let admission = terminal_process_group_id(process.id(), "bounded read").and_then(|pgid| {
+            anyhow::ensure!(pgid > 0, "bounded read process group must be positive");
+            Ok(pgid)
+        });
+        let pgid = admit_bounded_read_group(process.id(), admission, |detail| {
+            retain_unresolved_bounded_read(process.clone(), reap_state, detail);
+        })?;
         finish_bounded_read_group(&mut UnixBoundedReadGroup {
             process,
             reaped,
+            reap_state,
             pgid,
             probe_deadline: std::time::Instant::now() + Duration::from_millis(250),
         })

@@ -2,6 +2,38 @@
 // Does not exercise live hosts or grant authority. Split from bounded_read_process tests.
 use super::*;
 
+#[test]
+fn bounded_read_cleanup_admission_failure_retains_before_any_group_operation() {
+    for cause in [
+        "process id cannot fit in pid_t",
+        "process group must be positive",
+    ] {
+        let mut retained = Vec::new();
+        let mut group_started = false;
+        let admission: Result<i32> = Err(anyhow!(cause));
+        let result = admit_bounded_read_group(4242, admission, |detail| retained.push(detail))
+            .map(|_| group_started = true);
+
+        let error = result.unwrap_err();
+        assert!(!group_started, "invalid group must never reach signal or wait");
+        assert_eq!(retained.len(), 1);
+        assert!(retained[0].contains("pid=4242 reason=admission"));
+        assert!(retained[0].contains("probe_attempted=false"));
+        assert!(retained[0].contains(cause));
+        assert_eq!(error.root_cause().to_string(), cause);
+        assert_eq!(error.to_string(), retained[0]);
+    }
+}
+
+#[test]
+fn bounded_read_cleanup_admission_success_does_not_retain() {
+    let group = admit_bounded_read_group(4242, Ok(4242), |_| {
+        panic!("valid admission must not retain an unresolved owner")
+    })
+    .unwrap();
+    assert_eq!(group, 4242);
+}
+
 struct GroupFixture {
     signal_errno: Option<i32>,
     reap_errno: Option<i32>,

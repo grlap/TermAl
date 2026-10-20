@@ -7,6 +7,33 @@ trait BoundedReadRetainedIdentity {
     fn same_owner(&self, other: &Self) -> bool;
 }
 
+// An uncertain wait can have released the PID even when it returned an error.
+// Only the sole waiter's pre-attempt phase permits the initial group signal;
+// neither an unknown outcome nor diagnostic retention pins a numeric PID.
+#[cfg(any(unix, test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BoundedReadReapState {
+    Unreaped,
+    Reaped,
+    Unknown,
+}
+
+#[cfg(any(unix, test))]
+impl BoundedReadReapState {
+    fn can_signal(self) -> bool {
+        self == Self::Unreaped
+    }
+
+    fn wait<T>(&mut self, wait: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+        // Mark uncertainty before calling wait: ECHILD and every other error
+        // must never leave an apparently unreaped, signalable identity.
+        *self = Self::Unknown;
+        let status = wait()?;
+        *self = Self::Reaped;
+        Ok(status)
+    }
+}
+
 #[cfg(test)]
 impl<T> BoundedReadRetainedIdentity for Arc<T> {
     fn same_owner(&self, other: &Self) -> bool {
@@ -82,9 +109,9 @@ impl<T> BoundedReadRetainedOwners<T> {
 #[cfg(unix)]
 struct RetainedUnixReadOwner {
     process: Arc<SharedChild>,
-    // A later explicit reconciliation must preserve this phase: no group
-    // signal is legal once the leader was reaped, even under the same PID.
-    reaped: bool,
+    // Preserve uncertainty as well as confirmed reaping. A future reconcile
+    // must not infer a pinned PID from an unsuccessful wait or from this Arc.
+    reap_state: BoundedReadReapState,
 }
 
 #[cfg(unix)]
@@ -102,18 +129,29 @@ fn unresolved_bounded_reads() -> &'static Mutex<BoundedReadRetainedOwners<Retain
 }
 
 #[cfg(unix)]
-fn retain_unresolved_bounded_read(process: Arc<SharedChild>, reaped: bool, detail: String) {
+fn retain_unresolved_bounded_read(
+    process: Arc<SharedChild>,
+    reap_state: BoundedReadReapState,
+    detail: String,
+) {
     let pid = process.id();
     let evicted = unresolved_bounded_reads()
         .lock()
         .expect("read owner mutex poisoned")
-        .insert(pid, RetainedUnixReadOwner { process, reaped }, detail);
+        .insert(
+            pid,
+            RetainedUnixReadOwner {
+                process,
+                reap_state,
+            },
+            detail,
+        );
     if let Some(entry) = evicted {
         // SharedChild/Child Drop does not wait or signal. The unreaped child,
         // not this Arc, pins its PID; eviction never touches the numeric group.
         eprintln!(
-            "bounded read> pid={} sequence={} reaped={} retained={}: {}",
-            entry.pid, entry.sequence, entry._owner.reaped, entry.retained, entry.detail
+            "bounded read> pid={} sequence={} reap_state={:?} retained={}: {}",
+            entry.pid, entry.sequence, entry._owner.reap_state, entry.retained, entry.detail
         );
     }
 }

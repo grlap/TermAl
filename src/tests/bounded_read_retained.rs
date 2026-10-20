@@ -1,6 +1,30 @@
-// Owns fixed-capacity owner retention tests; no OS processes or syscalls.
-// Does not test cleanup outcomes, covered by bounded_read_cleanup_budget.
+// Owns wait-phase and fixed-capacity retention tests; no OS processes or syscalls.
+// Cleanup outcome sequencing is covered by bounded_read_cleanup_budget.
 use super::*;
+
+#[test]
+fn bounded_read_cleanup_failed_wait_never_leaves_a_signalable_reap_state() {
+    // ECHILD is 10 on Darwin/Linux; the other errors are uncertain too.
+    for errno in [10, 5, 4] {
+        let mut state = BoundedReadReapState::Unreaped;
+        assert!(state.can_signal());
+        let outcome: io::Result<()> = state.wait(|| Err(io::Error::from_raw_os_error(errno)));
+        assert_eq!(outcome.unwrap_err().raw_os_error(), Some(errno));
+        assert_eq!(state, BoundedReadReapState::Unknown);
+        assert!(
+            !state.can_signal(),
+            "wait error must not authorize group signal"
+        );
+    }
+}
+
+#[test]
+fn bounded_read_cleanup_successful_wait_marks_reaped_before_further_use() {
+    let mut state = BoundedReadReapState::Unreaped;
+    assert_eq!(state.wait(|| Ok(23)).unwrap(), 23);
+    assert_eq!(state, BoundedReadReapState::Reaped);
+    assert!(!state.can_signal());
+}
 
 #[test]
 fn bounded_read_cleanup_retained_owner_survives_stringifying_error() {

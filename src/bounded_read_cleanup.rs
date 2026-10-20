@@ -3,6 +3,24 @@
 // Extracted from bounded_read_process.rs; the worker remains the sole waiter.
 
 #[cfg(any(unix, test))]
+fn admit_bounded_read_group<T>(
+    process_id: u32,
+    admission: Result<T>,
+    retain: impl FnOnce(String),
+) -> Result<T> {
+    admission.map_err(|error| {
+        // The caller has committed to this cleanup attempt. Even a failure
+        // before its first syscall must retain the owner for diagnostics.
+        let message = format!(
+            "bounded read cleanup unresolved: pid={process_id} reason=admission \
+             signal_errno=None probe_errno=None probe_attempted=false detail={error:#}"
+        );
+        retain(message.clone());
+        error.context(message)
+    })
+}
+
+#[cfg(any(unix, test))]
 trait BoundedReadGroupIo {
     type Status;
 
@@ -145,6 +163,7 @@ fn unresolved_read_group<I: BoundedReadGroupIo>(
 struct UnixBoundedReadGroup<'a> {
     process: &'a Arc<SharedChild>,
     reaped: &'a mut bool,
+    reap_state: BoundedReadReapState,
     pgid: libc::pid_t,
     probe_deadline: std::time::Instant,
 }
@@ -156,8 +175,8 @@ impl BoundedReadGroupIo for UnixBoundedReadGroup<'_> {
     fn signal_before_reap(&mut self) -> io::Result<()> {
         // SharedChild::spawn and WNOWAIT preserve the leader's PID until
         // this worker's reap. Never add a wait thread at this boundary.
-        if *self.reaped {
-            return Err(io::Error::other("refusing group signal after leader reap"));
+        if *self.reaped || !self.reap_state.can_signal() {
+            return Err(io::Error::other("refusing group signal after leader wait attempt"));
         }
         if unsafe { libc::killpg(self.pgid, libc::SIGKILL) } == -1 {
             Err(io::Error::last_os_error())
@@ -167,19 +186,23 @@ impl BoundedReadGroupIo for UnixBoundedReadGroup<'_> {
     }
 
     fn reap(&mut self) -> io::Result<Self::Status> {
-        let status = self.process.wait()?;
+        let status = self.reap_state.wait(|| self.process.wait())?;
         *self.reaped = true;
         remove_reaped_bounded_read(self.process);
         Ok(status)
     }
 
     fn observe_before_reap(&mut self) -> io::Result<bool> {
-        read_child_has_exited(self.process)
+        let observed = read_child_has_exited(self.process);
+        if observed.is_err() {
+            self.reap_state = BoundedReadReapState::Unknown;
+        }
+        observed
     }
 
     fn probe_after_reap(&mut self) -> io::Result<()> {
         // A reused numeric group may only be observed, never signalled.
-        if !*self.reaped {
+        if !*self.reaped || self.reap_state != BoundedReadReapState::Reaped {
             return Err(io::Error::other("refusing group probe before leader reap"));
         }
         if unsafe { libc::kill(-self.pgid, 0) } == -1 {
@@ -213,6 +236,6 @@ impl BoundedReadGroupIo for UnixBoundedReadGroup<'_> {
     }
 
     fn retain_unresolved(&mut self, detail: String) {
-        retain_unresolved_bounded_read(self.process.clone(), *self.reaped, detail);
+        retain_unresolved_bounded_read(self.process.clone(), self.reap_state, detail);
     }
 }
