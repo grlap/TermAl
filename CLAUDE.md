@@ -184,6 +184,12 @@ in Engram::Advisor's session, recorded verbatim):
   evidence is recorded, and at the latest when the input's items close, and
   records the push and the deletion (commit id, tree id, fingerprint, times)
   on the item. This grants no other commit, push, install or restart.
+- S3 pilot lane (Greg, 2026-10-20, option (c)): a TermAl session
+  assigned as a pilot host's lane may, as an exception to the
+  work-only-in-the-repository rule, write only under the Engram
+  checkout's `target/s3-pilot/` on that host and run Git there exactly
+  as Engram's S3 pilot bullet allows; nothing else outside this
+  repository. This grants no other commit, push, install or restart.
 - Use explicit paths only: never `git add -A` or `git add -u`.
 - Do not amend, rebase or force-push. Commit message bodies (below the
   subject line) must not contain tracker ids (Engram ids, or Beads ids
