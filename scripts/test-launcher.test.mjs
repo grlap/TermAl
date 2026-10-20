@@ -55,6 +55,7 @@ import { focusedTestCounts } from "./test-counts.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 import { registerLauncherRegistrationTests, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
+import { registerLauncherLifecycleTests } from "./test-launcher-lifecycle-tests.mjs";
 
 const fixtureEnv = {
   ...process.env,
@@ -65,6 +66,16 @@ const fixtureEnv = {
 };
 const launcherScript = fileURLToPath(new URL("./test-launcher.mjs", import.meta.url));
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
+// Both private launcher copies must include its complete runtime dependency
+// closure, including the native helpers selected only when a stage executes.
+const copiedLauncherFiles = Object.freeze([
+  "test-launcher.mjs", "test-run-registration.mjs", "review-freeze-fingerprint.mjs",
+  "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
+  "test-categories-plan.mjs", "test-counts.mjs", "test-process-owner.mjs",
+  "test-command-progress.mjs", "test-process-owner-posix.mjs",
+  "test-process-owner-windows.mjs",
+  "test-process-owner-windows.ps1", "test-process-owner-windows.cs",
+]);
 const stage = (name, source = "") => ({
   name,
   command: process.execPath,
@@ -180,6 +191,7 @@ async function isolatedDetachedRepository(t, callback) {
 }
 
 registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit });
+registerLauncherLifecycleTests({ repository, stage, json });
 
 test("disk space native filesystem smoke reports capacity without imposing a threshold", () => {
   const root = realpathSync(projectRoot);
@@ -1820,7 +1832,7 @@ test("helper scripts run when started through a linked directory", async (t) => 
   removeFixtureOnPass(t, base);
   const real = join(base, "real");
   mkdirSync(join(real, "scripts"), { recursive: true });
-  for (const name of ["test-launcher.mjs", "test-run-registration.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs", "test-counts.mjs"]) {
+  for (const name of copiedLauncherFiles) {
     copyFileSync(join(projectRoot, "scripts", name), join(real, "scripts", name));
   }
   const linked = join(base, "linked");
@@ -1853,7 +1865,7 @@ test("a foreground run prints its run receipt before any stage completes", async
     // from inside the fixture.
     const scripts = join(root, "scripts");
     mkdirSync(scripts);
-    for (const name of ["test-launcher.mjs", "test-run-registration.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs", "test-categories-plan.mjs", "test-counts.mjs"]) {
+    for (const name of copiedLauncherFiles) {
       copyFileSync(join(projectRoot, "scripts", name), join(scripts, name));
     }
     const gate = mkdtempSync(join(testTempDirectory(), "launcher-receipt-"));

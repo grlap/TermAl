@@ -391,24 +391,39 @@ fn native_windows_launch_supervises_real_focused_launcher_and_recovers_run() {
         String::from_utf8_lossy(&clone.stderr)
     );
     std::fs::create_dir_all(repository.join("scripts")).unwrap();
-    // Copy the launcher's whole module set, not a hand-kept list: a module the
-    // launcher imports but the fixture lacks fails before the RUN receipt.
-    let mut copied = Vec::new();
-    for entry in std::fs::read_dir(root().join("scripts")).unwrap() {
-        let entry = entry.unwrap();
-        let filename = entry.file_name().to_string_lossy().into_owned();
-        if entry.file_type().unwrap().is_file()
-            && filename.ends_with(".mjs")
-            && !filename.ends_with(".test.mjs")
-        {
-            std::fs::copy(entry.path(), repository.join("scripts").join(&filename)).unwrap();
-            copied.push(filename);
-        }
+    // Consume the launcher's maintained manifest, including native helpers
+    // needed only after RUN, rather than guessing dependencies by extension.
+    let manifest = crate::Command::new("node.exe")
+        .args([
+            "--input-type=module",
+            "--eval",
+            "import { helperSupportFiles } from './scripts/test-launcher.mjs'; process.stdout.write(JSON.stringify(helperSupportFiles));",
+        ])
+        .current_dir(root())
+        .output()
+        .unwrap();
+    assert!(
+        manifest.status.success(),
+        "launcher helper manifest: {}",
+        String::from_utf8_lossy(&manifest.stderr)
+    );
+    let copied: Vec<String> = serde_json::from_slice(&manifest.stdout).unwrap();
+    for relative in &copied {
+        let path = Path::new(relative);
+        assert!(
+            path.components()
+                .all(|part| matches!(part, std::path::Component::Normal(_))),
+            "launcher helper path must be repository-relative: {relative}"
+        );
+        let destination = repository.join(path);
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::copy(root().join(path), &destination).unwrap();
+        assert!(destination.is_file(), "launcher helper missing: {relative}");
     }
     assert!(
         copied
             .iter()
-            .any(|filename| filename == "test-launcher.mjs"),
+            .any(|filename| filename == "scripts/test-launcher.mjs"),
         "the launcher module set was copied: {copied:?}"
     );
     let mut spec = LaunchSpec::new("node.exe");

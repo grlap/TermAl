@@ -43,6 +43,8 @@ import {
   resolveCategory,
 } from "./test-categories-plan.mjs";
 import { focusedCountSummaryLines, focusedTestCounts } from "./test-counts.mjs";
+import { runOwnedCommand } from "./test-process-owner.mjs";
+import { watchCommandProgress } from "./test-command-progress.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
@@ -75,7 +77,8 @@ export const helperTestArgs = Object.freeze([
   `--test-timeout=${HELPER_TEST_HANG_GUARD_MS}`,
   ...helperTestFiles,
 ]);
-const helperSupportFiles = Object.freeze([
+// Also consumed by real-launcher fixtures that copy the runtime helpers.
+export const helperSupportFiles = Object.freeze([
   nodeDurationReporterFile,
   "scripts/review-freeze-fingerprint.mjs",
   "scripts/test-categories-plan.mjs",
@@ -84,6 +87,13 @@ const helperSupportFiles = Object.freeze([
   "scripts/test-fixture-cleanup.mjs",
   "scripts/test-launcher.mjs",
   "scripts/test-launcher-registration-fixtures.mjs",
+  "scripts/test-launcher-lifecycle-tests.mjs",
+  "scripts/test-process-owner.mjs",
+  "scripts/test-process-owner-windows.mjs",
+  "scripts/test-process-owner-posix.mjs",
+  "scripts/test-process-owner-windows.ps1",
+  "scripts/test-process-owner-windows.cs",
+  "scripts/test-command-progress.mjs",
   "scripts/test-run-registration.mjs",
   "scripts/test-temp-root.mjs",
   "scripts/vitest-resource-preflight.mjs",
@@ -784,7 +794,19 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
   return failed;
 }
 
-export async function executeRun(runDir, env = process.env, { onReady, diskSpace } = {}) {
+// A failed observation must not leak into a later, unrelated result save.
+export function saveProgressObservation(resultPath, result, entry, observation, saveResult = save) {
+  const previous = entry.stall;
+  entry.stall = { ...observation, observedAt: new Date().toISOString() };
+  try { saveResult(resultPath, result); }
+  catch (error) {
+    if (previous === undefined) delete entry.stall;
+    else entry.stall = previous;
+    throw error;
+  }
+}
+
+export async function executeRun(runDir, env = process.env, { onReady, diskSpace, signal, progress, commandPhase } = {}) {
   // Exclusive admission: an interrupted run is not a retryable test command.
   closeSync(openSync(join(runDir, "execution.lock"), "wx"));
   const resultPath = join(runDir, "results.json");
@@ -944,11 +966,43 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         log: join(runDir, `${stage.name}.log`),
       });
       save(resultPath, result);
-      const outcome = await runCommand(stage.command, args, {
-        cwd: stage.cwd,
-        env: childEnv,
-        log: entry.log,
-      });
+      let outcome;
+      if (stage.name === "focused" && !request.full) {
+        let stopProgress;
+        let releaseCommandPhase;
+        const notices = [];
+        try {
+          releaseCommandPhase = commandPhase?.();
+          outcome = await runOwnedCommand(stage.command, args, {
+            cwd: stage.cwd, env: childEnv, log: entry.log, signal,
+            onOwner: (owner) => { entry.processOwner = owner; save(resultPath, result); },
+            onStart: (pid) => {
+              entry.pid = pid;
+              save(resultPath, result);
+              stopProgress = watchCommandProgress({
+                log: entry.log, pid, runId: request.runId, stage: stage.name,
+                observe: (observation) => {
+                  saveProgressObservation(resultPath, result, entry, observation);
+                  if (observation.state !== "stalled") return;
+                  console.error(stallSummary(observation));
+                  const notice = progress?.notify
+                    ? progress.notify(observation)
+                    : notifyStall(runDir, observation, childEnv);
+                  notices.push(Promise.resolve(notice).catch((error) => {
+                    console.error(`stall notice failed: ${error.message}; the command was not retried`);
+                  }));
+                },
+              }, progress);
+              progress?.onWatching?.(pid);
+            },
+          });
+        } finally { stopProgress?.(); releaseCommandPhase?.(); }
+        await Promise.all(notices);
+      } else {
+        outcome = await runCommand(stage.command, args, {
+          cwd: stage.cwd, env: childEnv, log: entry.log,
+        });
+      }
       Object.assign(entry, outcome, {
         ended: new Date().toISOString(),
         state: outcome.code === 0 && !outcome.error ? "passed" : "failed",
@@ -993,6 +1047,11 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       throw new Error(driftError("input drift: results do not validate the current source", expectedInput, after));
     }
     result.state = result.stages.every((stage) => stage.state === "passed") ? "passed" : "failed";
+    if (signal?.aborted) {
+      result.state = "failed";
+      result.interrupted = true;
+      result.error = `interrupted: ${String(signal.reason ?? "requested")}`;
+    }
     // A stage failed by its accounting exited 0 itself; the run still fails.
     const failedStage = result.stages.find((stage) => stage.state === "failed");
     result.exitCode = failedStage ? failedStage.code || 1 : result.state === "passed" ? 0 : 1;
@@ -1050,6 +1109,9 @@ export async function summarize(runDir) {
   ].sort((left, right) => Number(right.failed) - Number(left.failed));
   for (const stage of entries) {
     lines.push(stage.header);
+    if (stage.cleanup) lines.push(`cleanup=${stage.cleanup.state} trigger=${stage.cleanup.trigger} pids=${JSON.stringify(stage.cleanup.pids ?? [])} scope=${stage.cleanup.pidScope ?? "unspecified"}`.slice(0, diagnosticLimit));
+    if (stage.ownerDiagnostics && stage.failed) lines.push(`owner exit=${stage.ownerDiagnostics.code ?? "unknown"} signal=${stage.ownerDiagnostics.signal ?? "none"} stderr=${stage.ownerDiagnostics.stderr}`.slice(0, diagnosticLimit));
+    if (stage.stall) lines.push(`progress=${stage.stall.state} episode=${stage.stall.episode} inactive-ms=${stage.stall.inactiveMs ?? "unknown"} pid=${stage.stall.pid} log=${stage.stall.log}`.slice(0, diagnosticLimit));
     if (stage.error) lines.push(stage.error.slice(0, diagnosticLimit));
     if (stage.diagnostics?.text) {
       const text = stage.diagnostics.text.trimEnd();
@@ -1132,6 +1194,28 @@ function notificationDelivered(runDir) {
   return receipt?.code === 0 && !receipt.error;
 }
 
+function stallSummary(observation) {
+  return `STALLED ${observation.runId} stage=${observation.stage} pid=${observation.pid} no-output-ms=${observation.inactiveMs} log=${observation.log}`;
+}
+
+// Stall keys are separate from the eventual completion and are never retried
+// automatically. An absent --notify leaves the durable/holder notice only.
+export async function notifyStall(runDir, observation, env = process.env, send = runOwnedCommand) {
+  const request = readJson(join(runDir, "request.json"));
+  if (request.notifyTo === undefined) return;
+  const { cli, notifyTo } = validateNotification(request, env);
+  const name = `stall-${observation.stage}-${observation.episode}`;
+  const message = join(runDir, `${name}.message.txt`);
+  writeFileSync(message, `${stallSummary(observation)}\nThe command remains running. No timeout, termination or retry was triggered.\n`, { flag: "wx" });
+  const outcome = await send(cli, ["mailbox", "send", "--to", notifyTo,
+    "--message-file", message, "--idempotency-key", `termal-tests:${request.runId}:${name}`, "--json"], {
+    cwd: request.root, env, log: join(runDir, `${name}.notification.log`),
+    signal: AbortSignal.timeout(15000),
+  });
+  save(join(runDir, `${name}.receipt.json`), outcome);
+  if (outcome.code !== 0 || outcome.error) throw new Error(`stall notification failed; see ${name}.receipt.json`);
+}
+
 // One best-effort message from an admitted runner that could not save a
 // terminal result, so its coordinator is not left waiting. It says UNKNOWN,
 // never PASS, and uses its own idempotency key: the run's completion key stays
@@ -1201,6 +1285,11 @@ export async function recoverRun(runDir, env = process.env, {
     if (isAlive(result.pid)) {
       throw new Error(`worker pid ${result.pid} may still be running; wait for its completion, or see docs/test.md if that pid now belongs to another process`);
     }
+    for (const stage of result.stages) {
+      if (stage.state === "running" && Number.isSafeInteger(stage.processOwner?.pid) && isAlive(stage.processOwner.pid)) {
+        throw new Error(`process owner pid ${stage.processOwner.pid} may still be cleaning up; wait before recovering. If this PID was reused, the run stays UNKNOWN: start a new run instead of editing its evidence (docs/test.md).`);
+      }
+    }
     const lock = join(runDir, "recovery.lock");
     let locked = false;
     try {
@@ -1220,6 +1309,15 @@ export async function recoverRun(runDir, env = process.env, {
         const interruption = `worker ${result.pid} exited without saving a terminal result`;
         for (const stage of result.stages) {
           if (stage.state === "running") {
+            if (stage.processOwner) {
+              try {
+                const owned = readJson(stage.processOwner.ledger);
+                if (owned.nonce !== stage.processOwner.nonce) throw new Error("process owner ledger nonce mismatch");
+                stage.cleanup = owned.cleanup;
+              } catch (error) {
+                stage.cleanup = { state: "unresolved", trigger: "launcher-exit", error: error.message };
+              }
+            }
             stage.state = "failed";
             stage.error = `interrupted: ${interruption}; this stage's outcome is unknown`;
           }
@@ -1277,8 +1375,20 @@ async function finish(runDir, { workerHandshake = false } = {}) {
   // before it (another owner's lock) must not speak for the run.
   let admitted = false;
   let result;
+  const interruption = new AbortController();
+  const onInterrupt = () => interruption.abort("SIGINT");
+  const onTerminate = () => interruption.abort("SIGTERM");
   try {
     result = await executeRun(runDir, process.env, {
+      signal: interruption.signal,
+      commandPhase: () => {
+        process.once("SIGINT", onInterrupt);
+        process.once("SIGTERM", onTerminate);
+        return () => {
+          process.off("SIGINT", onInterrupt);
+          process.off("SIGTERM", onTerminate);
+        };
+      },
       onReady: async () => {
         admitted = true;
         if (workerHandshake) await sendWorkerReady(runDir);
@@ -1316,6 +1426,9 @@ async function finish(runDir, { workerHandshake = false } = {}) {
       }
     }
     return;
+  } finally {
+    process.off("SIGINT", onInterrupt);
+    process.off("SIGTERM", onTerminate);
   }
   process.stdout.write(await summarize(runDir));
   process.exitCode = result.exitCode;

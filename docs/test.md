@@ -306,10 +306,12 @@ delivered completion.
 [Host architecture](features/host-architecture.md#84-launcher-recovery-is-a-declaration-about-a-run)
 describes how a recovered run is recorded in the proposed execution record.
 
-Only the launcher's own pid is checked. A stage process that outlived a killed
-foreground launcher is not waited for: its exit status and diagnostics are never
-recorded, but it keeps its log open and can go on appending to it until it
-exits, so a settled run's raw log is not necessarily final.
+For a focused stage, recovery also refuses while its recorded process owner
+may be alive and cleaning up. Once the owner has exited, recovery imports its
+nonce-matched cleanup ledger when available; a missing ledger remains
+`unresolved`. Recovery never converts an interrupted test into a pass or
+reruns it. Older runs and non-focused stages can still have a child that
+outlived their launcher; their raw logs need not be final after recovery.
 If the recorded pid has been reused by an unrelated process, `recover` keeps
 refusing and the run stays `UNKNOWN`, which is never a pass: start a new run
 instead of editing its evidence. If a killed `recover` left `recovery.lock`
@@ -318,9 +320,117 @@ behind, remove that file by hand once no other `recover` is running.
 When a command is launched through TermAl's native Windows terminal or bounded
 reader with confirmed job membership, the host owns a kill-on-close job and
 ends its members after observing root exit. An `unavailable` launch can run
-without that job. The standalone launcher and `recover` do not provide that ownership.
+without that job. This host containment is separate from the focused
+launcher's command owner described below. `recover` itself never kills a
+process or creates ownership retroactively.
 See [Windows command containment](features/windows-command-containment.md) for
 the reported status, packaged-process limits and retained-handle fixture proof.
+
+### Focused command ownership and stall notices
+
+Every focused stage has a separate process owner. On Windows, a detached Node
+guardian starts built-in Windows PowerShell without detaching that shell.
+Windows PowerShell cannot initialize reliably under DETACHED_PROCESS; the
+guardian preserves independent lifetime while its ordinary child can run.
+PowerShell loads the checked-in C# owner and creates the command atomically in
+a non-breakaway, kill-on-close job, with an explicit inherited-handle list.
+It resumes the command only after attachment. Failure to establish that job
+refuses execution; there is no uncontained fallback. PowerShell compiler
+scratch uses a per-owner unique directory under the helper checkout's
+`.tmp/ow/`, independently of linked-worktree run-directory depth. Its absolute
+path is limited to 200 characters to leave room for generated compiler names;
+a longer helper checkout is refused with a diagnostic. Existing `.tmp` and
+`ow` components must be real directories canonically inside the helper checkout;
+redirecting junctions or symlinks are refused before allocation. The guardian
+rechecks those components before cleanup, then removes
+the scratch after PowerShell exits and records removal or retention in the
+bootstrap breadcrumbs. If the guardian itself is killed, scratch may remain
+for worktree cleanup. The command retains the caller's environment.
+No package or toolchain is installed. This requires Windows
+PowerShell and permission to load its C# helper; restricted environments that
+forbid that helper receive a failed run rather than partial containment.
+The guardian records its PowerShell child PID as well as its own. If the
+launcher dies, the guardian forwards private-pipe EOF and drains closed output
+until native cleanup publishes its ledger. If the guardian itself dies,
+Node's private job closes its PowerShell child, closing the strict job handle.
+Bootstrap breadcrumbs alongside the owner request identify shell entry,
+compilation, native entry and ledger publication; a silent shell exit cannot
+be mistaken for command execution.
+
+On macOS and Linux the separate Node owner uses a dedicated command process
+group. A descendant that deliberately leaves that group is outside this POSIX
+boundary; Windows descendants cannot request job breakaway. Neither platform
+enumerates processes by executable name. The unrelated processes of another
+run are never termination targets.
+This owns descendants created in the command's process tree, not work started
+through an external service such as WMI, a scheduler or the service manager.
+The POSIX boundary also depends on its guardian staying alive: killing that
+guardian itself (for example by SIGKILL or the OOM killer) can leave its group
+alive. Windows job-close containment also covers guardian death. A POSIX host
+without a working orphan reaper may retain zombies; a still-visible group is
+conservatively reported unresolved, never assumed reaped.
+
+Ctrl-C/SIGINT or SIGTERM requests focused shutdown. A forced launcher exit
+(including a runner deadline that terminates it) closes the owner's private
+control channel, so its owner also shuts down the tree. Teardown is idempotent
+and observes termination for at most five seconds. Windows confirms
+zero active job members; POSIX checks its process group. The final immutable
+`focused.log.owner-result.json` records the command PID, trigger, ownership
+kind and `reaped` or `unresolved` cleanup. Its PID list is a best-effort job
+snapshot on Windows and the command root only on POSIX, not a census of all
+descendants. Job inventory failure cannot skip termination. A failure or
+missing proof is never a pass. This adds no deadline to a test: the cleanup
+budget starts only after interruption or command exit. A normal command exit
+also ends any descendants it left behind.
+The bounded summary exposes cleanup, owner exit diagnostics and the latest
+stall observation. Bootstrap failures retain the owner's native exit code,
+signal and bounded stderr even when no final cleanup ledger was written.
+Cancellation observed before spawning the owner starts no command; an interrupt
+during native bootstrap can race command creation, but still requires owned
+cleanup and can never become a passing result.
+The CLI installs these signal handlers only during the owned command phase.
+Before or after that phase, signals retain their ordinary termination behavior;
+recovery can then settle any missing terminal result without rerunning it.
+On Windows, buffered bootstrap cancellation is checked directly on the private
+pipe before creation and again before resuming a created command; it does not
+depend on scheduling a background reader task.
+
+While a focused command runs, stdout and stderr still go directly to its log.
+The launcher checks the log's byte count once per second. Five minutes without
+new bytes produces a `STALLED` notice naming the run, stage, command PID,
+inactivity duration and log path, and saves the observation on that stage of
+`results.json`. This is output inactivity, not a diagnosis of the command.
+It applies to a quiet build as well as a quiet test. New output records
+`resumed` and starts a new inactivity interval; one notice is emitted per
+quiet episode. Tests control the clock rather than waiting five minutes.
+
+Use `--notify COORDINATOR_SESSION_ID` on a focused invocation to send each
+stall notice to that coordinator too. Without a notification target, the
+durable observation and foreground holder notice remain available. A notice
+uses a separate idempotency key and a bounded notification attempt; it never
+consumes the eventual completion key. A stalled command stays running until
+it exits or its owner explicitly interrupts it. No stall notice kills, retries
+or reruns a stage, changes a test timeout, supplies test counts, or declares a
+terminal result. Inspect the original run with `summary`; interrupt its owning
+execution if needed, then use `recover` only after the launcher and command
+owner have exited.
+The 15-second notification budget includes its process-owner bootstrap; a
+failed attempt is recorded and reported without an automatic retry. Failure to
+save a progress observation is reported to the holder without crashing the
+launcher; that quiet episode remains eligible for a later observation.
+Resume delivery is retried on later polls even without further output, so a
+failed resume save cannot suppress the next quiet episode.
+
+The lifecycle fixtures stay under this checkout's `.tmp/launcher-lifecycle`
+to keep agent-created files inside the repository even when an outer runner
+uses a system temporary root. Passing fixtures are removed by the repository
+helper; failed fixtures are retained for the holder's process audit and causal
+investigation, outside the managed run-root sweep. On Windows both launcher
+SIGTERM and SIGKILL fixtures use native process termination; they do not prove
+delivery of a POSIX signal. Unix additionally registers a real SIGINT case and
+asserts that both catchable signals pass through the launcher's abort handler.
+Those checks require a Unix run for native evidence. Injected POSIX state-machine checks cover IPC and
+cleanup-budget failures and do not establish native Unix process behavior.
 
 If an admitted worker cannot save its terminal result, for example because
 `results.json` cannot be replaced, it sends one best-effort `UNKNOWN` notice

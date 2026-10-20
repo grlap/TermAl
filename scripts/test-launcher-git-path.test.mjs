@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
-  mkdirSync, mkdtempSync, readdirSync, readFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync,
   realpathSync, writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
@@ -158,6 +158,23 @@ for (const linked of [false, true]) {
           assert.match(relative(realpathSync.native(join(admin, "review-runs")), realpathSync.native(result.runDir)), /^test-[^\\/]+$/u);
           assert.equal(result.state, "passed", JSON.stringify(result));
           assert.equal(result.executed, "x", "exactly one stage executes after registration");
+          if (process.platform === "win32") {
+            // Linked Git metadata deliberately makes run-local compiler TEMP
+            // too deep on the failing input. Keep that real run path intact.
+            const phases = readFileSync(join(result.runDir, "focused.log.owner-request.json.bootstrap.jsonl"), "utf8")
+              .trim().split(/\r?\n/u).map((line) => JSON.parse(line));
+            const scratch = phases.find((entry) => entry.phase === "before-add-type").compilerScratch;
+            assert.ok(isAbsolute(scratch));
+            assert.ok(scratch.length <= 200, "leave room for native compiler temporary names");
+            assert.match(relative(join(sourceRoot, ".tmp", "ow"), scratch), /^o-[A-Za-z0-9]{6}$/u);
+            assert.ok(result.runDir.length > scratch.length, "linked/main metadata remains deeper than compiler scratch");
+            const retained = phases.find((entry) => entry.phase === "compiler-scratch-retained");
+            const cleanupDiagnostic = JSON.stringify({ retained,
+              remaining: existsSync(scratch) ? readdirSync(scratch) : [],
+              runPathLength: result.runDir.length, scratchLength: scratch.length });
+            assert.equal(existsSync(scratch), false, `guardian removes compiler scratch after PowerShell exits: ${cleanupDiagnostic}`);
+            assert.ok(phases.some((entry) => entry.phase === "compiler-scratch-removed" && entry.compilerScratch === scratch));
+          }
           assert.equal(host.requests.length, 1);
           assert.equal(host.queries.length, 2, "parent and executor each confirm the registration");
           assert.equal(realpathSync.native(host.requests[0].body.runDirectory), realpathSync.native(result.runDir));
