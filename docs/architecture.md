@@ -1035,14 +1035,27 @@ fallbacks and defines catalog-only Codex Fast dispatch.
 ### Process descriptor capacity
 
 On Unix, TermAl raises its process-wide soft `RLIMIT_NOFILE` toward 8192 at
-startup, capped by the current hard limit. This happens before any agent
+startup, capped by the current hard limit and, on macOS, the read-only
+`kern.maxfilesperproc` ceiling. This happens before any agent
 runtime is spawned, so the shared Codex app-server, Claude processes, and
 their tools inherit the effective limit without requiring a shell-level
 `ulimit`. Set `TERMAL_NOFILE_LIMIT` to a positive integer to override the
-default. The lift is best-effort and never lowers an existing higher limit;
-TermAl logs a warning and continues when the OS rejects it. Already-running
+default; values above the safe maximum of **1,048,576** are capped with a
+diagnostic. Invalid or unreadable overrides use 8192 with a diagnostic.
+The lift is best-effort, never lowers an existing higher soft limit, and
+does not request a hard-limit change. A kernel `EINVAL` rejection triggers a bounded search above
+the last successful soft limit, so a hidden ceiling does not discard all
+available headroom. Permission or other errors stop the search. TermAl reads
+back the limit and reports requested/effective, hard and known kernel ceilings
+when the request cannot be met; an unavailable value is explicitly unknown.
+Startup continues after a failure. Already-running
 children cannot inherit a later change, so changing the override requires a
 full TermAl restart.
+
+This runtime policy is separate from the test wrapper's
+`TERMAL_TEST_FD_LIMIT`: see [testing](test.md) and the
+[shared Codex app-server](features/shared-codex-app-server.md#descriptor-capacity).
+The wrapper cannot repair limits inherited by an already-running app-server.
 
 ### Claude Code
 

@@ -52,6 +52,20 @@ Because the process is shared and long-lived, **its identity cannot answer
 per-session questions**. That single fact is the source of nearly every bug in this
 area.
 
+## Descriptor capacity
+
+The shared app-server and all its tools inherit TermAl's Unix soft file limit
+at process creation. TermAl raises it early toward 8192; `TERMAL_NOFILE_LIMIT`
+selects another positive target, capped at 1,048,576. The existing soft limit
+is never lowered, and the hard and macOS kernel ceilings still apply. An
+unmet request is diagnosed and does not prevent startup. Existing child
+processes are not modified; a later override requires a full TermAl restart.
+
+See [the runtime policy](../architecture.md#process-descriptor-capacity) for
+best-achievable fallback and diagnostics, and [the test-harness policy](../test.md)
+for `TERMAL_TEST_FD_LIMIT`. Raising the test wrapper's limit cannot repair an
+already-running app-server. Windows runtime limit behavior is unchanged.
+
 ## Shared CODEX_HOME and MCP configuration
 
 The shared app-server runs with a writable, TermAl-owned `CODEX_HOME` at

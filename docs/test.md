@@ -394,6 +394,16 @@ toolchain. Extra arguments are passed through to `cargo test`, for example:
 scripts/test-rust.sh mailbox_store_tests
 ```
 
+The wrapper's `TERMAL_TEST_FD_LIMIT` is a **test-harness** policy, not the
+application's `TERMAL_NOFILE_LIMIT` startup policy. The latter defaults to 8192,
+caps overrides at 1,048,576, and is inherited by newly spawned agent runtimes.
+See [runtime descriptor capacity](architecture.md#process-descriptor-capacity)
+and the [shared Codex app-server](features/shared-codex-app-server.md#descriptor-capacity).
+The `process_limit_tests` Rust filter exercises injected limit reads/writes,
+environment selection and diagnostics on every platform, including Windows;
+it never changes the test process's real resource limit or environment.
+That proves policy, not a native macOS syscall or live app-server capacity.
+
 The wrapper requires Node.js (the version in `.nvmrc`) on `PATH`, including
 `node.exe` when WSL launches Windows Cargo. Node owns the temporary run directory,
 redirects `TMP`/`TEMP`/`TMPDIR` into the product's `termal/tests/run-*` folder,
