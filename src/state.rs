@@ -1174,6 +1174,7 @@ struct AppState {
     /// Runtime-only handles; the supervisor owns insert/remove and shutdown.
     federation_peer_handles: FederationPeerHandles,
     federation_executor_wake_signal: Arc<FederationExecutorWakeSignal>,
+    test_run_phase_traces: TestRunPhaseTraces,
     /// Tracks the newest `_sseFallback` revision already recovered per remote
     /// so duplicate or older fallback events do not trigger redundant
     /// blocking `/api/state` fetches.

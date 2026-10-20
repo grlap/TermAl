@@ -133,6 +133,7 @@ struct TestRunRegistrationDiagnostics {
     durability_confirmed: bool,
     published: bool,
     failure_phase: Option<(&'static str, Duration)>,
+    trace: Option<TestRunPhaseTrace>,
 }
 
 impl TestRunRegistrationDiagnostics {
@@ -159,10 +160,12 @@ impl TestRunRegistrationDiagnostics {
             durability_confirmed: false,
             published: false,
             failure_phase: None,
+            trace: None,
         }
     }
 
     fn enter(&mut self, phase: &'static str) {
+        if let Some(trace) = &self.trace { trace.mark(phase); }
         if self.spans.len() < 16 {
             self.spans.push((self.phase, self.phase_started.duration_since(self.started), self.phase_started.elapsed()));
         }
@@ -324,6 +327,10 @@ impl AppState {
         mut diagnostics: TestRunRegistrationDiagnostics,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         let run_id = request.run_id.clone();
+        if diagnostics.trace.is_none() {
+            diagnostics.trace = Some(self.test_run_phase_traces.begin("registration", Some(&run_id),
+                &diagnostics.operation_id, diagnostics.started));
+        }
         diagnostics.enter("validate_request");
         let mut result = self.register_test_run_inner(session_id, request, &mut diagnostics);
         if result.is_err() {
@@ -343,6 +350,7 @@ impl AppState {
             }
         }
         if let Err(error) = &mut result {
+            if let Some(trace) = &diagnostics.trace { trace.mark("failed"); }
             diagnostics.report(&run_id, error);
         } else {
             diagnostics.enter("response_ready");
@@ -388,15 +396,11 @@ impl AppState {
         diagnostics.enter("canonicalize_directory");
         let run_directory = fs::canonicalize(&request.run_directory)
             .map_err(|_| ApiError::bad_request("test run directory is unavailable"))?;
-        diagnostics.enter("allowed_directory_scan");
+        diagnostics.enter("validate_target_directory");
         let common = test_runs_git_common_dir(FsPath::new(&project_root)).ok_or_else(|| {
             ApiError::bad_request("test run project Git directory is unavailable")
         })?;
-        let mut stamps = Vec::new();
-        let allowed = test_runs_directories(&common, &mut stamps)
-            .into_iter()
-            .filter_map(|directory| fs::canonicalize(directory).ok())
-            .any(|directory| directory == run_directory);
+        let allowed = test_run_registration_target(&common, &run_directory);
         if !allowed
             || run_directory.file_name().and_then(|name| name.to_str())
                 != Some(request.run_id.as_str())
@@ -430,6 +434,12 @@ impl AppState {
                 "test run request changed during registration",
             ));
         }
+        let request_common = test_runs_git_common_dir(FsPath::new(&disk.worktree))
+            .and_then(|directory| fs::canonicalize(directory).ok());
+        if request_common != fs::canonicalize(&common).ok() {
+            return Err(ApiError::bad_request("test run worktree is outside the configured project"));
+        }
+        if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         diagnostics.fence_deadline = Some(deadline);
         diagnostics.enter("capture_registration");
@@ -504,6 +514,7 @@ impl AppState {
                     }
                     if test_run_compact_is_installed(&inner, compacted) {
                         diagnostics.durability_confirmed = true;
+                        if let Some(trace) = &diagnostics.trace { trace.mark("durable"); }
                         diagnostics.published = true;
                         return Ok(RegisterTestRunResponse {
                             contract: "termal-durable-test-run-registration",
@@ -593,6 +604,16 @@ impl AppState {
             }
         }
         diagnostics.durability_confirmed = true;
+        if let Some(trace) = &diagnostics.trace { trace.mark("durable"); }
+        // Replace the rescan's former identity recheck with one bounded read
+        // of this request. A mutation while its fence waited is not an ACK.
+        diagnostics.enter("recheck_request");
+        let TestRunJson::Parsed(current, _, _) = test_run_read_json(&run_directory.join("request.json")) else {
+            return Err(ApiError::conflict("test run request became unavailable before acknowledgement"));
+        };
+        if test_run_registration_identity(&current)? != expected.request_identity {
+            return Err(ApiError::conflict("test run request changed before acknowledgement"));
+        }
         diagnostics.enter("publish_registration");
         {
             let mut inner = diagnostics.lock(&self.inner);
@@ -608,14 +629,13 @@ impl AppState {
                 .remove(&request.run_id);
             diagnostics.published = true;
         }
-        diagnostics.enter("refresh_index");
-        self.refresh_test_runs();
+        // Durability, not an unrelated global rescan, is the ACK boundary.
+        // The background index remains its only writer; exact GET can use
+        // the durable registration until that scanner catches up.
         diagnostics.enter("query_confirmation");
         let inner = diagnostics.lock(&self.inner);
-        if !inner.test_runs.find(&request.run_id).is_some_and(|entry| {
-            test_run_path_key(&entry.summary.run_dir) == test_run_path_key(&expected.run_directory)
-                && entry.disk.request_identity.as_ref() == Some(&expected.request_identity)
-        }) {
+        if !inner.test_runs.registered.contains(&request.run_id)
+            || inner.test_run_registrations.get(&request.run_id) != Some(&expected) {
             diagnostics.category = Some("query_unavailable");
             return Err(ApiError::internal(
                 "durable test run registration is not available in the host query",
@@ -832,12 +852,15 @@ async fn register_session_test_run(
     // This span begins at handler entry, after Axum's body extraction. It is
     // deliberately not labelled as network arrival or request-body time.
     let dispatched_at = std::time::Instant::now();
+    let mut diagnostics = TestRunRegistrationDiagnostics::new(&state.server_instance_id);
+    diagnostics.started = dispatched_at;
+    diagnostics.phase_started = dispatched_at;
+    diagnostics.phase = "blocking_dispatch";
+    diagnostics.correlate(&headers);
+    diagnostics.trace = Some(state.test_run_phase_traces.begin("registration", Some(&request.run_id),
+        &diagnostics.operation_id, dispatched_at));
     let response = run_blocking_api(move || {
-        let mut diagnostics = TestRunRegistrationDiagnostics::new(&state.server_instance_id);
-        diagnostics.started = dispatched_at;
-        diagnostics.phase_started = dispatched_at;
-        diagnostics.phase = "blocking_dispatch";
-        diagnostics.correlate(&headers);
+        if let Some(trace) = &diagnostics.trace { trace.mark("blocking_dispatched"); }
         state.register_test_run_with_diagnostics(&session_id, request, diagnostics)
     }).await?;
     Ok((StatusCode::CREATED, Json(response)))

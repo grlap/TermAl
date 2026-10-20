@@ -6,6 +6,15 @@ use super::*;
 #[path = "test_run_observation_publication.rs"]
 mod observation_publication;
 
+#[path = "test_run_registration_latency.rs"]
+mod latency;
+
+#[path = "test_run_phase_trace.rs"]
+mod phase_trace;
+
+#[path = "test_run_registration_history.rs"]
+mod history;
+
 #[test]
 fn registration_ack_waits_for_the_actual_background_sqlite_commit() {
     let mut fixture = FenceFixture::new();

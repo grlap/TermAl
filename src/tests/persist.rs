@@ -1906,6 +1906,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         server_instance_id: Uuid::new_v4().to_string(),
         federation_peer_handles: FederationPeerHandles::default(),
         federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
+        test_run_phase_traces: TestRunPhaseTraces::default(),
         default_workdir: "/tmp".to_owned(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),

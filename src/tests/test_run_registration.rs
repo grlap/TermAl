@@ -4,6 +4,12 @@
 // verification credit from an execution result.
 use super::*;
 
+#[path = "test_run_registration_identity.rs"]
+mod identity;
+
+#[path = "test_run_exact_query.rs"]
+mod exact_query;
+
 #[path = "test_run_observation_review.rs"]
 mod observation_review;
 

@@ -867,6 +867,14 @@ fn persist_delta_with_fences_timed(
     fences.expire_resolved();
     fences.mark_in_tick();
     let result = persist_delta_via_cache_timed(cache, path, delta, timings);
+    #[cfg(test)]
+    if result.is_ok() {
+        TEST_HISTORY_COMMITTED.with(|slot| {
+            if let Some(committed) = slot.borrow_mut().as_mut() {
+                committed(delta);
+            }
+        });
+    }
     // persist_delta_via_cache returns only after COMMIT and the existing
     // post-commit integrity checks. No StateInner guard is held here.
     let acknowledge_started = std::time::Instant::now();

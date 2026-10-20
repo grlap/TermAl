@@ -34,6 +34,31 @@ and `registered: true`. The host acknowledges only after content persistence and
 query visibility. Identical retries retain one record; changed immutable request
 identity is refused. Registration failure never returns a durable ACK.
 
+Registration validates only the named run's canonical Git-admin parent and
+request. It does not enumerate historical runs or wait for the global artifact
+rescan. The four-field ACK stays unchanged. An immediate exact-id GET returns
+the durable registration with `source: "registration"` until the background
+index catches up; indexed detail has `source: "index"`. This fallback confirms
+launch identity and durability, not execution results. Cards and SSE continue
+through the background scanner, normally on its next two-second tick.
+
+Indexed detail is selected only when its native canonical locator and immutable
+request identity (run, digest, owner and start) match the captured registration.
+A copied or older indexed request uses the registration fallback. If that
+registration changes during the off-lock path check, GET returns 409 for a fresh
+query; it does not select against a different registration snapshot.
+
+`GET /api/test-run-diagnostics?runId=EXACT_ID` (or `operationId=EXACT_ID`)
+returns bounded, memory-only registration phase observations and overlapping
+rescan traces. Supplying both identifiers narrows the match. At most 256
+operations with 32 phase points each are retained, including a truncation flag;
+old or evicted traces are absent. Timestamps are microseconds from one
+host-local monotonic epoch, identified by `serverInstanceId`, and reset on
+restart. Traces outlive an aborted HTTP caller but grant no test credit and do
+not survive restart. `response_ready` means the handler prepared its result,
+not that the caller received it. No request bodies, paths, commands or error
+details are stored in this ring.
+
 The production launcher requires this versioned ACK and an exact durable run
 query before fingerprint capture, preflight, Cargo bootstrap or any stage.
 Foreground and detached launches fail with an explicit registration error when

@@ -546,6 +546,12 @@ impl TestRunDisk {
             // The pid in these results is judged against when this version
             // was written, never against a stamp of a replaced version.
             TestRunJson::Parsed(results, digest, stamp) => {
+                #[cfg(test)]
+                TEST_HISTORY_PARSED.with(|slot| {
+                    if let Some(parsed) = slot.borrow_mut().as_mut() {
+                        parsed(run_dir, &digest);
+                    }
+                });
                 (Some(TestRunResultsExtract::new(&results, digest)), stamp)
             }
             // A run is created with both files, but a reader may still find

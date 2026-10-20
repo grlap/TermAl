@@ -167,6 +167,7 @@ struct TestRunListResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TestRunDetailResponse {
+    source: &'static str,
     run: TestRunSummary,
     detail: TestRunDetail,
 }
@@ -466,6 +467,8 @@ impl AppState {
         writer_may_be_alive: &TestRunLiveness,
         publish: &dyn Fn(&StateInner, &DeltaEvent),
     ) -> bool {
+        let trace = self.test_run_phase_traces.begin("rescan", None,
+            &Uuid::new_v4().to_string(), std::time::Instant::now());
         // One rescan at a time, from its first read to its last commit. A
         // rescan that panicked leaves nothing half-done behind the lock, so a
         // poisoned lock is still taken.
@@ -479,6 +482,7 @@ impl AppState {
         let _serialized = rescan
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        trace.mark("rescan_acquired");
         // Project roots and the previous parses, taken under the lock; all
         // disk reads happen without it. The parse cache is moved out, not
         // copied: rescans are serialized, so only this one uses it.
@@ -539,6 +543,13 @@ impl AppState {
                 inner.test_runs.compaction_stamps.clone(),
             )
         };
+        trace.mark("roots_taken");
+        #[cfg(test)]
+        if let Some(ready) = TEST_HISTORY_SCAN_READY.with(|slot| slot.borrow_mut().take()) {
+            // StateInner is released; no SQLite connection is held here.
+            // The scanner retains its normal serialization guard throughout.
+            ready();
+        }
         let mut projects = Vec::new();
         let mut common_dirs: BTreeMap<String, PathBuf> = BTreeMap::new();
         for (id, root) in roots {
@@ -713,7 +724,9 @@ impl AppState {
             test_run_file_stamp(&path.join("request.json")).is_none()
                 || test_run_file_stamp(&path.join("results.json")).is_none()
         }).map(|row| row.summary.run_id.clone()).collect();
+        trace.mark("reads_done");
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        trace.mark("commit_acquired");
         inner.test_runs.compaction_stamps = compact_stamps;
         let mut compact_metadata_changed = false;
         let compact_updates: HashMap<_, _> = inner.test_runs.compaction_stamps.iter()
@@ -899,6 +912,7 @@ impl AppState {
         // Run waits may settle from here on (`refresh_test_run_waits`).
         inner.test_runs.scanned_once = true;
         self.compact_test_runs_locked(&mut inner);
+        trace.mark("published");
         inner.test_runs.any_running()
     }
 

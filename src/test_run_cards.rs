@@ -290,7 +290,14 @@ enum TestRunCardFailureRead {
 /// with the detail route's 1 MiB guard: the first failing stage, else the
 /// first failing preflight check. Its diagnostics text is cut to 4 KiB.
 fn test_run_card_failure(run_dir: &FsPath) -> TestRunCardFailureRead {
-    test_run_failure_read(run_dir, TEST_RUN_CARD_EXCERPT_MAX_BYTES)
+    let failure = test_run_failure_read(run_dir, TEST_RUN_CARD_EXCERPT_MAX_BYTES);
+    #[cfg(test)]
+    TEST_HISTORY_EXCERPT.with(|slot| {
+        if let Some(observe) = slot.borrow_mut().as_mut() {
+            observe(run_dir, &failure);
+        }
+    });
+    failure
 }
 
 /// `test_run_card_failure` with the diagnostics cut to `max_excerpt` bytes:
