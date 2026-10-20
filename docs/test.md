@@ -738,6 +738,19 @@ a block, never let an older pass stand. A focused run is outside this rule
 and has its own, below; the stage name `focused` is reserved for it, so a
 full gate's stage of that name is never a test stage.
 
+A launcher run that never reached a stage tested nothing, so its failure is
+no test's, whatever its mode. A launcher that refuses before its run starts,
+as when its registration is aborted, prints only `FAIL launcher: …` and exits
+1. With neither the run's verdict `PASS|FAIL RUN exit=CODE` nor a stage line
+`NAME: passed|failed` in its output, its check ends with outcome Unknown, in
+the one-call form and the plain form alike. A run refused before its first
+stage after its summary was printed, such as by the disk-capacity floor above,
+prints `FAIL RUN exit=1`, but its own `results.json` records it failed with
+every stage unrun. In the foreground, when the summary's first verdict names
+the run whose `results.json` its `results:` line names, its check ends
+Unknown. A carried run like that is refused, neither credited nor recorded. A
+run that failed at any stage, its first included, is still recorded failed.
+
 A focused run, `node scripts/test-launcher.mjs focused -- COMMAND ARG...`,
 is a test check only when its wrapped command is itself one (a `cargo test`
 or a bounded native `node --test`, not a build or a `--no-run`). Its exit status alone says nothing about how

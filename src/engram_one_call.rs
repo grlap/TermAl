@@ -138,7 +138,9 @@ fn engram_check_exit_is_the_tests(
 
 /// `engram_check_outcome` for `check`, which ended `exit` with its runner's
 /// `result_lines`: an exit that is not its test's own
-/// (`engram_check_exit_is_the_tests`) is unknown.
+/// (`engram_check_exit_is_the_tests`), or a test launcher's that came with
+/// no sign its run executed (`engram_launcher_exit_without_run`), is
+/// unknown.
 fn engram_check_command_outcome(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
@@ -147,12 +149,53 @@ fn engram_check_command_outcome(
     if exit == EngramCommandExit::NotFinished {
         return None;
     }
-    let exit = if engram_check_exit_is_the_tests(check, exit, result_lines) {
+    let exit = if engram_check_exit_is_the_tests(check, exit, result_lines)
+        && !engram_launcher_exit_without_run(check, exit, result_lines)
+    {
         exit
     } else {
         EngramCommandExit::Unknown
     };
     engram_check_outcome(exit, check.simple)
+}
+
+/// The outcome of a check of `command` that ended as `end` says, judged from
+/// its exit and result lines (`engram_check_command_outcome`), unknown for a
+/// launcher run whose own terminal record says it ran no stage
+/// (`EngramTurnCheckEnd::launcher_ran_no_stage`): a run refused before its
+/// first stage prints a `FAIL RUN exit=1` verdict, but tested nothing.
+fn engram_check_end_outcome(
+    command: &EngramCheckCommand,
+    end: &EngramTurnCheckEnd,
+) -> Option<EngramExecutionOutcome> {
+    engram_check_command_outcome(command, end.exit, &end.result_lines).map(|outcome| {
+        if end.launcher_ran_no_stage {
+            EngramExecutionOutcome::Unknown
+        } else {
+            outcome
+        }
+    })
+}
+
+/// Whether `check` is a test launcher's test whose non-zero `exit` came with
+/// no sign that its run executed: among its `result_lines`, neither the
+/// run's verdict `PASS|FAIL RUN exit=CODE` (`engram_launcher_verdict`) nor a
+/// stage line `NAME: passed|failed`. A launcher that refuses before its run
+/// starts, as when its registration is aborted, prints only `FAIL launcher:
+/// …` and exits 1 having run no test, in the one-call form and the plain
+/// form alike, so that exit is no test's failure.
+fn engram_launcher_exit_without_run(
+    check: &EngramCheckCommand,
+    exit: EngramCommandExit,
+    result_lines: &[String],
+) -> bool {
+    matches!(exit, EngramCommandExit::Code(code) if code != 0)
+        && check.kind == EngramVerificationKind::Test
+        && engram_launcher_words(check).is_some()
+        && !result_lines.iter().any(|line| {
+            let line = line.trim();
+            engram_launcher_verdict(line).is_some() || engram_launcher_stage_line(line).is_some()
+        })
 }
 
 /// The recognised test a line runs after another command, `A && TEST` or

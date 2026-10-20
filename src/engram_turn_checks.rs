@@ -440,6 +440,10 @@ struct EngramTurnCheckEnd {
     /// A focused launcher run whose records back a pass but whose summary
     /// has no `focused:` stage line (`engram_focused_stage_line_missing`).
     focused_stage_line_missing: bool,
+    /// A launcher run whose own terminal record says it ran no stage
+    /// (`engram_launcher_output_ran_no_stage`): its failed exit is no test's
+    /// failure, so the check ends unknown (`engram_check_end_outcome`).
+    launcher_ran_no_stage: bool,
     end_basis: Arc<EngramBasisCapture>,
     /// A declared check's result, judged from its artifact on its own thread
     /// as its command ended (`engram_declared_result`); it decides the
@@ -877,7 +881,7 @@ fn engram_resolve_turn_checks_with_notices(
         }
         let Some(outcome) = (match engram_declared_result_of(&end) {
             Some(result) => engram_declared_outcome(end.exit, &result),
-            None => engram_check_command_outcome(&check.command, end.exit, &end.result_lines),
+            None => engram_check_end_outcome(&check.command, &end),
         }) else {
             continue;
         };

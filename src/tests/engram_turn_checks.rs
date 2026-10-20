@@ -504,6 +504,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
             result_lines: vec!["test result: ok. 0 passed; 0 failed".to_owned()],
             showed_passing_tests: false,
             focused_stage_line_missing: false,
+            launcher_ran_no_stage: false,
             end_basis: engram_ready_basis_capture(),
         }),
     };
@@ -2063,6 +2064,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
             result_lines: Vec::new(),
             showed_passing_tests: true,
             focused_stage_line_missing: false,
+            launcher_ran_no_stage: false,
             end_basis,
         }),
     };
@@ -2130,6 +2132,7 @@ pub(super) fn finished_check(
             result_lines: Vec::new(),
             showed_passing_tests: true,
             focused_stage_line_missing: false,
+            launcher_ran_no_stage: false,
             end_basis,
         }),
     }
@@ -4779,6 +4782,10 @@ fn a_session_in_a_turn_on_a_named_root_is_a_writer_there_too() {
 // further; it uses the `CheckedTurn` fixture above.
 #[path = "engram_one_call_checks.rs"]
 mod one_call_checks;
+
+// A launcher check that ran no test stage, likewise a child module.
+#[path = "engram_launcher_not_run.rs"]
+mod launcher_not_run;
 
 // Where a command of a shell TermAl lost may write, likewise a child module.
 #[path = "engram_lost_shell_overlap.rs"]

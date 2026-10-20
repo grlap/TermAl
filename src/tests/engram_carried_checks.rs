@@ -4223,6 +4223,7 @@ fn each_settlement_candidate_is_judged_by_its_own_closure() {
             result_lines: Vec::new(),
             showed_passing_tests: true,
             focused_stage_line_missing: false,
+            launcher_ran_no_stage: false,
             end_basis,
         };
         EngramResolvedCheck {

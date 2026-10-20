@@ -5,10 +5,12 @@
 // launcher), the stages named `rust-tests` and `vitest` count. Owns that rule
 // (`engram_launcher_test_stages`), finding a foreground run's request
 // record from the `results:` line of its summary
-// (`engram_launcher_output_test_stages`), and the focused-run rule: a focused
+// (`engram_launcher_output_test_stages`), the focused-run rule: a focused
 // run's one stage counts only when the run's own results.json records it
 // passed with test counts showing at least one test passed and none failed
-// (`engram_launcher_focused_record_passed`). Does not own reading a carried
+// (`engram_launcher_focused_record_passed`), and whether a run's own
+// results.json records that it ran no stage
+// (`engram_launcher_output_ran_no_stage`). Does not own reading a carried
 // run's records or judging them (`engram_read_carried_run` in
 // `engram_carried_checks.rs`), the bounded record read it shares with that
 // (`engram_read_launcher_record`), or whether a check's result lines show
@@ -62,32 +64,16 @@ fn engram_launcher_test_stages(request: &Value) -> Vec<String> {
 /// own text never earns credit. Reads the file system, so never under the
 /// state lock.
 fn engram_launcher_output_test_stages(output: &str) -> Vec<String> {
-    let Some(results) = output
-        .lines()
-        .rev()
-        .find_map(|line| line.trim().strip_prefix("results: "))
-    else {
+    let Some(named) = engram_launcher_output_run(output) else {
         return ENGRAM_LAUNCHER_FULL_TEST_STAGES
             .iter()
             .map(|name| (*name).to_owned())
             .collect();
     };
-    let results = FsPath::new(results.trim());
-    if !results.is_absolute()
-        || results.file_name().and_then(|name| name.to_str()) != Some("results.json")
-        || engram_network_path(&results.to_string_lossy())
-    {
-        return Vec::new();
-    }
-    let Some(directory) = results.parent() else {
+    let Some((directory, run)) = named else {
         return Vec::new();
     };
-    let run = directory.file_name().and_then(|name| name.to_str());
-    let read = |name: &str| {
-        engram_read_launcher_record(&directory.join(name))
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .filter(|record| run.is_some() && record.get("runId").and_then(Value::as_str) == run)
-    };
+    let read = |name: &str| engram_read_launcher_run_record(directory, run, name);
     let Some(request) = read("request.json") else {
         return Vec::new();
     };
@@ -96,7 +82,7 @@ fn engram_launcher_output_test_stages(output: &str) -> Vec<String> {
         // `results:` line printed later, inside a stage's diagnostics, cannot
         // lend another run's counts to this one.
         let verdict_is_this_runs_pass =
-            run.is_some_and(|run| engram_launcher_first_verdict(output) == Some(("PASS", run, "exit=0")));
+            engram_launcher_first_verdict(output) == Some(("PASS", run, "exit=0"));
         return read("results.json")
             .filter(|results| verdict_is_this_runs_pass && engram_launcher_focused_record_passed(results))
             .map(|_| vec![ENGRAM_LAUNCHER_FOCUSED_STAGE.to_owned()])
@@ -110,17 +96,86 @@ fn engram_launcher_output_test_stages(output: &str) -> Vec<String> {
         .collect()
 }
 
+/// The run directory a foreground launcher run's summary names in its last
+/// `results: PATH` line, with the run it is named for: `None` when the output
+/// has no such line, `Some(None)` when the line names no absolute local
+/// `results.json` in a directory with a readable name (never resolved here
+/// on a network path: `engram_network_path`).
+fn engram_launcher_output_run(output: &str) -> Option<Option<(&FsPath, &str)>> {
+    let results = output
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("results: "))?;
+    let results = FsPath::new(results.trim());
+    if !results.is_absolute()
+        || results.file_name().and_then(|name| name.to_str()) != Some("results.json")
+        || engram_network_path(&results.to_string_lossy())
+    {
+        return Some(None);
+    }
+    Some(results.parent().and_then(|directory| {
+        let run = directory.file_name().and_then(|name| name.to_str())?;
+        Some((directory, run))
+    }))
+}
+
+/// The record `name` in the run directory `directory` of the run `run`, when
+/// it can be read and names that run.
+fn engram_read_launcher_run_record(directory: &FsPath, run: &str, name: &str) -> Option<Value> {
+    engram_read_launcher_record(&directory.join(name))
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .filter(|record| record.get("runId").and_then(Value::as_str) == Some(run))
+}
+
+/// Whether the foreground launcher run whose output is `output` ran no
+/// stage, by its own terminal record: the `results.json` its summary names
+/// (`engram_launcher_output_run`), of the run its summary's verdict, its
+/// first, names, records it failed with every stage it lists unrun
+/// (`engram_launcher_record_ran_no_stage`). Such a run, refused before its
+/// first stage (the disk-capacity floor, a registration refusal recorded
+/// after the summary line), prints `FAIL RUN exit=1` but tested nothing. A
+/// `results:` line of another run, printed inside a stage's diagnostics, is
+/// not this run's. Reads the file system, so never under the state lock.
+fn engram_launcher_output_ran_no_stage(output: &str) -> bool {
+    let Some(Some((directory, run))) = engram_launcher_output_run(output) else {
+        return false;
+    };
+    engram_launcher_first_verdict(output).is_some_and(|(_, verdict_run, _)| verdict_run == run)
+        && engram_read_launcher_run_record(directory, run, "results.json")
+            .is_some_and(|results| engram_launcher_record_ran_no_stage(&results))
+}
+
+/// Whether `results`, a launcher run's terminal record, says the run ran no
+/// stage: it ended failed and lists at least one stage, every one `unrun`.
+fn engram_launcher_record_ran_no_stage(results: &Value) -> bool {
+    results.get("state").and_then(Value::as_str) == Some("failed")
+        && results
+            .get("stages")
+            .and_then(Value::as_array)
+            .is_some_and(|stages| {
+                !stages.is_empty()
+                    && stages
+                        .iter()
+                        .all(|stage| stage.get("state").and_then(Value::as_str) == Some("unrun"))
+            })
+}
+
 /// The first verdict line of a launcher summary, `PASS|FAIL RUN exit=CODE`,
 /// as its three words: the summary prints its own verdict before any stage
 /// diagnostics.
 fn engram_launcher_first_verdict(output: &str) -> Option<(&str, &str, &str)> {
-    output.lines().find_map(|line| {
-        let mut words = line.split_whitespace();
-        let verdict = words.next().filter(|word| matches!(*word, "PASS" | "FAIL"))?;
-        let run = words.next()?;
-        let exit = words.next().filter(|word| word.starts_with("exit="))?;
-        words.next().is_none().then_some((verdict, run, exit))
-    })
+    output.lines().find_map(engram_launcher_verdict)
+}
+
+/// `line` as a launcher verdict, `PASS|FAIL RUN exit=CODE`, in its three
+/// words. A launcher's refusal before its run starts, `FAIL launcher: …`, is
+/// none.
+fn engram_launcher_verdict(line: &str) -> Option<(&str, &str, &str)> {
+    let mut words = line.split_whitespace();
+    let verdict = words.next().filter(|word| matches!(*word, "PASS" | "FAIL"))?;
+    let run = words.next()?;
+    let exit = words.next().filter(|word| word.starts_with("exit="))?;
+    words.next().is_none().then_some((verdict, run, exit))
 }
 
 /// The one stage of a focused launcher run.

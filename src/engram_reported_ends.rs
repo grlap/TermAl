@@ -39,6 +39,9 @@ struct EngramEndReading {
         Option<EngramBuildDiagnostic>,
     )>,
     launcher_test_stages: Vec<String>,
+    /// A launcher test's own terminal record says its run ran no stage
+    /// (`engram_launcher_output_ran_no_stage`).
+    launcher_ran_no_stage: bool,
     parsed: Option<(EngramCheckCommand, Vec<String>, bool)>,
 }
 
@@ -97,6 +100,12 @@ fn engram_read_check_end(
         } else {
             Vec::new()
         };
+    // Whether a launcher test's run ran no stage, by its own terminal record,
+    // read off the lock too.
+    let launcher_ran_no_stage = starting_check.is_some_and(|check| {
+        check.command.kind == EngramVerificationKind::Test
+            && engram_launcher_words(&check.command).is_some()
+    }) && engram_launcher_output_ran_no_stage(output);
     let parsed = starting_check
         .is_some()
         .then(|| engram_check_command(command))
@@ -111,6 +120,7 @@ fn engram_read_check_end(
         build_completion,
         node_completion,
         launcher_test_stages,
+        launcher_ran_no_stage,
         parsed,
     }
 }
@@ -133,6 +143,7 @@ fn engram_record_check_end(
         build_completion,
         node_completion,
         launcher_test_stages,
+        launcher_ran_no_stage,
         parsed,
     } = reading;
     let (mut result_lines, mut showed_passing_tests) = match parsed {
@@ -221,6 +232,11 @@ fn engram_record_check_end(
         result_lines,
         showed_passing_tests,
         focused_stage_line_missing,
+        // Read for the check its key started; it holds for this one only
+        // when this one is a launcher test too.
+        launcher_ran_no_stage: launcher_ran_no_stage
+            && check.command.kind == EngramVerificationKind::Test
+            && engram_launcher_words(&check.command).is_some(),
         end_basis,
         declared,
     });
@@ -607,7 +623,7 @@ fn engram_settle_reported_end(
     }
     let outcome = match engram_declared_result_of(&end) {
         Some(result) => engram_declared_outcome(end.exit, &result),
-        None => engram_check_command_outcome(&check.command, end.exit, &end.result_lines),
+        None => engram_check_end_outcome(&check.command, &end),
     }
     .ok_or_else(|| "its reported end marks no result the host can judge".to_owned())?;
     // As for a check in its turn: success needs positive evidence that tests

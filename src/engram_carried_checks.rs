@@ -866,6 +866,14 @@ const ENGRAM_CARRIED_RUN_NEITHER: &str = concat!(
     "so it is neither credited nor recorded"
 );
 
+/// Why a failed run that ran no stage is refused
+/// (`engram_launcher_record_ran_no_stage`): refused before its first stage,
+/// it tested nothing, so its failure is no test's.
+const ENGRAM_CARRIED_RUN_NO_STAGE_RAN: &str = concat!(
+    "its run failed before its first stage (its terminal record has every stage unrun), ",
+    "so it tested nothing and is neither credited nor recorded"
+);
+
 /// Why a passed run with no test stage is refused
 /// (`engram_launcher_test_stages`).
 const ENGRAM_CARRIED_RUN_NO_TEST_STAGE: &str = concat!(
@@ -894,7 +902,8 @@ struct EngramCarriedRunVerdict {
 /// cannot be credited. A passed run needs every stage its request lists
 /// passed with code 0 and no error, among them a test stage by its request
 /// record (`engram_launcher_test_stages`), as a foreground gate needs; a
-/// failed one is recorded failed, whichever stage failed. Either way the
+/// failed one is recorded failed, whichever stage failed, unless it ran no
+/// stage at all (`ENGRAM_CARRIED_RUN_NO_STAGE_RAN`). Either way the
 /// expected, before and after input fingerprints must agree, and so must the
 /// request's.
 fn engram_read_carried_run(
@@ -987,6 +996,9 @@ fn engram_read_carried_run(
                 return Err(ENGRAM_CARRIED_RUN_NO_TEST_STAGE);
             }
             true
+        }
+        Some("failed") if engram_launcher_record_ran_no_stage(&record) => {
+            return Err(ENGRAM_CARRIED_RUN_NO_STAGE_RAN);
         }
         Some("failed") => false,
         _ => return Err(ENGRAM_CARRIED_RUN_NEITHER),
@@ -1161,6 +1173,9 @@ fn engram_settle_carried_check(
         showed_passing_tests: verdict.passed,
         // A carried run is a full gate, never a focused run.
         focused_stage_line_missing: false,
+        // A carried run that ran no stage is refused before this
+        // (`engram_read_carried_run`).
+        launcher_ran_no_stage: false,
         end_basis,
         declared: None,
     };
