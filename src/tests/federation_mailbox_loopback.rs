@@ -244,7 +244,7 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(exact["notificationCause"], FEDERATION_REMOTE_WAKE_CAUSE);
+    assert_eq!(exact["notificationCause"], "remote wake pending; awaiting matching durable receiver receipt");
     let ack_path = format!("mailboxes/{mailbox}/acknowledge");
     let (status, acked) = api(
         &client,

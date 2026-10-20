@@ -13,15 +13,21 @@ async fn federation_authenticate_message(
     let (mut parts, body) = request.into_parts();
     let mailbox_request =
         parts.method == axum::http::Method::POST && parts.uri.path() == "/federation/v1/mailbox";
+    let executor_request = parts.method == axum::http::Method::POST
+        && parts.uri.path() == FEDERATION_EXECUTOR_WAKE_ROUTE;
     let binding_request = parts.method == axum::http::Method::POST
         && parts.uri.path() == "/federation/v1/mailbox/binding";
-    let durable_request = mailbox_request || binding_request;
-    let request_limit = if mailbox_request {
+    let durable_request = mailbox_request || binding_request || executor_request;
+    let request_limit = if executor_request {
+        32 * 1024
+    } else if mailbox_request {
         FEDERATION_MAILBOX_REQUEST_BYTES
     } else {
         4096
     };
-    let response_limit = if mailbox_request {
+    let response_limit = if executor_request {
+        32 * 1024
+    } else if mailbox_request {
         FEDERATION_MAILBOX_RESPONSE_BYTES
     } else {
         FEDERATION_FRAME_LIMIT

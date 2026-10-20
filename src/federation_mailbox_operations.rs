@@ -233,6 +233,7 @@ impl AppState {
             }
         }
         drop(finalization);
+        self.federation_executor_wake_signal.kick();
         receipt.notification_cause = Some(FEDERATION_REMOTE_WAKE_CAUSE.to_owned());
         federation_mailbox_response(central, &receipt)
     }
@@ -245,7 +246,13 @@ impl AppState {
             .get(&message.target_session_id)
             .is_some_and(|target| target.binding.identity.host_id != target.binding.central.host_id)
         {
-            message.notification_cause = Some(FEDERATION_REMOTE_WAKE_CAUSE.to_owned());
+            drop(inner);
+            if self.refresh_federation_executor_reservation_domain().is_err() {
+                message.notification_cause = Some("remote wake state unavailable; authority not durable".into());
+                return;
+            }
+            message.notification_cause = Some(self.mailbox_store.federation_executor_wake_state(&message.id)
+                .unwrap_or_else(|_| "remote wake state unavailable; ownership not inferred".to_owned()));
         }
     }
 }

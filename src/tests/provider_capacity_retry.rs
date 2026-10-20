@@ -402,6 +402,8 @@ fn a_delayed_receipt_ack_cannot_outlive_capacity_cancellation_or_settings() {
             record.prompt_deliveries.insert(
                 id.clone(),
                 PromptDelivery {
+                    federation_operation: None,
+                    federation_handoff_started: false,
                     disposition: PromptDeliveryDisposition::Pending,
                     attempt: 0,
                     write_ahead: Uuid::new_v4().to_string(),

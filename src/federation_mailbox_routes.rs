@@ -132,6 +132,10 @@ impl AppState {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
         let expected = actor.as_ref().map(|actor| actor.binding.clone());
+        let acknowledged_mailbox = match &operation {
+            FederationMailboxOperation::Acknowledge { mailbox_id, .. } => Some(mailbox_id.clone()),
+            _ => None,
+        };
         let request = FederationMailboxRequest {
             protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
             schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
@@ -175,6 +179,16 @@ impl AppState {
             != expected
         {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+        }
+        if let (Some(mailbox), Some(binding), Some(lease)) =
+            (acknowledged_mailbox, expected, lease.as_ref())
+        {
+            let summary: MailboxSummary = serde_json::from_value(response.value.clone())
+                .map_err(|_| ApiError::bad_gateway("invalid central ACK response"))?;
+            if summary.id != mailbox { return Err(ApiError::conflict("central ACK mailbox mismatch")); }
+            let app = self.clone();
+            let lease = lease.clone();
+            run_blocking_api(move || app.retain_federation_executor_mailbox_ack(&binding, &summary, &lease)).await?;
         }
         serde_json::from_value(response.value)
             .map(|value| (value, lease))

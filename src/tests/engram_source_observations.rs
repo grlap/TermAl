@@ -1778,6 +1778,8 @@ fn a_retired_parked_continuation_returns_its_receipted_head_to_pending() {
         record.prompt_deliveries.insert(
             head.clone(),
             PromptDelivery {
+                federation_operation: None,
+                federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,
                 attempt: 1,
                 write_ahead: "parked-write-ahead".to_owned(),

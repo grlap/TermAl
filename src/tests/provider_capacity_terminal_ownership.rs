@@ -412,6 +412,8 @@ fn an_old_capacity_terminal_cannot_settle_a_new_armed_receipted_request() {
         record.prompt_deliveries.insert(
             head_id.clone(),
             PromptDelivery {
+                federation_operation: None,
+                federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::Pending,
                 attempt: 0,
                 write_ahead: Uuid::new_v4().to_string(),

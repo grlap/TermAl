@@ -1,19 +1,20 @@
-// Inert satellite operation storage. These APIs never enqueue, dispatch,
-// acknowledge a mailbox page or execute a lifecycle action. A future caller
-// must validate authenticated current authority and hold its returned guard
+// Durable operation storage. These APIs never enqueue, dispatch,
+// acknowledge a mailbox page or execute a lifecycle action. Runtime callers
+// validate authenticated current authority and hold their returned guard
 // through commit; captured identity alone is not authorization.
 // All journal rows count towards capacity, including processed dedup rows.
-// There is deliberately no eviction or pruning API in this increment.
-// Until a runtime caller is wired, allow these inert APIs outside tests only.
+// There is deliberately no eviction or pruning API. Lifecycle evidence APIs
+// remain reserved for a later caller, with item-scoped dead-code allowances.
 #[cfg_attr(not(test), allow(dead_code))]
-const FEDERATION_EXECUTOR_MAX_COUNT: u64 = 1000;
+const FEDERATION_EXECUTOR_MAX_COUNT: u64 = 65_536;
 #[cfg_attr(not(test), allow(dead_code))]
 const FEDERATION_EXECUTOR_MAX_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg_attr(not(test), allow(dead_code))]
 const FEDERATION_EXECUTOR_MAX_PAYLOAD: usize = 256 * 1024;
 
 #[cfg_attr(not(test), allow(dead_code))]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationExecutorOperation {
     central_host_id: String,
     central_epoch: u64,
@@ -200,36 +201,39 @@ impl FederationExecutorRecord {
     }
 }
 
-impl MailboxStore {
-    #[cfg_attr(not(test), allow(dead_code))]
-    fn admit_federation_executor_operation<G>(
-        &self,
-        operation: &FederationExecutorOperation,
-        authorize: impl FnOnce() -> Result<G>,
-    ) -> Result<FederationExecutorRecord> {
-        operation.validate()?;
-        let _writer = self.lock_writer("receiving executor operation")?;
-        let mut connection = self.connection()?;
-        let transaction = begin_mailbox_write(&mut connection, "receiving executor operation")?;
-        if let Some(existing) = federation_executor_read(&transaction,
+// Shared by receiver admission and the atomic central ownership mirror.
+fn federation_executor_admit(connection: &rusqlite::Connection, operation: &FederationExecutorOperation,
+    check_capacity: bool, reservations: &mut FederationExecutorReservationCache)
+    -> Result<FederationExecutorRecord>
+{
+        if let Some(existing) = federation_executor_read(connection,
             &operation.central_host_id, &operation.operation_key)?
         {
             if existing.operation != *operation { return Err(federation_executor_conflict()); }
-            let _authority = authorize()?;
-            transaction.commit()?;
             return Ok(existing);
         }
-        let (count, bytes): (u64, u64) = transaction.query_row(
+        let (mut count, mut bytes): (u64, u64) = connection.query_row(
             "SELECT COUNT(*),COALESCE(SUM(payload_bytes),0) FROM federation_executor_operations",
             [], |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        if count >= FEDERATION_EXECUTOR_MAX_COUNT
-            || bytes.saturating_add(operation.payload.len() as u64) > FEDERATION_EXECUTOR_MAX_BYTES
+        if check_capacity {
+            // A host that changes role must not spend slots already reserved
+            // for its earlier central obligations. Same-key duplicates above
+            // remain free, and a mirror settlement below swaps its own slot.
+            let reserved = reservations.refresh(connection)?;
+            count = count.saturating_add(reserved.len() as u64);
+            for (_, request) in reserved {
+                let payload = request.operation(1).map_err(|_| federation_executor_conflict())?.payload;
+                bytes = bytes.saturating_add(payload.len() as u64);
+            }
+        }
+        if check_capacity && (count >= FEDERATION_EXECUTOR_MAX_COUNT
+            || bytes.saturating_add(operation.payload.len() as u64) > FEDERATION_EXECUTOR_MAX_BYTES)
         {
             return Err(mailbox_store_error(MailboxStoreErrorKind::Capacity,
                 "executor journal is full; retained operations are not evicted"));
         }
-        transaction.execute(
+        connection.execute(
             "INSERT INTO federation_executor_operations(central_host_id,operation_key,central_epoch,
              target_host_id,enrollment_generation,session_id,creation_id,placement_generation,
              command_kind,payload_digest,payload,payload_bytes,stage,effect_state)
@@ -239,13 +243,66 @@ impl MailboxStore {
                 operation.creation_id,operation.placement_generation,operation.command_kind,
                 operation.digest(),operation.payload,operation.payload.len() as u64],
         )?;
-        let record = federation_executor_read(&transaction,
+        let record = federation_executor_read(connection,
             &operation.central_host_id, &operation.operation_key)?
             .ok_or_else(|| anyhow!("persisted executor operation disappeared"))?;
-        let _authority = authorize()?;
+        Ok(record)
+}
+
+impl MailboxStore {
+    fn local_federation_executor_recovery(
+        &self, central: &str, local_host: &str, after: &str,
+    ) -> Result<Vec<FederationExecutorRecord>> {
+        let connection = self.connection()?;
+        let keys = connection.prepare(
+            "SELECT operation_key FROM federation_executor_operations
+             WHERE central_host_id=?1 AND target_host_id=?2 AND operation_key>?3
+             AND command_kind='wake' ORDER BY operation_key LIMIT 100",
+        )?.query_map(rusqlite::params![central,local_host,after], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        keys.into_iter().map(|key| federation_executor_read(&connection, central, &key)?
+            .ok_or_else(|| anyhow!("executor recovery row disappeared"))).collect()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn admit_federation_executor_operation<G>(
+        &self,
+        operation: &FederationExecutorOperation,
+        authorize: impl FnOnce() -> Result<G>,
+    ) -> Result<FederationExecutorRecord> {
+        self.admit_federation_executor_operation_after_commit(operation, authorize, |_, _| {})
+    }
+
+    fn admit_federation_executor_operation_after_commit<G>(
+        &self, operation: &FederationExecutorOperation,
+        authorize: impl FnOnce() -> Result<G>,
+        committed: impl FnOnce(&mut G, &FederationExecutorRecord),
+    ) -> Result<FederationExecutorRecord> {
+        self.admit_federation_executor_operation_while_running(operation, || Ok(()), authorize, committed)
+    }
+
+    fn admit_federation_executor_operation_while_running<G>(
+        &self, operation: &FederationExecutorOperation,
+        before_writer: impl Fn() -> Result<()>,
+        authorize: impl FnOnce() -> Result<G>,
+        committed: impl FnOnce(&mut G, &FederationExecutorRecord),
+    ) -> Result<FederationExecutorRecord> {
+        operation.validate()?;
+        before_writer()?;
+        let _writer = self.lock_writer("receiving executor operation")?;
+        // A queued writer may have waited across stop. Refuse before opening
+        // its transaction; once authorized, cancellation never aborts COMMIT.
+        before_writer()?;
+        let mut connection = self.connection()?;
+        let transaction = begin_mailbox_write(&mut connection, "receiving executor operation")?;
+        let record = federation_executor_admit(&transaction, operation, true, &mut self.executor_reservations.lock().expect("executor reservation mutex poisoned"))?;
+        let mut authority = authorize()?;
         #[cfg(test)]
         federation_executor_test_cut("beforeReceiveCommit")?;
         transaction.commit()?;
+        // The callback owns no fallible I/O or additional lock acquisition.
+        // Both first receive and exact duplicates retain authority through it.
+        committed(&mut authority, &record);
         #[cfg(test)]
         federation_executor_test_cut("afterReceiveCommit")?;
         Ok(record)
@@ -254,11 +311,17 @@ impl MailboxStore {
     #[cfg_attr(not(test), allow(dead_code))]
     fn record_federation_executor_evidence<G>(
         &self,
+        executor_host_id: &str,
         operation: &FederationExecutorOperation,
         evidence: FederationExecutorEvidence,
         authorize: impl FnOnce() -> Result<G>,
     ) -> Result<FederationExecutorRecord> {
         operation.validate()?;
+        // Mirrored ownership receipts are immutable evidence on a different
+        // host. Role changes cannot turn one into a local executor operation.
+        if operation.target_host_id != executor_host_id {
+            return Err(federation_executor_conflict());
+        }
         let _writer = self.lock_writer("retaining executor evidence")?;
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "retaining executor evidence")?;
@@ -267,15 +330,18 @@ impl MailboxStore {
             .ok_or_else(|| mailbox_store_error(MailboxStoreErrorKind::NotFound,
                 "executor operation has not been durably received"))?;
         if record.operation != *operation { return Err(federation_executor_conflict()); }
+        let previous = record.clone();
         record.apply(evidence)?;
-        transaction.execute(
+        if record != previous {
+            transaction.execute(
             "UPDATE federation_executor_operations SET stage=?3,effect_state=?4,queue_entry_id=?5,
              delivery_attempt_id=?6,runtime_ack=?7,processed_evidence_kind=?8,processed_evidence=?9
              WHERE central_host_id=?1 AND operation_key=?2",
             rusqlite::params![operation.central_host_id,operation.operation_key,record.stage,
                 record.effect_state,record.queue_entry_id,record.delivery_attempt_id,record.runtime_ack,
                 record.processed_evidence_kind,record.processed_evidence],
-        )?;
+            )?;
+        }
         let _authority = authorize()?;
         #[cfg(test)]
         federation_executor_test_cut("beforeEvidenceCommit")?;

@@ -52,6 +52,8 @@ pub(super) fn receipt_the_parked_head(state: &AppState, session: &str) -> String
     record.prompt_deliveries.insert(
         id.clone(),
         PromptDelivery {
+            federation_operation: None,
+            federation_handoff_started: false,
             disposition: PromptDeliveryDisposition::Pending,
             attempt: 1,
             write_ahead: Uuid::new_v4().to_string(),

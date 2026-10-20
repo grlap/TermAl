@@ -1,5 +1,8 @@
 // Version 4 adds inert executor ownership and evidence. No mailbox replica,
 // cursor or network dispatch belongs here. Historical schemas stay frozen.
+// A row targeted at another host is an immutable central ownership mirror:
+// received/not_started with all queue, runtime and processing columns NULL.
+// Its existence records receiver ownership, never local executor permission.
 const FEDERATION_EXECUTOR_SCHEMA_SQL: &str = "
     CREATE TABLE federation_executor_operations (
       central_host_id TEXT NOT NULL CHECK (length(central_host_id) BETWEEN 1 AND 256),

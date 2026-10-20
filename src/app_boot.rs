@@ -782,6 +782,7 @@ impl AppState {
             agent_readiness_cache,
             agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
             federation_peer_handles: FederationPeerHandles::default(),
+            federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
             remote_registry: Arc::new(
                 std::thread::spawn(RemoteRegistry::new)
                     .join()
@@ -885,6 +886,7 @@ impl AppState {
         // the per-session readiness fence blocks only affected sessions until
         // their own recovery result is committed.
         self.recover_prepared_engram_sessions_after_boot(engram_plan);
+        self.recover_federation_executor_after_boot();
         // Materialize unread mailbox wakes before either workflow reconciler can
         // queue and dispatch a durable resume. That preserves FIFO ordering:
         // the workflow activation drains the recovered mailbox wake first.

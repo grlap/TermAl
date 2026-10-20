@@ -267,6 +267,8 @@ impl AppState {
     /// so callers that need strict durability for those variants should
     /// quiesce their producers before invoking this method.
     fn shutdown_persist_blocking(&self) {
+        #[cfg(test)]
+        self.federation_executor_wake_signal.observe("persistShutdown");
         let mut guard = self
             .persist_thread_handle
             .lock()
@@ -454,7 +456,12 @@ impl AppState {
     /// single-producer broadcast" pattern. See bugs.md "One-shot SSE
     /// shutdown notification can be missed before waiter registration".
     fn trigger_shutdown_signal(&self) {
+        self.federation_executor_wake_signal.stop();
         self.shutdown_signal_tx.send_replace(true);
+    }
+
+    fn host_is_shutting_down(&self) -> bool {
+        *self.shutdown_signal_tx.borrow()
     }
 
     /// Enqueues the owned delta after its commit, before releasing the same

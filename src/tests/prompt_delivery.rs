@@ -413,6 +413,8 @@ fn codex_handing_off(state: &AppState, generation: u64) -> (String, SharedCodexR
         record.prompt_deliveries.insert(
             prompt_id.clone(),
             PromptDelivery {
+                federation_operation: None,
+                federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,
                 attempt: 1,
                 write_ahead: "write-ahead-1".to_owned(),
@@ -624,6 +626,8 @@ fn acp_handing_off(state: &AppState, runtime_id: &str, generation: u64) -> (Stri
     record.prompt_deliveries.insert(
         prompt_id.clone(),
         PromptDelivery {
+            federation_operation: None,
+            federation_handoff_started: false,
             disposition: PromptDeliveryDisposition::HandingOff,
             attempt: 1,
             write_ahead: "write-ahead-1".to_owned(),
@@ -1714,7 +1718,7 @@ fn a_dispatch_held_before_its_hand_off_returns_the_receipt_to_pending() {
     let fixture = Fixture::new(state, "held-before-hand-off");
     let (id, turn_generation) = promoted_retained_receipt(&fixture, &writer);
     let nonce = fixture.delivery(&id).unwrap().write_ahead;
-    note_held_before_hand_off(&fixture.state, &fixture.session, turn_generation);
+    note_held_before_hand_off(&fixture.state, &fixture.session, turn_generation, None);
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
     assert_eq!(delivery.turn_generation, None);
@@ -1778,6 +1782,7 @@ fn reloaded_delivery(fixture: &Fixture, prompt_id: &str) -> PromptDelivery {
 /// Stop in progress defers one (`api.rs`).
 fn deferred_hand_off(fixture: &Fixture, turn_generation: u64, text: &str) -> DeferredEngramHandoff {
     DeferredEngramHandoff(Arc::new(Mutex::new(Some(TurnDispatch::PersistentClaude {
+        federation_handoff: None,
         active_turn_generation: turn_generation,
         opening_prompt: None,
         command: ClaudePromptCommand {

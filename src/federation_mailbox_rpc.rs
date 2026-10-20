@@ -24,6 +24,7 @@ impl FederationRpcRoute {
     fn response_limit(&self) -> usize {
         match self {
             Self::Mailbox(_, _) => FEDERATION_MAILBOX_RESPONSE_BYTES,
+            Self::ExecutorWake(_, _) => 32 * 1024,
             Self::Binding(_, _) => FEDERATION_FRAME_LIMIT,
             _ => 64 * 1024,
         }

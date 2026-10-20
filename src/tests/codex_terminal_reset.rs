@@ -364,6 +364,8 @@ fn shared_codex_terminal_effect_refuses_successor_generation_and_attachment() {
                 record.prompt_deliveries.insert(
                     "successor-receipt".to_owned(),
                     PromptDelivery {
+                        federation_operation: None,
+                        federation_handoff_started: false,
                         disposition: PromptDeliveryDisposition::HandingOff,
                         attempt: 1,
                         write_ahead: "successor-write".to_owned(),

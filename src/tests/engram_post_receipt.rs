@@ -874,6 +874,7 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
             handoff_prepared_turn_dispatch(
                 &state,
                 TurnDispatch::PersistentAcp {
+                    federation_handoff: None,
                     opening_prompt: None,
                     active_turn_generation,
                     engram_dispatch_generation: generation,
@@ -1185,6 +1186,7 @@ async fn assert_public_failed_stop_restores_admitted_handoff(
     handoff_prepared_turn_dispatch(
         &state,
         TurnDispatch::PersistentAcp {
+            federation_handoff: None,
             opening_prompt: None,
             active_turn_generation,
             engram_dispatch_generation: generation,
@@ -1474,6 +1476,8 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
         record.prompt_deliveries.insert(
             head.clone(),
             PromptDelivery {
+                federation_operation: None,
+                federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,
                 attempt: 1,
                 write_ahead: "admitted-write-ahead".to_owned(),

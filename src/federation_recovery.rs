@@ -4,6 +4,7 @@
 
 #[derive(Default)]
 struct FederationDurabilityRecovery {
+    task: Option<std::thread::JoinHandle<()>>,
     pending: Option<FederationDurabilityJob>,
     retry: FederationBackoff,
     next: Option<std::time::Instant>,
@@ -17,9 +18,10 @@ struct FederationDurabilityJob {
 
 impl FederationDurabilityRecovery {
     // Polled by the one host supervisor. Never waits under a lock or blocks
-    // reconciliation/shutdown on disk IO. An unresolved owned job is never
-    // replaced by a second writer job, even after its observation deadline.
+    // reconciliation on disk IO. Shutdown joins the owned job before its final
+    // persistence drain. An unresolved job is never replaced by a second writer.
     fn tick(&mut self, app: &AppState) {
+        if app.federation_executor_wake_signal.is_stopping() { return; }
         let now = std::time::Instant::now();
         if let Some(job) = &mut self.pending {
             match job.result.try_recv() {
@@ -44,6 +46,12 @@ impl FederationDurabilityRecovery {
                     }
                     return;
                 }
+            }
+        }
+        if let Some(task) = &self.task {
+            if !task.is_finished() { return; }
+            if self.task.take().expect("completed durability task").join().is_err() {
+                eprintln!("federation persistence recovery worker failed");
             }
         }
         let held = {
@@ -71,12 +79,15 @@ impl FederationDurabilityRecovery {
         match std::thread::Builder::new()
             .name("federation-persist-recovery".to_owned())
             .spawn(move || {
+                #[cfg(test)]
+                app.federation_executor_wake_signal.observe("durabilityRecoveryJob");
                 // The existing content fence rechecks the exact image after
                 // durable readback. It does not reset continuity quarantine,
                 // change epochs or release original operation reservations.
                 let _ = send.send(app.reconcile_federation_durability());
             }) {
-            Ok(_) => {
+            Ok(task) => {
+                self.task = Some(task);
                 self.pending = Some(FederationDurabilityJob {
                     result,
                     began: now,
@@ -85,6 +96,15 @@ impl FederationDurabilityRecovery {
             }
             Err(_) => {
                 self.failed(now, StatusCode::SERVICE_UNAVAILABLE);
+            }
+        }
+    }
+
+    async fn shutdown(mut self) {
+        if let Some(task) = self.task.take() {
+            match tokio::task::spawn_blocking(move || task.join()).await {
+                Ok(Ok(())) => {}
+                _ => eprintln!("federation persistence recovery worker failed during shutdown"),
             }
         }
     }

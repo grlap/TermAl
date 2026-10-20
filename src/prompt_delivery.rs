@@ -63,6 +63,13 @@ impl PromptDeliveryDisposition {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PromptDelivery {
+    // Kept beyond the ordinary receipt display limit: losing this association
+    // after a possible hand-off must never authorize a second remote wake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    federation_operation: Option<FederationExecutorOperation>,
+    #[serde(skip)]
+    // Valid only for write_ahead below; every fresh nonce clears this latch.
+    federation_handoff_started: bool,
     disposition: PromptDeliveryDisposition,
     /// Hand-off attempts begun so far.
     attempt: u32,
@@ -290,6 +297,8 @@ fn queue_receipted_orchestrator_prompt_on_record(
     record.prompt_deliveries.insert(
         prompt_id,
         PromptDelivery {
+            federation_operation: None,
+            federation_handoff_started: false,
             disposition: PromptDeliveryDisposition::Pending,
             attempt: 0,
             write_ahead: Uuid::new_v4().to_string(),
@@ -339,7 +348,8 @@ fn prune_prompt_deliveries(record: &mut SessionRecord) {
     }
     let queued = &record.queued_prompts;
     record.prompt_deliveries.retain(|prompt_id, delivery| {
-        delivery.turn_generation.is_some()
+        delivery.federation_operation.is_some()
+            || delivery.turn_generation.is_some()
             || delivery.disposition.is_settled()
             || queued
                 .iter()
@@ -348,7 +358,7 @@ fn prune_prompt_deliveries(record: &mut SessionRecord) {
     let mut settled = record
         .prompt_deliveries
         .iter()
-        .filter(|(_, delivery)| delivery.disposition.is_settled())
+        .filter(|(_, delivery)| delivery.disposition.is_settled() && delivery.federation_operation.is_none())
         .map(|(prompt_id, delivery)| (delivery.sequence, prompt_id.clone()))
         .collect::<Vec<_>>();
     if settled.len() > PROMPT_DELIVERY_SETTLED_LIMIT {
@@ -435,12 +445,20 @@ fn apply_prompt_delivery_outcome(
     turn_generation: u64,
     outcome: PromptDeliveryOutcome,
 ) -> Option<String> {
+    apply_prompt_delivery_outcome_for_prompt(record, turn_generation, outcome, None)
+}
+
+fn apply_prompt_delivery_outcome_for_prompt(
+    record: &mut SessionRecord, turn_generation: u64, outcome: PromptDeliveryOutcome,
+    exact_prompt: Option<&str>,
+) -> Option<String> {
     let prompt_id = record
         .prompt_deliveries
         .iter()
-        .filter(|(_, delivery)| {
+        .filter(|(prompt, delivery)| {
             delivery.disposition == PromptDeliveryDisposition::HandingOff
                 && delivery.turn_generation == Some(turn_generation)
+                && exact_prompt.is_none_or(|exact| prompt.as_str() == exact)
         })
         .max_by_key(|(_, delivery)| delivery.sequence)
         .map(|(prompt_id, _)| prompt_id.clone())?;
@@ -479,6 +497,7 @@ fn apply_prompt_delivery_outcome(
             delivery.disposition = PromptDeliveryDisposition::Pending;
             delivery.turn_generation = None;
             delivery.write_ahead = Uuid::new_v4().to_string();
+            delivery.federation_handoff_started = false;
             delivery.write_ahead_acknowledged = false;
             delivery.resume = None;
             delivery.entry = None;
@@ -739,6 +758,7 @@ fn mark_prompt_delivery_promoted(
     queued: &QueuedPromptRecord,
     dispatch: &mut TurnDispatch,
     message_id: &str,
+    server_instance_id: &str,
 ) {
     let active_turn_generation = dispatch.active_turn_generation();
     let Some(delivery) = record.prompt_deliveries.get_mut(&queued.pending_prompt.id) else {
@@ -748,6 +768,12 @@ fn mark_prompt_delivery_promoted(
     delivery.message_id = Some(message_id.to_owned());
     delivery.attempt_key = Some(prompt_delivery_attempt_key(dispatch, delivery.attempt));
     delivery.entry = Some(queued.clone());
+    if let Some(operation) = &delivery.federation_operation {
+        dispatch.set_federation_handoff(FederationExecutorHandoffIdentity {
+            operation: operation.clone(), prompt_id: queued.pending_prompt.id.clone(),
+            write_ahead: delivery.write_ahead.clone(), server_instance_id: server_instance_id.to_owned(),
+        });
+    }
     if let TurnDispatch::PersistentCodex { command, .. } = dispatch {
         delivery.runtime_write = PromptRuntimeWrite::Pending;
         command.delivery_receipt = Some(CodexPromptReceipt {
@@ -782,6 +808,7 @@ impl AppState {
         prompt_id: &str,
         promote: bool,
     ) -> bool {
+        if self.host_is_shutting_down() { return false; }
         // Ordinary prompts pass without touching the record.
         if !inner.sessions[index].prompt_deliveries.contains_key(prompt_id) {
             return true;
@@ -847,6 +874,7 @@ impl AppState {
         delivery.disposition = PromptDeliveryDisposition::HandingOff;
         delivery.attempt = delivery.attempt.saturating_add(1);
         delivery.write_ahead = write_ahead.clone();
+        delivery.federation_handoff_started = false;
         delivery.write_ahead_acknowledged = false;
         delivery.resume = match (explicit_resume, content) {
             (true, Some(content)) => Some(PromptDeliveryResume {
@@ -1045,6 +1073,7 @@ impl AppState {
                 Err(error) => {
                     delivery.disposition = PromptDeliveryDisposition::Pending;
                     delivery.write_ahead = Uuid::new_v4().to_string();
+                    delivery.federation_handoff_started = false;
                     delivery.resume = None;
                     delivery.reason = Some(format!(
                         "the hand-off record was not acknowledged durable ({error:?}); the prompt was not sent"
@@ -1210,13 +1239,22 @@ impl AppState {
         active_turn_generation: u64,
         receipt: Option<&CodexPromptReceipt>,
     ) -> bool {
+        // Admission linearizes before the host signal. A stopped host never
+        // starts a new prompt-carrying write, even for an already queued command.
         let Some(receipt) = receipt else {
-            return true;
+            return !self.host_is_shutting_down();
         };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let shutdown = self.shutdown_signal_tx.borrow();
+        if *shutdown { return false; }
         let Some(index) = inner.find_session_index(session_id) else {
             return false;
         };
+        if let Some(operation) = inner.sessions[index].prompt_deliveries
+            .get(&receipt.prompt_id).and_then(|delivery| delivery.federation_operation.as_ref())
+        {
+            if federation_executor_target_locked(&inner, operation).is_err() { return false; }
+        }
         let record = &mut inner.sessions[index];
         if !record.runtime.matches_runtime_token(token)
             || record.active_turn_generation != active_turn_generation
@@ -1278,6 +1316,7 @@ impl AppState {
         // began it: the next one needs a fresh explicit Resume or drain.
         delivery.disposition = PromptDeliveryDisposition::Pending;
         delivery.write_ahead = Uuid::new_v4().to_string();
+        delivery.federation_handoff_started = false;
         delivery.write_ahead_acknowledged = false;
         delivery.resume = None;
         delivery.reason = Some(
@@ -1303,6 +1342,20 @@ impl AppState {
         turn_generation: Option<u64>,
         outcome: PromptDeliveryOutcome,
     ) {
+        self.note_prompt_delivery_outcome_inner(session_id, turn_generation, outcome, None, false);
+    }
+
+    fn note_prompt_handoff_outcome(
+        &self, session_id: &str, turn_generation: Option<u64>, outcome: PromptDeliveryOutcome,
+        identity: Option<&FederationExecutorHandoffIdentity>,
+    ) {
+        self.note_prompt_delivery_outcome_inner(session_id, turn_generation, outcome, identity, true);
+    }
+
+    fn note_prompt_delivery_outcome_inner(
+        &self, session_id: &str, turn_generation: Option<u64>, outcome: PromptDeliveryOutcome,
+        identity: Option<&FederationExecutorHandoffIdentity>, guard_handoff: bool,
+    ) {
         // Every caller names the turn: an outcome is never matched to
         // whichever receipt happens to be handing off.
         let Some(turn_generation) = turn_generation else {
@@ -1318,7 +1371,19 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        let Some(prompt_id) = apply_prompt_delivery_outcome(record, turn_generation, outcome) else {
+        if guard_handoff {
+            let exact = match identity {
+                Some(identity) => identity.server_instance_id == self.server_instance_id
+                    && identity.matches(record),
+                None => !record.prompt_deliveries.values().any(|delivery|
+                    delivery.disposition == PromptDeliveryDisposition::HandingOff
+                        && delivery.turn_generation == Some(turn_generation)
+                        && delivery.federation_operation.is_some()),
+            };
+            if !exact { return; }
+        }
+        let Some(prompt_id) = apply_prompt_delivery_outcome_for_prompt(record, turn_generation, outcome,
+            identity.map(|identity| identity.prompt_id.as_str())) else {
             return;
         };
         if let Err(error) = self.commit_locked(&mut inner) {
@@ -1326,6 +1391,8 @@ impl AppState {
                 "prompt delivery> failed to persist the delivery outcome of `{prompt_id}` in session `{session_id}`: {error:#}"
             );
         }
+        drop(inner);
+        self.sync_federation_executor_runtime_receipt(session_id, &prompt_id);
     }
 
     /// What a direct hand-off of a prepared dispatch says about its attempt's
@@ -1340,24 +1407,35 @@ impl AppState {
     /// and a delivered one waits for the runtime's acceptance: both keep the
     /// receipt as it is. Only the attempt promoted under
     /// `active_turn_generation` that is still handing off moves.
+    #[cfg(test)]
     fn note_direct_hand_off_outcome(
         &self,
         session_id: &str,
         active_turn_generation: u64,
         outcome: &std::result::Result<HandoffPreparedTurnDispatchOutcome, ApiError>,
     ) {
+        self.note_direct_hand_off_outcome_with_federation(session_id, active_turn_generation, outcome, None);
+    }
+
+    fn note_direct_hand_off_outcome_with_federation(
+        &self, session_id: &str, active_turn_generation: u64,
+        outcome: &std::result::Result<HandoffPreparedTurnDispatchOutcome, ApiError>,
+        identity: Option<&FederationExecutorHandoffIdentity>,
+    ) {
         let reason = match outcome {
             Ok(HandoffPreparedTurnDispatchOutcome::Delivered)
-            | Ok(HandoffPreparedTurnDispatchOutcome::Scheduled) => return,
+            | Ok(HandoffPreparedTurnDispatchOutcome::Scheduled)
+            | Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend) => return,
             Ok(HandoffPreparedTurnDispatchOutcome::Superseded) => {
                 "the dispatch was superseded before it reached the runtime".to_owned()
             }
             Err(error) => error.message.clone(),
         };
-        self.note_prompt_delivery_outcome(
+        self.note_prompt_handoff_outcome(
             session_id,
             Some(active_turn_generation),
             PromptDeliveryOutcome::Rejected(reason),
+            identity,
         );
     }
 
@@ -1472,6 +1550,9 @@ impl AppState {
                 .get_mut(prompt_id)
                 .filter(|delivery| delivery.disposition == PromptDeliveryDisposition::Rejected)
                 .ok_or_else(|| anyhow!("prompt `{prompt_id}` has no rejected delivery"))?;
+            if delivery.federation_operation.is_some() {
+                bail!("remote operation retains its original queue identity; reconcile its original delivery");
+            }
             let mut entry = delivery
                 .entry
                 .take()

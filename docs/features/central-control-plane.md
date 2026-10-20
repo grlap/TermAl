@@ -90,9 +90,9 @@ same idempotency key; an unavailable response never proves that C did not commit
 Domain sends first persist a sender-local delivery intent. They return a send
 receipt only after the central append is confirmed and its outcome is retained
 locally. The central append, canonical digest outcome and durable wake obligation
-commit in one SQLite transaction. Remote
-wakes arrive with M4: until then a remote recipient's append truthfully reports
-`durableButNotWoken`, with its cause visible in message details. Central native
+commit in one SQLite transaction. A remote recipient's immutable append receipt
+reports `durableButNotWoken`; later wake ownership is shown separately in message
+details. Central native
 recipients keep local wake, unread and acknowledgement behavior.
 
 The negotiated `senderIntentRegistry` flag describes the central host, including
@@ -158,8 +158,10 @@ disabled with the M1 federation setting. Standalone mailbox behavior is unchange
 
 Coordination schema version 5 upgrades exact versions 1 through 4 atomically,
 preserving mailbox bodies, cursors, issued read receipts, delivery intents and
-executor journal records. Version 4 is the landed inert executor journal;
-version 5 adds standalone continuation audits, never recovered runtime coverage.
+executor journal records. Version 4 introduced the executor journal; the
+authenticated ordinary wake receiver and bounded recovery use that existing
+layout without a further migration. Version 5 adds standalone continuation
+audits, never recovered runtime coverage.
 The migration is one-way: an older binary without version-5 support visibly
 refuses to open the upgraded coordination.sqlite, preserving its mailbox data,
 receipts and cursors. Reverting only the binary is unsupported. There is no
@@ -168,6 +170,62 @@ from primary `termal.sqlite` versioning. Unknown or
 modified schema objects still refuse opening; no mailbox data is inferred from
 intents. The unlanded audit-only version-4 layout is not a supported production
 migration source and is refused without rewriting it.
+
+For an already placed native session, C sends only wake metadata through the
+authenticated executor endpoint. S commits the captured operation and payload
+digest before returning durable ownership. An exact repeat reuses its operation
+and queue identity, including after reconnect; changed content under its key
+conflicts. No mailbox body or workspace crosses this channel, and it installs
+no session binding or Start/Stop authority.
+
+The operation journal and session queue are separate durability surfaces. A held
+queue entry, full operation association and PromptDelivery nonce must be read
+back from the same session row before dispatch. Provider handoff retains one
+logical effect identity and separately fences each local write-ahead nonce.
+Positive runtime evidence and a validated central mailbox ACK advance separate
+states: an ACK cannot clear an unknown runtime effect. Recovery materializes
+missing queue associations, reconciles positive evidence, and holds uncertain
+handoffs without replay. It never resumes a dormant queue or bypasses explicit
+pause/Resume. The supervisor also retries retained sender intents using their
+original envelope, native owner and idempotency key.
+
+C settles a pending wake and inserts its matching receiver-ownership mirror in
+one coordination transaction under current-peer and exact-binding guards. A
+mirror is identified by `targetHostId` differing from the local host identity,
+regardless of configured role. Its columns stay `received`/`not_started`, with
+no queue, runtime or processed evidence; it can never execute locally. Legacy
+settled obligations without mirrors mean unknown receiver state and never replay.
+
+Before dispatch, the existing journal rows and an immutable-order prefix of
+pending remote wakes reserve capacity. Appends extend the pending suffix;
+settlement exchanges a reserved slot for equal mirror payload bytes without a
+quota recheck. Beyond-prefix wakes remain pending with reason `capacity`, while
+their original append receipts remain valid. There is no eviction. Until bounded
+retirement of resolved evidence is implemented, these are lifetime limits of
+65,536 retained operations and 64 MiB of payload per host, with 256 KiB maximum
+per operation. They must not decrease without a recorded migration decision.
+
+The dispatch window is separately limited to 1000 eligible obligations, ordered
+by immutable rowid. A process-local cache scans pages of 100 raw rows, at most
+1000 per pass, and keeps its scan position across passes. A deterministic
+unsupported envelope or permanently stale placement is excluded individually,
+shown as `unsupported` or `stale_authority`; I/O failure excludes nothing. The
+cache rebuilds from durable rows when durable identity, placement or local role
+changes, and on process start. Link disconnects never retire authority. A
+previously dispatched matching receipt can still settle unconditionally even
+if a later build makes more obligations eligible and the cap is temporarily
+exceeded; new dispatch waits at the cap.
+
+Wake envelopes keep mailbox, message and sender identifiers exact. Only display
+copies of sender name and topic strip control characters and truncate at UTF-8
+character boundaries (512 and 2048 bytes respectively); original metadata stays
+at C and remains readable. The normalized envelope determines the digest.
+Append commits and link reconnects kick one drain owner. Each batch attempts at
+most 16 wakes and stops after its current bounded RPC when its two-second work
+budget expires; peers without a lease are skipped. The periodic sweep is a
+fallback, and unchanged queue/evidence recovery performs no writes. Before any
+handoff, the exact current receipt/operation association is proved durable and
+the journal's Queued association is repaired before EffectAttempt.
 
 ## Model in one paragraph
 

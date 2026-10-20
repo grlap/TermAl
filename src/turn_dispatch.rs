@@ -391,6 +391,13 @@ impl AppState {
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(inner, &session_id);
         let host_mcp_servers_only =
             session_is_acceptance_evaluator_child_locked(inner, &session_id);
+        // Serialize the actual promotion against publication of host shutdown.
+        // The M4 supervisor's own stop does not stop ordinary local queues.
+        let host_shutdown = self.shutdown_signal_tx.borrow();
+        if *host_shutdown {
+            abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram);
+            return Ok(None);
+        }
         let mut started = match self.start_turn_on_record(
             inner
                 .session_mut_by_index(index)
@@ -419,6 +426,7 @@ impl AppState {
                 ));
             }
         };
+        drop(host_shutdown);
         // The session may now write under a check another session of its
         // worktree has open.
         EngramHost::turn_started(inner, index);
@@ -430,6 +438,7 @@ impl AppState {
             &queued,
             &mut started.dispatch,
             &started.message_delta.message_id,
+            &self.server_instance_id,
         );
         // Authorization intent survives until the provider handoff is known.
         if !retain_for_admission {
@@ -664,6 +673,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentClaude {
+                    federation_handoff: None,
                     active_turn_generation,
                     opening_prompt: None,
                     command: ClaudePromptCommand {
@@ -735,6 +745,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentCodex {
+                    federation_handoff: None,
                     active_turn_generation,
                     opening_prompt: None,
                     service_tier: codex_fast_service_tier_value(
@@ -836,6 +847,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentAcp {
+                    federation_handoff: None,
                     active_turn_generation,
                     opening_prompt: None,
                     command: AcpPromptCommand {
@@ -1524,6 +1536,10 @@ impl AppState {
         let releases_bind_retry = matches!(owner, Some(QueuedDrainOwner::BindRetry(_)));
         let releases_admission_retry =
             matches!(owner, Some(QueuedDrainOwner::AdmissionRetry(_)));
+        let live_owner = match &owner {
+            Some(QueuedDrainOwner::FederationWake(owner)) => Some(owner.clone()),
+            _ => None,
+        };
         let bypass_owner = match owner {
             Some(
                 QueuedDrainOwner::AbortRetry(owner)
@@ -1531,6 +1547,7 @@ impl AppState {
                 | QueuedDrainOwner::BindRetry(owner)
                 | QueuedDrainOwner::AdmissionRetry(owner),
             ) => Some(owner),
+            Some(QueuedDrainOwner::FederationWake(_)) => None,
             None => allow_blocked_dispatch
                 .then(|| {
                     let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1569,6 +1586,9 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
+            if live_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+                return Ok(None);
+            }
             if allow_blocked_dispatch
                 && !bypass_owner
                     .as_ref()
@@ -1712,6 +1732,9 @@ impl AppState {
                 let Some(index) = inner.find_session_index(session_id) else {
                     return Ok(None);
                 };
+                if live_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+                    return Ok(None);
+                }
                 if allow_blocked_dispatch
                     && !bypass_owner
                         .as_ref()
@@ -1887,6 +1910,7 @@ impl AppState {
                 return Ok(None);
             };
             let unchanged = inner.sessions[index].engram.dispatch_generation == snapshot.1
+                && live_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
                 && (!allow_blocked_dispatch
                     || bypass_owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index])))
                 && inner.sessions[index]
@@ -2765,6 +2789,8 @@ impl AppState {
 /// in advance.
 #[derive(Clone)]
 enum QueuedDrainOwner {
+    /// Same-process activation of one durable remote wake; never a pause bypass.
+    FederationWake(FederationExecutorLiveOwner),
     /// An explicit Resume of the head its caller checked.
     Resume(EngramQueuedAdmissionOwner),
     /// A retried admission due for this head; its acknowledged abort record

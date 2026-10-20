@@ -290,6 +290,7 @@ struct MailboxStore {
     /// coordination-store I/O; a conditional attempt check protects the later
     /// in-memory probe commit from a concurrent delegation rearm.
     delegation_review_recovery_guard: Mutex<()>,
+    executor_reservations: Mutex<FederationExecutorReservationCache>,
     #[cfg(test)]
     internal_writer_waiters: Mutex<usize>,
     #[cfg(test)]
@@ -1289,6 +1290,7 @@ impl MailboxStore {
             write_admission_timeout,
             dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
             delegation_review_recovery_guard: Mutex::new(()),
+            executor_reservations: Mutex::new(FederationExecutorReservationCache::default()),
             #[cfg(test)]
             internal_writer_waiters: Mutex::new(0),
             #[cfg(test)]
@@ -1305,6 +1307,7 @@ impl MailboxStore {
             write_admission_timeout: MAILBOX_WRITER_ADMISSION_TIMEOUT,
             dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
             delegation_review_recovery_guard: Mutex::new(()),
+            executor_reservations: Mutex::new(FederationExecutorReservationCache::default()),
             internal_writer_waiters: Mutex::new(0),
             internal_writer_waiter_changed: Condvar::new(),
         }

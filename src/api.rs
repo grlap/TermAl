@@ -29,6 +29,7 @@ fn file_metadata_mtime_ms(metadata: &fs::Metadata) -> Option<u64> {
     Some(millis.min(u128::from(u64::MAX)) as u64)
 }
 
+#[cfg(test)]
 fn record_rejected_turn_dispatch(
     state: &AppState,
     session_id: &str,
@@ -38,8 +39,18 @@ fn record_rejected_turn_dispatch(
     runtime_token: &RuntimeToken,
     active_turn_generation: u64,
 ) -> bool {
+    record_rejected_turn_dispatch_with_federation(state, session_id, error_message,
+        mailbox_notification, engram_dispatch_generation, runtime_token, active_turn_generation, None)
+}
+
+fn record_rejected_turn_dispatch_with_federation(
+    state: &AppState, session_id: &str, error_message: &str,
+    mailbox_notification: Option<&MailboxNotificationDelivery>, engram_dispatch_generation: Option<u64>,
+    runtime_token: &RuntimeToken, active_turn_generation: u64,
+    federation_identity: Option<&FederationExecutorHandoffIdentity>,
+) -> bool {
     let rejected_by_engram_generation = if let Some(dispatch_generation) =
-        engram_dispatch_generation
+        engram_dispatch_generation.filter(|_| federation_identity.is_none())
     {
         match state.reject_engram_turn_delivery_if_current(
             session_id,
@@ -66,13 +77,14 @@ fn record_rejected_turn_dispatch(
         // finish the exact turn by runtime token + active generation.
         // If this callback is stale, the atomic helper returns false without
         // touching the successor.
-        match state.fail_rejected_turn_delivery(
-            session_id,
-            runtime_token,
-            active_turn_generation,
-            engram_dispatch_generation,
-            error_message,
-        ) {
+        let failure = if federation_identity.is_some() {
+            state.fail_rejected_turn_delivery_with_federation(session_id, runtime_token,
+                active_turn_generation, engram_dispatch_generation, error_message, federation_identity)
+        } else {
+            state.fail_rejected_turn_delivery(session_id, runtime_token,
+                active_turn_generation, engram_dispatch_generation, error_message)
+        };
+        match failure {
             Ok(true) => {}
             // A false guard means a newer runtime/turn or an already-claimed
             // terminalization owns the record. That owner still holds the
@@ -183,6 +195,9 @@ fn deliver_turn_dispatch_holding(
     dispatch: TurnDispatch,
     held: Option<EngramRetrySlot>,
 ) -> TurnDispatchDeliveryOutcome {
+    if state.host_is_shutting_down() {
+        return deliver_turn_dispatch_now(state, dispatch);
+    }
     if matches!(
         &dispatch,
         TurnDispatch::PersistentCodex {
@@ -196,6 +211,7 @@ fn deliver_turn_dispatch_holding(
         let generation = dispatch.active_turn_generation();
         let engram_generation = dispatch.engram_dispatch_generation();
         let notification = dispatch.mailbox_notification().cloned();
+        let federation = dispatch.federation_handoff().cloned();
         // Completion callbacks run on the shared stdout reader. Waiting there
         // for model/list would prevent that same reader from routing its reply.
         // Only unresolved Fast needs a worker; ready tiers retain direct delivery.
@@ -220,7 +236,7 @@ fn deliver_turn_dispatch_holding(
             })
         {
             let detail = format!("failed to start Codex Fast discovery worker: {err}");
-            let rejected = record_rejected_turn_dispatch(
+            let rejected = record_rejected_turn_dispatch_with_federation(
                 state,
                 &session_id,
                 &detail,
@@ -228,13 +244,15 @@ fn deliver_turn_dispatch_holding(
                 engram_generation,
                 &runtime_token,
                 generation,
+                federation.as_ref(),
             );
             // Never handed to the runtime; noted after the rejection settled
             // the queue, as for any rejected dispatch (prompt_delivery.rs).
-            state.note_prompt_delivery_outcome(
+            state.note_prompt_handoff_outcome(
                 &session_id,
                 Some(generation),
                 PromptDeliveryOutcome::Rejected(detail.clone()),
+                federation.as_ref(),
             );
             return if rejected {
                 TurnDispatchDeliveryOutcome::Rejected(ApiError::internal(detail))
@@ -257,25 +275,32 @@ fn deliver_turn_dispatch_now(
     state: &AppState,
     dispatch: TurnDispatch,
 ) -> TurnDispatchDeliveryOutcome {
+    if state.host_is_shutting_down() {
+        state.hold_unsent_dispatch_for_shutdown(&dispatch);
+        return TurnDispatchDeliveryOutcome::Held { error: None };
+    }
     let session_id = dispatch.session_id().to_owned();
     let active_turn_generation = dispatch.active_turn_generation();
+    let federation = dispatch.federation_handoff().cloned();
     let outcome = deliver_prepared_turn_dispatch_now(state, dispatch);
     // A dispatch rejected or superseded before its channel send never
     // reached the runtime: a receipted prompt's delivery records that. Every
     // other outcome leaves it handing off until the runtime acknowledges it
     // (prompt_delivery.rs).
     match &outcome {
-        TurnDispatchDeliveryOutcome::Rejected(error) => state.note_prompt_delivery_outcome(
+        TurnDispatchDeliveryOutcome::Rejected(error) => state.note_prompt_handoff_outcome(
             &session_id,
             Some(active_turn_generation),
             PromptDeliveryOutcome::Rejected(error.message.clone()),
+            federation.as_ref(),
         ),
-        TurnDispatchDeliveryOutcome::Superseded => state.note_prompt_delivery_outcome(
+        TurnDispatchDeliveryOutcome::Superseded => state.note_prompt_handoff_outcome(
             &session_id,
             Some(active_turn_generation),
             PromptDeliveryOutcome::Rejected(
                 "the dispatch was superseded before it reached the runtime".to_owned(),
             ),
+            federation.as_ref(),
         ),
         TurnDispatchDeliveryOutcome::Delivered
         | TurnDispatchDeliveryOutcome::Scheduled
@@ -290,14 +315,16 @@ fn deliver_turn_dispatch_now(
 /// a receipted head it promoted returns to pending through the ordinary
 /// still-queued outcome (prompt_delivery.rs). A parked dispatch that is itself
 /// delivered later keeps its hand-off.
-fn note_held_before_hand_off(state: &AppState, session_id: &str, active_turn_generation: u64) {
-    state.note_prompt_delivery_outcome(
+fn note_held_before_hand_off(state: &AppState, session_id: &str, active_turn_generation: u64,
+    federation: Option<&FederationExecutorHandoffIdentity>) {
+    state.note_prompt_handoff_outcome(
         session_id,
         Some(active_turn_generation),
         PromptDeliveryOutcome::Rejected(
             "the dispatch was held before it reached the runtime; the prompt was not sent"
                 .to_owned(),
         ),
+        federation,
     );
 }
 
@@ -306,6 +333,7 @@ fn deliver_prepared_turn_dispatch_now(
     dispatch: TurnDispatch,
 ) -> TurnDispatchDeliveryOutcome {
     let active_turn_generation = dispatch.active_turn_generation();
+    let federation = dispatch.federation_handoff().cloned();
     let runtime_token = dispatch.runtime_token().clone();
     if let Some(dispatch_generation) = dispatch.engram_dispatch_generation() {
         match state
@@ -313,7 +341,7 @@ fn deliver_prepared_turn_dispatch_now(
         {
             EngramTurnDeliveryPreparation::Ready => {}
             EngramTurnDeliveryPreparation::ObservationRecovery => {
-                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
+                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
                 return TurnDispatchDeliveryOutcome::Held { error: None };
             }
             EngramTurnDeliveryPreparation::ObservationPending => {
@@ -325,7 +353,7 @@ fn deliver_prepared_turn_dispatch_now(
                 return TurnDispatchDeliveryOutcome::Superseded;
             }
             EngramTurnDeliveryPreparation::PersistenceUnknown => {
-                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
+                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
                 return TurnDispatchDeliveryOutcome::Held {
                     error: Some(engram_persistence_unknown_error()),
                 };
@@ -342,7 +370,7 @@ fn deliver_prepared_turn_dispatch_now(
                     active_turn_generation,
                 ) {
                     EngramAuthorizationParkOutcome::Parked => {
-                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
+                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
                         TurnDispatchDeliveryOutcome::Held { error: None }
                     }
                     EngramAuthorizationParkOutcome::Withdrawn => {
@@ -357,14 +385,14 @@ fn deliver_prepared_turn_dispatch_now(
                         }
                     }
                     EngramAuthorizationParkOutcome::PersistenceUnknown => {
-                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation);
+                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
                         TurnDispatchDeliveryOutcome::Held {
                             error: Some(engram_persistence_unknown_error()),
                         }
                     }
                     EngramAuthorizationParkOutcome::Superseded => {
                         let error_message = "Engram admission invalidated before runtime delivery";
-                        if record_rejected_turn_dispatch(
+                        if record_rejected_turn_dispatch_with_federation(
                             state,
                             dispatch.session_id(),
                             error_message,
@@ -372,6 +400,7 @@ fn deliver_prepared_turn_dispatch_now(
                             Some(dispatch_generation),
                             &runtime_token,
                             active_turn_generation,
+                            federation.as_ref(),
                         ) {
                             TurnDispatchDeliveryOutcome::Rejected(ApiError::conflict(error_message))
                         } else {
@@ -391,18 +420,18 @@ fn deliver_prepared_turn_dispatch_now(
                     active_turn_generation,
                 ) {
                     EngramAuthorizationParkOutcome::Parked => {
-                        note_held_before_hand_off(state, &session_id, active_turn_generation);
+                        note_held_before_hand_off(state, &session_id, active_turn_generation, federation.as_ref());
                         return TurnDispatchDeliveryOutcome::Held { error: None };
                     }
                     EngramAuthorizationParkOutcome::PersistenceUnknown => {
-                        note_held_before_hand_off(state, &session_id, active_turn_generation);
+                        note_held_before_hand_off(state, &session_id, active_turn_generation, federation.as_ref());
                         return TurnDispatchDeliveryOutcome::Held {
                             error: Some(engram_persistence_unknown_error()),
                         };
                     }
                     EngramAuthorizationParkOutcome::Superseded | EngramAuthorizationParkOutcome::Withdrawn => {}
                 }
-                let rejected = record_rejected_turn_dispatch(
+                let rejected = record_rejected_turn_dispatch_with_federation(
                     state,
                     &session_id,
                     error_message,
@@ -410,6 +439,7 @@ fn deliver_prepared_turn_dispatch_now(
                     Some(dispatch_generation),
                     &runtime_token,
                     active_turn_generation,
+                    federation.as_ref(),
                 );
                 return if rejected {
                     TurnDispatchDeliveryOutcome::Rejected(ApiError::conflict(error_message))
@@ -422,6 +452,7 @@ fn deliver_prepared_turn_dispatch_now(
     match handoff_prepared_turn_dispatch(state, dispatch) {
         Ok(HandoffPreparedTurnDispatchOutcome::Delivered) => TurnDispatchDeliveryOutcome::Delivered,
         Ok(HandoffPreparedTurnDispatchOutcome::Scheduled) => TurnDispatchDeliveryOutcome::Scheduled,
+        Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend) => TurnDispatchDeliveryOutcome::Held { error: None },
         Ok(HandoffPreparedTurnDispatchOutcome::Superseded) => {
             TurnDispatchDeliveryOutcome::Superseded
         }
@@ -434,6 +465,7 @@ enum HandoffPreparedTurnDispatchOutcome {
     Delivered,
     Scheduled,
     Superseded,
+    HeldBeforeSend,
 }
 
 // Admission and its durable receipt are complete. The Stop fence and provider
@@ -442,11 +474,16 @@ fn handoff_prepared_turn_dispatch(
     state: &AppState,
     mut dispatch: TurnDispatch,
 ) -> Result<HandoffPreparedTurnDispatchOutcome, ApiError> {
+    if state.host_is_shutting_down() {
+        state.hold_unsent_dispatch_for_shutdown(&dispatch);
+        return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
+    }
     let engram_generation = dispatch.engram_dispatch_generation();
     let active_turn_generation = dispatch.active_turn_generation();
     let runtime_token = dispatch.runtime_token().clone();
     let session_id = dispatch.session_id().to_owned();
     let mailbox_notification = dispatch.mailbox_notification().cloned();
+    let federation_identity = dispatch.federation_handoff().cloned();
 
     loop {
         let preparation = match &dispatch {
@@ -465,6 +502,10 @@ fn handoff_prepared_turn_dispatch(
             )),
             _ => None,
         };
+        if state.host_is_shutting_down() {
+            state.hold_unsent_dispatch_for_shutdown(&dispatch);
+            return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
+        }
         match preparation {
             None => break,
             Some(Ok(CodexServiceTierPreparation::Ready(tier))) => {
@@ -524,7 +565,7 @@ fn handoff_prepared_turn_dispatch(
                 let detail = format!(
                     "failed to resolve Codex Fast before dispatch: {error:#}. Retry or select Standard with /fast or settings"
                 );
-                return if record_rejected_turn_dispatch(
+                return if record_rejected_turn_dispatch_with_federation(
                     state,
                     &session_id,
                     &detail,
@@ -532,6 +573,7 @@ fn handoff_prepared_turn_dispatch(
                     engram_generation,
                     &runtime_token,
                     active_turn_generation,
+                    federation_identity.as_ref(),
                 ) {
                     Err(ApiError::internal(detail))
                 } else {
@@ -541,12 +583,31 @@ fn handoff_prepared_turn_dispatch(
         }
     }
 
+    let reject_federation = |error: ApiError| {
+        if record_rejected_turn_dispatch_with_federation(state, &session_id, &error.message,
+            mailbox_notification.as_ref(), engram_generation, &runtime_token, active_turn_generation,
+            federation_identity.as_ref())
+        { Err(error) } else { Ok(HandoffPreparedTurnDispatchOutcome::Superseded) }
+    };
+    let federation_handoff = match state.prepare_federation_executor_handoff(
+        &session_id, &runtime_token, active_turn_generation, federation_identity.as_ref(),
+    ) {
+        Ok(handoff) => handoff,
+        Err(error) => return reject_federation(error),
+    };
     let mut inner = state.inner.lock().expect("state mutex poisoned");
+    if let Some((operation, _, _)) = &federation_handoff {
+        if let Err(error) = federation_executor_target_locked(&inner, operation) {
+            drop(inner);
+            return reject_federation(error);
+        }
+    }
     let index = inner.find_session_index(&session_id);
     let mut opening_diagnostic_delivery = None;
     let mut source_root_notice_delivery = Vec::new();
     let guarded =
-        engram_generation.is_some() || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
+        engram_generation.is_some() || federation_handoff.is_some()
+            || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
     if guarded {
         let Some(index) = index else {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
@@ -589,6 +650,32 @@ fn handoff_prepared_turn_dispatch(
         }
     }
 
+    // Publication of shutdown and this unbounded channel enqueue are ordered
+    // by the watch read guard; no fallible store work runs under it.
+    let host_shutdown = state.shutdown_signal_tx.borrow();
+    if *host_shutdown {
+        drop(host_shutdown);
+        drop(inner);
+        state.hold_unsent_dispatch_for_shutdown(&dispatch);
+        return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
+    }
+    if let Some((operation, write_ahead, _)) = &federation_handoff {
+        let index = index.expect("current remote session checked");
+        let delivery = inner.sessions[index].prompt_deliveries.get_mut(&operation.queue_identity()).filter(|delivery|
+            delivery.turn_generation == Some(active_turn_generation)
+                && delivery.federation_operation.as_ref() == Some(operation)
+                && delivery.write_ahead == *write_ahead
+                && delivery.disposition == PromptDeliveryDisposition::HandingOff);
+        let Some(delivery) = delivery else {
+            // A changed nonce belongs to its successor. Nothing from the old
+            // carrier may reject or settle that newer attempt.
+            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        };
+        if delivery.federation_handoff_started {
+            return Ok(HandoffPreparedTurnDispatchOutcome::Delivered);
+        }
+        delivery.federation_handoff_started = true;
+    }
     // Channels are unbounded. ACP lifecycle lock order is state -> lifecycle;
     // lifecycle waiters must release that lock before accessing AppState.
     let (agent, sent) = match dispatch {
@@ -627,10 +714,11 @@ fn handoff_prepared_turn_dispatch(
             ("ACP", sent)
         }
     };
+    drop(host_shutdown);
     if let Err(error) = sent {
         drop(inner);
         let detail = format!("failed to queue prompt for {agent} session: {error}");
-        let rejected = record_rejected_turn_dispatch(
+        let rejected = record_rejected_turn_dispatch_with_federation(
             state,
             &session_id,
             &detail,
@@ -638,6 +726,7 @@ fn handoff_prepared_turn_dispatch(
             engram_generation,
             &runtime_token,
             active_turn_generation,
+            federation_identity.as_ref(),
         );
         return if rejected {
             Err(ApiError::internal(detail))

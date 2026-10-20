@@ -122,6 +122,8 @@ enum ApiErrorKind {
     FederationCentralMismatch,
     FederationInvalidBinding,
     FederationBoundSessions,
+    /// Retained exact receipt forbids recreating an explicitly retired queue.
+    FederationExecutorAssociationRetired,
 }
 
 impl ApiErrorKind {

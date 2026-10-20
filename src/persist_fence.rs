@@ -56,6 +56,23 @@ enum PersistFenceTarget {
         prompt_id: String,
         content: Value,
     },
+    // One session-row transaction must contain both the immutable held entry
+    // and its remote operation/attempt association before either can dispatch.
+    FederationExecutorQueue {
+        session_id: String,
+        prompt_id: String,
+        content: Value,
+        operation: Box<FederationExecutorOperation>,
+        write_ahead: String,
+    },
+    // The queue may already have been promoted, but its exact operation and
+    // current handoff nonce must still be durable before journal repair/send.
+    FederationExecutorHandoff {
+        session_id: String,
+        prompt_id: String,
+        operation: Box<FederationExecutorOperation>,
+        write_ahead: String,
+    },
     /// A receipted prompt's write-ahead hand-off record, read back from the
     /// durable session row: handing off under exactly this write-ahead nonce
     /// (`prompt_delivery.rs`).
@@ -79,6 +96,8 @@ impl PersistFenceTarget {
             Self::EngramCausalCard { .. } | Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
                 | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
                 | Self::EngramSourceRemoval { .. } | Self::QueuedPromptDurability { .. }
+                | Self::FederationExecutorQueue { .. }
+                | Self::FederationExecutorHandoff { .. }
                 | Self::PromptDeliveryWriteAhead { .. } | Self::ProviderCapacityRecovery { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
@@ -280,6 +299,30 @@ impl PersistFenceTarget {
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
                     == Some(content))
+            }
+            Self::FederationExecutorQueue { session_id, prompt_id, content, operation, write_ahead } => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
+                    |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false); };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref() == Some(content)
+                    && actual.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
+                        delivery.federation_operation.as_ref() == Some(operation.as_ref())
+                            && delivery.write_ahead == *write_ahead))
+            }
+            Self::FederationExecutorHandoff { session_id, prompt_id, operation, write_ahead } => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
+                    |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false); };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(actual.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
+                    delivery.federation_operation.as_ref() == Some(operation.as_ref())
+                        && delivery.write_ahead == *write_ahead
+                        && delivery.disposition == PromptDeliveryDisposition::HandingOff))
             }
             // The committed row must hold this exact hand-off record; a
             // return to pending writes a fresh nonce that never matches.

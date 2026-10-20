@@ -1905,6 +1905,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
     let state = AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         federation_peer_handles: FederationPeerHandles::default(),
+        federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
         default_workdir: "/tmp".to_owned(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),

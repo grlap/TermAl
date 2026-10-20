@@ -376,13 +376,15 @@ impl AppState {
                         .expect("deferred handoff mutex poisoned")
                         .take();
                     if let Some(prepared) = prepared {
+                        let federation = prepared.federation_handoff().cloned();
                         // Its receipt records what the replayed hand-off
                         // proved (prompt_delivery.rs).
                         let outcome = handoff_prepared_turn_dispatch(self, prepared);
-                        self.note_direct_hand_off_outcome(
+                        self.note_direct_hand_off_outcome_with_federation(
                             session_id,
                             active_turn_generation,
                             &outcome,
+                            federation.as_ref(),
                         );
                         outcome
                             .map(|_| ())
@@ -1021,10 +1023,20 @@ impl AppState {
         engram_dispatch_generation: Option<u64>,
         error_message: &str,
     ) -> Result<bool> {
-        let Some(owner_generation) = self.claim_turn_terminalization_if_runtime_matches(
+        self.fail_rejected_turn_delivery_with_federation(session_id, token, active_turn_generation,
+            engram_dispatch_generation, error_message, None)
+    }
+
+    fn fail_rejected_turn_delivery_with_federation(
+        &self, session_id: &str, token: &RuntimeToken, active_turn_generation: u64,
+        engram_dispatch_generation: Option<u64>, error_message: &str,
+        federation_identity: Option<&FederationExecutorHandoffIdentity>,
+    ) -> Result<bool> {
+        let Some(owner_generation) = self.claim_turn_terminalization_if_runtime_matches_with_federation(
             session_id,
             token,
             active_turn_generation,
+            federation_identity,
         )?
         else {
             return Ok(false);
@@ -1225,10 +1237,21 @@ impl AppState {
         token: &RuntimeToken,
         active_turn_generation: u64,
     ) -> Result<Option<u64>> {
+        self.claim_turn_terminalization_if_runtime_matches_with_federation(session_id, token,
+            active_turn_generation, None)
+    }
+
+    fn claim_turn_terminalization_if_runtime_matches_with_federation(
+        &self, session_id: &str, token: &RuntimeToken, active_turn_generation: u64,
+        federation_identity: Option<&FederationExecutorHandoffIdentity>,
+    ) -> Result<Option<u64>> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        if federation_identity.is_some_and(|identity|
+            identity.server_instance_id != self.server_instance_id || !identity.matches(&inner.sessions[index]))
+        { return Ok(None); }
         if !inner.sessions[index].runtime.matches_runtime_token(token)
             || inner.sessions[index].active_turn_generation != active_turn_generation
             || inner.sessions[index].runtime_stop_in_progress

@@ -165,6 +165,7 @@ mod federation_delivery_schema;
 mod federation_executor_journal;
 mod federation_executor_store;
 mod federation_native_binding_proof;
+mod federation_executor_delivery;
 mod federation_ssh;
 mod federation_runtime;
 mod federation_rpc;
@@ -943,6 +944,7 @@ fn test_app_state() -> AppState {
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         federation_peer_handles: FederationPeerHandles::default(),
+        federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         remote_delta_replay_cache: Arc::new(Mutex::new(RemoteDeltaReplayCache::default())),
         remote_delta_hydrations_in_flight: Arc::new(Mutex::new(HashSet::new())),

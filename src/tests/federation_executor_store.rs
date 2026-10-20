@@ -124,20 +124,20 @@ fn federation_m4_store_evidence_cuts_and_processed_ack_keep_unknown_effect() {
     let request = operation("one");
     let received = receive(&store, &request);
     FEDERATION_EXECUTOR_TEST_CUT.with(|cut| *cut.borrow_mut() = Some("beforeEvidenceCommit"));
-    assert!(store.record_federation_executor_evidence(&request,
+    assert!(store.record_federation_executor_evidence("satellite-fixture", &request,
         FederationExecutorEvidence::Queued { queue_entry_id: "queue".into(),
             delivery_attempt_id: "attempt".into() }, || Ok(())).is_err());
     assert_eq!(receive(&store, &request), received);
-    store.record_federation_executor_evidence(&request,
+    store.record_federation_executor_evidence("satellite-fixture", &request,
         FederationExecutorEvidence::Queued { queue_entry_id: "queue".into(),
             delivery_attempt_id: "attempt".into() }, || Ok(())).unwrap();
     FEDERATION_EXECUTOR_TEST_CUT.with(|cut| *cut.borrow_mut() = Some("afterEvidenceCommit"));
-    assert!(store.record_federation_executor_evidence(&request,
+    assert!(store.record_federation_executor_evidence("satellite-fixture", &request,
         FederationExecutorEvidence::EffectAttempt { delivery_attempt_id: "attempt".into() },
         || Ok(())).is_err());
     drop(store);
     let store = MailboxStore::open(&path).unwrap();
-    let processed = store.record_federation_executor_evidence(&request,
+    let processed = store.record_federation_executor_evidence("satellite-fixture", &request,
         FederationExecutorEvidence::Processed { kind: FederationExecutorProcessedKind::MailboxAck,
             evidence: "validated-central-receipt".into() }, || Ok(())).unwrap();
     assert_eq!(processed.stage, "processed");
@@ -145,10 +145,10 @@ fn federation_m4_store_evidence_cuts_and_processed_ack_keep_unknown_effect() {
     assert!(processed.runtime_ack.is_none());
     assert_eq!(store.pending_federation_executor_operations("central-fixture", "", 100)
         .unwrap(), vec![processed]);
-    assert_kind(store.record_federation_executor_evidence(&request,
+    assert_kind(store.record_federation_executor_evidence("satellite-fixture", &request,
         FederationExecutorEvidence::RuntimeAccepted { delivery_attempt_id: "other-attempt".into(),
             acknowledgement: "ack".into() }, || Ok(())), MailboxStoreErrorKind::Conflict);
-    let accepted = store.record_federation_executor_evidence(&request,
+    let accepted = store.record_federation_executor_evidence("satellite-fixture", &request,
         FederationExecutorEvidence::RuntimeAccepted { delivery_attempt_id: "attempt".into(),
             acknowledgement: "ack".into() }, || Ok(())).unwrap();
     assert_eq!(accepted.stage, "processed", "later evidence cannot erase processing");
@@ -165,7 +165,7 @@ fn federation_m4_store_ack_without_queue_and_receipt_pruning_do_not_erase_dedup(
     for index in 0..70 {
         let request = operation(&format!("operation-{index}"));
         receive(&store, &request);
-        let processed = store.record_federation_executor_evidence(&request,
+        let processed = store.record_federation_executor_evidence("satellite-fixture", &request,
             FederationExecutorEvidence::Processed { kind: FederationExecutorProcessedKind::MailboxAck,
                 evidence: format!("validated-central-receipt-{index}") }, || Ok(())).unwrap();
         assert!(processed.queue_entry_id.is_none());
@@ -350,17 +350,17 @@ fn federation_m4_store_command_outcome_is_not_a_mailbox_ack_or_runtime_ack() {
         let mut request = operation(command);
         request.command_kind = command.into();
         receive(&store, &request);
-        store.record_federation_executor_evidence(&request,
+        store.record_federation_executor_evidence("satellite-fixture", &request,
             FederationExecutorEvidence::Queued { queue_entry_id: command.into(),
                 delivery_attempt_id: command.into() }, || Ok(())).unwrap();
-        store.record_federation_executor_evidence(&request,
+        store.record_federation_executor_evidence("satellite-fixture", &request,
             FederationExecutorEvidence::EffectAttempt { delivery_attempt_id: command.into() },
             || Ok(())).unwrap();
-        assert_kind(store.record_federation_executor_evidence(&request,
+        assert_kind(store.record_federation_executor_evidence("satellite-fixture", &request,
             FederationExecutorEvidence::Processed { kind: FederationExecutorProcessedKind::MailboxAck,
                 evidence: "receipt-is-not-command-outcome".into() }, || Ok(())),
             MailboxStoreErrorKind::Conflict);
-        let processed = store.record_federation_executor_evidence(&request,
+        let processed = store.record_federation_executor_evidence("satellite-fixture", &request,
             FederationExecutorEvidence::Processed { kind: FederationExecutorProcessedKind::CommandOutcome,
                 evidence: format!("validated-{command}-outcome") }, || Ok(())).unwrap();
         assert_eq!(processed.stage, "processed");

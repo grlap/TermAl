@@ -575,6 +575,7 @@ struct MailboxNotificationDelivery {
 /// Defines the turn dispatch variants.
 enum TurnDispatch {
     PersistentClaude {
+        federation_handoff: Option<FederationExecutorHandoffIdentity>,
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
         command: ClaudePromptCommand,
@@ -585,6 +586,7 @@ enum TurnDispatch {
         session_id: String,
     },
     PersistentCodex {
+        federation_handoff: Option<FederationExecutorHandoffIdentity>,
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
         command: CodexPromptCommand,
@@ -596,6 +598,7 @@ enum TurnDispatch {
         session_id: String,
     },
     PersistentAcp {
+        federation_handoff: Option<FederationExecutorHandoffIdentity>,
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
         command: AcpPromptCommand,
@@ -609,6 +612,22 @@ enum TurnDispatch {
 }
 
 impl TurnDispatch {
+    fn federation_handoff(&self) -> Option<&FederationExecutorHandoffIdentity> {
+        match self {
+            Self::PersistentClaude { federation_handoff, .. }
+            | Self::PersistentCodex { federation_handoff, .. }
+            | Self::PersistentAcp { federation_handoff, .. } => federation_handoff.as_ref(),
+        }
+    }
+
+    fn set_federation_handoff(&mut self, identity: FederationExecutorHandoffIdentity) {
+        match self {
+            Self::PersistentClaude { federation_handoff, .. }
+            | Self::PersistentCodex { federation_handoff, .. }
+            | Self::PersistentAcp { federation_handoff, .. } => *federation_handoff = Some(identity),
+        }
+    }
+
     fn session_id(&self) -> &str {
         match self {
             Self::PersistentClaude { session_id, .. }

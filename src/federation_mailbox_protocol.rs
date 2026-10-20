@@ -10,7 +10,7 @@ const FEDERATION_MAILBOX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 // mailbox-specific; handshake/health responses retain L1's 64 KiB ceiling.
 const FEDERATION_MAILBOX_RESPONSE_BYTES: usize = 320 * 1024 * 1024;
 const FEDERATION_MAILBOX_PAGE_LIMIT: u64 = 200;
-const FEDERATION_REMOTE_WAKE_CAUSE: &str = "remote wake delivery arrives with M4";
+const FEDERATION_REMOTE_WAKE_CAUSE: &str = "remote wake ownership pending; see message details for current state";
 
 fn new_federation_native_creation_id() -> String {
     Uuid::new_v4().to_string()

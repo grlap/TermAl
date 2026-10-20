@@ -363,6 +363,7 @@ impl AppState {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
         inner.federation_durable = true;
+        self.federation_executor_wake_signal.kick();
         Ok(())
     }
 

@@ -127,6 +127,7 @@ impl FederationChannel {
                 return Err(federation_stale_link());
             }
             state.recorded_incarnation = Some(incarnation);
+            if let Some(app) = &channel.app { app.federation_executor_wake_signal.kick(); }
             Ok(())
         })
         .await

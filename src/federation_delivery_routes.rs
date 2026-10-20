@@ -550,6 +550,12 @@ async fn retry_federation_intent_route(
     AxumPath((session, key)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<MailboxAppendReceipt>, ApiError> {
+    retry_retained_federation_intent(state, session, key).await.map(Json)
+}
+
+async fn retry_retained_federation_intent(
+    state: AppState, session: String, key: String,
+) -> Result<MailboxAppendReceipt, ApiError> {
     let app = state.clone();
     let native = session.clone();
     let intent = run_blocking_api(move || app.local_federation_intent(&native, &key)).await?;
@@ -558,7 +564,7 @@ async fn retry_federation_intent_route(
         let _current = state
             .lock_federation_intent_owner(&session, &intent.creation, &identity.sender)
             .map_err(mailbox_api_error)?;
-        return Ok(Json(receipt));
+        return Ok(receipt);
     }
     if let Some(error) = intent.terminal_error() { return Err(error); }
     let payload = intent
@@ -569,7 +575,6 @@ async fn retry_federation_intent_route(
     state
         .send_prepared_federation_delivery(&session, delivery)
         .await
-        .map(Json)
 }
 
 async fn cancel_federation_intent_route(
