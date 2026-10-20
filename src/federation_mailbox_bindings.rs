@@ -89,6 +89,21 @@ impl AppState {
         binding: FederationMailboxBinding,
         expected_native_creation_id: &str,
     ) -> Result<(), ApiError> {
+        self.install_federation_mailbox_binding_on_link(
+            peer,
+            binding,
+            expected_native_creation_id,
+            None,
+        )
+    }
+
+    fn install_federation_mailbox_binding_on_link(
+        &self,
+        peer: &FederationPeerSnapshot,
+        binding: FederationMailboxBinding,
+        expected_native_creation_id: &str,
+        lease: Option<&FederationLinkLease>,
+    ) -> Result<(), ApiError> {
         binding.validate()?;
         let namespace_writer = self
             .mailbox_store
@@ -98,8 +113,15 @@ impl AppState {
             .mailbox_store
             .standalone_mailbox_history(&binding.identity.session_id)
             .map_err(mailbox_api_error)?;
-        let (image, dispatch) = {
+        let install = || {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(lease) = lease {
+                self.refresh_federation_transport_snapshot_locked(
+                    &inner,
+                    &lease.channel.transport_basis(),
+                    &lease.incarnation,
+                )?;
+            }
             self.ensure_federation_peer_current_locked(&inner, peer)?;
             if peer.local_role != FederationRole::Satellite
                 || binding.central != peer.peer
@@ -121,9 +143,10 @@ impl AppState {
                 ));
             }
             if record.federation_mailbox_binding.as_ref() == Some(&binding) {
-                return Ok(());
+                return Ok(None);
             }
             refuse_standalone_mailbox_history(&history)?;
+            let version = federation_next_generation(inner.federation.version)?;
             let index = inner
                 .find_session_index(&binding.identity.session_id)
                 .expect("root checked");
@@ -131,15 +154,37 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("root checked")
                 .federation_mailbox_binding = Some(binding);
-            inner.federation.version = federation_next_generation(inner.federation.version)?;
+            inner.federation.version = version;
             inner.federation_durable = false;
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
-            let dispatch = self
-                .persist_internal_locked_with_dispatch(&inner)
-                .map_err(|_| ApiError::internal("mailbox routing persistence failed"))?;
-            (image, dispatch)
+            let dispatch = if lease.is_some() {
+                self.queue_federation_entrypoint_persistence()?
+            } else {
+                self.persist_internal_locked_with_dispatch(&inner)
+                    .map_err(|_| ApiError::internal("mailbox routing persistence failed"))?
+            };
+            Ok(Some((image, dispatch)))
+        };
+        let persistence = match lease {
+            Some(lease) => lease.with_incarnation(install)?,
+            None => install()?,
         };
         drop(namespace_writer);
-        self.finish_federation_durability_with_clock(&image, dispatch, EngramBudgetClock::Real)
+        if let Some((image, dispatch)) = persistence {
+            let settled = self.finish_federation_durability_with_clock(
+                &image,
+                dispatch,
+                EngramBudgetClock::Real,
+            );
+            // Only the authenticated command has a pending/recovery contract.
+            // An image can change after the binding is installed; a failed
+            // fence cannot then prove the original command was refused.
+            if lease.is_some() {
+                settled.map_err(|_| federation_binding_unknown_outcome())?;
+            } else {
+                settled?;
+            }
+        }
+        Ok(())
     }
 }

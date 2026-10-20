@@ -5,6 +5,8 @@ It is disabled by default through the federation settings. Standalone and
 disabled hosts create no federation listeners, credential lookups or SSH children.
 See the [architecture overview](../architecture.md#system-overview) for local
 APIs and the existing project remote connector.
+See [native mailbox establishment](federation-entrypoints.md) for operator
+activation, placement and the authenticated binding command.
 
 The central host initiates one OpenSSH session per satellite. An explicit local
 forward reaches the satellite's dedicated federation listener; an explicit

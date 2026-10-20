@@ -53,6 +53,7 @@ impl FederationRpcClient {
             FederationRpcRoute::NativeBinding(lease, _) => {
                 (lease, "/federation/v1/mailbox/native-binding")
             }
+            FederationRpcRoute::Binding(lease, _) => (lease, "/federation/v1/mailbox/binding"),
         };
         lease.with_incarnation(|| Ok(()))?;
         let context = self.channel.security_context()?;
@@ -67,6 +68,7 @@ impl FederationRpcClient {
             FederationRpcRoute::Onboarding(_, probe) => probe.request(&self.client, url),
             FederationRpcRoute::Mailbox(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::NativeBinding(_, body) => self.client.post(url).json(body),
+            FederationRpcRoute::Binding(_, body) => self.client.post(url).json(body),
         };
         let mut prepared = builder.build().map_err(|_| federation_auth_refused())?;
         let body = prepared
@@ -200,6 +202,9 @@ impl FederationRpcClient {
                 // An authenticated transport refusal settles only this attempt;
                 // application uncertainty and its idempotency key remain owned.
                 context.settle(counter);
+                if matches!(&route, FederationRpcRoute::Binding(_, _)) {
+                    return Ok(Err(federation_binding_rpc_error(status)));
+                }
                 if route.mailbox_lease().is_some() {
                     return Ok(Err(federation_mailbox_rpc_error(status)));
                 }

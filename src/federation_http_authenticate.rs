@@ -13,6 +13,9 @@ async fn federation_authenticate_message(
     let (mut parts, body) = request.into_parts();
     let mailbox_request =
         parts.method == axum::http::Method::POST && parts.uri.path() == "/federation/v1/mailbox";
+    let binding_request = parts.method == axum::http::Method::POST
+        && parts.uri.path() == "/federation/v1/mailbox/binding";
+    let durable_request = mailbox_request || binding_request;
     let request_limit = if mailbox_request {
         FEDERATION_MAILBOX_REQUEST_BYTES
     } else {
@@ -83,6 +86,8 @@ async fn federation_authenticate_message(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "authenticated mailbox transport counter refused",
                 )
+            } else if binding_request {
+                federation_binding_unknown_outcome()
             } else {
                 error
             });
@@ -113,12 +118,15 @@ async fn federation_authenticate_message(
                 let permit = Arc::new(permit);
                 parts.extensions.insert(FederationAuthenticatedPeer {
                     lease: Some(lease.clone()),
-                    mailbox_permit: mailbox_request.then(|| permit.clone()),
+                    mailbox_permit: durable_request.then(|| permit.clone()),
                 });
                 let request =
                     axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
                 let response = match tokio::time::timeout_at(deadline, next.run(request)).await {
                     Ok(response) => response,
+                    Err(_) if binding_request => {
+                        federation_binding_unknown_outcome().into_response()
+                    }
                     Err(_) if mailbox_request => federation_mailbox_unknown_outcome(
                         StatusCode::SERVICE_UNAVAILABLE,
                         "central mailbox request deadline reached",
@@ -133,6 +141,9 @@ async fn federation_authenticate_message(
                 };
                 match (state.ensure_current)().and_then(|_| lease.with_incarnation(|| Ok(()))) {
                     Ok(()) => response,
+                    Err(_) if binding_request => {
+                        federation_binding_unknown_outcome().into_response()
+                    }
                     Err(_) if mailbox_request => federation_mailbox_unknown_outcome(
                         StatusCode::SERVICE_UNAVAILABLE,
                         "mailbox authority changed after dispatch",

@@ -62,103 +62,136 @@ impl AppState {
         build_slots: u32,
         gate_slots: u32,
     ) -> Result<FederationPlacement, ApiError> {
+        self.reserve_federation_placement_with(
+            expected,
+            admission_key,
+            session_id,
+            build_slots,
+            gate_slots,
+            None,
+            |_, _, placement| Ok(placement.clone()),
+        )
+    }
+
+    // The callback changes only the cloned candidate. A mailbox install intent
+    // and its reservation therefore enter the same content-fenced transaction.
+    fn reserve_federation_placement_with<T>(
+        &self,
+        expected: &FederationPeerSnapshot,
+        admission_key: String,
+        session_id: String,
+        build_slots: u32,
+        gate_slots: u32,
+        lease: Option<&FederationLinkLease>,
+        retain: impl FnOnce(
+            &mut FederationState,
+            &FederationSettings,
+            &FederationPlacement,
+        ) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
         validate_federation_reference(&admission_key)?;
         self.ensure_federation_peer_current(expected)?;
-        self.mutate_federation(|domain, settings| {
-            if domain.admission_quarantine.is_some() {
-                return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
-            }
-            if !settings.enabled || settings.role != FederationRole::Central {
-                return Err(ApiError::conflict("central federation role required"));
-            }
-            if let Some(existing) = domain.placements.get(&admission_key) {
-                if existing.identity.host_id != expected.peer.host_id
-                    || existing.identity.session_id != session_id
-                    || existing.build_slots != build_slots
-                    || existing.gate_slots != gate_slots
-                {
-                    return Err(ApiError::conflict(
-                        "federation admission key conflicts with its original intent",
-                    ));
+        self.mutate_federation_core_on_link(
+            lease,
+            false,
+            |domain, settings, _| {
+                if domain.admission_quarantine.is_some() {
+                    return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
                 }
-                return Ok(existing.clone());
-            }
-            let peer = domain
-                .peers
-                .get(&expected.peer.host_id)
-                .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-            if peer.record_generation != expected.record_generation
-                || peer.membership != FederationMembershipState::Active
-                || !peer.verified_on(domain.links.get(&peer.identity.host_id))
-            {
-                return Err(ApiError::conflict(
-                    "satellite is not active with current verification",
-                ));
-            }
-            let mut sessions = 0_u64;
-            let mut builds = 0_u64;
-            let mut gates = 0_u64;
-            let mut generation: u64 = 0;
-            for old in domain
-                .placements
-                .values()
-                .filter(|old| old.identity.host_id == peer.identity.host_id)
-            {
-                if old.identity.session_id == session_id {
-                    generation = generation.max(old.placement_generation);
-                    if old.state != FederationPlacementState::Completed {
+                if !settings.enabled || settings.role != FederationRole::Central {
+                    return Err(ApiError::conflict("central federation role required"));
+                }
+                if let Some(existing) = domain.placements.get(&admission_key).cloned() {
+                    if existing.identity.host_id != expected.peer.host_id
+                        || existing.identity.session_id != session_id
+                        || existing.build_slots != build_slots
+                        || existing.gate_slots != gate_slots
+                    {
                         return Err(ApiError::conflict(
-                            "session already has an unresolved placement",
+                            "federation admission key conflicts with its original intent",
                         ));
                     }
+                    return retain(domain, settings, &existing);
                 }
-                if old.state != FederationPlacementState::Completed {
-                    sessions += 1;
-                    builds += u64::from(old.build_slots);
-                    gates += u64::from(old.gate_slots);
+                let peer = domain
+                    .peers
+                    .get(&expected.peer.host_id)
+                    .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+                if peer.record_generation != expected.record_generation
+                    || peer.membership != FederationMembershipState::Active
+                    || !peer.verified_on(domain.links.get(&peer.identity.host_id))
+                {
+                    return Err(ApiError::conflict(
+                        "satellite is not active with current verification",
+                    ));
                 }
-            }
-            if sessions >= u64::from(peer.capacity.max_sessions)
-                || builds + u64::from(build_slots) > u64::from(peer.capacity.build_slots)
-                || gates + u64::from(gate_slots) > u64::from(peer.capacity.gate_slots)
-            {
-                return Err(ApiError::conflict(
-                    "satellite declared capacity is fully reserved",
-                ));
-            }
-            let identity = FederationSessionIdentity {
-                host_id: peer.identity.host_id.clone(),
-                session_id,
-                creation_id: Uuid::new_v4().to_string(),
-            };
-            identity.validate()?;
-            if domain
-                .placements
-                .values()
-                .any(|old| old.identity.creation_id == identity.creation_id)
-            {
-                return Err(ApiError::conflict(
-                    "session creation identity collision; retry admission",
-                ));
-            }
-            let placement = FederationPlacement {
-                admission_key: admission_key.clone(),
-                identity,
-                placement_generation: federation_next_generation(generation)?,
-                peer: expected.clone(),
-                link_incarnation: domain
-                    .links
-                    .get(&peer.identity.host_id)
-                    .expect("verified link")
-                    .clone(),
-                execution_basis: peer.verification_basis(),
-                build_slots,
-                gate_slots,
-                state: FederationPlacementState::Reserved,
-            };
-            domain.placements.insert(admission_key, placement.clone());
-            Ok(placement)
-        })
+                let mut sessions = 0_u64;
+                let mut builds = 0_u64;
+                let mut gates = 0_u64;
+                let mut generation: u64 = 0;
+                for old in domain
+                    .placements
+                    .values()
+                    .filter(|old| old.identity.host_id == peer.identity.host_id)
+                {
+                    if old.identity.session_id == session_id {
+                        generation = generation.max(old.placement_generation);
+                        if old.state != FederationPlacementState::Completed {
+                            return Err(ApiError::conflict(
+                                "session already has an unresolved placement",
+                            ));
+                        }
+                    }
+                    if old.state != FederationPlacementState::Completed {
+                        sessions += 1;
+                        builds += u64::from(old.build_slots);
+                        gates += u64::from(old.gate_slots);
+                    }
+                }
+                if sessions >= u64::from(peer.capacity.max_sessions)
+                    || builds + u64::from(build_slots) > u64::from(peer.capacity.build_slots)
+                    || gates + u64::from(gate_slots) > u64::from(peer.capacity.gate_slots)
+                {
+                    return Err(ApiError::conflict(
+                        "satellite declared capacity is fully reserved",
+                    ));
+                }
+                let identity = FederationSessionIdentity {
+                    host_id: peer.identity.host_id.clone(),
+                    session_id,
+                    creation_id: Uuid::new_v4().to_string(),
+                };
+                identity.validate()?;
+                if domain
+                    .placements
+                    .values()
+                    .any(|old| old.identity.creation_id == identity.creation_id)
+                {
+                    return Err(ApiError::conflict(
+                        "session creation identity collision; retry admission",
+                    ));
+                }
+                let placement = FederationPlacement {
+                    admission_key: admission_key.clone(),
+                    identity,
+                    placement_generation: federation_next_generation(generation)?,
+                    peer: expected.clone(),
+                    link_incarnation: domain
+                        .links
+                        .get(&peer.identity.host_id)
+                        .expect("verified link")
+                        .clone(),
+                    execution_basis: peer.verification_basis(),
+                    build_slots,
+                    gate_slots,
+                    state: FederationPlacementState::Reserved,
+                };
+                domain.placements.insert(admission_key, placement.clone());
+                retain(domain, settings, &placement)
+            },
+            |_| {},
+            EngramBudgetClock::Real,
+        )
     }
 
     fn ensure_federation_placement_current(

@@ -350,7 +350,7 @@ Internal bookkeeping that the frontend doesn't need (e.g. recording Codex sandbo
 
 ### HTTP API
 
-All routes are under `/api`. The backend serves JSON, and the frontend proxies requests through Vite in development.
+Local operator routes are under `/api`; pair-authenticated domain routes use a dedicated federation listener. The backend serves JSON, and the frontend proxies local API requests through Vite in development.
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -373,6 +373,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | DELETE | `/api/workspaces/{id}` (200) -> `WorkspaceLayoutsResponse` | Delete a persisted workspace layout and return the remaining layout summaries |
 | POST | `/api/settings` | Update app-wide preferences and remote config |
 | GET | `/api/federation` | Local operator registry view: enabled/role, local and central host identity, domain `version`, durability/continuity, peer membership and retained capacity, and on a satellite a `satellite` block (bound central, the central peer's enrollment, generations, verification and current-link state, bound sessions). No configuration change. |
+| POST | `/api/federation/peers/{id}/activate` | Activate only a currently verified satellite; exact duplicate returns committed state. See [native mailbox establishment](features/federation-entrypoints.md). |
+| POST | `/api/federation/peers/{id}/placements` | Explicitly reserve or recover a native mailbox placement; returns the installed participant or pending original operation key. |
+| POST | `/federation/v1/mailbox/binding` | Dedicated pair-authenticated satellite listener only: read-only PREPARE or durable INSTALL, then reverse Register. |
 | POST | `/api/federation/settings` | Local operator replacement `{enabled, role, central, expectedVersion?}` for Central, Satellite or Standalone configuration through M1's version/content-fenced durable write. A central binding equals this host's full identity; a satellite binding names another host's identity, read from that central. `expectedVersion` is required for a change from or to the satellite role and honoured whenever given. Disable with the same role and identity to retain reservations and bindings; standalone is a separate request. 400 invalid transition (`code` `federation_invalid_binding`, or `federation_expected_version_required`); 409 stale authority, unresolved-placement role replacement, or a typed `code` (`federation_version_conflict`, `federation_central_stale`, `federation_central_mismatch`, `federation_bound_sessions`); 422 malformed/unknown fields; 500 unresolved persistence. See [configuring a satellite](features/central-control-plane.md#configuring-a-satellite). |
 | POST | `/api/remotes/{id}/register` | Register an existing checkout on an SSH remote for TermAl lifecycle actions. Verifies the remote checkout/tooling and writes `~/.termal/remote-install.json`; returns capped stdout/stderr. |
 | POST | `/api/remotes/{id}/upgrade` | Build and install TermAl on a registered SSH remote by running `git pull --ff-only` and `cargo build --release --bin termal`, then copying the release binary to `~/.termal/bin/termal`; returns capped stdout/stderr. |

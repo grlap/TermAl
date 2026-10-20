@@ -310,6 +310,14 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/federation/peers/{id}/verification",
             get(get_federation_onboarding_report),
         )
+        .route(
+            "/api/federation/peers/{id}/activate",
+            post(activate_federation_satellite_route),
+        )
+        .route(
+            "/api/federation/peers/{id}/placements",
+            post(reserve_federation_mailbox_placement_route),
+        )
         .route("/api/file", get(read_file).put(write_file))
         .route("/api/fs", get(read_directory))
         .route("/api/git/status", get(read_git_status))
@@ -810,6 +818,10 @@ include!("federation_delivery_routes.rs");
 include!("federation_mailbox_directory.rs");
 include!("federation_mailbox_identity.rs");
 include!("federation_mailbox_bindings.rs");
+include!("federation_entrypoints_protocol.rs");
+include!("federation_entrypoints_activation.rs");
+include!("federation_entrypoints_binding.rs");
+include!("federation_entrypoints_placement.rs");
 include!("federation_mailbox_namespace.rs");
 include!("federation_mailbox_authority.rs");
 include!("federation_mailbox_operations.rs");

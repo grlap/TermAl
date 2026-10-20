@@ -146,6 +146,10 @@ impl FederationPeerRecord {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationState {
+    /// Central immutable binding-install intents share the reservation's state
+    /// transaction. Satellites retain only the installed per-session binding.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    binding_install_intents: BTreeMap<String, FederationBindingInstallIntent>,
     /// Mailbox-only locators, never native actors or executor routes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     mailbox_references: BTreeMap<String, FederationMailboxReference>,
@@ -187,6 +191,25 @@ fn federation_next_generation(generation: u64) -> Result<u64, ApiError> {
 
 impl FederationState {
     fn validate(&self) -> Result<()> {
+        for (key, intent) in &self.binding_install_intents {
+            intent
+                .validate()
+                .map_err(|_| anyhow!("invalid binding install intent"))?;
+            let placement = self
+                .placements
+                .get(key)
+                .ok_or_else(|| anyhow!("binding install lacks reservation"))?;
+            if intent.admission_key != *key
+                || intent.binding.identity != placement.identity
+                || intent.binding.placement_generation != placement.placement_generation
+                || intent.binding.central != placement.peer.central
+                || intent.execution_basis != placement.execution_basis
+                || intent.peer_enrollment_generation != placement.peer.enrollment_generation
+                || intent.configuration_basis != placement.peer.configuration_basis()
+            {
+                return Err(anyhow!("binding install reservation changed"));
+            }
+        }
         for (id, reference) in &self.mailbox_references {
             reference.validate().map_err(|_| anyhow!("invalid persisted mailbox reference"))?;
             if id != &reference.id {

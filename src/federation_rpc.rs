@@ -16,6 +16,7 @@ enum FederationRpcRoute {
     Onboarding(FederationLinkLease, FederationOnboardingRpc),
     Mailbox(FederationLinkLease, FederationMailboxRequest),
     NativeBinding(FederationLinkLease, FederationNativeBindingRequest),
+    Binding(FederationLinkLease, FederationBindingCommand),
 }
 
 impl FederationRpcClient {

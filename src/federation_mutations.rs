@@ -218,8 +218,32 @@ impl AppState {
         on_install: impl FnOnce(&T),
         clock: EngramBudgetClock,
     ) -> Result<T, ApiError> {
-        let (value, image, dispatch) = {
+        self.mutate_federation_core_on_link(None, reset_continuity, update, on_install, clock)
+    }
+
+    // The lease is held only while installing the candidate, never while
+    // waiting for durability. Preserve the established link -> state order.
+    fn mutate_federation_core_on_link<T>(
+        &self,
+        lease: Option<&FederationLinkLease>,
+        reset_continuity: bool,
+        update: impl FnOnce(
+            &mut FederationState,
+            &mut FederationSettings,
+            &FederationMutationContext,
+        ) -> Result<T, ApiError>,
+        on_install: impl FnOnce(&T),
+        clock: EngramBudgetClock,
+    ) -> Result<T, ApiError> {
+        let install = || {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(lease) = lease {
+                self.refresh_federation_transport_snapshot_locked(
+                    &inner,
+                    &lease.channel.transport_basis(),
+                    &lease.incarnation,
+                )?;
+            }
             if !inner.federation_durable || (inner.federation_continuity_lost && !reset_continuity)
             {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
@@ -243,12 +267,19 @@ impl AppState {
             inner.federation_durable = false;
             on_install(&value);
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
-            let dispatch = self
-                .persist_internal_locked_with_dispatch(&inner)
-                .map_err(|_| {
-                    ApiError::internal("federation persistence failed; admission remains held")
-                })?;
-            (value, image, dispatch)
+            let dispatch = if lease.is_some() {
+                self.queue_federation_entrypoint_persistence()?
+            } else {
+                self.persist_internal_locked_with_dispatch(&inner)
+                    .map_err(|_| {
+                        ApiError::internal("federation persistence failed; admission remains held")
+                    })?
+            };
+            Ok((value, image, dispatch))
+        };
+        let (value, image, dispatch) = match lease {
+            Some(lease) => lease.with_incarnation(install)?,
+            None => install()?,
         };
         self.finish_federation_durability_with_clock(&image, dispatch, clock)?;
         if reset_continuity {
@@ -267,13 +298,39 @@ impl AppState {
         dispatch: PersistDispatch,
         clock: EngramBudgetClock,
     ) -> Result<(), ApiError> {
+        // Metadata may commit while a hot session is deferred by the bounded
+        // collector. Recovery ticks use this same composite target, so they
+        // cannot clear an INSTALL hold before the exact native row commits.
+        let target = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if federation_persist_image(&PersistedState::metadata_from_inner(&inner)) != *image {
+                return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+            }
+            let sessions = inner
+                .sessions
+                .iter()
+                .filter(|row| !row.hidden)
+                .filter_map(|row| {
+                    row.federation_mailbox_binding.as_ref().map(|binding| {
+                        FederationNativeBindingFence {
+                            binding: binding.clone(),
+                            native_creation_id: row.federation_native_creation_id.clone(),
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            if sessions.is_empty() {
+                PersistFenceTarget::Federation(image.clone())
+            } else {
+                PersistFenceTarget::FederationBindings(Box::new(FederationBindingsFence {
+                    image: image.clone(),
+                    sessions,
+                }))
+            }
+        };
         if matches!(dispatch, PersistDispatch::BackgroundQueued) {
             let deadline = clock.now() + Duration::from_secs(5);
-            let (fence, waiter) = PersistFence::new_with_clock(
-                PersistFenceTarget::Federation(image.clone()),
-                deadline,
-                clock,
-            );
+            let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock);
             self.persist_tx
                 .send(PersistRequest::Fence(Box::new(fence)))
                 .map_err(|_| {
@@ -287,6 +344,19 @@ impl AppState {
                 .map_err(|_| {
                     ApiError::internal("federation durability failed; admission remains held")
                 })?;
+        } else if matches!(&target, PersistFenceTarget::FederationBindings(_)) {
+            // The legacy synchronous fallback has already committed. Keep its
+            // row proof exact as well; never mark a quarantined row durable.
+            let connection = rusqlite::Connection::open(self.persistence_path.as_path())
+                .map_err(|_| ApiError::internal("binding durability readback unavailable"))?;
+            if !target
+                .is_already_durable(&connection)
+                .map_err(|_| ApiError::internal("binding durability readback failed"))?
+            {
+                return Err(ApiError::internal(
+                    "binding durability unresolved; admission remains held",
+                ));
+            }
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if federation_persist_image(&PersistedState::metadata_from_inner(&inner)) != *image {

@@ -24,6 +24,7 @@ impl FederationRpcRoute {
     fn response_limit(&self) -> usize {
         match self {
             Self::Mailbox(_, _) => FEDERATION_MAILBOX_RESPONSE_BYTES,
+            Self::Binding(_, _) => FEDERATION_FRAME_LIMIT,
             _ => 64 * 1024,
         }
     }
@@ -33,6 +34,8 @@ impl FederationRpcRoute {
     fn response_failure(&self, error: ApiError) -> ApiError {
         if self.mailbox_lease().is_some() {
             federation_mailbox_unknown_outcome(error.status, &error.message)
+        } else if matches!(self, Self::Binding(_, _)) {
+            federation_binding_unknown_outcome()
         } else {
             error
         }
