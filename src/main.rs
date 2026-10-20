@@ -342,6 +342,7 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .route("/api/settings", post(update_app_settings))
         .route("/api/federation", get(get_federation))
+        .route("/api/federation/journal", get(get_federation_journal))
         .route("/api/federation/settings", post(update_federation_settings))
         .route("/api/engram/settings", patch(update_engram_host_settings))
         .route("/api/remotes/{id}/register", post(register_remote_termal))
@@ -860,6 +861,10 @@ include!("federation_mutations.rs");
 include!("federation_membership.rs");
 include!("federation_views.rs");
 include!("federation_operator.rs");
+include!("federation_journal_cursor.rs");
+include!("federation_journal_rows.rs");
+include!("federation_journal_scan.rs");
+include!("federation_journal.rs");
 include!("federation_placement.rs");
 include!("persist_federation.rs");
 include!("persist_federation_image.rs");

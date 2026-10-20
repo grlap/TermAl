@@ -112,34 +112,40 @@ impl FederationExecutorReservationCache {
     }
 }
 
+fn federation_executor_reservation_domain_locked(inner: &StateInner)
+    -> Result<FederationExecutorReservationDomain, ApiError>
+{
+    if !inner.federation_durable || inner.federation_continuity_lost {
+        return Err(federation_transport_unavailable());
+    }
+    // Link incarnations, endpoint verification and enabled/settings
+    // edits are wait conditions, never permanent exclusions.
+    let central = inner.federation.local.clone();
+    let mut current = Vec::new();
+    let mut identities = BTreeMap::new();
+    for (key, placement) in &inner.federation.placements {
+        let peer = inner.federation.peers.get(&placement.identity.host_id);
+        let valid = placement.state != FederationPlacementState::Completed
+            && central.as_ref() == Some(&placement.peer.local)
+            && peer.is_some_and(|peer|
+                peer.identity == placement.peer.peer
+                    && peer.enrollment_generation == placement.peer.enrollment_generation
+                    && peer.membership != FederationMembershipState::Revoked);
+        let binding = FederationMailboxBinding { central: placement.peer.local.clone(),
+            identity: placement.identity.clone(), placement_generation: placement.placement_generation };
+        identities.insert(key.clone(), (binding.clone(), placement.peer.enrollment_generation, valid));
+        if valid { current.push(binding); }
+    }
+    let image = serde_json::to_string(&(&central, &identities, &inner.preferences.federation.role))
+        .expect("durable reservation identities serialize");
+    Ok(FederationExecutorReservationDomain { image, central, current })
+}
+
 impl AppState {
     fn refresh_federation_executor_reservation_domain(&self) -> Result<(), ApiError> {
         let domain = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if !inner.federation_durable || inner.federation_continuity_lost {
-                return Err(federation_transport_unavailable());
-            }
-            // Link incarnations, endpoint verification and enabled/settings
-            // edits are wait conditions, never permanent exclusions.
-            let central = inner.federation.local.clone();
-            let mut current = Vec::new();
-            let mut identities = BTreeMap::new();
-            for (key, placement) in &inner.federation.placements {
-                let peer = inner.federation.peers.get(&placement.identity.host_id);
-                let valid = placement.state != FederationPlacementState::Completed
-                    && central.as_ref() == Some(&placement.peer.local)
-                    && peer.is_some_and(|peer|
-                        peer.identity == placement.peer.peer
-                            && peer.enrollment_generation == placement.peer.enrollment_generation
-                            && peer.membership != FederationMembershipState::Revoked);
-                let binding = FederationMailboxBinding { central: placement.peer.local.clone(),
-                    identity: placement.identity.clone(), placement_generation: placement.placement_generation };
-                identities.insert(key.clone(), (binding.clone(), placement.peer.enrollment_generation, valid));
-                if valid { current.push(binding); }
-            }
-            let image = serde_json::to_string(&(&central, &identities, &inner.preferences.federation.role))
-                .expect("durable reservation identities serialize");
-            FederationExecutorReservationDomain { image, central, current }
+            federation_executor_reservation_domain_locked(&inner)?
         };
         let mut cache = self.mailbox_store.executor_reservations.lock()
             .expect("executor reservation mutex poisoned");

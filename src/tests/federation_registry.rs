@@ -390,3 +390,6 @@ mod operator;
 
 #[path = "federation_satellite_operator.rs"]
 mod satellite_operator;
+
+#[path = "federation_journal.rs"]
+mod journal;

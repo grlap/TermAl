@@ -272,6 +272,10 @@ capacity, and, on a satellite, a `satellite` block (below). Host identities use
 release reservations or change the store. This is a local operator API, not a
 domain transport or satellite enrollment endpoint.
 
+The [journal diagnostic](federation-journal.md) reads bounded executor history
+and central wake obligations on this same local operator surface, with no
+payload or evidence values and no configuration or dispatch side effect.
+
 To enable this host as central, first read its identity, then send
 `POST /api/federation/settings` with:
 
