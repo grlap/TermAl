@@ -3,6 +3,31 @@
 use super::*;
 use super::durability::{HeldWriter, list_at, reloaded_api};
 
+#[test]
+fn federation_reference_publication_diagnostic_preserves_forced_sqlite_failure() {
+    let error = rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY_SNAPSHOT),
+        Some("forced publication write failure".to_owned()),
+    );
+    let original = format!("{error:?}");
+    // Exercise the actual error observation, including its libtest-captured
+    // eprintln!, without making a database fail or changing the returned error.
+    let result: Result<(), _> = reference_publication_observe!("publish.insert_marker", Err(error));
+    let error = result.unwrap_err();
+    assert_eq!(format!("{error:?}"), original);
+    let message = reference_publication_diagnostic_message("publish.insert_marker", &error);
+    assert!(message.contains("REFERENCE_PUBLICATION_DIAGNOSTIC stage=publish.insert_marker"), "{message}");
+    assert!(message.contains("sqlite=DatabaseBusy/extended=517"), "{message}");
+    assert!(message.contains(&format!("error={original}")), "{message}");
+    assert!(message.contains("forced publication write failure"), "{message}");
+
+    let wrapped = anyhow::Error::new(error).context("forced wrapper context");
+    let message = reference_publication_diagnostic_message("publish.insert_marker", &wrapped);
+    assert!(message.contains("sqlite=DatabaseBusy/extended=517"), "{message}");
+    assert!(message.contains("forced wrapper context"), "{message}");
+    assert!(message.contains("forced publication write failure"), "{message}");
+}
+
 fn prepared(fixture: &ReferenceFixture) -> FederationMailboxReference {
     let inner = fixture.proof.central.inner.lock().unwrap();
     assert_eq!(inner.federation.mailbox_references.len(), 1);
@@ -160,16 +185,20 @@ async fn federation_reference_publication_concurrent_same_key_has_one_descriptor
     let a = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, first).await.unwrap().unwrap();
     let b = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, second).await.unwrap().unwrap();
     let mut descriptors = Vec::new();
-    for response in [a, b] {
+    for (contender, response) in [a, b].into_iter().enumerate() {
         let response = if response.status() == StatusCode::SERVICE_UNAVAILABLE {
             let error: Value = response.json().await.unwrap();
-            assert!(error["error"].as_str().unwrap().starts_with("REFERENCE_PUBLICATION_BUSY:"));
+            assert!(error["error"].as_str().unwrap().starts_with("REFERENCE_PUBLICATION_BUSY:"),
+                "contender={contender}; status=503; body={error}");
             // One explicit protocol replay after both contenders have settled,
             // not a test rerun or retry-until-green loop.
             fixture.create_response("same-key-race").await
         } else { response };
-        assert_eq!(response.status(), StatusCode::CREATED);
-        descriptors.push(response.json::<Value>().await.unwrap()["reference"].clone());
+        let status = response.status();
+        let body = response.text().await.unwrap();
+        assert_eq!(status, StatusCode::CREATED,
+            "contender={contender}; status={status}; body={body}; underlying stage/error/SQLite code is in REFERENCE_PUBLICATION_DIAGNOSTIC stderr");
+        descriptors.push(serde_json::from_str::<Value>(&body).unwrap()["reference"].clone());
     }
     assert_eq!(descriptors[0], descriptors[1]);
     let row = prepared(&fixture);

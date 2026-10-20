@@ -1,6 +1,53 @@
 // Durable, explicitly federation-owned mailbox locators. These are not
 // SessionRecords and can never acquire a legacy remote executor configuration.
 
+// Failure-only test observations preserve details before API errors erase them.
+// Non-test expansion is exactly the original expression, including its error.
+#[cfg(test)]
+macro_rules! reference_publication_observe {
+    ($stage:literal, $operation:expr) => {
+        ($operation).inspect_err(|error| reference_publication_observe_error($stage, error))
+    };
+}
+
+#[cfg(not(test))]
+macro_rules! reference_publication_observe {
+    ($stage:literal, $operation:expr) => { $operation };
+}
+
+#[cfg(test)]
+fn reference_publication_observe_error<E: std::fmt::Debug + 'static>(stage: &str, error: &E) {
+    // libtest retains this stderr with a failing test; the launcher keeps it
+    // in rust-tests.log. Use the same formatter that the forced-error test checks.
+    eprintln!("{}", reference_publication_diagnostic_message(stage, error));
+}
+
+#[cfg(test)]
+fn reference_publication_diagnostic_message<E: std::fmt::Debug + 'static>(
+    stage: &str,
+    error: &E,
+) -> String {
+    let erased = error as &dyn std::any::Any;
+    let sqlite = erased.downcast_ref::<rusqlite::Error>().or_else(|| {
+        erased.downcast_ref::<anyhow::Error>()
+            .and_then(|error| error.downcast_ref::<rusqlite::Error>())
+    });
+    let sqlite_code = match sqlite {
+        Some(rusqlite::Error::SqliteFailure(code, _)) => {
+            format!("{:?}/extended={}", code.code, code.extended_code)
+        }
+        Some(error) => format!("non-engine SQLite error: {error:?}"),
+        None => "not present in this error".to_owned(),
+    };
+    let io = erased.downcast_ref::<std::io::Error>().or_else(|| {
+        erased.downcast_ref::<anyhow::Error>()
+            .and_then(|error| error.downcast_ref::<std::io::Error>())
+    });
+    format!(
+        "REFERENCE_PUBLICATION_DIAGNOSTIC stage={stage} sqlite={sqlite_code} io={io:?} error={error:?}"
+    )
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationMailboxReference {

@@ -46,9 +46,9 @@ async fn provision_federation_mailbox_reference(
         }
         let state = app.clone();
         let prepared = row.clone();
-        if let Some(descriptor) = run_blocking_api(move || {
+        if let Some(descriptor) = reference_publication_observe!("route.reconcile_publication", run_blocking_api(move || {
             state.reconcile_federation_reference_publication(&prepared)
-        }).await? {
+        }).await)? {
             return Ok((StatusCode::CREATED, Json(json!({ "reference": descriptor }))));
         }
         if !row.is_published() {
@@ -60,20 +60,20 @@ async fn provision_federation_mailbox_reference(
                 .map(|handle| handle.channel.durability_clock.clone()).unwrap_or_default();
             #[cfg(not(test))]
             let clock = EngramBudgetClock::Real;
-            run_blocking_api(move || state.reconcile_federation_durability_with_clock(clock)).await?;
+            reference_publication_observe!("route.reconcile_durability", run_blocking_api(move || state.reconcile_federation_durability_with_clock(clock)).await)?;
         }
     }
-    let context = app.capture_federation_reference(&owner, &request.participant_id)?;
+    let context = reference_publication_observe!("route.capture", app.capture_federation_reference(&owner, &request.participant_id))?;
     if prior.as_ref().is_some_and(|row| !context.matches(row)) {
         return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
     }
-    let proof = context.proof(&app).await?;
+    let proof = reference_publication_observe!("route.proof", context.proof(&app).await)?;
     if prior.as_ref().is_some_and(|row| row.native_creation_id != proof.native_creation_id) {
         return Err(ApiError::conflict("native creation changed; old reference intent is retained"));
     }
     let state = app.clone();
-    let descriptor = run_blocking_api(move || {
-        let (row, persistence) = context.with_current(&state, |inner| {
+    let descriptor = reference_publication_observe!("route.provision", run_blocking_api(move || {
+        let (row, persistence) = reference_publication_observe!("route.with_current", context.with_current(&state, |inner| {
             // Recheck under the commit-adjacent lock, not only before I/O.
             if let Some(existing) = inner.federation.mailbox_references.values().find(|row| {
                 row.owner == context.owner && row.owner_creation == context.owner_creation
@@ -102,15 +102,15 @@ async fn provision_federation_mailbox_reference(
             inner.federation.version = row.generation;
             inner.federation_durable = false;
             let image = federation_persist_image(&PersistedState::metadata_from_inner(inner));
-            let dispatch = state.persist_internal_locked_with_dispatch(inner)
+            let dispatch = reference_publication_observe!("route.persist_dispatch", state.persist_internal_locked_with_dispatch(inner))
                 .map_err(|_| ApiError::internal("reference persistence failed; publication remains held"))?;
             Ok((row, Some((image, dispatch))))
-        })?;
+        }))?;
         if let Some((image, dispatch)) = persistence {
-            state.finish_federation_durability_with_clock(&image, dispatch, context.durability_clock())?;
+            reference_publication_observe!("route.finish_durability", state.finish_federation_durability_with_clock(&image, dispatch, context.durability_clock()))?;
         }
         state.publish_federation_reference(&context, &row)
-    }).await?;
+    }).await)?;
     Ok((StatusCode::CREATED, Json(json!({ "reference": descriptor }))))
 }
 

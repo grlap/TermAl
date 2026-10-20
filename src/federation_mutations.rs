@@ -331,26 +331,32 @@ impl AppState {
         if matches!(dispatch, PersistDispatch::BackgroundQueued) {
             let deadline = clock.now() + Duration::from_secs(5);
             let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock);
-            self.persist_tx
-                .send(PersistRequest::Fence(Box::new(fence)))
+            reference_publication_observe!("durability.send_fence", self.persist_tx
+                .send(PersistRequest::Fence(Box::new(fence))))
                 .map_err(|_| {
                     ApiError::internal("federation persistence unavailable; admission remains held")
                 })?;
             waiter
                 .wait_until(deadline)
                 .ok_or_else(|| {
+                    #[cfg(test)]
+                    reference_publication_observe_error("durability.fence_deadline", &"no fence receipt before existing deadline");
                     ApiError::internal("federation durability unresolved; admission remains held")
                 })?
-                .map_err(|_| {
+                .map_err(|error| {
+                    #[cfg(test)]
+                    reference_publication_observe_error("durability.fence_error", &error);
+                    #[cfg(not(test))]
+                    let _ = error;
                     ApiError::internal("federation durability failed; admission remains held")
                 })?;
         } else if matches!(&target, PersistFenceTarget::FederationBindings(_)) {
             // The legacy synchronous fallback has already committed. Keep its
             // row proof exact as well; never mark a quarantined row durable.
-            let connection = rusqlite::Connection::open(self.persistence_path.as_path())
+            let connection = reference_publication_observe!("durability.open_readback", rusqlite::Connection::open(self.persistence_path.as_path()))
                 .map_err(|_| ApiError::internal("binding durability readback unavailable"))?;
-            if !target
-                .is_already_durable(&connection)
+            if !reference_publication_observe!("durability.readback", target
+                .is_already_durable(&connection))
                 .map_err(|_| ApiError::internal("binding durability readback failed"))?
             {
                 return Err(ApiError::internal(
@@ -382,8 +388,8 @@ impl AppState {
         let (image, dispatch) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
-            let dispatch = self
-                .persist_internal_locked_with_dispatch(&inner)
+            let dispatch = reference_publication_observe!("durability.reconcile_dispatch", self
+                .persist_internal_locked_with_dispatch(&inner))
                 .map_err(|_| {
                     ApiError::internal("federation persistence failed; admission remains held")
                 })?;
