@@ -34,6 +34,32 @@ fn mailbox_ack_schema_has_no_top_level_combinators() {
 }
 
 #[test]
+fn mailbox_ack_schema_and_docs_expose_optional_explicit_coverage() {
+    let tools = mcp_tools_list_result();
+    let tool = tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "termal_acknowledge_mailbox")
+        .unwrap();
+    assert_eq!(
+        tool["inputSchema"]["properties"]["noContinuation"],
+        json!({"type":"boolean", "default":false})
+    );
+    let description = tool["description"].as_str().unwrap();
+    for required in [
+        "ACK alone never suppresses",
+        "same-later-active-turn",
+        "noContinuation",
+        "Numeric ACK",
+        "Later messages",
+        "durably audited",
+    ] {
+        assert!(description.contains(required), "{required}");
+    }
+}
+
+#[test]
 fn mailbox_wake_tool_descriptions_teach_read_first_and_snapshot_ack() {
     let tools = mcp_tools_list_result();
     let description = |name: &str| {

@@ -577,6 +577,7 @@ fn queue_prompt_on_record_with_source(
         attachments,
         pending_prompt,
     });
+    note_mailbox_continuation_boundary(record, &prompt_id);
     if peer_prompt {
         let pending_prompt = record
             .queued_prompts

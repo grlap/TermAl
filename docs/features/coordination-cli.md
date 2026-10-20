@@ -31,7 +31,7 @@ termal mailbox read [--as-session <id>] --mailbox-id <id>
                     [--json] [--base-url <url>]
 termal mailbox read-message [--as-session <id>] --message-id <id>
                     [--json] [--base-url <url>]
-termal mailbox acknowledge [--as-session <id>] --mailbox-id <id> --receipt <receipt>
+termal mailbox acknowledge [--as-session <id>] --mailbox-id <id> --receipt <receipt> [--no-continuation]
 # Legacy numeric form (also validates recorded page issuance):
 termal mailbox acknowledge [--as-session <id>] --mailbox-id <id>
                     --expected <processedThrough> --through <processedThrough>
@@ -91,6 +91,19 @@ the CLI keeps parity with it rather than pretending to enforce more.
 admits; other values are usage errors.
 
 ### Idempotency, replay and acknowledgement
+
+ACK alone never suppresses a queued continuation. The host can cover one with
+an exact page read and receipt ACK in the same later active turn when nothing
+is unread. `--no-continuation` on a receipt ACK is a separate explicit declaration
+that all messages through that receipt are fully handled, required replies are
+sent, and no next-turn work remains. It applies only to that mailbox and receipt
+boundary; later mail, including an awaited reply, re-arms the wake. It is rejected
+with numeric ACK. Successful declarations are durably audited, but process-local
+coverage proof does not survive restart. Retained work, Stop, durability holds
+and paused queues stay protected. See [mailbox coverage](agent-mailboxes.md#coverage-of-an-accepted-continuation).
+
+Coverage is local to standalone mailboxes. Central-domain mailboxes reject
+`--no-continuation`; their normal receipt acknowledgement keeps the owed wake.
 
 - `mailbox send` requires `--idempotency-key`. Re-running the identical
   command returns the original receipt with `duplicate: true`; the backend

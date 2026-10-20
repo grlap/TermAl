@@ -257,7 +257,7 @@ fn federation_m4_store_version_three_guard_refuses_upgrade_without_rewriting_row
     assert_eq!(coordination_schema_objects(&connection).unwrap(), schema);
     assert_eq!(federation_executor_read(&connection, "central-fixture", "one").unwrap(), Some(original));
     assert_eq!(connection.query_row("SELECT value FROM meta WHERE key='coordination_schema_version'",
-        [], |row| row.get::<_, String>(0)).unwrap(), "4");
+        [], |row| row.get::<_, String>(0)).unwrap(), COORDINATION_SQLITE_SCHEMA_VERSION);
 }
 
 #[test]
@@ -497,7 +497,7 @@ fn federation_m4_store_pinned_previous_binary_refuses_without_mailbox_data_loss(
         .stdin(Stdio::null())
         .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     let output = wait_for_executor_child(child, "pinned previous schema opener");
-    assert!(!output.status.success(), "old binary must refuse the v4 database");
+    assert!(!output.status.success(), "old binary must refuse the current database");
     let diagnostic = format!("{}{}", String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr));
     assert!(diagnostic.contains("unsupported coordination database schema"), "{diagnostic}");

@@ -18,6 +18,9 @@
 use super::mailboxes::mailbox_test_state;
 use super::*;
 
+#[path = "mailbox_continuation_coverage.rs"]
+mod continuation_coverage;
+
 const RUNTIME_ID: &str = "acknowledged-wake-runtime";
 
 pub(super) fn send(
@@ -162,10 +165,16 @@ fn expect_prompt(input_rx: &mpsc::Receiver<ClaudeRuntimeCommand>, context: &str)
 }
 
 fn expect_no_turn(input_rx: &mpsc::Receiver<ClaudeRuntimeCommand>, context: &str) {
-    assert!(
-        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "{context}: no turn may be handed to the runtime"
-    );
+    match input_rx.try_recv() {
+        Err(mpsc::TryRecvError::Empty) => {}
+        Err(mpsc::TryRecvError::Disconnected) => {
+            panic!("{context}: fixture runtime command channel disconnected")
+        }
+        Ok(ClaudeRuntimeCommand::Prompt(command)) => {
+            panic!("{context}: unexpected provider prompt: {:?}", command.text)
+        }
+        Ok(_) => panic!("{context}: unexpected non-prompt runtime command"),
+    }
 }
 
 /// The continuation text names the mailbox and boundary, says the mail was

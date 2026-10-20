@@ -629,6 +629,7 @@ fn push_remote_proxy_session_record(
         active_codex_reasoning_effort: None,
         active_codex_sandbox_mode: None,
         active_turn_generation: 0,
+        mailbox_continuations: MailboxContinuationCoverage::default(),
         active_turn_mailbox_notification: None,
         active_turn_start_message_count: None,
         file_change_tracking: None,

@@ -1912,6 +1912,8 @@ struct SessionRecord {
     /// every dispatch so asynchronous callbacks cannot mistake a successor
     /// turn on the same shared runtime for the turn that armed them.
     active_turn_generation: u64,
+    /// Process-local coverage; never recovered from a cursor or durable audit.
+    mailbox_continuations: MailboxContinuationCoverage,
     /// Exact durable mailbox boundary represented by the active turn, if any.
     /// Failure/Stop recovery takes this value before draining the next queued
     /// turn so it never requeues a successor's delivery.

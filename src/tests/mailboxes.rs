@@ -689,6 +689,7 @@ async fn mailbox_read_routes_reject_delegation_children_as_non_peers() {
         State(state),
         Json(AcknowledgeMailboxRequest {
             receipt: None,
+            no_continuation: false,
             expected_processed_through: Some(0),
             processed_through: Some(receipt.sequence),
         }),
@@ -925,6 +926,7 @@ async fn normal_mailbox_interactions_reactivate_stale_live_participants() {
         State(state.clone()),
         Json(AcknowledgeMailboxRequest {
             receipt: None,
+            no_continuation: false,
             expected_processed_through: Some(0),
             processed_through: Some(second.sequence),
         }),

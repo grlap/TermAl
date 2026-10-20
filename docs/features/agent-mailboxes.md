@@ -210,13 +210,53 @@ one-time boot pass covers every unread inbound mailbox because delivered turns
 that died in the crash have no narrower recovery path. The complete
 authoritative list remains available through `termal_list_mailboxes`.
 
-### Acknowledgement does not cancel an accepted wake
+The additional injected host guidance is:
+
+```text
+ACK alone never suppresses a queued continuation. The host may cover it with an exact read and receipt ACK in the same later active turn, through its boundary, when nothing is unread. Set noContinuation (CLI --no-continuation) on a receipt acknowledgement only when you have fully handled every message through that receipt, sent every reply they need, and owe no work in a later turn. Never set it when you promised a follow-up, are waiting for a delegation, evaluator or gate result that will not arrive as mail, or have not read the whole page. It covers only that mailbox and receipt boundary; a later message, including a reply you await, re-arms the wake. Numeric ACK cannot carry it.
+```
+
+### Coverage of an accepted continuation
+
+ACK alone never suppresses an accepted wake. Two independent proofs can cover
+its exact mailbox boundary before turn-end checkpoint selection:
+
+- A page is read and that exact receipt is acknowledged in the same active
+  runtime turn, whose generation is later than acceptance or the last boundary
+  advance. The page must include the boundary and the mailbox must have no
+  unread messages. Re-reading an existing receipt records a new read observation.
+- A receipt ACK with `noContinuation: true` (CLI `--no-continuation`) explicitly
+  declares that no later-turn work remains for that receipt's mailbox boundary.
+  The whole page must be handled and required replies sent. Do not use it for
+  promised follow-ups, unread bodies, or pending delegation, evaluator or gate
+  results that will not arrive as mail. Numeric ACK cannot carry this declaration.
+
+The latest successful declaration per receipt is audited atomically with the ACK in coordination
+schema 5, naming session, mailbox, receipt, through-sequence, turn and time.
+An outside-turn declaration records generation zero and supplies no coverage.
+Exact schemas 1 through 4 migrate additively without changing messages, cursors,
+read receipts, delivery records or the landed version-4 executor journal.
+Refused or failed ACKs record no declaration. Coverage evidence is process-local:
+neither durable cursors nor the audit reconstruct it after restart. Read and ACK
+must share a live turn; legacy numeric ACK, preview reads, partial pages and
+outside-turn observations do not provide coverage. The flag does not extend to
+another mailbox, delegation completion, background completion or evaluator fan-in.
+
+Every boundary advance invalidates coverage, and later mail (including a reply
+the sender awaits) re-arms the wake. Retained and durability-held entries, Stop
+and paused queues remain protected. A covered removal preserves unrelated queued
+work, emits one bounded diagnostic (`session`, `mailbox`, `boundary`, `proof`) and
+increments a process-local counter once. Removing the last obligation makes the
+checkpoint choose `wait`; a previously retained checkpoint is never rewritten.
+
+### Plain acknowledgement keeps an accepted wake
 
 A message accepted while its receiver is running a turn queues a wake behind
 that turn (`queuedBehindActiveTurn`, or `heldBehindPausedQueue` behind a
 paused queue). The receiver often reads and acknowledges that message within
-the turn that is still running. Acknowledgement advances the data cursor only.
-The accepted wake keeps its queue position, identity and boundary, and the
+the turn that is still running. Plain acknowledgement advances the data cursor only.
+Without either coverage proof, the accepted wake keeps its queue position,
+identity and boundary, and the
 turn after the current one still starts. An Engram-controlled root's
 turn-end checkpoint therefore says `continue`, not `wait`.
 
@@ -237,7 +277,8 @@ keeps a head with no unread mail as this continuation, rewriting its text if
 the acknowledgement-time refresh did not. Its store read is optimistic: it
 applies only while the head's prompt, text and source are unchanged, so it
 never writes the older unread text back over a head that an acknowledgement
-rewrote in the meantime. It drops the head only in two cases: the boundary
+rewrote in the meantime. Without a coverage proof it drops the head only in
+two cases: the boundary
 row is no longer visible to the receiver, or the row's delivery record
 (`notificationState` `deliveredToIdleSession`) shows that a handoff already
 covered it. A message delivered directly to an idle receiver queues no wake.
@@ -483,10 +524,15 @@ caller can safely replay them. WAL still permits concurrent readers.
 External-process or OS-level lock exhaustion uses the same retryable
 classification instead of an internal-error `500`.
 
+Coverage applies to standalone local mailboxes. Central-domain mailboxes retain
+their receipt-only protocol and owed wakes; `noContinuation: true` is refused
+there, rather than silently accepted without a matching local runtime proof.
+
 Before either coordination store or the HTTP listener is available, TermAl
 initializes an empty `coordination.sqlite` with the current schema, atomically
-adds receipt storage to the exact version-1 schema without changing messages
-or cursors, or validates
+upgrades exact versions 1 through 4 to version 5, adding receipt, delivery,
+executor and continuation-audit storage as needed without changing messages,
+cursors, delivery or executor records, or validates
 that an existing file already has the exact current version and canonical
 schema definitions, including column types and constraints, foreign keys, and
 named indexes. Empty-state initialization is decided again while holding an

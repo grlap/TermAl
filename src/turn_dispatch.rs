@@ -2357,6 +2357,7 @@ impl AppState {
                             existing.source = QueuedPromptSource::Mailbox;
                         }
                         message_id = existing.pending_prompt.id.clone();
+                        note_mailbox_continuation_boundary(record, &message_id);
                         sync_pending_prompts(record);
                         self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
                             .map_err(|err| {

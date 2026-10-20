@@ -30,10 +30,15 @@ const COORDINATION_CLI_USAGE: &str = "usage:
   termal mailbox read-message [--as-session <id>] --message-id <id>
                       [--json] [--base-url <url>]
   termal mailbox acknowledge [--as-session <id>] --mailbox-id <id>
-                      --receipt <receipt>
+                      --receipt <receipt> [--no-continuation]
                       [--json] [--base-url <url>]
   Legacy acknowledge accepts --expected <cursor> --through <last> instead
   of --receipt; every newly acknowledged visible message must have been issued.
+  ACK alone never suppresses a wake. A same-later-turn read and receipt ACK
+  through its boundary can cover it when nothing is unread. --no-continuation
+  explicitly declares no later-turn work is owed for that receipt's mailbox
+  boundary; use only after processing all bodies and sending required replies.
+  Later messages re-arm the wake. Numeric ACK cannot carry this declaration.
 
 Flags accept `--flag value` and `--flag=value`. `--as-session` is the root
 session the command acts as and defaults to TERMAL_SESSION_ID; delegation-child
@@ -58,7 +63,7 @@ Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
 
 fn coordination_cli_usage() -> String {
-    format!("{COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}")
+    format!("{COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}")
 }
 
 /// `termal sessions list` needs no caller identity: the inventory tool only
@@ -142,6 +147,7 @@ enum CoordinationCliCommand {
         as_session: String,
         mailbox_id: String,
         receipt: String,
+        no_continuation: bool,
     },
 }
 
@@ -315,6 +321,15 @@ fn parse_coordination_cli_args_with_default_session_id(
             json = true;
             continue;
         }
+        if name == "--no-continuation" {
+            if inline_value.is_some() {
+                return Err(coordination_cli_usage_error(
+                    "`--no-continuation` takes no value",
+                ));
+            }
+            flags.insert(&name, "true".to_owned())?;
+            continue;
+        }
         // A following option token is never a value: `--as-session --json`
         // must fail here instead of sending `--json` as a session id, and a
         // help request anywhere still wins. Values that genuinely look like
@@ -434,6 +449,7 @@ fn parse_coordination_cli_args_with_default_session_id(
                 )?,
                 mailbox_id: flags.take_required("--mailbox-id")?,
                 receipt: flags.take_required("--receipt")?,
+                no_continuation: flags.values.remove("--no-continuation").is_some(),
             }
         }
         ("mailbox", "acknowledge") => CoordinationCliCommand::MailboxAcknowledge {
@@ -778,9 +794,14 @@ fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) ->
             as_session,
             mailbox_id,
             receipt,
+            no_continuation,
         } => {
             let bridge = coordination_cli_authorized_bridge(as_session, base_url)?;
-            bridge.tool_acknowledge_mailbox(json!({"mailboxId":mailbox_id,"receipt":receipt}))
+            let mut arguments = json!({"mailboxId":mailbox_id,"receipt":receipt});
+            if *no_continuation {
+                arguments["noContinuation"] = json!(true);
+            }
+            bridge.tool_acknowledge_mailbox(arguments)
         }
         CoordinationCliCommand::MailboxAcknowledge {
             as_session,

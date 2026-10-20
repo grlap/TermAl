@@ -1515,7 +1515,14 @@ impl TermalDelegationMcpBridge {
 
     fn tool_acknowledge_mailbox(&self, arguments: Value) -> Result<Value> {
         let mailbox_id = required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
-        let body = if arguments.get("receipt").is_some() {
+        let no_continuation = arguments.get("noContinuation")
+            .map(|value| value.as_bool().ok_or_else(|| anyhow!("noContinuation must be a boolean")))
+            .transpose()?
+            .unwrap_or(false);
+        if no_continuation && arguments.get("receipt").is_none() {
+            bail!("noContinuation requires a receipt acknowledgement");
+        }
+        let mut body = if arguments.get("receipt").is_some() {
             if arguments.get("expectedProcessedThrough").is_some()
                 || arguments.get("processedThrough").is_some()
             {
@@ -1531,6 +1538,9 @@ impl TermalDelegationMcpBridge {
                 required_u64(arguments.get("processedThrough"), "processedThrough")?;
             json!({"expectedProcessedThrough": expected_processed_through, "processedThrough": processed_through})
         };
+        if no_continuation {
+            body["noContinuation"] = json!(true);
+        }
         let path = format!(
             "/api/sessions/{}/mailboxes/{}/acknowledge",
             self.serving_session_id, mailbox_id
@@ -2733,13 +2743,14 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_acknowledge_mailbox",
-                "description": "After processing an entire read page, acknowledge with mailboxId and its unchanged receipt. Do not also send numeric boundaries. Receipts are participant/mailbox-bound, durable and safe to retry, even if sending or another acknowledgement advanced the cursor. A later page cannot skip an earlier unacknowledged visible page. On a gap, read from the current cursor and process that page first. Legacy expectedProcessedThrough/processedThrough remains a forward-only compare-and-swap, but every newly acknowledged visible message must have recorded issuance; on rejection, re-read. Neither path proves comprehension.",
+                "description": "After processing an entire read page, acknowledge with mailboxId and its unchanged receipt. Do not also send numeric boundaries. Receipts are participant/mailbox-bound, durable and safe to retry, even if sending or another acknowledgement advanced the cursor. A later page cannot skip an earlier unacknowledged visible page. On a gap, read from the current cursor and process that page first. Legacy expectedProcessedThrough/processedThrough remains a forward-only compare-and-swap, but every newly acknowledged visible message must have recorded issuance; on rejection, re-read. Neither path proves comprehension. ACK alone never suppresses a queued wake. A full same-later-active-turn read and receipt ACK through its boundary, with no unread mail, is independent host coverage. Optional noContinuation:true on a receipt ACK explicitly declares that all work through that exact mailbox receipt boundary is handled; use only after required replies and with no next-turn work owed. Later messages re-arm the wake. Numeric ACK cannot carry the declaration. Central-domain mailboxes reject noContinuation and retain their owed wakes. Successful standalone declarations are durably audited, while coverage evidence is process-local and is lost on restart; retained, durability-held, Stopped or paused work stays protected.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId"],
                     "properties": {
                         "mailboxId": { "type": "string" },
                         "receipt": { "type": "string", "minLength": 1 },
+                        "noContinuation": { "type": "boolean", "default": false },
                         "expectedProcessedThrough": { "type": "integer", "minimum": 0 },
                         "processedThrough": { "type": "integer", "minimum": 0 }
                     }

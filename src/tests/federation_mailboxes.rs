@@ -297,6 +297,47 @@ async fn numeric_ack_is_rejected_for_domain_members_but_standalone_behavior_rema
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+#[tokio::test]
+async fn central_domain_receipt_cannot_silently_accept_a_local_coverage_declaration() {
+    let _temp = TestTempRootDirectoryScope::repository_local();
+    let state = central_store();
+    let (sender, _) = local_participant(&state, "Sender");
+    let (target, participant) = local_participant(&state, "Target");
+    let sent: MailboxAppendReceipt = state.federation_mailbox_operation(
+        &sender, send(&participant.session_id, "coverage-declaration"),
+    ).await.unwrap();
+    let page: MailboxReadResponse = state.federation_mailbox_operation(
+        &target, FederationMailboxOperation::Read {
+            mailbox_id: sent.mailbox_id.clone(), after_sequence: None,
+            limit: 10, issue_receipt: true,
+        },
+    ).await.unwrap();
+    let receipt = page.receipt.unwrap();
+    let error = acknowledge_mailbox(
+        AxumPath((target.clone(), sent.mailbox_id.clone())), State(state.clone()),
+        Json(AcknowledgeMailboxRequest {
+            receipt: Some(receipt.clone()), expected_processed_through: None,
+            processed_through: None, no_continuation: true,
+        }),
+    ).await.unwrap_err();
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("noContinuation is unavailable for central-domain"));
+    assert_eq!(mailbox_processed_through(
+        &state.mailbox_store.connection().unwrap(), &sent.mailbox_id, &participant.session_id,
+    ).unwrap(), 0);
+    let summary = acknowledge_mailbox(
+        AxumPath((target, sent.mailbox_id)), State(state.clone()),
+        Json(AcknowledgeMailboxRequest {
+            receipt: Some(receipt), expected_processed_through: None,
+            processed_through: None, no_continuation: false,
+        }),
+    ).await.unwrap().0;
+    assert_eq!(summary.unread_count, 0);
+    assert_eq!(state.mailbox_store.connection().unwrap().query_row(
+        "SELECT count(*) FROM mailbox_continuation_declarations", [], |r| r.get::<_, u64>(0),
+    ).unwrap(), 0);
+}
+
 #[test]
 fn recreated_local_id_and_name_inherit_no_directory_access_or_receipts() {
     let state = central_store();

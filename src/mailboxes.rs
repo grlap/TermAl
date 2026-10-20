@@ -257,6 +257,8 @@ struct AcknowledgeMailboxRequest {
     receipt: Option<String>,
     expected_processed_through: Option<u64>,
     processed_through: Option<u64>,
+    #[serde(default)]
+    no_continuation: bool,
 }
 
 fn default_mailbox_read_limit() -> u64 {
@@ -277,6 +279,8 @@ struct MailboxDispatchFinalization {
 }
 
 struct MailboxStore {
+    /// Invalidates optimistic zero-unread coverage reads on a new append.
+    continuation_epoch: AtomicU64,
     connection: Mutex<Option<rusqlite::Connection>>,
     write_lock: Arc<SqliteStateWriterAdmission>,
     write_admission_timeout: Duration,
@@ -965,6 +969,9 @@ impl AppState {
     /// dispatch fail closed. A transient store error is logged and retried by
     /// the next dispatch/boot reconciliation.
     fn revalidate_queued_mailbox_wakeups_before_dispatch(&self, session_id: &str) {
+        if let Err(error) = self.settle_covered_mailbox_continuations(session_id, None) {
+            eprintln!("mailbox coverage> deferred at drain: {error:#}");
+        }
         loop {
             match self.revalidate_front_mailbox_wakeup_for_session(session_id) {
                 Ok(true) => continue,
@@ -1112,7 +1119,8 @@ async fn read_mailbox(
     }
     let messages = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
-        state
+        let turn = state.mailbox_coverage_turn(&session_id);
+        let page = state
             .mailbox_store
             .read_range_with_issuance(
                 &session_id,
@@ -1121,7 +1129,11 @@ async fn read_mailbox(
                 request.limit,
                 request.issue_receipt,
             )
-            .map_err(mailbox_api_error)
+            .map_err(mailbox_api_error)?;
+        if request.issue_receipt {
+            state.observe_mailbox_coverage_read(&session_id, &mailbox_id, turn, &page);
+        }
+        Ok(page)
     })
     .await?;
     Ok(Json(messages))
@@ -1151,6 +1163,11 @@ async fn acknowledge_mailbox(
     Json(request): Json<AcknowledgeMailboxRequest>,
 ) -> Result<Json<MailboxSummary>, ApiError> {
     if state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
+        if request.no_continuation {
+            return Err(ApiError::bad_request(
+                "noContinuation is unavailable for central-domain mailboxes; acknowledge the receipt without it and keep the continuation",
+            ));
+        }
         let (Some(receipt),None,None) = (request.receipt,request.expected_processed_through,request.processed_through) else {
             return Err(ApiError::bad_request("central domain acknowledgement requires only the unchanged issued receipt"));
         };
@@ -1158,16 +1175,35 @@ async fn acknowledge_mailbox(
     }
     let summary = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
+        if request.no_continuation && request.receipt.is_none() {
+            return Err(ApiError::bad_request(
+                "noContinuation requires a receipt acknowledgement",
+            ));
+        }
+        let turn = state.mailbox_coverage_turn(&session_id);
         match (
             request.receipt,
             request.expected_processed_through,
             request.processed_through,
         ) {
             (Some(receipt), None, None) => {
-                let summary = state
+                let (summary, receipt_through) = state
                     .mailbox_store
-                    .acknowledge_page(&session_id, &mailbox_id, &receipt)
+                    .acknowledge_page_with_declaration(
+                        &session_id,
+                        &mailbox_id,
+                        &receipt,
+                        request.no_continuation.then(|| turn.as_ref().map_or(0, |t| t.generation)),
+                    )
                     .map_err(mailbox_api_error)?;
+                state.observe_mailbox_coverage_ack(
+                    &session_id,
+                    &mailbox_id,
+                    turn,
+                    &receipt,
+                    receipt_through,
+                    request.no_continuation,
+                );
                 let through = summary
                     .participants
                     .iter()
@@ -1248,6 +1284,7 @@ impl MailboxStore {
             })?;
         Ok(Self {
             connection: Mutex::new(Some(connection)),
+            continuation_epoch: AtomicU64::new(0),
             write_lock: sqlite_state_write_lock(path),
             write_admission_timeout,
             dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
@@ -1263,6 +1300,7 @@ impl MailboxStore {
     fn disabled_for_tests() -> Self {
         Self {
             connection: Mutex::new(None),
+            continuation_epoch: AtomicU64::new(0),
             write_lock: Arc::new(SqliteStateWriterAdmission::default()),
             write_admission_timeout: MAILBOX_WRITER_ADMISSION_TIMEOUT,
             dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
@@ -1717,6 +1755,7 @@ impl MailboxStore {
         if let Err(err) = transaction.commit() {
             return Err(mailbox_sqlite_write_error("committing mailbox append", err));
         }
+        self.continuation_epoch.fetch_add(1, Ordering::SeqCst);
         drop(authority);
         drop(write_guard);
 
@@ -2393,7 +2432,9 @@ impl MailboxStore {
             None,
             expected_processed_through,
             processed_through,
+            None,
         )
+        .map(|r| r.0)
     }
 
     fn acknowledge_page(
@@ -2402,7 +2443,18 @@ impl MailboxStore {
         mailbox_id: &str,
         receipt: &str,
     ) -> Result<MailboxSummary> {
-        self.acknowledge_validated(session_id, mailbox_id, Some(receipt), 0, 0)
+        self.acknowledge_validated(session_id, mailbox_id, Some(receipt), 0, 0, None)
+            .map(|r| r.0)
+    }
+
+    fn acknowledge_page_with_declaration(
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        receipt: &str,
+        generation: Option<u64>,
+    ) -> Result<(MailboxSummary, u64)> {
+        self.acknowledge_validated(session_id, mailbox_id, Some(receipt), 0, 0, generation)
     }
 
     fn acknowledge_validated(
@@ -2412,15 +2464,35 @@ impl MailboxStore {
         receipt: Option<&str>,
         expected_processed_through: u64,
         processed_through: u64,
-    ) -> Result<MailboxSummary> {
-        self.acknowledge_authorized(session_id, mailbox_id, receipt, expected_processed_through, processed_through, || Ok(()))
+        declaration_generation: Option<u64>,
+    ) -> Result<(MailboxSummary, u64)> {
+        self.acknowledge_authorized_with_declaration(
+            session_id, mailbox_id, receipt, expected_processed_through,
+            processed_through, declaration_generation, || Ok(()),
+        )
     }
 
     fn acknowledge_authorized<G>(
         &self, session_id: &str, mailbox_id: &str, receipt: Option<&str>,
-        mut expected_processed_through: u64, mut processed_through: u64,
+        expected_processed_through: u64, processed_through: u64,
         authorize: impl FnOnce() -> Result<G>,
     ) -> Result<MailboxSummary> {
+        self.acknowledge_authorized_with_declaration(
+            session_id, mailbox_id, receipt, expected_processed_through,
+            processed_through, None, authorize,
+        ).map(|result| result.0)
+    }
+
+    fn acknowledge_authorized_with_declaration<G>(
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        receipt: Option<&str>,
+        mut expected_processed_through: u64,
+        mut processed_through: u64,
+        declaration_generation: Option<u64>,
+        authorize: impl FnOnce() -> Result<G>,
+    ) -> Result<(MailboxSummary, u64)> {
         if processed_through < expected_processed_through {
             return Err(mailbox_store_error(
                 MailboxStoreErrorKind::Validation,
@@ -2433,6 +2505,7 @@ impl MailboxStore {
             begin_mailbox_write(&mut connection, "beginning mailbox acknowledgement")?;
         require_mailbox_participant(&transaction, mailbox_id, session_id)?;
         let current = mailbox_processed_through(&transaction, mailbox_id, session_id)?;
+        let mut receipt_through = None;
         if let Some(receipt) = receipt {
             let page = transaction.query_row(
                 "SELECT after_sequence, through_sequence FROM mailbox_read_pages
@@ -2466,6 +2539,7 @@ impl MailboxStore {
             }
             expected_processed_through = current;
             processed_through = page.1.max(current);
+            receipt_through = Some(page.1);
         }
         let latest_sequence: u64 = transaction.query_row(
             "SELECT next_sequence - 1 FROM mailboxes WHERE id = ?1",
@@ -2569,13 +2643,24 @@ impl MailboxStore {
                     "mailbox not found while acknowledging",
                 )
             })?;
+        if let (Some(receipt), Some(through), Some(generation)) =
+            (receipt, receipt_through, declaration_generation)
+        {
+            transaction.execute(
+                "INSERT INTO mailbox_continuation_declarations(session_id, mailbox_id, receipt, through_sequence, turn_generation, declared_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(session_id, mailbox_id, receipt) DO UPDATE SET
+                   turn_generation=excluded.turn_generation, declared_at=excluded.declared_at",
+                rusqlite::params![session_id, mailbox_id, receipt, through, generation, stamp_now()],
+            )?;
+        }
         let _authority = authorize()?;
         transaction
             .commit()
             .map_err(|err| mailbox_sqlite_write_error("committing mailbox acknowledgement", err))?;
         drop(connection);
         drop(write_guard);
-        Ok(summary)
+        Ok((summary, receipt_through.unwrap_or(processed_through)))
     }
 }
 

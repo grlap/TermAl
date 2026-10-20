@@ -31,6 +31,9 @@ mod admission_retry;
 #[path = "engram_acknowledged_mailbox_wake.rs"]
 mod acknowledged_mailbox_wake;
 
+#[path = "engram_mailbox_continuation_coverage.rs"]
+mod mailbox_continuation_coverage;
+
 #[path = "engram_delegation_held.rs"]
 mod delegation_held;
 

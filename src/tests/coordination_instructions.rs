@@ -344,3 +344,36 @@ fn mailbox_guidance_existing_surfaces_share_agent_neutral_body() {
             .contains(TERMAL_MAILBOX_GUIDANCE)
     );
 }
+
+#[test]
+fn mailbox_coverage_guidance_is_shared_bounded_and_explicit_about_later_replies() {
+    assert!(TERMAL_MAILBOX_COVERAGE_GUIDANCE.len() <= 800);
+    for surface in [
+        render_termal_host_guidance(),
+        termal_codex_agents_section(),
+        coordination_cli_usage(),
+    ] {
+        assert_eq!(surface.matches(TERMAL_MAILBOX_COVERAGE_GUIDANCE).count(), 1);
+    }
+    for required in [
+        "ACK alone never suppresses",
+        "same later active turn",
+        "noContinuation",
+        "--no-continuation",
+        "sent every reply",
+        "owe no work",
+        "delegation, evaluator or gate",
+        "a later message",
+        "re-arms",
+        "Numeric ACK",
+    ] {
+        assert!(
+            TERMAL_MAILBOX_COVERAGE_GUIDANCE.contains(required),
+            "{required}"
+        );
+    }
+    assert!(
+        include_str!("../../docs/features/agent-mailboxes.md")
+            .contains(TERMAL_MAILBOX_COVERAGE_GUIDANCE)
+    );
+}

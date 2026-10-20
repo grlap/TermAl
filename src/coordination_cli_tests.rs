@@ -14,6 +14,54 @@ use super::delegation_mcp_tests::spawn_test_mcp_http_server;
 use super::*;
 
 #[test]
+fn mailbox_no_continuation_cli_forwards_only_receipt_declaration() {
+    let invocation = parse_coordination_cli_args(cli_args(&[
+        "mailbox",
+        "acknowledge",
+        "--as-session",
+        "session-root",
+        "--mailbox-id",
+        "mailbox-1",
+        "--receipt",
+        "issued-token",
+        "--no-continuation",
+    ]))
+    .unwrap();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, |request| {
+        if request.path == "/api/state" {
+            return (200, root_inventory_state());
+        }
+        assert_eq!(
+            serde_json::from_str::<Value>(&request.body).unwrap(),
+            json!({"receipt": "issued-token", "noContinuation": true})
+        );
+        (
+            200,
+            json!({"id":"mailbox-1", "latestSequence":1, "unreadCount":0, "participants":[]}),
+        )
+    });
+    execute_coordination_cli(&invocation.command, &base_url).unwrap();
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    for flags in [
+        vec!["--expected", "0", "--through", "1", "--no-continuation"],
+        vec!["--receipt", "r", "--no-continuation=true"],
+        vec!["--receipt", "r", "--no-continuation", "--no-continuation"],
+    ] {
+        let mut args = cli_args(&[
+            "mailbox",
+            "acknowledge",
+            "--as-session",
+            "session-root",
+            "--mailbox-id",
+            "mailbox-1",
+        ]);
+        args.extend(cli_args(&flags));
+        assert!(parse_coordination_cli_args(args).is_err(), "{flags:?}");
+    }
+}
+
+#[test]
 fn mailbox_wake_cli_help_teaches_read_first_and_snapshot_ack() {
     let usage = coordination_cli_usage();
     assert_eq!(usage.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);

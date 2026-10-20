@@ -757,6 +757,7 @@ impl PersistedSessionRecord {
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
             active_turn_generation: 0,
+            mailbox_continuations: MailboxContinuationCoverage::default(),
             active_turn_mailbox_notification: None,
             active_turn_start_message_count: None,
             file_change_tracking: None,

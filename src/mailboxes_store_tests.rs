@@ -7,6 +7,9 @@
 
 use super::*;
 
+#[path = "tests/mailbox_continuation_migration.rs"]
+mod continuation_migration;
+
 struct MailboxTestRoot;
 
 impl MailboxTestRoot {
@@ -376,7 +379,8 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
             .connection()
             .unwrap()
             .execute_batch(
-                "DROP TABLE federation_executor_operations;
+                "DROP TABLE mailbox_continuation_declarations;
+             DROP TABLE federation_executor_operations;
              DROP TABLE federation_mailbox_wake_obligations;
              DROP TABLE federation_mailbox_dedup;
              DROP TABLE federation_mailbox_intents;
@@ -417,6 +421,129 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
         )
         .unwrap();
     validate_current_coordination_schema(&store.connection().unwrap()).unwrap();
+}
+
+#[test]
+fn mailbox_version_two_upgrade_preserves_receipts_and_cursor_without_coverage() {
+    let root = MailboxTestRoot::new();
+    let path = root.database_path();
+    let (message, receipt) = {
+        let store = MailboxStore::open(&path).unwrap();
+        let message = store.append(&test_input()).unwrap();
+        let page = store
+            .read_range("session-target", &message.mailbox_id, None, 10)
+            .unwrap();
+        let receipt = page.receipt.unwrap();
+        store
+            .acknowledge_page("session-target", &message.mailbox_id, &receipt)
+            .unwrap();
+        store
+            .connection()
+            .unwrap()
+            .execute_batch(
+                "DROP TABLE mailbox_continuation_declarations;
+             DROP TABLE federation_executor_operations;
+             DROP TABLE federation_mailbox_wake_obligations;
+             DROP TABLE federation_mailbox_dedup;
+             DROP TABLE federation_mailbox_intents;
+             DROP TABLE federation_mailbox_retired_namespaces;
+            UPDATE meta SET value='2' WHERE key='coordination_schema_version';",
+            )
+            .unwrap();
+        (message.receipt.clone(), receipt)
+    };
+    let store = MailboxStore::open(&path).unwrap();
+    store
+        .acknowledge_page("session-target", &message.mailbox_id, &receipt)
+        .unwrap();
+    let connection = store.connection().unwrap();
+    assert_eq!(
+        mailbox_processed_through(&connection, &message.mailbox_id, "session-target").unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM mailbox_read_pages WHERE receipt=?1",
+                [&receipt],
+                |r| r.get::<_, u64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM mailbox_continuation_declarations",
+                [],
+                |r| r.get::<_, u64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    validate_current_coordination_schema(&connection).unwrap();
+}
+
+#[test]
+fn mailbox_version_three_upgrade_preserves_delivery_records_and_receipts() {
+    let root = MailboxTestRoot::new();
+    let path = root.database_path();
+    let (message, receipt) = {
+        let store = MailboxStore::open(&path).unwrap();
+        let message = store.append(&test_input()).unwrap();
+        let page = store.read_range("session-target", &message.mailbox_id, None, 10).unwrap();
+        let receipt = page.receipt.unwrap();
+        store.acknowledge_page("session-target", &message.mailbox_id, &receipt).unwrap();
+        let connection = store.connection().unwrap();
+        connection.execute_batch(
+            "DROP TABLE mailbox_continuation_declarations;
+             DROP TABLE federation_executor_operations;
+             UPDATE meta SET value='3' WHERE key='coordination_schema_version';
+             INSERT INTO federation_mailbox_intents
+              (sender_session_id,idempotency_key,sender_host_id,owner_session_id,owner_creation_id,
+               target_session_id,canonical_digest,envelope_json,state,payload,payload_bytes)
+             VALUES('sender','key','host','owner','creation','target','digest','envelope',
+                    'appendOutcomeUnknown','payload',7);
+             INSERT INTO federation_mailbox_dedup
+              (sender_host_id,sender_session_id,idempotency_key,target_session_id,canonical_digest,state)
+             VALUES('host','sender','key','target','digest','refused');
+             INSERT INTO federation_mailbox_retired_namespaces VALUES('retired','retired-at');"
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO federation_mailbox_wake_obligations VALUES(?1,'target','binding','pending')",
+            [&message.message_id],
+        ).unwrap();
+        validate_coordination_schema_version(&connection, "3").unwrap();
+        (message.receipt.clone(), receipt)
+    };
+    let store = MailboxStore::open(&path).unwrap();
+    store.acknowledge_page("session-target", &message.mailbox_id, &receipt).unwrap();
+    let connection = store.connection().unwrap();
+    validate_current_coordination_schema(&connection).unwrap();
+    assert_eq!(mailbox_processed_through(&connection, &message.mailbox_id, "session-target").unwrap(), 1);
+    for (query, expected) in [
+        ("SELECT envelope_json || ':' || state || ':' || payload FROM federation_mailbox_intents", "envelope:appendOutcomeUnknown:payload"),
+        ("SELECT canonical_digest || ':' || state FROM federation_mailbox_dedup", "digest:refused"),
+        ("SELECT target_binding_json || ':' || state FROM federation_mailbox_wake_obligations", "binding:pending"),
+        ("SELECT sender_session_id || ':' || retired_at FROM federation_mailbox_retired_namespaces", "retired:retired-at"),
+    ] {
+        assert_eq!(connection.query_row(query, [], |r| r.get::<_, String>(0)).unwrap(), expected);
+    }
+    assert_eq!(connection.query_row("SELECT count(*) FROM mailbox_continuation_declarations", [], |r| r.get::<_, u64>(0)).unwrap(), 0);
+    assert_eq!(connection.query_row("SELECT count(*) FROM mailbox_read_pages WHERE receipt=?1", [&receipt], |r| r.get::<_, u64>(0)).unwrap(), 1);
+}
+
+#[test]
+fn mailbox_version_three_failed_upgrade_leaves_the_exact_schema_unchanged() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
+    connection.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL).unwrap();
+    connection.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL).unwrap();
+    connection.execute_batch("INSERT INTO meta VALUES('coordination_schema_version','3'); PRAGMA query_only=ON;").unwrap();
+    let before = coordination_schema_objects(&connection).unwrap();
+    assert!(ensure_sqlite_coordination_schema(&connection).is_err());
+    assert_eq!(coordination_schema_objects(&connection).unwrap(), before);
+    validate_coordination_schema_version(&connection, "3").unwrap();
 }
 
 #[test]

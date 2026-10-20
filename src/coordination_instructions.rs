@@ -13,8 +13,11 @@ mailbox send --to <id> --message <text> --idempotency-key <key> --json
 mailbox acknowledge --mailbox-id <id> --receipt <receipt> --json
 mailbox list is discovery only."#;
 
+// A separately bounded addition keeps the original receipt protocol unchanged.
+const TERMAL_MAILBOX_COVERAGE_GUIDANCE: &str = "ACK alone never suppresses a queued continuation. The host may cover it with an exact read and receipt ACK in the same later active turn, through its boundary, when nothing is unread. Set noContinuation (CLI --no-continuation) on a receipt acknowledgement only when you have fully handled every message through that receipt, sent every reply they need, and owe no work in a later turn. Never set it when you promised a follow-up, are waiting for a delegation, evaluator or gate result that will not arrive as mail, or have not read the whole page. It covers only that mailbox and receipt boundary; a later message, including a reply you await, re-arms the wake. Numeric ACK cannot carry it.";
+
 fn render_termal_host_guidance() -> String {
-    format!("TermAl host guidance\n{TERMAL_MAILBOX_GUIDANCE}")
+    format!("TermAl host guidance\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}")
 }
 
 /// Check live ownership at the injection boundary, not a cached agent label.

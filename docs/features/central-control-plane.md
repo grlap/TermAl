@@ -156,14 +156,18 @@ retry payload while retaining identity, digest, target and outcome. Namespace
 retirement and central tombstones have no time-based expiry. These routes are
 disabled with the M1 federation setting. Standalone mailbox behavior is unchanged.
 
-Coordination schema version 4 upgrades exact versions 1 through 3 atomically,
-preserving mailbox bodies, cursors, issued read receipts and delivery intents.
-It adds an inert executor journal with bounded store APIs; it adds no dispatch.
-The migration is one-way: an older binary without version-4 support visibly
+Coordination schema version 5 upgrades exact versions 1 through 4 atomically,
+preserving mailbox bodies, cursors, issued read receipts, delivery intents and
+executor journal records. Version 4 is the landed inert executor journal;
+version 5 adds standalone continuation audits, never recovered runtime coverage.
+The migration is one-way: an older binary without version-5 support visibly
 refuses to open the upgraded coordination.sqlite, preserving its mailbox data,
-receipts and cursors. There is no automatic downgrade or reset. Unknown or
+receipts and cursors. Reverting only the binary is unsupported. There is no
+automatic backup, downgrade or reset. Coordination's 4-to-5 migration is separate
+from primary `termal.sqlite` versioning. Unknown or
 modified schema objects still refuse opening; no mailbox data is inferred from
-intents.
+intents. The unlanded audit-only version-4 layout is not a supported production
+migration source and is refused without rewriting it.
 
 ## Model in one paragraph
 

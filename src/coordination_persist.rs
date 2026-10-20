@@ -4,8 +4,9 @@ Current coordination SQLite schema ownership.
 Owns the independent `coordination.sqlite` path plus current-schema
 initialization and validation. Runtime mailbox and board stores use these
 helpers but keep separate long-lived connections and writer-admission domains.
-Exact versions 1 through 3 upgrade atomically to version 4 by adding read receipts,
-delivery intents and an inert executor journal; cursors and messages are preserved. Other unsupported
+Exact versions 1 through 4 upgrade atomically to version 5 by adding missing
+receipts, delivery intents, executor records and continuation audits. Existing
+cursors, messages, delivery and executor records are preserved. Other unsupported
 schemas are rejected, never copied from `termal.sqlite`.
 */
 
@@ -13,7 +14,30 @@ fn resolve_coordination_persistence_path(persistence_path: &FsPath) -> PathBuf {
     persistence_path.with_file_name("coordination.sqlite")
 }
 
-const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "4";
+const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "5";
+
+// Latest explicit declaration per receipt: durable audit, never restart proof.
+const MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL: &str = "
+    CREATE TABLE mailbox_continuation_declarations (
+      session_id TEXT NOT NULL,
+      mailbox_id TEXT NOT NULL,
+      receipt TEXT NOT NULL,
+      through_sequence INTEGER NOT NULL CHECK (through_sequence > 0),
+      turn_generation INTEGER NOT NULL CHECK (turn_generation >= 0),
+      declared_at TEXT NOT NULL,
+      PRIMARY KEY (session_id, mailbox_id, receipt),
+      FOREIGN KEY (receipt) REFERENCES mailbox_read_pages(receipt) ON DELETE CASCADE
+    );
+";
+
+#[cfg(test)]
+type CoordinationUpgradeCommitHook = Box<dyn FnOnce(&rusqlite::Connection) -> Result<()>>;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_COORDINATION_BEFORE_UPGRADE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_COORDINATION_UPGRADE_BEFORE_COMMIT: std::cell::RefCell<Option<CoordinationUpgradeCommitHook>> = const { std::cell::RefCell::new(None) };
+}
 
 // Version 2 adds durable read receipts without rewriting any mailbox cursor or
 // message. Unacknowledged reads from version 1 must be repeated after upgrade.
@@ -187,7 +211,7 @@ fn expected_coordination_schema_objects_for_version(
     version: &str,
 ) -> Result<Vec<CoordinationSchemaObject>> {
     match version {
-        "1" | "2" | "3" | "4" => {}
+        "1" | "2" | "3" | "4" | "5" => {}
         _ => {
             return Err(reject_unsupported_coordination_schema(format!(
                 "unknown version {version}"
@@ -202,11 +226,15 @@ fn expected_coordination_schema_objects_for_version(
     if version != "1" {
         connection.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)?;
     }
-    if matches!(version, "3" | "4") {
+    if matches!(version, "3" | "4" | "5") {
         connection.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)?;
     }
-    if version == "4" {
+    // Historical version 4 is exactly the landed executor schema.
+    if matches!(version, "4" | "5") {
         connection.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)?;
+    }
+    if version == "5" {
+        connection.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)?;
     }
     coordination_schema_objects(&connection)
 }
@@ -220,6 +248,9 @@ fn initialize_current_coordination_schema(transaction: &rusqlite::Transaction<'_
         .context("failed to initialize mailbox read receipts")?;
     transaction.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)?;
     transaction.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)?;
+    transaction
+        .execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)
+        .context("failed to initialize mailbox continuation declarations")?;
     transaction
         .execute(
             "INSERT INTO meta(key, value) VALUES('coordination_schema_version', ?1)",
@@ -295,52 +326,85 @@ fn validate_coordination_schema_version(
 }
 
 fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
-    let actual_schema = coordination_schema_objects(connection)?;
+    let historical = ["1", "2", "3", "4"]
+        .into_iter()
+        .map(|version| {
+            Ok((
+                version,
+                expected_coordination_schema_objects_for_version(version)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // Inspect the complete layout and marker in one read snapshot. Another
+    // opener must not make us combine its new marker with our old inventory.
+    let (actual_schema, source_version) = {
+        let inspection = rusqlite::Transaction::new_unchecked(
+            connection,
+            rusqlite::TransactionBehavior::Deferred,
+        )?;
+        let schema = coordination_schema_objects(&inspection)?;
+        let version = historical
+            .iter()
+            .find(|(_, expected)| expected == &schema)
+            .map(|(version, _)| *version);
+        if let Some(version) = version {
+            validate_coordination_schema_version(&inspection, version)?;
+        } else if !schema.is_empty() {
+            validate_current_coordination_schema(&inspection)?;
+        }
+        inspection.commit()?;
+        (schema, version)
+    };
     if !actual_schema.is_empty() {
         // Validate the complete historical schema before any write. Unknown
         // objects and modified definitions are never adopted by migration.
-        let version_one_schema = expected_coordination_schema_objects_for_version("1")?;
-        let version_two_schema = expected_coordination_schema_objects_for_version("2")?;
-        let version_three_schema = expected_coordination_schema_objects_for_version("3")?;
-        if actual_schema == version_one_schema
-            || actual_schema == version_two_schema
-            || actual_schema == version_three_schema
-        {
+        if source_version.is_some() {
+            #[cfg(test)]
+            if let Some(hook) =
+                TEST_COORDINATION_BEFORE_UPGRADE.with(|slot| slot.borrow_mut().take())
+            {
+                hook();
+            }
             let transaction = rusqlite::Transaction::new_unchecked(
                 connection,
                 rusqlite::TransactionBehavior::Immediate,
             )?;
             // Another process may have upgraded while we waited for SQLite.
             let locked_schema = coordination_schema_objects(&transaction)?;
-            if locked_schema == version_one_schema
-                || locked_schema == version_two_schema
-                || locked_schema == version_three_schema
+            if let Some((old_version, _)) = historical
+                .iter()
+                .find(|(_, schema)| schema == &locked_schema)
             {
                 // Validate metadata only after acquiring the transaction:
                 // concurrent upgrade may have changed it since the first read.
                 // Unreadable metadata remains an operational error, not reset guidance.
-                if locked_schema == version_one_schema {
-                    validate_coordination_schema_version(&transaction, "1")?;
+                validate_coordination_schema_version(&transaction, old_version)?;
+                if *old_version == "1" {
                     transaction.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)?;
-                } else if locked_schema == version_two_schema {
-                    validate_coordination_schema_version(&transaction, "2")?;
-                } else {
-                    validate_coordination_schema_version(&transaction, "3")?;
                 }
-                if locked_schema != version_three_schema {
+                if matches!(*old_version, "1" | "2") {
                     transaction.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)?;
                 }
-                transaction.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)?;
+                if *old_version != "4" {
+                    transaction.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)?;
+                }
+                transaction.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)?;
                 transaction.execute(
                     "UPDATE meta SET value = ?1 WHERE key = 'coordination_schema_version'",
                     [COORDINATION_SQLITE_SCHEMA_VERSION],
                 )?;
             }
             validate_current_coordination_schema(&transaction)?;
+            #[cfg(test)]
+            if let Some(hook) =
+                TEST_COORDINATION_UPGRADE_BEFORE_COMMIT.with(|slot| slot.borrow_mut().take())
+            {
+                hook(&transaction)?;
+            }
             transaction.commit()?;
             return Ok(());
         }
-        return validate_current_coordination_schema(connection);
+        return Ok(());
     }
 
     let transaction =
@@ -417,7 +481,7 @@ mod sqlite_coordination_tests {
             format!("{:x}", Sha256::digest(normalized.as_bytes())),
             "185e9fbf25eafe9ae4a45a58654a54712853e60ab1f31e1d762f330431eca0b0"
         );
-        for version in ["", "0", "5", "future"] {
+        for version in ["", "0", "6", "future"] {
             assert!(
                 expected_coordination_schema_objects_for_version(version).is_err(),
                 "{version}"
@@ -427,6 +491,7 @@ mod sqlite_coordination_tests {
         assert!(expected_coordination_schema_objects_for_version("2").is_ok());
         assert!(expected_coordination_schema_objects_for_version("3").is_ok());
         assert!(expected_coordination_schema_objects_for_version("4").is_ok());
+        assert!(expected_coordination_schema_objects_for_version("5").is_ok());
     }
     use std::time::Instant;
 

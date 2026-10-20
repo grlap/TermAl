@@ -5369,6 +5369,12 @@ impl AppState {
         runtime_token: &RuntimeToken,
         active_turn_generation: Option<u64>,
     ) {
+        if let Err(error) = self.settle_covered_mailbox_continuations(
+            session_id,
+            Some((runtime_token, active_turn_generation)),
+        ) {
+            eprintln!("mailbox coverage> deferred before checkpoint: {error:#}");
+        }
         let next_intent = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
