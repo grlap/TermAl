@@ -2541,7 +2541,7 @@ impl AppState {
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
-        let (starting_check, workdir, unresolved_writers) = {
+        let (starting_check, workdir, unresolved_writers, launch_held_target) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -2552,6 +2552,19 @@ impl AppState {
                 .active_turn_checks
                 .iter()
                 .find(|check| check.key == key && check.end.is_none()).cloned();
+            // A launcher full gate with batch members reads the session's
+            // held claims at its launch, off the lock below, so each member
+            // carries the fence its claim has then (`engram_batch_binds.rs`).
+            // Only for a launch that is carried: a foreground gate, or a
+            // dropped launch, binds no member.
+            let launch_held_target = starting_check
+                .as_ref()
+                .filter(|check| engram_launch_needs_held_read(&inner, index, session_id, check, exit))
+                .and_then(|_| {
+                    Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                        .ok()
+                        .flatten()
+                });
             (
                 starting_check.clone(),
                 record.session.workdir.clone(),
@@ -2561,8 +2574,16 @@ impl AppState {
                 } else {
                     Vec::new()
                 },
+                launch_held_target,
             )
         };
+        // On the recorder's path, so bounded as the turn path's own held read.
+        let launch_held = launch_held_target.map(|target| {
+            target.adapter.read_held_claims(
+                &target.connection,
+                target.settings.call_timeout().min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT),
+            )
+        });
         let reading =
             engram_read_check_end(starting_check.as_ref(), session_id, command, output, exit);
         // The session's worktree, resolved off the lock for overlap marking,
@@ -2628,6 +2649,21 @@ impl AppState {
         // (`engram_claude_interference.rs`).
         engram_reconcile_claude_consumer(&mut inner, index);
         let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
+        // A launcher full gate's batch members, read from the root table
+        // before the session is borrowed, with the fences their claims had at
+        // the launch; used only if it is carried below
+        // (`engram_batch_binds.rs`). A launch whose held claims could not be
+        // read binds none of them, and their holder is told.
+        let (launch_bind_targets, unbindable_lines) = inner.sessions[index]
+            .engram
+            .active_turn_checks
+            .iter()
+            .find(|check| running_check(check))
+            .filter(|check| engram_check_is_launcher_full(&check.command))
+            .map(|check| {
+                engram_launch_batch_members(&inner, index, session_id, check, launch_held.as_ref())
+            })
+            .unwrap_or_default();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -2716,7 +2752,11 @@ impl AppState {
                 if let Some(cause) = other_writer {
                     launched.note_overlap(|| cause);
                 }
-                if let Some(line) = engram_carry_check(record, launched) {
+                if let Some(line) = engram_carry_check(record, launched, launch_bind_targets) {
+                    eprintln!("engram> session={session_id} {line}");
+                    record.engram.set_pending_source_root_line(line);
+                }
+                for line in unbindable_lines {
                     eprintln!("engram> session={session_id} {line}");
                     record.engram.set_pending_source_root_line(line);
                 }

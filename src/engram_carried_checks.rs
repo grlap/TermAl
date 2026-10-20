@@ -131,6 +131,11 @@ struct EngramCarriedCheck {
     /// settlement candidate is judged against it by that candidate's own
     /// closure (`engram_carried_candidate_closure`).
     potential: Option<(u64, ClaudeHazardCause)>,
+    /// The other items of a batch this gate's passed record is bound to
+    /// (`engram_verification_bind.rs`), as its launch recorded them. Empty
+    /// for a single-item gate and for a carried Codex test.
+    /// Each with the fence its claim had at the gate's launch, read then.
+    bind_targets: Vec<EngramBindTarget>,
 }
 
 /// When a settlement candidate's evidence interval closed, on the
@@ -172,6 +177,10 @@ struct EngramCarriedLaunchMarker {
     /// can no longer be reported to the host. Absent for a launcher full gate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     unknown_line: Option<String>,
+    /// For a batch gate: its other members' references, each told at load
+    /// that the gate's record was not bound to it (`engram_batch_binds.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bind_members: Vec<String>,
 }
 
 impl EngramCarriedCheck {
@@ -183,6 +192,11 @@ impl EngramCarriedCheck {
             unknown_line: self.ends_by_report.then(|| {
                 engram_reported_end_lost_to_restart_line(&self.check.command, self.end_reported())
             }),
+            bind_members: self
+                .bind_targets
+                .iter()
+                .map(|target| target.short_ref.clone())
+                .collect(),
         }
     }
 
@@ -1511,7 +1525,11 @@ fn engram_carry_refusal(record: &SessionRecord, launched: &EngramTurnCheck) -> O
 /// named root it ran in. Past the limit the oldest carried check is dropped
 /// and its holder told. Returns the line for the holder when it is not
 /// carried.
-fn engram_carry_check(record: &mut SessionRecord, launched: EngramTurnCheck) -> Option<String> {
+fn engram_carry_check(
+    record: &mut SessionRecord,
+    launched: EngramTurnCheck,
+    bind_targets: Vec<EngramBindTarget>,
+) -> Option<String> {
     if let Some(line) = engram_carry_refusal(record, &launched) {
         // The launch may still have started a run, which a later launch in
         // the same worktree must not take as its own.
@@ -1549,6 +1567,8 @@ fn engram_carry_check(record: &mut SessionRecord, launched: EngramTurnCheck) -> 
     let carried = EngramCarriedCheck {
         ambiguous,
         fence,
+        // A batch gate's members, with their fences at this launch.
+        bind_targets,
         ..engram_new_carried_check(binding, turn_root.generation, launched, None)
     };
     engram_push_carried_check(record, carried)
@@ -1582,6 +1602,7 @@ fn engram_new_carried_check(
         fence: None,
         terminal_at: None,
         potential: None,
+        bind_targets: Vec::new(),
     }
 }
 
@@ -1660,13 +1681,37 @@ fn engram_check_is_launcher_full(command: &EngramCheckCommand) -> bool {
 /// The lines telling the holder in `record` that each of its carried checks
 /// earned no credit because `why`, for a reset of its Engram state that
 /// drops them (a project's Engram settings changed, or the project was
-/// removed). The caller logs them and sets them again after the reset.
+/// removed). The caller logs them and sets them again after the reset. A
+/// batch gate's members, of a gate still carried, pending its checkpoint's
+/// answer or owed a bind, are dropped by the same reset, and each gets its
+/// line too.
 fn engram_carried_checks_reset_lines(record: &SessionRecord, why: &str) -> Vec<String> {
-    record
-        .engram
+    let engram = &record.engram;
+    let unbound = engram
+        .carried_checks
+        .iter()
+        .flat_map(|carried| carried.bind_targets.iter())
+        .chain(engram.pending_batches.iter().flat_map(|batch| batch.targets.iter()))
+        .chain(
+            engram
+                .owed_binds
+                .iter()
+                .filter(|owed| !engram_owed_bind_may_be_bound(owed))
+                .map(|owed| &owed.target),
+        )
+        .map(|target| engram_batch_not_recorded_line(&target.short_ref, why));
+    // One that may have been sent may be bound already: its state is unknown.
+    let unknown = engram
+        .owed_binds
+        .iter()
+        .filter(|owed| engram_owed_bind_may_be_bound(owed))
+        .map(|owed| engram_batch_unconfirmed_line(&owed.target.short_ref, why));
+    engram
         .carried_checks
         .iter()
         .map(|carried| carried.refusal_line(why))
+        .chain(unbound)
+        .chain(unknown)
         .collect()
 }
 
@@ -2058,10 +2103,26 @@ fn engram_credit_carried_checks(
     inner: &mut StateInner,
     index: usize,
     session_id: &str,
+    checkpoint_grant_id: &str,
     settled: Vec<EngramCarriedSettlement>,
     held_claims: Option<&EngramHeldClaims>,
     resolved: &mut Vec<EngramResolvedCheck>,
 ) -> usize {
+    // The members of each batch gate, by the grant and sequence it launched
+    // under, read before the settled gates leave the carried list.
+    let batch_members: Vec<_> = inner.sessions[index]
+        .engram
+        .carried_checks
+        .iter()
+        .filter(|carried| !carried.bind_targets.is_empty())
+        .map(|carried| {
+            (
+                carried.check.grant_id.clone(),
+                carried.check.sequence,
+                carried.bind_targets.clone(),
+            )
+        })
+        .collect();
     let store = engram_project_for_session_locked(inner, session_id)
         .and_then(|project| project.engram.as_ref())
         .and_then(|settings| settings.authority_store_key.clone());
@@ -2103,6 +2164,35 @@ fn engram_credit_carried_checks(
     for line in lines {
         eprintln!("engram> session={session_id} {line}");
         record.engram.set_pending_source_root_line(line);
+    }
+    // A batch gate credited as passed leaves its members pending until this
+    // checkpoint's answer names its own record (`engram_batch_binds.rs`). A
+    // failed gate binds nothing: its own line already tells its holder.
+    for check in credited
+        .iter()
+        .filter(|check| check.outcome == EngramExecutionOutcome::Succeeded)
+    {
+        let Some((_, _, targets)) = batch_members.iter().find(|(grant_id, sequence, _)| {
+            *grant_id == check.check.grant_id && *sequence == check.check.sequence
+        }) else {
+            continue;
+        };
+        record.engram.pending_batches.push(EngramPendingBatch {
+            checkpoint_grant_id: checkpoint_grant_id.to_owned(),
+            producer_observation_id: engram_batch_producer_observation_id(
+                session_id,
+                &check.check.grant_id,
+                check.check.sequence,
+                &check.check.key,
+            ),
+            measurement: EngramBindMeasurement {
+                workspace_id: check.basis.workspace_id.clone(),
+                source_revision: check.basis.source_revision.clone(),
+                measured_at: check.end.completed_at.clone(),
+            },
+            targets: targets.clone(),
+            pended_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        });
     }
     let carried_count = credited.len();
     for check in &credited {

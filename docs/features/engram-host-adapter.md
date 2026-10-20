@@ -2263,6 +2263,51 @@ control card. Turning the premium flag off fences the transition, checkpoints
 open control state, clears the binding, and resumes ordinary Base-only
 dispatch.
 
+#### Batch full gates
+
+A carried full gate that passes can also be recorded for the other items its
+session holds and has named on the same worktree, each on its own run, through
+Engram's host-private `verification_bind`
+([batch full gates](batch-full-gates.md)). The gate's own item is credited as
+above; the binding never replaces that credit and never moves credit through
+the gate's grant (host architecture, Rule 10). In order:
+
+- At a carried launch whose root other items of the session name, the host
+  reads the session's held claims (off the lock, at most six seconds) and
+  records each member with its claim's fence then
+  (`engram_launch_batch_members`). A member missing from a list Engram cut
+  short, or every member when the read fails, is not recorded, with a line.
+- The credit leaves a pending batch until the checkpoint answers. The
+  answer's record id at the gate's own Test input (one id per input, in
+  input order) is the original; each member becomes an owed bind, persisted
+  before any call (`engram_owe_batch_binds`). This holds for a rebind's
+  recovery checkpoint too, against the report it sent. A refused checkpoint
+  drains its batches with a line per member (`forget_refused_engram_turn_report`).
+- The owed binds run on their own thread (`engram_owed_binds_tick`), at most
+  20 seconds of calls per tick. A member is decided once from its held claim
+  and newest sighting (`engram_bind_decision`); the decision is stored and
+  read back (`PersistFenceTarget::EngramOwedBindDecision`) before the first
+  send; every send rebuilds the same request under one key per gate and
+  member (`termal-verification-bind:{original}:{work_id}`). A credential
+  refusal of credentials still the session's own marks them stale and asks
+  for a rebind, in one critical section with the check. The owed binds make
+  that rebind themselves only while the session is idle (no turn open,
+  admitted or being dispatched), since the rebind's recovery checkpoint
+  would close a running turn's grant without its report; a busy session is
+  rebound by its own next admission. The idle and credentials check and the
+  claim of the bind happen in one critical section, so an admission that
+  arrives during the rebind finds the bind claimed and backs off.
+- A receipt counts only when it names the gate's original and a valid record
+  id for the member. `verification_bind_refused` and other definite refusals
+  settle the member; an expiry, a busy store, a storage error and every
+  uncertain answer are resent with backoff, capped at eight attempts or 30
+  minutes.
+- Pending batches and owed binds are persisted with the session; a restart
+  sends owed binds again and tells the members of pending or carried batches.
+  The acceptance binding read accepts Engram's bound records
+  (`AcceptanceBindingEvidenceBound`), ordering the producer on the original's
+  run.
+
 ### Authorization timeout and retained prompts
 
 Ordinary gated admission uses one twenty-second remaining-time budget across the

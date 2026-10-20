@@ -581,6 +581,13 @@ check recorded after an evaluation's evidence basis makes it stale), so
 request it after the checkpoint that records the gate. The full rules are in
 [the Engram host adapter's carried background gates](features/engram-host-adapter.md#carried-background-gates).
 
+One carried gate can also be recorded for every item of a commit that lands
+several items: hold each item's claim, name each item's source root to the
+gate's worktree, and give each item a granted turn on its own claim on the
+frozen tree before launching the gate. TermAl then binds the gate's passed
+record to each other item, on that item's own run, and says for each whether
+it was recorded. See [batch full gates](features/batch-full-gates.md).
+
 ### Which stages count as tests
 
 Another project can run its own copy of the test launcher, with its own

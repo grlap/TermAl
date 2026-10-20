@@ -71,6 +71,7 @@ mod delegation_worker_handoff;
 mod delegations;
 mod engram_authority_fence_phases;
 mod engram_authority_fixture;
+mod engram_batch_binds;
 mod engram_budget_clock_boundary;
 mod engram_child_temp;
 mod engram_compaction;
@@ -83,6 +84,7 @@ mod engram_recovery_validation;
 // under engram_host_adapter's turn_observations module, whose ClaimedRoot
 // fixture they share.
 mod engram_source_roots;
+mod engram_verification_bind;
 mod evaluator_tool_access;
 mod federation_onboarding;
 mod federation_entrypoints;

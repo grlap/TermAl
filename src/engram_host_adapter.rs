@@ -739,6 +739,15 @@ enum EngramControlRequest {
         report: EngramTurnReport,
         idempotency_key: String,
     },
+    /// Host-private: binds one native passed check to other items this
+    /// session holds on the same worktree (`engram_verification_bind.rs`).
+    VerificationBind {
+        routing_token: String,
+        idempotency_key: String,
+        original: String,
+        measurement: EngramBindMeasurement,
+        targets: Vec<EngramVerificationBindTarget>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -1642,6 +1651,10 @@ impl EngramControlTransport for StatefulEngramControlTransport {
             | EngramControlRequest::NamedRootSightingRead { .. } => Err(Self::remote_error(
                 "unsupported_test_operation",
                 "this grant-lifecycle fixture does not model named roots",
+            )),
+            EngramControlRequest::VerificationBind { .. } => Err(Self::remote_error(
+                "unsupported_test_operation",
+                "this grant-lifecycle fixture does not model verification binds",
             )),
             EngramControlRequest::SessionBind {
                 idempotency_key, ..
@@ -2653,6 +2666,14 @@ struct EngramSessionState {
     /// (`engram_carried_checks.rs`). In memory; a marker of each is persisted
     /// so a restart can tell the holder the run lost its credit.
     carried_checks: Vec<EngramCarriedCheck>,
+    /// Passed batch gates credited into a checkpoint that has not answered
+    /// yet (`engram_batch_binds.rs`). Persisted, so a restart tells each
+    /// member's holder.
+    pending_batches: Vec<EngramPendingBatch>,
+    /// The members a passed batch gate's own record is still to be bound
+    /// to, one each (`engram_batch_binds.rs`). Persisted, so a restart sends
+    /// them again.
+    owed_binds: Vec<EngramOwedBind>,
     /// The Codex tests of this session still running when their turn closed,
     /// carried or not (`engram_reported_ends.rs`). Kept apart from
     /// `carried_checks`: refusing or dropping a test's evidence does not end
@@ -2913,6 +2934,8 @@ impl Default for EngramSessionState {
             turn_begun_since_binding_read: false,
             active_turn_checks: Vec::new(),
             carried_checks: Vec::new(),
+            pending_batches: Vec::new(),
+            owed_binds: Vec::new(),
             running_codex_tests: Vec::new(),
             carried_consumed_runs: Vec::new(),
             carried_unmatched_launches: Vec::new(),
@@ -5002,6 +5025,7 @@ impl AppState {
                         &mut inner,
                         index,
                         session_id,
+                        &grant_id,
                         std::mem::take(&mut settled_carried),
                         held_claims.as_ref(),
                         &mut resolved_checks,
@@ -5120,6 +5144,10 @@ impl AppState {
                             if let Some((store, binding)) = target.settings.authority_store_key.as_ref().zip(target.work_binding.as_ref()) {
                                 self.settle_test_run_verification_receipt(&report, &receipt, store, binding);
                             }
+                            // A passed batch gate's members become owed binds
+                            // once this answer names its own record
+                            // (`engram_batch_binds.rs`).
+                            self.owe_engram_batch_binds(session_id, &report, &receipt);
                             Ok(())
                         }
                         EngramTurnCheckpointResponse::Checkpointed { .. } => {
@@ -7884,6 +7912,19 @@ impl AppState {
                             Ok(EngramTurnCheckpointResponse::Checkpointed { receipt })
                                 if receipt.grant_id == grant_id =>
                             {
+                                // A passed batch gate this closing report
+                                // credited is settled by the answer that
+                                // recovers it too (`engram_batch_binds.rs`),
+                                // against the report actually sent.
+                                let sent = match &checkpoint_request {
+                                    EngramControlRequest::TurnCheckpoint { report, .. } => report,
+                                    _ => &report,
+                                };
+                                self.owe_engram_batch_binds(
+                                    &target.connection.session_id,
+                                    sent,
+                                    &receipt,
+                                );
                                 Some(())
                             }
                             Ok(EngramTurnCheckpointResponse::Checkpointed { .. }) => {
@@ -8977,6 +9018,21 @@ impl AppState {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        Self::record_engram_transport_failure_locked(&mut inner, session_id, error);
+    }
+
+    /// `record_engram_transport_failure` under a lock the caller already
+    /// holds, so a caller can check what the failure answers in the same
+    /// critical section (`engram_batch_binds.rs`).
+    fn record_engram_transport_failure_locked(
+        inner: &mut StateInner,
+        session_id: &str,
+        error: &EngramTransportError,
+    ) {
+        if error.kind == EngramTransportErrorKind::LocalState
+            || error.invocation_application() == EngramInvocationApplication::CertifiedNotApplied {
+            return;
+        }
         if let Some(index) = inner.find_session_index(session_id) {
             let runtime_enabled = engram_project_for_session_locked(&inner, session_id)
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)

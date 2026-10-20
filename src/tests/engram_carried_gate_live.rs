@@ -5,7 +5,8 @@
 // which the real store accepts and reads back; and a gate the holder's own
 // write refused, which leaves no verification in the store. Does not own the
 // scripted checks of the same behaviour (src/tests/engram_carried_checks.rs)
-// or the root recovery checks of its parent module, whose fixture it uses.
+// or the root recovery checks of its parent module, whose fixture it uses, or
+// the batch gate's live check (its child module, engram_batch_gate_live.rs).
 // New module, a child of the live root recovery module so the launcher's
 // `live` mode runs it.
 use super::*;
@@ -409,3 +410,8 @@ fn live_carried_gate_refused_by_a_write_leaves_no_verification_in_the_real_store
         "{line}"
     );
 }
+
+// A batch full gate bound to a second held item against the real store, a
+// child module so the launcher's `live` mode runs it.
+#[path = "engram_batch_gate_live.rs"]
+mod batch_gate_live;

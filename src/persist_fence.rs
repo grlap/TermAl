@@ -81,6 +81,15 @@ enum PersistFenceTarget {
         prompt_id: String,
         write_ahead: String,
     },
+    /// A batch gate's owed bind with exactly this decision, read back from
+    /// the durable session row before the decision is first sent
+    /// (`engram_batch_binds.rs`).
+    EngramOwedBindDecision {
+        session_id: String,
+        original: String,
+        work_id: String,
+        decided: Value,
+    },
 }
 
 impl PersistFenceTarget {
@@ -98,7 +107,8 @@ impl PersistFenceTarget {
                 | Self::EngramSourceRemoval { .. } | Self::QueuedPromptDurability { .. }
                 | Self::FederationExecutorQueue { .. }
                 | Self::FederationExecutorHandoff { .. }
-                | Self::PromptDeliveryWriteAhead { .. } | Self::ProviderCapacityRecovery { .. } => false,
+                | Self::PromptDeliveryWriteAhead { .. } | Self::ProviderCapacityRecovery { .. }
+                | Self::EngramOwedBindDecision { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
                 .as_deref()
@@ -342,6 +352,29 @@ impl PersistFenceTarget {
                     delivery.disposition == PromptDeliveryDisposition::HandingOff
                         && delivery.write_ahead == *write_ahead
                 }))
+            }
+            // The committed row must hold this owed bind with exactly this
+            // decision; a settled or redecided entry never matches.
+            Self::EngramOwedBindDecision { session_id, original, work_id, decided } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                for owed in actual.engram_owed_binds.iter().filter(|owed| {
+                    owed.original == *original && owed.target.work_id == *work_id
+                }) {
+                    if serde_json::to_value(&owed.decided)? == *decided {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
             }
         }
     }

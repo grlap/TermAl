@@ -59,6 +59,22 @@ impl AppState {
         if let Err(err) = spawned {
             eprintln!("engram> failed to start the automatic retry tick: {err}");
         }
+        // A passed batch gate's owed binds (`engram_batch_binds.rs`) have a
+        // thread of their own: their Engram calls, bounded per tick, never
+        // hold up the admission retries above.
+        let state = self.clone();
+        let shutdown = self.subscribe_shutdown_signal();
+        let spawned = std::thread::Builder::new()
+            .name("termal-engram-owed-binds".to_owned())
+            .spawn(move || {
+                while !*shutdown.borrow() {
+                    state.engram_owed_binds_tick(chrono::Utc::now(), ENGRAM_OWED_BIND_TICK_BUDGET);
+                    std::thread::sleep(ENGRAM_RETRY_TICK);
+                }
+            });
+        if let Err(err) = spawned {
+            eprintln!("engram> failed to start the owed batch binds tick: {err}");
+        }
     }
 }
 

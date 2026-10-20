@@ -353,7 +353,11 @@ The rest of the brief follows these.
     under that work's own claim; it is never carried by the bound work's
     grant in its place (section 5.4). A generic host or execution
     observation may stay unattributed, or be linked to several separately
-    attributed executions; it invents no claim and no credit.
+    attributed executions; it invents no claim and no credit. A passed full
+    gate bound to another held work through Engram's `verification_bind`
+    keeps this rule: Engram writes the bound record on that work's own run,
+    after checking that work's claim, root and sighting itself, and the
+    gate's grant carries nothing for it ([batch full gates](batch-full-gates.md)).
 
 ### 3.1 Real modules or fragments
 
@@ -963,6 +967,15 @@ component, so that whoever completes it keeps the following.
   resolution per session to this is a behaviour change with its own named
   proof (step 7 in section 10); the first extraction keeps today's
   resolution unchanged.
+- **Batch full gates.** A carried gate's members are the other held works
+  the session named on the gate's worktree; each is recorded at the launch
+  with its claim's fence then. After the gate's own credit, its passed record
+  is bound to each member through `verification_bind`, on the member's own
+  run, only while the member's claim is held at that fence, its root names the
+  gate's worktree at the same generation, and its newest sighting is at the
+  gate's revision. This is not substitution: no grant is opened and no
+  evidence moves through the bound work's grant; Engram checks each member
+  itself and writes its record there ([batch full gates](batch-full-gates.md)).
 - **Scope and keys.** A selection is shared by (authority store, work,
   claim). It is not an evictable cache entry. The generation allocator and
   its high-water mark are host-wide and persisted, and generations seen from

@@ -548,6 +548,17 @@ struct PersistedSessionRecord {
     /// checks themselves; loading tells each holder its run lost its credit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_carried_launches: Vec<EngramCarriedLaunchMarker>,
+    /// The members a passed batch gate's own record was still to be bound
+    /// to when the record was written (`engram_batch_binds.rs`). Loading
+    /// keeps them owed: Engram replays a committed bind by its key, so
+    /// sending one again never binds twice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_owed_binds: Vec<EngramOwedBind>,
+    /// Passed batch gates whose checkpoint had not answered when the record
+    /// was written (`engram_batch_binds.rs`). Loading cannot learn the
+    /// gate's record any more, so it tells each member's holder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_pending_batches: Vec<EngramPendingBatch>,
     /// A queue head whose delivery was withheld before provider handoff and
     /// whose authority is settled (`engram_abort_retry.rs`). Read back, it
     /// was durable, so loading rebuilds its retry.
@@ -685,6 +696,8 @@ impl PersistedSessionRecord {
                 .iter()
                 .map(EngramCarriedCheck::marker)
                 .collect(),
+            engram_owed_binds: record.engram.owed_binds.clone(),
+            engram_pending_batches: record.engram.pending_batches.clone(),
             engram_abort_retry: record.engram.abort_retry.clone(),
             engram_bind_retry: record.engram.bind_retry.clone(),
             engram_source_observation_gate: record.engram.source_observation_gate.clone(),
@@ -807,6 +820,15 @@ impl PersistedSessionRecord {
                 dispatch_generation: self.engram_dispatch_generation,
                 rebind_required: self.engram_routing_token.is_some(),
                 abort_retry: self.engram_abort_retry.clone(),
+                // Sent again after the restart, however long it took.
+                owed_binds: {
+                    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                    self.engram_owed_binds
+                        .iter()
+                        .cloned()
+                        .map(|owed| engram_owed_bind_after_load(owed, &now))
+                        .collect()
+                },
                 source_observation_gate: self.engram_source_observation_gate.clone(),
                 source_observation_delete_requested: self.engram_source_observation_delete_requested,
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
@@ -855,6 +877,30 @@ impl PersistedSessionRecord {
         // credit: the host could not watch its worktree meanwhile.
         for marker in &self.engram_carried_launches {
             let line = EngramHost::carried_lost_to_restart_line(marker);
+            eprintln!("engram> session={} {line}", record.session.id);
+            record.engram.set_pending_source_root_line(line);
+        }
+        // A batch gate's members whose bind was not owed yet: the gate's
+        // record can no longer be learned, so each holder is told; owed
+        // binds load as they were and are sent again (`engram_batch_binds.rs`).
+        let unbound = self
+            .engram_carried_launches
+            .iter()
+            .flat_map(|marker| {
+                marker.bind_members.iter().map(|member| {
+                    engram_batch_member_lost_line(member, "before the batch gate settled")
+                })
+            })
+            .chain(self.engram_pending_batches.iter().flat_map(|batch| {
+                batch.targets.iter().map(|target| {
+                    engram_batch_member_lost_line(
+                        &target.short_ref,
+                        "before Engram's answer named the batch gate's record",
+                    )
+                })
+            }))
+            .collect::<Vec<_>>();
+        for line in unbound {
             eprintln!("engram> session={} {line}", record.session.id);
             record.engram.set_pending_source_root_line(line);
         }

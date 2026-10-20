@@ -941,6 +941,8 @@ include!("engram_work_binding_refresh.rs");
 include!("engram_held_claims.rs");
 include!("engram_turn_checks.rs");
 include!("engram_carried_checks.rs");
+include!("engram_verification_bind.rs");
+include!("engram_batch_binds.rs");
 include!("engram_reported_ends.rs");
 include!("engram_claude_interference.rs");
 include!("engram_check_recognition.rs");

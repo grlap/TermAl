@@ -1038,7 +1038,45 @@ struct AcceptanceBindingEvidenceVerification {
     check_fingerprint: String,
     result: String,
     source_basis: EngramExecutionSourceBasis,
+    /// For a bound record, the original's producer: its position is on the
+    /// original's run, not this one.
     producer: AcceptanceBindingEvidenceProducer,
+    /// Present only on a record Engram bound from a check run on another item
+    /// (`verification_bind`, `engram_verification_bind.rs`); absent on every
+    /// native record.
+    #[serde(default)]
+    bound: Option<AcceptanceBindingEvidenceBound>,
+}
+
+/// Where a bound record's check ran and how it was bound to this item, as
+/// Engram's `acceptance_binding_read` serves it. Every field is declared so an
+/// unknown one is refused; this reader uses the ones that place the original.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AcceptanceBindingEvidenceBound {
+    /// The original native verification.
+    verification: String,
+    /// The original's item.
+    work_ref: String,
+    /// The original's run, on whose feed `original_position` and the
+    /// producer's position lie.
+    #[allow(dead_code)]
+    run: Value,
+    original_position: i64,
+    original_basis: EngramExecutionSourceBasis,
+    #[allow(dead_code)]
+    original_completed_at: String,
+    #[allow(dead_code)]
+    binder: Value,
+    #[allow(dead_code)]
+    bound_at: String,
+    /// The target run's sighting the binding stood on.
+    sighting: String,
+    #[allow(dead_code)]
+    measurement: Value,
+    #[allow(dead_code)]
+    #[serde(default)]
+    criteria: Vec<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1311,9 +1349,34 @@ fn apply_acceptance_binding_evidence(
             continue;
         };
         let verification = satisfaction.verification;
+        // A native record's producer precedes it on this run. A bound
+        // record's producer and original lie on the original's run, so they
+        // are ordered there; the original ran at this record's revision.
+        let producer_valid = match &verification.bound {
+            None => {
+                position_valid(verification.producer.position)
+                    && verification.producer.position < verification.position
+            }
+            Some(bound) => {
+                verification.producer.position > 0
+                    && bound.original_position > 0
+                    && verification.producer.position < bound.original_position
+                    && is_citable_acceptance_locator(&bound.verification)
+                    && is_citable_acceptance_locator(&bound.sighting)
+                    // It is named in the brief: a short item reference only.
+                    && !bound.work_ref.is_empty()
+                    && bound.work_ref.len() <= 64
+                    && bound
+                        .work_ref
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                    && bound.original_basis.source_revision
+                        == verification.source_basis.source_revision
+            }
+        };
         if !position_valid(satisfaction.evaluated_cut)
             || !position_valid(verification.position)
-            || !position_valid(verification.producer.position)
+            || !producer_valid
             || !is_citable_acceptance_locator(&verification.record)
             || !is_citable_acceptance_locator(&verification.check_fingerprint)
             || !is_citable_acceptance_locator(&verification.producer.record)
@@ -1324,7 +1387,6 @@ fn apply_acceptance_binding_evidence(
                 .as_ref()
                 .is_some_and(|pin| pin != &verification.check_fingerprint)
             || verification.producer.outcome != "succeeded"
-            || verification.producer.position >= verification.position
             || verification.position > satisfaction.evaluated_cut
             || satisfaction.evaluated_cut >= resolution.position
             || verification.source_basis.workspace_id.is_empty()
@@ -1344,9 +1406,15 @@ fn apply_acceptance_binding_evidence(
             locators: vec![verification.record.clone()],
             association: "original obligation closure".to_owned(),
         });
+        let provenance = verification.bound.as_ref().map_or_else(String::new, |bound| {
+            format!(
+                " It is bound to this item from {}'s check (original record {}), which ran there.",
+                bound.work_ref, bound.verification
+            )
+        });
         additions.push(AcceptanceEvaluationEvidence {
             locator: verification.record, kind: "verification".to_owned(), by: None, created_at: None,
-            summary: Some(format!("Host projection of the original recorded closure (not the stored record body) at run cut {}: command fingerprint {}; source workspace {} at {}; producer {} succeeded. This records the original closure, not current freshness.",
+            summary: Some(format!("Host projection of the original recorded closure (not the stored record body) at run cut {}: command fingerprint {}; source workspace {} at {}; producer {} succeeded.{provenance} This records the original closure, not current freshness.",
                 satisfaction.evaluated_cut, verification.check_fingerprint, verification.source_basis.workspace_id,
                 verification.source_basis.source_revision, verification.producer.record)),
             body_bytes: None, non_holder: false, cut_by_tracker: false,

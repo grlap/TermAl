@@ -37,6 +37,11 @@ mod cargo_target_sibling;
 #[path = "engram_reported_ends.rs"]
 mod reported_ends;
 
+// A passed batch gate bound to its other members, end to end, a child
+// module so this file does not grow further.
+#[path = "engram_batch_gate_flow.rs"]
+mod batch_gate_flow;
+
 #[test]
 fn a_full_gate_launch_is_carried_dropped_or_ordinary_by_its_line_and_result() {
     use EngramLaunchDisposition::{Carry, Drop, Ordinary};
@@ -2172,6 +2177,7 @@ fn check_credit_lines_read_cleanly_and_merge_without_evicting_bind_lines() {
             launched_at: "2026-09-29T00:00:00.000Z".to_owned(),
             fingerprint: "a".repeat(64),
             unknown_line: None,
+            bind_members: Vec::new(),
         }),
         ENGRAM_CARRIED_RUN_NEITHER.to_owned(),
     ];

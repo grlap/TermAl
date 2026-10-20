@@ -26,6 +26,9 @@ mod bindings;
 #[path = "acceptance_evaluation_workspace.rs"]
 mod workspace;
 
+#[path = "acceptance_evaluation_bound.rs"]
+mod bound;
+
 #[path = "acceptance_evaluation_citation_retry.rs"]
 mod citation_retry;
 

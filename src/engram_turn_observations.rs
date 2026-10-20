@@ -820,6 +820,14 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
+        // A batch gate the refused checkpoint carried can no longer be bound,
+        // whatever became of the report: its members are told now
+        // (`engram_batch_binds.rs`).
+        if Self::drain_engram_refused_batches(&mut inner, index, session_id, grant_id, code)
+            && let Err(error) = self.commit_locked(&mut inner)
+        {
+            eprintln!("engram> session={session_id} failed persisting drained batch gates: {error:#}");
+        }
         let engram = &mut inner.sessions[index].engram;
         let holds_report =
             engram

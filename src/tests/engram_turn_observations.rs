@@ -2326,3 +2326,8 @@ fn an_edit_in_the_main_checkout_is_no_change_of_a_turn_measured_in_a_named_root(
 
 #[path = "engram_source_root_naming.rs"]
 mod source_root_naming;
+
+// A batch gate settled by a rebind's recovery checkpoint, a child module so
+// this file does not grow further.
+#[path = "engram_batch_recovery.rs"]
+mod batch_recovery;
