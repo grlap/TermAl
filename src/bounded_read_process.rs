@@ -226,6 +226,8 @@ fn run_bounded_read_process_input(
         }
     };
     let mut reaped = false;
+    #[cfg(unix)]
+    let mut group_cleanup_started = false;
     let result = (|| {
         let stdout = process
             .take_stdout()
@@ -259,11 +261,17 @@ fn run_bounded_read_process_input(
         }
         // Unix observes exit with WNOWAIT: no waiter has reaped the leader,
         // so its process-group identity cannot be reused before termination.
-        if let Some(tree) = &tree {
-            terminate_read_process_tree(tree, &process)?;
-        }
-        let status = process.wait()?;
-        reaped = true;
+        let status = if let Some(tree) = &tree {
+            #[cfg(unix)]
+            {
+                group_cleanup_started = true;
+            }
+            finish_read_process_tree(tree, &process, &mut reaped)?
+        } else {
+            let status = process.wait()?;
+            reaped = true;
+            status
+        };
         // A completed process may be observed just past its deadline. Give
         // both reader threads one shared, bounded EOF/drain grace, not a zero
         // timeout racing their sends and not an unbounded receive.
@@ -283,37 +291,67 @@ fn run_bounded_read_process_input(
             if reaped {
                 tree.cleanup_after_shell_exit(&process, "bounded read")
             } else {
-                terminate_read_process_tree(tree, &process)
+                #[cfg(unix)]
+                if group_cleanup_started {
+                    // The unresolved contract retained this exact owner. Do
+                    // not reset its budget or start a second wait/signal.
+                    Ok(())
+                } else {
+                    finish_read_process_tree(tree, &process, &mut reaped).map(|_| ())
+                }
+                #[cfg(not(unix))]
+                finish_read_process_tree(tree, &process, &mut reaped).map(|_| ())
             }
         } else {
             process.kill().map_err(anyhow::Error::from)
         };
         if let Err(err) = cleanup {
             eprintln!("bounded read> cleanup: {err:#}");
+            #[cfg(unix)]
+            if tree.is_some() {
+                return result.map_err(|error| error.context(format!("{err:#}")));
+            }
         }
+        #[cfg(unix)]
+        if tree.is_none() {
+            let _ = process.wait();
+        }
+        // Unix-owned trees were either reaped by the contract or retained
+        // unresolved. A blocking final wait would defeat its finite budget.
+        #[cfg(not(unix))]
         let _ = process.wait();
     }
     result
 }
 
 #[cfg(any(not(windows), test))]
-fn terminate_read_process_tree(
+fn finish_read_process_tree(
     tree: &TerminalProcessTree,
     process: &Arc<SharedChild>,
-) -> Result<()> {
+    reaped: &mut bool,
+) -> Result<std::process::ExitStatus> {
     #[cfg(unix)]
     {
         let _ = tree;
         // Do not use helpers that spawn a wait thread: this worker alone must
         // keep the leader unreaped through group termination.
-        terminate_terminal_process_group(
-            terminal_process_group_id(process.id(), "bounded read")?,
-            "bounded read",
-        )
+        let pgid = terminal_process_group_id(process.id(), "bounded read")?;
+        if pgid <= 0 {
+            bail!("bounded read process group must be positive");
+        }
+        finish_bounded_read_group(&mut UnixBoundedReadGroup {
+            process,
+            reaped,
+            pgid,
+            probe_deadline: std::time::Instant::now() + Duration::from_millis(250),
+        })
     }
     #[cfg(not(unix))]
     {
-        tree.cleanup_after_shell_exit(process, "bounded read")
+        tree.cleanup_after_shell_exit(process, "bounded read")?;
+        let status = process.wait()?;
+        *reaped = true;
+        Ok(status)
     }
 }
 

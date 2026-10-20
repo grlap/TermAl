@@ -975,6 +975,8 @@ include!("engram_named_root_release.rs");
 include!("engram_named_root_capacity.rs");
 #[cfg(test)]
 include!("engram_named_root_test_transport.rs");
+include!("bounded_read_cleanup.rs");
+include!("bounded_read_retained.rs");
 include!("bounded_read_process.rs");
 include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");
