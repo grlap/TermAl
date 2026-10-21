@@ -1010,6 +1010,21 @@ fn merge_persist_delta_passes(mut earlier: PersistDelta, later: PersistDelta) ->
     earlier
 }
 
+/// Trims committed session tails under the shared state lock. The writer owns
+/// watermark advancement and fence acknowledgement separately from this work.
+#[track_caller]
+fn trim_persisted_session_tails_from_shared_state(
+    inner: &StateMutex<StateInner>,
+    watermark: u64,
+    persisted_session_ids: &[String],
+) {
+    if persisted_session_ids.is_empty() {
+        return;
+    }
+    let mut inner = inner.lock().expect("state mutex poisoned");
+    inner.trim_persisted_session_tails(watermark, persisted_session_ids);
+}
+
 /// Builds a persistence delta without holding the global mutex across the
 /// whole dirty batch.
 ///

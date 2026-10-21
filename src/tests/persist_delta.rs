@@ -40,6 +40,134 @@ fn make_persist_delta_test_delegation(
     }
 }
 
+fn seed_postcommit_trim_session(
+    inner: &mut StateInner,
+    status: SessionStatus,
+    mutation_stamp: u64,
+) -> String {
+    let id = inner
+        .create_session(Agent::Codex, None, "/tmp".to_owned(), None, None)
+        .session
+        .id;
+    let index = inner.find_session_index(&id).unwrap();
+    let record = &mut inner.sessions[index];
+    record.session.status = status;
+    record.mutation_stamp = mutation_stamp;
+    record.session.messages = (0..SESSION_IN_MEMORY_MESSAGE_LIMIT + 2)
+        .map(|index| Message::Text {
+            attachments: Vec::new(),
+            id: format!("{id}-message-{index}"),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: format!("message {index}"),
+            expanded_text: None,
+            source: None,
+        })
+        .collect();
+    record.session.message_count = record.session.messages.len() as u32;
+    record.session.messages_loaded = true;
+    record.message_start_index = 0;
+    record.message_positions = build_message_positions(&record.session.messages);
+    id
+}
+
+#[test]
+fn postcommit_trim_empty_ids_returns_before_held_state_is_released() {
+    let shared = Arc::new(StateMutex::new(StateInner::new()));
+    let held = shared.lock().unwrap();
+    let worker_state = shared.clone();
+    let (done_tx, done_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        trim_persisted_session_tails_from_shared_state(&worker_state, 10, &[]);
+        done_tx.send(()).unwrap();
+    });
+
+    // The guard only diagnoses a deadlock: the helper must finish while this
+    // thread still holds the mutex, regardless of how quickly either runs.
+    let completed = phase_sync::receive_before_cleanup(&done_rx, "empty postcommit trim");
+    drop(held);
+    worker
+        .join()
+        .expect("postcommit trim worker should finish after release");
+    assert!(
+        completed.is_ok(),
+        "empty postcommit trim must return before the held state lock is released"
+    );
+}
+
+#[test]
+fn postcommit_trim_nonempty_ids_trim_only_selected_eligible_tails() {
+    for status in [SessionStatus::Idle, SessionStatus::Error] {
+        let mut inner = StateInner::new();
+        let selected = seed_postcommit_trim_session(&mut inner, status, 10);
+        let unselected = seed_postcommit_trim_session(&mut inner, status, 10);
+        let shared = StateMutex::new(inner);
+
+        trim_persisted_session_tails_from_shared_state(&shared, 10, &[selected.clone()]);
+
+        let inner = shared.lock().unwrap();
+        let trimmed = &inner.sessions[inner.find_session_index(&selected).unwrap()];
+        assert_eq!(
+            trimmed.session.messages.len(),
+            SESSION_IN_MEMORY_MESSAGE_LIMIT
+        );
+        assert_eq!(trimmed.message_start_index, 2);
+        assert_eq!(
+            trimmed.session.message_count as usize,
+            SESSION_IN_MEMORY_MESSAGE_LIMIT + 2
+        );
+        assert!(!trimmed.session.messages_loaded);
+        assert_eq!(
+            trimmed.session.messages[0].id(),
+            format!("{selected}-message-2")
+        );
+        assert_eq!(
+            trimmed.message_positions,
+            build_message_positions(&trimmed.session.messages)
+        );
+        assert_eq!(trimmed.mutation_stamp, 10);
+        let untouched = &inner.sessions[inner.find_session_index(&unselected).unwrap()];
+        assert_eq!(
+            untouched.session.messages.len(),
+            SESSION_IN_MEMORY_MESSAGE_LIMIT + 2
+        );
+        assert_eq!(untouched.message_start_index, 0);
+        assert!(untouched.session.messages_loaded);
+    }
+}
+
+#[test]
+fn postcommit_trim_preserves_active_and_newer_mutated_tails() {
+    let mut inner = StateInner::new();
+    let ids = [
+        (SessionStatus::Active, 10),
+        (SessionStatus::Approval, 10),
+        (SessionStatus::Stopping, 10),
+        (SessionStatus::Idle, 11),
+    ]
+    .into_iter()
+    .map(|(status, stamp)| seed_postcommit_trim_session(&mut inner, status, stamp))
+    .collect::<Vec<_>>();
+    let shared = StateMutex::new(inner);
+
+    trim_persisted_session_tails_from_shared_state(&shared, 10, &ids);
+
+    let inner = shared.lock().unwrap();
+    for id in ids {
+        let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
+        assert_eq!(
+            record.session.messages.len(),
+            SESSION_IN_MEMORY_MESSAGE_LIMIT + 2
+        );
+        assert_eq!(record.message_start_index, 0);
+        assert!(record.session.messages_loaded);
+        assert_eq!(
+            record.message_positions,
+            build_message_positions(&record.session.messages)
+        );
+    }
+}
+
 #[test]
 fn persist_delta_plan_defers_only_the_session_that_changes_before_materialization() {
     let mut inner = StateInner::new();

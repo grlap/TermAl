@@ -664,13 +664,11 @@ impl AppState {
                                 return Err(err);
                             }
                         };
-                        {
-                            let mut inner = inner_for_persist.lock().expect("state mutex poisoned");
-                            inner.trim_persisted_session_tails(
-                                next_watermark,
-                                &persisted_session_ids,
-                            );
-                        }
+                        trim_persisted_session_tails_from_shared_state(
+                            &inner_for_persist,
+                            next_watermark,
+                            &persisted_session_ids,
+                        );
                         watermark = next_watermark;
                         prompt_history_carry = next_prompt_history_carry;
                         if !pending_scope_deletions.is_empty()
