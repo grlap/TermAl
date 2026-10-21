@@ -1085,6 +1085,7 @@ struct AppState {
     /// dedicated thread serializes it to JSON and writes the file so the
     /// state mutex is never held during I/O.
     persist_tx: mpsc::Sender<PersistRequest>,
+    persist_observer: Arc<PersistObserver>,
     /// Handle to the background persist thread. Wrapped in
     /// `Arc<Mutex<Option<_>>>` so that:
     ///   - `AppState` stays `Clone` (the handle is shared, not duplicated),

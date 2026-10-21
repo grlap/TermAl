@@ -136,6 +136,7 @@ mod peer_messages;
 mod persist;
 mod persist_delta;
 mod persist_fence;
+mod persist_observer;
 mod project_creation_races;
 mod project_digest;
 mod projects;
@@ -926,6 +927,7 @@ fn test_app_state() -> AppState {
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,
+        persist_observer: Arc::new(PersistObserver::default()),
         // Tests skip the real persist worker; the test constructor owns no
         // background thread to join, so the handle stays `None` and
         // `shutdown_persist_blocking` is a no-op.

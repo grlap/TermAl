@@ -1925,6 +1925,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx,
+        persist_observer: Arc::new(PersistObserver::default()),
         // Live persist channel for the test; the worker thread is not
         // spawned by this constructor, so there's no JoinHandle to track.
         persist_thread_handle: Arc::new(Mutex::new(None)),

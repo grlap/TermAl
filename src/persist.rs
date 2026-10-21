@@ -1416,6 +1416,7 @@ fn persist_delta_via_cache_inner(
 ) -> Result<Vec<String>> {
     // Every phase records its elapsed time before its result is checked, so a
     // failed tick still accounts for the time it spent.
+    persist_observe_phase("serialize");
     let serialize_started = std::time::Instant::now();
     let serialized = (|| -> Result<_> {
         let metadata_json = serde_json::to_string(&delta.metadata)
@@ -1437,12 +1438,14 @@ fn persist_delta_via_cache_inner(
     })();
     timings.serialize = serialize_started.elapsed();
     let (metadata_json, serialized_sessions, serialized_delegations) = serialized?;
+    persist_observe_payload(&metadata_json, &serialized_sessions, &serialized_delegations);
     let persisted_session_ids = serialized_sessions
         .iter()
         .map(|session| session.session_id.clone())
         .collect::<Vec<_>>();
     // Opening covers a reopen after an invalidated cache (schema setup and
     // hardening, under the same writer lock) and the redirection check.
+    persist_observe_phase("open");
     let open_started = std::time::Instant::now();
     let opened = cache.connection_for(path).and_then(|connection| {
         // Keep state-path redirection failures fatal on cached writes too.
@@ -1455,9 +1458,11 @@ fn persist_delta_via_cache_inner(
     timings.open = open_started.elapsed();
     let connection = opened?;
     let write_lock = sqlite_state_write_lock(path);
+    persist_observe_phase("writer_ticket");
     let ticket_started = std::time::Instant::now();
     let write_guard = lock_sqlite_state_writer(&write_lock);
     timings.ticket_wait = ticket_started.elapsed();
+    persist_observe_phase("statements");
     let statements_started = std::time::Instant::now();
     let written = connection
         .transaction()
@@ -1480,6 +1485,7 @@ fn persist_delta_via_cache_inner(
         });
     timings.statements = statements_started.elapsed();
     let tx = written?;
+    persist_observe_phase("commit");
     let commit_started = std::time::Instant::now();
     let committed = tx
         .commit()
@@ -1491,6 +1497,7 @@ fn persist_delta_via_cache_inner(
     // fatal. The chmod helper itself honors
     // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
     // accepts insecure state-file modes.
+    persist_observe_phase("post_commit");
     let post_commit_started = std::time::Instant::now();
     let verified = verify_persist_commit_integrity(path);
     timings.post_commit = post_commit_started.elapsed();

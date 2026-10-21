@@ -298,6 +298,7 @@ fn app_router_with_acceptance_policy_limiter(
 
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/diagnostics/persistence", get(get_persistence_diagnostics))
         .route(
             "/api/federation/peers/{id}/enroll",
             post(enroll_federation_satellite),
@@ -1055,6 +1056,7 @@ include!("persisted_state.rs");
 include!("persist.rs");
 include!("persist_fence.rs");
 include!("persist_tick_timings.rs");
+include!("persist_observer.rs");
 include!("coordination_persist.rs");
 include!("mailboxes.rs");
 include!("mailbox_acknowledged_wake.rs");

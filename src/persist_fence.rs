@@ -502,6 +502,7 @@ type PersistFenceResolution = Box<dyn FnOnce(PersistFenceResult) + Send>;
 
 struct PersistFence {
     target: PersistFenceTarget,
+    observed_created_at: std::time::Instant,
     completion: Arc<PersistFenceCompletion>,
     on_acknowledged: Mutex<Option<PersistFenceAcknowledgement>>,
     on_resolved: Mutex<Option<PersistFenceResolution>>,
@@ -543,6 +544,7 @@ impl PersistFence {
         (
             Self {
                 target,
+                observed_created_at: std::time::Instant::now(),
                 completion: completion.clone(),
                 on_acknowledged: Mutex::new(None),
                 on_resolved: Mutex::new(None),
@@ -727,6 +729,8 @@ impl PersistFenceWaiter {
 #[derive(Default)]
 struct PersistFenceBatch {
     pending: Vec<PersistFence>,
+    observed_accepted: usize,
+    observed_age_max_us: u64,
 }
 
 impl PersistFenceBatch {
@@ -735,6 +739,10 @@ impl PersistFenceBatch {
             PersistRequest::Delta => PersistWorkerWaitOutcome::Process,
             PersistRequest::Shutdown => PersistWorkerWaitOutcome::Shutdown,
             PersistRequest::Fence(fence) => {
+                self.observed_accepted = self.observed_accepted.saturating_add(1);
+                self.observed_age_max_us = self.observed_age_max_us.max(persist_observed_us(
+                    std::time::Instant::now().saturating_duration_since(fence.observed_created_at),
+                ));
                 fence.completion.progress().phase = PersistFencePhase::Accepted;
                 self.pending.push(*fence);
                 PersistWorkerWaitOutcome::Process
@@ -764,11 +772,22 @@ impl PersistFenceBatch {
         }
     }
 
-    fn drain(&mut self, rx: &mpsc::Receiver<PersistRequest>, mut shutdown: bool) -> bool {
+    #[cfg(test)]
+    fn drain(&mut self, rx: &mpsc::Receiver<PersistRequest>, shutdown: bool) -> bool {
+        self.drain_observed(rx, shutdown).0
+    }
+
+    fn drain_observed(&mut self, rx: &mpsc::Receiver<PersistRequest>, mut shutdown: bool) -> (bool, usize) {
+        let mut drained = 0;
         while let Ok(request) = rx.try_recv() {
+            drained += 1;
             shutdown |= matches!(self.accept(request), PersistWorkerWaitOutcome::Shutdown);
         }
-        shutdown
+        (shutdown, drained)
+    }
+
+    fn take_observer_acceptance(&mut self) -> (usize, u64) {
+        (std::mem::take(&mut self.observed_accepted), std::mem::take(&mut self.observed_age_max_us))
     }
 
     fn fail(&mut self, error: PersistFenceError) {
@@ -877,6 +896,7 @@ fn persist_delta_with_fences_timed(
     }
     // persist_delta_via_cache returns only after COMMIT and the existing
     // post-commit integrity checks. No StateInner guard is held here.
+    persist_observe_phase("acknowledge");
     let acknowledge_started = std::time::Instant::now();
     fences.finish_write(delta, &result, cache.connection.as_ref());
     timings.acknowledge = acknowledge_started.elapsed();

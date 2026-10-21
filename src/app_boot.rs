@@ -461,6 +461,8 @@ impl AppState {
         let agent_readiness_cache =
             Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir)));
         let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+        let persist_observer = Arc::new(PersistObserver::default());
+        let observer_for_persist = Arc::clone(&persist_observer);
 
         let persist_path_for_persist = Arc::new(persistence_path.clone());
         let persist_path_for_state = Arc::clone(&persist_path_for_persist);
@@ -556,6 +558,8 @@ impl AppState {
                     }
                     let mut should_exit_after_tick =
                         matches!(outcome, PersistWorkerWaitOutcome::Shutdown);
+                    let observation = observer_for_persist.begin_at(std::time::Instant::now());
+                    let drain_started = std::time::Instant::now();
                     // Drain any queued signals — the delta collection
                     // below captures everything that has changed since
                     // the last tick regardless of how many Delta
@@ -565,11 +569,22 @@ impl AppState {
                     // flag so the very last delta reaches SQLite before
                     // we exit. See bugs.md "Server restart without
                     // browser refresh can lose the last streamed message".
-                    should_exit_after_tick = fences.drain(&persist_rx, should_exit_after_tick);
+                    let (shutdown, drained) = fences.drain_observed(&persist_rx, should_exit_after_tick);
+                    should_exit_after_tick = shutdown;
+                    let (accepted, age_us) = fences.take_observer_acceptance();
+                    observer_for_persist.update(|tick| {
+                        tick.phases.drain_us = persist_observed_us(drain_started.elapsed());
+                        tick.counts.drained_requests = drained;
+                        tick.counts.accepted_fences = accepted;
+                        tick.counts.pending_fences_before = fences.pending.len();
+                        tick.counts.new_fence_age_max_us = age_us;
+                    });
 
                     let mut timings = PersistTickTimings::default();
+                    let mut bookkeeping_started = None;
                     let result: Result<()> = (|| {
                         fences.mark_in_tick();
+                        persist_observe_phase("collect");
                         let collect_started = std::time::Instant::now();
                         let delta =
                             collect_persist_delta_from_shared_state_with_prompt_history_carry(
@@ -578,6 +593,7 @@ impl AppState {
                                 &prompt_history_carry,
                             );
                         timings.collect = collect_started.elapsed();
+                        persist_observe_delta(&delta);
                         let next_watermark = delta.watermark;
                         let next_prompt_history_carry = delta
                             .deferred_prompt_history_session_ids
@@ -603,13 +619,16 @@ impl AppState {
                         // `changed_sessions` + `removed_session_ids` is
                         // fine; the transaction just upserts one
                         // app_state row.
-                        let persisted_session_ids = match persist_delta_with_fences_timed(
+                        let persisted = persist_delta_with_fences_timed(
                             &mut cache,
                             &persist_path_for_persist,
                             &delta,
                             &mut fences,
                             &mut timings,
-                        ) {
+                        );
+                        persist_observe_phase("bookkeeping");
+                        bookkeeping_started = Some(std::time::Instant::now());
+                        let persisted_session_ids = match persisted {
                             Ok(persisted_session_ids) => persisted_session_ids,
                             Err(err) => {
                                 // On write failure, restore only the drained
@@ -671,8 +690,13 @@ impl AppState {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
                     timings.log_if_slow();
-                    if retry_state.finish_fenced_tick(&result, should_exit_after_tick, &mut fences)
-                    {
+                    let should_exit = retry_state.finish_fenced_tick(&result, should_exit_after_tick, &mut fences);
+                    observer_for_persist.update(|tick| {
+                        tick.counts.pending_fences_after = fences.pending.len();
+                        tick.phases.bookkeeping_us = bookkeeping_started.map_or(0, |started| persist_observed_us(started.elapsed()));
+                    });
+                    observation.finish(result.is_ok(), &timings);
+                    if should_exit {
                         break;
                     }
                 }
@@ -766,6 +790,7 @@ impl AppState {
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),
             persist_tx,
+            persist_observer,
             persist_thread_handle: Arc::new(Mutex::new(Some(persist_thread_handle))),
             persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),

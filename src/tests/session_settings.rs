@@ -764,6 +764,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,
+        persist_observer: Arc::new(PersistObserver::default()),
         persist_thread_handle: Arc::new(Mutex::new(None)),
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),

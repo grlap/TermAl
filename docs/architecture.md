@@ -236,6 +236,7 @@ AppState {
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     remote_registry: Arc<RemoteRegistry>,
     persist_tx: mpsc::Sender<PersistRequest>,  // wake the background persist thread
+    persist_observer: Arc<PersistObserver>,   // bounded process-local writer diagnostics
     inner: Arc<Mutex<StateInner>>,
 }
 
@@ -355,6 +356,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/health` | Health check + capability probe |
+| GET | `/api/diagnostics/persistence` | Read bounded, passive [persistence writer diagnostics](features/persistence-diagnostics.md) |
 | GET | `/api/file?path=...` | Read file content |
 | PUT | `/api/file` | Write file content |
 | GET | `/api/fs?path=...` | List directory entries |

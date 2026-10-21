@@ -1100,10 +1100,7 @@ fn collect_persist_delta_pass_from_shared_state(
     prompt_history_carry: &BTreeSet<String>,
     after_plan: impl FnOnce(),
 ) -> PersistDelta {
-    let mut plan = {
-        let mut state = inner.lock().expect("state mutex poisoned");
-        state.collect_persist_delta_plan(watermark)
-    };
+    let mut plan = persist_collect_locked(inner, |state| state.collect_persist_delta_plan(watermark));
     for candidate in &mut plan.changed_sessions {
         candidate.persist_prompt_history |= prompt_history_carry.contains(&candidate.session_id);
     }
@@ -1111,8 +1108,7 @@ fn collect_persist_delta_pass_from_shared_state(
 
     materialize_persist_delta_plan(
         plan,
-        |candidate| {
-            let state = inner.lock().expect("state mutex poisoned");
+        |candidate| persist_collect_locked(inner, |state| {
             let Some(record) = state
                 .sessions
                 .iter()
@@ -1126,9 +1122,8 @@ fn collect_persist_delta_pass_from_shared_state(
             let mut persisted = PersistedSessionRecord::from_record(record);
             persisted.persist_prompt_history = candidate.persist_prompt_history;
             PersistCandidateMaterialization::Snapshot(persisted)
-        },
-        |candidate| {
-            let state = inner.lock().expect("state mutex poisoned");
+        }),
+        |candidate| persist_collect_locked(inner, |state| {
             let Some(delegation) = state
                 .delegations
                 .iter()
@@ -1145,7 +1140,7 @@ fn collect_persist_delta_pass_from_shared_state(
                 return PersistCandidateMaterialization::Changed;
             }
             PersistCandidateMaterialization::Snapshot(delegation.clone())
-        },
+        }),
     )
 }
 
