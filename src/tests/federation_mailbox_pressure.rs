@@ -232,8 +232,8 @@ async fn unusable_successful_central_reply_is_an_unknown_mailbox_outcome() {
         .request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(
             lease,
             FederationMailboxRequest {
-                protocol_version: 1,
-                schema_version: "1".to_owned(),
+                protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+                schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
                 central,
                 actor: None,
                 operation: FederationMailboxOperation::Protocol,

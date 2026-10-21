@@ -9,7 +9,7 @@ impl MailboxStore {
         target: &FederationMailboxParticipant,
         authority: &FederationMailboxAuthority,
     ) -> Result<MailboxSummary> {
-        let _writer = self.lock_writer("creating central mailbox membership")?;
+        let _writer = self.lock_writer_with_budget("creating central mailbox membership", Duration::from_secs(2))?;
         let mut connection = self.connection()?;
         let transaction =
             begin_mailbox_write(&mut connection, "creating central mailbox membership")?;

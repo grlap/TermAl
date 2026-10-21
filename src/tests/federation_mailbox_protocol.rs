@@ -31,8 +31,11 @@ async fn central_negotiation_reports_authority_schema_and_unchanged_mailbox_limi
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 16384).await.unwrap()).unwrap();
-    assert_eq!(body["protocolVersion"], 1);
-    assert_eq!(body["schemaVersion"], "1");
+    assert_eq!(body["protocolVersion"], 2);
+    assert_eq!(body["schemaVersion"], "2");
+    assert!(body["readIncarnation"].is_string());
+    assert!(body["readEpochMs"].is_u64());
+    assert!(body["readKey"].is_string());
     assert_eq!(body["central"], serde_json::to_value(central).unwrap());
     assert_eq!(body["limits"]["bodyBytes"], 262144);
     assert_eq!(body["limits"]["metadataBytes"], 4096);

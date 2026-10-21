@@ -87,13 +87,73 @@ follow a committed append. The satellite preserves an explicit unknown-outcome
 signal through the local API and bridge. Retry the original request with the
 same idempotency key; an unavailable response never proves that C did not commit.
 
+Mailbox domain wire/schema **2/2** adds authenticated, bounded error classes and
+frozen read pages. The global federation transport/MAC version remains 1; primary
+and coordination SQLite schemas are unchanged. Both hosts must run the new mailbox
+contract and re-verify their pair before using it. A mixed mailbox version returns
+`upgradeRequired`; it cannot downgrade to a preview, numeric ACK or local replica.
+An authenticated plain 400 or 422 lacking the required v2 envelope is a protocol
+refusal and returns typed `upgradeRequired`. A current peer's generic 400 uses a
+correlated `request_refused` envelope instead; it grants no safe mutation retry.
+Only a verified `writer_admission_timeout` proves that the requested mailbox write
+did not commit. `directory_fence_unavailable` proves that the requested mailbox
+operation was not entered, while the directory mutation may already have committed.
+These two allow one exact retry inside the existing client budget. Handler deadlines,
+transport loss and authority changes remain unknown outcomes; actual authority drift
+requires reconciliation. Raw remote database errors are never forwarded.
+
+A native receipt read captures its page through a separate read-only connection,
+without waiting for coordination writer admission or its long-lived connection mutex.
+The complete page, cursor and wake metadata are frozen under a process-scoped
+`readKey`. Receipt issuance has its own two-second allowance inside the unchanged
+five-second central request budget. A blocked issuance returns the page with
+`receiptState: "receiptPending"`, its key and `receipt: null`. This is readable
+content, never ACK, numeric-ACK, noContinuation or wake-settlement authority.
+Only a real committed receipt can acknowledge it.
+
+The existing native API, MCP and CLI read flow owns key creation and performs at
+most one pending-page resolution inside its existing request budget. An identical
+ordinary read can finish the one retained pending page; agents need no new command.
+The native API retains at most 16 unresolved read intents (key, exact inputs and
+binding only), so an explicit retry after a transient 503 resolves the original key
+even across separate CLI invocations. This is memory-only client bookkeeping, with
+no message cache, durable journal or automatic retry of an uncertain mutation.
+The central protocol response offers the bridge a one-use admission key. An
+unconsumed offer grants no read or ACK authority. The first keyed read consumes
+it before capture. Both resolution flags expire when an accepted key is missing;
+neither can recapture later rows after reclamation. The bridge manages this
+without new agent steps. A full ring of pending pages offers no new key.
+An explicit resolution preserves the original inputs, including omitted versus
+explicit `afterSequence`. It adds issuance state and the receipt without selecting
+later messages or replacing frozen cursor/wake metadata. `pageId` identifies the
+versioned frozen descriptor; `cursorGeneration` binds the qualified participant and
+its processed-through snapshot. Empty pages stay empty under the same key.
+
+The ring retains at most 16 offers and pages combined, each page with a two-MiB
+serialized bound, for at most ten minutes from its offer. Pages contain a nonempty
+prefix of complete messages when more
+rows fit on subsequent pages. Capacity is reserved before accepting a new page;
+unresolved pages are never evicted to admit another. Unconsumed offers, issued
+pages and empty/preview entries are reclaimable at capacity, so completed reads
+cannot block later readers. Restart, expiry or a missing retained entry yields
+typed `readKeyExpired`; a fresh logical read needs a new offered key.
+There is no durable read journal or descriptor-based reconstruction after restart.
+
 Domain sends first persist a sender-local delivery intent. They return a send
 receipt only after the central append is confirmed and its outcome is retained
 locally. The central append, canonical digest outcome and durable wake obligation
-commit in one SQLite transaction. A remote recipient's immutable append receipt
-reports `durableButNotWoken`; later wake ownership is shown separately in message
-details. Central native
-recipients keep local wake, unread and acknowledgement behavior.
+commit in one SQLite transaction. The immutable domain append receipt reports
+`durableButNotWoken` at that commit point, for both remote and central native
+recipients. It does not wait for notification or dispatch finalization; an exact
+duplicate returns the same committed message identity without waiting either.
+Later wake ownership is shown separately in message details. For a central native
+recipient, an owned worker in the federation supervisor reads the committed
+obligation, revalidates the exact target binding while queuing, and uses ordinary
+queue coalescing and dispatch. It is kicked after commitment, falls back to a
+bounded recovery scan, and is joined at shutdown. A lost kick or HTTP reply does
+not discard the obligation. Until it is queued, message details report
+`committed; native wake pending`. Standalone mailbox sends retain their existing
+receipt and notification behavior.
 
 The negotiated `senderIntentRegistry` flag describes the central host, including
 when a satellite forwards its protocol response. An authenticated central that

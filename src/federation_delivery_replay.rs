@@ -132,7 +132,7 @@ impl MailboxStore {
         delivery: &FederationDelivery,
         authorize: impl FnOnce() -> Result<G>,
     ) -> Result<Option<FederationDeliveryOutcome>> {
-        let mut outcome = {
+        let outcome = {
             let connection = self.connection()?;
             let sender = delivery.sender.participant_key();
             let retired: bool = connection.query_row(
@@ -165,7 +165,7 @@ impl MailboxStore {
                                     .then(|| FEDERATION_REMOTE_WAKE_CAUSE.to_owned()),
                                 mailbox_id: message.mailbox_id, message_id: message.message_id,
                                 sequence: message.sequence, unread_depth: message.unread_depth_at_append,
-                                notification_disposition: message.dispatch_outcome.unwrap_or_default(),
+                                notification_disposition: "durableButNotWoken".to_owned(),
                                 duplicate: true, sender_processed_through: cursor, sender_cursor_advanced: false,
                             })
                         }
@@ -181,13 +181,8 @@ impl MailboxStore {
             let _sender = authorize()?;
             outcome
         };
-        // Dispatch may still be finishing. Never wait with SQLite, writer,
-        // link or state locks held, and never dispatch a duplicate wake.
-        if let Some(FederationDeliveryOutcome::Committed(receipt)) = &mut outcome {
-            if receipt.notification_disposition.is_empty() {
-                receipt.notification_disposition = self.wait_for_final_dispatch_outcome(&receipt.message_id)?;
-            }
-        }
+        // The immutable commitment is already known. Wake completion is a
+        // separate projection, and no duplicate starts or waits for delivery.
         Ok(outcome)
     }
 }

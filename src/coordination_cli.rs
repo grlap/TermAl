@@ -55,6 +55,9 @@ nextAfterSequence. Reading never acknowledges. After processing a whole page,
 acknowledge its unchanged --receipt, even after sending. Retry that receipt on
 uncertainty; acknowledge pages in order. Old numeric clients must re-read if
 issuance is missing (including unacknowledged pre-upgrade reads).
+Domain receiptPending pages have no ACK authority until receipt issuance finishes;
+repeat the identical read to resolve the bridge-owned key. readKeyExpired requires
+a fresh logical read after expiry or a central restart.
 A reply sent after reading is outside that page: acknowledge the original page,
 then read/process/acknowledge the reply on the next page. Numeric ACK through
 that unissued reply returns 409. Reads through an old MCP bridge that omits
@@ -1011,6 +1014,11 @@ fn render_coordination_cli_output(
                 coordination_cli_field(output, "hasMore"),
                 coordination_cli_field(output, "nextAfterSequence")
             )?;
+            if output.get("receiptState").is_some() {
+                writeln!(out, "receipt state {}, readKey {}",
+                    coordination_cli_field(output, "receiptState"),
+                    coordination_cli_field(output, "readKey"))?;
+            }
             let messages = output
                 .get("messages")
                 .and_then(Value::as_array)

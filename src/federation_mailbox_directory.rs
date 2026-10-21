@@ -62,7 +62,7 @@ impl AppState {
             }
             participant
         };
-        self.mutate_federation(|domain, settings| {
+        self.mutate_federation_core_on_link_with_budget(None, false, |domain, settings, _| {
             if !federation_mailbox_remote_in_domain(domain, settings, peer, &actor.binding) {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }
@@ -70,6 +70,11 @@ impl AppState {
                 .mailbox_directory
                 .insert(participant.session_id.clone(), participant.clone());
             Ok(participant.clone())
+        }, |_| {}, EngramBudgetClock::Real, Duration::from_secs(2))
+        .map_err(|error| {
+            if error.status.is_server_error() {
+                error.with_kind(ApiErrorKind::FederationMailboxDirectoryFence)
+            } else { error }
         })
     }
 

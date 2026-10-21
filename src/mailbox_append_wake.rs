@@ -19,6 +19,14 @@ impl AppState {
             return Ok(receipt);
         }
 
+        #[cfg(test)]
+        {
+            let hook = self.mailbox_store.before_native_wake.lock().unwrap().take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+
         // This post-commit probe controls wake delivery only. It must never
         // mutate participant authorization: only deliberate session deletion
         // owns `left_at`.

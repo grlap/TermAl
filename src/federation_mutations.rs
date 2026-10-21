@@ -235,6 +235,20 @@ impl AppState {
         on_install: impl FnOnce(&T),
         clock: EngramBudgetClock,
     ) -> Result<T, ApiError> {
+        self.mutate_federation_core_on_link_with_budget(lease, reset_continuity, update,
+            on_install, clock, Duration::from_secs(5))
+    }
+
+    fn mutate_federation_core_on_link_with_budget<T>(
+        &self,
+        lease: Option<&FederationLinkLease>,
+        reset_continuity: bool,
+        update: impl FnOnce(&mut FederationState, &mut FederationSettings,
+            &FederationMutationContext) -> Result<T, ApiError>,
+        on_install: impl FnOnce(&T),
+        clock: EngramBudgetClock,
+        budget: Duration,
+    ) -> Result<T, ApiError> {
         let install = || {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(lease) = lease {
@@ -281,7 +295,7 @@ impl AppState {
             Some(lease) => lease.with_incarnation(install)?,
             None => install()?,
         };
-        self.finish_federation_durability_with_clock(&image, dispatch, clock)?;
+        self.finish_federation_durability_with_budget(&image, dispatch, clock, budget)?;
         if reset_continuity {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if federation_persist_image(&PersistedState::metadata_from_inner(&inner)) != image {
@@ -297,6 +311,13 @@ impl AppState {
         image: &Value,
         dispatch: PersistDispatch,
         clock: EngramBudgetClock,
+    ) -> Result<(), ApiError> {
+        self.finish_federation_durability_with_budget(image, dispatch, clock, Duration::from_secs(5))
+    }
+
+    fn finish_federation_durability_with_budget(
+        &self, image: &Value, dispatch: PersistDispatch, clock: EngramBudgetClock,
+        budget: Duration,
     ) -> Result<(), ApiError> {
         // Metadata may commit while a hot session is deferred by the bounded
         // collector. Recovery ticks use this same composite target, so they
@@ -329,7 +350,7 @@ impl AppState {
             }
         };
         if matches!(dispatch, PersistDispatch::BackgroundQueued) {
-            let deadline = clock.now() + Duration::from_secs(5);
+            let deadline = clock.now() + budget;
             let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock);
             reference_publication_observe!("durability.send_fence", self.persist_tx
                 .send(PersistRequest::Fence(Box::new(fence))))

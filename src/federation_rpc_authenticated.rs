@@ -44,6 +44,29 @@ impl FederationRpcClient {
     }
 
     async fn request<T: DeserializeOwned>(&self, route: FederationRpcRoute) -> Result<T, ApiError> {
+        let retry = match &route {
+            FederationRpcRoute::Mailbox(lease, request)
+                if !matches!(request.operation, FederationMailboxOperation::ReadKeyed { .. }) =>
+                Some((lease.clone(), request.clone())),
+            _ => None,
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let first = self.request_once(route).await;
+        if first.as_ref().err().is_some_and(|error| matches!(error.kind,
+            Some(ApiErrorKind::FederationMailboxWriterAdmission | ApiErrorKind::FederationMailboxDirectoryFence))) {
+            if let Some((lease, request)) = retry {
+                return match tokio::time::timeout_at(deadline,
+                    self.request_once(FederationRpcRoute::Mailbox(lease, request))).await {
+                    Ok(result) => result,
+                    Err(_) => Err(federation_mailbox_unknown_outcome(StatusCode::SERVICE_UNAVAILABLE,
+                        "central mailbox transport_loss during exact retry")),
+                };
+            }
+        }
+        first
+    }
+
+    async fn request_once<T: DeserializeOwned>(&self, route: FederationRpcRoute) -> Result<T, ApiError> {
         (self.ensure_current)()?;
         let _permit = self.channel.bound.try_acquire()?;
         let (lease, path) = match &route {
@@ -208,7 +231,8 @@ impl FederationRpcClient {
                     return Ok(Err(federation_binding_rpc_error(status)));
                 }
                 if route.mailbox_lease().is_some() {
-                    return Ok(Err(federation_mailbox_rpc_error(status)));
+                    let FederationRpcRoute::Mailbox(_, request) = &route else { unreachable!() };
+                    return Ok(Err(federation_mailbox_verified_error(request, status, &bytes)));
                 }
                 return Ok(Err(match status {
                     StatusCode::LOCKED

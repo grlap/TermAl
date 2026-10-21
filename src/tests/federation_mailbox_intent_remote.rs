@@ -46,8 +46,8 @@ fn request(
     operation: FederationMailboxOperation,
 ) -> FederationMailboxRequest {
     FederationMailboxRequest {
-        protocol_version: 1,
-        schema_version: "1".to_owned(),
+        protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+        schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
         central: actor.binding.central.clone(),
         actor: Some(actor.clone()),
         operation,

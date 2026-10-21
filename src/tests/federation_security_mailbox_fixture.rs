@@ -11,7 +11,12 @@ pub(super) struct MailboxCase {
 
 impl MailboxCase {
     pub async fn new() -> Self {
-        let central = super::super::federation_mailboxes::central_store();
+        Self::with_writer_timeout(MAILBOX_WRITER_ADMISSION_TIMEOUT).await
+    }
+
+    pub async fn with_writer_timeout(timeout: Duration) -> Self {
+        let mut central = super::super::federation_mailboxes::central_store();
+        Arc::get_mut(&mut central.mailbox_store).unwrap().write_admission_timeout = timeout;
         let (_, target) = super::super::federation_mailboxes::local_participant(&central, "Target");
         let pair = HostPair::new(central, io()).await;
         let connected = pair.central.federation_peer_snapshot(&pair.id).unwrap();
@@ -44,8 +49,8 @@ impl MailboxCase {
         pair.central
             .execute_federation_mailbox(
                 FederationMailboxRequest {
-                    protocol_version: 1,
-                    schema_version: "1".to_owned(),
+                    protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+                    schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
                     central: current.local.clone(),
                     actor: Some(actor.clone()),
                     operation: FederationMailboxOperation::Register,
@@ -54,8 +59,8 @@ impl MailboxCase {
             )
             .unwrap();
         let request = FederationMailboxRequest {
-            protocol_version: 1,
-            schema_version: "1".to_owned(),
+            protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+            schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
             central: current.local,
             actor: Some(actor),
             operation: FederationMailboxOperation::Send {

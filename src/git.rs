@@ -1031,6 +1031,11 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
         ),
         Some(
             ApiErrorKind::LocalSessionMissing
+            | ApiErrorKind::FederationMailboxUpgradeRequired
+            | ApiErrorKind::FederationMailboxWriterAdmission
+            | ApiErrorKind::FederationMailboxDirectoryFence
+            | ApiErrorKind::FederationMailboxReadExpired
+            | ApiErrorKind::FederationMailboxReadConflict
             | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::FederationSshCleanupUnknown
             | ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown

@@ -95,6 +95,11 @@
 /// locally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ApiErrorKind {
+    FederationMailboxUpgradeRequired,
+    FederationMailboxWriterAdmission,
+    FederationMailboxDirectoryFence,
+    FederationMailboxReadExpired,
+    FederationMailboxReadConflict,
     #[cfg_attr(not(unix), allow(dead_code))]
     GitDocumentBecameSymlink,
     GitDocumentInvalidUtf8,

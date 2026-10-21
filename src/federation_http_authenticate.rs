@@ -62,6 +62,9 @@ async fn federation_authenticate_message(
         &body,
     )?;
     federation_verify_mac(&context.keys[key], &[&representation], &tag)?;
+    let mailbox_intent = if mailbox_request {
+        serde_json::from_slice::<FederationMailboxRequest>(&body).ok()
+    } else { None };
     let reserved = {
         let link = state
             .channel
@@ -133,11 +136,8 @@ async fn federation_authenticate_message(
                     Err(_) if binding_request => {
                         federation_binding_unknown_outcome().into_response()
                     }
-                    Err(_) if mailbox_request => federation_mailbox_unknown_outcome(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "central mailbox request deadline reached",
-                    )
-                    .into_response(),
+                    Err(_) if mailbox_request => federation_mailbox_unknown_response(
+                        mailbox_intent.as_ref(), "handler_deadline"),
                     Err(_) => {
                         state
                             .channel
@@ -150,11 +150,8 @@ async fn federation_authenticate_message(
                     Err(_) if binding_request => {
                         federation_binding_unknown_outcome().into_response()
                     }
-                    Err(_) if mailbox_request => federation_mailbox_unknown_outcome(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "mailbox authority changed after dispatch",
-                    )
-                    .into_response(),
+                    Err(_) if mailbox_request => federation_mailbox_unknown_response(
+                        mailbox_intent.as_ref(), "authority_changed"),
                     Err(error) => error.into_response(),
                 }
             }

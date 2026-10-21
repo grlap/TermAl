@@ -44,8 +44,8 @@ impl ReferenceFixture {
             // Existing participant registration, not reference evidence. The
             // future provisioner still has to obtain S's real proof over HTTP.
             proof.central.execute_federation_mailbox(FederationMailboxRequest {
-                protocol_version: 1,
-                schema_version: "1".to_owned(),
+                protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+                schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
                 central: proof.binding.central.clone(),
                 actor: Some(FederationMailboxActor {
                     binding: proof.binding.clone(), name: "Satellite native".to_owned(),

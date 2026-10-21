@@ -41,8 +41,8 @@ pub(super) fn request(
         .clone()
         .unwrap();
     FederationMailboxRequest {
-        protocol_version: 1,
-        schema_version: "1".to_owned(),
+        protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+        schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
         central,
         actor: state.federation_mailbox_actor(local).unwrap(),
         operation,
@@ -159,6 +159,9 @@ async fn opposite_first_sends_and_creation_use_one_mailbox_and_one_pair_of_membe
         .unwrap();
     assert_eq!(mailbox.id, first["mailboxId"].as_str().unwrap());
     assert_eq!(mailbox.latest_sequence, 2);
+    let notifications = state.clone();
+    tokio::task::spawn_blocking(move || notifications.run_native_mailbox_wake_batch(0))
+        .await.unwrap();
     let inner = state.inner.lock().unwrap();
     assert_eq!(
         inner.sessions[inner.find_session_index(&a).unwrap()]
@@ -190,6 +193,9 @@ async fn domain_read_issues_receipts_and_exact_retry_keeps_the_canonical_append(
     assert_eq!(first["messageId"], duplicate["messageId"]);
     assert_eq!(duplicate["duplicate"], true);
     let mailbox = first["mailboxId"].as_str().unwrap().to_owned();
+    let notifications = state.clone();
+    tokio::task::spawn_blocking(move || notifications.run_native_mailbox_wake_batch(0))
+        .await.unwrap();
     let page: MailboxReadResponse = state
         .federation_mailbox_operation(
             &b,

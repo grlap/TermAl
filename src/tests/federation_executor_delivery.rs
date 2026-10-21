@@ -90,8 +90,8 @@ impl Fixture {
         let outbound_lease = outbound.current_lease().unwrap();
         let actor = FederationMailboxActor { binding: target.clone(), name: "Satellite".into() };
         central.execute_federation_mailbox(FederationMailboxRequest {
-            protocol_version: 1,
-            schema_version: "1".into(),
+            protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+            schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
             central: peer.local.clone(),
             actor: Some(actor),
             operation: FederationMailboxOperation::Register,

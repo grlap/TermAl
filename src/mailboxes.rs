@@ -109,6 +109,14 @@ struct MailboxAppendReceipt {
 #[serde(rename_all = "camelCase")]
 struct MailboxReadResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    receipt_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    read_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    page_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cursor_generation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     reader_session_id: Option<String>,
     messages: Vec<MailboxMessage>,
     after_sequence: u64,
@@ -206,6 +214,9 @@ enum MailboxStoreErrorKind {
 struct MailboxStoreError {
     kind: MailboxStoreErrorKind,
     message: String,
+    // Only a lead writer-admission refusal may certify notCommitted. An
+    // operation with an earlier commit must never reuse that certificate.
+    writer_admission: bool,
 }
 
 impl std::fmt::Display for MailboxStoreError {
@@ -220,6 +231,7 @@ fn mailbox_store_error(kind: MailboxStoreErrorKind, message: impl Into<String>) 
     MailboxStoreError {
         kind,
         message: message.into(),
+        writer_admission: false,
     }
     .into()
 }
@@ -241,6 +253,8 @@ struct SendMailboxMessageRequest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReadMailboxRequest {
+    #[serde(default)]
+    read_key: Option<String>,
     // Only the agent MCP/CLI transport opts into durable page issuance.
     // Missing stays preview-safe for existing UI bundles and old bridges.
     #[serde(default)]
@@ -279,6 +293,9 @@ struct MailboxDispatchFinalization {
 }
 
 struct MailboxStore {
+    path: PathBuf,
+    federation_reads: Mutex<FederationMailboxReadCache>,
+    federation_read_intents: Mutex<HashMap<String, FederationMailboxClientRead>>,
     /// Invalidates optimistic zero-unread coverage reads on a new append.
     continuation_epoch: AtomicU64,
     connection: Mutex<Option<rusqlite::Connection>>,
@@ -291,6 +308,8 @@ struct MailboxStore {
     /// in-memory probe commit from a concurrent delegation rearm.
     delegation_review_recovery_guard: Mutex<()>,
     executor_reservations: Mutex<FederationExecutorReservationCache>,
+    #[cfg(test)]
+    before_native_wake: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
     internal_writer_waiters: Mutex<usize>,
     #[cfg(test)]
@@ -586,6 +605,19 @@ impl AppState {
         recovery: MailboxWakeupRecovery,
         promote_existing_to_front: bool,
     ) -> Result<MailboxWakeQueueOutcome> {
+        self.queue_mailbox_wakeups_for_binding_outcome(
+            session_id, wakeups, recovery, promote_existing_to_front, None,
+        )
+    }
+
+    fn queue_mailbox_wakeups_for_binding_outcome(
+        &self,
+        session_id: &str,
+        wakeups: Vec<MailboxUnreadWakeup>,
+        recovery: MailboxWakeupRecovery,
+        promote_existing_to_front: bool,
+        expected_binding: Option<&FederationMailboxBinding>,
+    ) -> Result<MailboxWakeQueueOutcome> {
         let Some(storage_key)=self.local_mailbox_storage_key(session_id) else { return Ok(MailboxWakeQueueOutcome::default()); };
         if wakeups.is_empty() {
             return Ok(MailboxWakeQueueOutcome::default());
@@ -595,6 +627,18 @@ impl AppState {
         let Some(index) = inner.find_visible_session_index(session_id) else {
             return Ok(MailboxWakeQueueOutcome::default());
         };
+        if let Some(binding) = expected_binding {
+            // Revalidate while applying the queue change, after all store I/O.
+            // A delayed committed wake never targets a recreated native root.
+            if inner.sessions[index].federation_mailbox_binding.as_ref() != Some(binding)
+                || inner.federation.mailbox_directory.get(&storage_key).is_none_or(|row| {
+                    row.binding != *binding
+                        || !federation_mailbox_participant_current_locked(&inner, row)
+                })
+            {
+                return Ok(MailboxWakeQueueOutcome::default());
+            }
+        }
         if !inner.sessions[index].is_local_session()
             || inner.sessions[index].session.parent_delegation_id.is_some()
             || inner
@@ -1115,8 +1159,11 @@ async fn read_mailbox(
     Json(request): Json<ReadMailboxRequest>,
 ) -> Result<Json<MailboxReadResponse>, ApiError> {
     if state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
-        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::Read {
-            mailbox_id,after_sequence:request.after_sequence,limit:request.limit,issue_receipt:request.issue_receipt }).await.map(Json);
+        return state.read_federation_mailbox(&session_id, mailbox_id, request.after_sequence,
+            request.limit, request.issue_receipt, request.read_key).await.map(Json);
+    }
+    if request.read_key.is_some() {
+        return Err(ApiError::conflict("readKey requires its original central mailbox binding; no local fallback"));
     }
     let messages = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
@@ -1237,6 +1284,11 @@ async fn acknowledge_mailbox(
 
 fn mailbox_api_error(err: anyhow::Error) -> ApiError {
     if let Some(mailbox_error) = err.downcast_ref::<MailboxStoreError>() {
+        if mailbox_error.writer_admission {
+            return ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
+                mailbox_error.message.clone())
+                .with_kind(ApiErrorKind::FederationMailboxWriterAdmission);
+        }
         return match mailbox_error.kind {
             MailboxStoreErrorKind::Validation => {
                 ApiError::bad_request(mailbox_error.message.clone())
@@ -1284,6 +1336,9 @@ impl MailboxStore {
                 )
             })?;
         Ok(Self {
+            path: path.to_path_buf(),
+            federation_reads: Mutex::new(FederationMailboxReadCache::default()),
+            federation_read_intents: Mutex::new(HashMap::new()),
             connection: Mutex::new(Some(connection)),
             continuation_epoch: AtomicU64::new(0),
             write_lock: sqlite_state_write_lock(path),
@@ -1291,6 +1346,8 @@ impl MailboxStore {
             dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
             delegation_review_recovery_guard: Mutex::new(()),
             executor_reservations: Mutex::new(FederationExecutorReservationCache::default()),
+            #[cfg(test)]
+            before_native_wake: Mutex::new(None),
             #[cfg(test)]
             internal_writer_waiters: Mutex::new(0),
             #[cfg(test)]
@@ -1301,6 +1358,9 @@ impl MailboxStore {
     #[cfg(test)]
     fn disabled_for_tests() -> Self {
         Self {
+            path: PathBuf::new(),
+            federation_reads: Mutex::new(FederationMailboxReadCache::default()),
+            federation_read_intents: Mutex::new(HashMap::new()),
             connection: Mutex::new(None),
             continuation_epoch: AtomicU64::new(0),
             write_lock: Arc::new(SqliteStateWriterAdmission::default()),
@@ -1308,21 +1368,27 @@ impl MailboxStore {
             dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
             delegation_review_recovery_guard: Mutex::new(()),
             executor_reservations: Mutex::new(FederationExecutorReservationCache::default()),
+            before_native_wake: Mutex::new(None),
             internal_writer_waiters: Mutex::new(0),
             internal_writer_waiter_changed: Condvar::new(),
         }
     }
 
     fn lock_writer(&self, operation: &str) -> Result<SqliteStateWriterGuard<'_>> {
-        lock_sqlite_state_writer_for(&self.write_lock, self.write_admission_timeout).ok_or_else(
+        self.lock_writer_with_budget(operation, self.write_admission_timeout)
+    }
+
+    fn lock_writer_with_budget(&self, operation: &str, budget: Duration) -> Result<SqliteStateWriterGuard<'_>> {
+        lock_sqlite_state_writer_for(&self.write_lock, self.write_admission_timeout.min(budget)).ok_or_else(
             || {
-                mailbox_store_error(
-                    MailboxStoreErrorKind::Retryable,
-                    format!(
+                anyhow::Error::new(MailboxStoreError {
+                    kind: MailboxStoreErrorKind::Retryable,
+                    writer_admission: true,
+                    message: format!(
                         "mailbox storage is temporarily busy while {operation}; no mailbox write \
                          was committed by this operation, so retry the same request"
                     ),
-                )
+                })
             },
         )
     }
@@ -1551,7 +1617,9 @@ impl MailboxStore {
 
     fn append_with_delivery<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
         validate_mailbox_append_input(input)?;
-        let write_guard = self.lock_writer("waiting to begin mailbox append")?;
+        let write_guard = if delivery.is_some() {
+            self.lock_writer_with_budget("waiting to begin mailbox append", Duration::from_secs(2))?
+        } else { self.lock_writer("waiting to begin mailbox append")? };
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "beginning mailbox append")?;
         if let Some(delivery) = delivery {
@@ -1594,6 +1662,8 @@ impl MailboxStore {
             drop(connection);
             drop(write_guard);
             let notification_disposition = match existing.dispatch_outcome {
+                // Domain receipts describe commitment, not the later wake.
+                _ if delivery.is_some() => "durableButNotWoken".to_owned(),
                 Some(dispatch_outcome) => dispatch_outcome,
                 None => self.wait_for_final_dispatch_outcome(&existing.message_id)?,
             };
@@ -2384,6 +2454,7 @@ impl MailboxStore {
             .commit()
             .map_err(|err| mailbox_sqlite_write_error("committing mailbox page issuance", err))?;
         Ok(MailboxReadResponse {
+            receipt_state: None, read_key: None, page_id: None, cursor_generation: None,
             reader_session_id: None,
             messages,
             after_sequence,

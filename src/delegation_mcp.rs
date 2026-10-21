@@ -1482,6 +1482,9 @@ impl TermalDelegationMcpBridge {
             .unwrap_or(50);
         // Transport-owned: model arguments cannot turn an agent read into UI preview.
         let mut body = json!({ "limit": limit, "issueReceipt": true });
+        if let Some(read_key) = arguments.get("readKey") {
+            body["readKey"] = json!(required_string(Some(read_key), "readKey")?);
+        }
         if let Some(after_sequence) = after_sequence {
             body["afterSequence"] = json!(after_sequence);
         }
@@ -1494,7 +1497,7 @@ impl TermalDelegationMcpBridge {
         )?;
         let range: MailboxReadResponse =
             serde_json::from_value(response).context("mailbox read response shape was invalid")?;
-        Ok(json!({
+        let mut result = json!({
             "mailboxId": mailbox_id,
             "messages": mcp_mailbox_messages(&range.messages, range.reader_session_id.as_deref().unwrap_or(&self.serving_session_id))?,
             "afterSequence": range.after_sequence,
@@ -1502,7 +1505,12 @@ impl TermalDelegationMcpBridge {
             "receipt": range.receipt,
             "hasMore": range.has_more,
             "nextAfterSequence": range.next_after_sequence
-        }))
+        });
+        if let Some(state) = range.receipt_state { result["receiptState"] = json!(state); }
+        if let Some(key) = range.read_key { result["readKey"] = json!(key); }
+        if let Some(id) = range.page_id { result["pageId"] = json!(id); }
+        if let Some(generation) = range.cursor_generation { result["cursorGeneration"] = json!(generation); }
+        Ok(result)
     }
 
     fn tool_read_mailbox_message(&self, arguments: Value) -> Result<Value> {
@@ -2719,7 +2727,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox",
-                "description": "Read a FIFO page without acknowledging it. Omit afterSequence to start at the durable cursor. Returns messages (including own sends): incoming bodies in full, own sends as headers with bodyOmitted:true; fetch an omitted body by id using termal_read_mailbox_message. Own headers still belong to the receipt page and must be processed before acknowledgement. Returns receipt, hasMore, nextAfterSequence and cursor metadata. Save receipt and acknowledge it unchanged only after processing the entire page, even if you send a reply meanwhile. Empty pages have no receipt. Process/ack pages in order; explicit afterSequence may replay history but cannot authorize skipping earlier visible messages. The server records issuance, not proof of reading or understanding. Legacy numeric clients remain supported with issuance validation; pre-upgrade reads may need repeating. A reply appended after reading is outside that receipt: acknowledge the original page, then read/process/acknowledge the next page including your reply. Numeric ACK through that unissued reply returns 409. The bridge sets issueReceipt itself; UI previews and old bridge binaries without that flag do not issue pages. Upgrade/restart an old bridge or use the current CLI; repeating its preview cannot repair missing issuance.",
+                "description": "Read a FIFO page without acknowledging it. Omit afterSequence to start at the durable cursor. Returns messages (including own sends): incoming bodies in full, own sends as headers with bodyOmitted:true; fetch an omitted body by id using termal_read_mailbox_message. Own headers still belong to the receipt page and must be processed before acknowledgement. Returns receipt, hasMore, nextAfterSequence and cursor metadata. Save receipt and acknowledge it unchanged only after processing the entire page, even if you send a reply meanwhile. Empty pages have no receipt. Process/ack pages in order; explicit afterSequence may replay history but cannot authorize skipping earlier visible messages. The server records issuance, not proof of reading or understanding. Legacy numeric clients remain supported with issuance validation; pre-upgrade reads may need repeating. A reply appended after reading is outside that receipt: acknowledge the original page, then read/process/acknowledge the next page including your reply. Numeric ACK through that unissued reply returns 409. The bridge sets issueReceipt itself; UI previews and old bridge binaries without that flag do not issue pages. Upgrade/restart an old bridge or use the current CLI; repeating its preview cannot repair missing issuance. A domain receiptPending page is readable but receipt=null grants no ACK or noContinuation authority. Repeat the identical read to resolve its bridge-owned key; readKeyExpired requires a fresh logical read.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId"],

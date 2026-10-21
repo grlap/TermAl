@@ -18,6 +18,14 @@ mod liveness;
 mod mailbox_fixture;
 #[path = "federation_security_mailbox_outcomes.rs"]
 mod mailbox_outcomes;
+#[path = "federation_mailbox_availability.rs"]
+mod mailbox_availability;
+#[path = "federation_mailbox_availability_errors.rs"]
+mod mailbox_availability_errors;
+#[path = "federation_mailbox_availability_reads.rs"]
+mod mailbox_availability_reads;
+#[path = "federation_mailbox_keyed_reads.rs"]
+mod mailbox_keyed_reads;
 #[path = "federation_security_receiver_hold.rs"]
 mod receiver_hold;
 #[path = "federation_security_pair.rs"]

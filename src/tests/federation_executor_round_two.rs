@@ -174,7 +174,9 @@ async fn federation_m4_round_two_live_activation_survives_a_transient_queue_evid
 fn committed_ack(fixture: &Fixture) -> MailboxSummary {
     let actor = FederationMailboxActor { binding: fixture.target.clone(), name: "Satellite".into() };
     let mailbox = fixture.request["wake"]["mailboxId"].as_str().unwrap().to_owned();
-    let request = |operation| FederationMailboxRequest { protocol_version: 1, schema_version: "1".into(),
+    let request = |operation| FederationMailboxRequest {
+        protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+        schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
         central: fixture.target.central.clone(), actor: Some(actor.clone()), operation };
     let lease = fixture.outbound.current_lease().unwrap();
     let page = fixture.central.execute_federation_mailbox(request(FederationMailboxOperation::Read {

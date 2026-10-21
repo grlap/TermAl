@@ -102,7 +102,16 @@ fn queued_bound_native_wake_records_delivery_and_drops_an_acknowledged_successor
             target: target.session_id.clone(), message: "wake".to_owned(), key: "wake".to_owned(),
             topic: None, state_stamp: None,
         }), None).unwrap().value).unwrap();
-    assert_eq!(sent.notification_disposition, "queuedBehindActiveTurn");
+    assert_eq!(sent.notification_disposition, "durableButNotWoken");
+    {
+        let inner = state.inner.lock().unwrap();
+        assert!(inner.sessions[inner.find_session_index(&b).unwrap()].queued_prompts.is_empty());
+    }
+    state.run_native_mailbox_wake_batch(0);
+    {
+        let inner = state.inner.lock().unwrap();
+        assert_eq!(inner.sessions[inner.find_session_index(&b).unwrap()].queued_prompts.len(), 1);
+    }
     state.mark_mailbox_notification_delivered(&MailboxNotificationDelivery {
         session_id: b.clone(), mailbox_id: sent.mailbox_id.clone(), through_sequence: sent.sequence,
     });

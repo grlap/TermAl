@@ -57,11 +57,134 @@ async fn get_or_create_federation_mailbox(
 }
 
 impl AppState {
+    async fn read_federation_mailbox(
+        &self, session: &str, mailbox_id: String, after_sequence: Option<u64>,
+        limit: u64, issue_receipt: bool, read_key: Option<String>,
+    ) -> Result<MailboxReadResponse, ApiError> {
+        if read_key.as_ref().is_some_and(|key| key.len() > 160 || !issue_receipt) {
+            return Err(ApiError::bad_request("invalid keyed receipt read"));
+        }
+        if !issue_receipt {
+            return self.dispatch_federation_mailbox_operation(session,
+                FederationMailboxOperation::Read { mailbox_id, after_sequence, limit,
+                    issue_receipt: false }).await;
+        }
+        let binding = self.federation_mailbox_actor(session)?.ok_or_else(||
+            ApiError::conflict("session has no explicit central mailbox binding"))?.binding;
+        let slot = sha256_hex(&serde_json::to_vec(&(session, &mailbox_id))
+            .expect("read slot serializes"));
+        let input = sha256_hex(&serde_json::to_vec(&(after_sequence, limit.clamp(1, 200), issue_receipt))
+            .expect("read input serializes"));
+        let owner = Uuid::new_v4();
+        let retained_key = {
+            let mut intents = self.mailbox_store.federation_read_intents.lock()
+                .expect("mailbox read intents poisoned");
+            if intents.get(&slot).is_some_and(|intent| !intent.in_flight && intent.accepted.elapsed()
+                >= Duration::from_millis(FEDERATION_MAILBOX_READ_TTL_MS)) {
+                intents.remove(&slot);
+                return Err(federation_mailbox_read_expired());
+            }
+            intents.retain(|_, intent| intent.in_flight || intent.accepted.elapsed()
+                < Duration::from_millis(FEDERATION_MAILBOX_READ_TTL_MS));
+            if let Some(intent) = intents.get_mut(&slot) {
+                if intent.binding != binding {
+                    intents.remove(&slot);
+                    return Err(ApiError::conflict(format!(
+                        "authority_changed; {FEDERATION_MAILBOX_UNKNOWN_OUTCOME}; reconcile the original read")));
+                }
+                if intent.input != input || read_key.as_ref().is_some_and(|key| intent.key.as_ref() != Some(key)) {
+                    return Err(ApiError::conflict("readKey input conflict; finish the identical retained read"));
+                }
+                if intent.in_flight {
+                    return Err(ApiError::from_status(StatusCode::TOO_MANY_REQUESTS,
+                        "mailbox read resolution is in flight; repeat the identical read"));
+                }
+                intent.in_flight = true;
+                intent.owner = owner;
+                intent.key.clone()
+            } else {
+                if intents.len() >= FEDERATION_MAILBOX_FROZEN_KEYS {
+                    return Err(ApiError::from_status(StatusCode::TOO_MANY_REQUESTS,
+                        "mailbox read intent capacity reached"));
+                }
+                intents.insert(slot.clone(), FederationMailboxClientRead { binding, input,
+                    key: read_key.clone(), accepted: std::time::Instant::now(), in_flight: true, owner });
+                read_key
+            }
+        };
+        let _flight = FederationMailboxReadFlight {
+            intents: &self.mailbox_store.federation_read_intents, slot: slot.clone(), owner,
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let read = async {
+            let resolve = retained_key.is_some();
+            let key = if let Some(key) = retained_key { key } else {
+                let protocol: FederationMailboxProtocol = self.dispatch_federation_mailbox_operation(
+                    session, FederationMailboxOperation::Protocol).await?;
+                if protocol.protocol_version != FEDERATION_MAILBOX_WIRE_VERSION
+                    || protocol.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION {
+                    return Err(federation_mailbox_upgrade_required());
+                }
+                protocol.read_key.ok_or_else(|| ApiError::from_status(StatusCode::TOO_MANY_REQUESTS,
+                    "mailbox frozen-page capacity reached; resolve a retained pending page first"))?
+            };
+            if let Some(intent) = self.mailbox_store.federation_read_intents.lock()
+                .expect("mailbox read intents poisoned").get_mut(&slot).filter(|intent| intent.owner == owner) {
+                intent.key = Some(key.clone());
+            }
+            let operation = |resolve| FederationMailboxOperation::ReadKeyed {
+                mailbox_id: mailbox_id.clone(), after_sequence, limit, issue_receipt,
+                read_key: key.clone(), resolve,
+            };
+            let first: MailboxReadResponse = self.dispatch_federation_mailbox_operation(
+                session, operation(resolve)).await?;
+            if first.receipt_state.as_deref() == Some("receiptPending") {
+                // Only a returned pending page licenses automatic resolution.
+                // Transport/authority errors remain explicit UNKNOWN outcomes.
+                let exact_key = first.read_key.clone().ok_or_else(|| ApiError::bad_gateway("pending page omitted readKey"))?;
+                if let Some(intent) = self.mailbox_store.federation_read_intents.lock()
+                    .expect("mailbox read intents poisoned").get_mut(&slot).filter(|intent| intent.owner == owner) {
+                    intent.key = Some(exact_key.clone());
+                }
+                let second = self.dispatch_federation_mailbox_operation(session,
+                    FederationMailboxOperation::ReadKeyed { mailbox_id, after_sequence, limit,
+                        issue_receipt, read_key: exact_key, resolve: true }).await;
+                match second {
+                    Ok(page) => return Ok(page),
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok(first)
+        };
+        let result = tokio::time::timeout_at(deadline, read).await
+            .map_err(|_| federation_mailbox_unknown_outcome(StatusCode::SERVICE_UNAVAILABLE,
+                "central mailbox read handler_deadline; repeat the identical read to resolve its retained key"))?;
+        let mut intents = self.mailbox_store.federation_read_intents.lock()
+            .expect("mailbox read intents poisoned");
+        if intents.get(&slot).is_some_and(|intent| intent.owner == owner) {
+            match &result {
+                Ok(page) if page.receipt_state.as_deref() != Some("receiptPending") => { intents.remove(&slot); }
+                Ok(page) => { intents.get_mut(&slot).expect("intent checked").key = page.read_key.clone(); }
+                Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadExpired) => { intents.remove(&slot); }
+                Err(_) => {},
+            }
+        }
+        drop(intents);
+        result
+    }
+
     async fn federation_mailbox_operation<T: DeserializeOwned>(
         &self,
         session: &str,
         operation: FederationMailboxOperation,
     ) -> Result<T, ApiError> {
+        if let FederationMailboxOperation::Read { mailbox_id, after_sequence, limit, issue_receipt } = operation {
+            let page = self.read_federation_mailbox(session, mailbox_id, after_sequence,
+                limit, issue_receipt, None).await?;
+            return serde_json::from_value(serde_json::to_value(page)
+                .map_err(|_| ApiError::internal("mailbox page encoding failed"))?)
+                .map_err(|_| ApiError::bad_gateway("invalid mailbox page schema"));
+        }
         if let FederationMailboxOperation::Send { target, .. }
             | FederationMailboxOperation::GetOrCreate { target } = &operation
         {
@@ -166,9 +289,10 @@ impl AppState {
             (response, Some(lease))
         };
         if response.protocol_version != FEDERATION_MAILBOX_WIRE_VERSION
-            || response.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION
-            || response.central != central
-        {
+            || response.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION {
+            return Err(federation_mailbox_upgrade_required());
+        }
+        if response.central != central {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
         // A delayed reply cannot be attached to a recreated local session or
@@ -207,7 +331,7 @@ fn federation_mailbox_routes() -> Router<FederationListenerState> {
 async fn serve_federation_mailbox(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
     Json(request): Json<FederationMailboxRequest>,
-) -> Result<Json<FederationMailboxResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     let lease = peer.lease.ok_or_else(federation_stale_link)?;
     let permit = peer
         .mailbox_permit
@@ -217,7 +341,8 @@ async fn serve_federation_mailbox(
         .app
         .clone()
         .ok_or_else(federation_mailbox_unavailable)?;
-    run_blocking_api(move || {
+    let original = request.clone();
+    let result = run_blocking_api(move || {
         let _permit = permit;
         lease.with_current(&app, |inner, _| {
             federation_mailbox_central_locked(inner).map(|_| ())
@@ -242,6 +367,9 @@ async fn serve_federation_mailbox(
         })?;
         Ok(response)
     })
-    .await
-    .map(Json)
+    .await;
+    Ok(match result {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => federation_mailbox_error_response(&original, error),
+    })
 }

@@ -39,6 +39,12 @@ impl MailboxStore {
 
     fn federation_executor_wake_state(&self, message: &str) -> Result<String> {
         let connection = self.connection()?;
+        let mut reservations = self.executor_reservations.lock().expect("executor reservation mutex poisoned");
+        self.federation_executor_wake_state_on(&connection, message, &mut reservations)
+    }
+
+    fn federation_executor_wake_state_on(&self, connection: &rusqlite::Connection, message: &str,
+        reservations: &mut FederationExecutorReservationCache) -> Result<String> {
         let state: Option<String> = connection.query_row(
             "SELECT state FROM federation_mailbox_wake_obligations WHERE message_id=?1",
             [message], |row| row.get(0)).optional()?;
@@ -57,7 +63,7 @@ impl MailboxStore {
             Ok(binding) => binding,
             Err(_) => return Ok("remote wake pending; reason unsupported".into()),
         };
-        if self.executor_reservations.lock().expect("executor reservation mutex poisoned").stale(&target) {
+        if reservations.stale(&target) {
             return Ok("remote wake pending; reason stale_authority".into());
         }
         let wake = connection.query_row(
@@ -72,7 +78,13 @@ impl MailboxStore {
         if request.operation(1).is_err() {
             return Ok("remote wake pending; reason unsupported".into());
         }
-        let reserved = self.executor_reservations.lock().expect("executor reservation mutex poisoned").refresh(&connection)?;
+        let reserved = match reservations.refresh(connection) {
+            Ok(reserved) => reserved,
+            Err(error) if error.downcast_ref::<MailboxStoreError>().is_some_and(|error|
+                error.kind == MailboxStoreErrorKind::Capacity) =>
+                return Ok("remote wake pending; reservation scan incomplete".into()),
+            Err(error) => return Err(error),
+        };
         Ok(if reserved.iter().any(|(_, request)| request.wake.message_id == message) {
             "remote wake pending; awaiting matching durable receiver receipt"
         } else { "remote wake pending; reason capacity" }.into())

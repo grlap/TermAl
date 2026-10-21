@@ -33,8 +33,9 @@ impl FederationRpcRoute {
     // Only used after starting HTTP. A central append can have committed even
     // when its reply cannot be read, decoded, allocated or accepted locally.
     fn response_failure(&self, error: ApiError) -> ApiError {
-        if self.mailbox_lease().is_some() {
-            federation_mailbox_unknown_outcome(error.status, &error.message)
+        if let Self::Mailbox(_, request) = self {
+            federation_mailbox_read_advice(request,
+                federation_mailbox_unknown_outcome(error.status, &error.message))
         } else if matches!(self, Self::Binding(_, _)) {
             federation_binding_unknown_outcome()
         } else {

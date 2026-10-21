@@ -2,8 +2,8 @@
 // Does not authenticate channels or store mail and sender retry intents. New
 // domain protocol beside mailboxes.rs; standalone mailbox APIs stay unchanged.
 
-const FEDERATION_MAILBOX_SCHEMA_VERSION: &str = "1";
-const FEDERATION_MAILBOX_WIRE_VERSION: u16 = 1;
+const FEDERATION_MAILBOX_SCHEMA_VERSION: &str = "2";
+const FEDERATION_MAILBOX_WIRE_VERSION: u16 = 2;
 const FEDERATION_MAILBOX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 // Preserve the existing 200-message ceiling, including worst-case JSON escape
 // expansion of 256 KiB bodies and both 4 KiB metadata fields. This bound is
@@ -120,6 +120,14 @@ enum FederationMailboxOperation {
         limit: u64,
         issue_receipt: bool,
     },
+    ReadKeyed {
+        mailbox_id: String,
+        after_sequence: Option<u64>,
+        limit: u64,
+        issue_receipt: bool,
+        read_key: String,
+        resolve: bool,
+    },
     ReadMessage {
         message_id: String,
     },
@@ -141,6 +149,9 @@ struct FederationMailboxResponse {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FederationMailboxLimits {
+    page_bytes: usize,
+    frozen_keys: usize,
+    read_key_ttl_ms: u64,
     body_bytes: usize,
     metadata_bytes: usize,
     display_name_chars: usize,
@@ -152,6 +163,9 @@ struct FederationMailboxLimits {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FederationMailboxProtocol {
+    read_incarnation: String,
+    read_epoch_ms: u64,
+    read_key: Option<String>,
     protocol_version: u16,
     schema_version: String,
     central: FederationHostIdentity,
@@ -162,12 +176,18 @@ struct FederationMailboxProtocol {
     remote_wake_cause: String,
 }
 
-fn federation_mailbox_protocol(central: FederationHostIdentity) -> FederationMailboxProtocol {
+fn federation_mailbox_protocol(central: FederationHostIdentity, cache: &mut FederationMailboxReadCache) -> FederationMailboxProtocol {
     FederationMailboxProtocol {
+        read_incarnation: cache.incarnation.clone(),
+        read_epoch_ms: federation_mailbox_read_now_ms(),
+        read_key: cache.offer_key(),
         protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
         schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
         central,
         limits: FederationMailboxLimits {
+            page_bytes: FEDERATION_MAILBOX_PAGE_BYTES,
+            frozen_keys: FEDERATION_MAILBOX_FROZEN_KEYS,
+            read_key_ttl_ms: FEDERATION_MAILBOX_READ_TTL_MS,
             body_bytes: MAX_MAILBOX_BODY_BYTES,
             metadata_bytes: MAX_MAILBOX_METADATA_BYTES,
             display_name_chars: 160,

@@ -11,9 +11,7 @@ impl AppState {
         if request.protocol_version != FEDERATION_MAILBOX_WIRE_VERSION
             || request.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION
         {
-            return Err(ApiError::bad_request(
-                "unsupported central mailbox protocol or schema; negotiate before retrying",
-            ));
+            return Err(federation_mailbox_upgrade_required());
         }
         let central =
             federation_mailbox_central_locked(&self.inner.lock().expect("state mutex poisoned"))?;
@@ -23,7 +21,8 @@ impl AppState {
         if matches!(request.operation, FederationMailboxOperation::Protocol) {
             return federation_mailbox_response(
                 central.clone(),
-                &federation_mailbox_protocol(central),
+                &federation_mailbox_protocol(central,
+                    &mut self.mailbox_store.federation_reads.lock().expect("mailbox read cache poisoned")),
             );
         }
         let actor = request
@@ -144,21 +143,20 @@ impl AppState {
                 limit,
                 issue_receipt,
             } => {
-                let mut page = self
-                    .mailbox_store
-                    .read_range_authorized(
-                        &participant.session_id,
-                        &mailbox_id,
-                        after_sequence,
-                        limit.clamp(1, FEDERATION_MAILBOX_PAGE_LIMIT),
-                        issue_receipt,
-                        || authority.lock(),
-                    )
-                    .map_err(mailbox_api_error)?;
-                for message in &mut page.messages {
-                    self.federation_mailbox_message_cause(message);
+                if !issue_receipt {
+                    let page = self.capture_federation_mailbox_page(&authority, &mailbox_id,
+                        after_sequence, limit.clamp(1, FEDERATION_MAILBOX_PAGE_LIMIT), None)?;
+                    return federation_mailbox_response(central, &page);
                 }
-                page.reader_session_id = Some(participant.session_id);
+                let page = self.federation_mailbox_read_page(&authority, &mailbox_id,
+                    after_sequence, limit, issue_receipt, None, false)?;
+                federation_mailbox_response(central, &page)
+            }
+            FederationMailboxOperation::ReadKeyed {
+                mailbox_id, after_sequence, limit, issue_receipt, read_key, resolve,
+            } => {
+                let page = self.federation_mailbox_read_page(&authority, &mailbox_id,
+                    after_sequence, limit, issue_receipt, Some(read_key), resolve)?;
                 federation_mailbox_response(central, &page)
             }
             FederationMailboxOperation::ReadMessage { message_id } => {
@@ -219,40 +217,40 @@ impl AppState {
         let appended = self.mailbox_store
             .append_with_delivery(&input, Some(&delivery), || authority.lock())
             .map_err(mailbox_api_error)?;
-        if target.binding.identity.host_id == central.host_id {
-            let receipt = self.finish_mailbox_append_and_notify(
-                &participant.session_id, &target.binding.identity.session_id, &input, appended)?;
-            return federation_mailbox_response(central, &receipt);
-        }
         let MailboxAppendResult { mut receipt, finalization } = appended;
-        if !receipt.duplicate {
-            if let Err(error) = self.mailbox_store
-                .record_initial_dispatch_outcome(&receipt.message_id, "durableButNotWoken")
-            {
-                eprintln!("central mailbox message {} committed; dispatch outcome recording failed: {error:#}", receipt.message_id);
-            }
+        if target.binding.identity.host_id != central.host_id {
+            receipt.notification_cause = Some(FEDERATION_REMOTE_WAKE_CAUSE.to_owned());
         }
+        // The committed obligation owns notification. Never put a native queue
+        // commit, provider handoff or dispatch-finalization wait before this
+        // receipt. The supervisor also discovers the row after a lost kick.
+        let response = federation_mailbox_response(central, &receipt);
         drop(finalization);
         self.federation_executor_wake_signal.kick();
-        receipt.notification_cause = Some(FEDERATION_REMOTE_WAKE_CAUSE.to_owned());
-        federation_mailbox_response(central, &receipt)
+        response
     }
 
     fn federation_mailbox_message_cause(&self, message: &mut MailboxMessage) {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        if inner
+        let target_is_remote = inner
             .federation
             .mailbox_directory
             .get(&message.target_session_id)
-            .is_some_and(|target| target.binding.identity.host_id != target.binding.central.host_id)
-        {
-            drop(inner);
+            .map(|target| target.binding.identity.host_id != target.binding.central.host_id);
+        drop(inner);
+        if target_is_remote == Some(true) {
             if self.refresh_federation_executor_reservation_domain().is_err() {
                 message.notification_cause = Some("remote wake state unavailable; authority not durable".into());
                 return;
             }
             message.notification_cause = Some(self.mailbox_store.federation_executor_wake_state(&message.id)
                 .unwrap_or_else(|_| "remote wake state unavailable; ownership not inferred".to_owned()));
+        } else if target_is_remote == Some(false) {
+            match self.mailbox_store.native_mailbox_wake_pending(&message.id) {
+                Ok(true) => message.notification_cause = Some("committed; native wake pending".into()),
+                Ok(false) => {}
+                Err(_) => message.notification_cause = Some("committed; native wake state unavailable".into()),
+            }
         }
     }
 }

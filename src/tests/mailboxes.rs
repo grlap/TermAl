@@ -667,6 +667,7 @@ async fn mailbox_read_routes_reject_delegation_children_as_non_peers() {
         AxumPath((target_id.clone(), receipt.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
+            read_key: None,
             issue_receipt: true,
             after_sequence: Some(0),
             limit: 20,
@@ -908,6 +909,7 @@ async fn normal_mailbox_interactions_reactivate_stale_live_participants() {
         AxumPath((target_id.clone(), first.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
+            read_key: None,
             issue_receipt: true,
             after_sequence: Some(0),
             limit: 20,
