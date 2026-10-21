@@ -66,7 +66,15 @@ in Engram::Advisor's session, recorded verbatim):
      it to an unavailable Codex or Claude.
   2. The full gate is green on exactly that input, compiled from it, before
      every commit whether or not a commit prompt is shown.
-  3. The tasks carry the evidence needed to close them.
+  3. The tasks carry the evidence needed to close them. A criterion that
+     only the landing itself can satisfy, namely that the change is
+     committed, pushed, on master or installed, counts as carried when
+     conditions 1 and 2 hold and an independent acceptance evaluation of the
+     frozen tree found every other criterion, and every other part of that
+     criterion, met; a criterion that needs the build running, a restart, or
+     a live or remote observation is not one of these. The landing then
+     makes it true, and the item completes only after a post-landing
+     evaluation passes it.
 - Greg's earlier wording of the same rule (2026-09-12, to Termal::Fable):
   "jak review jest czyste mozna commit push sync"; and on 2026-09-25, to
   Termal::Opus: "git commit means also push and dolt push". A commit under
