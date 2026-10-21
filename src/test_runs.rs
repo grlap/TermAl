@@ -397,6 +397,20 @@ fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSumm
     summary
 }
 
+/// Membership only: the caller retains removal ordering, publication and the
+/// previous entries needed when a delta cannot be sent.
+fn test_run_removed_ids<'a>(
+    previous_ids: impl IntoIterator<Item = &'a str>,
+    current_ids: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    let current_ids: HashSet<&str> = current_ids.into_iter().collect();
+    previous_ids
+        .into_iter()
+        .filter(|id| !current_ids.contains(*id))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The index after a rescan whose deltas were not all sent: a run whose delta
 /// was not sent keeps its previous entry (stays absent if it was new, stays
 /// listed if it was removed), so the index never claims a change clients did
@@ -814,11 +828,10 @@ impl AppState {
             .iter()
             .map(|entry| (entry.summary.run_id.clone(), entry.clone()))
             .collect();
-        let removed: Vec<String> = before
-            .keys()
-            .filter(|run_id| !entries.iter().any(|entry| &entry.summary.run_id == *run_id))
-            .cloned()
-            .collect();
+        let removed = test_run_removed_ids(
+            before.keys().map(String::as_str),
+            entries.iter().map(|entry| entry.summary.run_id.as_str()),
+        );
         let changed: Vec<TestRunSummary> = entries
             .iter()
             // The summary carries the detail version, so a changed summary

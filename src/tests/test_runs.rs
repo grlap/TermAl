@@ -1024,6 +1024,90 @@ fn unsent_deltas_leave_the_previous_entries_in_the_index() {
 }
 
 #[test]
+fn test_run_membership_preserves_removed_id_semantics() {
+    let cases: &[(&str, &[&str], &[&str], &[&str])] = &[
+        ("both empty", &[], &[], &[]),
+        ("empty previous", &[], &["new"], &[]),
+        ("empty current", &["b", "a"], &[], &["a", "b"]),
+        ("unchanged", &["a", "b"], &["a", "b"], &[]),
+        ("reordered", &["b", "a"], &["a", "b"], &[]),
+        ("added", &["a"], &["a", "new"], &[]),
+        ("removed", &["c", "a", "b"], &["b"], &["a", "c"]),
+        (
+            "duplicate current",
+            &["a", "b", "c"],
+            &["b", "b", "new"],
+            &["a", "c"],
+        ),
+        ("case sensitive", &["Run", "run"], &["run"], &["Run"]),
+        (
+            "prefix distinct",
+            &["run", "run-1", "run-10"],
+            &["run-1"],
+            &["run", "run-10"],
+        ),
+    ];
+    for &(label, previous, current, expected) in cases {
+        let mut removed = test_run_removed_ids(previous.iter().copied(), current.iter().copied());
+        // Ordering belongs to the existing publication caller, not membership.
+        removed.sort();
+        let expected = expected.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        assert_eq!(removed, expected, "{label}");
+    }
+}
+
+#[test]
+fn test_run_membership_keeps_removal_publication_sorted() {
+    let fixture = RunFixture::new("membership-publication");
+    let runs = fixture.runs_dir();
+    let ids = ["test-z", "test-a", "test-m"];
+    let directories = ids
+        .iter()
+        .map(|run_id| {
+            write_run(
+                &runs,
+                run_id,
+                full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+                Some(passed_results()),
+            )
+        })
+        .collect::<Vec<_>>();
+    fixture.refresh(&[]);
+    assert_eq!(fixture.summaries().len(), ids.len());
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        // Exercise removal itself rather than retained-history fallback.
+        for id in ids {
+            inner.test_run_compacted.remove(id);
+            assert!(test_run_artifact_fallback(&inner, id).is_none());
+        }
+    }
+    let project_root = fixture.root.canonicalize().unwrap();
+    for directory in directories {
+        let directory = directory.canonicalize().unwrap();
+        assert!(directory.starts_with(&project_root) && directory != project_root);
+        fs::remove_dir_all(directory).unwrap();
+    }
+    let removed = Mutex::new(Vec::new());
+    fixture
+        .state
+        .refresh_test_runs_with(&|_, _| false, &|inner, event| {
+            match event {
+                DeltaEvent::TestRunRemoved { run_id, .. } => {
+                    removed.lock().unwrap().push(run_id.clone());
+                }
+                _ => panic!("this fixture should publish only removed runs"),
+            }
+            fixture.state.publish_delta_locked(inner, event.clone());
+        });
+    assert_eq!(
+        removed.into_inner().unwrap(),
+        ["test-a", "test-m", "test-z"].map(str::to_owned).to_vec()
+    );
+    assert!(fixture.summaries().is_empty());
+}
+
+#[test]
 fn a_duplicate_run_id_keeps_the_first_directory() {
     let fixture = RunFixture::new("duplicate");
     let runs = fixture.runs_dir();
