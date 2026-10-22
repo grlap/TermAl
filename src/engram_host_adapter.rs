@@ -1708,6 +1708,13 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                 };
                 Ok(json!({
                     "phase": phase,
+                    "open_grant_state": if session.begun_grant_id.is_some() {
+                        Some("begun")
+                    } else if session.issued_grant_id.is_some() {
+                        Some("issued")
+                    } else {
+                        None
+                    },
                     "open_grant_id": session
                         .begun_grant_id
                         .as_ref()

@@ -831,13 +831,16 @@ fn disabled_control_after_restart_surfaces_retained_authorization_until_cancel()
             .id
             .clone()
     };
-    state.resume_session_queue(&session).unwrap();
+    let error = state
+        .resume_session_queue(&session)
+        .err()
+        .expect("control off must explain its hold");
+    assert_eq!(error.status, StatusCode::CONFLICT);
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         assert!(record.session.preview.contains("Engram control is off"));
-        assert!(record.queued_prompts[0].engram_interrupted);
-        assert!(!record.engram.recovered_admission);
+        assert!(record.queued_prompts[0].is_engram_retained());
     }
     assert_eq!(operations(&transport), ["session_bind", "turn_evaluate"]);
     assert!(receiver.try_recv().is_err());
@@ -848,6 +851,283 @@ fn disabled_control_after_restart_surfaces_retained_authorization_until_cancel()
         receiver.try_recv().unwrap(),
         CodexRuntimeCommand::Prompt { .. }
     ));
+}
+
+struct LostAdmissionReplyTransport {
+    inner: Arc<StatefulEngramControlTransport>,
+    operation: &'static str,
+    lose_next: AtomicBool,
+}
+
+impl EngramControlTransport for LostAdmissionReplyTransport {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: Duration,
+    ) -> std::result::Result<Value, EngramTransportError> {
+        let reply = self.inner.request(connection, request, timeout)?;
+        if serde_json::to_value(request).unwrap()["operation"] == self.operation
+            && self.lose_next.swap(false, Ordering::SeqCst)
+        {
+            return Err(EngramTransportError::deadline(
+                "applied admission reply lost",
+            ));
+        }
+        Ok(reply)
+    }
+
+    fn shutdown_session(&self, session_id: &str) {
+        self.inner.shutdown_session(session_id);
+    }
+}
+
+#[test]
+fn reenabled_control_resume_recovers_retained_evaluate_without_cancel() {
+    for lost_operation in ["session_bind", "turn_evaluate"] {
+        let (state, session, receiver, _) = root_fixture([]);
+        let (project_id, root, settings) = {
+            let mut inner = state.inner.lock().unwrap();
+            let project = inner
+                .projects
+                .iter_mut()
+                .find(|p| p.engram.is_some())
+                .unwrap();
+            let root = PathBuf::from(&project.root_path);
+            fs::write(root.join(".engram-project"), "fixture-ready\n").unwrap();
+            let settings = real_fixture_engram_settings(&root);
+            project.engram = Some(settings.clone());
+            (project.id.clone(), root, settings)
+        };
+        let _readiness = stage_test_engram_readiness_without_launch(&[&root]);
+        // Start with the same validated store identity that the public update
+        // writes, so the test changes only the control tier, not authority.
+        let mut settings = settings;
+        let project = state
+            .inner
+            .lock()
+            .unwrap()
+            .find_project(&project_id)
+            .unwrap()
+            .clone();
+        settings.authority_store_key = Some(
+            validate_engram_project_enablement(
+                &project,
+                &settings,
+                &state.engram_host_launch_workdir(),
+            )
+            .unwrap(),
+        );
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project_id)
+            .unwrap()
+            .engram = Some(settings.clone());
+        let transport = Arc::new(LostAdmissionReplyTransport {
+            inner: StatefulEngramControlTransport::new(),
+            operation: lost_operation,
+            lose_next: AtomicBool::new(true),
+        });
+        state.install_control_test_transport(transport.clone());
+        deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
+        assert!(receiver.try_recv().is_err());
+        let (prompt_id, original_request) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            (
+                record.queued_prompts[0].pending_prompt.id.clone(),
+                transport.inner.requests().last().unwrap().request.clone(),
+            )
+        };
+        let mut disabled = settings.clone();
+        disabled.turn_gated_control = false;
+        state
+            .update_project_engram_settings(&project_id, disabled)
+            .unwrap();
+        let error = state
+            .resume_session_queue(&session)
+            .err()
+            .expect("control off holds the retained intent");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(receiver.try_recv().is_err());
+        let count_before_enable = transport.inner.requests().len();
+        state
+            .update_project_engram_settings(&project_id, settings)
+            .unwrap();
+        assert_eq!(
+            transport.inner.requests().len(),
+            count_before_enable,
+            "settings must not rotate the retained binding before Resume"
+        );
+        {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
+            assert!(record.queued_prompts[0].engram_interrupted);
+        }
+        state
+            .resume_session_queue(&session)
+            .expect("retained prompt can resume");
+        assert!(matches!(
+            receiver
+                .try_recv()
+                .expect("Resume sends the retained prompt"),
+            CodexRuntimeCommand::Prompt { .. }
+        ));
+        assert!(
+            receiver.try_recv().is_err(),
+            "no duplicate provider handoff"
+        );
+        state.resume_session_queue(&session).unwrap();
+        assert!(
+            receiver.try_recv().is_err(),
+            "repeated Resume cannot resend an active turn"
+        );
+        let requests = transport.inner.requests();
+        let replays: Vec<_> = requests
+            .iter()
+            .filter(|r| r.request["operation"] == lost_operation)
+            .collect();
+        assert_eq!(replays.len(), 2, "only the exact lost operation is retried");
+        assert_eq!(replays[1].request, original_request);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|r| r.request["operation"] == "turn_begin")
+                .count(),
+            1
+        );
+        assert!(transport.inner.grant_state(&session).1.is_some());
+        let inner = state.inner.lock().unwrap();
+        assert!(
+            inner.sessions[inner.find_session_index(&session).unwrap()]
+                .queued_prompts
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn interrupted_head_without_wire_intent_requires_recorded_begin_format() {
+    for records_begins in [false, true] {
+        let (state, session, _, _) = root_fixture([]);
+        queue_test_engram_prompt(
+            &state,
+            &session,
+            "Stopped before admission",
+            QueuedPromptSource::User,
+            None,
+        );
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let record = &mut inner.sessions[index];
+        record.engram.begins_recorded = records_begins;
+        record.queued_prompts[0].engram_interrupted = true;
+        record.queued_prompts[0].promotion_disposition_known = true;
+        assert!(!record.queued_prompts[0].has_engram_intent());
+        assert!(
+            matches!(
+                engram_begin_preparation_resume(record),
+                EngramBeginPreparationResume::Releasable
+            ) == records_begins
+        );
+    }
+}
+
+#[test]
+fn interrupted_retained_resume_preserves_unresolved_grants_and_authority() {
+    for problem in ["begun", "uncertain", "different_settings"] {
+        let (state, session, receiver, transport) = root_fixture([
+            bind_reply("token"),
+            ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
+                "lost evaluate",
+            ))),
+        ]);
+        deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
+        let before = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
+            record.engram = EngramSessionState::default();
+            let head = record.queued_prompts.front_mut().unwrap();
+            head.engram_interrupted = true;
+            match problem {
+                "begun" => {
+                    head.engram_evaluate.as_mut().unwrap().begun_grant_id =
+                        Some("possibly-delivered".into())
+                }
+                "uncertain" => record.engram.uncertain_grant_id = Some("uncertain".into()),
+                "different_settings" => {
+                    head.engram_evaluate.as_mut().unwrap().connection.home = "different-home".into()
+                }
+                _ => unreachable!(),
+            }
+            serde_json::to_value(&record.queued_prompts[0].engram_evaluate).unwrap()
+        };
+        let error = state
+            .resume_session_queue(&session)
+            .err()
+            .expect("unresolved authorization must be refused explicitly");
+        assert_eq!(error.status, StatusCode::CONFLICT, "{problem}");
+        assert!(
+            receiver.try_recv().is_err(),
+            "{problem}: no provider handoff"
+        );
+        assert_eq!(
+            operations(&transport),
+            ["session_bind", "turn_evaluate"],
+            "{problem}"
+        );
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.queued_prompts[0].engram_interrupted);
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts[0].engram_evaluate).unwrap(),
+            before
+        );
+    }
+}
+
+#[test]
+fn resumed_cold_recovery_reports_a_remotely_begun_turn_without_delivery() {
+    let (state, session, receiver, transport) = root_fixture([
+        bind_reply("token"),
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline("lost evaluate"))),
+        ScriptedEngramControlResponse::Reply(Ok(json!({
+            "phase": "turn_open", "open_grant_id": "remote-grant", "open_grant_state": "begun"
+        }))),
+        checkpoint_reply("remote-grant"),
+    ]);
+    deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].engram = EngramSessionState::default();
+        inner.sessions[index].queued_prompts[0].engram_interrupted = true;
+    }
+    let error = state
+        .resume_session_queue(&session)
+        .err()
+        .expect("Resume must expose the recovered hold");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(
+        operations(&transport),
+        [
+            "session_bind",
+            "turn_evaluate",
+            "session_status",
+            "turn_checkpoint"
+        ]
+    );
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert!(record.queued_prompts[0].engram_interrupted);
+    assert!(record.orchestrator_auto_dispatch_blocked);
 }
 
 /// Commits, through the real writer, the prepared-Begin acknowledgement that
@@ -952,7 +1232,11 @@ fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
         inner.sessions[index].engram.active_grant_id = None;
         inner.recover_interrupted_sessions();
     }
-    state.resume_session_queue(&session).unwrap();
+    let error = state
+        .resume_session_queue(&session)
+        .err()
+        .expect("known interrupted delivery is an explicit hold");
+    assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(
         receiver.try_recv().is_err(),
         "never deliver the same prompt twice"

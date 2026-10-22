@@ -77,9 +77,18 @@ fn ambiguous_dispatch_card_commit_is_an_error_and_never_reaches_provider() {
     assert!(record.session.preview.contains("persistence unknown"));
     drop(inner);
 
-    state
+    // A retained, possibly delivered owner is an explicit refusal even when
+    // the optional preview write meets the same broken store.
+    let refusal = state
         .resume_session_queue(&session)
-        .expect("public Resume should safely preserve a reconciliation-only owner");
+        .err()
+        .expect("retained head must refuse Resume");
+    assert_eq!(refusal.status, StatusCode::CONFLICT);
+    assert!(
+        refusal
+            .message
+            .contains("retained prompt cannot resume until its admission state is reconciled")
+    );
     assert!(receiver.try_recv().is_err());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
@@ -256,9 +265,18 @@ fn public_root_send_surfaces_post_begin_fence_uncertainty_and_resume_requires_re
         assert_eq!(record.queued_prompts.len(), 1);
         assert!(record.queued_prompts[0].engram_interrupted);
     }
-    state
+    // Resume must explain that reconciliation still owns the head; a silent
+    // success would claim progress while preserving the same paused queue.
+    let refusal = state
         .resume_session_queue(&session)
-        .expect("public Resume should no-op on a reconciliation-only owner");
+        .err()
+        .expect("retained head must refuse Resume");
+    assert_eq!(refusal.status, StatusCode::CONFLICT);
+    assert!(
+        refusal
+            .message
+            .contains("retained prompt cannot resume until its admission state is reconciled")
+    );
     assert!(receiver.try_recv().is_err());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
@@ -1614,7 +1632,14 @@ fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
                 )
             };
             let requests_before = transport.requests().len();
-            state.resume_session_queue(&session).unwrap();
+            assert_eq!(
+                state
+                    .resume_session_queue(&session)
+                    .err()
+                    .expect("retained head must refuse Resume")
+                    .status,
+                StatusCode::CONFLICT
+            );
             if child {
                 state
                     .refresh_delegation_for_child_session(&session)

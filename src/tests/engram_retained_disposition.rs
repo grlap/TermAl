@@ -1075,7 +1075,14 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
         state
             .update_project_engram_settings(&project, settings)
             .unwrap();
-        state.resume_session_queue(&session).unwrap();
+        assert_eq!(
+            state
+                .resume_session_queue(&session)
+                .err()
+                .expect("retained head must refuse Resume")
+                .status,
+            StatusCode::CONFLICT
+        );
         assert!(matches!(
             state
                 .dispatch_turn(
@@ -1186,7 +1193,14 @@ fn degraded_unknown_and_terminal_store_faults_remain_cancelable_without_retry() 
                 )
             };
             let calls = transport.requests().len();
-            state.resume_session_queue(&session).unwrap();
+            assert_eq!(
+                state
+                    .resume_session_queue(&session)
+                    .err()
+                    .expect("retained head must refuse Resume")
+                    .status,
+                StatusCode::CONFLICT
+            );
             if child {
                 state
                     .refresh_delegation_for_child_session(&session)
@@ -2000,7 +2014,14 @@ fn writer_backed_begun_prehandoff_restart_never_resends_provider_prompt() {
     state.select_test_scripted_engram_budget_clock();
     let recovery_transport = ScriptedEngramControlTransport::new([status_reply("ready")]);
     state.install_control_test_transport(recovery_transport.clone());
-    state.resume_session_queue(&session).unwrap();
+    assert_eq!(
+        state
+            .resume_session_queue(&session)
+            .err()
+            .expect("retained head must refuse Resume")
+            .status,
+        StatusCode::CONFLICT
+    );
     assert!(receiver.try_recv().is_err());
     assert_eq!(operations(&recovery_transport), ["session_status"]);
     let inner = state.inner.lock().unwrap();

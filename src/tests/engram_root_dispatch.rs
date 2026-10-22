@@ -298,7 +298,14 @@ fn root_cold_begun_recovery_checkpoints_but_never_resends_retained_prompt() {
         let index = inner.find_session_index(&session).unwrap();
         inner.sessions[index] = restored;
     }
-    state.resume_session_queue(&session).unwrap();
+    assert_eq!(
+        state
+            .resume_session_queue(&session)
+            .err()
+            .expect("retained head must refuse Resume")
+            .status,
+        StatusCode::CONFLICT
+    );
     assert!(receiver.try_recv().is_err());
     assert_eq!(
         operations(&transport),

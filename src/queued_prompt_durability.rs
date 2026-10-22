@@ -429,6 +429,21 @@ impl AppState {
         if let Some(refusal) = queued_head_durability_resume_refusal(record) {
             return UnstartedResumeStep::Refuse(refusal);
         }
+        // Cold recovery can discover a previously begun turn after Resume's
+        // initial check. Report the retained hold instead of a silent success.
+        if checked_head.is_some_and(|id| {
+            record
+                .queued_prompts
+                .front()
+                .is_some_and(|head| head.pending_prompt.id == id)
+        }) && engram_queue_head_refused_as_interrupted(record)
+            && !engram_retry_attempt_in_flight(record)
+        {
+            return UnstartedResumeStep::Refuse(format!(
+                "Engram recovery retained this prompt: {} Reconcile its prior turn or cancel the retained prompt before continuing.",
+                record.session.preview,
+            ));
+        }
         let changed_to_saved_entry = record.queued_prompts.front().is_some_and(|head| {
             checked_head != Some(head.pending_prompt.id.as_str())
                 && queued_prompt_kept_standalone(record, head)

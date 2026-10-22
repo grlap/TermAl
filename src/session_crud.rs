@@ -3144,6 +3144,17 @@ impl AppState {
             final_session_ids
                 .iter()
                 .filter_map(|session_id| {
+                    // A retained wire intent owns its original binding until
+                    // Resume reconciles it. A fresh bind here would rotate the
+                    // token and expire an issued grant before recovery can read it.
+                    if inner.find_session_index(session_id).is_some_and(|index| {
+                        inner.sessions[index]
+                            .queued_prompts
+                            .front()
+                            .is_some_and(QueuedPromptRecord::has_engram_intent)
+                    }) {
+                        return None;
+                    }
                     match project_engram_binding_target_during_owned_reset_locked(
                         &inner,
                         session_id,

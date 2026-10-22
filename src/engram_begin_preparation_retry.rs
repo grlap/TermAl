@@ -646,6 +646,10 @@ enum EngramBeginPreparationResume {
     /// begin is sent as that exact begin, never re-admitted afresh), so its
     /// grant is kept.
     ReleasablePending,
+    /// Settings interrupted a retained bind/evaluate. Keep its original
+    /// authority and recover it exactly, including the cold status check;
+    /// interruption alone is not evidence that a grant was never begun.
+    ReconcileRetained,
     /// A prepared begin with no pending marker of this host, as a restart
     /// leaves one, whatever its card's cause: it may have been sent, so it
     /// stays held and Resume says why.
@@ -684,6 +688,34 @@ fn engram_begin_preparation_resume(record: &SessionRecord) -> EngramBeginPrepara
         _ if engram_begin_preparation_newest_cause(record) => {
             EngramBeginPreparationResume::Releasable
         }
+        // This session records Begin ownership on the head before sending.
+        // Thus no head intent proves no Begin was sent only for this format;
+        // legacy sessions without begins_recorded retain the conservative hold.
+        _ if !head.has_engram_intent()
+            && engram.begins_recorded
+            && !engram_retry_attempt_in_flight(record)
+            && !record.runtime_stop_in_progress
+            && !matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            ) =>
+        {
+            EngramBeginPreparationResume::Releasable
+        }
+        // A settings reset clears transport failure state. An unresolved
+        // protocol/store fault on this live binding is not a retry grant.
+        _ if head.has_engram_intent()
+            && engram.consecutive_transport_failures == 0
+            && engram.disabled_reason.is_none()
+            && !engram_retry_attempt_in_flight(record)
+            && !record.runtime_stop_in_progress
+            && !matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            ) =>
+        {
+            EngramBeginPreparationResume::ReconcileRetained
+        }
         _ => EngramBeginPreparationResume::NotHeld,
     }
 }
@@ -708,6 +740,31 @@ fn engram_begin_preparation_newest_cause(record: &SessionRecord) -> bool {
 }
 
 impl AppState {
+    fn refuse_engram_queue_resume_locked(
+        &self,
+        inner: &mut StateInner,
+        index: usize,
+        reason: &str,
+    ) -> ApiError {
+        if inner.sessions[index].session.preview == reason {
+            return ApiError::conflict(reason);
+        }
+        let previous_preview = std::mem::replace(
+            &mut inner.sessions[index].session.preview,
+            reason.to_owned(),
+        );
+        inner.stamp_session_at_index(index);
+        if let Err(error) = self.commit_locked(inner) {
+            inner.sessions[index].session.preview = previous_preview;
+            // Refusing delivery is independent of saving its explanatory preview.
+            // A broken store must not turn a safety refusal into a server error.
+            return ApiError::conflict(format!(
+                "{reason}; recovery status could not be saved: {error:#}"
+            ));
+        }
+        ApiError::conflict(reason)
+    }
+
     /// Records, under the lock, that `owner`'s head had a prepared begin
     /// withheld: its first such hold, from which its admission budget is
     /// enforced (a head that already has one keeps it), and the grant of a
@@ -949,6 +1006,49 @@ impl AppState {
         };
         // A new window starts on the wall time its deadline is measured on.
         let wall_now = inner.engram_budget_clock_snapshot().wall_now();
+        if owner.is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+            return Ok(None);
+        }
+        let gated = Self::engram_session_requires_dispatch_card_locked(&inner, session_id);
+        if !gated
+            && inner.sessions[index]
+                .queued_prompts
+                .front()
+                .is_some_and(QueuedPromptRecord::is_engram_retained)
+        {
+            return Err(self.refuse_engram_queue_resume_locked(&mut inner, index,
+                "Engram control is off for this project; enable it to reconcile the retained prompt, or cancel it"));
+        }
+        let reconcile = engram_begin_preparation_resume(&inner.sessions[index])
+            == EngramBeginPreparationResume::ReconcileRetained;
+        // The original store and settings own a retained request. Never turn
+        // an explicit Resume into authorization on a different authority.
+        if reconcile && gated {
+            let target = Self::engram_binding_target_for_session_shape_locked(
+                &inner, session_id, true,
+            )
+            .map_err(|error| ApiError::conflict(format!("Engram recovery unavailable: {error}")))?
+            .ok_or_else(|| {
+                ApiError::conflict(
+                    "Engram recovery has no binding; restore the original settings before resuming",
+                )
+            })?;
+            let head = inner.sessions[index]
+                .queued_prompts
+                .front()
+                .expect("retained head");
+            let matches = head.engram_bind.as_ref().is_none_or(|bind| {
+                bind.connection == target.connection
+                    && bind.settings.same_admission_settings(&target.settings)
+            }) && head.engram_evaluate.as_ref().is_none_or(|evaluate| {
+                evaluate.connection == target.connection
+                    && evaluate.settings.same_admission_settings(&target.settings)
+            });
+            if !matches {
+                return Err(self.refuse_engram_queue_resume_locked(&mut inner, index,
+                    "Engram retained authorization belongs to different settings; restore the original settings to reconcile this prompt, or cancel it"));
+            }
+        }
         let record = &mut inner.sessions[index];
         if owner.is_some_and(|owner| !owner.matches(record)) {
             return Ok(None);
@@ -964,6 +1064,14 @@ impl AppState {
         }
         match engram_begin_preparation_resume(record) {
             EngramBeginPreparationResume::NotHeld => {
+                if gated
+                    && engram_queue_head_refused_as_interrupted(record)
+                    && !record.engram.recovered_admission
+                {
+                    return Err(self.refuse_engram_queue_resume_locked(&mut inner, index,
+                        "Engram retained prompt cannot resume until its admission state is reconciled; the prompt remains queued",
+                    ));
+                }
                 // Accepted for the ordinary Resume, which admits a head that
                 // is not interrupted while control is enabled: an ended or
                 // spent window is replaced by one new window, stamped so the
@@ -990,7 +1098,8 @@ impl AppState {
                 ));
             }
             EngramBeginPreparationResume::Releasable
-            | EngramBeginPreparationResume::ReleasablePending => {}
+            | EngramBeginPreparationResume::ReleasablePending
+            | EngramBeginPreparationResume::ReconcileRetained => {}
         }
         let keep_pending = engram_begin_preparation_resume(record)
             == EngramBeginPreparationResume::ReleasablePending;
@@ -1000,34 +1109,49 @@ impl AppState {
                  held. Nothing was sent. Cancel it before continuing."
             )));
         }
-        if keep_pending {
-            // This host's pending begin was never sent: the head is released
-            // for that exact begin, which the drain acknowledges again and
-            // replays. Its issued grant must survive for it, so no rebind
-            // (armed by the Stop) may expire it. This accepted Resume opens
-            // one new window, keeping the pending begin, in the same write.
+        if keep_pending || reconcile {
+            // Preserve the exact pending begin or retained bind/evaluate.
+            // Reconciliation checks remote status before proceeding; a
+            // rebind here could expire the grant being recovered. Open one
+            // explicit Resume window in the same saved transition.
             let head = record.queued_prompts.front_mut().expect("a held head");
             let saved = (
                 head.engram_interrupted,
                 head.engram_waiting,
                 record.engram.rebind_required,
                 record.engram.begin_preparation_lineage.clone(),
+                record.engram.recovered_admission,
+                record.engram.routing_token.clone(),
             );
             head.engram_interrupted = false;
             head.engram_waiting = true;
             record.engram.rebind_required = false;
+            if reconcile {
+                record.engram.recovered_admission = true;
+                if let Some(evaluate) = &head.engram_evaluate
+                    && let EngramControlRequest::TurnEvaluate { routing_token, .. } =
+                        &evaluate.request
+                {
+                    // The reset may have lost the session mirror. Recovery
+                    // verifies this exact token before any new begin; the
+                    // subsequent delivery preparation needs the same mirror.
+                    record.engram.routing_token = Some(routing_token.clone());
+                }
+            }
             renew_engram_admission_budget_window(record, wall_now);
             sync_pending_prompts(record);
             inner.stamp_session_at_index(index);
             if let Err(error) = self.commit_locked(&mut inner) {
                 let record = &mut inner.sessions[index];
-                let (interrupted, waiting, rebind, lineage) = saved;
+                let (interrupted, waiting, rebind, lineage, recovered, routing) = saved;
                 if let Some(head) = record.queued_prompts.front_mut() {
                     head.engram_interrupted = interrupted;
                     head.engram_waiting = waiting;
                 }
                 record.engram.rebind_required = rebind;
                 record.engram.begin_preparation_lineage = lineage;
+                record.engram.recovered_admission = recovered;
+                record.engram.routing_token = routing;
                 sync_pending_prompts(record);
                 return Err(ApiError::internal(format!(
                     "Engram: the held prompt could not be released, because its state could \
