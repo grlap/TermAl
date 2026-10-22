@@ -24,6 +24,21 @@ struct FederationPlacement {
     state: FederationPlacementState,
 }
 
+// Permanent retirement is shared by admission accounting and wake reservations.
+// Transport, verification and settings changes only hold a current reservation.
+fn federation_placement_reserves_capacity(
+    domain: &FederationState,
+    placement: &FederationPlacement,
+) -> bool {
+    placement.state != FederationPlacementState::Completed
+        && domain.local.as_ref() == Some(&placement.peer.local)
+        && domain.peers.get(&placement.identity.host_id).is_some_and(|peer| {
+            peer.identity == placement.peer.peer
+                && peer.enrollment_generation == placement.peer.enrollment_generation
+                && peer.membership != FederationMembershipState::Revoked
+        })
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 fn federation_placement_authority(
     domain: &FederationState,
@@ -136,17 +151,18 @@ impl AppState {
                 {
                     if old.identity.session_id == session_id {
                         generation = generation.max(old.placement_generation);
-                        if old.state != FederationPlacementState::Completed {
-                            return Err(ApiError::conflict(
-                                "session already has an unresolved placement",
-                            ));
-                        }
                     }
-                    if old.state != FederationPlacementState::Completed {
-                        sessions += 1;
-                        builds += u64::from(old.build_slots);
-                        gates += u64::from(old.gate_slots);
+                    if !federation_placement_reserves_capacity(domain, old) {
+                        continue;
                     }
+                    if old.identity.session_id == session_id {
+                        return Err(ApiError::conflict(
+                            "session already has an unresolved placement",
+                        ));
+                    }
+                    sessions += 1;
+                    builds += u64::from(old.build_slots);
+                    gates += u64::from(old.gate_slots);
                 }
                 if sessions >= u64::from(peer.capacity.max_sessions)
                     || builds + u64::from(build_slots) > u64::from(peer.capacity.build_slots)
@@ -217,7 +233,7 @@ impl AppState {
     }
 
     /// Only a current exact runtime owner may reconcile its reservation.
-    /// Disconnection, stale liveness and revocation never release capacity.
+    /// Retirement changes accounting only; it never authorizes reconciliation.
     fn reconcile_federation_placement(
         &self,
         expected: &FederationPlacement,

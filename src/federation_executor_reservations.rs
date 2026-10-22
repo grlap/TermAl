@@ -124,13 +124,7 @@ fn federation_executor_reservation_domain_locked(inner: &StateInner)
     let mut current = Vec::new();
     let mut identities = BTreeMap::new();
     for (key, placement) in &inner.federation.placements {
-        let peer = inner.federation.peers.get(&placement.identity.host_id);
-        let valid = placement.state != FederationPlacementState::Completed
-            && central.as_ref() == Some(&placement.peer.local)
-            && peer.is_some_and(|peer|
-                peer.identity == placement.peer.peer
-                    && peer.enrollment_generation == placement.peer.enrollment_generation
-                    && peer.membership != FederationMembershipState::Revoked);
+        let valid = federation_placement_reserves_capacity(&inner.federation, placement);
         let binding = FederationMailboxBinding { central: placement.peer.local.clone(),
             identity: placement.identity.clone(), placement_generation: placement.placement_generation };
         identities.insert(key.clone(), (binding.clone(), placement.peer.enrollment_generation, valid));

@@ -321,6 +321,166 @@ fn federation_revoke_retains_reservations_and_refuses_every_old_principal() {
 }
 
 #[test]
+fn federation_retired_enrollment_releases_placement_capacity() {
+    let state = central();
+    let record = peer(48001);
+    assert_eq!(record.capacity.max_sessions, 1);
+    let first = active(&state, record.clone());
+    let retired = reserve(&state, &first, "retired", "old-root").unwrap();
+    let original = serde_json::to_vec(&retired).unwrap();
+    let full = reserve(&state, &first, "before-reenrollment", "another-root").unwrap_err();
+    assert_eq!(full.status, StatusCode::CONFLICT);
+    assert_eq!(full.message, "satellite declared capacity is fully reserved");
+
+    // Re-enrollment retires the old principal without completing its record.
+    let current = active(&state, record);
+    assert!(current.enrollment_generation > first.enrollment_generation);
+    {
+        let inner = state.inner.lock().unwrap();
+        let domain = federation_executor_reservation_domain_locked(&inner).unwrap();
+        assert!(domain.current.is_empty());
+        assert_eq!(
+            serde_json::to_vec(&inner.federation.placements["retired"]).unwrap(),
+            original
+        );
+    }
+    assert!(state.ensure_federation_placement_current(&retired).is_err());
+    assert!(state.reconcile_federation_placement(&retired, true).is_err());
+    assert!(
+        state
+            .validate_federation_session_assertion(&current, &retired.identity)
+            .is_err()
+    );
+
+    let fresh = reserve(&state, &current, "fresh", "fresh-root")
+        .expect("retired enrollment must not consume the single declared placement slot");
+    assert!(state.ensure_federation_placement_current(&fresh).is_ok());
+    let full = reserve(&state, &current, "overflow", "third-root").unwrap_err();
+    assert_eq!(full.status, StatusCode::CONFLICT);
+    assert_eq!(full.message, "satellite declared capacity is fully reserved");
+    let inner = state.inner.lock().unwrap();
+    assert_eq!(inner.federation.placements.len(), 2);
+    assert_eq!(
+        serde_json::to_vec(&inner.federation.placements["retired"]).unwrap(),
+        original
+    );
+    let domain = federation_executor_reservation_domain_locked(&inner).unwrap();
+    assert_eq!(domain.current.len(), 1);
+    assert_eq!(domain.current[0].identity, fresh.identity);
+}
+
+#[test]
+fn federation_retired_same_session_keeps_generation_and_stale_authority_fences() {
+    let state = central();
+    let record = peer(48001);
+    let first = active(&state, record.clone());
+    let retired = reserve(&state, &first, "retired", "same-root").unwrap();
+    let current = active(&state, record);
+    let fresh = reserve(&state, &current, "fresh", "same-root").unwrap();
+    assert!(fresh.placement_generation > retired.placement_generation);
+    assert_ne!(fresh.identity.creation_id, retired.identity.creation_id);
+    assert_eq!(reserve(&state, &current, "fresh", "same-root").unwrap(), fresh);
+    let duplicate = reserve(&state, &current, "duplicate", "same-root").unwrap_err();
+    assert_eq!(duplicate.message, "session already has an unresolved placement");
+    assert!(state.ensure_federation_placement_current(&retired).is_err());
+    assert!(state.reconcile_federation_placement(&retired, true).is_err());
+    assert!(
+        state
+            .validate_federation_session_assertion(&current, &retired.identity)
+            .is_err()
+    );
+    assert_eq!(state.inner.lock().unwrap().federation.placements["retired"], retired);
+}
+
+#[test]
+fn federation_current_reservation_survives_settings_and_link_recovery() {
+    for uncertain in [false, true] {
+        let state = central();
+        let initial = active(&state, peer(48001));
+        let original = reserve(&state, &initial, "retained", "old-root").unwrap();
+        if uncertain {
+            state.reconcile_federation_placement(&original, false).unwrap();
+        }
+        let retained = state.inner.lock().unwrap().federation.placements["retained"].clone();
+        let mut settings = state.inner.lock().unwrap().preferences.federation.clone();
+        settings.enabled = false;
+        state.configure_federation(settings.clone()).unwrap();
+        {
+            let inner = state.inner.lock().unwrap();
+            let domain = federation_executor_reservation_domain_locked(&inner).unwrap();
+            assert_eq!(domain.current.len(), 1);
+            assert_eq!(domain.current[0].identity, retained.identity);
+        }
+        settings.enabled = true;
+        state.configure_federation(settings).unwrap();
+        let before = state.federation_peer_snapshot(&initial.peer.host_id).unwrap();
+        let connected = state
+            .federation_peer_connected(&before, Uuid::new_v4().to_string())
+            .unwrap();
+        assert_eq!(connected.enrollment_generation, initial.enrollment_generation);
+        assert!(connected.transport_generation > initial.transport_generation);
+        assert!(state.ensure_federation_placement_current(&retained).is_err());
+        state.verify_federation_peer(&connected, checks()).unwrap();
+        let verified = state.federation_peer_snapshot(&initial.peer.host_id).unwrap();
+        state.transition_federation_peer(&verified, FederationMembershipState::Active).unwrap();
+        let current = state.federation_peer_snapshot(&initial.peer.host_id).unwrap();
+        let full = reserve(&state, &current, "overflow", "fresh-root").unwrap_err();
+        assert_eq!(full.message, "satellite declared capacity is fully reserved");
+        let inner = state.inner.lock().unwrap();
+        assert_eq!(inner.federation.placements.len(), 1);
+        assert_eq!(inner.federation.placements["retained"], retained);
+        assert_eq!(federation_executor_reservation_domain_locked(&inner).unwrap().current.len(), 1);
+    }
+}
+
+#[test]
+fn federation_retired_enrollment_releases_build_and_gate_capacity() {
+    let state = central();
+    let mut record = peer(48001);
+    record.capacity.max_sessions = 2;
+    let first = active(&state, record.clone());
+    let retired = state
+        .reserve_federation_placement(&first, "retired".to_owned(), "old-root".to_owned(), 1, 1)
+        .unwrap();
+    let current = active(&state, record);
+    state
+        .reserve_federation_placement(&current, "fresh".to_owned(), "fresh-root".to_owned(), 1, 1)
+        .unwrap();
+    for (key, builds, gates) in [("build-overflow", 1, 0), ("gate-overflow", 0, 1)] {
+        let full = state
+            .reserve_federation_placement(&current, key.to_owned(), key.to_owned(), builds, gates)
+            .unwrap_err();
+        assert_eq!(full.message, "satellite declared capacity is fully reserved");
+    }
+    state
+        .reserve_federation_placement(&current, "zero-slots".to_owned(), "zero-slots".to_owned(), 0, 0)
+        .unwrap();
+    let full = state
+        .reserve_federation_placement(&current, "session-overflow".to_owned(), "third-root".to_owned(), 0, 0)
+        .unwrap_err();
+    assert_eq!(full.message, "satellite declared capacity is fully reserved");
+    assert_eq!(state.inner.lock().unwrap().federation.placements["retired"], retired);
+}
+
+#[test]
+fn federation_revoked_placement_is_retained_but_not_reserved_across_reload() {
+    let state = central();
+    let snapshot = active(&state, peer(48001));
+    let retired = reserve(&state, &snapshot, "retired", "old-root").unwrap();
+    state.transition_federation_peer(&snapshot, FederationMembershipState::Revoked).unwrap();
+    {
+        let inner = state.inner.lock().unwrap();
+        assert!(federation_executor_reservation_domain_locked(&inner).unwrap().current.is_empty());
+        assert_eq!(inner.federation.placements["retired"], retired);
+    }
+    assert!(state.ensure_federation_placement_current(&retired).is_err());
+    assert!(state.reconcile_federation_placement(&retired, true).is_err());
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    assert_eq!(loaded.federation.placements["retired"], retired);
+    assert!(federation_executor_reservation_domain_locked(&loaded).unwrap().current.is_empty());
+}
+
+#[test]
 fn federation_last_slot_is_atomic_and_identical_admission_recovers_its_reservation() {
     let state = Arc::new(central());
     let snapshot = active(&state, peer(48001));
