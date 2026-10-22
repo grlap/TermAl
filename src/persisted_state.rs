@@ -229,9 +229,10 @@ impl PersistedState {
         let mut preferences = self.preferences;
         preferences.remotes = validate_persisted_remote_configs(preferences.remotes)?;
         // A restored release record was committed, so it reserves no slot;
-        // one whose root is still retained recorded an intent whose release
-        // never happened (a crash before the canonical retirement), so it is
-        // dropped rather than read as done. A canonical record is kept only
+        // a legacy intent whose root is retained is dropped. An explicitly
+        // enqueued canonical intent instead retains its exact audit/owner,
+        // unacknowledged, for replay; the selection already counts its slot.
+        // A removed canonical record is kept only
         // if a retirement notice of its selection names its own transition:
         // otherwise another owner retired it. One whose retirement is
         // committed but not yet published stays pending, so the identical
@@ -240,8 +241,13 @@ impl PersistedState {
         let engram_named_root_release_audit = self
             .engram_named_root_release_audit
             .into_iter()
-            .filter(|record| !self.engram_work_source_roots.contains(&record.selection))
             .filter_map(|record| {
+                if self.engram_work_source_roots.contains(&record.selection) {
+                    return (record.route == EngramNamedRootReleaseRoute::Canonical.label()
+                        && record.phase == Some(EngramNamedRootReleasePhase::Enqueued)
+                        && record.authority_owner.is_some())
+                        .then_some(EngramNamedRootReleaseAudit { acknowledged: false, ..record });
+                }
                 if record.route != EngramNamedRootReleaseRoute::Canonical.label() {
                     return Some(EngramNamedRootReleaseAudit { acknowledged: true, ..record });
                 }

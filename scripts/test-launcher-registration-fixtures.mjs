@@ -3,12 +3,14 @@
 // registration, run indexing, credit, or restart policy in the product.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { basename, join, relative } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { createRun, executeRun, startDetachedRun } from "./test-launcher.mjs";
-import { validateRunRegistration } from "./test-run-registration.mjs";
+import { registerTestRun, validateRunRegistration } from "./test-run-registration.mjs";
 
 function registrationRootSpelling(t, root, spelling) {
   if (spelling === "original") return root;
@@ -93,11 +95,12 @@ export async function registrationHost(callback, {
         response.destroy();
         return;
       }
-      response.writeHead(status, { "content-type": "application/json" });
+      const responseStatus = typeof status === "function" ? status(record) : status;
+      response.writeHead(responseStatus, { "content-type": "application/json" });
       const normalAck = {
         contract: "termal-durable-test-run-registration", version: 1, runId: record.body.runId, registered,
       };
-      response.end(rawAcknowledgement ?? JSON.stringify(errorReason && status >= 400
+      response.end(rawAcknowledgement ?? JSON.stringify(errorReason && responseStatus >= 400
         ? { error: errorReason } : typeof acknowledgement === "function"
           ? acknowledgement(normalAck) : acknowledgement ?? normalAck));
     } catch (error) {
@@ -170,6 +173,174 @@ async function refusedLaunch(root, env, detached, workerExit) {
 }
 
 export function registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit }) {
+  async function pendingRepository(t, callback) {
+    // Respect the maintained wrapper when present. A plain, filtered Node
+    // invocation needs no environment prefix or writes to the OS temp folder.
+    if (process.env.TERMAL_TEST_USER_TEMP) return repository(t, callback);
+    let directory = fileURLToPath(new URL("../", import.meta.url));
+    for (const component of [".tmp", "launcher-pending"]) {
+      directory = join(directory, component);
+      try { mkdirSync(directory); } catch (error) { if (error.code !== "EEXIST") throw error; }
+      const entry = lstatSync(directory);
+      if (entry.isSymbolicLink() || !entry.isDirectory()) {
+        throw new Error(`Pending fixture parent must be a plain directory: ${directory}`);
+      }
+    }
+    return repository(t, callback, undefined, directory);
+  }
+
+  function pendingRegistration(request) {
+    const fields = ["runId", "root", "stages", "notifyTo", "full", "scope", "detached",
+      "creatorPid", "owner", "started", "requiredBinaryEnv", "prerequisiteFiles", "needsCargo", "liveEngram"];
+    const ordered = (value) => Array.isArray(value) ? value.map(ordered)
+      : value && typeof value === "object"
+        ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, ordered(value[key])])) : value;
+    const immutable = Object.fromEntries(fields.map((key) => [key, request[key] ?? null]));
+    return {
+      error: "Durability is pending; retry the unchanged original request.",
+      contract: "termal-durability-pending", version: 1, code: "durability_pending", outcome: "pending",
+      operation: "test_run_registration",
+      identity: { runId: request.runId, ownerSessionId: request.owner,
+        requestDigest: createHash("sha256").update(JSON.stringify(ordered(immutable))).digest("hex") },
+      retry: { mode: "same_request" },
+    };
+  }
+
+  test("durability pending registration preserves identity and stops before any stage", async (t) => {
+    await pendingRepository(t, async (root, env) => {
+      let pending;
+      let unresolved = true;
+      let service;
+      await registrationHost(async (host) => {
+        service = host;
+        let runDir;
+        let failure;
+        try {
+          await createRun({ root, full: false, scope: "focused", needsCargo: true,
+            onRunCreated: (directory) => { runDir = directory; },
+            stages: [stage("focused", "throw new Error('pending registration admitted execution')")],
+          }, { ...env, TERMAL_BASE_URL: host.url });
+        } catch (error) { failure = error; }
+        assert.ok(failure, "pending is not a registered receipt");
+        assertNoExecution(root, runDir);
+        assert.equal(host.requests.length, 1, "typed pending has no automatic replay");
+        assert.equal(host.queries.length, 0, "pending cannot enter ACK confirmation");
+        const original = JSON.parse(readFileSync(join(runDir, "request.json"), "utf8"));
+        const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+        assert.equal(original.registration, undefined, "no successful receipt is fabricated");
+        assert.equal(result.state, "failed", "the launcher does not report a completed check");
+
+        // Explicit resend, not a launcher retry: the host now acknowledges
+        // the same row. Neither the immutable request nor the run is replaced.
+        unresolved = false;
+        const registered = await registerTestRun(original, runDir, { ...env, TERMAL_BASE_URL: host.url });
+        assert.equal(registered.registered, true);
+        assert.equal(registered.runId, original.runId);
+        assert.equal(registered.requestIdentity, pending.identity.requestDigest);
+        assert.equal(host.requests.length, 2);
+        assert.equal(host.requests[1].rawBody, host.requests[0].rawBody);
+        assert.equal(host.registrations.size, 1);
+        assertNoExecution(root, runDir);
+
+        // Contract assertions last, after the explicit same-request witness.
+        assert.deepEqual(failure.durabilityPending, pending);
+        assert.equal(result.registration.state, "pending");
+        assert.deepEqual(result.registration.pending, pending);
+      }, { autoAcknowledge: true, status: () => unresolved ? 503 : 201, acknowledgement: (ack) => {
+        if (!unresolved) return ack;
+        // The fixture receives the actual immutable request before replying.
+        pending = pendingRegistration(service.registrations.get(ack.runId).request);
+        return pending;
+      } });
+    });
+  });
+
+  for (const invalid of ["contract", "version", "code", "outcome", "operation", "runId", "digest", "owner", "retry", "error", "status"]) {
+    test(`durability pending registration rejects a mismatched envelope: ${invalid}`, async (t) => {
+      await pendingRepository(t, async (root, env) => {
+        let service;
+        await registrationHost(async (host) => {
+          service = host;
+          let runDir;
+          let failure;
+          try {
+            await createRun({ root, full: false, scope: "focused", needsCargo: true,
+              onRunCreated: (directory) => { runDir = directory; },
+              stages: [stage("focused", "throw new Error('malformed pending admitted execution')")],
+            }, { ...env, TERMAL_BASE_URL: host.url });
+          } catch (error) { failure = error; }
+          assert.ok(failure);
+          assertNoExecution(root, runDir);
+          assert.equal(host.requests.length, 1, "malformed pending does not authorize replay");
+          assert.equal(host.queries.length, 0);
+          assert.equal(failure.durabilityPending, undefined, "unrelated identities are not this pending operation");
+          const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+          assert.notEqual(result.registration.state, "pending");
+          assert.equal(result.registration.pending, undefined);
+        }, { autoAcknowledge: true, status: invalid === "status" ? 201 : 503, acknowledgement: (ack) => {
+          const pending = pendingRegistration(service.registrations.get(ack.runId).request);
+          switch (invalid) {
+            case "contract": pending.contract = "unrelated-contract"; break;
+            case "version": pending.version = 2; break;
+            case "code": pending.code = "definitely_not_applied"; break;
+            case "outcome": pending.outcome = "not_applied"; break;
+            case "operation": pending.operation = "named_root_release"; break;
+            case "runId": pending.identity.runId = "test-another-run"; break;
+            case "digest": pending.identity.requestDigest = "0".repeat(64); break;
+            case "owner": pending.identity.ownerSessionId = "another-owner"; break;
+            case "retry": pending.retry.mode = "new_request"; break;
+            case "error": pending.error = ""; break;
+          }
+          return pending;
+        } });
+      });
+    });
+  }
+
+  test("durability pending registration is not accepted on GET confirmation", async (t) => {
+    await pendingRepository(t, async (root, env) => {
+      await registrationHost(async (host) => {
+        const originalFetch = globalThis.fetch;
+        t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+          const response = await originalFetch(url, options);
+          if ((options.method ?? "GET") !== "GET") return response;
+          await response.body.cancel();
+          const saved = [...host.registrations.values()][0];
+          return new Response(JSON.stringify(pendingRegistration(saved.request)), { status: 503 });
+        });
+        const failure = await registrationFailure(root, { ...env, TERMAL_BASE_URL: host.url });
+        assert.equal(failure.durabilityPending, undefined);
+        assert.equal(host.requests.length, 1, "confirmation failure cannot resend POST");
+        assert.equal(host.queries.length, 1);
+        t.mock.restoreAll();
+      }, { autoAcknowledge: true });
+    });
+  });
+
+  test("durability pending registration retains only bounded supported fields", async (t) => {
+    await pendingRepository(t, async (root, env) => {
+      let service;
+      await registrationHost(async (host) => {
+        service = host;
+        const failure = await registrationFailure(root, { ...env, TERMAL_BASE_URL: host.url });
+        const pending = failure.durabilityPending;
+        assert.ok(pending, "the supported envelope survives diagnostic and launcher wrappers");
+        assert.deepEqual(Object.keys(pending).sort(),
+          ["error", "contract", "version", "code", "outcome", "operation", "identity", "retry"].sort());
+        assert.deepEqual(Object.keys(pending.identity).sort(), ["runId", "requestDigest", "ownerSessionId"].sort());
+        assert.ok(pending.error.length <= 384);
+        assert.doesNotMatch(pending.error, /[\r\n\u0000]/u);
+        assert.doesNotMatch(JSON.stringify(pending), /private-field-sentinel/u);
+        assert.equal(host.requests.length, 1);
+        assert.equal(host.queries.length, 0);
+      }, { autoAcknowledge: true, status: 503, acknowledgement: (ack) => {
+        const pending = pendingRegistration(service.registrations.get(ack.runId).request);
+        return { ...pending, error: `pending\n${"x".repeat(500)}`, extra: "private-field-sentinel",
+          identity: { ...pending.identity, extra: "private-field-sentinel" } };
+      } });
+    });
+  });
+
   async function registrationFailure(root, env) {
     let runDir;
     let failure;

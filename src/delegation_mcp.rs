@@ -900,6 +900,12 @@ impl TermalDelegationMcpBridge {
         };
         Ok(Some(match result {
             Ok(result) => mcp_json_rpc_result(id_for_response, result),
+            Err(err) if err.downcast_ref::<TermalDurabilityPendingError>().is_some() => {
+                mcp_json_rpc_durability_pending_error(
+                    id_for_response,
+                    err.downcast_ref::<TermalDurabilityPendingError>().unwrap(),
+                )
+            }
             Err(err) => mcp_json_rpc_tool_error(id_for_response, err.to_string()),
         }))
     }

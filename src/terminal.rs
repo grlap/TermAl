@@ -428,6 +428,7 @@ fn annotate_remote_terminal_429(err: ApiError, remote_name: &str) -> ApiError {
         status: err.status,
         message: format!("remote {remote_name}: {}", err.message),
         kind: err.kind,
+        durability_deadline: err.durability_deadline,
     }
 }
 

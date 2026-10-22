@@ -50,17 +50,24 @@ struct EngramNamedRootReleaseRequest {
 struct EngramNamedRootReleaseResponse {
     released: bool,
     route: String,
+    resolution: &'static str,
     notice: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum EngramNamedRootReleasePhase {
+    Enqueued,
 }
 
 /// A durable record of one operator release. `acknowledged` turns true once
 /// the writer has committed the release (`PersistFenceTarget::
 /// EngramNamedRootRelease`); until then an operator release keeps reserving
 /// its slot (`engram_named_root_capacity`). On restore (`PersistedState::
-/// into_inner`) a record whose selection is still retained is dropped, a
-/// canonical record is kept only if its own transition retired the selection
-/// (pending while that retirement is unpublished), and the rest are
-/// acknowledged.
+/// into_inner`) an enqueued canonical intent survives with its retained
+/// selection, without reserving another slot. Legacy intents retain their
+/// old restore rule. A removed canonical selection needs its own retirement
+/// notice (pending while unpublished); other removed records acknowledge.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct EngramNamedRootReleaseAudit {
@@ -78,6 +85,10 @@ struct EngramNamedRootReleaseAudit {
     /// operator's only if the selection's retirement notice names it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     authority_owner: Option<String>,
+    /// Stored beside the prepared owner before its first fence is enqueued.
+    /// Absence preserves the legacy, never-enqueued restore disposition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    phase: Option<EngramNamedRootReleasePhase>,
 }
 
 /// Whether the canonical release `record` retired its selection itself:
@@ -455,10 +466,146 @@ fn engram_named_root_release_record(
         lifecycle: lifecycle.to_owned(),
         released_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         authority_owner: None,
+        phase: None,
     }
 }
 
+fn engram_named_root_release_durability_error(
+    mut error: ApiError,
+    audit: &EngramNamedRootReleaseAudit,
+) -> ApiError {
+    if let Some(deadline) = &mut error.durability_deadline {
+        deadline.identity = json!({
+            "workId": audit.selection.work_id,
+            "workRef": audit.selection.short_ref,
+            "claimId": audit.selection.claim_id,
+            "generation": audit.selection.generation,
+            "auditId": audit.id,
+            "phase": audit.phase,
+            "reason": audit.reason,
+            "requesterSessionId": audit.requested_by,
+        });
+    }
+    error.at_durability_boundary(DurabilityPendingOperation::NamedRootRelease)
+}
+
+fn engram_named_root_release_conflict(
+    audit: &EngramNamedRootReleaseAudit,
+    reason: &str,
+) -> ApiError {
+    ApiError::conflict(format!(
+        "release audit {} generation {} resolution=conflict: {reason}; the original audit is retained",
+        audit.id, audit.selection.generation,
+    ))
+}
+
 impl AppState {
+    /// Attach the release to the first prepared image under the same lock.
+    /// A replay confirms and continues that owner, never prepares a replacement.
+    fn prepare_engram_release_authority_until(
+        &self,
+        root: &EngramWorkSourceRoot,
+        binding: &EngramControlWorkBinding,
+        audit_id: &str,
+        deadline: std::time::Instant,
+    ) -> Result<EngramAuthorityTransition, ApiError> {
+        let original_owner = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let audit = inner.engram_named_root_release_audit.iter()
+                .find(|audit| audit.id == audit_id)
+                .ok_or_else(|| ApiError::conflict("the release audit disappeared"))?;
+            match audit.authority_owner.as_deref() {
+                None => None,
+                Some(id) => {
+                    if audit.phase != Some(EngramNamedRootReleasePhase::Enqueued) {
+                        return Err(engram_named_root_release_conflict(audit,
+                            "the retained audit has no enqueued authority stage"));
+                    }
+                    let owner = inner.engram_work_naming_history.iter()
+                        .find(|history| history.store == root.store && history.work_id == root.work_id)
+                        .and_then(|history| history.transition.as_ref()
+                            .filter(|owner| owner.version == history.owner_version))
+                        .filter(|owner| owner.id == id && owner.binding == *binding)
+                        .cloned()
+                        .ok_or_else(|| engram_named_root_release_conflict(audit,
+                            "the current authority owner no longer matches the enqueued release"))?;
+                    Some(owner)
+                }
+            }
+        };
+        // A candidate is an existing exact-image publication obligation.
+        // Settle it before re-arming the same operation for another read.
+        if original_owner.as_ref().is_some_and(|owner| owner.phase == EngramAuthorityPhase::Candidate) {
+            self.recover_engram_authority_candidate_until(&root.store, &root.work_id, deadline)?;
+        }
+        let image = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.engram_named_root_release_audit.iter()
+                .position(|audit| audit.id == audit_id)
+                .ok_or_else(|| ApiError::conflict("the release audit disappeared"))?;
+            let audit = &inner.engram_named_root_release_audit[index];
+            if audit.selection != *root || audit.acknowledged
+                || audit.route != EngramNamedRootReleaseRoute::Canonical.label()
+                || !inner.engram_work_source_roots.contains(root)
+            {
+                return Err(engram_named_root_release_conflict(audit,
+                    "the exact retained selection or audit changed"));
+            }
+            engram_named_root_release_route_for(&inner, root, None)
+                .map_err(|error| engram_named_root_release_conflict(audit, &error.message))?;
+            if let Some(owner_id) = audit.authority_owner.as_deref() {
+                let history = inner.engram_work_naming_history.iter()
+                    .find(|history| history.store == root.store && history.work_id == root.work_id);
+                if audit.phase != Some(EngramNamedRootReleasePhase::Enqueued)
+                    || !history.is_some_and(|history| history.transition.as_ref().is_some_and(|owner|
+                        owner.id == owner_id && owner.version == history.owner_version
+                            && owner.binding == *binding
+                            && original_owner.as_ref().is_some_and(|original|
+                                original.id == owner.id && original.version == owner.version
+                                    && original.binding == owner.binding)
+                            && owner.phase != EngramAuthorityPhase::Candidate))
+                {
+                    return Err(engram_named_root_release_conflict(audit,
+                        "the current authority owner no longer matches the enqueued release"));
+                }
+                let history = inner.engram_work_naming_history.iter_mut()
+                    .find(|history| history.store == root.store && history.work_id == root.work_id)
+                    .expect("validated release history");
+                if history.transition.as_ref().expect("validated release owner").phase
+                    == EngramAuthorityPhase::Published
+                {
+                    // Retain every prior fact and the UUID/version. This new
+                    // exact Prepared ACK, not an old Candidate ACK, guards
+                    // the original release's current canonical reread.
+                    history.transition.as_mut().expect("validated release owner").phase = EngramAuthorityPhase::Prepared;
+                    engram_retain_recovery_run(&mut history.unresolved_runs, binding);
+                    history.recovery_reason.get_or_insert_with(||
+                        "the retained release requires a fresh guarded canonical read".to_owned());
+                }
+            } else {
+                // Prior-candidate recovery belongs before audit allocation.
+                // Do not await a concurrently appearing candidate and then
+                // advertise this still-unprepared audit as its identity.
+                if inner.engram_work_naming_history.iter().any(|history|
+                    history.store == root.store && history.work_id == root.work_id
+                        && history.transition.as_ref().is_some_and(|owner|
+                            owner.phase == EngramAuthorityPhase::Candidate))
+                {
+                    return Err(engram_named_root_release_conflict(audit,
+                        "a candidate appeared before this release was prepared; retry after its authority settles"));
+                }
+                let prepared = self.prepare_engram_authority_image_locked(&mut inner, &root.store, binding)?;
+                let audit = &mut inner.engram_named_root_release_audit[index];
+                audit.authority_owner = Some(prepared.history.transition.as_ref()
+                    .expect("prepared owner").id.clone());
+                audit.phase = Some(EngramNamedRootReleasePhase::Enqueued);
+            }
+            EngramAuthorityImage::capture(&inner, &root.store, &root.work_id)?
+        };
+        self.confirm_engram_authority_image_until(&image, deadline)?;
+        Ok(image.history.transition.expect("prepared release owner"))
+    }
+
     /// Confirms an earlier release whose writer confirmation failed: the
     /// same fence over its recorded removal and audit, then the record is
     /// acknowledged and its reserved slot freed. Its route, reason and
@@ -467,18 +614,44 @@ impl AppState {
     /// publication, since the unpublished retirement still holds the slot.
     fn resume_engram_named_root_release(
         &self,
-        pending: EngramNamedRootReleaseAudit,
+        mut pending: EngramNamedRootReleaseAudit,
     ) -> Result<EngramNamedRootReleaseResponse, ApiError> {
+        let mut resolution = "current_state";
         if pending.route == EngramNamedRootReleaseRoute::Canonical.label() {
             let deadline =
                 self.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
+            let retained_without_notice = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.engram_work_source_roots.contains(&pending.selection)
+                    && engram_named_root_release_retired_it(&inner, &pending).is_none()
+            };
+            if retained_without_notice {
+                // A deadline in the authority guard can precede removal.
+                // Resume this audit, not a second release record.
+                let outcome = self.recover_one_engram_root_traced_until(
+                    &pending.selection,
+                    &EngramRootReclamationRoute::Unfocused,
+                    deadline,
+                    Some(&pending.id),
+                );
+                pending = self.inner.lock().expect("state mutex poisoned")
+                    .engram_named_root_release_audit.iter()
+                    .find(|record| record.id == pending.id).cloned()
+                    .ok_or_else(|| ApiError::conflict("the release audit changed during recovery"))?;
+                outcome.map_err(|error| engram_named_root_release_durability_error(error, &pending))?;
+                resolution = "resumed";
+            }
             self.recover_engram_authority_candidate_until(
                 &pending.selection.store,
                 &pending.selection.work_id,
                 deadline,
-            )?;
+            ).map_err(|error| engram_named_root_release_durability_error(error, &pending))?;
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(published) = engram_named_root_release_retired_it(&inner, &pending) else {
+                if inner.engram_work_source_roots.contains(&pending.selection) {
+                    return Err(engram_named_root_release_conflict(&pending,
+                        "the canonical facts still retain this root; retry the unchanged request when authority can settle it"));
+                }
                 // Another owner retired it: not this release's to record.
                 engram_named_root_withdraw_release_locked(&mut inner, &pending.id);
                 self.commit_engram_root_locked(&mut inner)
@@ -499,7 +672,8 @@ impl AppState {
             }
         }
         let deadline = self.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_PERSIST_BUDGET;
-        self.confirm_engram_named_root_release_until(&pending, deadline)?;
+        self.confirm_engram_named_root_release_until(&pending, deadline)
+            .map_err(|error| engram_named_root_release_durability_error(error, &pending))?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(record) = inner
             .engram_named_root_release_audit
@@ -515,6 +689,7 @@ impl AppState {
         Ok(EngramNamedRootReleaseResponse {
             released: true,
             route: pending.route.clone(),
+            resolution,
             notice: format!(
                 "The earlier release of named source root {} ({}) generation {} is now \
                  confirmed; its slot is free.",
@@ -547,13 +722,18 @@ impl AppState {
         if self.persist_tx.send(PersistRequest::Fence(Box::new(fence))).is_ok() {
             return match waiter.wait_until(deadline).unwrap_or(Err(PersistFenceError::Deadline)) {
                 Ok(()) => Ok(()),
-                Err(PersistFenceError::Deadline) => Err(ApiError::internal(format!(
+                Err(PersistFenceError::Deadline) => Err(ApiError::enqueued_durability_deadline(format!(
                     "the release of {} generation {} is recorded but its persistence is \
                      unconfirmed (Deadline) while {}; its slot stays reserved",
                     audit.selection.short_ref,
                     audit.selection.generation,
                     waiter.progress().describe(),
-                ))),
+                ), json!({
+                    "workId": audit.selection.work_id,
+                    "claimId": audit.selection.claim_id,
+                    "generation": audit.selection.generation,
+                    "auditId": audit.id,
+                }))),
                 Err(error) => Err(ApiError::internal(format!(
                     "the release of {} generation {} is recorded but its persistence is \
                      unconfirmed ({error:?}); its slot stays reserved",
@@ -659,8 +839,8 @@ impl AppState {
     /// (engram_named_root_capacity.rs): its own turn does not hold the
     /// release back, and the audit records route `own`. Every release takes
     /// the single reclamation flight first, so it never races the automatic
-    /// pass, and answers a failure before its own removal as a definitive
-    /// conflict with nothing applied.
+    /// pass. A proven refusal is a conflict; an enqueued fence deadline is
+    /// pending because the recorded authority image may still commit.
     fn release_engram_named_root_as(
         &self,
         requested_by: Option<&str>,
@@ -679,8 +859,41 @@ impl AppState {
         if let Some(requested_by) = requested_by {
             engram_named_root_release_text("requestedBy", requested_by)?;
         }
+        // Serialize the audit lookup as well as the removal: two callers
+        // cannot both observe no pending audit and allocate distinct intents.
+        let _flight = self.acquire_engram_named_root_release_flight()?;
         let (root, route) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(previous) = inner.engram_named_root_release_audit.iter().rev()
+                .find(|record| engram_named_root_release_names(&request, &record.selection))
+                .cloned()
+            {
+                if previous.reason != reason || previous.requested_by.as_deref() != requested_by
+                    || own_session.is_some_and(|session| previous.selection.named_by_session != session)
+                {
+                    return Err(engram_named_root_release_conflict(&previous,
+                        "this release identity already has a different reason or requester; retry the unchanged original request"));
+                }
+                if previous.acknowledged {
+                    if inner.engram_work_source_roots.contains(&previous.selection) {
+                        return Err(ApiError::conflict(
+                            "the acknowledged release selection is retained again; reconcile its owner before any further release",
+                        ));
+                    }
+                    return Ok(EngramNamedRootReleaseResponse {
+                        released: true,
+                        route: previous.route,
+                        resolution: "current_state",
+                        notice: "This exact named-root release is already acknowledged; no new release was applied.".to_owned(),
+                    });
+                }
+                if inner.engram_work_source_roots.contains(&previous.selection) {
+                    engram_named_root_release_route_for(&inner, &previous.selection, own_session)
+                        .map_err(|error| engram_named_root_release_conflict(&previous, &error.message))?;
+                }
+                drop(inner);
+                return self.resume_engram_named_root_release(previous);
+            }
             let Some(root) = engram_named_root_release_selection(&inner, &request) else {
                 // An earlier release of exactly this selection whose writer
                 // confirmation failed is resumed: its slot is freed once the
@@ -699,7 +912,6 @@ impl AppState {
                     Some(pending) => {
                         // A resume finishes the same retirement, so it takes
                         // the flight as the release itself did.
-                        let _flight = self.acquire_engram_named_root_release_flight()?;
                         self.resume_engram_named_root_release(pending)
                     }
                     None => Err(ApiError::conflict(
@@ -711,18 +923,51 @@ impl AppState {
             let route = engram_named_root_release_route_for(&inner, &root, own_session)?;
             (root, route)
         };
-        // Held until this release returns; a running pass is waited out.
-        let _flight = self.acquire_engram_named_root_release_flight()?;
         let lifecycle;
-        let audit;
+        let mut audit;
         match route {
             EngramNamedRootReleaseRoute::Canonical => {
+                let deadline =
+                    self.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
+                // This older authority obligation is not a new release's
+                // preparation. Its Deadline must identify that exact owner,
+                // with no phantom audit that restore would discard.
+                self.recover_engram_authority_candidate_until(&root.store, &root.work_id, deadline)
+                    .map_err(|mut error| {
+                        if let Some(pending) = &mut error.durability_deadline {
+                            pending.identity["auditId"] = Value::Null;
+                            pending.identity["workRef"] = json!(root.short_ref);
+                            pending.identity["reason"] = json!(reason);
+                            pending.identity["requesterSessionId"] = json!(requested_by);
+                            pending.identity["phase"] = json!("candidate");
+                            pending.identity["releaseStage"] = json!("prior_authority");
+                            pending.identity["requestedSelection"] = json!({
+                                "workId": root.work_id, "claimId": root.claim_id,
+                                "generation": root.generation, "root": root.root,
+                            });
+                        }
+                        error.at_durability_boundary(DurabilityPendingOperation::NamedRootRelease)
+                    })?;
                 // The operator's intent is recorded BEFORE the retirement, so
                 // the authority's own image commits it with the removal: a
                 // failure or crash after the removal leaves an unacknowledged
                 // record that an identical retry resumes.
                 {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if !inner.engram_work_source_roots.contains(&root)
+                        || engram_named_root_release_route_for(&inner, &root, own_session)? != route
+                    {
+                        return Err(ApiError::conflict(
+                            "the exact release selection changed while prior authority settled; no new release was prepared"));
+                    }
+                    if inner.engram_work_naming_history.iter().any(|history|
+                        history.store == root.store && history.work_id == root.work_id
+                            && history.transition.as_ref().is_some_and(|owner|
+                                owner.phase == EngramAuthorityPhase::Candidate))
+                    {
+                        return Err(ApiError::conflict(
+                            "authority changed while the prior candidate settled; retry before creating a release"));
+                    }
                     lifecycle = engram_named_root_lifecycle_text(&inner, &root);
                     audit = engram_named_root_release_record(
                         &root, route, &reason, requested_by, &lifecycle,
@@ -731,8 +976,6 @@ impl AppState {
                     self.commit_engram_root_locked(&mut inner)
                         .map_err(|error| ApiError::internal(error.to_string()))?;
                 }
-                let deadline =
-                    self.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
                 // The transition this release prepares is recorded on its
                 // intent before that owner can remove anything, so the image
                 // that commits a removal by it also commits the link.
@@ -740,18 +983,13 @@ impl AppState {
                     &root,
                     &EngramRootReclamationRoute::Unfocused,
                     deadline,
-                    &mut |owner: &str| {
-                        let mut inner = self.inner.lock().expect("state mutex poisoned");
-                        if let Some(record) = inner
-                            .engram_named_root_release_audit
-                            .iter_mut()
-                            .find(|record| record.id == audit.id)
-                        {
-                            record.authority_owner = Some(owner.to_owned());
-                        }
-                    },
+                    Some(&audit.id),
                 );
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
+                // Preparation records the owner and enqueued phase under its
+                // lock, before the first authority image can reach the writer.
+                audit = inner.engram_named_root_release_audit.iter()
+                    .find(|record| record.id == audit.id).cloned().unwrap_or(audit);
                 let still_retained = inner.engram_work_source_roots.contains(&root);
                 let retired_it = inner
                     .engram_named_root_release_audit
@@ -763,7 +1001,9 @@ impl AppState {
                     (Some(true), _) => {}
                     // This release removed it, but its publication or commit
                     // is unconfirmed: the record stays for the retry to resume.
-                    (Some(false), Err(error)) => return Err(error),
+                    (Some(false), Err(error)) => return Err(
+                        engram_named_root_release_durability_error(error, &audit)
+                    ),
                     (Some(false), Ok(_)) => {
                         return Err(ApiError::conflict(format!(
                             "this release removed {} generation {}, but its retirement is not \
@@ -773,10 +1013,18 @@ impl AppState {
                     }
                     // This release removed nothing: the intent is withdrawn.
                     (None, outcome) => {
+                        if let Err(error) = outcome.as_ref()
+                            && error.is_enqueued_durability_deadline()
+                        {
+                            // The exact authority image can still commit; do
+                            // not withdraw its audit or claim not-applied.
+                            let error = outcome.err().expect("matched deadline");
+                            return Err(engram_named_root_release_durability_error(error, &audit));
+                        }
                         engram_named_root_withdraw_release_locked(&mut inner, &audit.id);
-                        // Only revision exhaustion fails here; restore drops
-                        // an intent whose selection is still retained, and
-                        // one another owner retired.
+                        // Only revision exhaustion fails here. No enqueued
+                        // deadline is withdrawn above; a proven refusal or
+                        // another owner's retirement is not this release.
                         let committed = self.commit_engram_root_locked(&mut inner);
                         let why = inner
                             .engram_work_naming_history
@@ -857,7 +1105,8 @@ impl AppState {
         }
         // Success only once the writer committed the removal and its audit.
         let deadline = self.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_PERSIST_BUDGET;
-        self.confirm_engram_named_root_release_until(&audit, deadline)?;
+        self.confirm_engram_named_root_release_until(&audit, deadline)
+            .map_err(|error| engram_named_root_release_durability_error(error, &audit))?;
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(record) = inner
@@ -874,6 +1123,7 @@ impl AppState {
         Ok(EngramNamedRootReleaseResponse {
             released: true,
             route: audit.route.clone(),
+            resolution: "applied_fresh",
             notice: format!(
                 "Released named source root {} ({}) generation {} by the {} route; no producer \
                  event was created.",

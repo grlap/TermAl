@@ -8,6 +8,10 @@
 // New module.
 use super::*;
 
+mod durability_pending {
+    include!("durability_pending_release.rs");
+}
+
 /// A retained root with no canonical run association: no journal exists for
 /// its claim. `named_by` is its naming session.
 fn orphan_of(entry: &EngramWorkSourceRoot, label: &str, named_by: &str, offset: u64) -> EngramWorkSourceRoot {
@@ -511,7 +515,7 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
     // A restart here keeps the canonical record pending, since its retirement
     // is still unpublished, so the identical retry can still resume it. A
     // removed operator release is committed, so it comes back done; an intent
-    // whose selection is still retained never happened, so it is dropped.
+    // with a legacy, never-enqueued retained intent still drops that intent.
     {
         let mut persisted = PersistedState::from_inner(&claimed.state.inner.lock().unwrap());
         let pending = persisted.engram_named_root_release_audit[0].clone();
@@ -522,6 +526,7 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
         let mut retained_intent = pending.clone();
         retained_intent.id = "restored-retained".to_owned();
         retained_intent.selection.generation += 2000;
+        retained_intent.phase = None; // Exercise the legacy intent format.
         // The same selection, credited to a transition that did not retire it.
         let mut foreign = pending.clone();
         foreign.id = "restored-foreign".to_owned();

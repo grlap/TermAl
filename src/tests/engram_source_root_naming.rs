@@ -9,6 +9,10 @@
 // child module uses). New module.
 use super::*;
 
+mod durability_pending {
+    include!("durability_pending_naming.rs");
+}
+
 mod authority {
     include!("engram_root_authority.rs");
 }

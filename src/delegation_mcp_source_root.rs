@@ -39,8 +39,8 @@ impl TermalDelegationMcpBridge {
             ),
         }
         // The server bounds naming by its own budget; waiting that on top of
-        // the normal request timeout means a reported failure is never a name
-        // the server kept anyway.
+        // the normal request timeout lets the classified pending reply arrive;
+        // pending is not proof that the server kept no name.
         let path = format!("/api/sessions/{}/engram-source-root", self.serving_session_id);
         self.post_long_call(
             DelegationLongCall::SourceRootNaming,

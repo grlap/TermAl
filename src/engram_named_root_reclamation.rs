@@ -448,20 +448,18 @@ impl AppState {
         route: &EngramRootReclamationRoute,
         deadline: std::time::Instant,
     ) -> Result<bool, ApiError> {
-        self.recover_one_engram_root_traced_until(root, route, deadline, &mut |_: &str| {})
+        self.recover_one_engram_root_traced_until(root, route, deadline, None)
     }
 
-    /// `recover_one_engram_root_until`, telling `on_prepared` the id of the
-    /// authority transition it prepared, before that owner can remove
-    /// anything. A retirement notice names the transition that removed its
-    /// selection, so the caller can tell its own retirement from another
-    /// owner's. Not called when an older publication obligation is retried.
+    /// Explicit releases attach their audit before the prepared-image fence
+    /// and resume its retained owner. Maintenance passes no release audit and
+    /// keeps the ordinary preparation/publication path.
     fn recover_one_engram_root_traced_until(
         &self,
         root: &EngramWorkSourceRoot,
         route: &EngramRootReclamationRoute,
         deadline: std::time::Instant,
-        on_prepared: &mut dyn FnMut(&str),
+        release_audit: Option<&str>,
     ) -> Result<bool, ApiError> {
         let (binding, journal_snapshot, pending_publication) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -508,8 +506,11 @@ impl AppState {
             // read or removal. Retrying its exact image cannot mint a notice.
             self.publish_engram_authority_image_until(&root.store, &owner, deadline)?;
         } else {
-            let owner = self.prepare_engram_authority_until(&root.store, &binding, deadline)?;
-            on_prepared(&owner.id);
+            let owner = match release_audit {
+                Some(audit) => self.prepare_engram_release_authority_until(
+                    root, &binding, audit, deadline)?,
+                None => self.prepare_engram_authority_until(&root.store, &binding, deadline)?,
+            };
             {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 if !inner.engram_work_source_roots.contains(root)

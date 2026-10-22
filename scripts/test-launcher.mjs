@@ -485,13 +485,17 @@ export async function createRun({
     save(join(runDir, "request.json"), request);
   } catch (error) {
     const result = readJson(join(runDir, "results.json"));
+    const pending = error.durabilityPending;
     Object.assign(result, {
       state: "failed", exitCode: 1, ended: new Date().toISOString(),
       error: error.message,
-      registration: { state: "failed", reason: error.message },
+      registration: { state: pending ? "pending" : "failed", reason: error.message,
+        ...(pending ? { pending } : {}) },
     });
     save(join(runDir, "results.json"), result);
-    throw new Error(`${error.message}; run directory: ${runDir}`);
+    const failure = new Error(`${error.message}; run directory: ${runDir}`, { cause: error });
+    if (pending) failure.durabilityPending = pending;
+    throw failure;
   }
   try {
     const input = await captureFingerprint(normalizedRoot, gitEnv);

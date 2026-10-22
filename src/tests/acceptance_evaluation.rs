@@ -59,6 +59,9 @@ mod obligation_assessment;
 #[path = "acceptance_evaluation_spawn_ack.rs"]
 mod spawn_ack;
 
+#[path = "durability_pending_evaluation.rs"]
+mod durability_pending;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 /// These request/submission fixtures begin after a canonical no-event read

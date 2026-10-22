@@ -3,6 +3,10 @@
 This document describes the current TermAl test strategy and the commands used
 before reviews or releases.
 
+The [durability-pending contract](features/durability-pending.md) describes
+post-enqueue registration deadlines: pending is not stage-launch permission,
+and an explicit retry keeps the original request and run identity.
+
 ## Current State
 
 TermAl has both backend and frontend automated tests.

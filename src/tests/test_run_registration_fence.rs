@@ -124,6 +124,18 @@ async fn registration_fence_failures_report_the_actual_phase_and_writer_progress
             "persist_write_failed",
             "in a writer tick",
         ),
+        (
+            "shutdown",
+            PersistFenceError::Shutdown,
+            "worker_shutdown",
+            "accepted, awaiting a writer tick",
+        ),
+        (
+            "superseded",
+            PersistFenceError::Superseded,
+            "superseded",
+            "accepted, awaiting a writer tick",
+        ),
     ] {
         let mut fixture = FenceFixture::new();
         let mut state = test_app_state();
@@ -181,6 +193,7 @@ async fn registration_fence_failures_report_the_actual_phase_and_writer_progress
             reply_rx.try_recv(),
             Err(mpsc::TryRecvError::Empty)
         ));
+        let deadline = matches!(&fault, PersistFenceError::Deadline);
         let exact_fence_error = format!("{fault:?}");
         if phase == "queued" {
             // Leave this exact fence unaccepted, as when an earlier tick owns
@@ -207,11 +220,26 @@ async fn registration_fence_failures_report_the_actual_phase_and_writer_progress
                 .contains(&run_id)
         );
         let response = error.into_response();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(response.status(), if deadline {
+            StatusCode::SERVICE_UNAVAILABLE
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        });
         let bytes = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .unwrap();
         let body: Value = serde_json::from_slice(&bytes).unwrap();
+        if deadline {
+            assert_eq!(body["contract"], "termal-durability-pending");
+            assert_eq!(body["version"], 1);
+            assert_eq!(body["code"], "durability_pending");
+            assert_eq!(body["outcome"], "pending");
+            assert_eq!(body["operation"], "test_run_registration");
+            assert_eq!(body["identity"]["runId"], run_id);
+            assert_eq!(body["retry"]["mode"], "same_request");
+        } else {
+            assert!(body.get("contract").is_none(), "{body}");
+        }
         let message = body["error"].as_str().unwrap();
         assert!(message.contains("phase=durability_wait"), "{message}");
         assert!(

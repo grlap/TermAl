@@ -147,6 +147,24 @@ impl ApiErrorKind {
     }
 }
 
+/// Only an operation boundary may expose an enqueued fence's deadline as
+/// pending. Shared authority/startup helpers retain the fact without changing
+/// their ordinary error responses.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DurabilityPendingOperation {
+    TestRunRegistration,
+    AcceptanceEvaluationSubmission,
+    NamedRootNaming,
+    NamedRootRelease,
+}
+
+#[derive(Debug)]
+struct EnqueuedDurabilityDeadline {
+    identity: Value,
+    operation: Option<DurabilityPendingOperation>,
+}
+
 #[derive(Debug)]
 struct ApiError {
     message: String,
@@ -156,6 +174,7 @@ struct ApiError {
     // `code`), and remote proxy JSON decoding reconstructs `ApiError` with
     // `kind: None`; callers that need typed recovery must tag errors locally.
     kind: Option<ApiErrorKind>,
+    durability_deadline: Option<EnqueuedDurabilityDeadline>,
 }
 
 impl ApiError {
@@ -166,6 +185,7 @@ impl ApiError {
             message: message.into(),
             status: StatusCode::BAD_REQUEST,
             kind: None,
+            durability_deadline: None,
         }
     }
 
@@ -174,6 +194,7 @@ impl ApiError {
             message: message.into(),
             status: StatusCode::CONFLICT,
             kind: None,
+            durability_deadline: None,
         }
     }
 
@@ -182,6 +203,7 @@ impl ApiError {
             message: message.into(),
             status: StatusCode::NOT_FOUND,
             kind: None,
+            durability_deadline: None,
         }
     }
 
@@ -194,6 +216,7 @@ impl ApiError {
             message: message.into(),
             status: StatusCode::INTERNAL_SERVER_ERROR,
             kind: None,
+            durability_deadline: None,
         }
     }
 
@@ -202,6 +225,7 @@ impl ApiError {
             message: message.into(),
             status: StatusCode::BAD_GATEWAY,
             kind: None,
+            durability_deadline: None,
         }
     }
 
@@ -211,6 +235,7 @@ impl ApiError {
             message: message.into(),
             status,
             kind: None,
+            durability_deadline: None,
         }
     }
 
@@ -219,11 +244,52 @@ impl ApiError {
         self.kind = Some(kind);
         self
     }
+
+    /// Call only for an exact Deadline after successfully sending its fence.
+    /// Neither a failed send nor another fence error establishes this fact.
+    fn enqueued_durability_deadline(message: impl Into<String>, identity: Value) -> Self {
+        let mut error = Self::internal(message);
+        error.durability_deadline = Some(EnqueuedDurabilityDeadline {
+            identity,
+            operation: None,
+        });
+        error
+    }
+
+    fn is_enqueued_durability_deadline(&self) -> bool {
+        self.durability_deadline.is_some()
+    }
+
+    fn at_durability_boundary(mut self, operation: DurabilityPendingOperation) -> Self {
+        if let Some(deadline) = &mut self.durability_deadline {
+            deadline.operation = Some(operation);
+            self.status = StatusCode::SERVICE_UNAVAILABLE;
+            self.message = format!(
+                "{}; the operation may still commit; retry the unchanged original request",
+                truncate_chars(&self.message, 800),
+            );
+        }
+        self
+    }
 }
 
 impl IntoResponse for ApiError {
     /// Converts the value into response.
     fn into_response(self) -> Response {
+        if let Some(deadline) = self.durability_deadline
+            && let Some(operation) = deadline.operation
+        {
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+                "error": truncate_chars(&self.message, 2048),
+                "contract": "termal-durability-pending",
+                "version": 1,
+                "code": "durability_pending",
+                "outcome": "pending",
+                "operation": operation,
+                "identity": deadline.identity,
+                "retry": { "mode": "same_request" },
+            }))).into_response();
+        }
         let body = Json(ErrorResponse {
             error: self.message,
         });

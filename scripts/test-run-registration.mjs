@@ -100,6 +100,7 @@ class RegistrationDiagnostics {
     this.started = performance.now();
     this.runId = request.runId;
     this.requestDigest = requestIdentity(request);
+    this.ownerSessionId = request.owner;
     this.operationId = randomUUID();
     this.operation = operation;
     this.deadline = deadline;
@@ -139,6 +140,7 @@ class RegistrationDiagnostics {
       : `${this.method} ${this.phase.endsWith("headers") ? "send" : "body"} ${category === "aborted" ? "aborted" : `transport failure (${transportCode(error)})`}; no tests started`;
     const result = new Error(`${errorPrefix} ${human}; ${this.fields(category)}`.slice(0, 1280), { cause: error });
     result.registrationDiagnostic = true;
+    if (error?.durabilityPending) result.durabilityPending = error.durabilityPending;
     return result;
   }
 
@@ -147,23 +149,52 @@ class RegistrationDiagnostics {
   }
 }
 
+// A pending reply is not a definite no-write refusal or an acknowledgement.
+// Keep only this POST's validated identity and the supported wire fields;
+// arbitrary response fields must not enter the error or retained artifact.
+function registrationPending(body, response, diagnostics, reason) {
+  if (response.status !== 503 || diagnostics.method !== "POST" || diagnostics.phase !== "post_body"
+      || body?.contract !== "termal-durability-pending" || body.version !== 1
+      || body.code !== "durability_pending" || body.outcome !== "pending"
+      || body.operation !== "test_run_registration" || body.retry?.mode !== "same_request"
+      || typeof body.error !== "string" || !body.error.trim()
+      || typeof body.identity?.runId !== "string" || !body.identity.runId
+      || body.identity?.runId !== diagnostics.runId
+      || body.identity?.requestDigest !== diagnostics.requestDigest
+      || body.identity?.ownerSessionId !== diagnostics.ownerSessionId) return;
+  return {
+    error: reason,
+    contract: "termal-durability-pending", version: 1, code: "durability_pending", outcome: "pending",
+    operation: "test_run_registration",
+    identity: { runId: diagnostics.runId, requestDigest: diagnostics.requestDigest,
+      ownerSessionId: diagnostics.ownerSessionId },
+    retry: { mode: "same_request" },
+  };
+}
+
 async function httpFailure(response, diagnostics, signal) {
   let reason = "host reason unavailable";
   let bodyCategory = "missing_reason";
   let bodyCode = "unavailable";
+  let pending;
   try {
     const body = await readResponse(response);
     if (typeof body?.error === "string" && body.error.trim()) {
       reason = body.error.replace(/[\u0000-\u001f\u007f\u2028\u2029]/gu, " ").slice(0, 384);
       bodyCategory = "host_reason";
     }
+    pending = registrationPending(body, response, diagnostics, reason);
   } catch (error) {
-    // Non-2xx is already definitive. Reading/cancelling its body cannot erase
-    // that status or turn it into an ambiguous retryable POST transport loss.
+    // Non-2xx already forbids execution and automatic replay. A body failure
+    // cannot turn that status into an ambiguous retryable POST transport loss.
     bodyCategory = failureCategory(error, signal);
     bodyCode = transportCode(error);
   }
-  const error = responseFailure("http_error", `${diagnostics.method} HTTP ${response.status}: host refused registration; ${reason}; errorBodyCategory=${bodyCategory}; errorBodyCode=${bodyCode}`);
+  const disposition = pending ? "registration durability is pending; retry the unchanged original request; no tests started"
+    : "host refused registration";
+  const error = responseFailure(pending ? "durability_pending" : "http_error",
+    `${diagnostics.method} HTTP ${response.status}: ${disposition}; ${reason}; errorBodyCategory=${bodyCategory}; errorBodyCode=${bodyCode}`);
+  if (pending) error.durabilityPending = pending;
   return diagnostics.failure(error, signal);
 }
 

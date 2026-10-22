@@ -948,6 +948,7 @@ fn git_diff_degraded_untagged_statuses_always_produce_a_note() {
             status: *status,
             message: format!("untagged {status} error"),
             kind: None,
+            durability_deadline: None,
         };
         assert!(
             should_degrade_git_diff_document_enrichment_error(&error),

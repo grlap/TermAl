@@ -976,6 +976,7 @@ include!("delegation_mcp.rs");
 include!("delegation_mcp_source_root.rs");
 include!("delegation_mcp_named_root_release.rs");
 include!("delegation_mcp_timeouts.rs");
+include!("delegation_mcp_durability_pending.rs");
 include!("delegation_mcp_review_freeze.rs");
 include!("review_freeze.rs");
 include!("content_revision.rs");

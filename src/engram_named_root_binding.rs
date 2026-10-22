@@ -1204,17 +1204,18 @@ impl AppState {
         })
     }
 
-    fn engram_orphaned_root_pending(
+    fn engram_orphaned_root_intent(
         &self,
         store: &EngramAuthorityStoreKey,
         claim_id: &str,
-    ) -> bool {
+    ) -> Option<EngramNamedRootEvent> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         engram_root_journal(&inner.engram_named_root_journal, store, claim_id)
             .and_then(|journal| journal.pending.as_ref())
-            .is_some_and(|event| {
+            .filter(|event| {
                 !event.reporter.is_empty() && !Self::engram_root_reporter_available(&inner, event)
             })
+            .cloned()
     }
 
     /// A queued delta is not durable. This fence names one claim's exact
@@ -1893,20 +1894,40 @@ impl AppState {
         expected_connection: Option<&EngramConnectionConfig>,
         deadline: std::time::Instant,
     ) -> Result<(), EngramTransportError> {
-        let outcome = self
-            .reconcile_engram_named_root_classified_until(
-                session_id,
-                expected_token,
-                binding,
-                state,
-                fence,
-                expected_connection,
-                deadline,
-                None,
-                None,
-                None,
-            )
-            .map_err(EngramRootReconcileFailure::into_transport)?;
+        self.reconcile_engram_named_root_with_fence_classified_until(
+            session_id,
+            expected_token,
+            binding,
+            state,
+            fence,
+            expected_connection,
+            deadline,
+        )
+        .map_err(EngramRootReconcileFailure::into_transport)
+    }
+
+    fn reconcile_engram_named_root_with_fence_classified_until(
+        &self,
+        session_id: &str,
+        expected_token: &str,
+        binding: Option<&EngramControlWorkBinding>,
+        state: Option<EngramNamedRootState>,
+        fence: &EngramRootReadFence,
+        expected_connection: Option<&EngramConnectionConfig>,
+        deadline: std::time::Instant,
+    ) -> Result<(), EngramRootReconcileFailure> {
+        let outcome = self.reconcile_engram_named_root_classified_until(
+            session_id,
+            expected_token,
+            binding,
+            state,
+            fence,
+            expected_connection,
+            deadline,
+            None,
+            None,
+            None,
+        )?;
         match outcome {
             EngramRootReconcileOutcome::Confirmed | EngramRootReconcileOutcome::NoClaim => Ok(()),
             EngramRootReconcileOutcome::EvidenceWithheld {
@@ -1923,7 +1944,7 @@ impl AppState {
                             EngramTransportError::local_state("source-root reader disappeared")
                         })?
                 };
-                self.apply_engram_root_withholding_until(
+                self.apply_engram_root_withholding_classified_until(
                     &target,
                     expected_token,
                     binding,
@@ -1937,7 +1958,7 @@ impl AppState {
                 ..
             } => Ok(()),
             EngramRootReconcileOutcome::EvidenceWithheld { reason, .. } => {
-                Err(reason.into_transport())
+                Err(EngramRootReconcileFailure::EvidenceWithheld(reason))
             }
         }
     }

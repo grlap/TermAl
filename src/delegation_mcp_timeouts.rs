@@ -66,8 +66,8 @@ delegation_long_calls! {
     EvaluationRequest,
     /// May run the tracker twice, and waits for the writer before and after.
     EvaluationSubmit,
-    /// Bounded as a whole by the naming budget, so a failure the bridge reports
-    /// never leaves a name the server kept.
+    /// Bounded by the naming budget. An enqueued durability deadline remains
+    /// pending: a name may still commit after the reply.
     SourceRootNaming,
     /// Waits out a running reclamation pass, then the release's authority
     /// budget and the writer's confirmation and acknowledgement.
@@ -209,10 +209,15 @@ fn termal_delegation_outcome_is_unknown(err: &anyhow::Error) -> bool {
         || err
             .downcast_ref::<TermalDelegationResponseError>()
             .is_some()
-        || err.downcast_ref::<TermalDelegationApiError>().is_some_and(|error| {
-            error.status.is_server_error() && error.message.split(';')
-                .any(|clause| clause.trim() == FEDERATION_MAILBOX_UNKNOWN_OUTCOME)
-        })
+        || err
+            .downcast_ref::<TermalDelegationApiError>()
+            .is_some_and(|error| {
+                error.status.is_server_error()
+                    && error
+                        .message
+                        .split(';')
+                        .any(|clause| clause.trim() == FEDERATION_MAILBOX_UNKNOWN_OUTCOME)
+            })
 }
 
 /// `message`, which embeds `err`, as a `TermalDelegationUnknownOutcome`.
@@ -238,10 +243,11 @@ impl TermalDelegationMcpBridge {
     /// transport error names that wait.
     fn post_long_call(&self, call: DelegationLongCall, path: &str, body: &Value) -> Result<Value> {
         let allowance = self.allowance(call);
-        self.decode_response_within(
+        self.decode_response_for_request_within(
             "POST",
             path,
             allowance,
+            Some(body),
             self.client
                 .post(self.url(path))
                 .timeout(allowance)
@@ -284,6 +290,19 @@ impl TermalDelegationMcpBridge {
         timeout: Duration,
         response: std::result::Result<reqwest::blocking::Response, reqwest::Error>,
     ) -> Result<Value> {
+        self.decode_response_for_request_within(method, path, timeout, None, response)
+    }
+
+    /// Only the single-attempt long-call path supplies the original body.
+    /// Generic requests cannot opt into an operation's pending contract.
+    fn decode_response_for_request_within(
+        &self,
+        method: &'static str,
+        path: &str,
+        timeout: Duration,
+        original_request: Option<&Value>,
+        response: std::result::Result<reqwest::blocking::Response, reqwest::Error>,
+    ) -> Result<Value> {
         let response = response.map_err(|source| TermalDelegationTransportError {
             method,
             path: path.to_owned(),
@@ -311,8 +330,20 @@ impl TermalDelegationMcpBridge {
                 .into()
             });
         }
-        let message = serde_json::from_str::<Value>(&text)
-            .ok()
+        let parsed = serde_json::from_str::<Value>(&text).ok();
+        if let (Some(request), Some(value)) = (original_request, parsed.as_ref())
+            && let Some(pending) = durability_pending_for_request(
+                status,
+                method,
+                path,
+                &self.serving_session_id,
+                request,
+                value,
+            )
+        {
+            return Err(pending.into());
+        }
+        let message = parsed
             .and_then(|value| {
                 value
                     .get("error")

@@ -1756,8 +1756,11 @@ impl AppState {
             return Err(in_progress());
         }
         let authority = acceptance_evaluation_submit_authority_locked(&inner, child)?;
-        if authority.target.attempt_history.as_ref().is_some_and(|h| h.schema_version == 1)
-            && request.attempt_key.as_deref() != Some(authority.target.attempt_key.as_str())
+        let requires_attempt_key = authority.target.attempt_history.as_ref()
+            .is_some_and(|history| history.schema_version == 1);
+        if request.attempt_key.as_deref()
+            .is_some_and(|key| key != authority.target.attempt_key)
+            || (requires_attempt_key && request.attempt_key.is_none())
         {
             return Err(ApiError::conflict("the submission must echo the exact attemptKey from its current host-authored brief; an earlier attempt cannot submit under this target"));
         }
@@ -2100,9 +2103,14 @@ impl AppState {
             receipt: acceptance_evaluation_receipt_extract(&receipt),
             recorded_at: recorded_at.clone(),
         };
-        if let Err(err) = self.settle_open_acceptance_evaluation_submission(&authority, recorded) {
+        if let Err(err) = self.settle_open_acceptance_evaluation_submission_classified(&authority, recorded) {
+            if err.is_enqueued_durability_deadline() {
+                return Err(err.at_durability_boundary(
+                    DurabilityPendingOperation::AcceptanceEvaluationSubmission,
+                ));
+            }
             return Err(ApiError::internal(format!(
-                "the tracker recorded the evaluation, but TermAl could not confirm that it persisted that ({err}); submit the same verdicts again: the tracker replays them and the receipt is recovered"
+                "the tracker recorded the evaluation, but TermAl could not confirm that it persisted that ({}); submit the same verdicts again: the tracker replays them and the receipt is recovered", err.message
             )));
         }
         let (receipt, receipt_truncated) = bounded_acceptance_evaluation_receipt(receipt);
@@ -2265,8 +2273,16 @@ impl AppState {
             return Ok(begun);
         }
         if let Err(reason) =
-            self.confirm_acceptance_evaluation_submission_durable(authority, &written)
+            self.confirm_acceptance_evaluation_submission_durable_classified(authority, &written)
         {
+            if reason.is_enqueued_durability_deadline() {
+                // The pending image can still commit. Keep its original
+                // verdicts/attempt in memory as well; a different payload must
+                // not replace it while that write remains unresolved.
+                return Err(reason.at_durability_boundary(
+                    DurabilityPendingOperation::AcceptanceEvaluationSubmission,
+                ));
+            }
             // Nothing was sent, so `none` is the truth again where this
             // request's own `pending` still stands. An earlier open write is
             // not this request's to withdraw.
@@ -2274,7 +2290,7 @@ impl AppState {
                 self.withdraw_own_acceptance_evaluation_pending(authority, &begun.payload_digest);
             }
             return Err(ApiError::internal(format!(
-                "the submission was not acknowledged as persisted before running the tracker ({reason}), so nothing was sent; submit the same verdicts again"
+                "the submission was not acknowledged as persisted before running the tracker ({}), so nothing was sent; submit the same verdicts again", reason.message
             )));
         }
         Ok(begun)
@@ -2293,6 +2309,17 @@ impl AppState {
         authority: &AcceptanceEvaluationSubmitAuthority,
         written: &DelegationRecord,
     ) -> std::result::Result<(), String> {
+        self.confirm_acceptance_evaluation_submission_durable_classified(authority, written)
+            .map_err(|error| error.message)
+    }
+
+    // Shared startup/reuse callers keep their existing string error contract.
+    // Only the submission boundary opts this typed fact into a pending reply.
+    fn confirm_acceptance_evaluation_submission_durable_classified(
+        &self,
+        authority: &AcceptanceEvaluationSubmitAuthority,
+        written: &DelegationRecord,
+    ) -> std::result::Result<(), ApiError> {
         let deadline = std::time::Instant::now() + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT;
         let written_target = written
             .acceptance_evaluation
@@ -2312,11 +2339,11 @@ impl AppState {
                 // No writer (shutdown): write here, as a commit without one does.
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 if !inner.delegations.iter().any(|record| *record == expected) {
-                    return Err("the delegation changed before it was persisted".to_owned());
+                    return Err(ApiError::internal("the delegation changed before it was persisted"));
                 }
                 return self
                     .persist_internal_locked(&inner)
-                    .map_err(|error| format!("{error:#}"));
+                    .map_err(|error| ApiError::internal(format!("{error:#}")));
             }
             // Same content: keep waiting. Other content: ask again below.
             let current = loop {
@@ -2326,15 +2353,23 @@ impl AppState {
                     // fence, so the refusal says which persist phase failed.
                     return result.map_err(|error| match error {
                         PersistFenceError::Deadline => {
-                            format!("Deadline: {}", waiter.progress().describe())
+                            ApiError::enqueued_durability_deadline(
+                                format!("evaluation submission persistence is unconfirmed (Deadline: {})",
+                                    waiter.progress().describe()),
+                                json!({
+                                    "delegationId": authority.delegation_id,
+                                    "attemptKey": authority.target.attempt_key,
+                                    "evaluatorSessionId": expected.child_session_id,
+                                }),
+                            )
                         }
-                        error => format!("{error:?}"),
+                        error => ApiError::internal(format!("{error:?}")),
                     });
                 }
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 let Some(index) = acceptance_evaluation_attempt_index_locked(&inner, authority)
                 else {
-                    return Err("the delegation is gone".to_owned());
+                    return Err(ApiError::internal("the delegation is gone"));
                 };
                 if inner.delegations[index] != expected {
                     break inner.delegations[index].clone();
@@ -2346,12 +2381,12 @@ impl AppState {
                 .as_ref()
                 != written_target
             {
-                return Err("the submission state changed before it was acknowledged".to_owned());
+                return Err(ApiError::internal("the submission state changed before it was acknowledged"));
             }
             if attempts == ACCEPTANCE_EVALUATION_PERSIST_ACK_ATTEMPTS {
-                return Err(format!(
+                return Err(ApiError::internal(format!(
                     "the delegation kept changing through {attempts} acknowledgement attempts"
-                ));
+                )));
             }
             attempts += 1;
             expected = current;
@@ -2529,6 +2564,15 @@ impl AppState {
         authority: &AcceptanceEvaluationSubmitAuthority,
         next: AcceptanceEvaluationSubmission,
     ) -> std::result::Result<(), String> {
+        self.settle_open_acceptance_evaluation_submission_classified(authority, next)
+            .map_err(|error| error.message)
+    }
+
+    fn settle_open_acceptance_evaluation_submission_classified(
+        &self,
+        authority: &AcceptanceEvaluationSubmitAuthority,
+        next: AcceptanceEvaluationSubmission,
+    ) -> std::result::Result<(), ApiError> {
         let recorded = matches!(next, AcceptanceEvaluationSubmission::Recorded { .. });
         let (written, previous, dispatch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -2557,14 +2601,14 @@ impl AppState {
                             target.submission = previous;
                         }
                     }
-                    return Err(format!("{err:#}"));
+                    return Err(ApiError::internal(format!("{err:#}")));
                 }
             }
         };
         if dispatch == PersistDispatch::Synchronous {
             return Ok(());
         }
-        let confirmed = self.confirm_acceptance_evaluation_submission_durable(authority, &written);
+        let confirmed = self.confirm_acceptance_evaluation_submission_durable_classified(authority, &written);
         if confirmed.is_err() && recorded {
             self.restore_unacknowledged_acceptance_evaluation_recorded(
                 authority, &written, previous,

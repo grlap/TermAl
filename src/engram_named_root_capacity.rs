@@ -365,8 +365,9 @@ impl AppState {
             // The caller's own retained root first (the same work or short
             // reference may be retained in another store, or by another
             // session); then any match, so a wrong caller learns whose it is;
-            // then an earlier release of one this session made whose
-            // confirmation is still pending.
+            // then an earlier release requested by this session. The common
+            // release path decides pending replay versus durable current state
+            // and still checks the exact selection, reason and naming owner.
             let selection = inner
                 .engram_work_source_roots
                 .iter()
@@ -379,8 +380,7 @@ impl AppState {
                         .iter()
                         .rev()
                         .find(|record| {
-                            !record.acknowledged
-                                && names(&record.selection)
+                            names(&record.selection)
                                 && record.requested_by.as_deref() == Some(session_id)
                         })
                         .map(|record| record.selection.clone())

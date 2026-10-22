@@ -120,6 +120,9 @@ enum EngramRootReconcileOutcome {
 enum EngramRootReconcileFailure {
     AdmissionInvalid(EngramTransportError),
     Infrastructure(ApiError),
+    // Keep the uncertainty's origin so legacy callers retain protocol errors,
+    // while the explicit naming boundary can preserve a marked local deadline.
+    EvidenceWithheld(EngramRootEvidenceUncertainty),
 }
 
 enum EngramAuthorityReadFailure {
@@ -141,6 +144,7 @@ impl EngramRootReconcileFailure {
         match self {
             Self::AdmissionInvalid(error) => error,
             Self::Infrastructure(error) => EngramTransportError::transport(error.message),
+            Self::EvidenceWithheld(reason) => reason.into_transport(),
         }
     }
 }
@@ -265,6 +269,39 @@ fn engram_authority_work_unresolved(
 }
 
 impl EngramAuthorityImage {
+    /// Describes the exact image whose fence expired, never a later owner
+    /// looked up after the off-lock wait. A first-contact guard has an owner
+    /// identity even before a naming generation has been allocated.
+    fn durability_identity(&self) -> Value {
+        let owner = self.history.transition.as_ref();
+        let claim = owner.map(|owner| owner.binding.claim_id.as_str());
+        let root = self
+            .journals
+            .iter()
+            .filter(|journal| Some(journal.claim_id.as_str()) == claim)
+            .find_map(|journal| journal.pending.as_ref().map(|event| &event.root))
+            .or(self
+                .selection
+                .as_ref()
+                .filter(|root| Some(root.claim_id.as_str()) == claim))
+            // Clear has removed the selection and settled its pending event
+            // before the final publication fence. The immutable confirmed
+            // event still names the exact generation that was cleared.
+            .or_else(|| {
+                self.journals
+                    .iter()
+                    .filter(|journal| Some(journal.claim_id.as_str()) == claim)
+                    .find_map(|journal| journal.confirmed.as_ref().map(|(event, _)| &event.root))
+            });
+        json!({
+            "workId": self.work_id,
+            "claimId": claim,
+            "generation": root.map(|root| root.generation),
+            "ownerId": owner.map(|owner| &owner.id),
+            "ownerVersion": owner.map(|owner| owner.version),
+        })
+    }
+
     fn capture(
         inner: &StateInner,
         store: &EngramAuthorityStoreKey,
@@ -573,10 +610,30 @@ impl AppState {
         target: &EngramBindingTarget,
         expected_token: &str,
         binding: Option<&EngramControlWorkBinding>,
-        mut guard: Option<EngramAcknowledgedRootGuard>,
+        guard: Option<EngramAcknowledgedRootGuard>,
         admission_owner: Option<&EngramQueuedAdmissionOwner>,
         deadline: std::time::Instant,
     ) -> Result<(), EngramTransportError> {
+        self.apply_engram_root_withholding_classified_until(
+            target,
+            expected_token,
+            binding,
+            guard,
+            admission_owner,
+            deadline,
+        )
+        .map_err(EngramRootReconcileFailure::into_transport)
+    }
+
+    fn apply_engram_root_withholding_classified_until(
+        &self,
+        target: &EngramBindingTarget,
+        expected_token: &str,
+        binding: Option<&EngramControlWorkBinding>,
+        mut guard: Option<EngramAcknowledgedRootGuard>,
+        admission_owner: Option<&EngramQueuedAdmissionOwner>,
+        deadline: std::time::Instant,
+    ) -> Result<(), EngramRootReconcileFailure> {
         let identity_current = |inner: &StateInner, guard: Option<&EngramAcknowledgedRootGuard>| {
             Self::engram_root_admission_is_current_locked(
                 inner,
@@ -592,7 +649,8 @@ impl AppState {
             if !identity_current(&inner, guard.as_ref()) {
                 return Err(EngramTransportError::local_state(
                     "source uncertainty belongs to an invalid admission owner",
-                ));
+                )
+                .into());
             }
         }
         if target.settings.authority_store_key.is_some()
@@ -603,7 +661,7 @@ impl AppState {
             // A successor's publication invalidates the old proof's lifetime.
             // Establish a new acknowledged obligation, never reuse its token
             // to overwrite a successor's admission or assume on-disk guard state.
-            guard = self.guard_engram_root_read_until(target, binding, deadline)?;
+            guard = self.guard_engram_root_read_classified_until(target, binding, deadline)?;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if !identity_current(&inner, guard.as_ref())
@@ -614,7 +672,8 @@ impl AppState {
         {
             return Err(EngramTransportError::local_state(
                 "source uncertainty has no current acknowledged recovery guard",
-            ));
+            )
+            .into());
         }
         let index = inner
             .find_session_index(&target.connection.session_id)
@@ -873,9 +932,14 @@ impl AppState {
                     "recovery batch belongs to an earlier owner",
                 ));
             }
-            let namer = inner.engram_work_source_roots.iter()
-                .find(|root| &root.store == store && root.work_id == owner.binding.work_id
-                    && root.claim_id == owner.binding.claim_id)
+            let namer = inner
+                .engram_work_source_roots
+                .iter()
+                .find(|root| {
+                    &root.store == store
+                        && root.work_id == owner.binding.work_id
+                        && root.claim_id == owner.binding.claim_id
+                })
                 .map(|root| root.named_by_session.as_str());
             let target = engram_root_recovery_reader_target_locked(&inner, store, namer);
             let abandoned = inner
@@ -890,9 +954,13 @@ impl AppState {
                 history
                     .unresolved_runs
                     .iter()
-                    .filter(|binding| required_selection.is_none_or(|root|
-                        binding.work_id == root.work_id && binding.claim_id == root.claim_id
-                            && engram_same_recovery_run(binding, &owner.binding)))
+                    .filter(|binding| {
+                        required_selection.is_none_or(|root| {
+                            binding.work_id == root.work_id
+                                && binding.claim_id == root.claim_id
+                                && engram_same_recovery_run(binding, &owner.binding)
+                        })
+                    })
                     .take(8)
                     .cloned()
                     .collect::<Vec<_>>(),
@@ -912,26 +980,43 @@ impl AppState {
             let (selection_snapshot, journal_snapshot) = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 (
-                    inner.engram_work_source_roots.iter()
-                        .filter(|root| &root.store == store && root.work_id == binding.work_id
-                            && root.claim_id == binding.claim_id).cloned().collect::<Vec<_>>(),
-                    inner.engram_named_root_journal.iter()
-                        .filter(|journal| &journal.store == store
-                            && journal.read_binding.as_ref().is_some_and(|retained|
-                                engram_same_recovery_run(retained, &binding)))
-                        .cloned().collect::<Vec<_>>(),
+                    inner
+                        .engram_work_source_roots
+                        .iter()
+                        .filter(|root| {
+                            &root.store == store
+                                && root.work_id == binding.work_id
+                                && root.claim_id == binding.claim_id
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    inner
+                        .engram_named_root_journal
+                        .iter()
+                        .filter(|journal| {
+                            &journal.store == store
+                                && journal.read_binding.as_ref().is_some_and(|retained| {
+                                    engram_same_recovery_run(retained, &binding)
+                                })
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
                 )
             };
-            if required_selection.is_some_and(|required|
-                required.work_id == binding.work_id && !selection_snapshot.contains(required))
-            {
-                return Err(ApiError::conflict("the caller's retained selection was replaced before its canonical read"));
+            if required_selection.is_some_and(|required| {
+                required.work_id == binding.work_id && !selection_snapshot.contains(required)
+            }) {
+                return Err(ApiError::conflict(
+                    "the caller's retained selection was replaced before its canonical read",
+                ));
             }
             if reclamation.is_some_and(|(root, route)| {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 !engram_root_reclamation_route_current(&inner, root, route)
             }) {
-                return Err(ApiError::conflict("the reclamation owner changed or became active before its canonical read"));
+                return Err(ApiError::conflict(
+                    "the reclamation owner changed or became active before its canonical read",
+                ));
             }
             let result = target
                 .as_ref()
@@ -953,25 +1038,49 @@ impl AppState {
             {
                 engram_named_root_record_refused_claim_locked(&mut inner, store, &binding.claim_id);
             }
-            let selection_current = inner.engram_work_source_roots.iter()
-                .filter(|root| &root.store == store && root.work_id == binding.work_id
-                    && root.claim_id == binding.claim_id).cloned().collect::<Vec<_>>();
-            let journal_current = inner.engram_named_root_journal.iter()
-                .filter(|journal| &journal.store == store
-                    && journal.read_binding.as_ref().is_some_and(|retained|
-                        engram_same_recovery_run(retained, &binding)))
-                .cloned().collect::<Vec<_>>();
-            let reader_current = target.as_ref().is_some_and(|target|
+            let selection_current = inner
+                .engram_work_source_roots
+                .iter()
+                .filter(|root| {
+                    &root.store == store
+                        && root.work_id == binding.work_id
+                        && root.claim_id == binding.claim_id
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let journal_current = inner
+                .engram_named_root_journal
+                .iter()
+                .filter(|journal| {
+                    &journal.store == store
+                        && journal
+                            .read_binding
+                            .as_ref()
+                            .is_some_and(|retained| engram_same_recovery_run(retained, &binding))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let reader_current = target.as_ref().is_some_and(|target| {
                 Self::engram_binding_target_for_session_shape_locked(
-                    &inner, &target.connection.session_id, true).ok().flatten()
-                    .is_some_and(|current| current.connection == target.connection
+                    &inner,
+                    &target.connection.session_id,
+                    true,
+                )
+                .ok()
+                .flatten()
+                .is_some_and(|current| {
+                    current.connection == target.connection
                         && current.routing_token == target.routing_token
-                        && current.settings.authority_store_key.as_ref() == Some(store)));
-            let route_current = reclamation.is_none_or(|(root, route)|
-                engram_root_reclamation_route_current(&inner, root, route));
-            let current_owner_appeared = reclamation.is_some_and(|(root, route)|
+                        && current.settings.authority_store_key.as_ref() == Some(store)
+                })
+            });
+            let route_current = reclamation.is_none_or(|(root, route)| {
+                engram_root_reclamation_route_current(&inner, root, route)
+            });
+            let current_owner_appeared = reclamation.is_some_and(|(root, route)| {
                 matches!(route, EngramRootReclamationRoute::Unfocused)
-                    && engram_named_root_current_owner(&inner, root).is_some());
+                    && engram_named_root_current_owner(&inner, root).is_some()
+            });
             let current = inner
                 .engram_work_naming_history
                 .iter_mut()
@@ -995,8 +1104,11 @@ impl AppState {
                 Ok(proof) => {
                     // A canonical answer authorizes only the image read for.
                     // A new selection or a newly executable intent survives.
-                    if selection_current != selection_snapshot || journal_current != journal_snapshot
-                        || !reader_current || !route_current {
+                    if selection_current != selection_snapshot
+                        || journal_current != journal_snapshot
+                        || !reader_current
+                        || !route_current
+                    {
                         engram_retain_recovery_run(&mut current.unresolved_runs, &binding);
                         current.recovery_reason = Some(if current_owner_appeared {
                             "a current owner appeared during canonical read; entry retained"
@@ -1072,10 +1184,17 @@ impl AppState {
                         }
                     }
                     for root in &selection_snapshot {
-                        let associated = engram_root_journal(&inner.engram_named_root_journal, store, &root.claim_id)
-                            .is_some_and(|journal| journal.pending.is_none()
-                                && journal.read_binding.as_ref().is_some_and(|retained|
-                                    engram_same_recovery_run(retained, &binding)));
+                        let associated = engram_root_journal(
+                            &inner.engram_named_root_journal,
+                            store,
+                            &root.claim_id,
+                        )
+                        .is_some_and(|journal| {
+                            journal.pending.is_none()
+                                && journal.read_binding.as_ref().is_some_and(|retained| {
+                                    engram_same_recovery_run(retained, &binding)
+                                })
+                        });
                         if associated {
                             engram_retire_exact_root_locked(&mut inner, root, &binding, &proof);
                         }
@@ -1161,18 +1280,27 @@ impl AppState {
                 .collect::<Vec<_>>();
             // Settled naming receipts are still lifecycle read associations.
             // Focus changes do not make the original binding disappear.
-            let mut retained = inner.engram_work_source_roots.iter()
+            let mut retained = inner
+                .engram_work_source_roots
+                .iter()
                 .filter(|root| root.store == store)
                 .filter(|root| !engram_named_root_current_binding(&inner, root))
-                .filter_map(|root| engram_root_journal(&inner.engram_named_root_journal, &store, &root.claim_id)
-                    .filter(|journal| journal.pending.is_none())
-                    .and_then(|journal| journal.read_binding.clone())
-                    .filter(|binding| binding.work_id == root.work_id && binding.claim_id == root.claim_id)
-                    .map(|binding| (root.named_at.clone(), binding)))
+                .filter_map(|root| {
+                    engram_root_journal(&inner.engram_named_root_journal, &store, &root.claim_id)
+                        .filter(|journal| journal.pending.is_none())
+                        .and_then(|journal| journal.read_binding.clone())
+                        .filter(|binding| {
+                            binding.work_id == root.work_id && binding.claim_id == root.claim_id
+                        })
+                        .map(|binding| (root.named_at.clone(), binding))
+                })
                 .collect::<Vec<_>>();
             retained.sort_by(|a, b| a.0.cmp(&b.0));
             for (_, binding) in retained {
-                if !runs.iter().any(|current| engram_same_recovery_run(current, &binding)) {
+                if !runs
+                    .iter()
+                    .any(|current| engram_same_recovery_run(current, &binding))
+                {
                     runs.push(binding);
                 }
             }
@@ -1181,7 +1309,8 @@ impl AppState {
                     .engram_authority_read_cursor
                     .get(&store)
                     .map_or(0, |last| {
-                        runs.iter().position(|binding| binding.claim_id == *last)
+                        runs.iter()
+                            .position(|binding| binding.claim_id == *last)
                             .map_or(0, |index| (index + 1) % runs.len())
                     });
                 runs.rotate_left(offset);
@@ -1200,7 +1329,8 @@ impl AppState {
                 .engram_authority_read_cursor
                 .insert(store.clone(), binding.claim_id.clone());
             if let Ok(owner) = self.prepare_engram_authority_until(&store, &binding, deadline) {
-                let _ = self.recover_engram_authority_batch_until(&store, &owner, deadline, true, None);
+                let _ =
+                    self.recover_engram_authority_batch_until(&store, &owner, deadline, true, None);
                 let _ = self.publish_engram_authority_until(&store, &owner, deadline);
             }
         }
@@ -1420,68 +1550,69 @@ impl AppState {
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
     ) -> Result<EngramAuthorityImage, ApiError> {
-            let index =
-                match inner.engram_work_naming_history.iter().position(|history| {
-                    &history.store == store && history.work_id == binding.work_id
-                }) {
-                    Some(index) => index,
-                    None => {
-                        inner
-                            .engram_work_naming_history
-                            .push(EngramWorkNamingHistory {
-                                store: store.clone(),
-                                work_id: binding.work_id.clone(),
-                                revision: 0,
-                                known_generation: 0,
-                                epoch: 0,
-                                frontier: None,
-                                owner_version: 0,
-                                transition: None,
-                                unresolved_runs: Vec::new(),
-                                proofs: Vec::new(),
-                                retirements: Vec::new(),
-                                recovery_reason: None,
-                            });
-                        inner.engram_work_naming_history.len() - 1
-                    }
-                };
-            let journal_runs = inner
-                .engram_named_root_journal
-                .iter()
-                .filter(|journal| {
-                    &journal.store == store
-                        && engram_journal_names_work(journal, &binding.work_id)
-                        && journal.requires_reconciliation()
-                })
-                .filter_map(|journal| journal.read_binding.clone())
-                .collect::<Vec<_>>();
-            let history = &mut inner.engram_work_naming_history[index];
-            for retained in journal_runs {
-                engram_retain_recovery_run(&mut history.unresolved_runs, &retained);
+        let index = match inner
+            .engram_work_naming_history
+            .iter()
+            .position(|history| &history.store == store && history.work_id == binding.work_id)
+        {
+            Some(index) => index,
+            None => {
+                inner
+                    .engram_work_naming_history
+                    .push(EngramWorkNamingHistory {
+                        store: store.clone(),
+                        work_id: binding.work_id.clone(),
+                        revision: 0,
+                        known_generation: 0,
+                        epoch: 0,
+                        frontier: None,
+                        owner_version: 0,
+                        transition: None,
+                        unresolved_runs: Vec::new(),
+                        proofs: Vec::new(),
+                        retirements: Vec::new(),
+                        recovery_reason: None,
+                    });
+                inner.engram_work_naming_history.len() - 1
             }
-            if let Some(previous) = history
-                .transition
-                .as_ref()
-                .filter(|previous| previous.phase != EngramAuthorityPhase::Published)
-            {
-                engram_retain_recovery_run(&mut history.unresolved_runs, &previous.binding);
-            }
-            engram_retain_recovery_run(&mut history.unresolved_runs, binding);
-            history.recovery_reason.get_or_insert_with(|| {
-                "canonical naming history for a retained run still needs an acknowledged read"
-                    .to_owned()
-            });
-            history.owner_version = history
-                .owner_version
-                .checked_add(1)
-                .ok_or_else(|| ApiError::internal("named-root owner version exhausted"))?;
-            history.transition = Some(EngramAuthorityTransition {
-                id: Uuid::new_v4().to_string(),
-                version: history.owner_version,
-                binding: binding.clone(),
-                phase: EngramAuthorityPhase::Prepared,
-            });
-            EngramAuthorityImage::capture(inner, store, &binding.work_id)
+        };
+        let journal_runs = inner
+            .engram_named_root_journal
+            .iter()
+            .filter(|journal| {
+                &journal.store == store
+                    && engram_journal_names_work(journal, &binding.work_id)
+                    && journal.requires_reconciliation()
+            })
+            .filter_map(|journal| journal.read_binding.clone())
+            .collect::<Vec<_>>();
+        let history = &mut inner.engram_work_naming_history[index];
+        for retained in journal_runs {
+            engram_retain_recovery_run(&mut history.unresolved_runs, &retained);
+        }
+        if let Some(previous) = history
+            .transition
+            .as_ref()
+            .filter(|previous| previous.phase != EngramAuthorityPhase::Published)
+        {
+            engram_retain_recovery_run(&mut history.unresolved_runs, &previous.binding);
+        }
+        engram_retain_recovery_run(&mut history.unresolved_runs, binding);
+        history.recovery_reason.get_or_insert_with(|| {
+            "canonical naming history for a retained run still needs an acknowledged read"
+                .to_owned()
+        });
+        history.owner_version = history
+            .owner_version
+            .checked_add(1)
+            .ok_or_else(|| ApiError::internal("named-root owner version exhausted"))?;
+        history.transition = Some(EngramAuthorityTransition {
+            id: Uuid::new_v4().to_string(),
+            version: history.owner_version,
+            binding: binding.clone(),
+            phase: EngramAuthorityPhase::Prepared,
+        });
+        EngramAuthorityImage::capture(inner, store, &binding.work_id)
     }
 
     fn confirm_engram_authority_image_until(
@@ -1521,11 +1652,14 @@ impl AppState {
                         Some(_) => "no longer current",
                         None => "unknown (state busy)",
                     };
-                    return Err(ApiError::internal(format!(
-                        "named-root authority persistence is unconfirmed (Deadline) while {}; \
+                    return Err(ApiError::enqueued_durability_deadline(
+                        format!(
+                            "named-root authority persistence is unconfirmed (Deadline) while {}; \
                          the authority image is {ownership}; recovery remains withheld",
-                        waiter.progress().describe(),
-                    )));
+                            waiter.progress().describe(),
+                        ),
+                        image.durability_identity(),
+                    ));
                 }
                 Err(error) => {
                     return Err(ApiError::internal(format!(

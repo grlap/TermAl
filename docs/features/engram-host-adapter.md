@@ -4,6 +4,10 @@ Related: [Supervised pilot onboarding](supervised-pilot-onboarding.md) (the
 settings a colleague's machine uses for the first supervised pilot: Base
 enabled, turn-gated control off).
 
+See [Durability pending](durability-pending.md) for the versioned pending
+outcome on enqueued evaluation submission and named-root name/clear/release
+deadlines, exact-identity retries, MCP propagation and restart limits.
+
 ## Status and product tiers
 
 The local Engram integration has two independent tiers:

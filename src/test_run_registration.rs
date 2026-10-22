@@ -590,6 +590,16 @@ impl AppState {
                     diagnostics.cause = Some(format!("{error:?}"));
                     diagnostics.fence_error = Some(format!("{error:?}"));
                     diagnostics.writer_progress = Some(waiter.progress().describe());
+                    if matches!(error, PersistFenceError::Deadline) {
+                        return Err(ApiError::enqueued_durability_deadline(
+                            "test run registration persistence is not yet acknowledged",
+                            json!({
+                                "runId": expected.run_id,
+                                "requestDigest": expected.request_identity,
+                                "ownerSessionId": expected.owning_session_id,
+                            }),
+                        ).at_durability_boundary(DurabilityPendingOperation::TestRunRegistration));
+                    }
                     return Err(ApiError::internal(
                         "test run registration durability failed",
                     ));

@@ -86,6 +86,15 @@ fn engram_source_root_control_within<T>(
     let result = call(budget);
     let elapsed = clock.elapsed_since(started);
     *remaining = remaining.saturating_sub(elapsed);
+    // A fence may expire exactly at this control allowance. Preserve its
+    // proven post-enqueue classification for the explicit caller boundary;
+    // replacing it with a generic budget error loses the pending identity.
+    if result
+        .as_ref()
+        .is_err_and(|error| error.is_enqueued_durability_deadline())
+    {
+        return result;
+    }
     if elapsed >= budget {
         return Err(ApiError::bad_gateway(
             "named-root control reply arrived after its budget; retry the same request to settle any pending intent",
@@ -230,7 +239,10 @@ impl EngramSourceRootNotice {
 
     fn retired(&self, inner: &StateInner) -> bool {
         if matches!(self.kind, EngramSourceRootNoticeKind::Reclaimed { .. }) {
-            return !inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+            return !inner
+                .engram_work_naming_history
+                .iter()
+                .flat_map(|history| &history.retirements)
                 .any(|notice| notice.id == self.id && notice.published && !notice.delivered);
         }
         let (store, work, _) = self.scope();
@@ -305,18 +317,33 @@ fn refresh_engram_source_root_notices_locked(
     index: usize,
 ) -> Vec<EngramSourceRootNotice> {
     let session_id = &inner.sessions[index].session.id;
-    let restored = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-        .filter(|notice| notice.published && !notice.delivered
-            && notice.selection.named_by_session == *session_id)
+    let restored = inner
+        .engram_work_naming_history
+        .iter()
+        .flat_map(|history| &history.retirements)
+        .filter(|notice| {
+            notice.published
+                && !notice.delivered
+                && notice.selection.named_by_session == *session_id
+        })
         .map(|notice| EngramSourceRootNotice {
             id: notice.id.clone(),
             kind: EngramSourceRootNoticeKind::Reclaimed {
-                selection: notice.selection.clone(), line: notice.line.clone(),
+                selection: notice.selection.clone(),
+                line: notice.line.clone(),
             },
-        }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
     for notice in restored {
-        if !inner.sessions[index].engram.source_root_notices.contains(&notice) {
-            inner.sessions[index].engram.source_root_notices.push(notice);
+        if !inner.sessions[index]
+            .engram
+            .source_root_notices
+            .contains(&notice)
+        {
+            inner.sessions[index]
+                .engram
+                .source_root_notices
+                .push(notice);
         }
     }
     let pending = std::mem::take(&mut inner.sessions[index].engram.source_root_notices);
@@ -530,8 +557,7 @@ impl EngramSessionState {
             line
         };
         lines.retain(|pending| {
-            *pending != line
-                && !(uncredited && engram_is_uncredited_check_line(pending))
+            *pending != line && !(uncredited && engram_is_uncredited_check_line(pending))
         });
         if let Some((delivered, _)) = self.source_root_line_delivery.as_mut() {
             *delivered = delivered
@@ -1681,6 +1707,30 @@ impl AppState {
         session_id: &str,
         request: EngramSourceRootRequest,
     ) -> std::result::Result<EngramSourceRootResponse, ApiError> {
+        let action = if request.path.is_some() {
+            "name"
+        } else {
+            "clear"
+        };
+        let work = request.work.clone();
+        let path = request.path.clone();
+        self.name_engram_source_root_inner(session_id, request)
+            .map_err(|mut error| {
+                if let Some(deadline) = &mut error.durability_deadline {
+                    deadline.identity["action"] = json!(action);
+                    deadline.identity["requestedWork"] = json!(work);
+                    deadline.identity["requestedPath"] = json!(path);
+                    deadline.identity["sessionId"] = json!(session_id);
+                }
+                error.at_durability_boundary(DurabilityPendingOperation::NamedRootNaming)
+            })
+    }
+
+    fn name_engram_source_root_inner(
+        &self,
+        session_id: &str,
+        request: EngramSourceRootRequest,
+    ) -> std::result::Result<EngramSourceRootResponse, ApiError> {
         let clock = self.engram_budget_clock();
         // Everything below shares one budget, within the bridge's wait.
         let deadline = clock.now() + ENGRAM_SOURCE_ROOT_NAMING_BUDGET;
@@ -1719,18 +1769,41 @@ impl AppState {
         };
         let (unfocused_clear, clear_selection, full_new_name) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let store = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
-                .ok().flatten().and_then(|target| target.settings.authority_store_key);
-            let selection = inner.engram_work_source_roots.iter()
-                .chain(inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-                    .filter(|notice| !notice.published).map(|notice| &notice.selection))
-                .find(|root| Some(&root.store) == store.as_ref()
-                    && (root.work_id == work || root.short_ref == work)).cloned();
-            let unfocused = path.is_none() && selection.as_ref().is_some_and(|root|
-                inner.find_session_index(session_id).is_some_and(|index|
-                    inner.sessions[index].engram.work_binding.as_ref().is_none_or(|binding|
-                        binding.work_id != root.work_id || binding.claim_id != root.claim_id)));
-            let full = path.is_some() && selection.is_none()
+            let store =
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    .ok()
+                    .flatten()
+                    .and_then(|target| target.settings.authority_store_key);
+            let selection = inner
+                .engram_work_source_roots
+                .iter()
+                .chain(
+                    inner
+                        .engram_work_naming_history
+                        .iter()
+                        .flat_map(|history| &history.retirements)
+                        .filter(|notice| !notice.published)
+                        .map(|notice| &notice.selection),
+                )
+                .find(|root| {
+                    Some(&root.store) == store.as_ref()
+                        && (root.work_id == work || root.short_ref == work)
+                })
+                .cloned();
+            let unfocused = path.is_none()
+                && selection.as_ref().is_some_and(|root| {
+                    inner.find_session_index(session_id).is_some_and(|index| {
+                        inner.sessions[index]
+                            .engram
+                            .work_binding
+                            .as_ref()
+                            .is_none_or(|binding| {
+                                binding.work_id != root.work_id || binding.claim_id != root.claim_id
+                            })
+                    })
+                });
+            let full = path.is_some()
+                && selection.is_none()
                 && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT;
             (unfocused, selection, full)
         };
@@ -1835,11 +1908,17 @@ impl AppState {
         {
             meanwhile();
         }
-        if path.is_none() && !held.items.iter().any(|claim| claim.work_id == work || claim.short_ref == work) {
-            if let Some(root) = clear_selection.as_ref().filter(|root| root.store == store)
-            {
+        if path.is_none()
+            && !held
+                .items
+                .iter()
+                .any(|claim| claim.work_id == work || claim.short_ref == work)
+        {
+            if let Some(root) = clear_selection.as_ref().filter(|root| root.store == store) {
                 if root.named_by_session != session_id {
-                    return Err(ApiError::conflict("not the naming session; another reader cannot confer ownership of this retained name"));
+                    return Err(ApiError::conflict(
+                        "not the naming session; another reader cannot confer ownership of this retained name",
+                    ));
                 }
                 return self.clear_obsolete_own_engram_root_until(session_id, root, deadline);
             }
@@ -1916,12 +1995,19 @@ impl AppState {
             })?;
             engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
                 let phase_deadline = (clock.now() + budget).min(deadline);
-                self.guard_engram_root_read_until(
+                self.guard_engram_root_read_classified_until(
                     &target,
                     target.work_binding.as_ref(),
                     phase_deadline,
                 )
-                .map_err(|error| ApiError::bad_gateway(error.to_string()))?;
+                .map_err(|error| match error {
+                    EngramRootReconcileFailure::Infrastructure(error)
+                        if error.is_enqueued_durability_deadline() =>
+                    {
+                        error
+                    }
+                    other => ApiError::bad_gateway(other.into_transport().to_string()),
+                })?;
                 target
                     .adapter
                     .request(
@@ -1940,7 +2026,7 @@ impl AppState {
         } else {
             None
         };
-        if self.engram_orphaned_root_pending(&store, &claim.claim_id) {
+        if let Some(intent) = self.engram_orphaned_root_intent(&store, &claim.claim_id) {
             let token = target.routing_token.as_deref().ok_or_else(|| {
                 ApiError::conflict(
                     "focus this claim and start a turn to recover its orphaned source-root intent",
@@ -1957,7 +2043,7 @@ impl AppState {
             }
             // A read never acknowledges a possibly executable transport send.
             // Only a covering canonical lifecycle proof settles its exact intent.
-            self.reconcile_engram_named_root_with_fence_until(
+            self.reconcile_engram_named_root_with_fence_classified_until(
                 session_id,
                 token,
                 target.work_binding.as_ref(),
@@ -1967,7 +2053,27 @@ impl AppState {
                 deadline,
             )
             .map_err(|error| {
-                ApiError::bad_gateway(format!("recovering orphaned root intent: {error}"))
+                let mut error = match error {
+                    EngramRootReconcileFailure::Infrastructure(error)
+                    | EngramRootReconcileFailure::EvidenceWithheld(
+                        EngramRootEvidenceUncertainty::Publication(error)
+                        | EngramRootEvidenceUncertainty::CanonicalRead(error)
+                        | EngramRootEvidenceUncertainty::CanonicalHistory(error),
+                    ) if error.is_enqueued_durability_deadline() => error,
+                    other => {
+                        return ApiError::bad_gateway(format!(
+                            "recovering orphaned root intent: {}",
+                            other.into_transport(),
+                        ));
+                    }
+                };
+                // Publication can move this exact intent into reconciliation
+                // and retire its selection. Retain its immutable generation,
+                // not an older confirmed event or a later journal lookup.
+                if let Some(deadline) = &mut error.durability_deadline {
+                    deadline.identity["generation"] = json!(intent.root.generation);
+                }
+                error
             })?;
             return Err(ApiError::conflict(
                 "the original reporter is unavailable; authoritative recovery was attempted. Retry naming a valid worktree for a fresh generation; evidence stays withheld until it succeeds",
@@ -2229,10 +2335,13 @@ impl AppState {
             _ => None,
         });
         let transition = if let Some(event) = event {
-            if entry.is_some() && old.is_none()
+            if entry.is_some()
+                && old.is_none()
                 && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT
             {
-                return Err(ApiError::conflict("named source-root capacity is retained, including unacknowledged retirements; no capacity release is confirmed"));
+                return Err(ApiError::conflict(
+                    "named source-root capacity is retained, including unacknowledged retirements; no capacity release is confirmed",
+                ));
             }
             let mut trial = inner.engram_work_source_roots.clone();
             engram_set_work_source_root(&mut trial, &store, &claim.work_id, entry.clone())
@@ -2337,10 +2446,13 @@ impl AppState {
             &workdir,
             engram_one_call_offered_up_front(inner.sessions[index].session.agent),
         );
-        if entry.is_some() && old.is_none()
+        if entry.is_some()
+            && old.is_none()
             && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT
         {
-            return Err(ApiError::conflict("named source-root capacity remains retained; any producer intent is preserved for its existing owner"));
+            return Err(ApiError::conflict(
+                "named source-root capacity remains retained; any producer intent is preserved for its existing owner",
+            ));
         }
         if let Err(error) = engram_set_work_source_root(
             &mut inner.engram_work_source_roots,
