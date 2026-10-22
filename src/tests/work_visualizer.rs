@@ -466,6 +466,11 @@ pub(super) fn fixture() -> (AppState, String, String, PathBuf) {
         .unwrap()
         .join("work-project");
     fs::create_dir_all(&root).unwrap();
+    // The host's filesystem ancestor walk must stop here even when this
+    // non-repository fixture lives under the checkout's ignored .tmp tree.
+    // An empty entry has no Git metadata; tests that need a repository can
+    // initialize it normally with make_workdir_a_worktree.
+    fs::create_dir(root.join(".git")).unwrap();
     let project = create_test_project(&state, &root, "Work fixture");
     let session = create_test_project_session(&state, Agent::Codex, &project, &root);
     (state, project, session, root)

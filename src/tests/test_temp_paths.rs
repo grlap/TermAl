@@ -3,6 +3,23 @@
 
 use super::*;
 
+#[test]
+fn fixture_git_discovery_stops_before_the_enclosing_checkout() {
+    let root = TestTempRoot::create("termal-git-discovery-boundary");
+    assert_eq!(resolve_git_repo_root(&root).unwrap(), None);
+    // A non-repository sentinel also contains the host's filesystem walk.
+    fs::create_dir(root.join(".git")).unwrap();
+    assert_eq!(engram_worktree_root_path(&root), fs::canonicalize(root.path()).unwrap());
+    assert!(content_revision(&root).is_err());
+    run_git_test_command(&root, &["init", "--quiet"]);
+    let nested = root.join("nested");
+    fs::create_dir(&nested).unwrap();
+    assert_eq!(
+        fs::canonicalize(resolve_git_repo_root(&nested).unwrap().unwrap()).unwrap(),
+        fs::canonicalize(root.path()).unwrap()
+    );
+}
+
 fn age_test_directory(path: &FsPath) {
     let mut options = fs::OpenOptions::new();
     options.read(true);

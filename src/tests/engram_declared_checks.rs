@@ -475,6 +475,14 @@ fn a_declaration_that_breaks_a_load_rule_is_disabled_with_its_reason() {
             "`artifact` does not resolve inside",
         ),
         (
+            entry(DECLARED_TEST, None, "C:outside.trx"),
+            "`artifact` does not resolve inside",
+        ),
+        (
+            entry(DECLARED_TEST, None, r"\\server\share\outside.trx"),
+            "`artifact` does not resolve inside",
+        ),
+        (
             entry(DECLARED_TEST, None, "/outside.trx"),
             "`artifact` does not resolve inside",
         ),

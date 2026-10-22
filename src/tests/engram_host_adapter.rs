@@ -4139,6 +4139,7 @@ fn host_engram_settings_reject_out_of_range_boot_recovery_budgets() {
 
 #[test]
 fn host_engram_settings_validate_the_developer_principal() {
+    let home = TestTempRoot::create("termal-developer-principal-home");
     assert_eq!(default_engram_developer_name(), "dev");
     let missing_developer_name = serde_json::from_value::<UpdateEngramHostSettingsRequest>(json!({
         "binaryPath": "engram",
@@ -4167,6 +4168,7 @@ fn host_engram_settings_validate_the_developer_principal() {
 
     let mut settings = EngramHostSettings::default();
     settings.developer_name = " Greg.Dev_1-Local ".to_owned();
+    settings.home = home.path().to_string_lossy().into_owned();
     let normalized = normalize_engram_host_settings(settings)
         .expect("valid developer principals should normalize");
     assert_eq!(normalized.developer_name, "greg.dev_1-local");
@@ -5225,6 +5227,7 @@ fn engram_unresolved_windows_store_identity_is_case_insensitive() {
 
 #[test]
 fn retired_engram_authority_uses_utc_rfc3339_and_evicts_only_oldest_confirmed_entries() {
+    let home = if cfg!(windows) { "C:/engram-home" } else { "/engram-home" };
     let now = retired_engram_authority_timestamp_now();
     let parsed =
         chrono::DateTime::parse_from_rfc3339(&now).expect("retirement timestamps must be RFC3339");
@@ -5234,7 +5237,7 @@ fn retired_engram_authority_uses_utc_rfc3339_and_evicts_only_oldest_confirmed_en
 
     let make_entry =
         |index: usize, confirmed: bool, retired_at: String| EngramRetiredWorkAuthorityGrant {
-            home: "C:/engram-home".to_owned(),
+            home: home.to_owned(),
             project_root: "C:/project".to_owned(),
             store_key: None,
             project_id: "project-id".to_owned(),
@@ -5269,8 +5272,9 @@ fn retired_engram_authority_uses_utc_rfc3339_and_evicts_only_oldest_confirmed_en
 
 #[test]
 fn retired_engram_authority_unconfirmed_capacity_is_atomic_and_never_evicts_pending_work() {
+    let home = if cfg!(windows) { "C:/engram-home" } else { "/engram-home" };
     let make_entry = |index: usize| EngramRetiredWorkAuthorityGrant {
-        home: "C:/engram-home".to_owned(),
+        home: home.to_owned(),
         project_root: "C:/project".to_owned(),
         store_key: None,
         project_id: "project-id".to_owned(),

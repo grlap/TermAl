@@ -392,6 +392,9 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let codex_home = test_temp_dir().join(format!("termal-codex-home-limited-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let scope = codex_home.join("workspace");
+    let thread_cwd = scope.join("subdir");
+    fs::create_dir_all(&thread_cwd).expect("discovery scope should exist");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
     connection
@@ -420,7 +423,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     format!("thread-in-scope-{index}"),
-                    "/tmp/termal/subdir",
+                    thread_cwd.to_string_lossy(),
                     format!("In-scope thread {index}"),
                     r#"{"type":"workspace-write"}"#,
                     "on-request",
@@ -433,7 +436,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
             .expect("thread row should insert");
     }
 
-    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/termal")])
+    let threads = discover_codex_threads_from_home(&codex_home, &[scope])
         .expect("threads should load");
     let last_expected_id = format!(
         "thread-in-scope-{}",

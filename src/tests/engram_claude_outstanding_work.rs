@@ -1136,7 +1136,11 @@ fn only_a_top_level_simple_full_gate_call_is_its_own_gate() {
             "id": "call", "name": "Bash", "input": {"command": command,
                 "run_in_background": true}}]}})
     };
-    let gate = "pushd \"C:/work/root\" && node scripts/test-launcher.mjs full";
+    let gate = if cfg!(windows) {
+        "pushd \"C:/work/root\" && node scripts/test-launcher.mjs full"
+    } else {
+        "pushd \"/work/root\" && node scripts/test-launcher.mjs full"
+    };
     assert_eq!(
         started(bash(gate), false),
         vec![("call".to_owned(), true, true)]

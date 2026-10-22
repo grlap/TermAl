@@ -164,7 +164,7 @@ esac
 if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
   if [ "$is_readiness" -eq 1 ]; then diagnostic=readiness; else diagnostic=doctor; fi
   printf '%s\n' "$diagnostic" >> "$engram_home/diagnostic-commands"
-  mode=$(tr -d '\r\n' < "$project_file")
+  mode=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$project_file" | tr -d '\r\n')
   if [ "$mode" = 'fixture-diagnostic-large-refusal' ]; then
     awk 'BEGIN { printf "invalid-json-"; for (i = 0; i < 100000; i++) printf "x"; print "" }'
     awk 'BEGIN { printf "warning-"; for (i = 0; i < 100000; i++) printf "y"; print "" }' >&2

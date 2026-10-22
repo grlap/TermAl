@@ -32,7 +32,9 @@ fn captured_run(runs: &FsPath, edit: impl FnOnce(&mut Value)) -> (PathBuf, Strin
         serde_json::to_vec(&results).expect("the results serialize"),
     )
     .expect("the results should write");
-    let summary = CAPTURED_SUMMARY.replace(CAPTURED_DIRECTORY, &directory.display().to_string());
+    let summary = CAPTURED_SUMMARY
+        .replace(CAPTURED_DIRECTORY, &directory.display().to_string())
+        .replace('\\', "/");
     (directory, summary)
 }
 

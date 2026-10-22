@@ -460,7 +460,7 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
     );
     let refused = holder_line(&turn);
     assert!(
-        refused.contains("a Codex test still running when its turn closed")
+        refused.contains("the Codex test launched at")
             && refused.contains("earned no credit")
             && refused.contains("a file in its worktree changed")
             && refused.contains("(while it was running)"),

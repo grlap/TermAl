@@ -319,9 +319,13 @@ async fn retained_intent_refuses_changed_enrollment_or_placement_identity() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn intent_sqlite_round_trip_and_invalid_maps_fail_validation() {
-    let pair = Pair::new().await;
+    let mut pair = Pair::new().await;
     pair.fixture_active();
     assert_eq!(pair.reserve("stored-intent").await.0, StatusCode::OK);
+    // Quiesce the owned control loop and writer before opening the restart
+    // image, as replace_central_channel(reload=true) does.
+    pair.retire_central_channel().await;
+    pair.central.shutdown_persist_blocking();
     let restored = load_state(pair.central.persistence_path.as_path())
         .unwrap()
         .unwrap();
