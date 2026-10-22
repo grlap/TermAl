@@ -262,6 +262,49 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
     });
   }
 
+  for (const outcome of ["settled", "permission-denied", "live", "unexpected-signal-error"]) {
+    test(`focused lifecycle: POSIX permission result requires an absent-group probe (${outcome})`, async () => {
+      const parent = new EventEmitter(); parent.connected = true; parent.env = {}; parent.pid = 1;
+      parent.disconnect = () => { parent.connected = false; parent.emit("disconnect"); };
+      parent.send = (_message, callback) => callback();
+      const child = new EventEmitter(); child.pid = 2; child.unref = () => {};
+      let signals = 0, probes = 0, clock = 0;
+      const permission = () => Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      const owner = startPosixOwner({ command: "fixture", args: [], cleanupBudgetMs: 5000, nonce: "fixture" }, {
+        parent, spawnCommand: () => child, openLog: () => 7, closeLog: () => {}, persist: () => {},
+        killGroup: () => {
+          signals += 1;
+          if (outcome === "unexpected-signal-error") throw Object.assign(new Error("signal EIO"), { code: "EIO" });
+          throw permission();
+        },
+        groupAlive: () => {
+          probes += 1;
+          if (outcome === "settled" && probes > 1) return false; // ESRCH, only after reaping.
+          if (outcome === "live") return true;
+          throw permission();
+        },
+        now: () => clock, sleep: async () => { clock += 1000; },
+      });
+      child.emit("exit", 0, null);
+      const result = await owner.finish("crossed-finish");
+      assert.equal(signals, 1, "never signal a potentially reused group again");
+      assert.equal(result.cleanup.state, outcome === "settled" ? "reaped" : "unresolved");
+      assert.equal(result.code, outcome === "settled" ? 0 : 1);
+      if (outcome === "settled") {
+        assert.equal(probes, 2);
+        assert.equal(clock, 1000);
+        assert.equal(result.error, undefined);
+      } else if (outcome === "unexpected-signal-error") {
+        assert.equal(probes, 0);
+        assert.match(result.error, /EIO/u);
+      } else {
+        assert.equal(clock, 5000, "keep the existing cleanup bound");
+        assert.match(result.error, /signal=EPERM/u);
+        assert.match(result.error, outcome === "live" ? /probe=present/u : /probe=EPERM/u);
+      }
+    });
+  }
+
   test("focused lifecycle: failed stall and resume saves recover without more output and allow episode two", async (t) => {
     await lifecycleRepository(t, async (root) => {
       const log = join(root, ".git", "observer.log"); writeFileSync(log, "");

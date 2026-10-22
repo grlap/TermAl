@@ -12,11 +12,29 @@ async fn federation_central_monitor(
     io: &FederationRuntimeIo,
     attempt: &mut FederationAttemptState,
 ) -> Result<(), ApiError> {
+    if *stop.borrow() || stop.has_changed().is_err() {
+        return Ok(());
+    }
+    client.channel.current_authority()?;
     let process_snapshot = snapshot.clone();
     let start = io.ssh.clone();
+    let start_channel = client.channel.clone();
+    let start_stop = stop.clone();
     let started = tokio::time::Instant::now();
     let mut process = federation_os_operation(
-        move || start(&process_snapshot, forward_port, &known_hosts),
+        move || {
+            if *start_stop.borrow()
+                || start_stop.has_changed().is_err()
+                || start_channel
+                    .app
+                    .as_ref()
+                    .is_some_and(|app| federation_credential_read_stopped(app, &start_stop))
+            {
+                return Err(federation_stale_link());
+            }
+            start_channel.current_authority()?;
+            start(&process_snapshot, forward_port, &known_hosts)
+        },
         Some(stop),
         attempt.unresolved.clone(),
         io.operation_timeout,

@@ -6,6 +6,9 @@ include!("federation_runtime_fixture.rs");
 #[path = "federation_worker_io.rs"]
 mod worker_io;
 
+#[path = "federation_credential_settlement.rs"]
+mod credential_settlement;
+
 #[path = "federation_forward_ownership.rs"]
 mod forward_ownership;
 
@@ -98,6 +101,7 @@ async fn federation_disabled_and_standalone_start_without_os_effects() {
         reconcile_interval: Duration::from_millis(10),
         probe_interval: Duration::from_millis(10),
         operation_timeout: Duration::from_secs(5),
+        credential_reporting_deadline: Duration::from_secs(5),
         control_interval: Duration::from_secs(15),
         control_timeout: Duration::from_secs(45),
         link_startup_timeout: FEDERATION_LINK_STARTUP_TIMEOUT,
@@ -109,6 +113,7 @@ async fn federation_disabled_and_standalone_start_without_os_effects() {
         }),
         connection_published: Arc::new(|| {}),
         control_observed: Arc::new(|_, _| {}),
+        credential_observed: Arc::new(|_| {}),
     };
     for state in [app, {
         let disabled = federation_registry::central();

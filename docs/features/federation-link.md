@@ -90,7 +90,15 @@ An unusable signed receipt during a local persistence hold retains that same
 uncertainty and key, while settling only its transport counter.
 
 An observed secret or pin change under the same references stops retries until
-an explicit configuration transition. An unresolved OS operation or SSH cleanup
+an explicit configuration transition. A credential read exceeding its reporting
+deadline is reported as `credential read: pending`, not quarantined or retried.
+Its original owned thread and any queued result retain the worker's settlement
+guard until adoption or destruction. No listener, handle, SSH start or second
+read is admitted while that read is pending. A late success can proceed only
+after validating the captured basis, stop state and installed material; stale
+or stopped results are discarded. Shutdown does not join the credential thread.
+Completed credential failures are reported separately without their raw errors.
+An unresolved SSH operation or SSH cleanup
 quarantines the peer for that runtime; no replacement child starts. Logs report
 the peer and quarantine without secrets. Runtime registry views expose consecutive
 attestation refusals without key material.

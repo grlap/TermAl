@@ -213,6 +213,7 @@ impl Fixture {
                 reconcile_interval: Duration::from_millis(20),
                 probe_interval: Duration::from_millis(20),
                 operation_timeout: Duration::from_secs(5),
+                credential_reporting_deadline: Duration::from_secs(5),
                 control_interval: Duration::from_secs(15),
                 control_timeout: Duration::from_secs(45),
                 link_startup_timeout: FEDERATION_LINK_STARTUP_TIMEOUT,
@@ -226,6 +227,7 @@ impl Fixture {
                 reconciled: Arc::new(|_| {}),
                 connection_published: Arc::new(|| {}),
                 control_observed: Arc::new(|_, _| {}),
+                credential_observed: Arc::new(|_| {}),
             },
         }
     }

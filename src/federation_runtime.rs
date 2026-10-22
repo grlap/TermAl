@@ -24,6 +24,18 @@ struct FederationWorker {
     basis: Arc<FederationTransportBasis>,
     stop: tokio::sync::watch::Sender<bool>,
     task: tokio::task::JoinHandle<()>,
+    joined: bool,
+}
+
+impl FederationWorker {
+    async fn join(&mut self) {
+        if !self.joined {
+            if let Err(error) = (&mut self.task).await {
+                eprintln!("federation worker failed: {error}");
+            }
+            self.joined = true;
+        }
+    }
 }
 
 struct FederationRuntime {
@@ -140,7 +152,7 @@ async fn federation_supervise(
                 if worker.basis.is_settling() {
                     return false;
                 }
-                if worker.task.is_finished() {
+                if worker.joined || worker.task.is_finished() {
                     return true;
                 }
                 let channel = peers
@@ -181,10 +193,15 @@ async fn federation_supervise(
             }
         }
         for id in removed {
-            if let Some(worker) = workers.remove(&id) {
-                if let Err(error) = worker.task.await {
-                    eprintln!("federation worker failed: {error}");
+            if let Some(worker) = workers.get_mut(&id) {
+                worker.join().await;
+                // A read can acquire its guard AFTER the removal cut but
+                // BEFORE observing stop. Keep this joined worker as the
+                // replacement fence until its detached operation settles.
+                if worker.basis.is_settling() {
+                    continue;
                 }
+                workers.remove(&id);
                 peers
                     .lock()
                     .expect("federation registry mutex poisoned")
@@ -212,6 +229,7 @@ async fn federation_supervise(
                     basis,
                     stop: peer_stop,
                     task,
+                    joined: false,
                 },
             );
         }
@@ -239,10 +257,9 @@ async fn federation_supervise(
     for worker in workers.values() {
         worker.stop.send_replace(true);
     }
-    for (_, worker) in workers {
-        if let Err(error) = worker.task.await {
-            eprintln!("federation worker failed during shutdown: {error}");
-        }
+    for (_, mut worker) in workers {
+        // Join each task once, never the uninterruptible credential thread.
+        worker.join().await;
     }
     peers
         .lock()

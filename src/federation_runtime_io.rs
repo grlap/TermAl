@@ -55,6 +55,7 @@ struct FederationRuntimeIo {
     reconcile_interval: Duration,
     probe_interval: Duration,
     operation_timeout: Duration,
+    credential_reporting_deadline: Duration,
     control_interval: Duration,
     control_timeout: Duration,
     link_startup_timeout: Duration,
@@ -68,6 +69,8 @@ struct FederationRuntimeIo {
     connection_published: Arc<dyn Fn() + Send + Sync>,
     #[cfg(test)]
     control_observed: Arc<dyn Fn(&'static str, u64) + Send + Sync>,
+    #[cfg(test)]
+    credential_observed: Arc<dyn Fn(&'static str) + Send + Sync>,
 }
 
 impl Default for FederationRuntimeIo {
@@ -85,6 +88,7 @@ impl Default for FederationRuntimeIo {
             reconcile_interval: Duration::from_secs(15),
             probe_interval: Duration::from_secs(15),
             operation_timeout: Duration::from_secs(5),
+            credential_reporting_deadline: Duration::from_secs(5),
             control_interval: Duration::from_secs(15),
             control_timeout: Duration::from_secs(45),
             link_startup_timeout: federation_timeout_from_env(
@@ -104,6 +108,8 @@ impl Default for FederationRuntimeIo {
             connection_published: Arc::new(|| {}),
             #[cfg(test)]
             control_observed: Arc::new(|_, _| {}),
+            #[cfg(test)]
+            credential_observed: Arc::new(|_| {}),
         }
     }
 }

@@ -11,20 +11,33 @@ async fn federation_serve_peer(
     attempt: &mut FederationAttemptState,
     io: &FederationRuntimeIo,
 ) -> Result<(), ApiError> {
-    let credentials_snapshot = snapshot.clone();
-    let read = io.credentials.clone();
-    let credentials = federation_os_operation(
-        move || read(&credentials_snapshot),
-        Some(stop),
-        attempt.unresolved.clone(),
-        io.operation_timeout,
-    )
-    .await?;
-    app.ensure_federation_peer_current(snapshot)?;
-    attempt.check_material(credentials.material_fingerprint)?;
-    if *stop.borrow() {
+    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+    let read = FederationCredentialRead::start(snapshot.clone(), &basis, io.credentials.clone())
+        .inspect_err(|_| {
+            eprintln!(
+                "federation peer {} credential read: could not start",
+                snapshot.peer.host_id
+            );
+        })?;
+    // Stay inside this attempt while pending: the worker must consume its
+    // own result even though its basis settlement guard is still held.
+    let Some(completed) = read
+        .wait(stop, io.credential_reporting_deadline, |state| {
+            eprintln!(
+                "federation peer {} credential read: {state}",
+                snapshot.peer.host_id
+            );
+            #[cfg(test)]
+            (io.credential_observed)(state);
+        })
+        .await?
+    else {
         return Ok(());
-    }
+    };
+    let FederationCredentialResult { result, settlement } = completed;
+    let credentials = result?;
+    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+    attempt.check_material(credentials.material_fingerprint)?;
     let port = match snapshot.local_role {
         FederationRole::Central => snapshot.endpoint.central_federation_port,
         FederationRole::Satellite => snapshot.endpoint.satellite_federation_port,
@@ -33,10 +46,12 @@ async fn federation_serve_peer(
     let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port)))
         .await
         .map_err(|_| federation_transport_unavailable())?;
+    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+    attempt.check_material(credentials.material_fingerprint)?;
     disable_socket_inheritance(&listener);
     let channel = FederationChannel::for_app(snapshot.clone(), credentials.capability, app.clone());
     let mut channel = channel;
-    channel.basis = basis;
+    channel.basis = basis.clone();
     channel.control = FederationControlSettings::from_io(io);
     #[cfg(test)]
     {
@@ -85,22 +100,44 @@ async fn federation_serve_peer(
             io: FederationOnboardingIo::local(directory),
         },
     ));
-    let server = tokio::spawn(serve_federation_control_listener(
-        listener,
-        router,
-        listener_stop_rx,
-        channel.clone(),
-    ));
-    peers
-        .lock()
-        .expect("federation registry mutex poisoned")
-        .insert(
-            snapshot.peer.host_id.clone(),
-            Arc::new(FederationPeerHandle {
-                channel: channel.clone(),
-                rpc: client.clone(),
-            }),
-        );
+    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+    attempt.check_material(credentials.material_fingerprint)?;
+    let server = {
+        // Serialize publication with configuration changes and stop signals.
+        // The preceding async bind may have yielded to either of them.
+        let inner = app.inner.lock().expect("state mutex poisoned");
+        let stopped = stop.borrow();
+        let shutdown = app.subscribe_shutdown_signal();
+        let shutting_down = shutdown.borrow();
+        if *stopped
+            || *shutting_down
+            || stop.has_changed().is_err()
+            || app.federation_executor_wake_signal.is_stopping()
+        {
+            return Err(federation_stale_link());
+        }
+        app.ensure_federation_peer_current_locked(&inner, snapshot)?;
+        let server = tokio::spawn(serve_federation_control_listener(
+            listener,
+            router,
+            listener_stop_rx,
+            channel.clone(),
+        ));
+        peers
+            .lock()
+            .expect("federation registry mutex poisoned")
+            .insert(
+                snapshot.peer.host_id.clone(),
+                Arc::new(FederationPeerHandle {
+                    channel: channel.clone(),
+                    rpc: client.clone(),
+                }),
+            );
+        server
+    };
+    // Material is adopted on the validated captured basis. Pending connection
+    // commits take their own settlement guards as before.
+    drop(settlement);
     let result = if snapshot.local_role == FederationRole::Central {
         match credentials.known_hosts {
             Some(known_hosts) => {

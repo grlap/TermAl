@@ -901,6 +901,7 @@ include!("federation_rpc.rs");
 include!("federation_credentials.rs");
 include!("federation_process.rs");
 include!("federation_runtime_io.rs");
+include!("federation_credential_read.rs");
 include!("federation_control_clock.rs");
 include!("federation_recovery.rs");
 include!("federation_runtime.rs");

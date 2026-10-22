@@ -38,11 +38,32 @@ export function startPosixOwner(request, {
       let cleanup = "reaped", error;
       try {
         if (child?.pid) {
+          let signalError, probeError;
           try { killGroup(child.pid); }
-          catch (failure) { if (failure.code !== "ESRCH") throw failure; }
+          catch (failure) {
+            if (!["ESRCH", "EPERM"].includes(failure.code)) throw failure;
+            signalError = failure.code;
+          }
           const started = now();
-          while (groupAlive(child.pid) && now() - started < request.cleanupBudgetMs) await sleep();
-          if (groupAlive(child.pid)) { cleanup = "unresolved"; error = "owned process group did not exit within cleanup budget"; }
+          for (;;) {
+            // Darwin may report EPERM while killed members are still zombies.
+            // Neither a signal result nor EPERM proves absence. Yield so Node
+            // can reap its child, then require a real ESRCH group probe. Send
+            // no further signal: a reused group must never be killed here.
+            try {
+              if (!groupAlive(child.pid)) break;
+              probeError = undefined;
+            } catch (failure) {
+              if (failure.code !== "EPERM") throw failure;
+              probeError = failure.code;
+            }
+            if (now() - started >= request.cleanupBudgetMs) {
+              cleanup = "unresolved";
+              error = `owned process group did not exit within cleanup budget (signal=${signalError ?? "ok"}, probe=${probeError ?? "present"})`;
+              break;
+            }
+            await sleep();
+          }
         }
       } catch (failure) { cleanup = "unresolved"; error = failure.message; }
       const result = {

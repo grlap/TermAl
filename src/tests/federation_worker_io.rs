@@ -12,7 +12,7 @@ impl Drop for ReleaseRead {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn federation_unresolved_credential_read_is_bounded_and_quarantined() {
+async fn federation_pending_credential_read_keeps_stop_bounded_without_quarantine() {
     let mut fixture = Fixture::new().await;
     let released = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
     let release = ReleaseRead(released.clone());
@@ -20,7 +20,16 @@ async fn federation_unresolved_credential_read_is_bounded_and_quarantined() {
     let began = Arc::new(Mutex::new(Some(began)));
     let (finished, finished_rx) = tokio::sync::oneshot::channel();
     let finished = Arc::new(Mutex::new(Some(finished)));
-    fixture.io.operation_timeout = Duration::from_millis(50);
+    fixture.io.credential_reporting_deadline = Duration::ZERO;
+    let (pending, pending_rx) = tokio::sync::oneshot::channel();
+    let pending = Arc::new(Mutex::new(Some(pending)));
+    fixture.io.credential_observed = Arc::new(move |state| {
+        if state.starts_with("pending;") {
+            if let Some(pending) = pending.lock().unwrap().take() {
+                let _ = pending.send(());
+            }
+        }
+    });
     fixture.io.credentials = Arc::new(move |_| {
         if let Some(began) = began.lock().unwrap().take() {
             let _ = began.send(());
@@ -39,9 +48,11 @@ async fn federation_unresolved_credential_read_is_bounded_and_quarantined() {
         .await
         .unwrap()
         .unwrap();
-    let classified = fixture
-        .event(|e| matches!(e, Event::Attempt(StatusCode::SERVICE_UNAVAILABLE)))
-        .await;
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, pending_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(runtime.peer(&fixture.id).is_none());
     let quarantined = runtime.quarantined.clone();
     let id = fixture.id.clone();
     let shutdown = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, fixture.finish(runtime)).await;
@@ -51,9 +62,8 @@ async fn federation_unresolved_credential_read_is_bounded_and_quarantined() {
         .await
         .unwrap()
         .unwrap();
-    assert!(classified);
     assert!(shutdown.is_ok());
-    assert!(quarantined.lock().unwrap().contains(&id));
+    assert!(!quarantined.lock().unwrap().contains(&id));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
