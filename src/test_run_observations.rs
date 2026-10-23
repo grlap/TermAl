@@ -546,6 +546,7 @@ impl AppState {
             if exit == Some(EngramCommandExit::NotFinished) {
                 if row.summary.preset == TestRunPreset::Full {
                     row.launch_only = true;
+                    test_run_observation_launch_unconfirmed(row);
                     let row = row.clone();
                     self.persist_test_command_observation_locked(&mut inner, row);
                 }
@@ -554,10 +555,7 @@ impl AppState {
             if row.launch_only {
                 // The launcher returning (even with exit 0) is not the run's
                 // terminal outcome. Only its exact artifact may supply that.
-                row.summary.state = TestRunState::Unknown;
-                row.summary.unknown_reason = Some(TestRunUnknownReason::ResultsUnreadable);
-                row.summary.error = Some("Launcher result describes only the launch; the test run's terminal outcome is not confirmed.".to_owned());
-                row.summary.exit_code = None;
+                test_run_observation_launch_unconfirmed(row);
                 let row = row.clone();
                 self.persist_test_command_observation_locked(&mut inner, row);
                 continue;
@@ -666,12 +664,17 @@ impl AppState {
         for id in obsolete {
             inner.test_runs.unclassified_commands.remove(&id);
         }
+        // A launch acknowledgement may already be Unknown while its provider
+        // is still monitored. Record exact runtime loss once, without claiming
+        // that the workload ended or acquired a terminal result.
         let stale: Vec<_> = inner
             .test_run_observations
             .values()
             .filter(|row| {
-                row.summary.state == TestRunState::Running
+                (row.summary.state == TestRunState::Running
+                    || (row.launch_only && row.summary.state == TestRunState::Unknown))
                     && row.summary.ended_at.is_none()
+                    && !row.summary.interrupted
                     && inner
                         .find_session_index(row.summary.owner_session_id.as_deref().unwrap_or(""))
                         .and_then(|index| {
@@ -692,6 +695,26 @@ impl AppState {
             row.summary.interrupted = true;
             row.monitoring_interrupted_at = Some(test_run_timestamp());
             row.summary.error = Some("Provider runtime ended or changed before reporting this execution's terminal status.".to_owned());
+            let row = row.clone();
+            self.persist_test_command_observation_locked(&mut inner, row);
+        }
+        // Repair persisted launch acknowledgements from older hosts without
+        // requiring their still-live provider runtime to be replaced first.
+        let unconfirmed: Vec<_> = inner
+            .test_run_observations
+            .values()
+            .filter(|row| {
+                row.launch_only
+                    && row.summary.ended_at.is_none()
+                    && row.summary.state == TestRunState::Running
+            })
+            .map(|row| row.execution_id.clone())
+            .collect();
+        for id in unconfirmed {
+            let Some(row) = inner.test_run_observations.get_mut(&id) else {
+                continue;
+            };
+            test_run_observation_launch_unconfirmed(row);
             let row = row.clone();
             self.persist_test_command_observation_locked(&mut inner, row);
         }

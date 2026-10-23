@@ -922,6 +922,7 @@ impl AppState {
         // Cards follow the summaries clients were told about.
         self.sync_test_run_cards_locked(&mut inner, &entries, &published_changed, &failures, publish);
         inner.test_runs.entries = entries;
+        self.retain_test_command_artifact_terminals_locked(&mut inner);
         // Run waits may settle from here on (`refresh_test_run_waits`).
         inner.test_runs.scanned_once = true;
         self.compact_test_runs_locked(&mut inner);

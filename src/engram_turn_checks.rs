@@ -2540,8 +2540,10 @@ impl AppState {
         runtime_output_cut: bool,
     ) {
         self.observe_test_command_description(session_id, provenance, key, Some(command), None);
-        self.observe_test_command_artifact(session_id, provenance, key, command, output, runtime_output_cut);
+        // Record the provider boundary before artifact capture can retain a
+        // terminal result. Only this boundary may finalize native host proof.
         self.observe_test_command_end(session_id, provenance, key, exit);
+        self.observe_test_command_artifact(session_id, provenance, key, command, output, runtime_output_cut);
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.

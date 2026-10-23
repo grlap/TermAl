@@ -1,9 +1,81 @@
 // Provider-to-launcher artifact association beside test_run_observations.rs.
-// New file. Owns bounded validation of an explicit locator returned by the
-// original tool call. Does not guess by PID/time/command similarity, scan for
-// processes, mint verification, or manufacture a launcher registration ACK.
+// Owns bounded validation of the original tool's explicit locator, retention
+// of exactly associated terminal facts, and launch-only uncertainty projection.
+// Provider lifecycle monitoring stays in test_run_observations.rs. Does not
+// guess by PID/time/command similarity, scan processes, mint verification or
+// final host proof, or manufacture a launcher registration ACK.
+
+fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) {
+    row.summary.state = TestRunState::Unknown;
+    row.summary.unknown_reason = Some(TestRunUnknownReason::ResultsUnreadable);
+    row.summary.error = Some("Launcher result describes only the launch; the test run's terminal outcome is not confirmed.".to_owned());
+    row.summary.exit_code = None;
+}
 
 impl AppState {
+    // Retain factual terminal results before artifacts can disappear. Use the
+    // same positive association as API/SSE alias suppression, with no I/O or
+    // evidence settlement here. A native terminal proof is never rewritten.
+    fn retain_test_command_artifact_terminals_locked(&self, inner: &mut StateInner) {
+        let mut terminal = Vec::new();
+        for entry in &inner.test_runs.entries {
+            if !entry.disk.is_terminal()
+                || !matches!(
+                    entry.summary.state,
+                    TestRunState::Passed | TestRunState::Failed
+                )
+            {
+                continue;
+            }
+            let Some(digest) = entry
+                .summary
+                .detail_version
+                .as_deref()
+                .and_then(|version| version.strip_prefix("sha256:"))
+            else {
+                continue;
+            };
+            for row in inner.test_run_observations.values() {
+                if row.summary.ended_at.is_none()
+                    && test_run_observation_matches_run(
+                        inner,
+                        &entry.summary,
+                        Some(&entry.disk),
+                        row,
+                    )
+                {
+                    terminal.push((
+                        row.execution_id.clone(),
+                        entry.summary.clone(),
+                        digest.to_owned(),
+                    ));
+                }
+            }
+        }
+        for (id, terminal, digest) in terminal {
+            let Some(row) = inner.test_run_observations.get_mut(&id) else {
+                continue;
+            };
+            // Keep original execution identity, provenance and authority. The
+            // result digest fences later artifact replacement independently
+            // of the request match that established the association.
+            if let Some(artifact) = &mut row.artifact {
+                artifact.terminal_digest = Some(digest);
+            }
+            row.summary.state = terminal.state;
+            row.summary.ended_at = terminal.ended_at;
+            row.summary.exit_code = terminal.exit_code;
+            row.summary.interrupted = terminal.interrupted;
+            row.summary.unknown_reason = terminal.unknown_reason;
+            row.summary.error = terminal.error;
+            row.summary.current_stage = terminal.current_stage;
+            row.summary.stages = terminal.stages;
+            row.summary.detail_version = terminal.detail_version;
+            let row = row.clone();
+            self.persist_test_command_observation_locked(inner, row);
+        }
+    }
+
     fn observe_test_command_artifact(
         &self,
         session_id: &str,
