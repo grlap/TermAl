@@ -113,6 +113,33 @@ fn engram_root_reclamation_route_current(
     }
 }
 
+/// Whether an evaluator delegation of `work_id` in `store` is open (queued,
+/// running or held) and has not submitted: its evaluation still has to pass
+/// the root check. Its own budget ends it, so it never pins a root for good.
+fn engram_work_has_open_evaluation_locked(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    work_id: &str,
+) -> bool {
+    inner.delegations.iter().any(|delegation| {
+        matches!(
+            delegation.status,
+            DelegationStatus::Queued | DelegationStatus::Running | DelegationStatus::Held
+        ) && delegation.acceptance_evaluation.as_ref().is_some_and(|target| {
+            target.store.as_ref() == Some(store)
+                && matches!(target.submission, AcceptanceEvaluationSubmission::None)
+                && (target
+                    .naming_history
+                    .as_ref()
+                    .is_some_and(|token| token.work_id == work_id)
+                    || target
+                        .source_root
+                        .as_ref()
+                        .is_some_and(|root| root.work_id == work_id))
+        })
+    })
+}
+
 fn engram_root_reclamation_plan_locked(
     inner: &StateInner,
     now: std::time::Instant,
@@ -134,6 +161,14 @@ fn engram_root_reclamation_plan_locked(
             binding.work_id != root.work_id || binding.claim_id != root.claim_id)
         { continue; }
         let route = match engram_named_root_current_owner(inner, &root) {
+            // A pass over a root whose work is being evaluated only re-learns
+            // the same binding, and its unpublished window would refuse the
+            // evaluator's submission as retryable: leave the root alone
+            // until the evaluation is submitted or ends. Retiring an ended
+            // claim's root (the Unfocused route) is never held back.
+            Some(_) if engram_work_has_open_evaluation_locked(inner, &root.store, &root.work_id) => {
+                continue;
+            }
             Some(session_id) if engram_root_reclamation_idle_owner(inner, &session_id) => {
                 EngramRootReclamationRoute::Current(session_id)
             }

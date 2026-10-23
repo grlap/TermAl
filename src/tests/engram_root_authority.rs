@@ -10,6 +10,14 @@ mod reclamation {
     include!("engram_named_root_reclamation.rs");
 }
 
+mod naming_supersede {
+    include!("engram_named_root_naming_supersede.rs");
+}
+
+mod naming_supersede_bounds {
+    include!("engram_named_root_naming_supersede_bounds.rs");
+}
+
 mod begin_reserve {
     include!("engram_root_begin_reserve.rs");
 }

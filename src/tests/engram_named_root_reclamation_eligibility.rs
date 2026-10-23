@@ -1,7 +1,9 @@
 // Owns the witnesses that named-root reclamation answers its eligibility and
 // current-owner questions from a narrow authority view, without building a
 // full binding target or the root read fence each target captures (which
-// clones every root, journal and project store) under the global lock. Does
+// clones every root, journal and project store) under the global lock, and
+// that an open evaluation of a root's work holds back only its Current-route
+// pass, never a retirement. Does
 // not own reclamation's selection, retirement or recovery behaviour (the
 // sibling reclamation modules) or the target builders themselves
 // (engram_host_adapter.rs). New module beside the reclamation tests.
@@ -228,4 +230,65 @@ fn named_root_reclamation_current_owner_questions_build_no_binding_target_or_roo
     }
     assert_eq!(engram_authority_build_counts(), (0, 0),
         "(root read fences, binding targets) built by the current-owner questions");
+}
+
+/// An evaluator delegation of `entry`'s work, open and not yet submitted;
+/// returns its id.
+fn open_evaluation_of(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot) -> String {
+    let workdir = claimed.root.to_string_lossy().into_owned();
+    let (delegation, _child) = crate::tests::acceptance_evaluation::install_evaluator_delegation(
+        &claimed.state, &claimed.session_id, None, &workdir, 1);
+    crate::tests::acceptance_evaluation::update_evaluation_target(&claimed.state, &delegation,
+        |target| {
+            target.store = Some(entry.store.clone());
+            target.naming_history.as_mut().unwrap().work_id = entry.work_id.clone();
+        });
+    delegation
+}
+
+/// A pass through an evaluated work's current owner would only re-learn the
+/// same binding, and its unpublished window would refuse the evaluation's
+/// first submission as retryable: the plan leaves the root alone while
+/// the evaluation is open, holds back no other work's root, and takes the
+/// Current route again once the evaluation ends.
+#[test]
+fn named_root_reclamation_leaves_an_evaluated_works_current_root_alone_until_it_ends() {
+    let (claimed, entry) = settled_root("reclamation-open-evaluation", "completed");
+    let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
+        &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
+    claimed.record(|record| {
+        record.engram.work_binding = Some(binding.clone());
+        record.session.status = SessionStatus::Idle;
+    });
+    let current = EngramRootReclamationRoute::Current(claimed.session_id.clone());
+    let delegation = open_evaluation_of(&claimed, &entry);
+    assert!(reclamation_plan(&claimed).is_empty(), "no owner pass while the evaluation is open");
+
+    crate::tests::acceptance_evaluation::update_evaluation_target(&claimed.state, &delegation,
+        |target| target.naming_history.as_mut().unwrap().work_id = "another-work".to_owned());
+    let plan = reclamation_plan(&claimed);
+    assert_eq!(plan.len(), 1, "another work's evaluation holds nothing back");
+    assert_eq!(plan[0].route, current);
+
+    crate::tests::acceptance_evaluation::update_evaluation_target(&claimed.state, &delegation,
+        |target| target.naming_history.as_mut().unwrap().work_id = entry.work_id.clone());
+    {
+        let mut inner = claimed.state.inner.lock().unwrap();
+        let index = inner.find_delegation_index(&delegation).unwrap();
+        inner.delegations[index].status = DelegationStatus::Completed;
+    }
+    let plan = reclamation_plan(&claimed);
+    assert_eq!(plan.len(), 1, "the owner pass resumes once the evaluation ends");
+    assert_eq!(plan[0].route, current);
+}
+
+/// Retiring a root whose claim has no current owner is never held back by an
+/// open evaluation of its work.
+#[test]
+fn named_root_reclamation_still_retires_an_unfocused_root_under_an_open_evaluation() {
+    let (claimed, entry) = settled_root("reclamation-open-evaluation-unfocused", "completed");
+    open_evaluation_of(&claimed, &entry);
+    let plan = reclamation_plan(&claimed);
+    assert_eq!(plan.len(), 1, "the retirement is still planned");
+    assert_eq!(plan[0].route, EngramRootReclamationRoute::Unfocused);
 }

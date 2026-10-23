@@ -12,7 +12,7 @@ const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME: &str = "termal_submit_acceptance_evaluation";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_acceptance_evaluation";
-const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A definitive refusal ends that attempt. Only acceptance_evaluation_resubmit supplies a refreshed host brief: judge every criterion afresh and echo its new attemptKey. A refusal whose answer names records the tracker admits instead allows one re-submission under the same attemptKey, citing for each criterion it names only the records named for it; any further refusal is final. Other refusals must be reported to the parent. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. If a refusal says the worktree changed while it was evaluated, do not submit again: finish and report it, because only the parent can request a new evaluation. Once an evaluation is recorded, further submissions are refused.";
+const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A definitive refusal ends that attempt. Only acceptance_evaluation_resubmit supplies a refreshed host brief: judge every criterion afresh and echo its new attemptKey. A refusal whose answer names records the tracker admits instead allows one re-submission under the same attemptKey, citing for each criterion it names only the records named for it; any further refusal is final. Other refusals must be reported to the parent. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal begins \"authority transition in flight\", nothing was recorded and the attempt is still open: wait the seconds it names and submit exactly the same verdicts again, at most three more times; if it is still refused, finish and report that last refusal verbatim. No other refusal is retried this way. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. If a refusal says the worktree changed while it was evaluated, do not submit again: finish and report it, because only the parent can request a new evaluation. Once an evaluation is recorded, further submissions are refused.";
 
 const ACCEPTANCE_EVALUATION_READER_LABEL: &str = "acceptance-evaluation reader";
 const ACCEPTANCE_EVALUATION_SUBMIT_LABEL: &str = "acceptance-evaluation submission";
@@ -593,14 +593,21 @@ fn acceptance_evaluation_target_admission_locked(
             ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
         ));
     }
-    if seed
-        .naming_history
-        .as_ref()
-        .is_none_or(|token| !engram_work_naming_is_current(inner, &seed.store, token))
-    {
-        return Err(ApiError::conflict(
-            "the work's naming history changed or is unavailable; request a fresh acceptance evaluation",
-        ));
+    match &seed.naming_history {
+        None => {
+            return Err(ApiError::conflict(
+                "the work's naming history changed or is unavailable: the request carried no \
+                 naming token; request a fresh acceptance evaluation",
+            ));
+        }
+        Some(token) => {
+            if let Some(change) = engram_work_naming_change(inner, &seed.store, token) {
+                return Err(acceptance_evaluation_naming_refusal(
+                    "the work's naming history changed or is unavailable",
+                    change,
+                ));
+            }
+        }
     }
     // The root was looked up before the fingerprint was taken off the lock;
     // a rename, a clear or a first name since then would leave the evaluator
@@ -937,7 +944,15 @@ impl AppState {
                 "An evaluator model override requires an explicit agent (Claude or Codex)",
             ));
         }
-        let (target, parent_workdir, parent_agent, defaults, held_connection, naming_snapshot) = {
+        let (
+            target,
+            parent_workdir,
+            parent_agent,
+            defaults,
+            held_connection,
+            naming_snapshot,
+            roots_snapshot,
+        ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(parent_session_id)
@@ -973,6 +988,10 @@ impl AppState {
                         )
                     })
                     .collect::<Vec<_>>(),
+                // The named roots as they stood with that history, so a token
+                // taken before the history's first frontier names the binding
+                // it was taken on.
+                inner.engram_work_source_roots.clone(),
             )
         };
         // The ref is caller text: never hand it to a shell shim or to a store
@@ -1262,12 +1281,51 @@ impl AppState {
         let captured_history = naming_snapshot.iter().find(|(history, _)| {
             history.store == target.store && history.work_id == canonical_work
         });
-        let captured_history = captured_history.filter(|(history, unresolved)| !unresolved && history.epoch == ENGRAM_NAMING_HISTORY_EPOCH).map(|(history, _)| history).ok_or_else(||
-            ApiError::conflict("the requested work has no acknowledged canonical naming history; request a fresh acceptance evaluation"))?;
+        // Each refusal names its cause and what can change it.
+        let captured_history = match captured_history {
+            None => {
+                return Err(ApiError::conflict(
+                    "the requested work has no acknowledged canonical naming history: no source \
+                     root was ever named for it on this host. Name a source root first \
+                     (termal_name_source_root), then request the evaluation",
+                ));
+            }
+            Some((_, true)) => {
+                return Err(ApiError::conflict(
+                    "the requested work has no acknowledged canonical naming history yet: a \
+                     naming of it is still being settled. Request a fresh acceptance evaluation \
+                     once it settles",
+                ));
+            }
+            Some((history, false)) if history.epoch != ENGRAM_NAMING_HISTORY_EPOCH => {
+                return Err(ApiError::conflict(
+                    "the requested work has no acknowledged canonical naming history: its \
+                     naming origin predates canonical history and needs recovery. Request a \
+                     fresh acceptance evaluation after it is recovered",
+                ));
+            }
+            Some((history, false)) => history,
+        };
+        // A canonical read after the requested claim's naming (the
+        // evaluator's own turn admission, typically) may learn that very
+        // naming and move the history once; the token records the binding,
+        // as the same snapshot names it, so that step can be proved.
+        let named_binding = requested_claim
+            .as_ref()
+            .and_then(|claim| {
+                engram_work_source_root_for_claim(
+                    &roots_snapshot,
+                    &target.store,
+                    canonical_work,
+                    &claim.claim_id,
+                )
+            })
+            .and_then(|entry| EngramWorkNamingBound::of_entry(entry, captured_history));
         let naming_history = EngramWorkNamingToken {
             epoch: captured_history.epoch,
             work_id: canonical_work.to_owned(),
             revision: captured_history.revision,
+            named_binding,
         };
 
         let evidence_deadline = canonical_deadline
@@ -1437,9 +1495,11 @@ impl AppState {
         // session is bound to by then.
         let (source_root, source_claim) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if !engram_work_naming_is_current(&inner, &target.store, &naming_history) {
-                return Err(ApiError::conflict(
-                    "the work's naming history changed or is unconfirmed; request a fresh acceptance evaluation",
+            if let Some(change) = engram_work_naming_change(&inner, &target.store, &naming_history)
+            {
+                return Err(acceptance_evaluation_naming_refusal(
+                    "the work's naming history changed or is unconfirmed",
+                    change,
                 ));
             }
             if acceptance_evaluation_claim_unconfirmed_locked(
@@ -1659,9 +1719,12 @@ impl AppState {
                 task.judged_workspace = judged_workspace;
                 {
                     let inner = self.inner.lock().expect("state mutex poisoned");
-                    if !engram_work_naming_is_current(&inner, &target.store, &naming_history) {
-                        return Err(ApiError::conflict(
-                            "the work's naming history changed or is unconfirmed; request a fresh acceptance evaluation",
+                    if let Some(change) =
+                        engram_work_naming_change(&inner, &target.store, &naming_history)
+                    {
+                        return Err(acceptance_evaluation_naming_refusal(
+                            "the work's naming history changed or is unconfirmed",
+                            change,
                         ));
                     }
                     if source_root.as_ref().is_some_and(|root| {
@@ -1839,9 +1902,10 @@ impl AppState {
         // name included, whether or not a revision was taken at the request.
         let place = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if acceptance_evaluation_root_changed_locked(&inner, target) {
+            if let Some(change) = acceptance_evaluation_root_change_locked(&inner, target) {
                 return Err(acceptance_evaluation_source_root_changed_error(
                     target.source_root.as_ref(),
+                    change,
                 ));
             }
             match &target.source_root {
@@ -2167,14 +2231,18 @@ impl AppState {
             // a clear may have landed meanwhile. Naming commits under this
             // lock too, so whichever comes first holds: a write admitted here
             // was for the root as it was named then. An open write replays.
-            if let Some(target) = inner.delegations[index]
+            if let Some((target, change)) = inner.delegations[index]
                 .acceptance_evaluation
                 .as_ref()
                 .filter(|target| matches!(target.submission, AcceptanceEvaluationSubmission::None))
-                .filter(|target| acceptance_evaluation_root_changed_locked(&inner, target))
+                .and_then(|target| {
+                    acceptance_evaluation_root_change_locked(&inner, target)
+                        .map(|change| (target, change))
+                })
             {
                 return Err(acceptance_evaluation_source_root_changed_error(
                     target.source_root.as_ref(),
+                    change,
                 ));
             }
             let Some(target) = inner.delegations[index].acceptance_evaluation.as_mut() else {

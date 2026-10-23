@@ -1901,7 +1901,11 @@ refusal, finish and report it unless the host supplies a refreshed brief.\n  \
 Judge every criterion afresh under that brief and echo its new key. If instead\n  \
 the refusal names records the tracker admits and allows one re-submission,\n  \
 submit once more, citing for each criterion it names only the records named\n  \
-for it; any further refusal is final. Call no other tracker tool.\n\
+for it; any further refusal is final. The one exception: a refusal that\n  \
+begins \"{in_flight}\" recorded nothing and leaves the attempt\n  \
+open, so wait the seconds it names and submit exactly the same verdicts\n  \
+again, at most {in_flight_retries} more times; if it is still refused, finish and report\n  \
+that last refusal verbatim. Call no other tracker tool.\n\
 - Finish with a short plain-text summary of the verdicts; it is the `Summary:`\n  \
 of the result packet described below.",
         work_ref = acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
@@ -1915,6 +1919,8 @@ of the result packet described below.",
         submit_tool = TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
         admission_rule = ACCEPTANCE_BRIEF_ADMISSION_RULE,
         carried = acceptance_brief_carried_failure(task, carried, false),
+        in_flight = ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT,
+        in_flight_retries = ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES,
     );
     AcceptanceEvaluatorBrief {
         prompt,

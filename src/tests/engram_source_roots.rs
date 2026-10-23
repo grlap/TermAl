@@ -573,6 +573,7 @@ fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
                     epoch: ENGRAM_NAMING_HISTORY_EPOCH,
                     work_id: "work-task".to_owned(),
                     revision: 0,
+                    named_binding: None,
                 }),
                 source_claim: None,
                 submission: AcceptanceEvaluationSubmission::None,

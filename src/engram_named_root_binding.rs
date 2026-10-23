@@ -511,6 +511,62 @@ struct EngramWorkNamingToken {
     revision: u64,
     #[serde(default)]
     epoch: u64,
+    /// The binding the requested claim named when the token was taken, with
+    /// the canonical run it was acknowledged in. A canonical read after the
+    /// naming may learn that very naming as the history's frontier and move
+    /// the revision once, which describes no change (see
+    /// `engram_work_naming_change`). Absent for a workdir evaluation and from
+    /// a token persisted before it existed: such a token compares the bare
+    /// revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    named_binding: Option<EngramWorkNamingBound>,
+}
+
+/// A named binding as the canonical history records it: the claim, the
+/// workspace, its claim-local root generation and named_at, and the
+/// canonical run (identity and ordinal) its naming belongs to.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramWorkNamingBound {
+    claim_id: String,
+    workspace: String,
+    generation: u64,
+    named_at: String,
+    run_id: String,
+    run_generation: i64,
+}
+
+impl EngramWorkNamingBound {
+    /// The binding `entry` names, in the canonical run of the latest proof
+    /// `history` acknowledged for the entry's claim. None without such a
+    /// proof: a binding whose run is unknown cannot be proved later.
+    fn of_entry(entry: &EngramWorkSourceRoot, history: &EngramWorkNamingHistory) -> Option<Self> {
+        let proof = history
+            .proofs
+            .iter()
+            .filter(|proof| proof.binding.claim_id == entry.claim_id)
+            .max_by_key(|proof| proof.read.run.generation)?;
+        Some(Self {
+            claim_id: entry.claim_id.clone(),
+            workspace: entry.root.clone(),
+            generation: entry.generation,
+            named_at: entry.named_at.clone(),
+            run_id: proof.read.run_id.clone(),
+            run_generation: proof.read.run.generation,
+        })
+    }
+
+    /// Whether the canonical `frontier` is the Bound event of this binding,
+    /// in the same canonical run.
+    fn is_frontier(&self, frontier: &EngramNamingFrontier) -> bool {
+        frontier.kind == EngramNamedRootKind::Bound
+            && frontier.claim_id == self.claim_id
+            && frontier.workspace_id == self.workspace
+            && u64::try_from(frontier.root_generation).ok() == Some(self.generation)
+            && engram_named_at_matches(&frontier.named_at, &self.named_at)
+            && frontier.run_id == self.run_id
+            && frontier.run_generation == self.run_generation
+    }
 }
 
 fn engram_work_naming_token(
@@ -518,18 +574,15 @@ fn engram_work_naming_token(
     store: &EngramAuthorityStoreKey,
     work_id: &str,
 ) -> EngramWorkNamingToken {
+    let history = inner
+        .engram_work_naming_history
+        .iter()
+        .find(|history| &history.store == store && history.work_id == work_id);
     EngramWorkNamingToken {
         work_id: work_id.to_owned(),
-        revision: inner
-            .engram_work_naming_history
-            .iter()
-            .find(|history| &history.store == store && history.work_id == work_id)
-            .map_or(0, |history| history.revision),
-        epoch: inner
-            .engram_work_naming_history
-            .iter()
-            .find(|history| &history.store == store && history.work_id == work_id)
-            .map_or(0, |history| history.epoch),
+        revision: history.map_or(0, |history| history.revision),
+        epoch: history.map_or(0, |history| history.epoch),
+        named_binding: None,
     }
 }
 
@@ -577,23 +630,133 @@ fn engram_record_naming_history(
     }
 }
 
-/// A publication whose durable acknowledgement is outstanding cannot supply
-/// a stable history fence, including to a request for an unfocused claim.
-fn engram_work_naming_is_current(
+/// Why a naming token taken for an acceptance evaluation no longer fences the
+/// tree it was taken on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngramWorkNamingChange {
+    /// The work's naming history moved past the token in a way not proved to
+    /// describe the same binding, or belongs to another authority epoch, or
+    /// is gone.
+    Moved,
+    /// A naming of the work is in flight: an intent awaiting its receipt, a
+    /// run awaiting recovery, or a binding awaiting reconciliation.
+    Pending,
+    /// Only an authority transition of the token's own binding is
+    /// unpublished (a reclamation, recovery or admission pass between its
+    /// preparation and its publication), with no naming intent, unresolved
+    /// run or reconciliation behind it: it will publish the same binding or a
+    /// retirement, so the caller tries again once it has, and that
+    /// publication decides. Another claim's prepared naming is not this.
+    InFlight,
+}
+
+/// Whether the only unresolved thing about the work is an authority
+/// transition of `bound` itself in flight: Prepared or Candidate, owned by
+/// the binding the token was taken on (the same claim, in the same canonical
+/// run), every retained run that owner's, acknowledged proofs in the current
+/// epoch, and no journal naming the work with an intent or a reconciliation
+/// outstanding. A transition another claim or run prepared is a naming of
+/// the work by someone else, never this binding's maintenance, so it is not
+/// in flight here; nor is any transition for a token with no named binding.
+fn engram_work_authority_transition_in_flight(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    work_id: &str,
+    bound: Option<&EngramWorkNamingBound>,
+) -> bool {
+    let Some(bound) = bound else {
+        return false;
+    };
+    let Some(history) = inner
+        .engram_work_naming_history
+        .iter()
+        .find(|history| &history.store == store && history.work_id == work_id)
+    else {
+        return false;
+    };
+    history.epoch == ENGRAM_NAMING_HISTORY_EPOCH
+        && !history.proofs.is_empty()
+        && history.transition.as_ref().is_some_and(|transition| {
+            transition.phase != EngramAuthorityPhase::Published
+                && transition.binding.claim_id == bound.claim_id
+                && transition.binding.run_id == bound.run_id
+                && history
+                    .unresolved_runs
+                    .iter()
+                    .all(|run| engram_same_recovery_run(run, &transition.binding))
+        })
+        && !inner.engram_named_root_journal.iter().any(|journal| {
+            &journal.store == store
+                && engram_journal_names_work(journal, work_id)
+                && (journal.pending.is_some() || journal.requires_reconciliation())
+        })
+}
+
+/// Whether `token` still fences the work's naming. The history revision
+/// decides, strictly, with one proved exception: a token taken on a binding
+/// its claim had named (`named_binding`) stays current across exactly one
+/// revision step that left that binding's own Bound event, in the same
+/// canonical run, as the history's frontier. That event is unique (a
+/// generation is never named twice, a same-generation re-name sends no
+/// event) and the frontier is the latest event learned, so the step learned
+/// no later clear, re-name or other claim's naming, whatever the frontier
+/// was before. Root generations are claim-local, so no generation number
+/// alone can stand in for the binding. A publication whose durable
+/// acknowledgement is outstanding cannot supply a stable history fence,
+/// including to a request for an unfocused claim.
+fn engram_work_naming_change(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     token: &EngramWorkNamingToken,
-) -> bool {
-    engram_work_naming_token(inner, store, &token.work_id) == *token
-        && token.epoch == ENGRAM_NAMING_HISTORY_EPOCH
-        && !engram_authority_work_unresolved(inner, store, &token.work_id)
-        && !inner.engram_named_root_journal.iter().any(|journal| {
+) -> Option<EngramWorkNamingChange> {
+    let history = inner
+        .engram_work_naming_history
+        .iter()
+        .find(|history| &history.store == store && history.work_id == token.work_id);
+    let (revision, epoch) = history.map_or((0, 0), |history| (history.revision, history.epoch));
+    let learned_own_binding = || {
+        token.named_binding.as_ref().is_some_and(|bound| {
+            token.revision.checked_add(1) == Some(revision)
+                && history
+                    .and_then(|history| history.frontier.as_ref())
+                    .is_some_and(|frontier| bound.is_frontier(frontier))
+        })
+    };
+    if epoch != token.epoch || token.epoch != ENGRAM_NAMING_HISTORY_EPOCH {
+        return Some(EngramWorkNamingChange::Moved);
+    }
+    // Before the revision: a pass over this token's own binding between its
+    // preparation and its publication is answered as retryable, and the
+    // published state decides the retry.
+    if engram_work_authority_transition_in_flight(
+        inner,
+        store,
+        &token.work_id,
+        token.named_binding.as_ref(),
+    ) {
+        return Some(EngramWorkNamingChange::InFlight);
+    }
+    if revision != token.revision && !learned_own_binding() {
+        return Some(EngramWorkNamingChange::Moved);
+    }
+    let pending = engram_authority_work_unresolved(inner, store, &token.work_id)
+        || inner.engram_named_root_journal.iter().any(|journal| {
             &journal.store == store
                 && journal
                     .pending
                     .as_ref()
                     .is_some_and(|event| event.root.work_id == token.work_id)
-        })
+        });
+    pending.then_some(EngramWorkNamingChange::Pending)
+}
+
+#[cfg(test)]
+fn engram_work_naming_is_current(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    token: &EngramWorkNamingToken,
+) -> bool {
+    engram_work_naming_change(inner, store, token).is_none()
 }
 
 /// Only settled, unused history is disposable. In particular a capture
@@ -1614,6 +1777,35 @@ impl AppState {
         self.send_engram_root_event_until(target, event, clock.now() + budget)
     }
 
+    /// Prepare the authority image for sending `event`. Nothing has been sent
+    /// yet, so while the claim's run association is still `binding` and
+    /// `event` is still its pending intent, a supersession by another owner
+    /// prepares a fresh image instead of refusing the naming
+    /// (`prepare_engram_authority_retrying_supersession_until`).
+    fn prepare_engram_root_event_authority_until(
+        &self,
+        event: &EngramNamedRootEvent,
+        binding: &EngramControlWorkBinding,
+        deadline: std::time::Instant,
+    ) -> Result<EngramAuthorityTransition, ApiError> {
+        self.prepare_engram_authority_retrying_supersession_until(
+            &event.root.store,
+            binding,
+            deadline,
+            |inner| {
+                engram_root_journal(
+                    &inner.engram_named_root_journal,
+                    &event.root.store,
+                    &event.root.claim_id,
+                )
+                .is_some_and(|journal| {
+                    journal.read_binding.as_ref() == Some(binding)
+                        && journal.pending.as_ref() == Some(event)
+                })
+            },
+        )
+    }
+
     fn send_engram_root_event_until(
         &self,
         target: &EngramBindingTarget,
@@ -1633,7 +1825,7 @@ impl AppState {
                 ApiError::conflict("naming requires the claim's canonical run association")
             })?
         };
-        let owner = self.prepare_engram_authority_until(&event.root.store, &binding, deadline)?;
+        let owner = self.prepare_engram_root_event_authority_until(event, &binding, deadline)?;
         let original_reporter;
         let target = if target.connection.session_id == event.reporter {
             target

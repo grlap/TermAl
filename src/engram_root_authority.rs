@@ -4,6 +4,16 @@
 
 const ENGRAM_NAMING_HISTORY_EPOCH: u64 = 1;
 
+/// The refusal when another owner replaced a work's authority image before
+/// this one was acknowledged. A caller may prepare a fresh image and try
+/// again when what it acts on is unchanged.
+const ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR: &str =
+    "named-root acknowledgement belongs to a superseded authority image";
+
+/// How many times a naming prepares a fresh authority image after another
+/// owner superseded the previous one, within the naming's own budget.
+const ENGRAM_NAMING_SUPERSEDED_RETRIES: usize = 3;
+
 #[cfg(test)]
 thread_local! {
     // Manual AppState fixtures explicitly lack the production persist worker.
@@ -766,11 +776,37 @@ impl AppState {
             .map_err(EngramRootReconcileFailure::into_transport)
     }
 
+    /// The guard a naming takes before reading the claim's lifecycle. Unlike
+    /// the other guard reads, a naming whose session still holds the same
+    /// connection and work binding prepares a fresh authority image when
+    /// another owner superseded the one it prepared: nothing has been sent
+    /// yet, and the naming's own budget bounds the retries. Failures stay
+    /// classified, as the other guard reads' are, so the caller can keep a
+    /// typed durability outcome.
+    fn guard_engram_root_read_for_naming_classified_until(
+        &self,
+        target: &EngramBindingTarget,
+        binding: Option<&EngramControlWorkBinding>,
+        deadline: std::time::Instant,
+    ) -> Result<Option<EngramAcknowledgedRootGuard>, EngramRootReconcileFailure> {
+        self.guard_engram_root_read_inner_until(target, binding, deadline, true)
+    }
+
     fn guard_engram_root_read_classified_until(
         &self,
         target: &EngramBindingTarget,
         binding: Option<&EngramControlWorkBinding>,
         deadline: std::time::Instant,
+    ) -> Result<Option<EngramAcknowledgedRootGuard>, EngramRootReconcileFailure> {
+        self.guard_engram_root_read_inner_until(target, binding, deadline, false)
+    }
+
+    fn guard_engram_root_read_inner_until(
+        &self,
+        target: &EngramBindingTarget,
+        binding: Option<&EngramControlWorkBinding>,
+        deadline: std::time::Instant,
+        retry_superseded: bool,
     ) -> Result<Option<EngramAcknowledgedRootGuard>, EngramRootReconcileFailure> {
         let Some((store, binding)) = target.settings.authority_store_key.as_ref().zip(binding)
         else {
@@ -794,9 +830,29 @@ impl AppState {
             }
             target.runtime_snapshot.clone()
         };
-        let owner = self
-            .prepare_engram_authority_until(store, binding, deadline)
-            .map_err(EngramRootReconcileFailure::Infrastructure)?;
+        let prepared = if retry_superseded {
+            self.prepare_engram_authority_retrying_supersession_until(
+                store,
+                binding,
+                deadline,
+                |inner| {
+                    Self::engram_binding_target_for_session_shape_locked(
+                        inner,
+                        &target.connection.session_id,
+                        true,
+                    )
+                    .ok()
+                    .flatten()
+                    .is_some_and(|current| {
+                        current.connection == target.connection
+                            && current.work_binding.as_ref() == Some(binding)
+                    })
+                },
+            )
+        } else {
+            self.prepare_engram_authority_until(store, binding, deadline)
+        };
+        let owner = prepared.map_err(EngramRootReconcileFailure::Infrastructure)?;
         let inner = self.inner.lock().expect("state mutex poisoned");
         let current = Self::engram_binding_target_for_session_shape_locked(
             &inner,
@@ -1493,6 +1549,56 @@ impl AppState {
         Ok(image.history.transition.expect("prepared owner"))
     }
 
+    /// Prepare the authority image for `binding` as a naming does, before it
+    /// has sent anything. Another owner (such as the automatic reclamation
+    /// pass) may replace the work's image before this one is acknowledged.
+    /// While `unchanged` still holds for the state, a fresh image is prepared,
+    /// at most `ENGRAM_NAMING_SUPERSEDED_RETRIES` times and within `deadline`,
+    /// instead of refusing a naming whose binding never changed. Any other
+    /// refusal is returned as is. A supersession that ends the attempts is
+    /// refused with what the caller can do: once `unchanged` fails, retrying
+    /// the same request cannot help; once the retries or the budget are spent
+    /// with the binding unchanged, the identical request can be retried.
+    fn prepare_engram_authority_retrying_supersession_until(
+        &self,
+        store: &EngramAuthorityStoreKey,
+        binding: &EngramControlWorkBinding,
+        deadline: std::time::Instant,
+        unchanged: impl Fn(&StateInner) -> bool,
+    ) -> Result<EngramAuthorityTransition, ApiError> {
+        let clock = self.engram_budget_clock();
+        let mut retries = 0;
+        loop {
+            let prepared = self.prepare_engram_authority_until(store, binding, deadline);
+            let error = match prepared {
+                Ok(owner) => return Ok(owner),
+                Err(error) => error,
+            };
+            if error.status != StatusCode::CONFLICT
+                || error.message != ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR
+            {
+                return Err(error);
+            }
+            if !unchanged(&self.inner.lock().expect("state mutex poisoned")) {
+                return Err(ApiError::conflict(format!(
+                    "{ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR}, and this naming's claim or work \
+                     binding changed while it waited, so retrying the same request cannot help: \
+                     nothing was named; read the claim again and name the root under the \
+                     current claim"
+                )));
+            }
+            if retries >= ENGRAM_NAMING_SUPERSEDED_RETRIES || clock.now() >= deadline {
+                return Err(ApiError::conflict(format!(
+                    "{ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR} at each of {} attempts within this \
+                     naming's budget: nothing was named, and its claim and work binding are \
+                     unchanged, so the identical naming request can be retried",
+                    retries + 1
+                )));
+            }
+            retries += 1;
+        }
+    }
+
     fn recover_engram_authority_candidate_until(
         &self,
         store: &EngramAuthorityStoreKey,
@@ -1638,9 +1744,7 @@ impl AppState {
             match outcome {
                 Ok(()) => {}
                 Err(PersistFenceError::Superseded) => {
-                    return Err(ApiError::conflict(
-                        "named-root acknowledgement belongs to a superseded authority image",
-                    ));
+                    return Err(ApiError::conflict(ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR));
                 }
                 Err(PersistFenceError::Deadline) => {
                     // Say where the writer's time went and whether waiting
@@ -1698,9 +1802,7 @@ impl AppState {
         self.test_engram_authority_ack_boundary("before_owner_check");
         let inner = self.inner.lock().expect("state mutex poisoned");
         if !image.still_owned(&inner) {
-            return Err(ApiError::conflict(
-                "named-root acknowledgement belongs to a superseded authority image",
-            ));
+            return Err(ApiError::conflict(ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR));
         }
         if clock.now() >= deadline {
             return Err(ApiError::conflict(format!(

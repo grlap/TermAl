@@ -1105,6 +1105,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
                 epoch: ENGRAM_NAMING_HISTORY_EPOCH,
                 work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
                 revision: 1,
+                named_binding: None,
             }),
             source_claim: source_root
                 .is_none()
@@ -1174,6 +1175,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
             epoch: ENGRAM_NAMING_HISTORY_EPOCH,
             work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
             revision: 1,
+            named_binding: None,
         }),
         source_claim: Some(AcceptanceEvaluationSourceClaim {
             work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
@@ -1515,6 +1517,7 @@ fn acceptance_old_workdir_claim_is_refused_after_a_new_claim_names_and_clears() 
                 epoch: ENGRAM_NAMING_HISTORY_EPOCH,
                 work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
                 revision: 0,
+                named_binding: None,
             }),
             source_claim: target.source_claim.clone(),
         };

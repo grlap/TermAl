@@ -691,24 +691,54 @@ struct AcceptanceEvaluationSourceClaim {
     named_generation_at_request: Option<u64>,
 }
 
+/// Why an evaluation's tree is no longer the one its work is measured in,
+/// so that its refusal names the cause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AcceptanceEvaluationRootChange {
+    /// The recorded root is no longer named under its claim and generation.
+    NoLongerNamed,
+    /// With no root recorded, a root was named since for the work.
+    NamedSince,
+    /// The claim's binding was displaced or awaits reconciliation.
+    Unsettled,
+    /// The work's naming moved, or a naming of it is pending.
+    Naming(EngramWorkNamingChange),
+    /// The target carries no naming token to fence its tree.
+    NoNamingToken,
+}
+
 /// Whether the root the evaluation `target` was requested on is no longer
 /// the one its work is measured in: a recorded root the work no longer names
 /// under its claim and generation, or, with none recorded, a root named since
 /// for the claim it was requested under (`source_claim`) on the evaluated
-/// work, which moved the work's measurements away from the tree evaluated.
-fn acceptance_evaluation_root_changed_locked(
+/// work, which moved the work's measurements away from the tree evaluated;
+/// a binding displaced or awaiting reconciliation; or a moved or pending
+/// naming of the work. History that only learned more of the same binding is
+/// no change. The structural causes are named first, as the most specific.
+fn acceptance_evaluation_root_change_locked(
     inner: &StateInner,
     target: &DelegationAcceptanceEvaluation,
-) -> bool {
-    let Some(store) = &target.store else {
-        return false;
+) -> Option<AcceptanceEvaluationRootChange> {
+    let store = target.store.as_ref()?;
+    let structural = match (&target.source_root, &target.source_claim) {
+        (Some(source_root), _) => !source_root.still_named(&inner.engram_work_source_roots, store),
+        (None, Some(claim)) => {
+            acceptance_evaluation_other_claim_named_since(inner, store, claim)
+                || acceptance_evaluation_claim_named_since(
+                    &inner.engram_work_source_roots,
+                    store,
+                    claim,
+                    &target.work_ref,
+                )
+        }
+        (None, None) => false,
     };
-    if target
-        .naming_history
-        .as_ref()
-        .is_none_or(|token| !engram_work_naming_is_current(inner, store, token))
-    {
-        return true;
+    if structural {
+        return Some(if target.source_root.is_some() {
+            AcceptanceEvaluationRootChange::NoLongerNamed
+        } else {
+            AcceptanceEvaluationRootChange::NamedSince
+        });
     }
     let claim_id = target
         .source_root
@@ -726,24 +756,63 @@ fn acceptance_evaluation_root_changed_locked(
                 || journal.retirement == Some(EngramRootRetirement::Displaced)
         })
     }) {
-        return true;
+        return Some(AcceptanceEvaluationRootChange::Unsettled);
     }
-    match (&target.source_root, &target.source_claim) {
-        (Some(source_root), _) => !source_root.still_named(&inner.engram_work_source_roots, store),
-        (None, Some(claim))
-            if acceptance_evaluation_other_claim_named_since(inner, store, claim) =>
-        {
-            true
-        }
-        (None, Some(claim)) => acceptance_evaluation_claim_named_since(
-            &inner.engram_work_source_roots,
-            store,
-            claim,
-            &target.work_ref,
-        ),
-        (None, None) => false,
+    match &target.naming_history {
+        None => Some(AcceptanceEvaluationRootChange::NoNamingToken),
+        Some(token) => engram_work_naming_change(inner, store, token)
+            .map(AcceptanceEvaluationRootChange::Naming),
     }
 }
+
+#[cfg(test)]
+fn acceptance_evaluation_root_changed_locked(
+    inner: &StateInner,
+    target: &DelegationAcceptanceEvaluation,
+) -> bool {
+    acceptance_evaluation_root_change_locked(inner, target).is_some()
+}
+
+/// The refusal of an evaluation request whose naming token no longer fences
+/// the work's tree, naming why.
+fn acceptance_evaluation_naming_refusal(lead: &str, change: EngramWorkNamingChange) -> ApiError {
+    let cause = match change {
+        EngramWorkNamingChange::Moved => {
+            "the work's naming history has since moved in a way not proved to describe the \
+             same binding, or now belongs to another authority epoch"
+        }
+        EngramWorkNamingChange::Pending => {
+            "a naming of the work is pending (an intent awaiting Engram's receipt, a run \
+             awaiting recovery, or a binding awaiting reconciliation)"
+        }
+        EngramWorkNamingChange::InFlight => {
+            return ApiError::from_status(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "{ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT}: {lead}: the work's authority \
+                     is between a maintenance pass's preparation and its publication; request \
+                     the evaluation again in {} seconds",
+                    ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER.as_secs()
+                ),
+            );
+        }
+    };
+    ApiError::conflict(format!("{lead}: {cause}; request a fresh acceptance evaluation"))
+}
+
+/// The start of every refusal that an authority transition in flight
+/// causes: retryable, never final (see `EngramWorkNamingChange::InFlight`).
+/// The host does not wait the transition out: its submit budget is already
+/// the sum of its stages' own deadlines, so a wait would widen it. The
+/// caller, which holds the attempt, retries instead.
+const ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT: &str = "authority transition in flight";
+/// How long a caller waits before trying again: a maintenance pass publishes
+/// once its one canonical read, bounded by its own budget, has answered.
+const ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER: Duration =
+    ENGRAM_ROOT_RECLAMATION_BUDGET.saturating_add(Duration::from_secs(1));
+/// How many times an evaluator submits the same verdicts again after an
+/// in-flight refusal before it reports that refusal.
+const ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES: usize = 3;
 
 /// A fresh name for the work under another current claim invalidates a
 /// previously seeded workdir evaluation. Retired historical claims cannot
@@ -791,27 +860,74 @@ fn acceptance_evaluation_claim_named_since(
 
 /// The refusal of an evaluation's first submission once the root it was
 /// requested on (`None`: the session's workdir) is no longer the one its
-/// work is measured in. The evaluator is told to treat it as final; the host
-/// enforces that only for a recorded root, whose generation never returns
-/// (with none recorded, a clear of the first name would admit a retry).
+/// work is measured in, naming the `change` found. The evaluator is told to
+/// treat it as final; the host enforces that only for a recorded root, whose
+/// generation never returns (with none recorded, a clear of the first name
+/// would admit a retry).
 fn acceptance_evaluation_source_root_changed_error(
     source_root: Option<&AcceptanceEvaluationSourceRoot>,
+    change: AcceptanceEvaluationRootChange,
 ) -> ApiError {
     let requested_on = match source_root {
         Some(source_root) => format!(
-            "the evaluation was requested on {} (generation {}), which the work no longer names \
-             under that claim",
+            "the evaluation was requested on {} (generation {})",
             source_root.root, source_root.generation
         ),
-        None => "the evaluation was requested on the session's workdir, and the work has since \
-                 been given a named source root"
-            .to_owned(),
+        None => "the evaluation was requested on the session's workdir".to_owned(),
+    };
+    if change == AcceptanceEvaluationRootChange::Naming(EngramWorkNamingChange::InFlight) {
+        // Retryable: the pass publishes the same binding or a retirement, and
+        // the next submission is judged on whichever it published.
+        return ApiError::from_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "{ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT}: {requested_on}, and the work's \
+                 authority is between a maintenance pass's preparation and its publication. \
+                 Nothing was recorded and this attempt is still open: wait {} seconds, then \
+                 submit exactly the same verdicts again",
+                ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER.as_secs()
+            ),
+        );
+    }
+    let lead = match change {
+        AcceptanceEvaluationRootChange::Naming(EngramWorkNamingChange::Pending) => {
+            "the work's naming is unsettled while it was evaluated"
+        }
+        _ => "the work's source root changed while it was evaluated",
+    };
+    let cause = match change {
+        AcceptanceEvaluationRootChange::NoLongerNamed => {
+            "which the work no longer names under that claim"
+        }
+        AcceptanceEvaluationRootChange::NamedSince => {
+            "and the work has since been given a named source root"
+        }
+        AcceptanceEvaluationRootChange::Unsettled => {
+            "and that claim's named-root binding has since been displaced by another claim's \
+             naming or awaits reconciliation with Engram"
+        }
+        AcceptanceEvaluationRootChange::Naming(EngramWorkNamingChange::Moved) => {
+            "and the work's naming history has since moved in a way not proved to describe \
+             that same binding, or to another authority epoch"
+        }
+        AcceptanceEvaluationRootChange::Naming(EngramWorkNamingChange::Pending) => {
+            "and a naming of the work is now pending (an intent awaiting Engram's receipt, a \
+             run awaiting recovery, or a binding awaiting reconciliation), so the tree it \
+             measures is not settled"
+        }
+        // Answered as retryable above; kept for an exhaustive match.
+        AcceptanceEvaluationRootChange::Naming(EngramWorkNamingChange::InFlight) => {
+            "and the work's authority is between a maintenance pass's preparation and its \
+             publication"
+        }
+        AcceptanceEvaluationRootChange::NoNamingToken => {
+            "but it carries no naming token that could fence that tree"
+        }
     };
     ApiError::conflict(format!(
-        "the work's source root changed while it was evaluated: {requested_on}, so these \
-         verdicts may not describe its tree. Treat this as final, even if the root changes \
-         back: do not submit again. Finish and report this; the parent must request a new \
-         evaluation"
+        "{lead}: {requested_on}, {cause}, so these verdicts may not describe its tree. Treat \
+         this as final, even if the root changes back: do not submit again. Finish and report \
+         this; the parent must request a new evaluation"
     ))
 }
 
@@ -1995,7 +2111,7 @@ impl AppState {
             })?;
             engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
                 let phase_deadline = (clock.now() + budget).min(deadline);
-                self.guard_engram_root_read_classified_until(
+                self.guard_engram_root_read_for_naming_classified_until(
                     &target,
                     target.work_binding.as_ref(),
                     phase_deadline,
@@ -2480,6 +2596,29 @@ impl AppState {
                 })
             {
                 journal.retire(EngramRootRetirement::Displaced);
+            }
+        }
+        // A kept name sends no event, yet Engram's authoritative read above
+        // confirmed this very claim's binding at the same generation and
+        // named_at, and the work's entry is this claim's. Any displacement or
+        // unsettled reconciliation recorded on the claim's own journal is
+        // then stale, and would refuse every evaluation under the binding.
+        if transition.is_none() && kept.is_some() {
+            if let Some(journal) = inner
+                .engram_named_root_journal
+                .iter_mut()
+                .find(|journal| journal.store == store && journal.claim_id == claim.claim_id)
+                .filter(|journal| journal.pending.is_none())
+            {
+                journal.obsolete = false;
+                journal.retirement = None;
+                if journal
+                    .reconciliation
+                    .as_ref()
+                    .is_some_and(|reconciliation| !reconciliation.settled)
+                {
+                    journal.reconciliation = None;
+                }
             }
         }
         if let Some((event, reply)) = &transition {

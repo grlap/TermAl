@@ -47,6 +47,12 @@ mod notes_cut;
 #[path = "acceptance_evaluation_authority.rs"]
 mod authority_budget;
 
+#[path = "acceptance_evaluation_unchanged_binding.rs"]
+mod unchanged_binding;
+
+#[path = "acceptance_evaluation_first_frontier.rs"]
+mod first_frontier;
+
 #[path = "acceptance_evaluation_refresh.rs"]
 mod refresh;
 
@@ -151,6 +157,7 @@ fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAc
             epoch: ENGRAM_NAMING_HISTORY_EPOCH,
             work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
             revision: 1,
+            named_binding: None,
         }),
         source_claim: None,
         submission: AcceptanceEvaluationSubmission::None,
@@ -169,7 +176,7 @@ fn established_store(state: &AppState, project_id: &str) -> Option<EngramAuthori
 /// A running read-only evaluator delegation with a stored target, installed
 /// directly: the creation path has its own test below. The target names the
 /// project's store as it is established at this moment.
-fn install_evaluator_delegation(
+pub(super) fn install_evaluator_delegation(
     state: &AppState,
     parent_session_id: &str,
     project_id: Option<&str>,
@@ -223,7 +230,7 @@ fn install_evaluator_delegation(
     (delegation_id, child_session_id)
 }
 
-fn update_evaluation_target(
+pub(super) fn update_evaluation_target(
     state: &AppState,
     delegation_id: &str,
     change: impl FnOnce(&mut DelegationAcceptanceEvaluation),
@@ -667,6 +674,21 @@ fn acceptance_evaluator_brief_numbers_criteria_lists_locators_and_names_the_tool
     assert!(!prompt.contains("older entries not shown"));
     assert!(prompt.contains("The workspace at /work/repo is read-only."));
     assert!(prompt.contains("Submit once with termal_submit_acceptance_evaluation."));
+    // The one retryable refusal: same verdicts, a bounded number of times,
+    // then the last refusal reported verbatim. The tool says the same.
+    assert!(prompt.contains(
+        "begins \"authority transition in flight\" recorded nothing and leaves the attempt\n  open"
+    ));
+    assert!(prompt.contains(
+        "submit exactly the same verdicts\n  again, at most 3 more times; if it is still refused, \
+         finish and report\n  that last refusal verbatim."
+    ));
+    assert!(TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION.contains(
+        "If a refusal begins \"authority transition in flight\", nothing was recorded and the \
+         attempt is still open: wait the seconds it names and submit exactly the same verdicts \
+         again, at most three more times; if it is still refused, finish and report that last \
+         refusal verbatim. No other refusal is retried this way."
+    ));
     // A Claude evaluator's brief states the command form TermAl's read-only
     // Claude gate allows, so an evaluator checking a freeze fingerprint does
     // not reach for a refused shape first.
