@@ -118,11 +118,11 @@ impl EngramBeginPreparationFailure {
 /// accepted for control admission and stays with the head whichever retry
 /// holds it meanwhile (this module's abort record, or a bind or parked-
 /// admission retry), and it is saved with the session, so neither a change
-/// of retry kind nor a restart starts it again. It is enforced once a
-/// prepared begin of the head was withheld (`held_since`), for every later
-/// phase of that head (bind, admission, abort, the exact replay of a begin
-/// possibly sent); other recoveries keep their own bounds. A delivered head
-/// or another head drops it. An exhausted recovery, a Stop, an operator's
+/// of retry kind nor a restart starts it again. It is enforced for every
+/// automatic recovery of the head (bind, admission, abort, the exact replay
+/// of a begin possibly sent), whether or not a prepared begin of the head
+/// was ever withheld (`held_since`, which marks prepared-begin recovery). A
+/// delivered head or another head drops it. An exhausted recovery, a Stop, an operator's
 /// pause or control disabled ends it (`ended`) but keeps it, so nothing that
 /// follows starts another one; only an explicit accepted Resume replaces it
 /// with one new window (`renew_engram_admission_budget_window`).
@@ -136,8 +136,8 @@ struct EngramBeginPreparationLineage {
     /// `admitted_at` plus the budget (RFC 3339): no automatic send starts
     /// at or after it.
     deadline: String,
-    /// When a prepared begin of the head was first withheld (RFC 3339); from
-    /// then on the budget is enforced.
+    /// When a prepared begin of the head was first withheld (RFC 3339): the
+    /// head entered prepared-begin recovery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     held_since: Option<String>,
     /// Automatic re-admission attempts started for the head so far.
@@ -206,9 +206,9 @@ impl EngramBeginPreparationLineage {
         self.deadline_at().is_none_or(|deadline| now >= deadline)
     }
 
-    /// Whether the budget is enforced: a prepared begin of the head was
-    /// withheld.
-    fn enforced(&self) -> bool {
+    /// Whether the head entered prepared-begin recovery: a prepared begin of
+    /// it was withheld. The budget itself binds every head that has one.
+    fn entered_prepared_begin_recovery(&self) -> bool {
         self.held_since.is_some()
     }
 }
@@ -232,8 +232,10 @@ fn accept_engram_admission_budget(
     true
 }
 
-/// The budget of `record`'s head while it is enforced: a prepared begin of
-/// the head was withheld, and no begin of it is applied. A begin possibly
+/// The budget of `record`'s head while it is enforced: the head has one, and
+/// no begin OF THAT HEAD is applied. A grant left open by an earlier turn
+/// (its closing checkpoint failed, and it is settled separately) is not the
+/// head's applied begin and exempts nothing. A begin possibly
 /// sent (an uncertain grant, a restart's reading of a saved prepared begin
 /// included) is not an applied one: its exact replay (`engram_begin_replay.rs`)
 /// runs inside what is left of the budget, and at the deadline it ends in the
@@ -245,10 +247,119 @@ fn accept_engram_admission_budget(
 fn engram_admission_budget_enforced(
     record: &SessionRecord,
 ) -> Option<&EngramBeginPreparationLineage> {
-    if record.engram.active_grant_id.is_some() {
+    if engram_head_begin_applied(record) {
         return None;
     }
-    engram_begin_preparation_lineage(record).filter(|lineage| lineage.enforced())
+    engram_begin_preparation_lineage(record)
+}
+
+/// Whether `record`'s active grant is its queue head's own applied begin: the
+/// grant the head's retained evaluate recorded as begun when Engram applied
+/// that begin. Any other active grant, such as a previous turn's grant whose
+/// closing checkpoint failed, is not.
+fn engram_head_begin_applied(record: &SessionRecord) -> bool {
+    let Some(active) = record.engram.active_grant_id.as_deref() else {
+        return false;
+    };
+    record
+        .queued_prompts
+        .front()
+        .and_then(|head| head.engram_evaluate.as_ref())
+        .and_then(|evaluate| evaluate.begun_grant_id.as_deref())
+        == Some(active)
+}
+
+/// Whether `record`'s head's admission window is spent at `now`: its saved
+/// window has ended (exhaustion, a Stop, an operator's pause or control
+/// disabled) or its saved deadline is at or before `now`. False for a head
+/// with no enforced budget (none, another head's, or an applied begin's).
+/// The park asks it first: a spent window schedules no further automatic
+/// attempt (`end_engram_spent_admission_window`).
+fn engram_admission_window_spent(record: &SessionRecord, now: chrono::DateTime<chrono::Utc>) -> bool {
+    engram_admission_budget_enforced(record)
+        .is_some_and(|lineage| lineage.ended || lineage.exhausted_at(now))
+}
+
+/// What is known of the last invocation when a spent window ends the
+/// automatic recovery, for the hold's card and preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngramSpentInvocation {
+    /// The producer certified that this invocation committed nothing
+    /// (`control_request_expired`, `control_store_busy`); earlier attempts
+    /// with the same key may have.
+    CertifiedNotApplied,
+    /// The invocation's outcome is unknown.
+    Unknown,
+    /// A local preparation cause: nothing was sent.
+    NotSent,
+    /// Engram applied the begin, but its receipt was first observed after the
+    /// deadline: the hold's own text says so.
+    Applied,
+}
+
+impl EngramSpentInvocation {
+    fn of_cause(cause: &str) -> Self {
+        if cause == ENGRAM_BEGIN_APPLIED_AFTER_DEADLINE_CODE {
+            Self::Applied
+        } else if cause == ENGRAM_BEGIN_PREPARATION_CODE
+            || cause == ENGRAM_BEGIN_PREPARATION_PENDING_CODE
+        {
+            Self::NotSent
+        } else if EngramInvocationApplication::from_remote_code(Some(cause))
+            == EngramInvocationApplication::CertifiedNotApplied
+        {
+            Self::CertifiedNotApplied
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// The sentence the exhausted hold adds about the last invocation.
+    fn sentence(self) -> &'static str {
+        match self {
+            Self::CertifiedNotApplied => {
+                " This invocation committed no changes (earlier attempts with the same key may have)."
+            }
+            Self::Unknown => " This invocation's outcome is unknown.",
+            Self::NotSent | Self::Applied => "",
+        }
+    }
+}
+
+/// The facts of a window that ended the automatic recovery, for the card the
+/// park writes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramSpentWindow {
+    /// Automatic attempts started in the window.
+    attempts: u32,
+    /// The newest dispatch card's code, else the class of the hold.
+    last_cause: String,
+    invocation: EngramSpentInvocation,
+    /// The window's saved start (RFC 3339).
+    admitted_at: String,
+    /// The window's saved deadline (RFC 3339).
+    deadline: String,
+}
+
+/// Ends the automatic recovery of `record`'s head whose window is spent
+/// (`engram_admission_window_spent`) in the Resume-or-Cancel exhaustion hold,
+/// as the tick does (`end_engram_begin_preparation_retry`), and returns its
+/// facts. It sends and saves nothing; the caller commits.
+fn end_engram_spent_admission_window(record: &mut SessionRecord) -> EngramSpentWindow {
+    let (attempts, admitted_at, deadline) = engram_begin_preparation_lineage(record).map_or_else(
+        || (0, String::new(), String::new()),
+        |lineage| (lineage.attempts, lineage.admitted_at.clone(), lineage.deadline.clone()),
+    );
+    let last_cause = engram_begin_preparation_last_cause(record);
+    let preview = engram_begin_preparation_exhausted_preview(record, attempts);
+    end_engram_begin_preparation_retry(record, preview);
+    EngramSpentWindow {
+        attempts,
+        invocation: EngramSpentInvocation::of_cause(&last_cause),
+        last_cause,
+        admitted_at,
+        deadline,
+    }
 }
 
 /// Whether a matching applied-begin receipt is late for the applied-begin
@@ -301,10 +412,12 @@ fn engram_admission_budget_deadline_at(
     Some(clock.now() + left)
 }
 
-/// What a retry preview adds for a head with an enforced budget: when
+/// What a retry preview adds for a head in prepared-begin recovery: when
 /// automatic recovery ends, after which only Resume or Cancel moves it.
 fn engram_admission_budget_preview_suffix(record: &SessionRecord) -> String {
-    engram_admission_budget_enforced(record).map_or_else(String::new, |lineage| {
+    engram_admission_budget_enforced(record)
+        .filter(|lineage| lineage.entered_prepared_begin_recovery())
+        .map_or_else(String::new, |lineage| {
             format!(" Automatic recovery ends at {}.", lineage.deadline)
         })
 }
@@ -338,23 +451,34 @@ fn engram_begin_preparation_retry_held(record: &SessionRecord) -> bool {
     record.engram.disabled_reason.is_some() || record.engram.operator_paused
 }
 
-/// The preview of `record`'s head whose automatic re-admission is exhausted:
-/// it keeps the explicit hold, which Resume or Cancel ends. Its last cause is
-/// the code of the head's newest dispatch card (`engram_newest_card_code`),
-/// or, without one, the class of its hold. When a begin may have been sent
-/// (an uncertain grant) or this host's pending begin is kept, that same
-/// begin is kept and Resume sends it, never a fresh grant.
-fn engram_begin_preparation_exhausted_preview(record: &SessionRecord, attempts: u32) -> String {
-    let possibly_sent = record.engram.uncertain_grant_id.is_some();
-    let pending = engram_begin_preparation_pending(record).is_some();
-    let fallback = if possibly_sent {
+/// The last cause of `record`'s head's automatic recovery: the code of its
+/// newest dispatch card (`engram_newest_card_code`), or, without one, the
+/// class of its hold.
+fn engram_begin_preparation_last_cause(record: &SessionRecord) -> String {
+    let fallback = if record.engram.uncertain_grant_id.is_some() {
         ENGRAM_BEGIN_REPLAY_CODE
-    } else if pending {
+    } else if engram_begin_preparation_pending(record).is_some() {
         ENGRAM_BEGIN_PREPARATION_PENDING_CODE
     } else {
         ENGRAM_BEGIN_PREPARATION_CODE
     };
-    let cause = engram_newest_card_code(record).unwrap_or_else(|| fallback.to_owned());
+    engram_newest_card_code(record).unwrap_or_else(|| fallback.to_owned())
+}
+
+/// The preview of `record`'s head whose automatic re-admission is exhausted:
+/// it keeps the explicit hold, which Resume or Cancel ends, and names the
+/// attempts and the last cause (`engram_begin_preparation_last_cause`). It
+/// says what is known of the last invocation: that it committed nothing only
+/// for a producer certificate, that its outcome is unknown for any other
+/// control outcome, and nothing for a local preparation cause, which sent
+/// nothing. When a begin may have been sent (an uncertain grant) or this
+/// host's pending begin is kept, that same begin is kept and Resume sends it,
+/// never a fresh grant.
+fn engram_begin_preparation_exhausted_preview(record: &SessionRecord, attempts: u32) -> String {
+    let possibly_sent = record.engram.uncertain_grant_id.is_some();
+    let pending = engram_begin_preparation_pending(record).is_some();
+    let cause = engram_begin_preparation_last_cause(record);
+    let invocation = EngramSpentInvocation::of_cause(&cause).sentence();
     let applied_late = possibly_sent
         && engram_begin_preparation_lineage(record).is_some_and(|lineage| {
             lineage.applied_after_deadline.is_some()
@@ -373,7 +497,7 @@ fn engram_begin_preparation_exhausted_preview(record: &SessionRecord, attempts: 
     };
     format!(
         "Engram: automatic re-admission exhausted after {attempts} attempts; last cause \
-         {cause}. {kept}"
+         {cause}.{invocation} {kept}"
     )
 }
 
@@ -449,11 +573,10 @@ fn end_engram_begin_preparation_retry(record: &mut SessionRecord, preview: Strin
     sync_pending_prompts(record);
 }
 
-/// Ends the enforced window of `record`'s head without dropping it: a Stop,
-/// an operator's pause, control disabled or exhaustion stops automatic
+/// Ends the window of `record`'s head without dropping it: a Stop, an
+/// operator's pause, control disabled or exhaustion stops automatic
 /// advancement, and the window's start, deadline and first hold stay as they
-/// were until an explicit accepted Resume replaces them. A head that never
-/// entered prepared-begin recovery keeps its budget as it was.
+/// were until an explicit accepted Resume replaces them.
 fn end_engram_admission_budget_window(record: &mut SessionRecord) {
     let Some(head) = record.queued_prompts.front() else {
         return;
@@ -462,7 +585,7 @@ fn end_engram_admission_budget_window(record: &mut SessionRecord) {
         .engram
         .begin_preparation_lineage
         .as_mut()
-        .filter(|lineage| lineage.prompt_id == head.pending_prompt.id && lineage.enforced())
+        .filter(|lineage| lineage.prompt_id == head.pending_prompt.id)
     {
         lineage.ended = true;
     }
@@ -474,12 +597,18 @@ fn end_engram_admission_budget_window(record: &mut SessionRecord) {
 /// explicit accepted Resume opens one. Its pending marker is dropped: a
 /// prepared begin evaluated under the old settings is no longer this host's
 /// pending begin to send, so Resume says it may have been sent and holds it
-/// for reconciliation or Cancel, never sends it under the new settings. Any
-/// other budget is dropped with the rest of that state, as before.
+/// for reconciliation or Cancel, never sends it under the new settings. A
+/// window already ended (exhausted, stopped, paused) is kept ended too, so
+/// the change revives no automatic recovery. Any other running budget is
+/// dropped with the rest of that state, as before.
 fn take_engram_admission_budget_for_settings_reset(
     record: &mut SessionRecord,
 ) -> Option<EngramBeginPreparationLineage> {
-    end_engram_admission_budget_window(record);
+    if engram_begin_preparation_lineage(record)
+        .is_some_and(EngramBeginPreparationLineage::entered_prepared_begin_recovery)
+    {
+        end_engram_admission_budget_window(record);
+    }
     record
         .engram
         .begin_preparation_lineage
@@ -604,7 +733,7 @@ fn engram_begin_preparation_boot_hold(record: &SessionRecord) -> bool {
         && !engram.operator_paused
         && !record.runtime_stop_in_progress
         && engram_begin_preparation_lineage(record)
-            .is_some_and(|lineage| lineage.enforced() && !lineage.ended)
+            .is_some_and(|lineage| lineage.entered_prepared_begin_recovery() && !lineage.ended)
 }
 
 /// Whether `record`'s head is in the interrupted hold a prepared begin's
@@ -848,9 +977,12 @@ impl AppState {
         }
     }
 
-    /// Whether `owner`'s head still has its admission budget enforced
-    /// (`engram_admission_budget_enforced`).
-    fn engram_admission_budget_enforced_for(
+    /// Whether `owner`'s head is in prepared-begin recovery: its admission
+    /// budget is enforced and it entered that recovery
+    /// (`EngramBeginPreparationLineage::entered_prepared_begin_recovery`). The
+    /// budget alone is enforced for every head and says nothing of the
+    /// recovery path a head takes.
+    fn engram_head_in_prepared_begin_recovery_for(
         &self,
         session_id: &str,
         owner: &EngramQueuedAdmissionOwner,
@@ -858,7 +990,9 @@ impl AppState {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner.find_session_index(session_id).is_some_and(|index| {
             let record = &inner.sessions[index];
-            owner.matches(record) && engram_admission_budget_enforced(record).is_some()
+            owner.matches(record)
+                && engram_admission_budget_enforced(record)
+                    .is_some_and(EngramBeginPreparationLineage::entered_prepared_begin_recovery)
         })
     }
 

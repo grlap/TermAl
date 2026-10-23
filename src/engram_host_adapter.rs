@@ -6406,11 +6406,13 @@ impl AppState {
                             // A fresh begin that failed before transmission
                             // (its guard or its budget ran out after a late
                             // durable acknowledgement) was never sent. After a
-                            // late preparation, or while the head's admission
-                            // budget is enforced, it stays the budget's pending
-                            // begin (its hold enforcing the budget from now
-                            // on), never a possibly begun one: it was not sent
-                            // (`engram_begin_preparation_retry.rs`). Nothing
+                            // late preparation, or while the head is in
+                            // prepared-begin recovery, it stays that recovery's
+                            // pending begin, never a possibly begun one: it was
+                            // not sent (`engram_begin_preparation_retry.rs`).
+                            // Any other head's unsent begin takes the exact
+                            // replay below, bounded by its admission budget
+                            // like every automatic attempt. Nothing
                             // reached Engram, so it is no transport failure:
                             // no circuit count, no bind backoff, and no rebind
                             // that would expire the pending begin's grant.
@@ -6423,7 +6425,7 @@ impl AppState {
                                 && !preparation_possibly_sent
                                 && admission_owner.as_ref().is_some_and(|owner| {
                                     preparation_late
-                                        || self.engram_admission_budget_enforced_for(session_id, owner)
+                                        || self.engram_head_in_prepared_begin_recovery_for(session_id, owner)
                                 });
                             if !kept_pending_unsent {
                                 self.record_queued_engram_transport_failure(

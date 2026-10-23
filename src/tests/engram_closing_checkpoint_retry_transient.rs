@@ -132,6 +132,51 @@ fn a_control_unavailable_close_recovers_the_withheld_prompt_without_resume() {
     }
 }
 
+/// The successor's own admission window bounds its automatic retry even while
+/// the previous turn's grant is still open after that turn's failed close:
+/// that grant is not the successor's applied begin, so it exempts nothing.
+/// Past the successor's deadline no automatic attempt starts, and the
+/// successor holds for Resume or Cancel.
+#[test]
+fn a_successors_window_bounds_its_retry_while_the_prior_grant_is_still_open() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let (fixture, original_head) = closed_with_control_unavailable(CausalFaultMode::NeverStarted);
+    let (prior_grant, window, enforced) = read(&fixture, |record| {
+        (
+            record.engram.active_grant_id.clone(),
+            record.engram.begin_preparation_lineage.clone(),
+            engram_admission_budget_enforced(record).is_some(),
+        )
+    });
+    assert!(prior_grant.is_some(), "the previous turn's grant is still open");
+    let window = window.expect("the successor's window started when it was accepted");
+    assert_eq!(window.prompt_id, original_head["id"].as_str().unwrap());
+    assert!(enforced, "the previous turn's open grant does not exempt the successor's window");
+    let deadline = chrono::DateTime::parse_from_rfc3339(&window.deadline)
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let total = |fixture: &CausalRoot| fixture.transport.attempts.lock().unwrap().values().sum::<usize>();
+    let before = total(&fixture);
+    let at = deadline + chrono::Duration::milliseconds(1);
+    fixture.state.engram_abort_retry_tick(at);
+    fixture.state.engram_abort_retry_tick(at);
+    assert_eq!(total(&fixture), before, "no automatic attempt past the successor's deadline");
+    assert_eq!(prompts(&fixture.receiver), 0, "nothing delivered");
+    let (retry, held, preview) = read(&fixture, |record| {
+        (
+            record.engram.admission_retry.clone(),
+            record.queued_prompts.len(),
+            record.session.preview.clone(),
+        )
+    });
+    assert_eq!(retry, None, "the automatic retry ends");
+    assert_eq!(held, 1, "the successor is retained");
+    assert!(
+        preview.starts_with("Engram: automatic re-admission exhausted after"),
+        "the exhaustion hold: {preview}"
+    );
+}
+
 /// An uncertain grant is truly unknown authority: its scheduled retry is
 /// dropped when due, nothing is sent and the prompt stays held.
 #[test]

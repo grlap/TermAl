@@ -4,7 +4,8 @@
 // Resume but settled by the exact begin replay, because the guard's code-less
 // failure parks with a retry code and an ordinary retry on a head whose
 // prepared begin names its uncertain grant is that replay
-// (src/engram_admission_retry.rs). Drives the ClaimedRoot fixture on its
+// (src/engram_admission_retry.rs); and that the replay ends with the head's
+// admission window like every automatic attempt. Drives the ClaimedRoot fixture on its
 // scripted budget clock with a gated persist writer; no real load. Does not
 // own the replay itself (src/engram_begin_replay.rs), the guard's share of the
 // admission budget (src/tests/engram_root_begin_reserve.rs) or the hold of a
@@ -168,11 +169,11 @@ fn replay_when_due(state: &AppState, session: &str) {
 /// The guard before Begin stalls past its authority fence's deadline, so it
 /// fails with Begin unsent and the cause says so (not_started). The head is
 /// not held for a Resume: it is not interrupted and the begin replay is
-/// scheduled. When due, the same stored begin (key, grant, tokens) is sent
-/// once, with no fresh evaluate, and the head is delivered exactly once.
-#[test]
-fn begin_stopped_before_transmission_is_replayed_exactly_and_delivered_once() {
-    let label = "begin-unsent-replay";
+/// scheduled. Returns the fixture, its writer, the grant and the prepared
+/// begin that stands.
+fn stop_begin_before_transmission(
+    label: &str,
+) -> (ClaimedRoot, GatedWriter, String, EngramPreparedBegin) {
     let grant = format!("{label}-grant");
     let mut claimed = ClaimedRoot::new_scripted(
         label,
@@ -252,7 +253,16 @@ fn begin_stopped_before_transmission_is_replayed_exactly_and_delivered_once() {
     );
     let prepared = prepared.expect("the acknowledged prepared begin stands");
     assert_eq!(prepared.grant_id, grant);
+    (claimed, writer, grant, prepared)
+}
 
+/// When due, the same stored begin (key, grant, tokens) of a Begin stopped
+/// before transmission is sent once, with no fresh evaluate, and the head is
+/// delivered exactly once.
+#[test]
+fn begin_stopped_before_transmission_is_replayed_exactly_and_delivered_once() {
+    let (claimed, mut writer, grant, prepared) =
+        stop_begin_before_transmission("begin-unsent-replay");
     let state = claimed.state.clone();
     let session = claimed.session_id.clone();
     writer.serve(&claimed, |_| false, move || replay_when_due(&state, &session));
@@ -267,5 +277,78 @@ fn begin_stopped_before_transmission_is_replayed_exactly_and_delivered_once() {
     assert!(
         record_of(&claimed, |record| record.queued_prompts.is_empty()),
         "the head was handed to the provider"
+    );
+}
+
+/// Runs the two-second tick just past the head's admission deadline, on one
+/// clock: the scripted clock is moved to the deadline first, as real time
+/// would be, and the tick is passed no earlier than it.
+fn tick_past_the_admission_window(state: &AppState, session: &str) {
+    let clock = state.engram_budget_clock();
+    let (waiter, deadline) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(session).unwrap()];
+        (
+            record.engram.abort_retry_fence.clone(),
+            record
+                .engram
+                .begin_preparation_lineage
+                .as_ref()
+                .map(|lineage| lineage.deadline.clone())
+                .expect("the head's admission window"),
+        )
+    };
+    if let Some(waiter) = waiter {
+        waiter
+            .0
+            .wait_until(waiter.0.now() + crate::tests::phase_sync::DEADLOCK_GUARD);
+    }
+    let deadline = chrono::DateTime::parse_from_rfc3339(&deadline)
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let wall = clock.wall_now();
+    if deadline > wall {
+        clock.advance((deadline - wall).to_std().unwrap() + Duration::from_millis(1));
+    }
+    let at = deadline.max(clock.wall_now()) + chrono::Duration::milliseconds(1);
+    state.engram_abort_retry_tick(at);
+    state.engram_abort_retry_tick(at);
+}
+
+/// The exact replay of a fresh Begin stopped before transmission is bounded by
+/// the head's 240 second admission window like every automatic attempt: past
+/// the window nothing is sent, and the head holds for Resume or Cancel with
+/// its prepared begin kept.
+#[test]
+fn the_replay_of_a_begin_stopped_before_transmission_ends_with_the_admission_window() {
+    let (claimed, mut writer, grant, prepared) =
+        stop_begin_before_transmission("begin-unsent-bounded");
+    let state = claimed.state.clone();
+    let session = claimed.session_id.clone();
+    writer.serve(&claimed, |_| false, move || {
+        tick_past_the_admission_window(&state, &session)
+    });
+
+    assert!(sent(&claimed, "turn_begin").is_empty(), "no begin past the window");
+    assert_eq!(sent(&claimed, "turn_evaluate").len(), 1, "no fresh evaluate");
+    assert_eq!(prompts_delivered(&claimed), 0, "nothing delivered");
+    let (retry, kept, preview) = record_of(&claimed, |record| {
+        (
+            record.engram.admission_retry.clone(),
+            record
+                .queued_prompts
+                .front()
+                .and_then(|head| head.engram_evaluate.as_ref())
+                .and_then(|evaluate| evaluate.prepared_begin.clone()),
+            record.session.preview.clone(),
+        )
+    });
+    assert_eq!(retry, None, "the automatic replay ends");
+    let kept = kept.expect("the head keeps its prepared begin");
+    assert_eq!(kept.grant_id, grant);
+    assert_eq!(kept.idempotency_key, prepared.idempotency_key, "the same begin for Resume");
+    assert!(
+        preview.starts_with("Engram: automatic re-admission exhausted after"),
+        "the exhaustion hold: {preview}"
     );
 }

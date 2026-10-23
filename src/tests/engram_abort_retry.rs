@@ -324,8 +324,9 @@ fn an_unacknowledged_settlement_holds_the_prompt_and_is_acknowledged_again() {
         2,
     );
     await_settlement_acknowledgement(&state, &session);
-    let far = chrono::Utc::now() + chrono::Duration::seconds(3600);
-    // Long past due, but the failed acknowledgement is only asked for again.
+    // Long past due but inside the admission budget, which would otherwise
+    // end the recovery: the failed acknowledgement is only asked for again.
+    let far = chrono::Utc::now() + chrono::Duration::seconds(60);
     state.engram_abort_retry_tick(far);
     assert_eq!(
         prompts_received(&receiver),
@@ -564,7 +565,8 @@ fn a_retry_waits_through_a_project_settings_fence() {
         let fence = inner.engram_project_resets.claim(&project_id).unwrap();
         (project_id, fence)
     };
-    let far = chrono::Utc::now() + chrono::Duration::seconds(3600);
+    // Past due but inside the admission budget.
+    let far = chrono::Utc::now() + chrono::Duration::seconds(60);
     state.engram_abort_retry_tick(far);
     assert_eq!(prompts_received(&receiver), 0);
     with_record(&state, &session, |record| {
@@ -635,6 +637,54 @@ fn a_retry_withheld_again_keeps_counting_attempts() {
             due_at >= chrono::Utc::now() + chrono::Duration::seconds(4),
             "the second delay is the longer one"
         );
+    });
+    persister.stop(&state);
+}
+
+/// The admission budget bounds the abort retry too: a withheld delivery whose
+/// grant closed is settled for a fresh admission, but past the head's 240
+/// second budget from its acceptance no fresh admission starts. The head
+/// ends in the resumable hold with its window ended, and nothing is sent or
+/// delivered.
+#[test]
+fn a_withheld_delivery_is_not_readmitted_past_its_admission_budget() {
+    let (state, session, receiver, persister, transport) =
+        withheld_root_delivery(checkpoint_reply("abort-grant-1"), fresh_admission_steps());
+    let window = with_record(&state, &session, |record| {
+        record.engram.begin_preparation_lineage.clone()
+    })
+    .expect("the head keeps the budget it started when it was accepted");
+    let deadline = chrono::DateTime::parse_from_rfc3339(&window.deadline)
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    await_settlement_acknowledgement(&state, &session);
+    state.engram_abort_retry_tick(chrono::Utc::now());
+    assert!(
+        with_record(&state, &session, |record| record.engram.abort_retry_acknowledged),
+        "the settlement is acknowledged"
+    );
+    let sent = transport.requests().len();
+    state.engram_abort_retry_tick(deadline + chrono::Duration::milliseconds(1));
+    state.engram_abort_retry_tick(deadline + chrono::Duration::hours(1));
+    assert_eq!(prompts_received(&receiver), 0, "never re-admitted past the budget");
+    assert_eq!(transport.requests().len(), sent, "no fresh admission past the budget");
+    with_record(&state, &session, |record| {
+        assert!(record.engram.abort_retry.is_none(), "automatic recovery ended");
+        assert_eq!(record.queued_prompts.len(), 1, "the prompt is retained");
+        let head = &record.queued_prompts[0];
+        assert!(head.engram_waiting && !head.engram_interrupted, "the resumable hold");
+        assert!(record.orchestrator_auto_dispatch_blocked, "the queue is paused");
+        assert!(
+            record
+                .session
+                .preview
+                .starts_with("Engram: automatic re-admission exhausted after"),
+            "{}",
+            record.session.preview
+        );
+        let ended = record.engram.begin_preparation_lineage.as_ref().expect("the window is kept");
+        assert!(ended.ended, "the window ended");
+        assert_eq!(ended.deadline, window.deadline, "never restarted");
     });
     persister.stop(&state);
 }

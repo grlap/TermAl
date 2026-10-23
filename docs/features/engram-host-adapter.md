@@ -2693,10 +2693,13 @@ recovery has an overall budget of 240 seconds
   a pending begin's grant and the automatic attempts started. It is kept
   through retries, backoff, the rebind, fence waits, a change of retry kind
   and a restart. It belongs to that prompt only; another head drops it.
-- **Enforcement.** It is enforced once a prepared begin of the head was
-  withheld, for every later phase of that head: bind, admission, abort and
-  the exact replay of a begin possibly sent. A head that never entered that
-  recovery keeps its existing bounds; its budget is saved but not enforced.
+- **Enforcement.** It bounds every automatic recovery of the head: bind,
+  admission and abort retries, the exact replay of a begin possibly sent,
+  and the certified non-application codes (`control_request_expired`,
+  `control_store_busy`) replayed on the admission schedule. This holds
+  whether or not a prepared begin of the head was ever withheld; the first
+  prepared-begin hold only marks that recovery. Only a begin Engram applied
+  (an active grant) ends the budget.
 - **Accounting.** Each attempt is clipped to what is left of the budget.
   Waiting on the shared schedule (2, 5, 10, 20, 30, then every 60 seconds,
   with jitter, one attempt per head, under the host-wide cap) uses up the
@@ -2706,7 +2709,18 @@ recovery has an overall budget of 240 seconds
   the recovery before the step of whichever retry holds the head. The head
   takes the resumable Resume/Cancel hold "automatic re-admission exhausted
   after N attempts; last cause …", with no further control call. The last
-  cause is the code of the head's newest dispatch card. A begin still pending
+  cause is the code of the head's newest dispatch card. The hold says what
+  is known of that last invocation:
+  - for a producer certificate (`control_request_expired`,
+    `control_store_busy`), that it committed no changes, though earlier
+    attempts with the same key may have;
+  - for any other control outcome, such as `deadline_exceeded`, that its
+    outcome is unknown;
+  - for a local preparation cause, nothing, since nothing was sent.
+  An uncertain outcome is never reported as not applied. An attempt that
+  finds the window already spent, withheld as `dispatch_budget_exhausted`,
+  ends in this hold at its park: no further retry is scheduled, and no card
+  promises one. A begin still pending
   then is kept as it is, with its marker, grant, key and delivery tokens: its
   write may still be unresolved, so nothing proves it absent, and no rebind
   is armed to expire its grant. Resume sends that same begin, never a fresh
@@ -2867,9 +2881,9 @@ times, the one-attempt-per-head guard and the host-wide slot cap. A cap
 deferral charges neither the attempt index nor the first-held time. The
 original 20-second admission budget does not end the schedule: each replay has
 its own call bound, and a failed replay schedules the next one with the same
-key until Engram answers definitely. The one exception is a head in
-prepared-begin recovery, whose 240-second budget ends its replay in the
-explicit hold at its deadline (see the budget above). While a replay is
+key while the head's 240-second budget runs. At its deadline the replay ends
+in the explicit hold, with that same begin and its uncertain grant kept, and
+the hold says the outcome is unknown (see the budget above). While a replay is
 scheduled, the preview reads
 "waiting for admission; retrying automatically (begin reconciliation:
 replaying the same begin), attempt N, next at T."

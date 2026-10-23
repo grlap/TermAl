@@ -10,7 +10,8 @@
 //! one new window; a restarted pending begin, read as possibly sent, still
 //! bounded by its original deadline; a stale owner's Resume; a receipted
 //! head's release by Resume before its hand-off record (prompt_delivery.rs);
-//! and the recoveries the budget leaves alone. Does not own the settlement, the late
+//! and the other recoveries (a bind outage, a lost begin's replay) the same
+//! budget bounds from acceptance. Does not own the settlement, the late
 //! acknowledgement or the fresh admission's order
 //! (src/tests/engram_begin_unknown_recovery.rs, whose fixtures it uses). New
 //! module.
@@ -108,11 +109,21 @@ fn exhausted_preview(attempts: u32) -> String {
 }
 
 /// The exhausted preview whose last cause is `cause`, for a head that keeps
-/// no prepared begin.
+/// no prepared begin. A cause from a control call says what is known of that
+/// invocation: nothing committed only for a producer certificate, otherwise
+/// an unknown outcome. A local preparation cause sent nothing and says
+/// neither.
 fn exhausted_preview_naming(attempts: u32, cause: &str) -> String {
+    let invocation = match cause {
+        "begin_preparation_unacknowledged" | "begin_preparation_pending" => "",
+        "control_request_expired" | "control_store_busy" => {
+            " This invocation committed no changes (earlier attempts with the same key may have)."
+        }
+        _ => " This invocation's outcome is unknown.",
+    };
     format!(
         "Engram: automatic re-admission exhausted after {attempts} attempts; last cause \
-         {cause}. Original prompt retained; resume to retry or cancel."
+         {cause}.{invocation} Original prompt retained; resume to retry or cancel."
     )
 }
 
@@ -847,7 +858,7 @@ fn a_pending_prepared_begin_at_the_budget_deadline_is_kept_for_resume() {
     let pending = with_record(&state, &session, |record| {
         engram_begin_preparation_pending(record).cloned().unwrap()
     });
-    assert!(first.enforced());
+    assert!(first.entered_prepared_begin_recovery());
     assert!(begin_requests(&transport).is_empty(), "nothing sent");
 
     let sent = transport.producer.requests().len();
@@ -884,12 +895,13 @@ fn a_pending_prepared_begin_at_the_budget_deadline_is_kept_for_resume() {
     assert_eq!(begins[0]["grant_id"], withheld_grant.as_str(), "its grant was kept");
 }
 
-/// The budget is enforced only on the prepared-begin recovery: a head held
-/// by another recovery (here a bind outage, with no prepared begin withheld)
-/// keeps its budget unenforced and is still retried and delivered past 240
-/// seconds after its acceptance.
+/// The budget bounds every recovery of the head, not only the prepared-begin
+/// one: a head held by another recovery (here a bind outage, with no prepared
+/// begin withheld) is not retried past 240 seconds after its acceptance. It
+/// ends in the resumable hold, naming the attempt count and the last cause,
+/// with its window ended but kept.
 #[test]
-fn the_admission_budget_leaves_other_recoveries_unchanged() {
+fn a_bind_outage_is_bounded_by_the_admission_budget() {
     let (state, session, receiver, transport) = lost_begin_fixture(false);
     let accepted = chrono::Utc::now();
     {
@@ -904,28 +916,37 @@ fn the_admission_budget_leaves_other_recoveries_unchanged() {
     });
     assert!(kind.is_some(), "the bind outage is held by a retry");
     let budget = budget.expect("the budget started at acceptance");
-    assert!(!budget.enforced(), "no prepared begin was withheld");
     assert!(rfc3339(&budget.admitted_at) >= accepted - chrono::Duration::seconds(1));
 
-    let late = accepted + chrono::Duration::seconds(ENGRAM_ADMISSION_BUDGET_SECONDS + 60);
+    let late = past_the_window(&budget) + chrono::Duration::seconds(60);
+    let sent = transport.producer.requests().len();
     for step in 0..3 {
-        let due = with_record(&state, &session, |record| {
-            record
-                .engram
-                .admission_retry
-                .as_ref()
-                .map(|retry| retry.due_at.clone())
-                .or_else(|| record.engram.bind_retry.as_ref().map(|retry| retry.due_at.clone()))
-        });
-        let at = due.map_or(late, |due| (rfc3339(&due) + chrono::Duration::milliseconds(1)).max(late));
-        tick_at(&state, &session, at + chrono::Duration::seconds(step));
+        tick_at(&state, &session, late + chrono::Duration::seconds(step));
     }
     assert_eq!(
-        abort_retry::prompts_received(&receiver),
-        1,
-        "retried and delivered past the budget: {:?}",
+        transport.producer.requests().len(),
+        sent,
+        "no control call past the budget: {:?}",
         operations(&transport).iter().map(|(operation, _)| operation.clone()).collect::<Vec<_>>()
     );
+    let (attempts, cause) = with_record(&state, &session, |record| {
+        (
+            record
+                .engram
+                .begin_preparation_lineage
+                .as_ref()
+                .map_or(0, |lineage| lineage.attempts),
+            engram_newest_card_code(record).expect("the bind failure's card names its code"),
+        )
+    });
+    assert_resumable_hold(
+        &state,
+        &session,
+        &receiver,
+        &exhausted_preview_naming(attempts, &cause),
+        "a bind outage",
+    );
+    assert_ended_window(&state, &session, &budget, "a bind outage");
 }
 
 /// A Resume made for an owner, as a delegation's Resume is, on the held
@@ -1003,10 +1024,47 @@ fn the_admission_budget_clips_attempts_and_spares_only_an_applied_begin() {
     let past = chrono::Utc::now() + left + chrono::Duration::seconds(1);
     let mut inner = state.inner.lock().unwrap();
     let index = inner.find_session_index(&session).unwrap();
+    let target = AppState::engram_binding_target_for_session_shape_locked(&inner, &session, true)
+        .unwrap()
+        .expect("the target");
     let record = &mut inner.sessions[index];
-    // An applied begin was the last automatic send: the steps completing its
-    // turn are neither clipped nor ended by the budget.
+    // An active grant the head did not begin (an earlier turn's, left open
+    // when its close failed) exempts nothing: the head stays clipped.
+    record.engram.active_grant_id = Some("grant-of-an-earlier-turn".to_owned());
+    assert!(
+        engram_admission_budget_deadline(record, &clock).is_some(),
+        "another turn's open grant does not exempt the head"
+    );
+    // The head's own applied begin was the last automatic send: applying it
+    // records the grant on the head's retained evaluate, as the host does
+    // (`finish_engram_dispatch_record_with_defer_retry`), and the steps
+    // completing its turn are neither clipped nor ended by the budget. This
+    // settled head was readmitted afresh, so it is given the evaluate a fresh
+    // admission retains, with that grant begun.
     record.engram.active_grant_id = Some("grant-begun".to_owned());
+    let head = &mut record.queued_prompts[0];
+    let fingerprint = engram_turn_intent_fingerprint(
+        &head.pending_prompt.text,
+        head.pending_prompt.expanded_text.as_deref(),
+        &head.attachments,
+        head.pending_prompt.source.as_ref(),
+        head.source,
+    );
+    let earlier_evaluate = head.engram_evaluate.replace(EngramQueuedEvaluate {
+        connection: target.connection.clone(),
+        settings: target.settings.clone(),
+        operation_generation: None,
+        request: EngramControlRequest::TurnEvaluate {
+            routing_token: "budget-token".to_owned(),
+            intent_fingerprint: fingerprint,
+            requested_effects: target.effects.clone(),
+            resource_intents: Vec::new(),
+            purpose: "ordinary".to_owned(),
+            idempotency_key: "budget-applied-evaluate".to_owned(),
+        },
+        begun_grant_id: Some("grant-begun".to_owned()),
+        prepared_begin: None,
+    });
     assert_eq!(
         engram_admission_budget_deadline(record, &clock),
         None,
@@ -1018,6 +1076,7 @@ fn the_admission_budget_clips_attempts_and_spares_only_an_applied_begin() {
         "nor ended by the budget"
     );
     record.engram.active_grant_id = None;
+    record.queued_prompts[0].engram_evaluate = earlier_evaluate;
 
     // A begin possibly sent is not an applied one: its exact replay stays
     // inside what is left of the budget and ends at the deadline.
@@ -1613,7 +1672,7 @@ fn only_an_accepted_resume_opens_a_new_window_after_a_stop() {
         "a full budget"
     );
     assert_eq!(opened.held_since, first.held_since, "still in prepared-begin recovery");
-    assert!(opened.enforced(), "so the new window is enforced");
+    assert!(opened.entered_prepared_begin_recovery(), "still in prepared-begin recovery");
     assert_eq!(opened.attempts, 0, "its attempts are counted afresh");
 
     state
@@ -1806,13 +1865,13 @@ fn a_stale_owner_resume_is_superseded_and_leaves_the_successor_untouched() {
     assert_eq!(abort_retry::prompts_received(&receiver), 0, "nothing delivered");
 }
 
-/// C4 as clarified for this item: a head that never entered prepared-begin
-/// recovery keeps its existing behavior. Its budget starts at acceptance but
-/// is never enforced, so a begin whose reply was lost keeps its exact replay
-/// unclipped past the 240 second deadline, and that replay delivers the
-/// prompt once with the same begin and no fresh grant.
+/// The budget bounds a head that never entered prepared-begin recovery too:
+/// a begin whose reply was lost has its budget enforced from acceptance, so
+/// past the 240 second deadline its exact replay does not start. The head
+/// holds for Resume or Cancel with that same begin and its uncertain grant
+/// kept, no fresh grant, and a hold that says the outcome is unknown.
 #[test]
-fn a_head_that_never_entered_prepared_begin_recovery_keeps_its_replay_unbounded() {
+fn a_lost_begin_replay_is_bounded_by_the_admission_budget() {
     let (state, session, receiver, transport) = lost_begin_fixture(true);
     deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
     assert!(receiver.try_recv().is_err(), "the lost reply withholds delivery");
@@ -1823,17 +1882,12 @@ fn a_head_that_never_entered_prepared_begin_recovery_keeps_its_replay_unbounded(
             first["grant_id"].as_str(),
             "the begin's outcome is unknown"
         );
-        assert!(
-            engram_admission_budget_enforced(record).is_none(),
-            "no prepared begin was withheld"
-        );
         record
             .engram
             .begin_preparation_lineage
             .clone()
             .expect("the budget started at acceptance")
     });
-    assert!(!window.enforced());
 
     let late = past_the_window(&window) + chrono::Duration::seconds(60);
     for step in 0..3 {
@@ -1841,14 +1895,13 @@ fn a_head_that_never_entered_prepared_begin_recovery_keeps_its_replay_unbounded(
     }
     assert_eq!(
         abort_retry::prompts_received(&receiver),
-        1,
-        "replayed and delivered past the budget"
+        0,
+        "never replayed past the budget"
     );
     let begins = begin_requests(&transport);
-    assert!(begins.len() >= 2, "the begin was replayed: {begins:?}");
     assert!(
-        begins.iter().all(|begin| begin["idempotency_key"] == first["idempotency_key"]),
-        "every begin is the same begin: {begins:?}"
+        begins.iter().all(|begin| begin == &first),
+        "only that same begin was ever sent: {begins:?}"
     );
     assert_eq!(
         operations(&transport)
@@ -1858,6 +1911,29 @@ fn a_head_that_never_entered_prepared_begin_recovery_keeps_its_replay_unbounded(
         1,
         "no fresh grant"
     );
+    with_record(&state, &session, |record| {
+        assert_eq!(
+            record.engram.uncertain_grant_id.as_deref(),
+            first["grant_id"].as_str(),
+            "the uncertain grant is kept"
+        );
+        assert!(record.engram.admission_retry.is_none(), "automatic recovery ended");
+        let head = &record.queued_prompts[0];
+        assert!(head.engram_waiting && !head.engram_interrupted, "the resumable hold");
+        assert!(record.orchestrator_auto_dispatch_blocked, "the queue is paused");
+        let preview = &record.session.preview;
+        assert!(
+            preview.starts_with("Engram: automatic re-admission exhausted after"),
+            "{preview}"
+        );
+        assert!(preview.contains("This invocation's outcome is unknown."), "{preview}");
+        assert!(!preview.contains("committed no changes"), "{preview}");
+        assert!(
+            preview.contains("The begin may have been sent and is kept"),
+            "{preview}"
+        );
+    });
+    assert_ended_window(&state, &session, &window, "a lost begin");
 }
 
 /// C4: control disabled ends the window of this host's pending begin, and a
@@ -2004,7 +2080,7 @@ fn a_fatal_control_response_during_a_pending_begin_retry_stays_held_after_restar
 fn a_settings_change_keeps_an_ended_window_and_drops_any_other_budget() {
     let (state, session, _receiver, _transport, writer) = settled_after_preparation_write_failure();
     let window = lineage(&state, &session).unwrap();
-    assert!(window.enforced(), "the head is in prepared-begin recovery");
+    assert!(window.entered_prepared_begin_recovery(), "the head is in prepared-begin recovery");
     let record = with_record(&state, &session, SessionRecord::clone);
     writer.finish(&state);
 
@@ -2423,6 +2499,61 @@ fn a_pending_begin_whose_attempt_finds_the_budget_spent_keeps_its_grant() {
     });
 }
 
+/// An attempt that finds its head's budget already spent is withheld with
+/// `dispatch_budget_exhausted`, and that withheld attempt ends the automatic
+/// recovery there: the head shows the exhaustion hold (Resume or Cancel)
+/// at once. No new retry is scheduled, and no card promises an automatic
+/// retry that the next tick would drop, as a live head showed after its
+/// 240 second window had ended.
+#[test]
+fn an_attempt_that_finds_the_budget_spent_ends_in_the_exhaustion_hold() {
+    let (mut state, session, receiver, transport) = lost_begin_fixture(false);
+    let writer = AcknowledgingWriter::install_with(
+        &mut state,
+        transport.log.clone(),
+        Some(PreparedFence::FailTimes(PersistFenceError::Deadline, 1)),
+    );
+    let clock = pinned_clock(&state);
+    let _ = deliver_turn_dispatch(&state, root_dispatch(&state, &session, false));
+    let deadline =
+        pin_window_deadline(&state, &session, &clock, |now| now + chrono::Duration::seconds(5));
+    clock.advance(deadline.saturating_duration_since(clock.now()) + Duration::from_secs(1));
+    tick_past_any_due(&state, &session);
+    writer.finish(&state);
+    assert!(begin_requests(&transport).is_empty(), "nothing sent");
+    assert_eq!(abort_retry::prompts_received(&receiver), 0, "nothing delivered");
+    with_record(&state, &session, |record| {
+        assert!(
+            record.engram.admission_retry.is_none(),
+            "no automatic retry is scheduled after the budget: {:?}",
+            record.engram.admission_retry
+        );
+        let preview = &record.session.preview;
+        assert!(
+            preview.starts_with("Engram: automatic re-admission exhausted after"),
+            "the exhaustion hold at once: {preview}"
+        );
+        assert!(!preview.contains("retrying automatically"), "{preview}");
+        let head = &record.queued_prompts[0];
+        assert!(head.engram_waiting && !head.engram_interrupted, "the resumable hold");
+        assert!(record.orchestrator_auto_dispatch_blocked, "the queue is paused");
+        let promised = record.session.messages.iter().rev().find_map(|message| match message {
+            Message::EngramControl { card, .. } => card
+                .causal_failure
+                .as_ref()
+                .map(|cause| cause.continuation_reason.contains("Automatic retry scheduled")),
+            _ => None,
+        });
+        assert_ne!(promised, Some(true), "no card promises an automatic retry");
+        let window = record
+            .engram
+            .begin_preparation_lineage
+            .as_ref()
+            .expect("the window is kept");
+        assert!(window.ended, "the window ended");
+    });
+}
+
 /// This host's pending begin whose re-acknowledgement then fails terminally
 /// (the writer stopped) is withdrawn, never sent: its grant is a first
 /// begin's issued orphan, so the orphan repair is armed for it, as for a
@@ -2784,7 +2915,7 @@ fn cap_saturation_consumes_the_admission_budget_and_starts_no_attempt() {
                     .unwrap_or_else(|| panic!("{label}: its admission retry")),
             )
         });
-        assert!(window.enforced(), "{label}: the budget is enforced");
+        assert!(window.entered_prepared_begin_recovery(), "{label}: in prepared-begin recovery");
 
         let held = (0..ENGRAM_RETRY_MAX_IN_FLIGHT)
             .map(|_| state.engram_retry_slots.try_acquire().expect("a free slot"))

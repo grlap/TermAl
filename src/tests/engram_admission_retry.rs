@@ -317,11 +317,24 @@ fn tick_at(state: &AppState, session: &str, at: chrono::DateTime<chrono::Utc>) {
     state.engram_abort_retry_tick(at);
 }
 
-/// `tick_at` just past the scheduled attempt, or an hour on when nothing is
-/// scheduled.
+/// `tick_at` just past the scheduled admission or bind attempt, or an hour on
+/// when nothing is scheduled.
 fn tick_past_due(state: &AppState, session: &str) {
+    let bind_due = with_record(state, session, |record| {
+        record.engram.bind_retry.as_ref().map(|retry| retry.due_at.clone())
+    })
+    .map(|due| {
+        chrono::DateTime::parse_from_rfc3339(&due)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    });
     let at = admission_retry(state, session).map_or_else(
-        || chrono::Utc::now() + chrono::Duration::hours(1),
+        || {
+            bind_due.map_or_else(
+                || chrono::Utc::now() + chrono::Duration::hours(1),
+                |due| due + chrono::Duration::milliseconds(1),
+            )
+        },
         |retry| due_time(&retry) + chrono::Duration::milliseconds(1),
     );
     tick_at(state, session, at);
@@ -2527,3 +2540,6 @@ mod begin_replay;
 
 #[path = "engram_control_non_application.rs"]
 mod control_non_application;
+
+#[path = "engram_admission_budget_bound.rs"]
+mod admission_budget_bound;

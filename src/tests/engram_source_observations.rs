@@ -1502,7 +1502,8 @@ fn source_observation_settled_abort_does_not_readmit_behind_pending_accounting()
     ]);
     claimed.transport.work_bindings.lock().unwrap().push_back(Ok(Some(before.binding.clone())));
     claimed.state.engram_abort_retry_tick(chrono::Utc::now());
-    claimed.state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::hours(1));
+    // Past due, inside the head's admission budget.
+    claimed.state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(60));
     let requests = claimed.transport.requests();
     assert_eq!(requests.iter().filter(|request| request.request["operation"] == "turn_begin").count(), 1,
         "a durable settled close must not readmit while accounting still needs explicit Resume");
@@ -1516,7 +1517,7 @@ fn source_observation_settled_abort_does_not_readmit_behind_pending_accounting()
     // then use its original acknowledged abort retry to admit exactly once.
     claimed.state.reconcile_retired_source_observations(&claimed.session_id).unwrap();
     let _ = finalized_observation_receipt(&claimed, &before);
-    claimed.state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::hours(2));
+    claimed.state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(120));
     let _ = received_prompt(&claimed);
     let requests = claimed.transport.requests();
     assert_eq!(requests.iter().filter(|request| request.request["operation"] == "turn_begin").count(), 2);

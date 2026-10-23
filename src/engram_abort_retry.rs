@@ -548,9 +548,9 @@ impl AppState {
         record.engram.abort_retry_fence = None;
         record.engram.abort_retry_acknowledged = false;
         record.engram.abort_retry_saved = false;
-        // The operator took the head over. A head in prepared-begin recovery
-        // keeps its window, ended, and only an explicit accepted Resume opens
-        // a new one; any other head's budget is dropped as before.
+        // The operator took the head over. The head keeps its window, ended,
+        // and only an explicit accepted Resume opens a new one; a window
+        // naming another prompt is dropped.
         end_engram_admission_budget_window(record);
         if !record
             .engram

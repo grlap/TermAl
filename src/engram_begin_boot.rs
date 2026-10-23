@@ -102,7 +102,7 @@ fn engram_begin_boot_plan(record: &SessionRecord) -> Option<EngramBeginBootPlan>
         return None;
     }
     let window_ended = engram_begin_preparation_lineage(record)
-        .is_some_and(|lineage| lineage.ended && lineage.enforced());
+        .is_some_and(|lineage| lineage.ended);
     if record.engram.uncertain_grant_id.is_none()
         && record.engram.active_grant_id.is_none()
         && let Some(grant_id) = record

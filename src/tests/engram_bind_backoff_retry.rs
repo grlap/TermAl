@@ -553,7 +553,8 @@ fn bind_returned_dispatch_real_mailbox_coalescing_settles_and_admits_only_new_co
     assert!(receiver.try_recv().is_err());
     acknowledge_bind_retry(&state, &session);
     elapse_bind_backoff(&state, &session);
-    state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::hours(2));
+    // Past the bind retry's due time, inside the head's admission budget.
+    state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(60));
     let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else { panic!("fresh head must deliver"); };
     assert!(command.prompt.contains("new-topic"));
     assert!(!command.prompt.contains("original-topic"));
@@ -641,7 +642,8 @@ fn bind_returned_dispatch_cancel_case(successor: bool) {
     if successor {
         acknowledge_bind_retry(&state, &session);
         elapse_bind_backoff(&state, &session);
-        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::hours(2));
+        // Past the bind retry's due time, inside the admission budget.
+        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(60));
         let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else { panic!("fresh successor must deliver"); };
         assert!(command.prompt.contains("independent successor"));
         assert!(!command.prompt.contains("Root controlled turn"));
@@ -1331,7 +1333,10 @@ fn repeated_bind_failures_keep_exact_wire_identity_and_obey_circuit_backoff() {
                 assert!(record.engram.circuit_open);
             }
         }
-        let due = chrono::Utc::now() + chrono::Duration::seconds(3600);
+        // Past every attempt this test schedules (2, 5 and 10 s, each with at
+        // most 20% jitter) but inside the head's 240 second admission budget,
+        // which would otherwise end its automatic recovery.
+        let due = chrono::Utc::now() + chrono::Duration::seconds(60);
         state.engram_abort_retry_tick(due);
         assert_eq!(
             transport.requests().len(),
@@ -1546,7 +1551,8 @@ fn a_dropped_bind_retry_no_longer_promises_an_automatic_retry() {
             }
             prompt_id
         };
-        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(3600));
+        // Past the bind retry's due time, inside the admission budget.
+        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(60));
         assert_eq!(operations(&transport), ["session_bind"], "{change}");
         assert!(receiver.try_recv().is_err(), "{change}");
 
@@ -1590,9 +1596,10 @@ fn an_unknown_evaluate_or_begin_never_becomes_a_bind_only_retry() {
         deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
         acknowledge_bind_retry(&state, &session);
         elapse_bind_backoff(&state, &session);
-        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(3600));
+        // Past the bind retry's due time, inside the admission budget.
+        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(60));
         let requests_before_tick = transport.requests().len();
-        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(7200));
+        state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(120));
         assert_eq!(transport.requests().len(), requests_before_tick, "{lost}");
         assert!(receiver.try_recv().is_err(), "{lost}");
         let inner = state.inner.lock().unwrap();

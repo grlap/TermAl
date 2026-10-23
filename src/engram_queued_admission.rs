@@ -944,11 +944,17 @@ impl AppState {
             (if interrupted { "Engram: Waiting/Unknown after interrupted authorization. Prompt retained; cancel or reconcile before continuing." }
             else { ENGRAM_ADMISSION_HELD_PREVIEW })
                 .to_owned();
+        // A head whose admission window is spent gets no further automatic
+        // attempt: it ends in the Resume-or-Cancel exhaustion hold here,
+        // before any retry is scheduled (`engram_begin_preparation_retry.rs`).
+        let spent = (!interrupted && !defer && engram_admission_window_spent(record, wall_now))
+            .then(|| end_engram_spent_admission_window(record));
         // An unknown outcome with nothing begun is replayed automatically
         // (`engram_admission_retry.rs`), and so is an unknown begin, by its
         // exact replay; a Defer, a Reconcile disposition or anything else
         // holding the head keeps this explicit hold.
-        let scheduled = !interrupted
+        let scheduled = spent.is_none()
+            && !interrupted
             && !defer
             && schedule_engram_admission_retry_locked(
                 record,
@@ -979,7 +985,17 @@ impl AppState {
             _ => None,
         }) {
             cause.publication_pending = true;
-            let disposition = if let Some(retry_disposition) = retry_disposition.as_deref() {
+            let spent_disposition = spent.as_ref().map(|spent| format!(
+                "Automatic recovery ended: the admission window from {} to {} is spent after {} attempts; last cause {}.{} Resume or Cancel.",
+                spent.admitted_at,
+                spent.deadline,
+                spent.attempts,
+                spent.last_cause,
+                spent.invocation.sentence()
+            ));
+            let disposition = if let Some(spent_disposition) = spent_disposition.as_deref() {
+                spent_disposition
+            } else if let Some(retry_disposition) = retry_disposition.as_deref() {
                 retry_disposition
             } else if interrupted {
                 "Automatic continuation withheld: retained authorization requires reconciliation."
