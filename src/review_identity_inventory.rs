@@ -223,7 +223,7 @@ fn identity_repository(
         let metadata = match fs::symlink_metadata(&full) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(identity_io_failure(&full, error)),
         };
         // A gitlink replaced by a symlink is not an initialized repository.
         // Refuse before looking for .git through the link's target.
@@ -253,7 +253,7 @@ fn identity_repository(
                     "gitlink-uninitialized",
                 ))?;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(identity_io_failure(&full, e)),
             Ok(metadata) => {
                 identity_plain_metadata(&metadata)?;
                 if !metadata.is_dir() {
@@ -267,7 +267,7 @@ fn identity_repository(
                         "directory-boundary",
                     ))?;
                     identity_repository(&child, &identity_join(prefix, &path), depth + 1, capture)?;
-                } else if fs::read_dir(&full)?.next().is_none() {
+                } else if identity_read_dir(&full)?.next().is_none() {
                     capture.add(ReviewIdentityEntry::new(
                         identity_join(prefix, &path),
                         "worktree",

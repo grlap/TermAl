@@ -191,9 +191,9 @@ struct ReviewIdentityScope {
 }
 impl ReviewIdentityScope {
     fn admit(&self, root: &FsPath) -> Result<PathBuf> {
-        let canonical = fs::canonicalize(root)?;
-        let cwd = fs::canonicalize(&self.cwd)?;
-        let project = fs::canonicalize(&self.project)?;
+        let canonical = identity_canonical(root)?;
+        let cwd = identity_canonical(FsPath::new(&self.cwd))?;
+        let project = identity_canonical(FsPath::new(&self.project))?;
         if !canonical.starts_with(&project) {
             return Err(identity_refusal("root_not_admitted"));
         }
@@ -283,10 +283,10 @@ fn review_identity_snapshot_allows(state: &Value, session: &str) -> bool {
 fn identity_registered_common(root: &FsPath) -> Result<PathBuf> {
     identity_no_links(root)?;
     let dotgit = root.join(".git");
-    let metadata = fs::symlink_metadata(&dotgit)?;
+    let metadata = identity_metadata(&dotgit)?;
     identity_plain_metadata(&metadata)?;
     if metadata.is_dir() {
-        return Ok(fs::canonicalize(dotgit)?);
+        return identity_canonical(&dotgit);
     }
     let bytes = identity_read_file(&dotgit, 4096)?.0;
     let pointer = std::str::from_utf8(&bytes)?
@@ -296,11 +296,11 @@ fn identity_registered_common(root: &FsPath) -> Result<PathBuf> {
         .trim();
     let own = root.join(pointer);
     identity_no_links(&own)?;
-    let own = fs::canonicalize(own)?;
+    let own = identity_canonical(&own)?;
     let bytes = identity_read_file(&own.join("commondir"), 4096)?.0;
     let common = own.join(std::str::from_utf8(&bytes)?.trim());
     identity_no_links(&common)?;
-    let common = fs::canonicalize(common)?;
+    let common = identity_canonical(&common)?;
     if own.parent().and_then(FsPath::file_name) != Some(std::ffi::OsStr::new("worktrees"))
         || own.parent().and_then(FsPath::parent) != Some(common.as_path())
     {
@@ -309,7 +309,7 @@ fn identity_registered_common(root: &FsPath) -> Result<PathBuf> {
     let back = identity_read_file(&own.join("gitdir"), 4096)?.0;
     let back = own.join(std::str::from_utf8(&back)?.trim());
     identity_no_links(&back)?;
-    if fs::canonicalize(back)? != fs::canonicalize(dotgit)? {
+    if identity_canonical(&back)? != identity_canonical(&dotgit)? {
         return Err(identity_refusal("git_metadata_escape"));
     }
     Ok(common)

@@ -111,7 +111,7 @@ fn identity_discovery_metadata(path: &FsPath) -> Result<fs::Metadata> {
         if error.kind() == io::ErrorKind::NotFound {
             identity_refusal("concurrent_change")
         } else {
-            error.into()
+            identity_io_failure(path, error)
         }
     })
 }
@@ -168,7 +168,7 @@ fn identity_discovery_policy(
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+        Err(error) => return Err(identity_io_failure(&full, error)),
     }
     Ok(())
 }
@@ -193,10 +193,10 @@ fn identity_discover_untracked(
             let full = identity_discovery_directory(git, directory)?;
             // Validate/hash the admitted ancestor's policy before Git can read it.
             identity_discovery_policy(git, prefix, &directory.relative, capture)?;
-            for entry in fs::read_dir(&full)? {
+            for entry in identity_read_dir(&full)? {
                 git.check_deadline()?;
                 capture.visit()?;
-                let entry = entry?;
+                let entry = entry.map_err(|error| identity_io_failure(&full, error))?;
                 let name = entry.file_name();
                 let metadata = identity_discovery_metadata(&entry.path())?;
                 if directory.relative.is_empty()

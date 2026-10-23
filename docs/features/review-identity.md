@@ -37,3 +37,17 @@ Limits are 200,000 inventory records, 200,000 visited directory entries,
 64 repository nodes, 8 MiB of encoded inventory, and pages of at most
 100 entries or 64 KiB. Unsupported, changing or over-budget input produces
 a named refusal and no usable fallback fingerprint.
+
+The admission check of the Git metadata trees (`objects/` and `refs/` of the
+worktree's own and common Git directory) refuses links and special files.
+Those trees are shared by every worktree, whose Git processes create and
+remove temporary entries in them (`tmp_obj_*`, `incoming-*` quarantines,
+`*.lock`). An entry removed after the check listed or queued it no longer
+exists (not found, or on Windows deleted while still open), so it can be
+neither a link nor an escape: the check skips it and the observation
+continues. The walked trees themselves must still exist.
+
+Every other failure of a filesystem read the engine makes is reported in
+the observer's stderr naming the path it could not read; a failure inside
+the shared Git runner's own setup names the review root. Such a failure
+remains `input_unavailable`.

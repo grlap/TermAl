@@ -852,3 +852,6 @@ fn review_identity_discovery_refuses_a_replaced_directory_before_enumeration() {
         "concurrent_change"
     );
 }
+
+#[path = "review_identity_vanishing.rs"]
+mod vanishing;

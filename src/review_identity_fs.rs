@@ -32,7 +32,9 @@ fn identity_no_links(path: &FsPath) -> Result<()> {
         if current.as_os_str().is_empty() {
             continue;
         }
-        identity_plain_metadata(&fs::symlink_metadata(&current)?)?;
+        identity_plain_metadata(
+            &fs::symlink_metadata(&current).map_err(|error| identity_io_failure(&current, error))?,
+        )?;
     }
     Ok(())
 }
@@ -65,7 +67,7 @@ fn identity_safe_path(root: &FsPath, relative: &str) -> Result<PathBuf> {
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => break,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(identity_io_failure(&current, e)),
         }
     }
     Ok(full)
@@ -74,9 +76,10 @@ fn identity_exact_spelling(git: &ReviewIdentityGit, relative: &str) -> Result<bo
     let mut parent = git.root.clone();
     for component in relative.split('/') {
         let mut found = false;
-        for entry in fs::read_dir(&parent)? {
+        for entry in identity_read_dir(&parent)? {
             git.check_deadline()?;
-            if entry?.file_name() == std::ffi::OsStr::new(component) {
+            let entry = entry.map_err(|error| identity_io_failure(&parent, error))?;
+            if entry.file_name() == std::ffi::OsStr::new(component) {
                 found = true;
                 break;
             }
@@ -86,7 +89,7 @@ fn identity_exact_spelling(git: &ReviewIdentityGit, relative: &str) -> Result<bo
         }
         parent.push(component);
         if parent != git.root.join(relative) {
-            identity_plain_metadata(&fs::symlink_metadata(&parent)?)?;
+            identity_plain_metadata(&identity_metadata(&parent)?)?;
         }
     }
     Ok(true)
@@ -108,6 +111,9 @@ fn identity_open(path: &FsPath) -> io::Result<fs::File> {
     options.open(path)
 }
 fn identity_physical_key(path: &FsPath) -> Result<String> {
+    identity_at(path, identity_physical_key_unnamed(path))
+}
+fn identity_physical_key_unnamed(path: &FsPath) -> Result<String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -125,6 +131,9 @@ fn identity_physical_key(path: &FsPath) -> Result<String> {
     }
 }
 fn identity_read_file(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
+    identity_at(path, identity_read_file_unnamed(path, limit))
+}
+fn identity_read_file_unnamed(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
     use std::io::Read;
     let before = fs::symlink_metadata(path)?;
     identity_plain_metadata(&before)?;
@@ -156,6 +165,13 @@ fn identity_read_file(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metad
 }
 
 fn identity_hash_file(
+    path: &FsPath,
+    deadline: std::time::Instant,
+    capture: &mut ReviewIdentityCapture,
+) -> Result<(u64, String, fs::Metadata)> {
+    identity_at(path, identity_hash_file_unnamed(path, deadline, capture))
+}
+fn identity_hash_file_unnamed(
     path: &FsPath,
     deadline: std::time::Instant,
     capture: &mut ReviewIdentityCapture,
@@ -213,7 +229,7 @@ fn identity_reparse_kind(path: &FsPath, metadata: &fs::Metadata) -> Result<Optio
     if metadata.file_attributes() & 0x400 == 0 {
         return Ok(None);
     }
-    let file = identity_open(path)?;
+    let file = identity_open(path).map_err(|error| identity_io_failure(path, error))?;
     let mut info: FILE_ATTRIBUTE_TAG_INFO = unsafe { std::mem::zeroed() };
     // SAFETY: the borrowed handle and initialized POD outlive the synchronous
     // metadata query; the API receives exactly the structure's byte size.
@@ -226,7 +242,7 @@ fn identity_reparse_kind(path: &FsPath, metadata: &fs::Metadata) -> Result<Optio
         )
     } == 0
     {
-        return Err(io::Error::last_os_error().into());
+        return Err(identity_io_failure(path, io::Error::last_os_error()));
     }
     match info.ReparseTag {
         0xA000000C => Ok(Some("symlink")),
@@ -251,7 +267,7 @@ fn identity_worktree_entry(
                 "absent",
             ));
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(identity_io_failure(&full, e)),
     };
     #[cfg(windows)]
     let symlink = identity_reparse_kind(&full, &metadata)? == Some("symlink");
@@ -260,8 +276,10 @@ fn identity_worktree_entry(
     let mut entry = ReviewIdentityEntry::new(identity_join(prefix, path), "worktree", "regular");
     if symlink {
         entry.kind = "symlink".to_owned();
-        entry.target = Some(identity_utf8_path(&fs::read_link(&full)?)?);
-        let after = fs::symlink_metadata(&full)?;
+        entry.target = Some(identity_utf8_path(
+            &fs::read_link(&full).map_err(|error| identity_io_failure(&full, error))?,
+        )?);
+        let after = identity_metadata(&full)?;
         if !review_freeze_same_entry(&metadata, &after) {
             return Err(identity_refusal("concurrent_change"));
         }

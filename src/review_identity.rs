@@ -35,9 +35,80 @@ impl std::error::Error for ReviewIdentityRefusal {}
 fn identity_refusal(code: &'static str) -> anyhow::Error {
     anyhow!(ReviewIdentityRefusal(code))
 }
+/// An IO failure of the review-identity observer, naming the path it could
+/// not read. The path is for the operator reading the observer's stderr; it
+/// never enters the reason code (`identity_error_code`).
+#[derive(Debug)]
+struct ReviewIdentityIoFailure {
+    path: String,
+    source: io::Error,
+}
+impl std::fmt::Display for ReviewIdentityIoFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "could not read {}", self.path)
+    }
+}
+impl std::error::Error for ReviewIdentityIoFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+fn identity_io_failure(path: &FsPath, source: io::Error) -> anyhow::Error {
+    anyhow::Error::new(ReviewIdentityIoFailure {
+        path: path.display().to_string(),
+        source,
+    })
+}
+/// `result` with a bare IO failure in it naming `path`. Refusals, and
+/// failures that already name their path, are kept as they are.
+fn identity_at<T>(path: &FsPath, result: Result<T>) -> Result<T> {
+    result.map_err(|error| {
+        if error.downcast_ref::<ReviewIdentityRefusal>().is_some()
+            || error.chain().any(|cause| cause.is::<ReviewIdentityIoFailure>())
+        {
+            return error;
+        }
+        match error.downcast::<io::Error>() {
+            Ok(source) => identity_io_failure(path, source),
+            Err(error) => error,
+        }
+    })
+}
+/// `fs::canonicalize`, naming the path when it cannot be resolved.
+fn identity_canonical(path: &FsPath) -> Result<PathBuf> {
+    fs::canonicalize(path).map_err(|error| identity_io_failure(path, error))
+}
+/// `fs::symlink_metadata`, naming the path when it cannot be read.
+fn identity_metadata(path: &FsPath) -> Result<fs::Metadata> {
+    fs::symlink_metadata(path).map_err(|error| identity_io_failure(path, error))
+}
+/// `fs::read_dir`, naming the directory when it cannot be listed.
+fn identity_read_dir(path: &FsPath) -> Result<fs::ReadDir> {
+    fs::read_dir(path).map_err(|error| identity_io_failure(path, error))
+}
+/// Whether an IO failure says the entry is gone: not found (Windows' file
+/// and path not found alike), or, on Windows, deleted while another handle
+/// still holds it open (delete pending).
+fn identity_gone(error: &io::Error) -> bool {
+    const ERROR_DELETE_PENDING: i32 = 303;
+    error.kind() == io::ErrorKind::NotFound
+        || (cfg!(windows) && error.raw_os_error() == Some(ERROR_DELETE_PENDING))
+}
+/// Whether `error` says a path it read no longer exists, as an entry a
+/// concurrent Git writer removed does (`identity_gone`).
+fn identity_vanished(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<io::Error>().is_some_and(identity_gone))
+}
 fn identity_error_code(error: &anyhow::Error) -> &'static str {
     if let Some(reason) = error.downcast_ref::<ReviewIdentityRefusal>() {
         reason.0
+    } else if error
+        .chain()
+        .any(|cause| cause.is::<ReviewIdentityIoFailure>())
+    {
+        "input_unavailable"
     } else {
         let message = format!("{error:#}");
         if message.contains("deadline") {
@@ -281,7 +352,7 @@ fn identity_result_until(
     let git = ReviewIdentityGit::new_until(root, deadline)?;
     let canonical = identity_utf8_path(&git.root)?;
     if let Some(requested) = &request.root
-        && fs::canonicalize(requested)? != git.root
+        && identity_canonical(FsPath::new(requested))? != git.root
     {
         return Err(identity_refusal("root_mismatch"));
     }
@@ -390,7 +461,8 @@ fn review_identity_mode(args: &[String]) -> Result<()> {
         };
         let mut value = identity_result_until(FsPath::new(&args[1]), &request, deadline)?;
         if let Some(registration) = registration
-            && identity_registered_common(&fs::canonicalize(&args[1])?)? != registration
+            && identity_registered_common(&identity_canonical(FsPath::new(&args[1]))?)?
+                != registration
         {
             return Err(identity_refusal("concurrent_change"));
         }
