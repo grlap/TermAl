@@ -6,8 +6,13 @@ the primary state writer. It returns `serverInstanceId` and a version-1
 database/file reads, persistence request, or extra payload serialization.
 Polling does not record anything or change a revision. Only GET is supported.
 
-The observer retains at most 16 completed ticks, oldest first, plus the current
-tick's phase and age. `completedTicks` and `failedTicks` are process-lifetime
+The observer retains at most 16 completed ticks in `recent`, oldest first, plus
+the current tick's phase and age. It also retains the eight slowest completed
+ticks since process start in `slowest`, greatest `loopWallUs` first; equal times
+prefer the newest tick. `recentLimit` and `slowestLimit` expose those bounds.
+Both histories contain full samples, including failed ticks, and can overlap.
+A spike stays in `slowest` after leaving `recent` until eight slower ticks
+replace it. `completedTicks` and `failedTicks` are process-lifetime
 counters. A restart resets everything; correlate with `serverInstanceId`.
 Microsecond durations saturate at u64::MAX. Failed or abandoned ticks are also
 retained. An abandoned scope has incomplete phase timings, not a successful
@@ -27,6 +32,22 @@ and `collectLockCount` measure the existing collection lock acquisitions;
 the observer never holds its own mutex while waiting for StateInner.
 Current phases distinguish a blocked writer from an idle one. A completed
 tick preserves the existing measurements even when the write fails.
+
+Each sample's `commit` object separates `sqliteCallUs` (executing the SQLite
+COMMIT statement, including any implicit autocheckpoint) from
+`transactionCleanupUs` (dropping the transaction, including rollback after a
+failed COMMIT). These are submeasurements of the existing inclusive
+`phases.commitUs`; do not add them to that total again. Current phase
+`commit_cleanup` distinguishes transaction cleanup from COMMIT execution.
+Each metric is either `{"status":"measured","value":N}` or
+`{"status":"unavailable"}`. A measured duration may legitimately be zero
+microseconds; an unattempted call is unavailable.
+
+`walWriteUs`, `fsyncUs`, `checkpointUs`, `walFrames` and `checkpointedFrames`
+are explicitly unavailable: this observer does not replace SQLite's WAL hook,
+change automatic checkpoint policy, issue diagnostic checkpoint calls or
+instrument the VFS. A long COMMIT alone cannot attribute time to those
+internals. Neither the metrics nor either history is persisted.
 
 Counts describe changed/removed/deferred sessions and delegations, serialized
 retained messages, and UTF-8 bytes of the already-built metadata, session

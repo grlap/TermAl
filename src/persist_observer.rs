@@ -4,6 +4,57 @@
 // payloads, persisted identifiers or error text enter this observer.
 
 const PERSIST_OBSERVER_RECENT_LIMIT: usize = 16;
+const PERSIST_OBSERVER_SLOWEST_LIMIT: usize = 8;
+
+/// A measured zero is distinct from an unobservable or unattempted phase.
+#[derive(Clone, Default, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+enum PersistObservedMetric {
+    #[default]
+    Unavailable,
+    Measured {
+        value: u64,
+    },
+}
+
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistObservedCommit {
+    sqlite_call_us: PersistObservedMetric,
+    transaction_cleanup_us: PersistObservedMetric,
+    // SQLite's implicit autocheckpoint is inside COMMIT. Observing it via a
+    // replacement WAL hook would take ownership of checkpoint policy. Keep
+    // these explicitly unavailable rather than pretending they cost zero.
+    wal_write_us: PersistObservedMetric,
+    fsync_us: PersistObservedMetric,
+    checkpoint_us: PersistObservedMetric,
+    wal_frames: PersistObservedMetric,
+    checkpointed_frames: PersistObservedMetric,
+}
+
+/// Same COMMIT statement and Transaction drop as rusqlite's commit(), with
+/// separate boundaries so a failed COMMIT's rollback is charged to cleanup.
+/// No checkpoint query, callback, policy or error conversion is introduced.
+fn persist_commit_transaction_observed(tx: rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+    let started = std::time::Instant::now();
+    let result = tx.execute_batch("COMMIT");
+    let committed = std::time::Instant::now();
+    persist_observe_phase("commit_cleanup");
+    let cleanup_started = std::time::Instant::now();
+    drop(tx);
+    let cleaned = std::time::Instant::now();
+    persist_observe(|observer| {
+        observer.update(|tick| {
+            tick.commit.sqlite_call_us = PersistObservedMetric::Measured {
+                value: persist_observed_us(committed.duration_since(started)),
+            };
+            tick.commit.transaction_cleanup_us = PersistObservedMetric::Measured {
+                value: persist_observed_us(cleaned.duration_since(cleanup_started)),
+            };
+        })
+    });
+    result
+}
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +186,7 @@ struct PersistObservedTick {
     loop_wall_us: u64,
     counts: PersistObservedCounts,
     phases: PersistObservedPhases,
+    commit: PersistObservedCommit,
 }
 
 struct PersistObservedActive {
@@ -151,6 +203,7 @@ struct PersistObserverState {
     failed_ticks: u64,
     active: Option<PersistObservedActive>,
     recent: std::collections::VecDeque<PersistObservedTick>,
+    slowest: Vec<PersistObservedTick>,
 }
 
 #[derive(Default)]
@@ -163,6 +216,7 @@ struct PersistObserver {
 struct PersistObserverSnapshot {
     version: u8,
     recent_limit: usize,
+    slowest_limit: usize,
     completed_ticks: u64,
     failed_ticks: u64,
     /// std::sync::mpsc has no instantaneous depth; do not mislabel the
@@ -170,6 +224,8 @@ struct PersistObserverSnapshot {
     channel_queue_depth: Option<usize>,
     current: Option<PersistObserverCurrent>,
     recent: Vec<PersistObservedTick>,
+    /// Greatest loop wall time first; equal times prefer the newest tick.
+    slowest: Vec<PersistObservedTick>,
 }
 
 #[derive(Serialize)]
@@ -261,6 +317,13 @@ impl PersistObserver {
             if state.recent.len() == PERSIST_OBSERVER_RECENT_LIMIT {
                 state.recent.pop_front();
             }
+            state.slowest.push(active.tick.clone());
+            state.slowest.sort_by(|a, b| {
+                b.loop_wall_us
+                    .cmp(&a.loop_wall_us)
+                    .then(b.tick.cmp(&a.tick))
+            });
+            state.slowest.truncate(PERSIST_OBSERVER_SLOWEST_LIMIT);
             state.recent.push_back(active.tick);
         });
     }
@@ -269,6 +332,7 @@ impl PersistObserver {
         self.with_state(|state| PersistObserverSnapshot {
             version: 1,
             recent_limit: PERSIST_OBSERVER_RECENT_LIMIT,
+            slowest_limit: PERSIST_OBSERVER_SLOWEST_LIMIT,
             completed_ticks: state.completed_ticks,
             failed_ticks: state.failed_ticks,
             channel_queue_depth: None,
@@ -281,6 +345,7 @@ impl PersistObserver {
                 sample: active.tick.clone(),
             }),
             recent: state.recent.iter().cloned().collect(),
+            slowest: state.slowest.clone(),
         })
     }
 }

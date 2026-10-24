@@ -1562,8 +1562,7 @@ fn persist_delta_via_cache_inner(
     let (tx, committed_metadata) = written?;
     persist_observe_phase("commit");
     let commit_started = std::time::Instant::now();
-    let committed = tx
-        .commit()
+    let committed = persist_commit_transaction_observed(tx)
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()));
     timings.commit = commit_started.elapsed();
     committed?;

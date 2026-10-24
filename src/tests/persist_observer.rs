@@ -35,6 +35,136 @@ fn recent_history_is_bounded_and_failed_ticks_are_counted() {
 }
 
 #[test]
+fn slowest_ticks_remain_bounded_after_the_recent_window_expires() {
+    let observer = Arc::new(PersistObserver::default());
+    let base = std::time::Instant::now();
+    for number in 0..40_u64 {
+        let started = base + Duration::from_secs(number * 60);
+        let mut scope = observer.begin_at(started);
+        observer.update(|tick| tick.counts.changed_sessions = number as usize);
+        let elapsed = if number < 12 {
+            30_000_000 - number * 100_000
+        } else {
+            50
+        };
+        observer.finish_at(
+            number != 0,
+            &PersistTickTimings::default(),
+            started + Duration::from_micros(elapsed),
+        );
+        scope.finished = true;
+    }
+    let snapshot =
+        serde_json::to_value(observer.snapshot_at(base + Duration::from_secs(2400))).unwrap();
+    assert_eq!(snapshot["recent"].as_array().unwrap().len(), 16);
+    assert_eq!(snapshot["recent"][0]["tick"], 25);
+    assert_eq!(snapshot["slowestLimit"], 8);
+    let slowest = snapshot["slowest"]
+        .as_array()
+        .expect("slow ticks outlive recent history");
+    assert_eq!(slowest.len(), 8, "retention has a fixed memory bound");
+    for (index, tick) in slowest.iter().enumerate() {
+        assert_eq!(tick["tick"], index + 1);
+        assert_eq!(tick["loopWallUs"], 30_000_000 - index * 100_000);
+        assert_eq!(tick["counts"]["changedSessions"], index);
+    }
+    assert_eq!(
+        slowest[0]["success"], false,
+        "failed slow ticks are retained too"
+    );
+}
+
+#[test]
+fn slowest_equal_duration_ticks_prefer_newest_and_exclude_active_ticks() {
+    let observer = Arc::new(PersistObserver::default());
+    let base = std::time::Instant::now();
+    for tick in 0..40 {
+        finish_at(&observer, base + Duration::from_micros(tick * 100), true);
+    }
+    let scope = observer.begin_at(base + Duration::from_secs(1));
+    let snapshot =
+        serde_json::to_value(observer.snapshot_at(base + Duration::from_secs(30))).unwrap();
+    let ticks = snapshot["slowest"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tick| tick["tick"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(ticks, (33..=40).rev().collect::<Vec<_>>());
+    assert_eq!(snapshot["current"]["sample"]["tick"], 41);
+    scope.finish(true, &PersistTickTimings::default());
+}
+
+#[test]
+fn commit_call_and_cleanup_are_observed_without_claiming_internal_io_timings() {
+    for fail_commit in [false, true] {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys=ON;
+            CREATE TABLE parent(id INTEGER PRIMARY KEY);
+            CREATE TABLE child(id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED);",
+            )
+            .unwrap();
+        let observer = Arc::new(PersistObserver::default());
+        let scope = observer.begin_at(std::time::Instant::now());
+        let initial =
+            serde_json::to_value(observer.snapshot_at(std::time::Instant::now())).unwrap();
+        assert_eq!(
+            initial["current"]["sample"]["commit"]["sqliteCallUs"]["status"],
+            "unavailable"
+        );
+        let tx = connection.transaction().unwrap();
+        if fail_commit {
+            tx.execute("INSERT INTO child VALUES(1)", []).unwrap();
+        } else {
+            tx.execute("INSERT INTO parent VALUES(1)", []).unwrap();
+        }
+        let result = persist_commit_transaction_observed(tx);
+        if fail_commit {
+            assert_eq!(
+                result.unwrap_err().sqlite_error_code(),
+                Some(rusqlite::ErrorCode::ConstraintViolation)
+            );
+        } else {
+            result.unwrap();
+        }
+        assert!(
+            connection.is_autocommit(),
+            "failed COMMIT still drops and rolls back the transaction"
+        );
+        let rows: i64 = connection
+            .query_row("SELECT count(*) FROM parent", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, i64::from(!fail_commit));
+        let child_rows: i64 = connection
+            .query_row("SELECT count(*) FROM child", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            child_rows, 0,
+            "failed transaction must not leave partial data"
+        );
+        scope.finish(!fail_commit, &PersistTickTimings::default());
+        let snapshot =
+            serde_json::to_value(observer.snapshot_at(std::time::Instant::now())).unwrap();
+        let commit = &snapshot["recent"][0]["commit"];
+        for field in ["sqliteCallUs", "transactionCleanupUs"] {
+            assert_eq!(commit[field]["status"], "measured");
+            assert!(commit[field]["value"].is_u64());
+        }
+        for field in [
+            "walWriteUs",
+            "fsyncUs",
+            "checkpointUs",
+            "walFrames",
+            "checkpointedFrames",
+        ] {
+            assert_eq!(commit[field], json!({"status":"unavailable"}));
+        }
+    }
+}
+
+#[test]
 fn live_phase_and_age_remain_available_before_a_tick_completes() {
     let observer = Arc::new(PersistObserver::default());
     let base = std::time::Instant::now();
@@ -249,6 +379,12 @@ fn real_sql_write_reports_bytes_without_leaking_content_or_changing_ack() {
     assert_eq!(sample.counts.changed_sessions, 1);
     assert!(sample.phases.collect_lock_count >= 2);
     let encoded = serde_json::to_string(&snapshot).unwrap();
+    let commit = serde_json::to_value(&sample.commit).unwrap();
+    assert_eq!(
+        commit["sqliteCallUs"]["status"], "measured",
+        "the production delta writer uses the observed COMMIT boundary"
+    );
+    assert_eq!(commit["transactionCleanupUs"]["status"], "measured");
     for secret in [
         "PRIVATE-PREVIEW",
         "PRIVATE-TRANSCRIPT",
@@ -311,8 +447,7 @@ fn connection_reopen_failure_does_not_report_metadata_commit() {
     let observer = Arc::new(PersistObserver::default());
     let scope = observer.begin_at(std::time::Instant::now());
     let mut timings = PersistTickTimings::default();
-    let error =
-        persist_delta_via_cache_timed(&mut cache, &path, &delta, &mut timings).unwrap_err();
+    let error = persist_delta_via_cache_timed(&mut cache, &path, &delta, &mut timings).unwrap_err();
     assert!(
         error
             .to_string()
@@ -355,6 +490,8 @@ async fn diagnostics_http_is_bounded_read_only_and_does_not_enqueue_work() {
         assert_eq!(body["serverInstanceId"], state.server_instance_id);
         assert_eq!(body["writer"]["version"], 1);
         assert_eq!(body["writer"]["recentLimit"], 16);
+        assert_eq!(body["writer"]["slowestLimit"], 8);
+        assert_eq!(body["writer"]["slowest"], json!([]));
         assert_eq!(body["writer"]["completedTicks"], 0);
         assert!(body["writer"]["channelQueueDepth"].is_null());
         assert!(body["writer"]["current"].is_null());
