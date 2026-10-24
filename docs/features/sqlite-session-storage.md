@@ -1,6 +1,6 @@
 # SQLite Session Storage Plan
 
-> The persisted `app_state` blob also holds the Codex `ignoredDiscoveredCodexThreadIds`
+> The persisted metadata units also hold the Codex `ignoredDiscoveredCodexThreadIds`
 > ignore set (the serialized camelCase key; not exposed via `/api/state`); see
 > [shared-codex-app-server.md](./shared-codex-app-server.md).
 
@@ -62,6 +62,14 @@ CREATE TABLE app_state (
   key TEXT PRIMARY KEY,
   value_json TEXT NOT NULL
 );
+
+CREATE TABLE state_metadata_units (
+  field_name TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  PRIMARY KEY(field_name, item_key)
+) WITHOUT ROWID;
 
 CREATE TABLE sessions (
   id TEXT PRIMARY KEY,
@@ -125,9 +133,13 @@ CREATE INDEX board_cards_tab_placement_created_idx
   ON board_cards(tab_id, placement, created_at, id);
 ```
 
-`app_state.metadataState` stores typed global app metadata without session,
-delegation, or message rows. It may be absent only in a freshly initialized,
-never-persisted database whose normalized authority tables are empty.
+`state_metadata_units` stores global app metadata as scalar rows, collection
+descriptors with member counts, and independently addressable members. See
+[incremental metadata](persistence-metadata-units.md) for the exact format,
+predecessor checks, migration and offline rollback contracts.
+`app_state.metadataState` is retained only as pre-upgrade provenance and is not
+updated by current writers. Metadata units may be absent only in a freshly
+initialized, never-persisted database with no other normalized authority rows.
 `sessions.value_json` stores one serialized
 metadata record with an empty `messages` array. `messages.value_json` stores one
 message payload. `overview_kind` and `is_user` are compact semantic fields
@@ -147,29 +159,32 @@ quarantine set so a later synchronous full-snapshot persistence fallback does
 not misinterpret the isolated row as a user deletion; the original SQLite row
 stays available for recovery or inspection.
 
-`meta.schema_version` is `2`, and
+`meta.schema_version` is `2-metadata-units-2`, and
 `meta.prompt_history_storage_version` is `1`. Existing databases must contain
-all nine tables above, but may retain unrelated tables from earlier development
+all required tables above, but may retain unrelated tables from earlier development
 builds. Each required table must have exactly the column set shown above,
 except that the retained current-schema maintenance may add the two message
 overview columns and the three board-card partition columns when they are
 missing. Unexpected columns and every other missing column are rejected before
-maintenance; after maintenance all nine tables must match the canonical sets.
+maintenance; after maintenance all required tables must match the canonical sets.
 Before any schema maintenance or persistent PRAGMA runs, startup also requires
-both metadata markers. A present `app_state.metadataState` row must deserialize
-as the current `PersistedState` shape. An absent row is accepted only when
+both metadata markers. Complete units must reconstruct the current
+`PersistedState` shape with validated kinds, counts and keys before defaults.
+An absent unit image is accepted only when
 `sessions`, `messages`, `session_overviews`, `session_prompt_histories`,
 `delegations`, and `board_cards` contain no rows; the schema-seeded default
 response-board tab does not count as persisted app metadata. Startup rejects
-the obsolete v2 authority shapes: non-empty `sessions` or `delegations` arrays
-in `app_state` (and fail-closed non-null values of the wrong type), or an array-valued
+the obsolete embedded authority shapes: non-empty `sessions` or `delegations`
+arrays in metadata (and fail-closed non-null values of the wrong type), or an array-valued
 `session.promptHistory` key in a parseable `sessions.value_json` row, including
 an empty array. A non-array prompt-history value is damaged row data rather
 than legacy authority and remains a row-level quarantine concern, as does
 malformed session JSON. Fresh databases create every table and both markers in
 one immediate transaction. Any unsupported or partial shape is rejected with
-move/delete reset guidance; there is no migration, dual-read, or alternate
-hydration path for unreleased local state.
+move/delete reset guidance. The supported primary-2 and emergency-units-1
+formats migrate atomically to units-2 after validation; other obsolete local
+formats have no alternate hydration path. Missing optional history in units-1
+cannot be retrospectively recovered or certified by the upgrade.
 
 ## API Shape
 
@@ -316,7 +331,7 @@ The normalized transcript schema and bounded HTTP reads are implemented:
   current-schema databases using `WITHOUT ROWID` are converted once, after
   startup authority validation, by an atomic copy/rebuild that preserves rows,
   constraints, indexes, triggers, views, and foreign-key relationships. The
-  logical schema version remains 2; unsupported logical schemas still reject.
+  transcript layout remains unchanged under units-2; unsupported logical schemas still reject.
 - Saving a changed session upserts only new or changed message contents and
   deletes only truncated or replaced identities. Unchanged retained messages
   and the cold transcript prefix keep their rows, including during metadata-only
@@ -383,4 +398,5 @@ Frontend tests:
 
 Session creation and startup are proportional to session metadata plus bounded
 retained suffixes, not all historical messages. Runtime reads only the current
-indexed tables; obsolete development schemas must be reset instead of migrated.
+indexed tables; unsupported development schemas require reset. The two supported
+metadata upgrades are described in [incremental metadata](persistence-metadata-units.md).

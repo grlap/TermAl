@@ -123,9 +123,23 @@ impl PersistFenceTarget {
             Self::TestRunCardsEpoch(expected) => {
                 delta.metadata.test_run_cards_epoch.as_deref() == Some(expected.as_str())
             }
-            Self::TestRunRegistration(expected) => delta.metadata.test_run_registrations.get(&expected.run_id) == Some(expected),
-            Self::TestRunObservation(expected) => delta.metadata.test_run_observations.get(&expected.execution_id) == Some(expected.as_ref()),
-            Self::TestRunCompaction(expected) => delta.metadata.test_run_compacted.get(&expected.summary.run_id) == Some(expected.as_ref()),
+            Self::TestRunRegistration(expected) => {
+                delta.metadata.test_run_registrations.get(&expected.run_id) == Some(expected)
+            }
+            Self::TestRunObservation(expected) => {
+                delta
+                    .metadata
+                    .test_run_observations
+                    .get(&expected.execution_id)
+                    == Some(expected.as_ref())
+            }
+            Self::TestRunCompaction(expected) => {
+                delta
+                    .metadata
+                    .test_run_compacted
+                    .get(&expected.summary.run_id)
+                    == Some(expected.as_ref())
+            }
         }
     }
 
@@ -145,24 +159,48 @@ impl PersistFenceTarget {
     /// row. Verify the stored bytes on the SAME cached writer connection; do
     /// not open another connection or treat row existence as proof.
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
+        let _snapshot = if connection.is_autocommit() {
+            Some(rusqlite::Transaction::new_unchecked(
+                connection,
+                rusqlite::TransactionBehavior::Deferred,
+            )?)
+        } else {
+            None
+        };
         match self {
-            Self::Federation(expected) => {
-                federation_committed_image_matches(connection, expected)
-            }
+            Self::Federation(expected) => federation_committed_image_matches(connection, expected),
             Self::FederationBindings(expected) => expected.is_already_durable(connection),
-            Self::EngramCausalCard { session_id, message_id, content } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM messages WHERE session_id = ?1 AND message_id = ?2",
-                    rusqlite::params![session_id, message_id], |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
+            Self::EngramCausalCard {
+                session_id,
+                message_id,
+                content,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM messages WHERE session_id = ?1 AND message_id = ?2",
+                        rusqlite::params![session_id, message_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 Ok(serde_json::from_str::<Value>(&stored)? == *content)
             }
-            Self::EngramRecovery { session_id, content } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id], |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
+            Self::EngramRecovery {
+                session_id,
+                content,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let actual: Value = serde_json::from_str(&stored)?;
                 let mut statement = connection.prepare(
                     "SELECT value_json FROM messages WHERE session_id = ?1 ORDER BY position",
@@ -176,86 +214,122 @@ impl PersistFenceTarget {
                     .collect::<serde_json::Result<Vec<_>>>()?;
                 Ok(engram_recovery_image_from_row(&actual, json!(messages)) == *content)
             }
-            Self::EngramSourceRemoval { owners, session_id, content } => {
+            Self::EngramSourceRemoval {
+                owners,
+                session_id,
+                content,
+            } => {
                 for owner in owners {
-                    if !Self::EngramSourceSightingHistory(Box::new(owner.clone())).is_already_durable(connection)? {
+                    if !Self::EngramSourceSightingHistory(Box::new(owner.clone()))
+                        .is_already_durable(connection)?
+                    {
                         return Ok(false);
                     }
                 }
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id], |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(source_observation_removal_content(&actual) == *content)
             }
-            Self::EngramSourceFinalization { owner, session_id, content } => {
-                if !Self::EngramSourceSightingHistory(owner.clone()).is_already_durable(connection)? {
+            Self::EngramSourceFinalization {
+                owner,
+                session_id,
+                content,
+            } => {
+                if !Self::EngramSourceSightingHistory(owner.clone())
+                    .is_already_durable(connection)?
+                {
                     return Ok(false);
                 }
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id], |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(source_observation_finalization_content(&actual) == *content)
             }
             Self::EngramSourceSightingHistory(owner) => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM app_state WHERE key = ?1",
-                    [SQLITE_METADATA_KEY], |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
-                let metadata: PersistedState = serde_json::from_str(&stored)?;
-                Ok(owner.matches_metadata(&metadata))
-            }
-            Self::EngramSourceObservation { owner, session_id, admission } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM app_state WHERE key = ?1",
-                    [SQLITE_METADATA_KEY], |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
-                let metadata: PersistedState = serde_json::from_str(&stored)?;
-                if !owner.matches_metadata(&metadata) { return Ok(false); }
-                // Metadata and the admission row must both have committed on
-                // this same writer connection; a quarantined row cannot ACK.
-                Self::EngramAdmission { session_id: session_id.clone(), content: admission.clone() }
-                    .is_already_durable(connection)
-            }
-            Self::EngramNamedRootRelease(audit) => {
-                let stored: Option<String> = connection
-                    .query_row(
-                        "SELECT value_json FROM app_state WHERE key = ?1",
-                        [SQLITE_METADATA_KEY],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(stored) = stored else {
+                let Some(metadata) =
+                    read_metadata_for_fence(connection, &["engramSourceSightings"])?
+                else {
                     return Ok(false);
                 };
-                let metadata: PersistedState = serde_json::from_str(&stored)?;
+                Ok(owner.matches_metadata(&metadata))
+            }
+            Self::EngramSourceObservation {
+                owner,
+                session_id,
+                admission,
+            } => {
+                let Some(metadata) =
+                    read_metadata_for_fence(connection, &["engramSourceSightings"])?
+                else {
+                    return Ok(false);
+                };
+                if !owner.matches_metadata(&metadata) {
+                    return Ok(false);
+                }
+                // Metadata and the admission row must both have committed on
+                // this same writer connection; a quarantined row cannot ACK.
+                Self::EngramAdmission {
+                    session_id: session_id.clone(),
+                    content: admission.clone(),
+                }
+                .is_already_durable(connection)
+            }
+            Self::EngramNamedRootRelease(audit) => {
+                let Some(metadata) = read_metadata_for_fence(
+                    connection,
+                    &["engramNamedRootReleaseAudit", "engramWorkSourceRoots"],
+                )?
+                else {
+                    return Ok(false);
+                };
                 Ok(engram_named_root_release_in_metadata(audit, &metadata))
             }
             Self::EngramWorkAuthority(image) => {
+                let Some(metadata) = read_metadata_for_fence(
+                    connection,
+                    &[
+                        "engramWorkNamingHistory",
+                        "engramWorkSourceRoots",
+                        "engramNamedRootJournal",
+                        "engramSourceRootGeneration",
+                    ],
+                )?
+                else {
+                    return Ok(false);
+                };
+                Ok(image.matches_metadata(&metadata))
+            }
+            Self::ProviderCapacityRecovery {
+                session_id,
+                content,
+            } => {
                 let stored: Option<String> = connection
                     .query_row(
-                        "SELECT value_json FROM app_state WHERE key = ?1",
-                        [SQLITE_METADATA_KEY],
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
                         |row| row.get(0),
                     )
                     .optional()?;
                 let Some(stored) = stored else {
                     return Ok(false);
                 };
-                let metadata: PersistedState = serde_json::from_str(&stored)?;
-                Ok(image.matches_metadata(&metadata))
-            }
-            Self::ProviderCapacityRecovery { session_id, content } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
-                    |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(serde_json::to_value(&actual.provider_capacity_retry)? == *content)
             }
@@ -289,13 +363,21 @@ impl PersistFenceTarget {
                     .context("failed to serialize delegation fence target")?;
                 Ok(stored.as_deref() == Some(expected_json.as_str()))
             }
-            // Every delta writes the whole metadata document, including waits
+            // Every successful delta reconciles the complete metadata units, including waits
             // and the card epoch. Absence/mismatch there is already
             // conclusive for this tick.
-            Self::WaitRegistration(_) | Self::TestRunCardsEpoch(_) | Self::TestRunRegistration(_) | Self::TestRunObservation(_) | Self::TestRunCompaction(_) => Ok(false),
+            Self::WaitRegistration(_)
+            | Self::TestRunCardsEpoch(_)
+            | Self::TestRunRegistration(_)
+            | Self::TestRunObservation(_)
+            | Self::TestRunCompaction(_) => Ok(false),
             // The hold's nonce and the exact queued entry must both be in the
             // committed row; a removed or replaced entry never matches.
-            Self::QueuedPromptDurability { session_id, prompt_id, content } => {
+            Self::QueuedPromptDurability {
+                session_id,
+                prompt_id,
+                content,
+            } => {
                 let stored: Option<String> = connection
                     .query_row(
                         "SELECT value_json FROM sessions WHERE id = ?1",
@@ -307,36 +389,74 @@ impl PersistFenceTarget {
                     return Ok(false);
                 };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                Ok(queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
-                    == Some(content))
+                Ok(
+                    queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
+                        == Some(content),
+                )
             }
-            Self::FederationExecutorQueue { session_id, prompt_id, content, operation, write_ahead } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
-                    |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
+            Self::FederationExecutorQueue {
+                session_id,
+                prompt_id,
+                content,
+                operation,
+                write_ahead,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                Ok(queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref() == Some(content)
-                    && actual.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
+                Ok(
+                    queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
+                        == Some(content)
+                        && actual
+                            .prompt_deliveries
+                            .get(prompt_id)
+                            .is_some_and(|delivery| {
+                                delivery.federation_operation.as_ref() == Some(operation.as_ref())
+                                    && delivery.write_ahead == *write_ahead
+                            }),
+                )
+            }
+            Self::FederationExecutorHandoff {
+                session_id,
+                prompt_id,
+                operation,
+                write_ahead,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(actual
+                    .prompt_deliveries
+                    .get(prompt_id)
+                    .is_some_and(|delivery| {
                         delivery.federation_operation.as_ref() == Some(operation.as_ref())
-                            && delivery.write_ahead == *write_ahead))
-            }
-            Self::FederationExecutorHandoff { session_id, prompt_id, operation, write_ahead } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
-                    |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
-                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                Ok(actual.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
-                    delivery.federation_operation.as_ref() == Some(operation.as_ref())
-                        && delivery.write_ahead == *write_ahead
-                        && delivery.disposition == PromptDeliveryDisposition::HandingOff))
+                            && delivery.write_ahead == *write_ahead
+                            && delivery.disposition == PromptDeliveryDisposition::HandingOff
+                    }))
             }
             // The committed row must hold this exact hand-off record; a
             // return to pending writes a fresh nonce that never matches.
-            Self::PromptDeliveryWriteAhead { session_id, prompt_id, write_ahead } => {
+            Self::PromptDeliveryWriteAhead {
+                session_id,
+                prompt_id,
+                write_ahead,
+            } => {
                 let stored: Option<String> = connection
                     .query_row(
                         "SELECT value_json FROM sessions WHERE id = ?1",
@@ -367,9 +487,11 @@ impl PersistFenceTarget {
                     return Ok(false);
                 };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                for owed in actual.engram_owed_binds.iter().filter(|owed| {
-                    owed.original == *original && owed.target.work_id == *work_id
-                }) {
+                for owed in actual
+                    .engram_owed_binds
+                    .iter()
+                    .filter(|owed| owed.original == *original && owed.target.work_id == *work_id)
+                {
                     if serde_json::to_value(&owed.decided)? == *decided {
                         return Ok(true);
                     }

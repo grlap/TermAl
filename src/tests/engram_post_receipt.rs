@@ -31,7 +31,7 @@ impl EngramControlTransport for StoreLostAtBegin {
 
 #[test]
 fn ambiguous_dispatch_card_commit_is_an_error_and_never_reaches_provider() {
-    let (mut state, session, receiver, scripted) = root_fixture([
+    let (state, session, receiver, scripted) = root_fixture([
         bind_reply("persistence-unknown-token"),
         grant_reply("persistence-unknown-grant"),
         begin_reply("persistence-unknown-grant"),
@@ -39,13 +39,7 @@ fn ambiguous_dispatch_card_commit_is_an_error_and_never_reaches_provider() {
     let dispatch = root_dispatch(&state, &session, false);
     let generation = dispatch.engram_dispatch_generation().unwrap();
     state.shutdown_persist_blocking();
-    let failing_path = state
-        .test_temp_root
-        .as_ref()
-        .unwrap()
-        .path()
-        .join("dispatch-card-caller-is-directory");
-    state.persistence_path = Arc::new(failing_path.clone());
+    let failing_path = state.persistence_path.as_ref().clone();
     // The prepared Begin is acknowledged on a working store. The store
     // becomes unusable as the begin is sent, so the dispatch card after it is
     // what meets the ambiguous persistence.

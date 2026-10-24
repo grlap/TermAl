@@ -155,8 +155,7 @@ async fn federation_m4_round_two_live_activation_survives_a_transient_queue_evid
     let fence = writer.take(prompt_delivery::HeldFence::WriteAhead);
     {
         let inner = fixture.satellite.inner.lock().unwrap();
-        let persisted = PersistedState::from_inner(&inner);
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(), &persisted).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
     }
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
     assert!(fence.target.is_already_durable(&connection).unwrap());

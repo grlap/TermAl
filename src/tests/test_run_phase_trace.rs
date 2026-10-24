@@ -164,7 +164,7 @@ async fn diagnostic_queries_are_exact_bounded_and_do_not_persist_state() {
 #[test]
 fn registration_trace_survives_cancellation_of_the_actual_http_reply() {
     let mut fixture = FenceFixture::new();
-    let mut state = test_app_state();
+    let mut state = fixture.app_state();
     let root = fixture.root.path().join("cancelled-registration");
     fs::create_dir_all(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
@@ -184,7 +184,6 @@ fn registration_trace_survives_cancellation_of_the_actual_http_reply() {
     )
     .unwrap();
     state.persist_tx = fixture.tx.clone();
-    state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
     fixture.inner = state.inner.clone();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -244,7 +243,7 @@ fn registration_trace_survives_cancellation_of_the_actual_http_reply() {
 #[test]
 fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
     let mut fixture = FenceFixture::new();
-    let mut state = test_app_state();
+    let mut state = fixture.app_state();
     let root = fixture.root.path().join("changed-registration");
     fs::create_dir_all(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
@@ -260,7 +259,6 @@ fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
     });
     fs::write(directory.join("request.json"), request.to_string()).unwrap();
     state.persist_tx = fixture.tx.clone();
-    state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
     fixture.inner = state.inner.clone();
     let (queued_tx, queued_rx) = mpsc::channel();
     let worker = {

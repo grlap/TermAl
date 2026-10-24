@@ -15598,15 +15598,14 @@ fn project_deletion_keeps_retired_authority_across_recreate_and_restart() {
             assert_eq!(tombstone.revoke_confirmed, revoke_confirmed);
         }
 
-        let reloaded = {
+        {
             let inner = state.inner.lock().expect("state mutex poisoned");
-            let encoded = serde_json::to_vec(&PersistedState::from_inner(&inner))
-                .expect("host ledger should serialize");
-            serde_json::from_slice::<PersistedState>(&encoded)
-                .expect("host ledger should deserialize")
-                .into_inner()
-                .expect("persisted host ledger should rehydrate")
-        };
+            persist_state(state.persistence_path.as_path(), &inner)
+                .expect("host ledger should persist before restart");
+        }
+        let reloaded = load_state(state.persistence_path.as_path())
+            .expect("host ledger should load")
+            .expect("persisted host ledger should exist");
         assert_engram_budget_clock_unread(&state);
         *state.inner.lock().expect("state mutex poisoned") = reloaded;
         // This fixture loads StateInner directly, bypassing production boot's
@@ -16242,7 +16241,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
     let durable_path = state.persistence_path.clone();
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        persist_state_from_persisted(durable_path.as_path(), &PersistedState::from_inner(&inner))
+        persist_state(durable_path.as_path(), &inner)
             .expect("the old authorization intent should be durable before fault injection");
     }
     state.shutdown_persist_blocking();

@@ -15,8 +15,7 @@ fn held_write_ahead(fixture: &mut Fixture) -> (Box<PersistFence>, String) {
         assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
         assert!(!delivery.write_ahead_acknowledged);
         assert!(delivery.turn_generation.is_none());
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(),
-            &PersistedState::from_inner(&inner)).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
         delivery.write_ahead.clone()
     };
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
@@ -190,8 +189,7 @@ async fn federation_m4_round_five_boot_recovery_current_row_is_part_of_the_shutd
     }).await;
     {
         let inner = fixture.satellite.inner.lock().unwrap();
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(),
-            &PersistedState::from_inner(&inner)).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
     }
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
     assert!(fence.target.is_already_durable(&connection).unwrap());

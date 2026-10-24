@@ -596,7 +596,8 @@ fn upsert_remote_proxy_session_record(
     }
 
     let number = inner.next_session_number;
-    inner.next_session_number += 1;
+    inner.next_session_number = inner.next_session_number.checked_add(1)
+        .expect("session identity space exhausted");
     let local_session_id = format!("session-{number}");
     let session = localize_remote_session(
         remote_id,
@@ -764,7 +765,8 @@ fn upsert_remote_proxy_session_summary_record(
     }
 
     let number = inner.next_session_number;
-    inner.next_session_number += 1;
+    inner.next_session_number = inner.next_session_number.checked_add(1)
+        .expect("session identity space exhausted");
     let local_session_id = format!("session-{number}");
     let session = localize_remote_session_summary(
         remote_id,

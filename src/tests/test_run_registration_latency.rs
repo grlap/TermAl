@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn durable_registration_and_query_do_not_wait_for_an_unrelated_rescan() {
     let mut fixture = FenceFixture::new();
-    let mut state = test_app_state();
+    let mut state = fixture.app_state();
     let root = fixture.root.path().join("registration-project");
     fs::create_dir_all(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
@@ -28,7 +28,6 @@ fn durable_registration_and_query_do_not_wait_for_an_unrelated_rescan() {
         }).to_string(),
     ).unwrap();
     state.persist_tx = fixture.tx.clone();
-    state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
     fixture.inner = state.inner.clone();
     let rescan = state.inner.lock().unwrap().test_runs.rescan.clone();
     let scan_guard = rescan.lock().unwrap();

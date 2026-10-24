@@ -660,9 +660,7 @@ fn remote_session_persist_failure_still_claims_the_current_event_bridge() {
 
 #[test]
 fn remote_session_create_publishes_prior_dirty_localization_recovery() {
-    let persistence_root = TestTempRoot::create("termal-remote-session-dirty-recovery");
-    let mut state = test_app_state();
-    let original_persistence_path = state.persistence_path.clone();
+    let state = test_app_state();
     let remote = remote_config("remote-session-dirty-recovery");
     let local_project_id = create_test_remote_project(
         &state,
@@ -689,11 +687,14 @@ fn remote_session_create_publishes_prior_dirty_localization_recovery() {
         spawn_remote_create_response_server("POST /api/sessions ", response_body, || {});
     insert_test_remote_connection(&state, &remote, port, TestRemoteBridgeOwnership::Claimed);
 
-    let failing_persistence_path = persistence_root.path().join("state.json");
-    fs::create_dir_all(&failing_persistence_path)
-        .expect("a directory at the persistence path should force failure");
     state.shutdown_persist_blocking();
-    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    let failing_persistence_path = state.persistence_path.as_ref().clone();
+    open_sqlite_state_connection(&failing_persistence_path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_dirty_localization BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT, 'dirty localization commit failure'); END;",
+        )
+        .unwrap();
     let mut peer_state_events = state.subscribe_events();
     let recovered_project_name = "Recovered Remote Project Name";
     let state_for_hook = state.clone();
@@ -707,13 +708,16 @@ fn remote_session_create_publishes_prior_dirty_localization_recovery() {
             .find(|project| project.id == project_id_for_hook)
             .expect("remote project should exist")
             .name = recovered_project_name.to_owned();
-        state_for_hook
+        let error = state_for_hook
             .commit_remote_localization_locked(&mut inner)
             .expect_err("the post-decode persistence failure should arm retry debt");
+        assert!(format!("{error:#}").contains("dirty localization commit failure"));
         assert!(inner.remote_delta_persist_dirty);
         drop(inner);
-        fs::remove_dir_all(&failing_path_for_hook)
-            .expect("the create commit should be able to replace the failing directory");
+        open_sqlite_state_connection(&failing_path_for_hook)
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_dirty_localization;")
+            .expect("the create commit should be able to retry the original store");
     });
 
     let created = state
@@ -795,7 +799,6 @@ fn remote_session_create_publishes_prior_dirty_localization_recovery() {
 
     join_test_server(server);
     let _ = fs::remove_file(&failing_persistence_path);
-    let _ = fs::remove_file(original_persistence_path.as_path());
 }
 
 #[test]

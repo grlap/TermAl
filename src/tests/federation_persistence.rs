@@ -143,7 +143,7 @@ fn federation_failed_durability_denies_admission_until_exact_reconciliation() {
         .clone()
         .unwrap();
     let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
-    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON app_state BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
     assert!(
         state
             .configure_federation(FederationSettings {

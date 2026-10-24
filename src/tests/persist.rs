@@ -832,15 +832,7 @@ async fn sqlite_stored_workspace_theme_id_is_ignored_on_load_and_dropped_on_save
     {
         // Seed the stored field directly: a current typed serializer omits it.
         let connection = rusqlite::Connection::open(path).expect("fixture database should open");
-        assert_eq!(
-            connection
-                .execute(
-                    "UPDATE app_state SET value_json = ?1 WHERE key = ?2",
-                    rusqlite::params![metadata.to_string(), SQLITE_METADATA_KEY],
-                )
-                .expect("stored workspace metadata should update"),
-            1
-        );
+        replace_metadata_units_for_test(&connection, metadata.clone());
     }
 
     let loaded = load_state(path)
@@ -4127,9 +4119,12 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
         make_persist_test_delegation("delegation-mismatched", &parent_id, &child_id);
     inner.delegations.push(delegation.clone());
     inner.delegations.push(mismatched_delegation.clone());
-    persist_state(&session_row_path, &inner).expect("session-row state should persist");
-    persist_state(&delegation_row_path, &inner).expect("delegation-row state should persist");
-    persist_state(&metadata_path, &inner).expect("metadata state should persist");
+    // Export one immutable initial image into three independent empty stores.
+    // Subsequent writes use the source loaded from each store's own lineage.
+    let initial = PersistedState::from_inner(&inner);
+    persist_state_from_persisted(&session_row_path, &initial).expect("session-row state should persist");
+    persist_state_from_persisted(&delegation_row_path, &initial).expect("delegation-row state should persist");
+    persist_state_from_persisted(&metadata_path, &initial).expect("metadata state should persist");
 
     {
         let connection =
@@ -4204,18 +4199,18 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
             rusqlite::Connection::open(&metadata_path).expect("sqlite state should open");
         connection
             .execute(
-                "UPDATE app_state SET value_json = '{ not json' WHERE key = 'metadataState'",
+                "UPDATE state_metadata_units SET value_json = '{ not json' WHERE field_name = 'revision' AND item_key = ''",
                 [],
             )
             .expect("metadata row should be corrupted");
     }
     let metadata_error = match load_state(&metadata_path) {
-        Ok(_) => panic!("malformed app_state row should fail startup load"),
+        Ok(_) => panic!("malformed metadata unit should fail startup load"),
         Err(error) => error,
     };
     let rendered = format!("{metadata_error:#}");
     assert!(
-        rendered.contains("persisted state metadata is not valid JSON"),
+        rendered.contains("persisted state metadata units are invalid"),
         "{rendered}"
     );
     assert!(
@@ -4314,6 +4309,12 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
     } else {
         0
     };
+    let metadata_units_exist: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='state_metadata_units')",
+        [], |row| row.get(0)).unwrap();
+    let metadata_unit_rows: u64 = if metadata_units_exist {
+        connection.query_row("SELECT count(*) FROM state_metadata_units", [], |row| row.get(0)).unwrap()
+    } else { 0 };
     let sessions_table_exists = connection
         .query_row(
             "SELECT EXISTS(
@@ -4337,6 +4338,7 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
         app_state_rows, 0,
         "synchronous fallback unexpectedly persisted app metadata"
     );
+    assert_eq!(metadata_unit_rows, 0, "synchronous fallback unexpectedly persisted metadata units");
     assert_eq!(
         session_rows, 0,
         "synchronous fallback unexpectedly persisted the created session"

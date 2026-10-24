@@ -177,11 +177,8 @@ fn persist_detected_federation_quarantine(
     let guard = lock_sqlite_state_writer(&writer);
     let transaction =
         rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)?;
-    let encoded: String = transaction.query_row(
-        "SELECT value_json FROM app_state WHERE key=?1",
-        [SQLITE_METADATA_KEY],
-        |row| row.get(0),
-    )?;
+    let encoded = read_persisted_metadata_json(&transaction)?
+        .ok_or_else(|| anyhow!("missing committed metadata during quarantine"))?;
     let mut raw: Value = serde_json::from_str(&encoded)?;
     let mut current: PersistedState = serde_json::from_value(raw.clone())?;
     if federation_persist_image(&current)
@@ -197,14 +194,22 @@ fn persist_detected_federation_quarantine(
     raw["federation"] = serde_json::to_value(&quarantined)?;
     raw["preferences"]["federation"] = serde_json::to_value(&current.preferences.federation)?;
     write_federation_host_generation(&transaction, &current)?;
-    transaction.execute(
-        "UPDATE app_state SET value_json=?1 WHERE key=?2",
-        rusqlite::params![serde_json::to_string(&raw)?, SQLITE_METADATA_KEY],
+    let committed_metadata = write_metadata_units(
+        &transaction,
+        metadata_value_to_units(raw)?,
+        None,
+        &[],
+        None,
+        false,
     )?;
     transaction.commit()?;
     verify_federation_write(connection, &current)?;
     drop(guard);
     verify_persist_commit_integrity(path)?;
+    inner.metadata_predecessor.store(
+        committed_metadata.generation,
+        std::sync::atomic::Ordering::Release,
+    );
     inner.federation = quarantined;
     Ok(())
 }

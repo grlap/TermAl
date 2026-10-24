@@ -5,13 +5,7 @@ use super::*;
 
 fn remove_defaulted_field(state: &AppState) -> (Value, String) {
     let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
-    let encoded: String = connection
-        .query_row(
-            "SELECT value_json FROM app_state WHERE key=?1",
-            [SQLITE_METADATA_KEY],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let encoded = read_persisted_metadata_json(&connection).unwrap().unwrap();
     let mut raw: Value = serde_json::from_str(&encoded).unwrap();
     assert_eq!(
         raw["federation"]
@@ -24,12 +18,7 @@ fn remove_defaulted_field(state: &AppState) -> (Value, String) {
         json!({"domain":raw["federation"], "settings":raw["preferences"]["federation"]});
     let digest = sha256_hex(&serde_json::to_vec(&stored_image).unwrap());
     let transaction = connection.unchecked_transaction().unwrap();
-    transaction
-        .execute(
-            "UPDATE app_state SET value_json=?1 WHERE key=?2",
-            rusqlite::params![serde_json::to_string(&raw).unwrap(), SQLITE_METADATA_KEY],
-        )
-        .unwrap();
+    replace_metadata_units_for_test(&transaction, raw.clone());
     transaction
         .execute(
             "UPDATE meta SET value=?1 WHERE key='federation_image_digest'",
@@ -83,12 +72,7 @@ fn federation_raw_marker_rejects_content_tampering_before_default_expansion() {
     let (mut raw, _) = remove_defaulted_field(&state);
     raw["preferences"]["federation"]["enabled"] = json!(false);
     let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
-    connection
-        .execute(
-            "UPDATE app_state SET value_json=?1 WHERE key=?2",
-            rusqlite::params![serde_json::to_string(&raw).unwrap(), SQLITE_METADATA_KEY],
-        )
-        .unwrap();
+    replace_metadata_units_for_test(&connection, raw);
     assert!(load_state(state.persistence_path.as_path()).is_err());
     let metadata = PersistedState::from_inner(&state.inner.lock().unwrap());
     assert!(

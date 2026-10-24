@@ -932,7 +932,15 @@ fn durability_pending_review_old_candidate_ack_cannot_ack_rearmed_read() {
     assert!(matches!(&batch.pending[0].target,
         PersistFenceTarget::EngramWorkAuthority(image) if **image == old_image));
     let candidate = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
-    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &candidate, &mut batch).unwrap();
+    let committed = persist_delta_via_cache(
+        &mut cache, claimed.state.persistence_path.as_path(), &candidate,
+    );
+    assert!(committed.is_ok(), "Candidate must commit before its ACK: {committed:?}");
+    // Recapture the same Candidate after its real COMMIT adopted the new
+    // predecessor, while its ACK still holds the worker at that crash cut.
+    let candidate_replay = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
+    assert!(old_image.matches_metadata(&candidate_replay.metadata));
+    batch.finish_write(&candidate, &committed, cache.connection.as_ref());
     // Its same owner must now obtain a NEW full Prepared-image ACK.
     receive_naming_authority_fence(&rx, &mut batch, &worker);
     assert!(matches!(&batch.pending[0].target,
@@ -947,9 +955,17 @@ fn durability_pending_review_old_candidate_ack_cannot_ack_rearmed_read() {
     let (stale, waiter) = PersistFence::new_with_clock(
         PersistFenceTarget::EngramWorkAuthority(Box::new(old_image)), deadline, clock);
     batch.accept(PersistRequest::Fence(Box::new(stale)));
-    // A delayed old snapshot can really commit/ACK its own image, but cannot
-    // ACK the new guard or permit its canonical read/publication.
-    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &prior_delta, &mut batch).unwrap();
+    // The immutable predecessor from before the first COMMIT must refuse;
+    // neither pending fence receives a fabricated success from that refusal.
+    let stale_error = persist_delta_via_cache(
+        &mut cache, claimed.state.persistence_path.as_path(), &prior_delta,
+    ).unwrap_err();
+    assert!(stale_error.to_string().contains("stale metadata snapshot"));
+    assert_eq!(batch.pending.len(), 2);
+    assert!(!worker.is_finished());
+    // A freshly captured Candidate can really commit/ACK its own image, but
+    // cannot ACK the new guard or permit its canonical read/publication.
+    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &candidate_replay, &mut batch).unwrap();
     assert!(matches!(waiter.wait_until(deadline), Some(Ok(()))));
     assert_eq!(batch.pending.len(), 1);
     assert!(!worker.is_finished());

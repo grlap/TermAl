@@ -23,7 +23,7 @@ struct ObservationPublicationFixture {
 impl ObservationPublicationFixture {
     fn new() -> Self {
         let mut writer = FenceFixture::new();
-        let mut state = test_app_state();
+        let mut state = writer.app_state();
         let root = writer.root.path().join("project");
         fs::create_dir(&root).unwrap();
         run_git_test_command(&root, &["init", "--quiet"]);
@@ -36,7 +36,6 @@ impl ObservationPublicationFixture {
             inner.session_mut_by_index(index).unwrap().runtime = SessionRuntime::Codex(runtime);
         }
         state.persist_tx = writer.tx.clone();
-        state.persistence_path = Arc::new(writer.root.path().join("termal.sqlite"));
         writer.inner = state.inner.clone();
         let baseline = writer.collect();
         writer.write(&baseline).unwrap();
@@ -154,18 +153,13 @@ impl ObservationPublicationFixture {
     }
 
     fn stored_observation(&self, id: &str) -> TestRunCommandObservation {
-        let encoded: String = self
+        let connection = self
             .writer
             .cache
             .connection
             .as_ref()
-            .unwrap()
-            .query_row(
-                "SELECT value_json FROM app_state WHERE key = 'metadataState'",
-                [],
-                |row| row.get(0),
-            )
             .unwrap();
+        let encoded = read_persisted_metadata_json(connection).unwrap().unwrap();
         let persisted: PersistedState = serde_json::from_str(&encoded).unwrap();
         persisted.test_run_observations[id].clone()
     }

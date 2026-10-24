@@ -186,7 +186,7 @@ impl AppState {
         // symmetric with the sibling means the two paths share one
         // durability posture.
         inner.finish_body_sequence_commits();
-        inner.revision += 1;
+        inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
         if self.persist_tx.send(PersistRequest::Delta).is_err() {
             persist_created_session(&self.persistence_path, inner, record)?;
         }
@@ -221,8 +221,7 @@ impl AppState {
             // and any shutdown path where the persist thread has
             // already exited. Build the full persist payload here
             // because we have no background worker to do it.
-            let persisted = PersistedState::from_inner(inner);
-            persist_state_from_persisted(&self.persistence_path, &persisted)?;
+            persist_locked_state_to_sqlite(&self.persistence_path, inner)?;
             return Ok(PersistDispatch::Synchronous);
         }
         Ok(PersistDispatch::BackgroundQueued)
@@ -309,8 +308,7 @@ impl AppState {
         // fallback in `commit_delta_locked`.
         let final_persist_result = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let persisted = PersistedState::from_inner(&inner);
-            let result = persist_state_from_persisted(&self.persistence_path, &persisted);
+            let result = persist_locked_state_to_sqlite(&self.persistence_path, &inner);
             self.persist_worker_alive
                 .store(false, std::sync::atomic::Ordering::Release);
             result
@@ -337,7 +335,7 @@ impl AppState {
     /// `turn_lifecycle.rs` where full snapshots would be overkill.
     fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
         inner.finish_body_sequence_commits();
-        inner.revision += 1;
+        inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
         // Post-shutdown durability: this commit shape doesn't send its own
         // `PersistRequest::Delta`. Normally the next persist-triggering
         // commit (via `commit_locked` / `commit_persisted_delta_locked`)
@@ -365,8 +363,7 @@ impl AppState {
             .persist_worker_alive
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            let persisted = PersistedState::from_inner(inner);
-            persist_state_from_persisted(&self.persistence_path, &persisted)?;
+            persist_locked_state_to_sqlite(&self.persistence_path, inner)?;
         }
         Ok(inner.revision)
     }
@@ -394,7 +391,7 @@ impl AppState {
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
         inner.finish_body_sequence_commits();
-        inner.revision += 1;
+        inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
         let dispatch = self.persist_internal_locked_with_dispatch(inner)?;
         Ok((inner.revision, dispatch))
     }

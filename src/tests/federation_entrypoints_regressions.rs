@@ -386,15 +386,7 @@ async fn intent_sqlite_round_trip_and_invalid_maps_fail_validation() {
         let mut connection = rusqlite::Connection::open(&path).unwrap();
         let transaction = connection.transaction().unwrap();
         write_federation_host_generation(&transaction, &snapshot).unwrap();
-        transaction
-            .execute(
-                "UPDATE app_state SET value_json=?1 WHERE key=?2",
-                rusqlite::params![
-                    serde_json::to_string(&snapshot).unwrap(),
-                    SQLITE_METADATA_KEY
-                ],
-            )
-            .unwrap();
+        replace_metadata_units_for_test(&transaction, serde_json::to_value(&snapshot).unwrap());
         transaction.commit().unwrap();
         drop(connection);
         let error = match load_state(&path) {

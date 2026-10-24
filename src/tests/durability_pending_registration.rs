@@ -88,7 +88,7 @@ async fn durability_pending_wire_preserves_the_exact_existing_identity_for_each_
 async fn durability_pending_registration_replays_the_same_operation_after_a_late_commit() {
     let _temp_scope = TestTempRootDirectoryScope::repository_local();
     let mut fixture = FenceFixture::new();
-    let mut state = test_app_state();
+    let mut state = fixture.app_state();
     let root = fixture.root.path().join("registration-project");
     fs::create_dir(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
@@ -108,7 +108,6 @@ async fn durability_pending_registration_replays_the_same_operation_after_a_late
     )
     .unwrap();
     state.persist_tx = fixture.tx.clone();
-    state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
     fixture.inner = state.inner.clone();
 
     let (ready_tx, ready_rx) = mpsc::channel();

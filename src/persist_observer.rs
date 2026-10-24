@@ -24,10 +24,85 @@ struct PersistObservedCounts {
     retained_messages: usize,
     payload_measured: bool,
     metadata_bytes: usize,
+    metadata_fields: Vec<PersistMetadataFieldObservation>,
+    metadata_transaction_committed: bool,
     session_metadata_bytes: usize,
     message_bytes: usize,
     prompt_history_bytes: usize,
     delegation_bytes: usize,
+}
+
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistMetadataFieldObservation {
+    field: &'static str,
+    units: usize,
+    encoded_bytes: usize,
+    attempted_upserts: usize,
+    attempted_bytes: usize,
+    attempted_deletes: usize,
+    committed_upserts: usize,
+    committed_bytes: usize,
+    committed_deletes: usize,
+}
+
+struct PersistMetadataUnitObservation(Vec<PersistMetadataFieldObservation>);
+
+impl PersistMetadataUnitObservation {
+    fn new(units: &PersistMetadataUnits) -> Self {
+        let mut rows: Vec<_> = METADATA_UNIT_FIELDS
+            .iter()
+            .map(|field| PersistMetadataFieldObservation {
+                field,
+                ..Default::default()
+            })
+            .collect();
+        for ((field, _), (_, encoded)) in units {
+            if let Some(row) = rows.iter_mut().find(|row| row.field == field.as_str()) {
+                row.units += 1;
+                row.encoded_bytes = row.encoded_bytes.saturating_add(encoded.len());
+            }
+        }
+        Self(rows)
+    }
+
+    fn upsert(&mut self, field: &str, bytes: usize) {
+        if let Some(row) = self.0.iter_mut().find(|row| row.field == field) {
+            row.attempted_upserts += 1;
+            row.attempted_bytes = row.attempted_bytes.saturating_add(bytes);
+        }
+    }
+
+    fn delete(&mut self, field: &str) {
+        if let Some(row) = self.0.iter_mut().find(|row| row.field == field) {
+            row.attempted_deletes += 1;
+        }
+    }
+}
+
+impl Drop for PersistMetadataUnitObservation {
+    fn drop(&mut self) {
+        persist_observe(|observer| {
+            observer.update(|tick| {
+                tick.counts.metadata_bytes = self.0.iter().map(|row| row.attempted_bytes).sum();
+                tick.counts.metadata_fields = std::mem::take(&mut self.0);
+                tick.counts.metadata_transaction_committed = false;
+            })
+        });
+    }
+}
+
+fn persist_observe_metadata_commit() {
+    persist_observe(|observer| {
+        observer.update(|tick| {
+            tick.counts.metadata_transaction_committed = true;
+            for field in &mut tick.counts.metadata_fields {
+                field.committed_upserts = field.attempted_upserts;
+                field.committed_bytes = field.attempted_bytes;
+                field.committed_deletes = field.attempted_deletes;
+            }
+        })
+    });
 }
 
 #[derive(Clone, Default, Serialize)]

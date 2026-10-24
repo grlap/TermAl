@@ -29,7 +29,7 @@ async fn federation_connect_write_failure_never_installs_an_unowned_link() {
     let fixture = Fixture::new().await;
     let channel = channel(&fixture.app, &fixture.id);
     let connection = rusqlite::Connection::open(fixture.app.persistence_path.as_path()).unwrap();
-    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON app_state BEGIN SELECT RAISE(ABORT,'connection write failure'); END;").unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'connection write failure'); END;").unwrap();
     assert!(record(&channel).await.unwrap().is_err());
     channel.invalidate();
     let orphan = fixture
@@ -206,7 +206,7 @@ async fn federation_connect_runtime_reconciles_actual_write_failure_without_manu
         .app
         .federation_peer_disconnected(&active, &prior_uuid));
     let connection = rusqlite::Connection::open(fixture.app.persistence_path.as_path()).unwrap();
-    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON app_state BEGIN SELECT RAISE(ABORT,'connection write failure'); END;").unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'connection write failure'); END;").unwrap();
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
     let failed = fixture
         .event(|event| matches!(event, Event::Attempt(StatusCode::INTERNAL_SERVER_ERROR)))
@@ -277,7 +277,7 @@ async fn federation_connect_failure_recovery_preserves_observed_credential_mater
         observer(result);
     });
     let connection = rusqlite::Connection::open(fixture.app.persistence_path.as_path()).unwrap();
-    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON app_state BEGIN SELECT RAISE(ABORT,'connection write failure'); END;").unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_federation_write BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'connection write failure'); END;").unwrap();
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
     assert!(
         fixture

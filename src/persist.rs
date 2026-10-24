@@ -10,7 +10,7 @@ lifecycle (`open_sqlite_state_connection`, `SqlitePersistConnectionCache`),
 load path (`load_state_for_boot`, `load_state_from_sqlite_with_connection`),
 and the transaction entry points used by the background persist thread
 (`persist_state_parts_via_connection`, `persist_delta_via_cache`,
-`persist_created_session`, `persist_state_from_persisted`, `persist_state`).
+`persist_created_session`, `persist_locked_state_to_sqlite`, `persist_state`).
 Current-schema validation, initialization and authority checks live in
 `persist_sqlite_schema.rs`; their unchanged regressions live in
 `persist_sqlite_schema_tests.rs`. Normalized session quarantine and transcript
@@ -30,7 +30,7 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("termal.sqlite")
 }
 
-const SQLITE_SCHEMA_VERSION: &str = "2";
+const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
@@ -503,7 +503,16 @@ fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    static METADATA_COMMIT_INTEGRITY_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn verify_persist_commit_integrity(path: &FsPath) -> Result<()> {
+    #[cfg(test)]
+    if METADATA_COMMIT_INTEGRITY_FAULT.with(|fault| fault.replace(false)) {
+        return Err(anyhow!("injected metadata post-commit integrity failure"));
+    }
     let hardening_result = harden_persist_commit_files(path);
     if let Err(redirection_err) = reject_existing_sqlite_state_path_redirection(path) {
         if let Err(err) = &hardening_result {
@@ -916,6 +925,7 @@ fn load_state_for_boot(
     Ok((state, Some(connection)))
 }
 
+include!("persist_metadata_units.rs");
 include!("persist_sqlite_schema.rs");
 
 include!("persist_sqlite_overview.rs");
@@ -1111,7 +1121,8 @@ fn remove_missing_persisted_delegations(
     Ok(())
 }
 
-fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<()> {
+#[cfg(test)]
+fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<u64> {
     let metadata = persisted.metadata_only();
     persist_state_parts_to_sqlite(
         path,
@@ -1130,10 +1141,39 @@ fn persist_created_session(
     inner: &StateInner,
     _record: &SessionRecord,
 ) -> Result<()> {
-    let persisted = PersistedState::from_inner(inner);
-    persist_persisted_state_to_sqlite(path, &persisted)
+    persist_locked_state_to_sqlite(path, inner)?;
+    Ok(())
 }
 
+// The caller holds StateInner throughout this operation. Admit this writer
+// before capturing its predecessor: an earlier background commit can publish
+// that predecessor while we wait, without needing to acquire StateInner.
+fn persist_locked_state_to_sqlite(path: &FsPath, inner: &StateInner) -> Result<u64> {
+    if let Some(parent) = path.parent() {
+        create_local_state_directory(parent)?;
+    }
+    let mut connection = open_sqlite_state_connection_unconfigured(path)?;
+    ensure_sqlite_state_schema_for_path(&connection, path)?;
+    let writer = sqlite_state_write_lock(path);
+    let guard = lock_sqlite_state_writer(&writer);
+    let persisted = PersistedState::from_inner(inner);
+    let metadata = persisted.metadata_only();
+    persist_state_parts_via_connection(
+        &mut connection,
+        path,
+        &metadata,
+        &persisted.sessions,
+        true,
+        &persisted.quarantined_persisted_session_ids,
+        &persisted.delegations,
+        true,
+        &persisted.quarantined_persisted_delegation_ids,
+        guard,
+        true,
+    )
+}
+
+#[cfg(test)]
 fn persist_state_parts_to_sqlite(
     path: &FsPath,
     metadata: &PersistedState,
@@ -1143,13 +1183,15 @@ fn persist_state_parts_to_sqlite(
     delegations: &[DelegationRecord],
     replace_delegations: bool,
     quarantined_delegation_ids: &BTreeSet<String>,
-) -> Result<()> {
+) -> Result<u64> {
     if let Some(parent) = path.parent() {
         create_local_state_directory(parent)?;
     }
 
     let mut connection = open_sqlite_state_connection_unconfigured(path)?;
     ensure_sqlite_state_schema_for_path(&connection, path)?;
+    let writer = sqlite_state_write_lock(path);
+    let guard = lock_sqlite_state_writer(&writer);
     persist_state_parts_via_connection(
         &mut connection,
         path,
@@ -1160,6 +1202,8 @@ fn persist_state_parts_to_sqlite(
         delegations,
         replace_delegations,
         quarantined_delegation_ids,
+        guard,
+        false,
     )
 }
 
@@ -1179,9 +1223,10 @@ fn persist_state_parts_via_connection(
     delegations: &[DelegationRecord],
     replace_delegations: bool,
     quarantined_delegation_ids: &BTreeSet<String>,
-) -> Result<()> {
-    let metadata_json =
-        serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
+    write_guard: SqliteStateWriterGuard<'_>,
+    adopt_locked_source: bool,
+) -> Result<u64> {
+    let metadata_units = project_metadata_units(metadata)?;
     let serialized_sessions = serialize_persisted_sessions_with_isolation(sessions);
     let serialized_delegations = delegations
         .iter()
@@ -1191,8 +1236,6 @@ fn persist_state_parts_via_connection(
                 .map(|json| (delegation.id.as_str(), json))
         })
         .collect::<Result<Vec<_>>>()?;
-    let write_lock = sqlite_state_write_lock(path);
-    let write_guard = lock_sqlite_state_writer(&write_lock);
     let tx = connection.transaction().with_context(|| {
         format!(
             "failed to start SQLite transaction for `{}`",
@@ -1200,12 +1243,14 @@ fn persist_state_parts_via_connection(
         )
     })?;
     write_federation_host_generation(&tx, metadata)?;
-    tx.execute(
-        "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
-        rusqlite::params![SQLITE_METADATA_KEY, metadata_json],
-    )
-    .with_context(|| format!("failed to write state metadata to `{}`", path.display()))?;
+    let committed_metadata = write_metadata_units(
+        &tx,
+        metadata_units,
+        None,
+        &serialized_sessions,
+        Some(&metadata.metadata_capture),
+        true,
+    )?;
     if replace_sessions {
         // Retain every session from the snapshot, including any session whose
         // current in-memory value failed validation. Such a session is skipped
@@ -1250,6 +1295,16 @@ fn persist_state_parts_via_connection(
     }
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
+    metadata
+        .metadata_capture
+        .committed(committed_metadata.generation);
+    if adopt_locked_source {
+        // Publish while writer admission is still held, even if the following
+        // integrity checks fail. The receipt still fails; only a fresh coherent
+        // source capture can follow this committed transaction.
+        metadata.metadata_capture.adopt_own_committed();
+    }
+    persist_observe_metadata_commit();
     verify_federation_write(connection, metadata)?;
     drop(write_guard);
     // Keep post-commit redirection and owner-only permission verification
@@ -1257,7 +1312,7 @@ fn persist_state_parts_via_connection(
     // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
     // accepts insecure state-file modes.
     verify_persist_commit_integrity(path)?;
-    Ok(())
+    Ok(committed_metadata.generation)
 }
 
 /// Thread-local SQLite connection cache for the background persist thread.
@@ -1278,6 +1333,7 @@ fn persist_state_parts_via_connection(
 struct SqlitePersistConnectionCache {
     path: Option<PathBuf>,
     connection: Option<rusqlite::Connection>,
+    metadata_units: Option<PersistMetadataUnitCache>,
 }
 
 impl SqlitePersistConnectionCache {
@@ -1285,6 +1341,7 @@ impl SqlitePersistConnectionCache {
         Self {
             path: None,
             connection: None,
+            metadata_units: None,
         }
     }
 
@@ -1297,6 +1354,7 @@ impl SqlitePersistConnectionCache {
             Some((path, connection)) => Self {
                 path: Some(path),
                 connection: Some(connection),
+                metadata_units: None,
             },
             None => Self::new(),
         }
@@ -1322,6 +1380,7 @@ impl SqlitePersistConnectionCache {
             // maintenance. Cached reuse hardens them again after each commit.
             self.path = Some(path.to_path_buf());
             self.connection = Some(connection);
+            self.metadata_units = None;
         }
         Ok(self
             .connection
@@ -1346,6 +1405,7 @@ impl SqlitePersistConnectionCache {
     fn invalidate(&mut self) {
         self.connection = None;
         self.path = None;
+        self.metadata_units = None;
     }
 }
 
@@ -1419,8 +1479,7 @@ fn persist_delta_via_cache_inner(
     persist_observe_phase("serialize");
     let serialize_started = std::time::Instant::now();
     let serialized = (|| -> Result<_> {
-        let metadata_json = serde_json::to_string(&delta.metadata)
-            .context("failed to serialize persisted state metadata")?;
+        let metadata_units = project_metadata_units(&delta.metadata)?;
         let serialized_sessions =
             serialize_persisted_sessions_with_isolation(&delta.changed_sessions);
         let serialized_delegations = delta
@@ -1434,11 +1493,11 @@ fn persist_delta_via_cache_inner(
                     .map(|json| (delegation.id.as_str(), json))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok((metadata_json, serialized_sessions, serialized_delegations))
+        Ok((metadata_units, serialized_sessions, serialized_delegations))
     })();
     timings.serialize = serialize_started.elapsed();
-    let (metadata_json, serialized_sessions, serialized_delegations) = serialized?;
-    persist_observe_payload(&metadata_json, &serialized_sessions, &serialized_delegations);
+    let (metadata_units, serialized_sessions, serialized_delegations) = serialized?;
+    persist_observe_payload("", &serialized_sessions, &serialized_delegations);
     let persisted_session_ids = serialized_sessions
         .iter()
         .map(|session| session.session_id.clone())
@@ -1456,7 +1515,9 @@ fn persist_delta_via_cache_inner(
         reject_existing_sqlite_state_path_redirection(path).map(|()| connection)
     });
     timings.open = open_started.elapsed();
-    let connection = opened?;
+    let _ = opened?;
+    let previous_metadata_units = cache.metadata_units.take();
+    let connection = cache.connection_for(path)?;
     let write_lock = sqlite_state_write_lock(path);
     persist_observe_phase("writer_ticket");
     let ticket_started = std::time::Instant::now();
@@ -1473,18 +1534,32 @@ fn persist_delta_via_cache_inner(
             )
         })
         .and_then(|tx| {
+            write_federation_host_generation(&tx, &delta.metadata)?;
+            let committed_metadata = write_metadata_units(
+                &tx,
+                metadata_units,
+                previous_metadata_units.as_ref(),
+                &serialized_sessions,
+                Some(&delta.metadata.metadata_capture),
+                !delta.changed_sessions.is_empty()
+                    || !delta.removed_session_ids.is_empty()
+                    || delta
+                        .changed_delegations
+                        .as_ref()
+                        .is_some_and(|rows| !rows.is_empty())
+                    || !delta.removed_delegation_ids.is_empty(),
+            )?;
             write_persist_delta_statements(
                 &tx,
                 path,
                 delta,
-                &metadata_json,
                 &serialized_sessions,
                 serialized_delegations,
-            )
-            .map(|()| tx)
+            )?;
+            Ok((tx, committed_metadata))
         });
     timings.statements = statements_started.elapsed();
-    let tx = written?;
+    let (tx, committed_metadata) = written?;
     persist_observe_phase("commit");
     let commit_started = std::time::Instant::now();
     let committed = tx
@@ -1492,6 +1567,17 @@ fn persist_delta_via_cache_inner(
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()));
     timings.commit = commit_started.elapsed();
     committed?;
+    delta
+        .metadata
+        .metadata_capture
+        .committed(committed_metadata.generation);
+    persist_observe_metadata_commit();
+    // This source produced the committed transaction. Cache and fence success
+    // still wait for integrity verification; failure requires a fresh capture.
+    delta
+        .metadata
+        .metadata_capture
+        .adopt(committed_metadata.generation);
     drop(write_guard);
     // Keep post-commit redirection and owner-only permission verification
     // fatal. The chmod helper itself honors
@@ -1502,6 +1588,7 @@ fn persist_delta_via_cache_inner(
     let verified = verify_persist_commit_integrity(path);
     timings.post_commit = post_commit_started.elapsed();
     verified?;
+    cache.metadata_units = Some(committed_metadata);
     Ok(persisted_session_ids)
 }
 
@@ -1510,17 +1597,9 @@ fn write_persist_delta_statements(
     tx: &rusqlite::Transaction<'_>,
     path: &FsPath,
     delta: &PersistDelta,
-    metadata_json: &str,
     serialized_sessions: &[SerializedPersistedSession],
     serialized_delegations: Vec<(&str, String)>,
 ) -> Result<()> {
-    write_federation_host_generation(tx, &delta.metadata)?;
-    tx.execute(
-        "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
-        rusqlite::params![SQLITE_METADATA_KEY, metadata_json],
-    )
-    .with_context(|| format!("failed to write state metadata to `{}`", path.display()))?;
     for session_id in &delta.removed_session_ids {
         tx.execute(
             "DELETE FROM sessions WHERE id = ?1",
@@ -1574,7 +1653,8 @@ fn write_persist_delta_statements(
 }
 
 /// Persists state from a pre-built `PersistedState` snapshot.
-fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
+#[cfg(test)]
+fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<u64> {
     persist_persisted_state_to_sqlite(path, persisted)
 }
 
@@ -1582,6 +1662,6 @@ fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Re
 /// setup of persisted state files).
 #[cfg(test)]
 fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
-    let persisted = PersistedState::from_inner(inner);
-    persist_state_from_persisted(path, &persisted)
+    persist_locked_state_to_sqlite(path, inner)?;
+    Ok(())
 }

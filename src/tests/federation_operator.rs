@@ -278,7 +278,7 @@ async fn federation_operator_failed_persistence_reports_an_unresolved_hold_not_s
     .unwrap();
     let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
     let stored_before = read_federation_persist_image(&connection).unwrap();
-    connection.execute_batch("CREATE TRIGGER reject_operator_write BEFORE INSERT ON app_state BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_operator_write BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
     operator_configure(
         &state,
         central_settings(&local, true),

@@ -14,6 +14,8 @@ struct SerializedPersistedMessage {
 
 struct SerializedPersistedSession {
     session_id: String,
+    // Remote-proxy transcript IDs belong to the peer, never our allocators.
+    local_identity_namespace: bool,
     message_start_index: usize,
     message_count: usize,
     write_overview: bool,
@@ -91,6 +93,7 @@ fn serialize_persisted_session(
 
     Ok(SerializedPersistedSession {
         session_id: record.session.id.clone(),
+        local_identity_namespace: remote_proxy_identity.is_none(),
         message_start_index: record.message_start_index,
         message_count: total_message_count,
         write_overview: remote_proxy_identity.is_none(),

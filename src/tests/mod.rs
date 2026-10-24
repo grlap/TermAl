@@ -1110,12 +1110,8 @@ fn write_test_codex_threads_db(
 
 fn sqlite_metadata_state_value(path: &FsPath) -> Value {
     let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
-    let encoded: String = connection
-        .query_row(
-            "SELECT value_json FROM app_state WHERE key = 'metadataState'",
-            [],
-            |row| row.get(0),
-        )
+    let encoded = read_persisted_metadata_json(&connection)
+        .expect("sqlite metadata authority should read")
         .expect("sqlite metadata state should exist");
     serde_json::from_str(&encoded).expect("sqlite metadata state should deserialize")
 }

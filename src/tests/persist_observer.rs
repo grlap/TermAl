@@ -213,6 +213,13 @@ fn real_sql_write_reports_bytes_without_leaking_content_or_changing_ack() {
     let mut batch = PersistFenceBatch::default();
     batch.accept(PersistRequest::Fence(Box::new(fence)));
     let mut cache = SqlitePersistConnectionCache::new();
+    cache.connection_for(state.persistence_path.as_path()).unwrap().execute_batch(
+        "CREATE TEMP TABLE metadata_write_payload(bytes INTEGER NOT NULL);
+         CREATE TEMP TRIGGER observe_metadata_insert AFTER INSERT ON main.state_metadata_units
+         BEGIN INSERT INTO metadata_write_payload VALUES(length(CAST(new.value_json AS BLOB))); END;
+         CREATE TEMP TRIGGER observe_metadata_update AFTER UPDATE ON main.state_metadata_units
+         BEGIN INSERT INTO metadata_write_payload VALUES(length(CAST(new.value_json AS BLOB))); END;"
+    ).unwrap();
     persist_delta_with_fences_timed(
         &mut cache,
         state.persistence_path.as_path(),
@@ -228,8 +235,8 @@ fn real_sql_write_reports_bytes_without_leaking_content_or_changing_ack() {
     let connection = cache.connection.as_ref().unwrap();
     let metadata_bytes: usize = connection
         .query_row(
-            "SELECT length(CAST(value_json AS BLOB)) FROM app_state WHERE key=?1",
-            [SQLITE_METADATA_KEY],
+            "SELECT coalesce(sum(bytes),0) FROM metadata_write_payload",
+            [],
             |row| row.get(0),
         )
         .unwrap();
@@ -277,6 +284,55 @@ fn failed_sql_write_still_records_observations_and_preserves_the_error() {
     assert_eq!(snapshot.failed_ticks, 1);
     assert!(!snapshot.recent[0].success);
     assert!(snapshot.recent[0].counts.payload_measured);
+}
+
+#[test]
+fn connection_reopen_failure_does_not_report_metadata_commit() {
+    let root = TestTempRoot::create("persist-observer-reopen-failure");
+    let path = root.path().join("state.sqlite");
+    let mut inner = StateInner::new();
+    persist_state(&path, &inner).unwrap();
+    let delta = inner.collect_persist_delta(0);
+    assert_eq!(delta.metadata.federation.version, 0);
+    let mut cache = SqlitePersistConnectionCache::new();
+    let connection = cache.connection_for(&path).unwrap();
+    let before = read_metadata_units_unchecked(connection).unwrap();
+    let generation = metadata_unit_generation(connection).unwrap();
+    // Fail before the units writer starts. A units SQL fault would reset the
+    // observation itself and hide a spurious COMMIT from reopen-time setup.
+    connection
+        .execute(
+            "INSERT INTO meta(key,value) VALUES('federation_state_version','1')",
+            [],
+        )
+        .unwrap();
+    cache.invalidate();
+
+    let observer = Arc::new(PersistObserver::default());
+    let scope = observer.begin_at(std::time::Instant::now());
+    let mut timings = PersistTickTimings::default();
+    let error =
+        persist_delta_via_cache_timed(&mut cache, &path, &delta, &mut timings).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("stale federation content in state write")
+    );
+    assert!(cache.connection.is_none());
+    scope.finish(false, &timings);
+
+    let snapshot = observer.snapshot_at(std::time::Instant::now());
+    assert_eq!(snapshot.completed_ticks, 1);
+    assert_eq!(snapshot.failed_ticks, 1);
+    let sample = &snapshot.recent[0];
+    assert!(!sample.success);
+    assert!(!sample.counts.metadata_transaction_committed);
+    assert_eq!(sample.counts.metadata_bytes, 0);
+    assert!(sample.counts.metadata_fields.is_empty());
+    let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
+    assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), before);
+    assert_eq!(metadata_unit_generation(&connection).unwrap(), generation);
+    assert_eq!(federation_meta_version(&connection).unwrap(), 1);
 }
 
 #[tokio::test]

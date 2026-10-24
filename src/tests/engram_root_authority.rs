@@ -2318,16 +2318,24 @@ fn connected_authority_settlement_failure(entry: &'static str) {
             "{entry}: a candidate committed without acknowledgement still restores withheld"
         );
         cache.connection.as_ref().unwrap().execute_batch(
-            "CREATE TEMP TRIGGER refuse_authority_metadata BEFORE INSERT ON app_state BEGIN SELECT RAISE(ABORT, 'authority commit failure'); END;").unwrap();
+            "CREATE TEMP TRIGGER refuse_authority_metadata BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT, 'authority commit failure'); END;").unwrap();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            // Change a real metadata unit after the committed candidate, so
+            // the fresh capture reaches the SQL failure rather than a stale guard.
+            let _ = inner.next_message_id();
+        }
+        let failure_delta = collect_persist_delta_from_shared_state(&state.inner, watermark);
         let failure = persist_delta_with_fences(
             &mut cache,
             state.persistence_path.as_path(),
-            &delta,
+            &failure_delta,
             &mut batch,
-        );
+        )
+        .expect_err("real connected writer must fail its metadata transaction");
         assert!(
-            failure.is_err(),
-            "real connected writer must fail its metadata transaction"
+            format!("{failure:#}").contains("authority commit failure"),
+            "the injected SQL failure must refuse the connected writer: {failure:#}"
         );
         failed_candidate = true;
         break;

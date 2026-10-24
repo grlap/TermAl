@@ -610,15 +610,9 @@ impl AppState {
                             .metadata
                             .pending_response_board_project_detachments
                             .is_empty();
-                        // Always upsert metadata (revision, preferences,
-                        // projects, orchestrators, workspace_layouts).
-                        // Mutation stamps only cover per-session changes,
-                        // but commit_locked bumps `inner.revision` which
-                        // must reach SQLite, and non-session fields can
-                        // change without any session stamp moving. Empty
-                        // `changed_sessions` + `removed_session_ids` is
-                        // fine; the transaction just upserts one
-                        // app_state row.
+                        // Persist the exact collected content. Allocation counters,
+                        // individual metadata fields and collection entries have
+                        // independent rows; this never rewrites app_state.
                         let persisted = persist_delta_with_fences_timed(
                             &mut cache,
                             &persist_path_for_persist,

@@ -15,6 +15,7 @@ mod sqlite_maintenance_tests {
         connection
             .execute_batch(SQLITE_STATE_AUXILIARY_SCHEMA_SQL)
             .unwrap();
+        connection.execute_batch(SQLITE_METADATA_UNITS_SCHEMA).unwrap();
         let expected_tables = CURRENT_SQLITE_STATE_TABLE_COLUMNS
             .iter()
             .map(|(table, _)| (*table).to_owned())
@@ -165,8 +166,7 @@ mod sqlite_maintenance_tests {
                 let path = root.database_path();
                 {
                     let connection = rusqlite::Connection::open(&path).unwrap();
-                    seed_current_state_core_tables(&connection);
-                    seed_current_state_auxiliary_tables(&connection);
+                    seed_primary2_state_schema_for_test(&connection);
                     let mut metadata = json!({"nextSessionNumber":1,"nextMessageNumber":1,"projects":[],"sessions":[]});
                     metadata[key] = value;
                     connection

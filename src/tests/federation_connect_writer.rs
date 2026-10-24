@@ -52,8 +52,7 @@ impl ControlledWriter {
     }
 
     fn commit(app: &AppState, fence: &PersistFence) {
-        let state = PersistedState::from_inner(&app.inner.lock().unwrap());
-        persist_persisted_state_to_sqlite(app.persistence_path.as_path(), &state).unwrap();
+        persist_state(app.persistence_path.as_path(), &app.inner.lock().unwrap()).unwrap();
         let connection = rusqlite::Connection::open(app.persistence_path.as_path()).unwrap();
         assert!(fence.target.is_already_durable(&connection).unwrap());
         fence.finish(Ok(()));

@@ -20,6 +20,8 @@
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedState {
+    #[serde(skip)]
+    metadata_capture: PersistMetadataCapture,
     #[serde(default)]
     federation: FederationState,
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
@@ -99,6 +101,7 @@ impl PersistedState {
     /// path.
     fn metadata_from_inner(inner: &StateInner) -> Self {
         Self {
+            metadata_capture: PersistMetadataCapture::new(inner.metadata_predecessor.clone()),
             federation: inner.federation.clone(),
             codex: inner.codex.clone(),
             preferences: inner.preferences.clone(),
@@ -144,8 +147,8 @@ impl PersistedState {
     /// `sessions` and `delegations` vecs.
     ///
     /// Used by the synchronous persist path
-    /// (`persist_persisted_state_to_sqlite`) to serialize the
-    /// `app_state` metadata row without the sessions or delegation
+    /// (`persist_locked_state_to_sqlite`) to serialize the
+    /// normalized metadata units without the sessions or delegation
     /// payloads. The
     /// previous `persisted.clone(); metadata.sessions.clear();`
     /// pattern deep-cloned every session transcript just to drop the
@@ -160,6 +163,7 @@ impl PersistedState {
     /// updating both.
     fn metadata_only(&self) -> Self {
         Self {
+            metadata_capture: self.metadata_capture.clone(),
             federation: self.federation.clone(),
             codex: self.codex.clone(),
             preferences: self.preferences.clone(),
@@ -268,6 +272,7 @@ impl PersistedState {
             })
             .collect();
         let mut inner = StateInner {
+            metadata_predecessor: self.metadata_capture.known.clone(),
             federation: self.federation,
             federation_durable: true,
             federation_continuity_lost: false,

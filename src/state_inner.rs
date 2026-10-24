@@ -108,7 +108,8 @@ impl StateInner {
         model: Option<String>,
     ) -> SessionRecord {
         let number = self.next_session_number;
-        self.next_session_number += 1;
+        self.next_session_number = self.next_session_number.checked_add(1)
+            .expect("session identity space exhausted");
         let session_id = format!("session-{number}");
         let session_name =
             name.unwrap_or_else(|| generated_session_name(agent, session_id.as_str()));
@@ -358,7 +359,8 @@ impl StateInner {
     /// Returns the next message ID.
     fn next_message_id(&mut self) -> String {
         let id = format!("message-{}", self.next_message_number);
-        self.next_message_number += 1;
+        self.next_message_number = self.next_message_number.checked_add(1)
+            .expect("message identity space exhausted");
         id
     }
 

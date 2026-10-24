@@ -4,6 +4,9 @@
 
 use super::*;
 
+#[path = "persist_metadata_units.rs"]
+mod metadata_units;
+
 #[path = "test_run_registration_fence.rs"]
 mod test_run_registration;
 
@@ -20,6 +23,14 @@ struct FenceFixture {
 }
 
 impl FenceFixture {
+    fn app_state(&self) -> AppState {
+        let mut state = test_app_state();
+        // Bind the store before any helper can synchronously commit a session
+        // or project. A source predecessor belongs to exactly that store.
+        state.persistence_path = Arc::new(self.root.path().join("termal.sqlite"));
+        state
+    }
+
     fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
@@ -417,12 +428,14 @@ fn engram_recovery_fence_reports_readback_corruption_and_actual_sql_failure() {
         .as_ref()
         .unwrap()
         .execute_batch(
-            "CREATE TRIGGER fail_recovery_metadata_write BEFORE UPDATE ON app_state
+            "CREATE TRIGGER fail_recovery_metadata_write BEFORE INSERT ON state_metadata_units
          BEGIN SELECT RAISE(ABORT, 'recovery-write-failure'); END;",
         )
         .unwrap();
     let waiter = fixture.enqueue(target);
     fixture.receive(false);
+    fixture.wait_record("recovery-write-trigger");
+    let empty = collect_persist_delta_from_shared_state(&fixture.inner, empty.watermark);
     let error = fixture.write(&empty).unwrap_err();
     assert!(format!("{error:#}").contains("recovery-write-failure"));
     assert_eq!(
@@ -690,7 +703,7 @@ fn engram_admission_fence_requires_exact_committed_session_content() {
         content: changed,
     });
     fixture.receive(false);
-    fixture.write(&delta).unwrap();
+    fixture.write(&fixture.collect()).unwrap();
     assert_eq!(
         poll(&mismatch),
         None,
@@ -1030,7 +1043,7 @@ fn real_sql_failure_completes_fences_and_preserves_the_writer_error() {
         .as_ref()
         .unwrap()
         .execute_batch(
-            "CREATE TRIGGER fail_metadata_write BEFORE UPDATE ON app_state
+            "CREATE TRIGGER fail_metadata_write BEFORE INSERT ON state_metadata_units
          BEGIN SELECT RAISE(ABORT, 'injected-fence-write-failure'); END;",
         )
         .unwrap();
@@ -1119,10 +1132,10 @@ fn unproductive_fence_retries_grow_to_a_cap_without_resetting_on_successful_sql(
     let waiter = fixture.enqueue(PersistFenceTarget::WaitRegistration(target));
     fixture.receive(false);
     fixture.inner.lock().unwrap().delegation_waits.clear();
-    let delta = fixture.collect();
     let mut retry = PersistWorkerRetryState::default();
     let (phase_tx, phase_rx) = mpsc::channel();
     for milliseconds in [250, 500, 1000, 2000, 4000, 8000, 16000, 30000, 30000] {
+        let delta = fixture.collect();
         fixture.write(&delta).unwrap();
         assert!(!retry.finish_fenced_tick(&Ok(()), false, &mut fixture.batch));
         // Replace only the channel's timeout boundary. The production scheduler

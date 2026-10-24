@@ -7,21 +7,14 @@ fn federation_persist_image(metadata: &PersistedState) -> Value {
 }
 
 fn read_federation_persist_image(connection: &rusqlite::Connection) -> Result<Option<Value>> {
-    let encoded: Option<String> = connection
-        .query_row(
-            "SELECT value_json FROM app_state WHERE key=?1",
-            [SQLITE_METADATA_KEY],
-            |row| row.get(0),
-        )
-        .optional()?;
-    encoded
-        .map(|encoded| {
-            let raw: Value = serde_json::from_str(&encoded)?;
-            // Preserve the stored subtrees exactly: serde defaults belong only in
-            // the loaded domain, never in the digest of a previous schema image.
-            Ok(json!({"domain":raw["federation"], "settings":raw["preferences"]["federation"]}))
-        })
-        .transpose()
+    let Some(domain) = read_persisted_metadata_field(connection, "federation")? else {
+        return Ok(None);
+    };
+    let preferences = read_persisted_metadata_field(connection, "preferences")?
+        .unwrap_or(Value::Null);
+    // Read only this domain's units. A session persist must not reconstruct
+    // the entire global document merely to validate federation's marker.
+    Ok(Some(json!({"domain":domain, "settings":preferences["federation"]})))
 }
 
 fn federation_meta_version(connection: &rusqlite::Connection) -> Result<u64> {

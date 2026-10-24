@@ -2,6 +2,27 @@
 //! Exercises disposable host persistence and scripted control, never a live store.
 use super::*;
 
+// Capture the intended crash cut while the original admission is blocked.
+// The old worker keeps its original store and StateMutex; the restarted host
+// receives this coherent SQLite image and a separate StateMutex after joining.
+fn snapshot_retained_admission_restart_store(state: &AppState) -> PathBuf {
+    let snapshot = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("pre-loss-admission.sqlite");
+    let connection = open_sqlite_state_connection_unconfigured(state.persistence_path.as_path())
+        .expect("the original admission store should open");
+    connection
+        .execute(
+            "VACUUM INTO ?1",
+            rusqlite::params![snapshot.to_string_lossy().as_ref()],
+        )
+        .expect("the pre-loss SQLite snapshot should be coherent");
+    snapshot
+}
+
 struct BlockedAdmissionTransport {
     inner: Arc<ScriptedEngramControlTransport>,
     operation: &'static str,
@@ -348,7 +369,7 @@ fn stale_bind_reply_cannot_reprepare_an_exact_retained_successor() {
 
 #[test]
 fn restart_replays_cached_defer_then_resume_uses_a_fresh_evaluate_identity() {
-    let (state, session, receiver, _) = root_fixture([]);
+    let (mut state, session, receiver, _) = root_fixture([]);
     let scripted = ScriptedEngramControlTransport::new([
         bind_reply("restart-token"),
         defer_reply("cached-defer"),
@@ -395,7 +416,8 @@ fn restart_replays_cached_defer_then_resume_uses_a_fresh_evaluate_identity() {
         &mut PersistFenceBatch::default(),
     )
     .unwrap();
-    let mut loaded = load_state(state.persistence_path.as_path())
+    let restart_path = snapshot_retained_admission_restart_store(&state);
+    let mut loaded = load_state(&restart_path)
         .unwrap()
         .unwrap();
     {
@@ -409,7 +431,8 @@ fn restart_replays_cached_defer_then_resume_uses_a_fresh_evaluate_identity() {
     }
     release_tx.send(()).unwrap();
     worker.join().unwrap().unwrap();
-    *state.inner.lock().unwrap() = loaded;
+    state.persistence_path = Arc::new(restart_path);
+    state.inner = Arc::new(StateMutex::new(loaded));
     // The restarted state starts on its default clock; it runs on a
     // scripted one again, chosen before any target exists.
     state.select_test_scripted_engram_budget_clock();
@@ -722,7 +745,7 @@ fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
     let durable_path = state.persistence_path.clone();
     {
         let inner = state.inner.lock().unwrap();
-        persist_state_from_persisted(durable_path.as_path(), &PersistedState::from_inner(&inner))
+        persist_state(durable_path.as_path(), &inner)
             .unwrap();
     }
     state.shutdown_persist_blocking();
@@ -857,7 +880,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
     let durable_path = state.persistence_path.clone();
     {
         let inner = state.inner.lock().unwrap();
-        persist_state_from_persisted(durable_path.as_path(), &PersistedState::from_inner(&inner))
+        persist_state(durable_path.as_path(), &inner)
             .unwrap();
     }
     state.shutdown_persist_blocking();
@@ -1418,7 +1441,7 @@ fn writer_backed_trimmed_unpromoted_admission_replays_after_restart() {
                 begin_reply("grant"),
             ]
         };
-        let (state, session, receiver, _) = root_fixture([]);
+        let (mut state, session, receiver, _) = root_fixture([]);
         let transport = ScriptedEngramControlTransport::new(replies);
         let (observed_tx, observed_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
@@ -1511,7 +1534,8 @@ fn writer_backed_trimmed_unpromoted_admission_replays_after_restart() {
             &mut PersistFenceBatch::default(),
         )
         .unwrap();
-        let mut loaded = load_state(state.persistence_path.as_path())
+        let restart_path = snapshot_retained_admission_restart_store(&state);
+        let mut loaded = load_state(&restart_path)
             .unwrap()
             .unwrap();
         {
@@ -1540,7 +1564,8 @@ fn writer_backed_trimmed_unpromoted_admission_replays_after_restart() {
         }
         release_tx.send(()).unwrap();
         worker.join().unwrap().unwrap();
-        *state.inner.lock().unwrap() = loaded;
+        state.persistence_path = Arc::new(restart_path);
+        state.inner = Arc::new(StateMutex::new(loaded));
         // The restarted state starts on its default clock; it runs on a
         // scripted one again, chosen before any target exists.
         state.select_test_scripted_engram_budget_clock();

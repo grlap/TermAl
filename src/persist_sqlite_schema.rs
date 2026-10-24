@@ -51,6 +51,7 @@ const CURRENT_SQLITE_STATE_TABLE_COLUMNS: &[(&str, &[&str])] = &[
     ),
     ("session_overviews", &["session_id", "value_blob"]),
     ("app_state", &["key", "value_json"]),
+    ("state_metadata_units", &["field_name", "item_key", "kind", "value_json"]),
     ("session_prompt_histories", &["session_id", "value_json"]),
     ("delegations", &["id", "value_json"]),
     (
@@ -88,6 +89,7 @@ const CURRENT_SQLITE_STATE_TABLE_COLUMNS: &[(&str, &[&str])] = &[
 // `response_board_tabs` is intentionally absent: schema initialization seeds
 // the deterministic default tab before the first metadata snapshot is written.
 const SQLITE_STATE_METADATA_AUTHORITY_TABLES: &[&str] = &[
+    "state_metadata_units",
     "sessions",
     "messages",
     "session_overviews",
@@ -218,7 +220,7 @@ const SQLITE_STATE_AUXILIARY_SCHEMA_SQL: &str = "
 
 fn reject_unsupported_state_schema(detail: impl std::fmt::Display) -> anyhow::Error {
     anyhow!(
-        "unsupported state database schema ({detail}); this unreleased local state is not migrated. \
+        "unsupported state database schema ({detail}); this schema cannot be migrated by this build. \
          Move or delete `termal.sqlite` to reset local app state, then restart TermAl"
     )
 }
@@ -247,6 +249,13 @@ fn first_normalized_state_authority_table_with_rows(
     connection: &rusqlite::Connection,
 ) -> Result<Option<&'static str>> {
     for table_name in SQLITE_STATE_METADATA_AUTHORITY_TABLES {
+        if *table_name == "state_metadata_units"
+            && required_state_meta_value(connection, "schema_version")? == "2"
+        {
+            // This table is created only after the legacy authority has been
+            // validated, inside the migration transaction.
+            continue;
+        }
         // Table names come only from the static inventory above. SQLite does
         // not allow a bound identifier in this EXISTS query.
         let has_rows = connection
@@ -305,14 +314,9 @@ fn reject_invalid_persisted_state_metadata_shape(error: serde_json::Error) -> an
 fn validate_no_legacy_embedded_state(
     connection: &rusqlite::Connection,
 ) -> Result<Option<PersistedState>> {
-    let metadata = connection
-        .query_row(
-            "SELECT value_json FROM app_state WHERE key = ?1",
-            rusqlite::params![SQLITE_METADATA_KEY],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .context("failed to inspect state metadata authority")?;
+    let metadata = read_persisted_metadata_json(connection).map_err(|error| {
+        reject_unsupported_state_schema(format!("persisted state metadata units are invalid: {error:#}"))
+    })?;
     let persisted = if let Some(encoded) = metadata {
         let value: Value = serde_json::from_str(&encoded).map_err(|error| {
             reject_unsupported_state_schema(format!(
@@ -328,8 +332,14 @@ fn validate_no_legacy_embedded_state(
         }
         #[cfg(test)]
         PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(|count| count.set(count.get() + 1));
-        let persisted = serde_json::from_str::<PersistedState>(&encoded)
+        let mut persisted = serde_json::from_str::<PersistedState>(&encoded)
             .map_err(reject_invalid_persisted_state_metadata_shape)?;
+        let generation = metadata_unit_generation(connection)?;
+        persisted
+            .metadata_capture
+            .known
+            .store(generation, std::sync::atomic::Ordering::Release);
+        persisted.metadata_capture.predecessor = generation;
         Some(persisted)
     } else if let Some(table_name) = first_normalized_state_authority_table_with_rows(connection)? {
         return Err(reject_unsupported_state_schema(format!(
@@ -424,6 +434,7 @@ fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> 
     transaction
         .execute_batch(SQLITE_STATE_AUXILIARY_SCHEMA_SQL)
         .context("failed to initialize current SQLite auxiliary state schema")?;
+    transaction.execute_batch(SQLITE_METADATA_UNITS_SCHEMA)?;
     ensure_sqlite_message_overview_columns(&transaction)?;
     ensure_sqlite_response_board_schema(&transaction)?;
     backfill_missing_sqlite_session_overviews(&transaction)?;
@@ -464,16 +475,17 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
 
     // Existing databases must pass every read-only compatibility check before
     // a persistent PRAGMA, CREATE/ALTER, backfill, or metadata write can run.
+    migrate_metadata_units(connection)?;
     validate_current_sqlite_state_schema(connection)?;
     finish_existing_sqlite_state_schema_setup(connection)
 }
 
 /// Applies maintenance after the caller's applicable read-only checks.
 ///
-/// The startup load path captures and returns the persisted `app_state`
-/// metadata before calling this helper. Consequently, maintenance here must
-/// not mutate `app_state`; a future metadata migration must instead move the
-/// capture to after that migration so the loader cannot observe stale state.
+/// The startup load path captures validated metadata units after any supported
+/// format migration and before calling this helper. Maintenance here must not
+/// change that metadata authority; the loader must receive the same image it
+/// validated. The old `app_state` row remains migration provenance.
 fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) -> Result<()> {
     configure_sqlite_state_connection(connection)?;
     ensure_sqlite_message_overview_columns(connection)?;
@@ -486,7 +498,7 @@ fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) 
 }
 
 /// Prepares the SQLite state database for a startup load and returns the
-/// already-deserialized metadata row.
+/// already-deserialized metadata image.
 ///
 /// Startup alone pays for the fail-closed legacy-authority checks. Returning
 /// the value parsed from the raw metadata string keeps the guard and loader on
@@ -503,6 +515,7 @@ fn ensure_sqlite_state_schema_for_load(
 
     // Existing databases must pass every read-only compatibility and startup
     // authority check before a persistent PRAGMA or maintenance write can run.
+    migrate_metadata_units(connection)?;
     validate_current_sqlite_state_schema(connection)?;
     let persisted = validate_no_legacy_embedded_state(connection)?;
     finish_existing_sqlite_state_schema_setup(connection)?;
@@ -511,6 +524,9 @@ fn ensure_sqlite_state_schema_for_load(
 
 #[cfg(test)]
 fn seed_current_state_auxiliary_tables(connection: &rusqlite::Connection) {
+    if !sqlite_state_user_table_names(connection).unwrap().contains("state_metadata_units") {
+        connection.execute_batch(SQLITE_METADATA_UNITS_SCHEMA).unwrap();
+    }
     connection
         .execute_batch(SQLITE_STATE_AUXILIARY_SCHEMA_SQL)
         .expect("current auxiliary state tables should initialize");
@@ -523,6 +539,7 @@ fn seed_current_state_core_tables(connection: &rusqlite::Connection) {
     connection
         .execute_batch(SQLITE_STATE_CORE_SCHEMA_SQL)
         .expect("current core state tables should initialize");
+    connection.execute_batch(SQLITE_METADATA_UNITS_SCHEMA).unwrap();
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .expect("fixture writes must enforce foreign keys");
@@ -544,13 +561,36 @@ fn seed_current_state_core_tables(connection: &rusqlite::Connection) {
 
 #[cfg(test)]
 fn seed_current_state_metadata(connection: &rusqlite::Connection) {
-    connection
-        .execute(
-            "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
-            rusqlite::params![
-                SQLITE_METADATA_KEY,
-                r#"{"nextSessionNumber":1,"nextMessageNumber":1,"projects":[],"sessions":[]}"#
-            ],
-        )
-        .expect("current metadata authority should seed");
+    let metadata = PersistedState::metadata_from_inner(&StateInner::new());
+    replace_metadata_units_for_test(connection, serde_json::to_value(metadata).unwrap());
+}
+
+// Deliberate fixture injection, bypassing production semantic validation. A
+// caller with concurrent readers supplies its existing transaction boundary.
+#[cfg(test)]
+fn replace_metadata_units_for_test(connection: &rusqlite::Connection, value: Value) {
+    // Whole-struct serde omits default collections; the durable format requires
+    // every descriptor. Fill only omitted fields from a complete default
+    // projection, then overlay raw fixture values (including deliberate errors).
+    let mut complete = metadata_units_to_value(
+        &project_metadata_units(&PersistedState::metadata_from_inner(&StateInner::new())).unwrap(),
+    ).unwrap();
+    for (field, value) in value.as_object().unwrap() {
+        complete[field] = value.clone();
+    }
+    connection.execute("DELETE FROM state_metadata_units", []).unwrap();
+    for ((field, key), (kind, encoded)) in metadata_value_to_units(complete).unwrap() {
+        connection.execute("INSERT INTO state_metadata_units(field_name,item_key,kind,value_json) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![field,key,kind,encoded]).unwrap();
+    }
+}
+
+#[cfg(test)]
+fn seed_primary2_state_schema_for_test(connection: &rusqlite::Connection) {
+    connection.execute_batch(include_str!("tests/fixtures/state_schema2.sql")).unwrap();
+    for (key,value) in [("schema_version", "2"),
+        (SQLITE_PROMPT_HISTORY_STORAGE_KEY, SQLITE_PROMPT_HISTORY_STORAGE_VERSION)] {
+        connection.execute("INSERT INTO meta(key,value) VALUES(?1,?2)", [key,value]).unwrap();
+    }
+    seed_federation_host_identity(connection).unwrap();
 }

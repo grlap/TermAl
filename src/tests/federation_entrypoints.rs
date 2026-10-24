@@ -171,8 +171,7 @@ async fn activation_revalidates_snapshot_after_a_delayed_commit() {
         result=&mut job => panic!("activation route did not reach commit cut: {:?}",result.unwrap()),
         fence=writer.take()=>fence,
     };
-    let state = PersistedState::from_inner(&pair.central.inner.lock().unwrap());
-    persist_persisted_state_to_sqlite(pair.central.persistence_path.as_path(), &state).unwrap();
+    persist_state(pair.central.persistence_path.as_path(), &pair.central.inner.lock().unwrap()).unwrap();
     let connection = rusqlite::Connection::open(pair.central.persistence_path.as_path()).unwrap();
     assert!(fence.target.is_already_durable(&connection).unwrap());
     {

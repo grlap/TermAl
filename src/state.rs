@@ -1478,6 +1478,7 @@ impl EngramProjectResetFences {
 
 /// Represents state inner.
 struct StateInner {
+    metadata_predecessor: Arc<std::sync::atomic::AtomicU64>,
     federation: FederationState,
     federation_durable: bool,
     federation_continuity_lost: bool,
@@ -1677,6 +1678,7 @@ impl StateInner {
     /// Creates a new instance.
     fn new() -> Self {
         Self {
+            metadata_predecessor: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             federation: FederationState::default(),
             federation_durable: false,
             federation_continuity_lost: false,

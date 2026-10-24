@@ -18,7 +18,7 @@ mod history;
 #[test]
 fn registration_ack_waits_for_the_actual_background_sqlite_commit() {
     let mut fixture = FenceFixture::new();
-    let mut state = test_app_state();
+    let mut state = fixture.app_state();
     let root = fixture.root.path().join("project");
     fs::create_dir_all(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
@@ -38,7 +38,6 @@ fn registration_ack_waits_for_the_actual_background_sqlite_commit() {
     )
     .unwrap();
     state.persist_tx = fixture.tx.clone();
-    state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
     fixture.inner = state.inner.clone();
     let request = RegisterTestRunRequest {
         run_id: run_id.to_owned(),
@@ -138,7 +137,7 @@ async fn registration_fence_failures_report_the_actual_phase_and_writer_progress
         ),
     ] {
         let mut fixture = FenceFixture::new();
-        let mut state = test_app_state();
+        let mut state = fixture.app_state();
         let root = fixture.root.path().join("registration-diagnostic-project");
         fs::create_dir_all(&root).unwrap();
         run_git_test_command(&root, &["init", "--quiet"]);
@@ -158,7 +157,6 @@ async fn registration_fence_failures_report_the_actual_phase_and_writer_progress
         )
         .unwrap();
         state.persist_tx = fixture.tx.clone();
-        state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
         fixture.inner = state.inner.clone();
         let request = RegisterTestRunRequest {
             run_id: run_id.clone(),
@@ -269,7 +267,7 @@ async fn registration_fence_failures_report_the_actual_phase_and_writer_progress
 #[test]
 fn test_run_compaction_keeps_full_detail_until_its_exact_proof_reaches_sqlite() {
     let mut fixture = FenceFixture::new();
-    let mut state = test_app_state();
+    let mut state = fixture.app_state();
     let root = fixture.root.path().join("compaction-project");
     fs::create_dir(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
@@ -281,7 +279,6 @@ fn test_run_compaction_keeps_full_detail_until_its_exact_proof_reaches_sqlite() 
         let index = inner.find_session_index(&session).unwrap();
         inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
     }
-    state.persistence_path = Arc::new(fixture.root.path().join("termal.sqlite"));
     for number in 0..TEST_RUN_TERMINAL_RUNS_PER_PROJECT {
         let key = format!("compaction-fence-{number}");
         state.note_engram_command_started(

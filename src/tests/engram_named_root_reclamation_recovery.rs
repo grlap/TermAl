@@ -423,8 +423,8 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
         if occurrence + 1 == ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
             // Both vectors persist. Restart must preserve the exact durable
             // notice identities without making them scarce journal pins.
-            let bytes = serde_json::to_vec(&PersistedState::from_inner(&inner)).unwrap();
-            let restored = serde_json::from_slice::<PersistedState>(&bytes).unwrap().into_inner().unwrap();
+            persist_state(claimed.state.persistence_path.as_path(), &inner).unwrap();
+            let restored = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
             assert_eq!(restored.engram_work_naming_history[0].retirements,
                 inner.engram_work_naming_history[0].retirements);
             *inner = restored;
@@ -673,16 +673,16 @@ fn named_root_reclamation_transition_controls_compacted_owner_recovers_candidate
             assert!(error.message.contains("superseded authority image"), "{error:?}");
             assert!(reached.load(std::sync::atomic::Ordering::SeqCst));
         }
-        let bytes = {
+        {
             let mut inner = claimed.state.inner.lock().unwrap();
             inner.test_engram_authority_ack_boundary = None;
             assert!(inner.engram_named_root_journal.is_empty());
             assert!(inner.engram_work_source_roots.is_empty());
             assert_eq!(inner.engram_work_naming_history[0].retirements, vec![notice.clone()]);
-            serde_json::to_vec(&PersistedState::from_inner(&inner)).unwrap()
-        };
-        *claimed.state.inner.lock().unwrap() = serde_json::from_slice::<PersistedState>(&bytes)
-            .unwrap().into_inner().unwrap();
+            persist_state(claimed.state.persistence_path.as_path(), &inner).unwrap();
+        }
+        *claimed.state.inner.lock().unwrap() =
+            load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
         claimed.state.select_test_engram_budget_clock(clock.clone());
         install_control_only_transport(&claimed.state, claimed.transport.clone());
         let owner = claimed.state.prepare_engram_authority(&entry.store, &notice.binding,

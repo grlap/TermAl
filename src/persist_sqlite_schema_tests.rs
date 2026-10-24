@@ -51,7 +51,7 @@ mod sqlite_schema_tests {
                 rendered.contains("Move or delete `termal.sqlite`"),
                 "{rendered}"
             );
-            assert!(rendered.contains("not migrated"), "{rendered}");
+            assert!(rendered.contains("cannot be migrated"), "{rendered}");
             let state_table_count: u32 = connection
                 .query_row(
                     "
@@ -89,6 +89,7 @@ mod sqlite_schema_tests {
                 "session_overviews".to_owned(),
                 "session_prompt_histories".to_owned(),
                 "sessions".to_owned(),
+                "state_metadata_units".to_owned(),
             ])
         );
         let stored_version: String = connection
@@ -98,7 +99,7 @@ mod sqlite_schema_tests {
                 |row| row.get(0),
             )
             .expect("current schema version should exist");
-        assert_eq!(stored_version, "2");
+        assert_eq!(stored_version, SQLITE_SCHEMA_VERSION);
         let prompt_history_storage_version: String = connection
             .query_row(
                 "SELECT value FROM meta WHERE key = ?1",
@@ -238,8 +239,7 @@ mod sqlite_schema_tests {
         for embedded_key in ["sessions", "delegations"] {
             let connection =
                 rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
-            ensure_sqlite_state_schema(&connection)
-                .expect("fresh current schema should initialize");
+            seed_primary2_state_schema_for_test(&connection);
             let encoded = format!(r#"{{"{embedded_key}":[{{"id":"legacy"}}]}}"#);
             connection
                 .execute(
@@ -263,7 +263,7 @@ mod sqlite_schema_tests {
     fn sqlite_schema_guard_gives_reset_guidance_for_malformed_app_state_metadata() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
-        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        seed_primary2_state_schema_for_test(&connection);
         connection
             .execute(
                 "INSERT INTO app_state(key, value_json) VALUES(?1, '{ not json')",
@@ -321,10 +321,10 @@ mod sqlite_schema_tests {
         );
         let rendered = format!("{error:#}");
         assert!(
-            rendered.contains("missing app_state `metadataState`"),
+            rendered.contains("missing required metadata descriptor"),
             "{rendered}"
         );
-        assert!(rendered.contains("sessions"), "{rendered}");
+        assert!(rendered.contains("federation"), "{rendered}");
         drop(connection);
         assert_eq!(
             fs::read(&path).expect("rejected database bytes should remain readable"),
@@ -340,8 +340,7 @@ mod sqlite_schema_tests {
         {
             let connection = open_sqlite_state_connection_unconfigured(&path)
                 .expect("file-backed sqlite should open");
-            ensure_sqlite_state_schema_for_path(&connection, &path)
-                .expect("fresh current schema should initialize");
+            seed_primary2_state_schema_for_test(&connection);
             connection
                 .execute(
                     "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
@@ -746,7 +745,7 @@ mod sqlite_schema_tests {
         assert!(rendered.contains("has_canvas_position"), "{rendered}");
         assert!(rendered.contains("placement"), "{rendered}");
         assert!(rendered.contains("tab_id"), "{rendered}");
-        assert!(rendered.contains("not migrated"), "{rendered}");
+        assert!(rendered.contains("cannot be migrated"), "{rendered}");
         assert!(
             rendered.contains("Move or delete `termal.sqlite`"),
             "{rendered}"

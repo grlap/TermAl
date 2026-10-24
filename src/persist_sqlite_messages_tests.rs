@@ -83,6 +83,7 @@ mod sqlite_message_storage_tests {
     fn session(count: usize) -> SerializedPersistedSession {
         SerializedPersistedSession {
             session_id: "session-test".into(),
+            local_identity_namespace: true,
             message_start_index: 0,
             message_count: count,
             write_overview: true,

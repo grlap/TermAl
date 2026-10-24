@@ -42,8 +42,7 @@ impl HeldWriter {
         assert!(!fence.target.is_already_durable(&before).unwrap(),
             "held content fence must name an uncommitted reference, not unrelated durable state");
         drop(before);
-        let image = PersistedState::from_inner(&app.inner.lock().unwrap());
-        persist_persisted_state_to_sqlite(app.persistence_path.as_path(), &image).unwrap();
+        persist_state(app.persistence_path.as_path(), &app.inner.lock().unwrap()).unwrap();
         let committed = rusqlite::Connection::open(app.persistence_path.as_path()).unwrap();
         assert!(fence.target.is_already_durable(&committed).unwrap(),
             "a requested write alone is not a successful durability acknowledgement");
@@ -65,9 +64,9 @@ impl RejectWrites {
     fn install(app: &AppState) -> Self {
         let connection = rusqlite::Connection::open(app.persistence_path.as_path()).unwrap();
         connection.execute_batch(
-            "CREATE TRIGGER reject_reference_insert BEFORE INSERT ON app_state
+            "CREATE TRIGGER reject_reference_insert BEFORE INSERT ON state_metadata_units
              BEGIN SELECT RAISE(ABORT,'reference fixture write failure'); END;
-             CREATE TRIGGER reject_reference_update BEFORE UPDATE ON app_state
+             CREATE TRIGGER reject_reference_update BEFORE UPDATE ON state_metadata_units
              BEGIN SELECT RAISE(ABORT,'reference fixture write failure'); END;"
         ).unwrap();
         Self(connection)

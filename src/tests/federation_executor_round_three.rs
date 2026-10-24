@@ -18,8 +18,7 @@ fn finish_recovered_handoff(fixture: &mut Fixture, input: &mpsc::Receiver<Claude
     let fence = writer.take(prompt_delivery::HeldFence::WriteAhead);
     {
         let inner = fixture.satellite.inner.lock().unwrap();
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(),
-            &PersistedState::from_inner(&inner)).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
     }
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
     assert!(fence.target.is_already_durable(&connection).unwrap());
@@ -224,8 +223,7 @@ async fn federation_m4_round_three_owned_worker_keeps_one_credit_until_queue_is_
     assert_eq!(fixture.channel.bound.permits.available_permits(), capacity - 1);
     {
         let inner = fixture.satellite.inner.lock().unwrap();
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(),
-            &PersistedState::from_inner(&inner)).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
     }
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
     assert!(fence.target.is_already_durable(&connection).unwrap());

@@ -2784,13 +2784,12 @@ fn a_restart_notice_is_told_once_through_the_store() {
     // down, so nothing else marks it to be written again.
     turn.finish();
     assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
-    let temp = TestTempRoot::create("termal-engram-carried-restart-store");
-    let path = temp.path().join("termal.sqlite");
+    let path = turn.state.persistence_path.as_path();
     {
         let inner = turn.state.inner.lock().expect("state mutex poisoned");
-        persist_state(&path, &inner).expect("the state persists");
+        persist_state(path, &inner).expect("the state persists");
     }
-    let loaded = load_state(&path)
+    let loaded = load_state(path)
         .expect("the state loads")
         .expect("a state was stored");
     let index = loaded
@@ -2811,8 +2810,8 @@ fn a_restart_notice_is_told_once_through_the_store() {
     // session), now without the marker, so a second restart does not repeat
     // the notice.
     assert_ne!(record.mutation_stamp, 0);
-    persist_state(&path, &loaded).expect("the loaded state persists");
-    let again = load_state(&path)
+    persist_state(path, &loaded).expect("the loaded state persists");
+    let again = load_state(path)
         .expect("the state loads")
         .expect("a state was stored");
     let index = again

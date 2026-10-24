@@ -34,8 +34,7 @@ async fn federation_m4_round_four_cancelled_association_releases_credit_and_late
             entry.pending_prompt.id == operations[0].queue_identity()));
         assert!(record.prompt_deliveries.contains_key(&operations[0].queue_identity()),
             "cancellation retains the exact federation receipt tombstone");
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(),
-            &PersistedState::from_inner(&inner)).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
     }
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
     assert!(!fence.target.is_already_durable(&connection).unwrap(),
@@ -169,7 +168,7 @@ async fn federation_m4_round_four_stopping_worker_finishes_only_its_current_asso
     fixture.satellite.federation_executor_wake_signal.stop();
     {
         let inner = fixture.satellite.inner.lock().unwrap();
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(), &PersistedState::from_inner(&inner)).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
     }
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
     assert!(fence.target.is_already_durable(&connection).unwrap());
@@ -198,8 +197,7 @@ async fn federation_m4_round_four_receiver_recovery_is_joined_and_stops_between_
     assert_join_pending(join.as_mut()).await;
     {
         let inner = fixture.satellite.inner.lock().unwrap();
-        persist_state_from_persisted(fixture.satellite.persistence_path.as_path(),
-            &PersistedState::from_inner(&inner)).unwrap();
+        persist_state(fixture.satellite.persistence_path.as_path(), &inner).unwrap();
     }
     let connection = rusqlite::Connection::open(fixture.satellite.persistence_path.as_path()).unwrap();
     assert!(fence.target.is_already_durable(&connection).unwrap());

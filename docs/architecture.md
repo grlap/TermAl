@@ -709,7 +709,7 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 
 ```
 ~/.termal/
-|-- termal.sqlite          # primary store: app_state + sessions + delegations tables (+ WAL/-shm sidecars)
+|-- termal.sqlite          # primary store: metadata units + sessions + delegations (+ WAL/-shm sidecars)
 |-- coordination.sqlite    # mailbox + coordination-board tables, isolated writer/WAL
 |-- orchestrators.json     # reusable orchestrator templates
 |-- termal-server.lock     # exclusive OS lock held by the one server using this directory
@@ -735,8 +735,8 @@ committed to SQLite. The expected loss bound is one un-drained mutation; once
 the backend restarts, persisted SQLite state is the source of truth.
 
 `PersistedState` is the logical projection of `StateInner` that excludes
-runtime handles and pending approval maps. On disk, `app_state` carries global
-metadata, `sessions` carries compact per-session metadata, and `delegations`
+runtime handles and pending approval maps. On disk, `state_metadata_units`
+carries global metadata, `sessions` carries compact per-session metadata, and `delegations`
 carries delegation records. Transcript bodies, their compact overview, and
 bounded composer history live separately in `messages`, `session_overviews`,
 and `session_prompt_histories`. Prompt history has its own mutation watermark,
@@ -746,6 +746,11 @@ serializing and rewriting up to 512 KiB of user prompts. The normalized
 This split lets the background persist thread write only the **changed** rows
 on each commit — see `collect_persist_delta`, `persist_delta_via_cache`, and
 `SqlitePersistConnectionCache` in `src/persist.rs`.
+Global fields and collection members are independent units, with complete
+descriptors and an immutable captured predecessor to reject stale writers.
+`app_state.metadataState` remains upgrade provenance only. See
+[incremental metadata](features/persistence-metadata-units.md) and the
+[storage layout](features/sqlite-session-storage.md) for the full contract.
 
 On startup, the backend loads state from `termal.sqlite` when it exists and
 otherwise boots a fresh local state. Template definitions live in
@@ -753,12 +758,12 @@ otherwise boots a fresh local state. Template definitions live in
 from running instances. Normalized session and delegation rows are independent
 startup failure boundaries: a malformed record is reported and skipped rather
 than aborting the process and hiding every healthy session. The primary state
-database must use the current normalized v2 authority: all required state
-tables with their canonical column sets, `schema_version=2`,
+database must use the current normalized authority: all required state
+tables with their canonical column sets, `schema_version=2-metadata-units-2`,
 `prompt_history_storage_version=1`, and no metadata-embedded session,
 delegation, or prompt-history records. Unrelated extra tables are tolerated.
-Present `app_state.metadataState` must deserialize as current typed metadata;
-it may be absent only while all normalized session, message, overview,
+Metadata units must pass complete inventory, kind, member-count and typed
+validation; they may be absent only while all normalized session, message, overview,
 prompt-history, delegation, and board-card tables are empty after fresh schema
 initialization. Only the five columns added by retained
 message-overview and response-board maintenance may initially be absent;
@@ -766,9 +771,11 @@ unexpected columns reject, and the post-maintenance shape must be canonical.
 Any parseable session row carrying an array-valued obsolete
 `session.promptHistory` key is rejected, including an empty array. Non-array
 values and malformed session JSON remain row-level quarantine concerns.
-Validation runs before persistent PRAGMAs or schema maintenance. Obsolete or
-partial unreleased schemas are rejected with reset guidance rather than
-migrated.
+Validation runs before persistent PRAGMAs or schema maintenance. Supported
+primary-2 and emergency-units-1 stores upgrade atomically; unsupported or
+partial schemas refuse with reset guidance. Older binaries refuse the new
+marker before modifying the store. Offline rollback rebuilds current metadata,
+or refuses unsafe images, as specified in the incremental metadata document.
 
 Coordination bootstrap runs before the persist worker, coordination stores,
 and HTTP listener. An empty `coordination.sqlite` is initialized atomically

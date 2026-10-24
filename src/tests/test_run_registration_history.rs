@@ -156,10 +156,7 @@ fn history_registration_case(
         let connection = rusqlite::Connection::open_with_flags(
             state.persistence_path.as_path(), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         ).unwrap();
-        let metadata: String = connection.query_row(
-            "SELECT value_json FROM app_state WHERE key = ?1", [SQLITE_METADATA_KEY],
-            |row| row.get(0),
-        ).unwrap();
+        let metadata = read_persisted_metadata_json(&connection).unwrap().unwrap();
         let metadata: Value = serde_json::from_str(&metadata).unwrap();
         serde_json::from_value(metadata["testRunRegistrations"][id.as_str()].clone()).unwrap()
     };
