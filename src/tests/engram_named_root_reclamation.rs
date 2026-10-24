@@ -18,6 +18,10 @@ mod eligibility {
     include!("engram_named_root_reclamation_eligibility.rs");
 }
 
+mod scheduler {
+    include!("engram_named_root_reclamation_scheduler.rs");
+}
+
 mod retry {
     include!("engram_named_root_reclamation_retry.rs");
 }
@@ -165,7 +169,19 @@ fn named_root_reclamation_unknown_old_binding_is_retained() { recovery_retains_u
 
 fn reclamation_plan(claimed: &ClaimedRoot) -> Vec<EngramRootReclamationTask> {
     let now = claimed.state.engram_budget_clock().now();
-    engram_root_reclamation_plan_locked(&claimed.state.inner.lock().unwrap(), now)
+    let (snapshot, expected, disposition) = {
+        let inner = claimed.state.inner.lock().unwrap();
+        (EngramRootReclamationSnapshot::capture(&inner),
+            engram_root_reclamation_plan_locked(&inner, now),
+            engram_named_root_disposition_due_locked(&inner, now))
+    };
+    let plan = snapshot.plan(now);
+    assert_eq!(plan.iter().map(|task| (&task.root, &task.route)).collect::<Vec<_>>(),
+        expected.iter().map(|task| (&task.root, &task.route)).collect::<Vec<_>>(),
+        "the snapshot plan must equal the original locked planner");
+    assert_eq!(snapshot.disposition_due(now), disposition,
+        "the snapshot disposition decision must equal the original locked scan");
+    plan
 }
 
 fn assert_root_retained(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot) {

@@ -49,6 +49,13 @@ fn reader_facts(claimed: &ClaimedRoot, session_id: &str) -> (ReaderFacts, Reader
         .map(|target| (target.routing_token.clone(), target.settings.authority_store_key.clone()));
     let view = engram_session_reader_view_locked(&inner, session_id)
         .map(|view| (view.routing_token.map(str::to_owned), view.store.cloned()));
+    let snapshot = EngramRootReclamationSnapshot::capture(&inner);
+    drop(inner);
+    let reader = snapshot.readers().into_iter().find(|(session, _)| session.id == session_id)
+        .map(|(_, store)| store.clone());
+    assert_eq!(reader, view.as_ref().filter(|(token, _)| token.is_some())
+        .and_then(|(_, store)| store.clone()),
+        "off-lock metadata must preserve the full target's reader eligibility");
     (target, view)
 }
 

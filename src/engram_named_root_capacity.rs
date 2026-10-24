@@ -234,7 +234,9 @@ fn engram_named_root_release_pending(
 }
 
 /// Whether a disposition pass has work now: a pending release to confirm, or
-/// a legacy or claim-refused root it has not examined lately. Lock-only.
+/// a legacy or claim-refused root it has not examined lately. Test oracle for
+/// the snapshot scheduler; production disposition still revalidates its work.
+#[cfg(test)]
 fn engram_named_root_disposition_due_locked(inner: &StateInner, now: std::time::Instant) -> bool {
     let schedule = &inner.engram_root_reclamation;
     inner

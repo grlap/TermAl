@@ -36,6 +36,24 @@ struct EngramRootReclamationTask {
     route: EngramRootReclamationRoute,
 }
 
+include!("engram_root_reclamation_snapshot.rs");
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ENGRAM_ROOT_RECLAMATION_PLANNING: std::cell::RefCell<
+        Option<Box<dyn Fn(&str, &[EngramRootReclamationTask])>>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn engram_root_reclamation_planning_boundary(phase: &str, plan: &[EngramRootReclamationTask]) {
+    TEST_ENGRAM_ROOT_RECLAMATION_PLANNING.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook(phase, plan);
+        }
+    });
+}
+
 struct EngramRootReclamationFlight {
     state: AppState,
     id: String,
@@ -116,6 +134,7 @@ fn engram_root_reclamation_route_current(
 /// Whether an evaluator delegation of `work_id` in `store` is open (queued,
 /// running or held) and has not submitted: its evaluation still has to pass
 /// the root check. Its own budget ends it, so it never pins a root for good.
+#[cfg(test)]
 fn engram_work_has_open_evaluation_locked(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
@@ -140,6 +159,9 @@ fn engram_work_has_open_evaluation_locked(
     })
 }
 
+// Retain the former locked planner as a differential test oracle. Production
+// scheduling uses the narrow owned snapshot, never this state-wide scan.
+#[cfg(test)]
 fn engram_root_reclamation_plan_locked(
     inner: &StateInner,
     now: std::time::Instant,
@@ -384,7 +406,7 @@ impl AppState {
     /// also implies single-flight per store. Control reads stay off its thread.
     fn schedule_engram_root_reclamation(&self, force: bool) -> &'static str {
         let now = self.engram_budget_clock().now();
-        let (id, plan) = {
+        let (id, snapshot) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if inner.engram_root_reclamation.flight.is_some() {
                 return "a bounded reclamation pass is already running";
@@ -392,20 +414,26 @@ impl AppState {
             if !force && inner.engram_root_reclamation.next_due.is_some_and(|due| now < due) {
                 return "the recurring pass is not due yet";
             }
-            let plan = engram_root_reclamation_plan_locked(&inner, now);
-            // A disposition that is due runs in the same flight even when no
-            // canonical read is planned (engram_named_root_capacity.rs).
-            if plan.is_empty() && !engram_named_root_disposition_due_locked(&inner, now) {
-                inner.engram_root_reclamation.next_due = Some(now + ENGRAM_ROOT_RECLAMATION_BUDGET);
-                return "no eligible reclamation pass was scheduled";
-            }
+            let snapshot = EngramRootReclamationSnapshot::capture(&inner);
             let id = Uuid::new_v4().to_string();
             inner.engram_root_reclamation.flight = Some(id.clone());
             inner.engram_root_reclamation.next_due = Some(now + ENGRAM_ROOT_RECLAMATION_BUDGET);
-            (id, plan)
+            (id, snapshot)
         };
-        let state = self.clone();
+        // Reserve the flight before unlocking: another scheduler or an
+        // operator release cannot overtake this planning pass. Every exit,
+        // including an empty plan or failed spawn, releases only this flight.
         let flight = EngramRootReclamationFlight { state: self.clone(), id };
+        let plan = snapshot.plan(now);
+        #[cfg(test)]
+        engram_root_reclamation_planning_boundary("selected", &plan);
+        // A disposition that is due runs in the same flight even when no
+        // canonical read is planned (engram_named_root_capacity.rs).
+        if plan.is_empty() && !snapshot.disposition_due(now) {
+            return "no eligible reclamation pass was scheduled";
+        }
+        drop(snapshot);
+        let state = self.clone();
         match std::thread::Builder::new().name("engram-root-reclamation".to_owned())
             .spawn(move || {
                 let flight = flight;
