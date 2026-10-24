@@ -146,7 +146,7 @@ fn seed_remote_proxy_session_via_apply_delta(
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
     full_remote_session.preview = "seed preview".to_owned();
-    full_remote_session.messages = messages;
+    full_remote_session.messages = (messages).into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = full_remote_session.messages.len() as u32;
     full_remote_session.session_mutation_stamp = Some(10);
@@ -2160,7 +2160,7 @@ fn cleared_remote_replay_cache_still_rejects_duplicate_text_by_offset() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello")];
+    full_remote_session.messages = (vec![remote_text_message("remote-message-1", "Hello")]).into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
     full_remote_session.session_mutation_stamp = Some(10);

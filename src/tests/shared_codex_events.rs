@@ -211,8 +211,8 @@ fn appended_codex_completion_preserves_prior_and_split_bubbles() {
             .messages;
         assert_eq!(after.len(), 3);
         assert_eq!(
-            serde_json::to_value(&after[..2]).unwrap(),
-            serde_json::to_value(&before[..2]).unwrap()
+            serde_json::to_value(after.window(..2)).unwrap(),
+            serde_json::to_value(before.window(..2)).unwrap()
         );
         match &after[2] {
             Message::Text { id, text, .. } => {
@@ -1121,11 +1121,13 @@ fn assert_shared_codex_turn_completed_uses_available_identity(
     let before_record = {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-        (record.active_turn_generation,
+        (
+            record.active_turn_generation,
             serde_json::to_value(&record.prompt_deliveries).unwrap(),
             serde_json::to_value(&record.provider_capacity_retry).unwrap(),
             record.orchestrator_auto_dispatch_blocked,
-            record.queued_prompts.len())
+            record.queued_prompts.len(),
+        )
     };
     let mut turn = json!({ "error": null });
     if let Some(event_turn_id) = event_turn_id {
@@ -1155,17 +1157,29 @@ fn assert_shared_codex_turn_completed_uses_available_identity(
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     if unbound_explicit_terminal {
-        let before_session = before.sessions.iter().find(|session| session.id == session_id).unwrap();
+        let before_session = before
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
         assert_eq!(session.status, SessionStatus::Active);
-        assert_eq!(serde_json::to_value(session).unwrap(), serde_json::to_value(before_session).unwrap(),
-            "an unbound explicit terminal changes no public session state");
+        assert_eq!(
+            serde_json::to_value(session).unwrap(),
+            serde_json::to_value(before_session).unwrap(),
+            "an unbound explicit terminal changes no public session state"
+        );
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-        assert_eq!(before_record, (record.active_turn_generation,
-            serde_json::to_value(&record.prompt_deliveries).unwrap(),
-            serde_json::to_value(&record.provider_capacity_retry).unwrap(),
-            record.orchestrator_auto_dispatch_blocked,
-            record.queued_prompts.len()));
+        assert_eq!(
+            before_record,
+            (
+                record.active_turn_generation,
+                serde_json::to_value(&record.prompt_deliveries).unwrap(),
+                serde_json::to_value(&record.provider_capacity_retry).unwrap(),
+                record.orchestrator_auto_dispatch_blocked,
+                record.queued_prompts.len()
+            )
+        );
         drop(inner);
         let shared = runtime.sessions.lock().unwrap();
         let shared = &shared[&session_id];
@@ -1176,7 +1190,10 @@ fn assert_shared_codex_turn_completed_uses_available_identity(
         assert!(shared.deferred_terminals.is_empty());
         assert!(shared.retired_turn_ids.is_empty());
         assert!(!shared.terminal_identity_unresolved);
-        assert!(input_rx.try_recv().is_err(), "no provider work or queue promotion");
+        assert!(
+            input_rx.try_recv().is_err(),
+            "no provider work or queue promotion"
+        );
     } else {
         assert_eq!(session.status, SessionStatus::Idle);
         assert_eq!(session.preview, "Ready for a prompt.");
@@ -1874,7 +1891,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     assert!(matches!(
-        session.messages.as_slice(),
+        session.messages.iter().collect::<Vec<_>>().as_slice(),
         [Message::Text { text, .. }] if text == "Previous shared Codex answer."
     ));
 

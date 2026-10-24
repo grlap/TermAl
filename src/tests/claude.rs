@@ -152,8 +152,8 @@ fn appended_claude_completion_preserves_prior_and_split_bubbles() {
                 .messages;
             assert_eq!(after.len(), 3);
             assert_eq!(
-                serde_json::to_value(&after[..2]).unwrap(),
-                serde_json::to_value(&before[..2]).unwrap()
+                serde_json::to_value(after.window(..2)).unwrap(),
+                serde_json::to_value(before.window(..2)).unwrap()
             );
             match &after[2] {
                 Message::Text { id, text, .. } => {

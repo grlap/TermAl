@@ -1048,6 +1048,7 @@ include!("engram_begin_replay.rs");
 include!("engram_begin_boot.rs");
 include!("engram_retry_schedule.rs");
 include!("provider_capacity_retry.rs");
+include!("message_sequence.rs");
 include!("messages.rs");
 include!("workspace_watch.rs");
 include!("file_event_attribution.rs");

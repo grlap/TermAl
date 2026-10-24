@@ -558,17 +558,17 @@ fn build_transition_result_text(
     match mode {
         OrchestratorTransitionResultMode::None => String::new(),
         OrchestratorTransitionResultMode::LastResponse => {
-            latest_transition_message_text(current_turn_messages).unwrap_or_default()
+            latest_transition_message_text(&current_turn_messages).unwrap_or_default()
         }
         OrchestratorTransitionResultMode::Summary => {
-            latest_transition_message_summary(current_turn_messages)
+            latest_transition_message_summary(&current_turn_messages)
                 .unwrap_or_else(|| record.session.preview.trim().to_owned())
         }
         OrchestratorTransitionResultMode::SummaryAndLastResponse => {
-            let summary = latest_transition_message_summary(current_turn_messages)
+            let summary = latest_transition_message_summary(&current_turn_messages)
                 .unwrap_or_else(|| record.session.preview.trim().to_owned());
             let last_response =
-                latest_transition_message_text(current_turn_messages).unwrap_or_default();
+                latest_transition_message_text(&current_turn_messages).unwrap_or_default();
             combine_transition_summary_and_result(&summary, &last_response)
         }
     }
@@ -783,15 +783,16 @@ fn combine_transition_summary_and_result(summary: &str, last_response: &str) -> 
 }
 
 /// Returns the current turn transition messages.
-fn current_turn_transition_messages(record: &SessionRecord) -> &[Message] {
+fn current_turn_transition_messages(record: &SessionRecord) -> MessageSequence {
     record
         .active_turn_start_message_count
-        .and_then(|start| record.session.messages.get(start..))
-        .unwrap_or(record.session.messages.as_slice())
+        .filter(|start| *start <= record.session.messages.len())
+        .map(|start| record.session.messages.window(start..))
+        .unwrap_or_else(|| record.session.messages.clone())
 }
 
 /// Returns the latest transition message summary.
-fn latest_transition_message_summary(messages: &[Message]) -> Option<String> {
+fn latest_transition_message_summary(messages: &MessageSequence) -> Option<String> {
     messages.iter().rev().find_map(transition_message_summary)
 }
 
@@ -837,7 +838,7 @@ fn transition_message_summary(message: &Message) -> Option<String> {
 }
 
 /// Returns the latest transition message text.
-fn latest_transition_message_text(messages: &[Message]) -> Option<String> {
+fn latest_transition_message_text(messages: &MessageSequence) -> Option<String> {
     messages.iter().rev().find_map(transition_message_text)
 }
 

@@ -915,7 +915,7 @@ fn engram_recovery_proof_cancel_readback_uses_real_serializer_and_complete_persi
         "a partial tail cannot establish terminal durable truth"
     );
     let mut hydrated = resident.session.clone();
-    hydrated.messages = complete;
+    hydrated.messages = (complete).into();
     hydrated.messages_loaded = true;
     row.session = &hydrated;
     assert!(engram_recovery_cancel_terminal(&row));
@@ -936,7 +936,7 @@ fn engram_recovery_proof_cancel_readback_uses_real_serializer_and_complete_persi
         .unwrap();
     assert!(!target.is_already_durable(&connection).unwrap());
     let mut after_deletion = hydrated.clone();
-    after_deletion.messages = read_messages();
+    after_deletion.messages = (read_messages()).into();
     let mut deleted_row = fixture.row();
     deleted_row.session = &after_deletion;
     assert!(!engram_recovery_cancel_terminal(&deleted_row));

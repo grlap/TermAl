@@ -3292,8 +3292,12 @@ fn update_parent_delegation_card_locked(
     let record = inner
         .session_mut_by_index(parent_index)
         .expect("parent session index should be valid");
-    for (message_index, message) in record.session.messages.iter_mut().enumerate().rev() {
-        let Message::ParallelAgents { id, agents, .. } = message else {
+    for message_index in (0..record.session.messages.len()).rev() {
+        if !matches!(&record.session.messages[message_index], Message::ParallelAgents { agents, .. }
+            if agents.iter().any(|agent| agent.id == delegation.id && agent.source == ParallelAgentSource::Delegation)) {
+            continue;
+        }
+        let Message::ParallelAgents { id, agents, .. } = &mut record.session.messages[message_index] else {
             continue;
         };
         let Some(agent) = agents.iter_mut().find(|agent| {

@@ -69,7 +69,7 @@ fn trim_retained_session_messages(record: &mut SessionRecord, limit: usize) {
         return;
     }
     let remove_count = record.session.messages.len() - limit;
-    record.session.messages.drain(..remove_count);
+    record.session.messages.discard(..remove_count);
     record.message_start_index = record.message_start_index.saturating_add(remove_count);
     record.message_positions = build_message_positions(&record.session.messages);
     record.session.messages_loaded = false;
@@ -95,10 +95,18 @@ fn normalize_prompt_history(prompts: impl IntoIterator<Item = String>) -> Vec<St
     history
 }
 
-fn prompt_history_from_messages(messages: &[Message]) -> Vec<String> {
+fn prompt_history_from_messages<'a, I>(messages: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a Message>,
+    I::IntoIter: DoubleEndedIterator,
+{
     let mut history = Vec::with_capacity(SESSION_PROMPT_HISTORY_LIMIT);
     let mut retained_bytes = 0_usize;
-    for prompt in messages.iter().rev().filter_map(Message::user_prompt_text) {
+    for prompt in messages
+        .into_iter()
+        .rev()
+        .filter_map(Message::user_prompt_text)
+    {
         let prompt = prompt.trim();
         if prompt.is_empty() || prompt.len() > SESSION_PROMPT_HISTORY_MAX_BYTES {
             continue;
@@ -168,10 +176,71 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Stri
     Some(notice)
 }
 
+// Select through shared references before obtaining a mutable body. A
+// no-op recovery/stop scan must not detach every retained persistence body.
+trait MutableMessages {
+    fn matching_mut(
+        &mut self,
+        predicate: fn(&Message) -> bool,
+    ) -> impl Iterator<Item = (usize, &mut Message)>;
+}
+impl MutableMessages for MessageSequence {
+    fn matching_mut(
+        &mut self,
+        predicate: fn(&Message) -> bool,
+    ) -> impl Iterator<Item = (usize, &mut Message)> {
+        MessageSequence::matching_mut(self, predicate)
+    }
+}
+impl MutableMessages for [Message] {
+    fn matching_mut(
+        &mut self,
+        predicate: fn(&Message) -> bool,
+    ) -> impl Iterator<Item = (usize, &mut Message)> {
+        self.iter_mut()
+            .enumerate()
+            .filter(move |(_, message)| predicate(message))
+    }
+}
+impl MutableMessages for Vec<Message> {
+    fn matching_mut(
+        &mut self,
+        predicate: fn(&Message) -> bool,
+    ) -> impl Iterator<Item = (usize, &mut Message)> {
+        self.as_mut_slice().matching_mut(predicate)
+    }
+}
+impl<const N: usize> MutableMessages for [Message; N] {
+    fn matching_mut(
+        &mut self,
+        predicate: fn(&Message) -> bool,
+    ) -> impl Iterator<Item = (usize, &mut Message)> {
+        self.as_mut_slice().matching_mut(predicate)
+    }
+}
+fn pending_interaction_message(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::Approval {
+            decision: ApprovalDecision::Pending,
+            ..
+        } | Message::UserInputRequest {
+            state: InteractionRequestState::Pending,
+            ..
+        } | Message::McpElicitationRequest {
+            state: InteractionRequestState::Pending,
+            ..
+        } | Message::CodexAppRequest {
+            state: InteractionRequestState::Pending,
+            ..
+        }
+    )
+}
+
 /// Expires pending interaction messages.
-fn expire_pending_interaction_messages(messages: &mut [Message]) -> usize {
+fn expire_pending_interaction_messages<C: MutableMessages + ?Sized>(messages: &mut C) -> usize {
     let mut count = 0;
-    for message in messages {
+    for (_, message) in messages.matching_mut(pending_interaction_message) {
         match message {
             Message::Approval { decision, .. } => {
                 if *decision == ApprovalDecision::Pending {
@@ -204,9 +273,11 @@ fn expire_pending_interaction_messages(messages: &mut [Message]) -> usize {
 }
 
 /// Cancels pending interaction messages.
-fn cancel_pending_interaction_messages(messages: &mut [Message]) -> Vec<usize> {
+fn cancel_pending_interaction_messages<C: MutableMessages + ?Sized>(
+    messages: &mut C,
+) -> Vec<usize> {
     let mut changed_indices = Vec::new();
-    for (index, message) in messages.iter_mut().enumerate() {
+    for (index, message) in messages.matching_mut(pending_interaction_message) {
         match message {
             Message::Approval { decision, .. } => {
                 if *decision == ApprovalDecision::Pending {
@@ -402,8 +473,16 @@ impl AppState {
 }
 
 /// Marks running command messages as failed.
-fn fail_running_command_messages(messages: &mut [Message]) {
-    for message in messages {
+fn fail_running_command_messages<C: MutableMessages + ?Sized>(messages: &mut C) {
+    for (_, message) in messages.matching_mut(|message| {
+        matches!(
+            message,
+            Message::Command {
+                status: CommandStatus::Running,
+                ..
+            }
+        )
+    }) {
         if let Message::Command { status, .. } = message {
             if *status == CommandStatus::Running {
                 *status = CommandStatus::Error;
@@ -413,9 +492,11 @@ fn fail_running_command_messages(messages: &mut [Message]) {
 }
 
 /// Builds message positions.
-fn build_message_positions(messages: &[Message]) -> HashMap<String, usize> {
+fn build_message_positions<'a>(
+    messages: impl IntoIterator<Item = &'a Message>,
+) -> HashMap<String, usize> {
     messages
-        .iter()
+        .into_iter()
         .enumerate()
         .map(|(index, message)| (message.id().to_owned(), index))
         .collect()
@@ -595,7 +676,7 @@ fn replace_session_messages_on_record(
         record.body_sequence.unrepresented_messages.clear();
     }
     record.message_start_index = 0;
-    record.session.messages = messages;
+    record.session.messages = messages.into();
     set_prompt_history_on_record(
         record,
         prompt_history_from_messages(&record.session.messages),

@@ -225,8 +225,12 @@ impl PersistedState {
             .test_run_registrations
             .values()
             .filter(|registration| {
-                test_run_registration_final_observation(registration, &self.test_run_observations, None)
-                    .is_some()
+                test_run_registration_final_observation(
+                    registration,
+                    &self.test_run_observations,
+                    None,
+                )
+                .is_some()
             })
             .map(|registration| registration.run_id.clone())
             .collect();
@@ -250,10 +254,16 @@ impl PersistedState {
                     return (record.route == EngramNamedRootReleaseRoute::Canonical.label()
                         && record.phase == Some(EngramNamedRootReleasePhase::Enqueued)
                         && record.authority_owner.is_some())
-                        .then_some(EngramNamedRootReleaseAudit { acknowledged: false, ..record });
+                    .then_some(EngramNamedRootReleaseAudit {
+                        acknowledged: false,
+                        ..record
+                    });
                 }
                 if record.route != EngramNamedRootReleaseRoute::Canonical.label() {
-                    return Some(EngramNamedRootReleaseAudit { acknowledged: true, ..record });
+                    return Some(EngramNamedRootReleaseAudit {
+                        acknowledged: true,
+                        ..record
+                    });
                 }
                 let owner = record.authority_owner.as_deref()?;
                 let published = self
@@ -332,22 +342,36 @@ impl PersistedState {
                 ..TestRunIndex::default()
             },
             test_run_cards_epoch: self.test_run_cards_epoch,
-            test_run_compacted: self.test_run_compacted.into_iter().map(|(id, mut row)| {
-                for observation in &mut row.observations {
-                    test_run_observation_boot(observation);
-                }
-                (id, row)
-            }).collect(),
-            test_run_observations: self.test_run_observations.into_iter().map(|(id, mut row)| {
-                test_run_observation_boot(&mut row);
-                (id, row)
-            }).collect(),
-            test_run_registrations: self.test_run_registrations.into_iter().map(|(id, mut registration)| {
-                if !terminal_unbound_registrations.contains(&id) {
-                    registration.monitoring_interrupted_at.get_or_insert_with(test_run_timestamp);
-                }
-                (id, registration)
-            }).collect(),
+            test_run_compacted: self
+                .test_run_compacted
+                .into_iter()
+                .map(|(id, mut row)| {
+                    for observation in &mut row.observations {
+                        test_run_observation_boot(observation);
+                    }
+                    (id, row)
+                })
+                .collect(),
+            test_run_observations: self
+                .test_run_observations
+                .into_iter()
+                .map(|(id, mut row)| {
+                    test_run_observation_boot(&mut row);
+                    (id, row)
+                })
+                .collect(),
+            test_run_registrations: self
+                .test_run_registrations
+                .into_iter()
+                .map(|(id, mut registration)| {
+                    if !terminal_unbound_registrations.contains(&id) {
+                        registration
+                            .monitoring_interrupted_at
+                            .get_or_insert_with(test_run_timestamp);
+                    }
+                    (id, registration)
+                })
+                .collect(),
             // The map is written with the metadata, but a card's transcript
             // row can be deferred to a later persist tick, so after a restart
             // the transcript is the authority: the flags are re-derived by the
@@ -605,7 +629,29 @@ struct PersistedSessionRecord {
     /// it; delta snapshots clear it unless the independent history stamp moved.
     #[serde(skip)]
     persist_prompt_history: bool,
+    #[serde(serialize_with = "serialize_persisted_session_view")]
     session: Session,
+}
+
+// Legacy/full JSON exports retain the same persisted projection. Normalized
+// SQLite metadata has no bodies here; its selected rows project separately.
+fn serialize_persisted_session_view<S: serde::Serializer>(
+    session: &Session,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    let mut projected = session.clone();
+    for index in 0..projected.messages.len() {
+        if matches!(projected.messages.get(index), Some(Message::EngramControl { card, .. })
+            if card.causal_failure.as_ref().is_some_and(|cause| cause.publication_pending))
+        {
+            if let Message::EngramControl { card, .. } = &mut projected.messages[index]
+                && let Some(cause) = &mut card.causal_failure
+            {
+                cause.publication_pending = false;
+            }
+        }
+    }
+    projected.serialize(serializer)
 }
 
 #[derive(Deserialize)]
@@ -662,16 +708,53 @@ fn normalize_persisted_session_prompt_history(session: &mut Session) {
 }
 
 impl PersistedSessionRecord {
+    fn clone_without_messages(&self) -> Self {
+        Self {
+            federation_mailbox_binding: self.federation_mailbox_binding.clone(),
+            federation_native_creation_id: self.federation_native_creation_id.clone(),
+            active_codex_approval_policy: self.active_codex_approval_policy.clone(),
+            active_codex_reasoning_effort: self.active_codex_reasoning_effort.clone(),
+            active_codex_sandbox_mode: self.active_codex_sandbox_mode.clone(),
+            codex_approval_policy: self.codex_approval_policy.clone(),
+            codex_reasoning_effort: self.codex_reasoning_effort.clone(),
+            codex_sandbox_mode: self.codex_sandbox_mode.clone(),
+            codex_thread_profile: self.codex_thread_profile.clone(),
+            external_session_id: self.external_session_id.clone(),
+            queued_prompts: self.queued_prompts.clone(),
+            queued_peer_messages: self.queued_peer_messages.clone(),
+            queued_prompt_durability_holds: self.queued_prompt_durability_holds.clone(),
+            prompt_deliveries: self.prompt_deliveries.clone(),
+            remote_id: self.remote_id.clone(),
+            remote_session_id: self.remote_session_id.clone(),
+            orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked.clone(),
+            provider_capacity_retry: self.provider_capacity_retry.clone(),
+            engram_routing_token: self.engram_routing_token.clone(),
+            engram_open_grant_id: self.engram_open_grant_id.clone(),
+            engram_uncertain_grant_id: self.engram_uncertain_grant_id.clone(),
+            engram_begins_recorded: self.engram_begins_recorded.clone(),
+            engram_dispatch_generation: self.engram_dispatch_generation.clone(),
+            engram_carried_launches: self.engram_carried_launches.clone(),
+            engram_owed_binds: self.engram_owed_binds.clone(),
+            engram_pending_batches: self.engram_pending_batches.clone(),
+            engram_abort_retry: self.engram_abort_retry.clone(),
+            engram_bind_retry: self.engram_bind_retry.clone(),
+            engram_admission_retry: self.engram_admission_retry.clone(),
+            engram_begin_preparation_lineage: self.engram_begin_preparation_lineage.clone(),
+            engram_operator_paused: self.engram_operator_paused.clone(),
+            engram_source_observation_gate: self.engram_source_observation_gate.clone(),
+            engram_source_observation_delete_requested: self
+                .engram_source_observation_delete_requested
+                .clone(),
+            engram_stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
+            message_start_index: self.message_start_index.clone(),
+            persist_prompt_history: self.persist_prompt_history.clone(),
+            session: self.session.clone_without_messages(),
+        }
+    }
+
     /// Builds the value from record.
     fn from_record(record: &SessionRecord) -> Self {
         let mut session = record.session.clone();
-        for message in &mut session.messages {
-            if let Message::EngramControl { card, .. } = message
-                && let Some(cause) = &mut card.causal_failure
-            {
-                cause.publication_pending = false;
-            }
-        }
         if record.is_local_session() {
             session.pending_prompts.clear();
         }
@@ -713,7 +796,9 @@ impl PersistedSessionRecord {
             engram_abort_retry: record.engram.abort_retry.clone(),
             engram_bind_retry: record.engram.bind_retry.clone(),
             engram_source_observation_gate: record.engram.source_observation_gate.clone(),
-            engram_source_observation_delete_requested: record.engram.source_observation_delete_requested,
+            engram_source_observation_delete_requested: record
+                .engram
+                .source_observation_delete_requested,
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
             engram_admission_retry: record.engram.admission_retry.clone(),
             engram_begin_preparation_lineage: record.engram.begin_preparation_lineage.clone(),
@@ -834,7 +919,8 @@ impl PersistedSessionRecord {
                 abort_retry: self.engram_abort_retry.clone(),
                 // Sent again after the restart, however long it took.
                 owed_binds: {
-                    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                    let now =
+                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
                     self.engram_owed_binds
                         .iter()
                         .cloned()
@@ -842,7 +928,8 @@ impl PersistedSessionRecord {
                         .collect()
                 },
                 source_observation_gate: self.engram_source_observation_gate.clone(),
-                source_observation_delete_requested: self.engram_source_observation_delete_requested,
+                source_observation_delete_requested: self
+                    .engram_source_observation_delete_requested,
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
                 admission_retry: self.engram_admission_retry.clone(),
                 // A saved pending marker proves nothing after a restart: the

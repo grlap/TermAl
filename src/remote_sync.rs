@@ -915,7 +915,7 @@ fn localize_remote_session_summary(
         engram_boot_recovery_pending: remote_session.engram_boot_recovery_pending,
         status: remote_session.status,
         preview: remote_session.preview.clone(),
-        messages: Vec::new(),
+        messages: MessageSequence::default(),
         prompt_history: Vec::new(),
         prompt_history_redacted: false,
         messages_loaded: remote_session.message_count == 0,

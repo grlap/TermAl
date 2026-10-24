@@ -279,7 +279,7 @@ fn proxy_fixture(body_seq: Option<u64>) -> (AppState, RemoteConfig, Session, Str
     )
     .sessions
     .remove(0);
-    session.messages = vec![text_message("text", "seed")];
+    session.messages = (vec![text_message("text", "seed")]).into();
     session.message_count = 1;
     session.messages_loaded = true;
     session.session_mutation_stamp = Some(10);
@@ -427,7 +427,7 @@ fn body_sequence_upstream_restart_changes_issuer_behind_unchanged_proxy() {
     let before = state.get_session_tail(&id, 20).unwrap();
     session.body_seq = Some(0);
     session.body_seq_epoch = Some("upstream-restarted".to_owned());
-    session.messages = vec![text_message("text", "recovered")];
+    session.messages = (vec![text_message("text", "recovered")]).into();
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&id).unwrap();
@@ -471,13 +471,14 @@ fn body_sequence_upstream_restart_changes_issuer_behind_unchanged_proxy() {
 #[test]
 fn body_sequence_remote_test_card_update_preserves_sequence_and_replay_identity() {
     let (state, remote, mut session, id) = proxy_fixture(Some(40));
-    session.messages = vec![Message::TestRun {
+    session.messages = (vec![Message::TestRun {
         id: "card".to_owned(),
         timestamp: stamp_now(),
         author: Author::System,
         schema_version: 1,
         run: card_snapshot(),
-    }];
+    }])
+    .into();
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&id).unwrap();

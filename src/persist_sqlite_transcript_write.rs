@@ -18,15 +18,35 @@ struct SerializedPersistedSession {
     local_identity_namespace: bool,
     message_start_index: usize,
     message_count: usize,
+    // Logical coverage is independent of the sparse upsert list.
+    truncate_to: Option<usize>,
+    snapshot: MessageSequence,
     write_overview: bool,
     prompt_history_value_json: Option<String>,
     value_json: String,
     messages: Vec<SerializedPersistedMessage>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static PERSIST_MESSAGE_SERIALIZE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce(&PersistedSessionRecord)>>> =
+        std::cell::RefCell::new(None);
+}
+
 fn serialize_persisted_session(
     record: &PersistedSessionRecord,
 ) -> Result<SerializedPersistedSession> {
+    serialize_persisted_session_since(record, None)
+}
+
+fn serialize_persisted_session_since(
+    record: &PersistedSessionRecord,
+    baseline: Option<&PersistTranscriptBaseline>,
+) -> Result<SerializedPersistedSession> {
+    #[cfg(test)]
+    if let Some(hook) = PERSIST_MESSAGE_SERIALIZE_HOOK.with(|slot| slot.take()) {
+        hook(record);
+    }
     let remote_proxy_identity = validate_remote_proxy_identity(
         record.remote_id.as_deref(),
         record.remote_session_id.as_deref(),
@@ -37,7 +57,7 @@ fn serialize_persisted_session(
             record.session.id
         )
     })?;
-    let mut metadata = record.clone();
+    let mut metadata = record.clone_without_messages();
     let retained_end = record
         .message_start_index
         .checked_add(record.session.messages.len())
@@ -73,11 +93,34 @@ fn serialize_persisted_session(
         .messages
         .iter()
         .enumerate()
+        .filter(|(index, _)| {
+            let absolute = record.message_start_index + index;
+            !baseline.is_some_and(|old| {
+                absolute.checked_sub(old.start).is_some_and(|offset| {
+                    old.identities.get(offset).is_some_and(|saved| {
+                        record.session.messages.matches_identity(*index, saved)
+                    })
+                })
+            })
+        })
         .map(|(local_index, message)| {
             let position = record
                 .message_start_index
                 .checked_add(local_index)
                 .context("persisted transcript position overflow")?;
+            // Projection is outside StateInner and only visits selected bodies.
+            let mut projected;
+            let message = if matches!(message, Message::EngramControl { .. }) {
+                projected = message.clone();
+                if let Message::EngramControl { card, .. } = &mut projected
+                    && let Some(cause) = &mut card.causal_failure
+                {
+                    cause.publication_pending = false;
+                }
+                &projected
+            } else {
+                message
+            };
             let value_json = serde_json::to_string(message)
                 .context("failed to serialize persisted transcript message")?;
             let (overview_kind, is_user) = conversation_overview_message_metadata(message);
@@ -96,6 +139,8 @@ fn serialize_persisted_session(
         local_identity_namespace: remote_proxy_identity.is_none(),
         message_start_index: record.message_start_index,
         message_count: total_message_count,
+        truncate_to: (retained_end == total_message_count).then_some(retained_end),
+        snapshot: record.session.messages.clone(),
         write_overview: remote_proxy_identity.is_none(),
         prompt_history_value_json,
         value_json,
@@ -171,71 +216,49 @@ fn write_serialized_persisted_session(
         })?;
         return Ok(());
     }
-    let mut overview_blob = if session.message_start_index == 0 {
-        Vec::with_capacity(session.message_count)
-    } else {
-        let existing = match tx.query_row(
-            "SELECT value_blob
-             FROM session_overviews
-             WHERE session_id = ?1",
-            rusqlite::params![session.session_id],
-            |row| row.get::<_, Vec<u8>>(0),
-        ) {
-            Ok(existing) => existing,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                let mut statement = tx
-                    .prepare(
-                        "SELECT overview_kind, is_user
-                         FROM messages
-                         WHERE session_id = ?1 AND position < ?2
-                         ORDER BY position",
-                    )
-                    .context("failed to prepare transcript overview prefix recovery")?;
-                statement
-                    .query_map(
-                        rusqlite::params![
-                            session.session_id,
-                            i64::try_from(session.message_start_index).context(
-                                "persisted transcript position exceeds SQLite integer range"
-                            )?,
-                        ],
-                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)),
-                    )
-                    .context("failed to query transcript overview prefix recovery")?
-                    .map(|row| {
-                        let (kind_index, is_user) =
-                            row.context("failed to read transcript overview prefix")?;
-                        let kind = match kind_index {
-                            0 => ConversationOverviewKind::Text,
-                            1 => ConversationOverviewKind::Command,
-                            2 => ConversationOverviewKind::Diff,
-                            3 => ConversationOverviewKind::Error,
-                            _ => bail!("invalid persisted transcript overview kind {kind_index}"),
-                        };
-                        Ok(encode_conversation_overview_message(kind, is_user))
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            }
-            Err(err) => {
-                return Err(err).context("failed to load persisted transcript overview prefix");
-            }
-        };
-        if existing.len() < session.message_start_index {
-            bail!(
-                "persisted transcript overview for `{}` has {} positions but tail starts at {}",
-                session.session_id,
-                existing.len(),
-                session.message_start_index
-            );
+    let existing = tx.query_row(
+        "SELECT value_blob FROM session_overviews WHERE session_id = ?1",
+        [&session.session_id],
+        |row| row.get::<_, Vec<u8>>(0),
+    );
+    let mut overview_blob = match existing {
+        Ok(blob) => blob,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            let mut statement = tx.prepare(
+                "SELECT overview_kind,is_user FROM messages WHERE session_id=?1 ORDER BY position",
+            )?;
+            statement
+                .query_map([&session.session_id], |row| {
+                    Ok((row.get::<_, usize>(0)?, row.get::<_, bool>(1)?))
+                })?
+                .map(|row| {
+                    let (kind, is_user) = row?;
+                    let kind = match kind {
+                        0 => ConversationOverviewKind::Text,
+                        1 => ConversationOverviewKind::Command,
+                        2 => ConversationOverviewKind::Diff,
+                        3 => ConversationOverviewKind::Error,
+                        _ => bail!("invalid persisted transcript overview kind {kind}"),
+                    };
+                    Ok(encode_conversation_overview_message(kind, is_user))
+                })
+                .collect::<Result<Vec<_>>>()?
         }
-        let mut prefix = existing;
-        prefix.truncate(session.message_start_index);
-        prefix.reserve(session.messages.len());
-        prefix
+        Err(error) => return Err(error.into()),
     };
-    overview_blob.extend(session.messages.iter().map(|message| {
-        encode_conversation_overview_message(message.overview_kind, message.is_user)
-    }));
+    if let Some(end) = session.truncate_to {
+        overview_blob.truncate(end);
+    }
+    for message in &session.messages {
+        let byte = encode_conversation_overview_message(message.overview_kind, message.is_user);
+        if message.position < overview_blob.len() {
+            overview_blob[message.position] = byte;
+        } else if message.position == overview_blob.len() {
+            overview_blob.push(byte);
+        } else {
+            bail!("persisted transcript overview has a gap");
+        }
+    }
     if overview_blob.len() != session.message_count {
         bail!(
             "persisted transcript overview for `{}` has {} positions but metadata expects {}",

@@ -151,7 +151,7 @@ impl AppState {
                 }
             }
             return Ok(LocalSessionHistorySnapshot {
-                messages: record.session.messages.clone(),
+                messages: record.session.messages.iter().cloned().collect(),
                 start_index: record.message_start_index,
                 cursor_position,
                 message_count,

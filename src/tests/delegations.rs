@@ -423,9 +423,9 @@ fn delegation_parent_card_update_ignores_tool_source_id_collision() {
         let parent_agents = parent
             .session
             .messages
-            .iter_mut()
+            .matching_mut(|message| matches!(message, Message::ParallelAgents { .. }))
             .rev()
-            .find_map(|message| match message {
+            .find_map(|(_, message)| match message {
                 Message::ParallelAgents { agents, .. } => Some(agents),
                 _ => None,
             })

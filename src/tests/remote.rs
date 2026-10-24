@@ -1827,10 +1827,11 @@ fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity
         .iter_mut()
         .find(|session| session.id == "remote-session-1")
         .expect("sample remote session should exist");
-    remote_session_with_transcript.messages = vec![remote_text_message(
+    remote_session_with_transcript.messages = (vec![remote_text_message(
         "remote-message-1",
         "Remote transcript should not be republished in orchestrator deltas.",
-    )];
+    )])
+    .into();
     remote_session_with_transcript.messages_loaded = true;
     remote_session_with_transcript.message_count = 1;
     state
@@ -1934,10 +1935,11 @@ fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payloa
         .iter_mut()
         .find(|session| session.id == "remote-session-1")
         .expect("sample remote session should exist");
-    remote_session_with_transcript.messages = vec![remote_text_message(
+    remote_session_with_transcript.messages = (vec![remote_text_message(
         "remote-message-1",
         "Remote transcript should not be republished in orchestrator deltas.",
-    )];
+    )])
+    .into();
     remote_session_with_transcript.messages_loaded = true;
     remote_session_with_transcript.message_count = 1;
 
@@ -2040,10 +2042,11 @@ fn remote_orchestrators_updated_summary_sessions_preserve_unloaded_message_count
         .iter_mut()
         .find(|session| session.id == "remote-session-2")
         .expect("second sample remote session should exist");
-    remote_session_with_transcript.messages = vec![remote_text_message(
+    remote_session_with_transcript.messages = (vec![remote_text_message(
         "remote-message-2",
         "Full transcript should still republish as a summary.",
-    )];
+    )])
+    .into();
     remote_session_with_transcript.messages_loaded = true;
     remote_session_with_transcript.message_count = 1;
     let mut expected_message_counts = remote_delta_state

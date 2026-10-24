@@ -154,10 +154,11 @@ fn seed_unloaded_remote_proxy_for_authority_test(
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_session.messages = vec![remote_text_message(
+    full_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Authoritative hydrated message.",
-    )];
+    )])
+    .into();
     full_session.messages_loaded = true;
     full_session.message_count = 1;
     full_session.session_mutation_stamp = Some(10);

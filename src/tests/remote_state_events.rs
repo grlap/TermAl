@@ -110,7 +110,8 @@ fn remote_text_delta_gap_triggers_bounded_authoritative_tail_repair() {
         OrchestratorInstanceStatus::Running,
     );
     initial_state.sessions[0].preview = "Hello".to_owned();
-    initial_state.sessions[0].messages = vec![remote_text_message("remote-message-1", "Hello")];
+    initial_state.sessions[0].messages =
+        (vec![remote_text_message("remote-message-1", "Hello")]).into();
     initial_state.sessions[0].messages_loaded = true;
     initial_state.sessions[0].message_count = 1;
     let initial_session = initial_state
@@ -138,7 +139,7 @@ fn remote_text_delta_gap_triggers_bounded_authoritative_tail_repair() {
     );
     repaired_state.sessions[0].preview = "Hello world".to_owned();
     repaired_state.sessions[0].messages =
-        vec![remote_text_message("remote-message-1", "Hello world")];
+        (vec![remote_text_message("remote-message-1", "Hello world")]).into();
     repaired_state.sessions[0].messages_loaded = true;
     repaired_state.sessions[0].message_count = 1;
     repaired_state.sessions[0].session_mutation_stamp = Some(11);
@@ -233,7 +234,8 @@ fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
         OrchestratorInstanceStatus::Running,
     );
     initial_state.sessions[0].preview = "Before recovery".to_owned();
-    initial_state.sessions[0].messages = vec![remote_text_message("remote-message-1", "Hello")];
+    initial_state.sessions[0].messages =
+        (vec![remote_text_message("remote-message-1", "Hello")]).into();
     initial_state.sessions[0].messages_loaded = true;
     initial_state.sessions[0].message_count = 1;
     let initial_session = initial_state.sessions[0].clone();
@@ -257,7 +259,7 @@ fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
     );
     repaired_state.sessions[0].preview = "Recovered from full state".to_owned();
     repaired_state.sessions[0].messages =
-        vec![remote_text_message("remote-message-1", "Hello world")];
+        (vec![remote_text_message("remote-message-1", "Hello world")]).into();
     repaired_state.sessions[0].messages_loaded = true;
     repaired_state.sessions[0].message_count = 1;
     repaired_state.sessions[0].session_mutation_stamp = Some(11);
@@ -1280,7 +1282,8 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
         OrchestratorInstanceStatus::Running,
     );
     initial_state.sessions[0].preview = "Initial remote preview".to_owned();
-    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
+    initial_state.sessions[0].messages =
+        (vec![remote_text_message("message-1", "Initial body")]).into();
     initial_state.sessions[0].message_count = 1;
     let initial_session = initial_state
         .sessions
@@ -1307,7 +1310,7 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
     );
     repaired_state.sessions[0].preview = "Lagged repaired preview".to_owned();
     repaired_state.sessions[0].messages =
-        vec![remote_text_message("message-1", "Lagged repaired body")];
+        (vec![remote_text_message("message-1", "Lagged repaired body")]).into();
     let repaired_data_lines =
         vec![serde_json::to_string(&repaired_state).expect("state payload should encode")];
 
@@ -1331,7 +1334,7 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
     repeated_same_revision_state.sessions[0].preview =
         "Unexpected second same-revision preview".to_owned();
     repeated_same_revision_state.sessions[0].messages =
-        vec![remote_text_message("message-1", "Unexpected repeated body")];
+        (vec![remote_text_message("message-1", "Unexpected repeated body")]).into();
     repeated_same_revision_state.sessions[0].message_count = 1;
     let repeated_same_revision_data_lines = vec![
         serde_json::to_string(&repeated_same_revision_state).expect("state payload should encode"),
@@ -1386,7 +1389,8 @@ fn remote_event_stream_parser_dispatches_bare_lagged_at_eof() {
         OrchestratorInstanceStatus::Running,
     );
     initial_state.sessions[0].preview = "Initial EOF remote preview".to_owned();
-    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial EOF body")];
+    initial_state.sessions[0].messages =
+        (vec![remote_text_message("message-1", "Initial EOF body")]).into();
     initial_state.sessions[0].message_count = 1;
     let initial_data_lines =
         vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
@@ -1425,7 +1429,7 @@ fn remote_event_stream_parser_dispatches_bare_lagged_at_eof() {
     );
     repaired_state.sessions[0].preview = "EOF lagged repaired preview".to_owned();
     repaired_state.sessions[0].messages =
-        vec![remote_text_message("message-1", "EOF lagged repaired body")];
+        (vec![remote_text_message("message-1", "EOF lagged repaired body")]).into();
     repaired_state.sessions[0].message_count = 1;
     let repaired_data_lines =
         vec![serde_json::to_string(&repaired_state).expect("state payload should encode")];
@@ -1474,7 +1478,8 @@ fn remote_event_stream_parser_clears_buffers_after_eof_state_dispatch() {
         OrchestratorInstanceStatus::Running,
     );
     remote_state.sessions[0].preview = "EOF state preview".to_owned();
-    remote_state.sessions[0].messages = vec![remote_text_message("message-1", "EOF state body")];
+    remote_state.sessions[0].messages =
+        (vec![remote_text_message("message-1", "EOF state body")]).into();
     remote_state.sessions[0].message_count = 1;
     let mut payload_value =
         serde_json::to_value(&remote_state).expect("state payload should encode");
@@ -1528,10 +1533,11 @@ fn remote_lagged_marker_clears_on_empty_data_bearing_frame() {
             OrchestratorInstanceStatus::Running,
         );
         initial_state.sessions[0].preview = format!("Initial empty {empty_event_name} preview");
-        initial_state.sessions[0].messages = vec![remote_text_message(
+        initial_state.sessions[0].messages = (vec![remote_text_message(
             "message-1",
             &format!("Initial empty {empty_event_name} body"),
-        )];
+        )])
+        .into();
         initial_state.sessions[0].message_count = 1;
         let initial_data_lines =
             vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
@@ -1564,10 +1570,11 @@ fn remote_lagged_marker_clears_on_empty_data_bearing_frame() {
         );
         repaired_state.sessions[0].preview =
             format!("Unexpected empty {empty_event_name} repaired preview");
-        repaired_state.sessions[0].messages = vec![remote_text_message(
+        repaired_state.sessions[0].messages = (vec![remote_text_message(
             "message-1",
             &format!("Unexpected empty {empty_event_name} repaired body"),
-        )];
+        )])
+        .into();
         repaired_state.sessions[0].message_count = 1;
         let repaired_data_lines =
             vec![serde_json::to_string(&repaired_state).expect("state payload should encode")];
@@ -1620,7 +1627,8 @@ fn remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress() 
         OrchestratorInstanceStatus::Running,
     );
     initial_state.sessions[0].preview = "Initial remote preview".to_owned();
-    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
+    initial_state.sessions[0].messages =
+        (vec![remote_text_message("message-1", "Initial body")]).into();
     initial_state.sessions[0].messages_loaded = true;
     initial_state.sessions[0].message_count = 1;
     let initial_session = initial_state
@@ -1680,10 +1688,11 @@ fn remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress() 
         OrchestratorInstanceStatus::Running,
     );
     stale_recovery.sessions[0].preview = "Stale lagged recovery preview".to_owned();
-    stale_recovery.sessions[0].messages = vec![remote_text_message(
+    stale_recovery.sessions[0].messages = (vec![remote_text_message(
         "message-1",
         "Stale lagged recovery body",
-    )];
+    )])
+    .into();
     stale_recovery.sessions[0].messages_loaded = true;
     stale_recovery.sessions[0].message_count = 1;
     let stale_recovery_data_lines =
@@ -1742,7 +1751,8 @@ fn remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot() {
         OrchestratorInstanceStatus::Running,
     );
     initial_state.sessions[0].preview = "Initial remote preview".to_owned();
-    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
+    initial_state.sessions[0].messages =
+        (vec![remote_text_message("message-1", "Initial body")]).into();
     initial_state.sessions[0].messages_loaded = true;
     initial_state.sessions[0].message_count = 1;
     let initial_data_lines =
@@ -1765,7 +1775,7 @@ fn remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot() {
     );
     repaired_state.sessions[0].preview = "Fallback repaired preview".to_owned();
     repaired_state.sessions[0].messages =
-        vec![remote_text_message("message-1", "Fallback repaired body")];
+        (vec![remote_text_message("message-1", "Fallback repaired body")]).into();
     repaired_state.sessions[0].messages_loaded = true;
     repaired_state.sessions[0].message_count = 1;
     let (port, requests, server) =
@@ -2041,7 +2051,8 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
         .expect("remote summary session create delta should apply");
 
     let mut hydrated_session = summary_session.clone();
-    hydrated_session.messages = vec![remote_text_message("remote-message-1", "Hydrated body.")];
+    hydrated_session.messages =
+        (vec![remote_text_message("remote-message-1", "Hydrated body.")]).into();
     hydrated_session.messages_loaded = true;
     hydrated_session.message_count = 1;
     hydrated_session.preview = "Hydrated body.".to_owned();

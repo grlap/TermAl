@@ -64,10 +64,11 @@ fn exact_bounded_tail_replay_retries_dirty_persistence() {
         .find(|session| session.id == "remote-session-1")
         .expect("sample remote session should exist");
     remote_session.preview = "Persisted tail preview.".to_owned();
-    remote_session.messages = vec![remote_text_message(
+    remote_session.messages = (vec![remote_text_message(
         "remote-message-tail-dirty-retry",
         "Persisted tail message.",
-    )];
+    )])
+    .into();
     remote_session.message_count = 1;
     remote_session.messages_loaded = true;
     let remote_session = remote_session.clone();
@@ -292,10 +293,11 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    remote_session.messages = vec![remote_text_message(
+    remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Remote transcript should stay out of SessionCreated deltas.",
-    )];
+    )])
+    .into();
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;
 
@@ -374,10 +376,11 @@ fn remote_session_created_duplicate_redelivery_does_not_publish_non_advancing_de
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    remote_session.messages = vec![remote_text_message(
+    remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Remote transcript.",
-    )];
+    )])
+    .into();
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;
 
@@ -516,11 +519,12 @@ fn remote_summary_count_decrease_discards_stale_cached_suffix() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![
+    full_remote_session.messages = (vec![
         remote_text_message("remote-message-1", "First cached message."),
         remote_text_message("remote-message-2", "Second cached message."),
         remote_text_message("remote-message-3", "Third cached message."),
-    ];
+    ])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 3;
     state
@@ -604,10 +608,11 @@ fn remote_summary_same_count_with_new_stamp_discards_stale_cached_suffix() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message(
+    full_remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Cached text before same-count rewrite.",
-    )];
+    )])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
     full_remote_session.prompt_history = vec!["Cached remote prompt".to_owned()];
@@ -690,10 +695,11 @@ fn remote_summary_same_count_with_same_stamp_preserves_cached_transcript() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message(
+    full_remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Cached text still matches remote stamp.",
-    )];
+    )])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
     full_remote_session.session_mutation_stamp = Some(10);
@@ -770,10 +776,11 @@ fn remote_summary_without_stamp_preserves_cached_transcript_and_stamp() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message(
+    full_remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Cached text from stamped retained suffix.",
-    )];
+    )])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
     full_remote_session.session_mutation_stamp = Some(10);
@@ -853,10 +860,11 @@ fn remote_summary_without_any_stamps_preserves_cached_transcript() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message(
+    full_remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Cached text from unstamped retained suffix.",
-    )];
+    )])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
     full_remote_session.session_mutation_stamp = None;
@@ -936,10 +944,11 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message(
+    full_remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Hydrated transcript from remote owner.",
-    )];
+    )])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
     let mut summary_session = full_remote_session.clone();
@@ -1063,11 +1072,12 @@ fn assert_bounded_history_proxy_sequence(body_seq: Option<u64>, epoch: Option<&s
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![
+    full_remote_session.messages = (vec![
         remote_text_message("remote-message-1", "Remote line 1."),
         remote_text_message("remote-message-2", "Remote line 2."),
         remote_text_message("remote-message-3", "Remote line 3."),
-    ];
+    ])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 3;
     let mut summary_session = full_remote_session.clone();
@@ -1105,7 +1115,12 @@ fn assert_bounded_history_proxy_sequence(body_seq: Option<u64>, epoch: Option<&s
         spawn_remote_session_history_response_server(SessionHistoryResponse {
             body_seq,
             body_seq_epoch: epoch.map(str::to_owned),
-            messages: full_remote_session.messages[1..].to_vec(),
+            messages: full_remote_session
+                .messages
+                .iter()
+                .skip(1)
+                .cloned()
+                .collect(),
             next_before: Some("remote-message-2".to_owned()),
             has_more: true,
             next_after: None,
@@ -1292,10 +1307,11 @@ fn stale_remote_tail_response_cannot_overwrite_newer_synchronized_metadata() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    stale_remote_session.messages = vec![remote_text_message(
+    stale_remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Stale remote tail.",
-    )];
+    )])
+    .into();
     stale_remote_session.messages_loaded = true;
     stale_remote_session.message_count = 1;
     stale_remote_session.session_mutation_stamp = Some(30);
@@ -1422,10 +1438,11 @@ fn assert_stale_remote_history_page_rejected(body_seq: Option<u64>, body_seq_epo
         spawn_remote_session_history_response_server(SessionHistoryResponse {
             body_seq,
             body_seq_epoch: body_seq_epoch.map(str::to_owned),
-            messages: vec![
+            messages: (vec![
                 remote_text_message("remote-message-1", "Stale remote history."),
                 remote_text_message("remote-message-2", "Stale final streaming body."),
-            ],
+            ])
+            .into(),
             next_before: None,
             has_more: false,
             next_after: None,
@@ -1484,10 +1501,11 @@ fn get_session_adopts_bounded_summary_when_remote_owner_has_no_tail_bytes() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    remote_session.messages = vec![remote_text_message(
+    remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Transcript only the owner should have.",
-    )];
+    )])
+    .into();
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;
 
@@ -1605,10 +1623,11 @@ fn get_session_hydration_skips_side_fetch_when_remote_revision_is_already_seen()
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message(
+    full_remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Hydrated transcript without state side fetch.",
-    )];
+    )])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
 
@@ -1707,7 +1726,8 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
         .find(|session| session.id == "remote-session-1")
         .cloned()
         .expect("sample remote session should exist");
-    hydrated_session.messages = vec![remote_text_message("remote-message-1", "Hello world")];
+    hydrated_session.messages =
+        (vec![remote_text_message("remote-message-1", "Hello world")]).into();
     hydrated_session.messages_loaded = true;
     hydrated_session.message_count = 1;
     hydrated_session.preview = "Hello world".to_owned();
@@ -1734,7 +1754,7 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
         .find(|session| session.id == "remote-session-2")
         .cloned()
         .expect("sample sibling remote session should exist");
-    sibling_session.messages = vec![remote_text_message("remote-message-2", "Other")];
+    sibling_session.messages = (vec![remote_text_message("remote-message-2", "Other")]).into();
     sibling_session.messages_loaded = true;
     sibling_session.message_count = 1;
     sibling_session.preview = "Other".to_owned();
@@ -1886,10 +1906,11 @@ fn get_session_propagates_remote_protocol_error_instead_of_cached_summary() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    remote_session.messages = vec![remote_text_message(
+    remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Transcript only the owner should have.",
-    )];
+    )])
+    .into();
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;
 
@@ -1976,10 +1997,11 @@ fn get_session_surfaces_remote_tail_transport_failure_without_summary_fallback()
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    remote_session.messages = vec![remote_text_message(
+    remote_session.messages = (vec![remote_text_message(
         "remote-message-1",
         "Transcript only the owner should have.",
-    )];
+    )])
+    .into();
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;
 
@@ -2107,7 +2129,7 @@ fn get_session_tail_does_not_fetch_a_broad_remote_state_snapshot() {
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
     stale_full_session.messages =
-        vec![remote_text_message("remote-message-1", "Stale transcript.")];
+        (vec![remote_text_message("remote-message-1", "Stale transcript.")]).into();
     stale_full_session.messages_loaded = true;
     stale_full_session.message_count = 1;
     stale_full_session.preview = "Stale transcript.".to_owned();
@@ -2218,13 +2240,14 @@ fn remote_message_delta_hydrates_unloaded_proxy_before_gap_check() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![
+    full_remote_session.messages = (vec![
         remote_text_message("remote-message-1", "Existing remote transcript."),
         remote_text_message(
             "remote-message-2",
             "New remote message from delta revision.",
         ),
-    ];
+    ])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 2;
     full_remote_session.session_mutation_stamp = Some(11);
@@ -2331,7 +2354,8 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         .find(|session| session.id == "remote-session-1")
         .cloned()
         .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello world")];
+    full_remote_session.messages =
+        (vec![remote_text_message("remote-message-1", "Hello world")]).into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
     full_remote_session.preview = "Hello world".to_owned();
@@ -2358,7 +2382,7 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         .find(|session| session.id == "remote-session-2")
         .cloned()
         .expect("sample sibling remote session should exist");
-    sibling_session.messages = vec![remote_text_message("remote-message-2", "Other")];
+    sibling_session.messages = (vec![remote_text_message("remote-message-2", "Other")]).into();
     sibling_session.messages_loaded = true;
     sibling_session.message_count = 1;
     sibling_session.preview = "Other".to_owned();
@@ -2571,7 +2595,7 @@ fn remote_session_create_forwards_configured_default_model() {
         engram_boot_recovery_pending: false,
         status: SessionStatus::Idle,
         preview: "Remote Default Model ready.".to_owned(),
-        messages: Vec::new(),
+        messages: (Vec::new()).into(),
         prompt_history: Vec::new(),
         prompt_history_redacted: false,
         messages_loaded: true,
@@ -2875,7 +2899,7 @@ fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
         .iter_mut()
         .find(|session| session.id == "remote-session-1")
         .expect("sample remote session should exist");
-    seed_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello")];
+    seed_remote_session.messages = (vec![remote_text_message("remote-message-1", "Hello")]).into();
     seed_remote_session.messages_loaded = true;
     seed_remote_session.message_count = 1;
     seed_remote_session.preview = "Hello".to_owned();
@@ -2997,7 +3021,8 @@ fn targeted_remote_hydration_rejects_message_count_length_mismatch() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello world")];
+    full_remote_session.messages =
+        (vec![remote_text_message("remote-message-1", "Hello world")]).into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 2;
     full_remote_session.session_mutation_stamp = Some(10);
@@ -3204,10 +3229,11 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    full_remote_session.messages = vec![
+    full_remote_session.messages = (vec![
         remote_text_message("remote-message-1", "Existing remote transcript."),
         remote_text_message("remote-message-2", "Newer transcript from future revision."),
-    ];
+    ])
+    .into();
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 2;
     full_remote_session.session_mutation_stamp = Some(99);

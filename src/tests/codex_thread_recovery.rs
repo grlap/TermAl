@@ -187,7 +187,7 @@ fn shared_codex_empty_rollout_recovers_the_same_prompt_on_a_new_thread() {
             .contains("Keep this user prompt")
     );
     assert_eq!(
-        serde_json::to_value(&snapshot.messages[..original_messages.len()]).unwrap(),
+        serde_json::to_value(snapshot.messages.window(..original_messages.len())).unwrap(),
         serde_json::to_value(&original_messages).unwrap()
     );
     let requests: Vec<Value> = String::from_utf8(writer)

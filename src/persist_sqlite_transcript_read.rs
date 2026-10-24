@@ -277,12 +277,12 @@ fn load_persisted_session_tail(
             );
         }
         record.message_start_index = total_message_count;
-        record.session.messages = Vec::new();
+        record.session.messages = MessageSequence::default();
         record.session.messages_loaded = total_message_count == 0;
         return Ok(());
     }
     record.message_start_index = start_index;
-    record.session.messages = messages;
+    record.session.messages = messages.into();
     record.session.messages_loaded = start_index == 0;
     Ok(())
 }

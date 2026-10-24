@@ -730,7 +730,7 @@ impl AppState {
             !messages_loaded || start_index == 0,
             "tail projection cannot mark a strict suffix as fully loaded"
         );
-        session.messages = source_messages[start_index..].to_vec();
+        session.messages = source_messages.window(start_index..);
         session.messages_loaded = messages_loaded;
         session
     }

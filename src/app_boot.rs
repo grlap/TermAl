@@ -669,6 +669,11 @@ impl AppState {
                             next_watermark,
                             &persisted_session_ids,
                         );
+                        // The captured bodies must outlive COMMIT and trim,
+                        // then release outside StateInner. The baseline owns
+                        // only weak identities and may now discard dead prefixes.
+                        drop(delta);
+                        cache.release_evicted_transcript_prefixes(&persisted_session_ids);
                         watermark = next_watermark;
                         prompt_history_carry = next_prompt_history_carry;
                         if !pending_scope_deletions.is_empty()

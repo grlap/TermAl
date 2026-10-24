@@ -132,7 +132,7 @@ fn remote_proxy_session_with_message(state: &AppState, remote: &RemoteConfig) ->
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    remote_session.messages = vec![Message::Text {
+    remote_session.messages = (vec![Message::Text {
         attachments: Vec::new(),
         id: "remote-message-1".to_owned(),
         timestamp: stamp_now(),
@@ -140,7 +140,8 @@ fn remote_proxy_session_with_message(state: &AppState, remote: &RemoteConfig) ->
         text: "Remote message".to_owned(),
         expanded_text: None,
         source: None,
-    }];
+    }])
+    .into();
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;
 
@@ -1663,7 +1664,7 @@ fn equal_remote_snapshot_retries_dirty_delta_persistence_after_failed_recovery()
             .iter_mut()
             .find(|session| session.id == "remote-session-1")
             .expect("sample remote session should exist");
-        remote_session.messages = vec![Message::Text {
+        remote_session.messages = (vec![Message::Text {
             attachments: Vec::new(),
             id: "remote-message-1".to_owned(),
             timestamp: stamp_now(),
@@ -1671,7 +1672,8 @@ fn equal_remote_snapshot_retries_dirty_delta_persistence_after_failed_recovery()
             text: "Remote message".to_owned(),
             expanded_text: None,
             source: None,
-        }];
+        }])
+        .into();
         remote_session.messages_loaded = true;
         remote_session.message_count = 1;
         remote_session.markers.clear();

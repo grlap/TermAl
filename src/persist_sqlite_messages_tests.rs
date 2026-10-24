@@ -86,6 +86,8 @@ mod sqlite_message_storage_tests {
             local_identity_namespace: true,
             message_start_index: 0,
             message_count: count,
+            truncate_to: Some(count),
+            snapshot: MessageSequence::default(),
             write_overview: true,
             prompt_history_value_json: None,
             value_json: "{}".into(),
@@ -309,6 +311,7 @@ mod sqlite_message_storage_tests {
         }
         session.messages.pop();
         session.message_count = 4;
+        session.truncate_to = Some(4);
         save(&mut connection, &session);
         let rows = snapshot(&connection);
         assert_eq!(rows[0], prefix);
@@ -324,10 +327,12 @@ mod sqlite_message_storage_tests {
             is_user: false,
         });
         session.message_count = 5;
+        session.truncate_to = Some(5);
         save(&mut connection, &session);
         assert_eq!(snapshot(&connection)[4].2, "appended");
         session.messages.clear();
         session.message_count = 1;
+        session.truncate_to = Some(1);
         save(&mut connection, &session);
         assert_eq!(snapshot(&connection), [prefix]);
     }

@@ -148,42 +148,24 @@ fn write_serialized_persisted_messages(
     tx: &rusqlite::Transaction<'_>,
     session: &SerializedPersistedSession,
 ) -> Result<()> {
-    let start = i64::try_from(session.message_start_index)
-        .context("persisted transcript position exceeds SQLite integer range")?;
-    let end = session
-        .message_start_index
-        .checked_add(session.messages.len())
-        .context("persisted transcript position overflow")?;
-    let end =
-        i64::try_from(end).context("persisted transcript position exceeds SQLite integer range")?;
-
-    // Remove only the truncated suffix. The cold prefix and retained messages
-    // keep their rows, avoiding delete/insert amplification on every save.
-    tx.execute(
-        "DELETE FROM messages WHERE session_id = ?1 AND position >= ?2",
-        rusqlite::params![session.session_id, end],
-    )
-    .context("failed to truncate persisted transcript")?;
-    let identities = {
-        let mut statement = tx.prepare_cached(
-            "SELECT position, message_id FROM messages
-             WHERE session_id = ?1 AND position >= ?2 AND position < ?3",
-        )?;
-        statement
-            .query_map(rusqlite::params![session.session_id, start, end], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut remove =
-        tx.prepare_cached("DELETE FROM messages WHERE session_id = ?1 AND position = ?2")?;
-    // Release changed identities before any insert, including both sides of a
-    // reorder, so UNIQUE(session_id, message_id) remains valid throughout.
-    for (position, id) in identities {
-        let offset = usize::try_from(position - start)?;
-        if session.messages[offset].message_id != id {
-            remove.execute(rusqlite::params![session.session_id, position])?;
-        }
+    if let Some(end) = session.truncate_to {
+        tx.execute(
+            "DELETE FROM messages WHERE session_id = ?1 AND position >= ?2",
+            rusqlite::params![session.session_id, i64::try_from(end)?],
+        )
+        .context("failed to truncate persisted transcript")?;
+    }
+    let mut remove = tx.prepare_cached(
+        "DELETE FROM messages WHERE session_id=?1 AND position=?2 AND message_id IS NOT ?3",
+    )?;
+    // Release all changed identities before any upsert (including reorder).
+    // Sparse positions never imply deletion of an omitted retained body.
+    for message in &session.messages {
+        remove.execute(rusqlite::params![
+            session.session_id,
+            i64::try_from(message.position)?,
+            message.message_id
+        ])?;
     }
     let mut upsert = tx.prepare_cached(
         "INSERT INTO messages(session_id, position, message_id, value_json, overview_kind, is_user)

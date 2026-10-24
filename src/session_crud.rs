@@ -960,7 +960,7 @@ fn rollback_engram_mcp_rotation_notices_locked(
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        for message in &record.session.messages[*previous_len..] {
+        for message in &record.session.messages.window(*previous_len..) {
             record
                 .body_sequence
                 .unrepresented_messages

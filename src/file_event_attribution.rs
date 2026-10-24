@@ -215,14 +215,11 @@ fn amend_late_file_change_summary(
     id: &str,
     captured: BTreeMap<String, WorkspaceFileChangeKind>,
 ) -> bool {
-    let Some(Message::FileChanges { files, title, .. }) = record
-        .session
-        .messages
-        .iter_mut()
-        .find(|message| message.id() == id)
-    else {
-        return false;
-    };
+    let Some(index) = record.session.messages.iter().position(|message| {
+        matches!(message, Message::FileChanges { .. }) && message.id() == id
+    }) else { return false; };
+    let Message::FileChanges { files, title, .. } = &mut record.session.messages[index]
+    else { unreachable!("selected file change summary"); };
     let mut merged = files
         .iter()
         .map(|entry| (entry.path.clone(), entry.kind))

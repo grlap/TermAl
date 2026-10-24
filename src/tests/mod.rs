@@ -136,6 +136,7 @@ mod handoffs;
 mod peer_messages;
 mod persist;
 mod persist_delta;
+mod persist_message_delta;
 mod persist_fence;
 mod persist_observer;
 mod project_creation_races;
@@ -1376,7 +1377,7 @@ fn sample_remote_orchestrator_state(
                 engram_boot_recovery_pending: false,
                 status: SessionStatus::Idle,
                 preview: format!("Remote {} ready.", template_session.name),
-                messages: Vec::new(),
+                messages: MessageSequence::default(),
                 prompt_history: Vec::new(),
                 prompt_history_redacted: false,
                 messages_loaded: true,

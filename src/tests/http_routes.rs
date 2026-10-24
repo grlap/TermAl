@@ -148,7 +148,7 @@ fn seed_loaded_history_messages(
         .find_session_index(session_id)
         .expect("seeded session should exist");
     let record = &mut inner.sessions[index];
-    record.session.messages = messages;
+    record.session.messages = (messages).into();
     record.session.messages_loaded = true;
     record.message_positions = build_message_positions(&record.session.messages);
     record.mutation_stamp = record.mutation_stamp.saturating_add(1);
@@ -696,7 +696,7 @@ async fn get_session_overview_route_is_complete_for_a_retained_tail() {
             .find_session_index(&session_id)
             .expect("session should exist");
         let record = &mut inner.sessions[index];
-        record.session.messages = (0..100)
+        record.session.messages = ((0..100)
             .map(|position| {
                 let id = format!("overview-message-{position:03}");
                 if position < 25 {
@@ -745,7 +745,8 @@ async fn get_session_overview_route_is_complete_for_a_retained_tail() {
                     }
                 }
             })
-            .collect();
+            .collect::<Vec<_>>())
+        .into();
         record.session.messages_loaded = true;
         record.session.message_count = 100;
         record.message_start_index = 0;
@@ -778,7 +779,7 @@ async fn get_session_overview_route_is_complete_for_a_retained_tail() {
             .find_session_index(&session_id)
             .expect("session should exist");
         let record = &mut inner.sessions[index];
-        record.session.messages.drain(..70);
+        record.session.messages.discard(..70);
         record.message_start_index = 70;
         record.message_positions = build_message_positions(&record.session.messages);
         record.session.messages_loaded = false;
@@ -894,15 +895,26 @@ async fn get_session_history_route_reads_exact_start_ranges() {
     for (start, limit, end) in [(0, 20, 20), (47, 20, 67), (95, 20, 100), (0, 64, 64)] {
         let (status, page): (StatusCode, SessionHistoryResponse) = request_json(
             &app,
-            Request::builder().method("GET")
-                .uri(format!("/api/sessions/{session_id}/history?start={start}&limit={limit}"))
-                .body(Body::empty()).unwrap(),
-        ).await;
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/sessions/{session_id}/history?start={start}&limit={limit}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(page.message_start_index, start);
         assert_eq!(page.messages.len(), end - start);
-        assert_eq!(page.messages.first().map(Message::id), Some(ids[start].as_str()));
-        assert_eq!(page.messages.last().map(Message::id), Some(ids[end - 1].as_str()));
+        assert_eq!(
+            page.messages.first().map(Message::id),
+            Some(ids[start].as_str())
+        );
+        assert_eq!(
+            page.messages.last().map(Message::id),
+            Some(ids[end - 1].as_str())
+        );
         assert_eq!(page.has_more, start > 0);
         assert_eq!(page.has_newer, end < 100);
     }
@@ -916,9 +928,17 @@ async fn get_session_history_route_reads_exact_start_ranges() {
         ("start=0&before=a", StatusCode::BAD_REQUEST),
         ("start=0&after=a", StatusCode::BAD_REQUEST),
     ] {
-        let response = app.clone().oneshot(Request::builder().method("GET")
-            .uri(format!("/api/sessions/{session_id}/history?{query}"))
-            .body(Body::empty()).unwrap()).await.unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/sessions/{session_id}/history?{query}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), expected, "{query}");
     }
 }
@@ -965,7 +985,7 @@ async fn get_session_overview_meets_large_transcript_latency_and_network_budgets
             .find_session_index(&session_id)
             .expect("session should exist");
         let record = &mut inner.sessions[index];
-        record.session.messages.drain(..24_970);
+        record.session.messages.discard(..24_970);
         record.message_start_index = 24_970;
         record.message_positions = build_message_positions(&record.session.messages);
         record.session.messages_loaded = false;

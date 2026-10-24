@@ -505,6 +505,7 @@ fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
 
 #[cfg(test)]
 thread_local! {
+    static PERSIST_MESSAGE_COMMIT_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
     static METADATA_COMMIT_INTEGRITY_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -1315,6 +1316,14 @@ fn persist_state_parts_via_connection(
     Ok(committed_metadata.generation)
 }
 
+/// Body identities at absolute transcript positions after a verified COMMIT.
+/// Weak references pin allocations against address reuse without owning bodies;
+/// an evicted prefix can therefore release both payloads and cached identities.
+struct PersistTranscriptBaseline {
+    start: usize,
+    identities: Vec<std::sync::Weak<Message>>,
+}
+
 /// Thread-local SQLite connection cache for the background persist thread.
 ///
 /// Every queued persist previously opened a fresh SQLite connection and
@@ -1334,6 +1343,11 @@ struct SqlitePersistConnectionCache {
     path: Option<PathBuf>,
     connection: Option<rusqlite::Connection>,
     metadata_units: Option<PersistMetadataUnitCache>,
+    // Adopted only after COMMIT and post-commit integrity verification.
+    transcripts: HashMap<String, PersistTranscriptBaseline>,
+    // Same-connection data_version sampled inside that committed transaction.
+    // Any different predecessor invalidates all sparse transcript assumptions.
+    transcript_data_version: Option<i64>,
 }
 
 impl SqlitePersistConnectionCache {
@@ -1342,6 +1356,8 @@ impl SqlitePersistConnectionCache {
             path: None,
             connection: None,
             metadata_units: None,
+            transcripts: HashMap::new(),
+            transcript_data_version: None,
         }
     }
 
@@ -1355,6 +1371,8 @@ impl SqlitePersistConnectionCache {
                 path: Some(path),
                 connection: Some(connection),
                 metadata_units: None,
+                transcripts: HashMap::new(),
+                transcript_data_version: None,
             },
             None => Self::new(),
         }
@@ -1381,11 +1399,34 @@ impl SqlitePersistConnectionCache {
             self.path = Some(path.to_path_buf());
             self.connection = Some(connection);
             self.metadata_units = None;
+            self.transcripts.clear();
+            self.transcript_data_version = None;
         }
         Ok(self
             .connection
             .as_mut()
             .expect("connection was just cached for the requested path"))
+    }
+
+    // Called after live-tail trimming and dropping the captured delta, with
+    // no StateInner guard. Drop dead weak prefixes too, so an imported large
+    // transcript does not leave its old identity/control-block window cached.
+    fn release_evicted_transcript_prefixes(&mut self, persisted_ids: &[String]) {
+        for id in persisted_ids {
+            let Some(baseline) = self.transcripts.get_mut(id) else {
+                continue;
+            };
+            let expired = baseline
+                .identities
+                .iter()
+                .take_while(|body| body.strong_count() == 0)
+                .count();
+            if expired != 0 {
+                drop(baseline.identities.drain(..expired));
+                baseline.identities.shrink_to_fit();
+                baseline.start += expired;
+            }
+        }
     }
 
     /// Drops the cached connection so the next `connection_for` call
@@ -1406,6 +1447,8 @@ impl SqlitePersistConnectionCache {
         self.connection = None;
         self.path = None;
         self.metadata_units = None;
+        self.transcripts.clear();
+        self.transcript_data_version = None;
     }
 }
 
@@ -1478,10 +1521,43 @@ fn persist_delta_via_cache_inner(
     // failed tick still accounts for the time it spent.
     persist_observe_phase("serialize");
     let serialize_started = std::time::Instant::now();
+    let predecessor_version = if cache.path.as_deref() == Some(path) {
+        cache
+            .connection
+            .as_ref()
+            .map(|connection| {
+                connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    if predecessor_version != cache.transcript_data_version {
+        cache.transcripts.clear();
+    }
+    let used_baseline = !cache.transcripts.is_empty();
     let serialized = (|| -> Result<_> {
         let metadata_units = project_metadata_units(&delta.metadata)?;
-        let serialized_sessions =
-            serialize_persisted_sessions_with_isolation(&delta.changed_sessions);
+        // A baseline belongs to the exact cached store connection. A reopen
+        // or path switch must send the complete captured coverage again.
+        let baseline = (cache.path.as_deref() == Some(path)).then_some(&cache.transcripts);
+        let serialized_sessions = delta
+            .changed_sessions
+            .iter()
+            .filter_map(|record| {
+                let previous = baseline.and_then(|rows| rows.get(&record.session.id));
+                match serialize_persisted_session_since(record, previous) {
+                    Ok(row) => Some(row),
+                    Err(error) => {
+                        eprintln!(
+                            "persist> preserving invalid session `{}`: {error:#}",
+                            record.session.id
+                        );
+                        None
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
         let serialized_delegations = delta
             .changed_delegations
             .as_deref()
@@ -1534,6 +1610,15 @@ fn persist_delta_via_cache_inner(
             )
         })
         .and_then(|tx| {
+            // Another connection may commit after preparation. Never apply a
+            // sparse list against that different predecessor; invalidate and
+            // let the normal retry submit complete captured coverage.
+            if used_baseline
+                && Some(tx.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?)
+                    != predecessor_version
+            {
+                bail!("transcript predecessor changed while preparing persistence");
+            }
             write_federation_host_generation(&tx, &delta.metadata)?;
             let committed_metadata = write_metadata_units(
                 &tx,
@@ -1562,10 +1647,20 @@ fn persist_delta_via_cache_inner(
     let (tx, committed_metadata) = written?;
     persist_observe_phase("commit");
     let commit_started = std::time::Instant::now();
+    // Anchor the body snapshot while this transaction still owns SQLite's
+    // write lock. Sampling after COMMIT could adopt an intervening external
+    // writer's version alongside our older immutable bodies. Our own commit
+    // does not change PRAGMA data_version on this connection.
+    let committed_transcript_version =
+        tx.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
     let committed = persist_commit_transaction_observed(tx)
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()));
     timings.commit = commit_started.elapsed();
     committed?;
+    #[cfg(test)]
+    if let Some(hook) = PERSIST_MESSAGE_COMMIT_HOOK.with(|slot| slot.take()) {
+        hook();
+    }
     delta
         .metadata
         .metadata_capture
@@ -1588,6 +1683,21 @@ fn persist_delta_via_cache_inner(
     timings.post_commit = post_commit_started.elapsed();
     verified?;
     cache.metadata_units = Some(committed_metadata);
+    cache.transcript_data_version = Some(committed_transcript_version);
+    // Publish only snapshots whose transaction and integrity checks succeeded.
+    // Weak identities prevent allocation-address ABA without retaining bodies.
+    for id in &delta.removed_session_ids {
+        cache.transcripts.remove(id);
+    }
+    for row in &serialized_sessions {
+        cache.transcripts.insert(
+            row.session_id.clone(),
+            PersistTranscriptBaseline {
+                start: row.message_start_index,
+                identities: row.snapshot.identities(),
+            },
+        );
+    }
     Ok(persisted_session_ids)
 }
 

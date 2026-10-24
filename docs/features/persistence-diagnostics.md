@@ -74,3 +74,34 @@ against byte counts, storage/ticket phases, fence age and loop wall time.
 Do not infer disk contention, a successful durability acknowledgement, or a
 safe retry merely from a long tick. Live observation requires this binary to
 be landed, installed and restarted by the operator under the existing rules.
+
+## Transcript payload and committed rows
+
+Resident transcripts share individual immutable message bodies with writer
+snapshots. Snapshot collection copies references while holding `StateInner`;
+message JSON preparation runs after releasing it. A mutable message access
+detaches that body, leaving an already captured snapshot coherent.
+
+The writer remembers non-owning identity tokens for the exact bodies from its
+last confirmed transaction. These weak tokens prevent allocation-address reuse
+without keeping evicted body data alive. After releasing the captured delta,
+writer bookkeeping drops expired identity prefixes outside `StateInner`.
+Metadata-only changes prepare no unchanged message JSON, and edits or appends
+prepare the changed absolute positions. Logical transcript extent and loaded
+coverage are separate from this sparse list: omitted bodies are retained, and
+evicting a cold prefix from memory does not delete it from SQLite. Reorder,
+replacement and truncation release conflicting identities before upserts.
+Failure, reopen, store changes and commits through another connection invalidate
+the predecessor; recovery submits the complete captured coverage. This adds no
+persisted encoding, table, index or migration marker.
+
+`retainedMessages` and `messageBytes` measure prepared/submitted message rows
+and JSON bytes. They do not measure affected SQL rows, physical disk writes or
+WAL bytes. Isolated regressions count committed insert/update/delete triggers
+separately, so a reduction in prepared payload cannot masquerade as a reduction
+in already differential SQL writes.
+
+Compare collect wait, collect hold, serialization and SQL durations separately.
+Prepared payload improvements alone do not establish the cause or resolution
+of an API stall: waiting for `StateInner`, including post-write tail trimming,
+is distinct from time holding it and from writer preparation or commit time.

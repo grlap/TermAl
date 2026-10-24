@@ -279,16 +279,20 @@ impl IntoResponse for ApiError {
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation
         {
-            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
-                "error": truncate_chars(&self.message, 2048),
-                "contract": "termal-durability-pending",
-                "version": 1,
-                "code": "durability_pending",
-                "outcome": "pending",
-                "operation": operation,
-                "identity": deadline.identity,
-                "retry": { "mode": "same_request" },
-            }))).into_response();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": truncate_chars(&self.message, 2048),
+                    "contract": "termal-durability-pending",
+                    "version": 1,
+                    "code": "durability_pending",
+                    "outcome": "pending",
+                    "operation": operation,
+                    "identity": deadline.identity,
+                    "retry": { "mode": "same_request" },
+                })),
+            )
+                .into_response();
         }
         let body = Json(ErrorResponse {
             error: self.message,
@@ -780,7 +784,7 @@ struct Session {
     engram_boot_recovery_pending: bool,
     status: SessionStatus,
     preview: String,
-    messages: Vec<Message>,
+    messages: MessageSequence,
     /// Recent user-authored prompts, ordered oldest to newest.
     ///
     /// This is deliberately independent of the bounded transcript window so
@@ -827,6 +831,66 @@ struct Session {
     session_mutation_stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parent_delegation_id: Option<String>,
+}
+impl Session {
+    fn clone_without_messages(&self) -> Self {
+        Self {
+            body_seq: self.body_seq.clone(),
+            body_seq_epoch: self.body_seq_epoch.clone(),
+            kimi_effort: self.kimi_effort.clone(),
+            kimi_current_effort: self.kimi_current_effort.clone(),
+            kimi_effort_options: self.kimi_effort_options.clone(),
+            kimi_approval_mode: self.kimi_approval_mode.clone(),
+            kimi_mode: self.kimi_mode.clone(),
+            kimi_current_mode: self.kimi_current_mode.clone(),
+            opencode_approval_mode: self.opencode_approval_mode.clone(),
+            id: self.id.clone(),
+            name: self.name.clone(),
+            emoji: self.emoji.clone(),
+            agent: self.agent.clone(),
+            workdir: self.workdir.clone(),
+            project_id: self.project_id.clone(),
+            remote_id: self.remote_id.clone(),
+            model: self.model.clone(),
+            model_options: self.model_options.clone(),
+            approval_policy: self.approval_policy.clone(),
+            reasoning_effort: self.reasoning_effort.clone(),
+            codex_fast_mode: self.codex_fast_mode.clone(),
+            sandbox_mode: self.sandbox_mode.clone(),
+            cursor_mode: self.cursor_mode.clone(),
+            claude_effort: self.claude_effort.clone(),
+            claude_approval_mode: self.claude_approval_mode.clone(),
+            gemini_approval_mode: self.gemini_approval_mode.clone(),
+            opencode_model: self.opencode_model.clone(),
+            opencode_effort: self.opencode_effort.clone(),
+            opencode_current_effort: self.opencode_current_effort.clone(),
+            opencode_effort_options: self.opencode_effort_options.clone(),
+            opencode_mode: self.opencode_mode.clone(),
+            opencode_current_mode: self.opencode_current_mode.clone(),
+            opencode_mode_options: self.opencode_mode_options.clone(),
+            external_session_id: self.external_session_id.clone(),
+            agent_commands_revision: self.agent_commands_revision.clone(),
+            codex_thread_state: self.codex_thread_state.clone(),
+            live_activity: self.live_activity.clone(),
+            engram_boot_recovery_pending: self.engram_boot_recovery_pending.clone(),
+            status: self.status.clone(),
+            preview: self.preview.clone(),
+            messages: MessageSequence::default(),
+            prompt_history: self.prompt_history.clone(),
+            prompt_history_redacted: self.prompt_history_redacted.clone(),
+            messages_loaded: self.messages_loaded.clone(),
+            message_count: self.message_count.clone(),
+            markers: self.markers.clone(),
+            pending_prompts: self.pending_prompts.clone(),
+            prompt_deliveries: self.prompt_deliveries.clone(),
+            queue_paused: self.queue_paused.clone(),
+            provider_capacity_waiting: self.provider_capacity_waiting.clone(),
+            source_tracking_recovery: self.source_tracking_recovery.clone(),
+            queue_projection_hash: self.queue_projection_hash.clone(),
+            session_mutation_stamp: self.session_mutation_stamp.clone(),
+            parent_delegation_id: self.parent_delegation_id.clone(),
+        }
+    }
 }
 
 /// Transcript-free session metadata carried by broad state snapshots and
@@ -1827,7 +1891,9 @@ impl DelegationAcceptanceEvaluation {
                     refusal.original.args.clear();
                 }
                 if let AcceptanceEvaluationSubmission::Pending { original, .. }
-                | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } = &mut previous.submission {
+                | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } =
+                    &mut previous.submission
+                {
                     original.args.clear();
                 }
             }

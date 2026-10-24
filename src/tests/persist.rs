@@ -3371,7 +3371,7 @@ fn sqlite_startup_retains_only_the_latest_page_and_reads_older_history_by_index(
         let record = inner
             .session_mut_by_index(session_index)
             .expect("created session should be mutable");
-        record.session.messages = (0..130)
+        record.session.messages = ((0..130)
             .map(|index| Message::Text {
                 attachments: Vec::new(),
                 id: format!("message-{index:03}"),
@@ -3381,7 +3381,8 @@ fn sqlite_startup_retains_only_the_latest_page_and_reads_older_history_by_index(
                 expanded_text: None,
                 source: None,
             })
-            .collect();
+            .collect::<Vec<_>>())
+        .into();
         record.session.message_count = 130;
         record.session.messages_loaded = true;
         record.message_start_index = 0;
@@ -4032,7 +4033,7 @@ fn local_history_cursor_and_page_share_the_persisted_read_path() {
         let record = inner
             .session_mut_by_index(session_index)
             .expect("created session should be mutable");
-        record.session.messages = (0..130)
+        record.session.messages = ((0..130)
             .map(|index| Message::Text {
                 attachments: Vec::new(),
                 id: format!("message-{index:03}"),
@@ -4042,7 +4043,8 @@ fn local_history_cursor_and_page_share_the_persisted_read_path() {
                 expanded_text: None,
                 source: None,
             })
-            .collect();
+            .collect::<Vec<_>>())
+        .into();
         record.session.message_count = 130;
         record.session.messages_loaded = true;
         record.message_start_index = 0;
@@ -4123,8 +4125,10 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
     // Export one immutable initial image into three independent empty stores.
     // Subsequent writes use the source loaded from each store's own lineage.
     let initial = PersistedState::from_inner(&inner);
-    persist_state_from_persisted(&session_row_path, &initial).expect("session-row state should persist");
-    persist_state_from_persisted(&delegation_row_path, &initial).expect("delegation-row state should persist");
+    persist_state_from_persisted(&session_row_path, &initial)
+        .expect("session-row state should persist");
+    persist_state_from_persisted(&delegation_row_path, &initial)
+        .expect("delegation-row state should persist");
     persist_state_from_persisted(&metadata_path, &initial).expect("metadata state should persist");
 
     {
@@ -4314,8 +4318,14 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='state_metadata_units')",
         [], |row| row.get(0)).unwrap();
     let metadata_unit_rows: u64 = if metadata_units_exist {
-        connection.query_row("SELECT count(*) FROM state_metadata_units", [], |row| row.get(0)).unwrap()
-    } else { 0 };
+        connection
+            .query_row("SELECT count(*) FROM state_metadata_units", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    } else {
+        0
+    };
     let sessions_table_exists = connection
         .query_row(
             "SELECT EXISTS(
@@ -4339,7 +4349,10 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
         app_state_rows, 0,
         "synchronous fallback unexpectedly persisted app metadata"
     );
-    assert_eq!(metadata_unit_rows, 0, "synchronous fallback unexpectedly persisted metadata units");
+    assert_eq!(
+        metadata_unit_rows, 0,
+        "synchronous fallback unexpectedly persisted metadata units"
+    );
     assert_eq!(
         session_rows, 0,
         "synchronous fallback unexpectedly persisted the created session"
@@ -4396,7 +4409,7 @@ fn sqlite_startup_tolerates_remote_metadata_message_count_without_local_rows() {
         // The remote-proxy shape: metadata knows the remote length, nothing
         // is hydrated locally. Well above SQLITE_SESSION_TAIL_MESSAGES (64)
         // so the loader computes a non-zero start_index and expects a tail.
-        record.session.messages = Vec::new();
+        record.session.messages = (Vec::new()).into();
         record.session.message_count = 1408;
         record.session.messages_loaded = false;
         record.message_start_index = 0;
@@ -4452,7 +4465,7 @@ fn sqlite_startup_tolerates_bounded_remote_proxy_suffix_without_overview() {
         let record = inner
             .session_mut_by_index(session_index)
             .expect("created session should be mutable");
-        record.session.messages = (936..1000)
+        record.session.messages = ((936..1000)
             .map(|position| Message::Text {
                 attachments: Vec::new(),
                 id: format!("remote-message-{position}"),
@@ -4462,7 +4475,8 @@ fn sqlite_startup_tolerates_bounded_remote_proxy_suffix_without_overview() {
                 expanded_text: None,
                 source: None,
             })
-            .collect();
+            .collect::<Vec<_>>())
+        .into();
         record.session.message_count = 1000;
         record.session.messages_loaded = false;
         record.message_start_index = 936;

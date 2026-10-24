@@ -246,7 +246,7 @@ impl StateInner {
                 engram_boot_recovery_pending: false,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
-                messages: Vec::new(),
+                messages: MessageSequence::default(),
                 prompt_history: Vec::new(),
                 prompt_history_redacted: false,
                 messages_loaded: true,

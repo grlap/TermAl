@@ -377,11 +377,12 @@ fn project_digest_orders_mixed_protocol_approvals_and_skips_trimmed_acp_head() {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let session_index = inner.find_session_index(&session_id).unwrap();
         let record = &mut inner.sessions[session_index];
-        record.session.messages = vec![
+        record.session.messages = (vec![
             approval_message("acp-head"),
             approval_message("codex-newer"),
             approval_message("acp-later"),
-        ];
+        ])
+        .into();
         record.message_positions = build_message_positions(&record.session.messages);
         record
             .pending_acp_approvals
@@ -406,11 +407,12 @@ fn project_digest_orders_mixed_protocol_approvals_and_skips_trimmed_acp_head() {
             "newer Codex approval should beat the older ACP FIFO head"
         );
 
-        record.session.messages = vec![
+        record.session.messages = (vec![
             approval_message("codex-newer"),
             approval_message("acp-later"),
             approval_message("acp-head"),
-        ];
+        ])
+        .into();
         record.message_positions = build_message_positions(&record.session.messages);
         assert_eq!(
             registered_pending_approval_message_id(record).as_deref(),

@@ -142,6 +142,86 @@ fn result_notes(value: &Value) -> String {
         .unwrap_or_default()
 }
 
+#[tokio::test]
+async fn handoff_borrows_unrelated_large_message_bodies_under_state_lock() {
+    let (fixture, delegation_id, child, _) = start_worker().await;
+    let (result, copied) = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&child).unwrap();
+        let record = inner.session_mut_by_index(index).unwrap();
+        for message in [
+            Message::Text {
+                id: "large-handoff-text".into(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "unrelated transcript body".repeat(16 * 1024),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source: None,
+            },
+            Message::Command {
+                id: "large-handoff-output".into(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                command: "cargo test report".into(),
+                command_language: Some("shell".into()),
+                output: "unrelated command output".repeat(16 * 1024),
+                output_language: Some("text".into()),
+                status: CommandStatus::Success,
+            },
+            Message::FileChanges {
+                id: "handoff-observation".into(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "observed change".into(),
+                files: vec![FileChangeSummaryEntry {
+                    path: "current-attempt.rs".into(),
+                    kind: WorkspaceFileChangeKind::Modified,
+                }],
+            },
+        ] {
+            push_message_on_record(record, message);
+        }
+        // The observer must distinguish shared-body consumption from borrowing.
+        let (owned, control_clones) = MessageSequence::observe_shared_body_clones(|| {
+            record
+                .session
+                .messages
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>()
+        });
+        let control_count = owned.len();
+        drop(owned);
+        let delegation = inner
+            .delegations
+            .iter()
+            .find(|entry| entry.id == delegation_id)
+            .unwrap();
+        let mut result: DelegationResult = serde_json::from_value(json!({
+            "delegationId": delegation_id, "childSessionId": child,
+            "status": "completed", "summary": "handoff",
+        }))
+        .unwrap();
+        let (_, copied) = MessageSequence::observe_shared_body_clones(|| {
+            record_worker_handoff(&inner, delegation, &mut result);
+        });
+        (result, (copied, control_clones, control_count))
+    };
+    assert_eq!(
+        copied.1, copied.2,
+        "shared consuming control must exercise body copies"
+    );
+    assert!(copied.1 >= 3);
+    assert_eq!(result.commands_run.len(), 1);
+    assert_eq!(result.commands_run[0].command, "cargo test report");
+    assert_eq!(result.observed_workspace_changes, ["current-attempt.rs"]);
+    assert_eq!(
+        copied.0, 0,
+        "handoff metadata must not clone transcript bodies under StateInner"
+    );
+}
+
 fn assert_source_metadata(value: &Value, fixture: &WorkerFixture, base: &str) {
     assert_eq!(
         value["result"]["baseRevision"], base,
@@ -367,7 +447,7 @@ async fn delegation_worker_handoff_followup_excludes_previous_native_claim_and_c
         .messages
         .retain(|message| message.user_prompt_text().is_none());
     assert!(
-        worker_current_attempt_messages(&trimmed).is_none(),
+        worker_current_attempt_start(&trimmed).is_none(),
         "a missing prompt must not fall back to the whole transcript"
     );
 }

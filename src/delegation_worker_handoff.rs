@@ -24,12 +24,12 @@ fn worker_result_worktree_path(delegation: &DelegationRecord) -> Option<&str> {
     }
 }
 
-fn worker_current_attempt_messages(session: &Session) -> Option<&[Message]> {
+fn worker_current_attempt_start(session: &Session) -> Option<usize> {
     session
         .messages
         .iter()
         .rposition(|message| message.user_prompt_text().is_some())
-        .map(|index| &session.messages[index + 1..])
+        .map(|index| index + 1)
 }
 
 /// Called once when terminal result construction snapshots workspace observations.
@@ -55,7 +55,7 @@ fn record_worker_handoff(
         // The recorded id remains authoritative even if its queue entry was
         // removed before failure/cancel settlement. Never fall back to an old
         // user message when that exact prompt has not been promoted.
-        let attempt_messages = match delegation.queued_followup_prompt_id.as_deref() {
+        let attempt_start = match delegation.queued_followup_prompt_id.as_deref() {
             Some(prompt_id) => child
                 .session
                 .messages
@@ -63,14 +63,20 @@ fn record_worker_handoff(
                 .position(|message| {
                     matches!(message, Message::Text { id, author: Author::You, .. } if id == prompt_id)
                 })
-                .map(|index| &child.session.messages[index + 1..]),
-            None => worker_current_attempt_messages(&child.session),
+                .map(|index| index + 1),
+            None => worker_current_attempt_start(&child.session),
         };
         let unstarted_followup =
-            delegation.queued_followup_prompt_id.is_some() && attempt_messages.is_none();
-        result.worker_output_unavailable = Some(attempt_messages.is_none());
-        let messages = attempt_messages.unwrap_or_default();
-        if attempt_messages.is_none() {
+            delegation.queued_followup_prompt_id.is_some() && attempt_start.is_none();
+        result.worker_output_unavailable = Some(attempt_start.is_none());
+        // Borrow the resident window: handoff needs command/path metadata,
+        // never owned copies of unrelated transcript bodies under StateInner.
+        let messages = child
+            .session
+            .messages
+            .iter()
+            .skip(attempt_start.unwrap_or(child.session.messages.len()));
+        if attempt_start.is_none() {
             // A trimmed/missing prompt cannot establish current-attempt attribution.
             // Keep original prose in full output, never promote it as this handoff.
             result.notes.clear();
@@ -83,7 +89,7 @@ fn record_worker_handoff(
         }
         if result.status != DelegationStatus::Canceled {
             result.commands_run = messages
-                .iter()
+                .clone()
                 .filter_map(|message| match message {
                     Message::Command {
                         command, status, ..
@@ -97,7 +103,7 @@ fn record_worker_handoff(
         }
         // The ordinary failure path retains only its summary. Recover Notes only
         // from this turn's latest failed packet; never reuse an earlier outcome.
-        if attempt_messages.is_some()
+        if attempt_start.is_some()
             && result.status == DelegationStatus::Failed
             && let Some(parsed) = latest_assistant_message_delegation_result(&child.session)
             && parsed.status == DelegationStatus::Failed
@@ -114,7 +120,7 @@ fn record_worker_handoff(
                 observed.extend(files.iter().map(|file| file.path.clone()));
             }
         }
-        if attempt_messages.is_some() {
+        if attempt_start.is_some() {
             observed.extend(child.active_turn_file_changes.keys().cloned());
         }
         result.observed_workspace_changes = observed.into_iter().collect();

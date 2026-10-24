@@ -76,7 +76,7 @@ impl CardFixture {
         inner.sessions[inner.find_session_index(&self.owner).unwrap()]
             .session
             .messages
-            .clone()
+            .iter().cloned().collect()
     }
 
     fn cards(&self) -> Vec<(String, TestRunCardSnapshot)> {
