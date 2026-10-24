@@ -424,10 +424,15 @@ impl AppState {
     ) -> Result<Self> {
         // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
-        let (loaded_state, mut boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
+        let (loaded_state, mut boot_persistence_connection) =
+            load_state_for_boot(&persistence_path)?;
         let mut inner =
             loaded_state.unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
-        prepare_federation_boot(&mut inner, &persistence_path, &mut boot_persistence_connection)?;
+        prepare_federation_boot(
+            &mut inner,
+            &persistence_path,
+            &mut boot_persistence_connection,
+        )?;
         let host_workdir = engram_host_workdir(&persistence_path)?;
         inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(host_workdir.clone()));
         #[cfg(test)]
@@ -569,7 +574,8 @@ impl AppState {
                     // flag so the very last delta reaches SQLite before
                     // we exit. See bugs.md "Server restart without
                     // browser refresh can lose the last streamed message".
-                    let (shutdown, drained) = fences.drain_observed(&persist_rx, should_exit_after_tick);
+                    let (shutdown, drained) =
+                        fences.drain_observed(&persist_rx, should_exit_after_tick);
                     should_exit_after_tick = shutdown;
                     let (accepted, age_us) = fences.take_observer_acceptance();
                     observer_for_persist.update(|tick| {
@@ -682,10 +688,15 @@ impl AppState {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
                     timings.log_if_slow();
-                    let should_exit = retry_state.finish_fenced_tick(&result, should_exit_after_tick, &mut fences);
+                    let should_exit = retry_state.finish_fenced_tick(
+                        &result,
+                        should_exit_after_tick,
+                        &mut fences,
+                    );
                     observer_for_persist.update(|tick| {
                         tick.counts.pending_fences_after = fences.pending.len();
-                        tick.phases.bookkeeping_us = bookkeeping_started.map_or(0, |started| persist_observed_us(started.elapsed()));
+                        tick.phases.bookkeeping_us = bookkeeping_started
+                            .map_or(0, |started| persist_observed_us(started.elapsed()));
                     });
                     observation.finish(result.is_ok(), &timings);
                     if should_exit {
@@ -718,14 +729,10 @@ impl AppState {
         let state_broadcast_mailbox = Arc::new(StateBroadcastMailbox::default());
 
         // Background state-broadcast thread: drains a bounded ordered mailbox
-        // of owned snapshots and typed deltas. Producers enqueue under the
-        // same state lock that allocates their revision; this worker serializes
-        // both kinds after releasing the state and mailbox locks, then forwards
-        // them in that order to the stream channel `/api/events` reads.
-        // Consecutive state snapshots coalesce before they reach this thread,
-        // but a snapshot queued before a delta must be sent before that delta;
-        // otherwise the browser can see delta N+1 while still waiting for
-        // state N and trigger an avoidable `/api/state` repair fetch. If a
+        // of immutable metadata cuts and typed deltas. Adjacent metadata cuts
+        // coalesce; no snapshot crosses a delta. Only capacity loss emits a
+        // recovery marker. Full DTO materialization happens on this worker.
+        // Serialization and forwarding hold neither state nor mailbox lock. If a
         // large snapshot stalls this thread, the mailbox drops the oldest
         // pending work at capacity rather than blocking the commit lock.
         //
@@ -746,21 +753,7 @@ impl AppState {
             #[cfg(test)]
             delta_events: broadcast::channel(256).0,
         };
-        let state_broadcast_senders_for_thread = state_broadcast_senders.clone();
-        let state_broadcast_mailbox_for_thread = state_broadcast_mailbox.clone();
-        std::thread::Builder::new()
-            .name("termal-state-broadcast".to_owned())
-            .spawn(move || {
-                loop {
-                    forward_state_broadcast_work(
-                        state_broadcast_mailbox_for_thread.recv_next(),
-                        &state_broadcast_senders_for_thread,
-                    );
-                }
-            })
-            .expect("failed to spawn state broadcast thread");
-
-        let state = Self {
+        let mut state = Self {
             // Per-process UUID generated at boot. Every `StateResponse`
             // and `HealthResponse` carries this value so clients can
             // distinguish server-restart-driven revision rewinds from
@@ -787,6 +780,7 @@ impl AppState {
             persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
             state_broadcast_mailbox: Some(state_broadcast_mailbox),
+            state_broadcast_worker: None,
             telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
@@ -822,6 +816,8 @@ impl AppState {
             #[cfg(test)]
             test_temp_root: None,
         };
+        state.warm_state_projection_cache();
+        state.state_broadcast_worker = Some(Arc::new(StateBroadcastWorker::start(state.clone())));
         let remote_config_publication = {
             let inner = state.inner.lock().expect("state mutex poisoned");
             // Persist first so a boot failure cannot abandon a publication

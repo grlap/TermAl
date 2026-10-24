@@ -222,7 +222,7 @@ fn ordered_publication_interleaved_commits_keep_revision_and_body_sequence_order
     assert!(
         pending
             .iter()
-            .any(|work| matches!(work, StateBroadcastWork::Snapshot(_))),
+            .any(|work| matches!(work, StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_))),
         "the metadata commits were published"
     );
 

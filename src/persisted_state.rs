@@ -273,6 +273,7 @@ impl PersistedState {
             .collect();
         let mut inner = StateInner {
             metadata_predecessor: self.metadata_capture.known.clone(),
+            state_projection_cache: Mutex::new(StateProjectionCache::default()),
             federation: self.federation,
             federation_durable: true,
             federation_continuity_lost: false,

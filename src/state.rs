@@ -427,6 +427,8 @@ impl<T> Drop for StateMutexGuard<'_, T> {
 
 enum StateBroadcastWork {
     Snapshot(StateResponse),
+    ImmutableSnapshot(ImmutableStateSnapshot),
+    Drain,
     Delta(DeltaEvent),
     /// Pending work was dropped at capacity: consumers must resync. A loss
     /// signal outside the commit order, with no revision of its own.
@@ -438,6 +440,8 @@ impl StateBroadcastWork {
     fn revision(&self) -> Option<u64> {
         match self {
             Self::Snapshot(snapshot) => Some(snapshot.revision),
+            Self::ImmutableSnapshot(snapshot) => Some(snapshot.header.revision),
+            Self::Drain => None,
             Self::Delta(event) => Some(event.revision()),
             Self::Lagged => None,
         }
@@ -450,6 +454,8 @@ const STATE_BROADCAST_MAILBOX_CAPACITY: usize = 256;
 struct StateBroadcastPending {
     work: VecDeque<StateBroadcastWork>,
     lagged: bool,
+    closing: bool,
+    stopped: bool,
 }
 
 impl StateBroadcastPending {
@@ -476,18 +482,28 @@ impl StateBroadcastPending {
 struct StateBroadcastMailbox {
     pending: Mutex<StateBroadcastPending>,
     work_available: Condvar,
+    #[cfg(test)]
+    before_forward: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl StateBroadcastMailbox {
     fn publish_snapshot(&self, snapshot: StateResponse) {
+        self.publish_snapshot_work(StateBroadcastWork::Snapshot(snapshot));
+    }
+
+    fn publish_snapshot_work(&self, work: StateBroadcastWork) {
         let mut pending = self
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
-        if let Some(StateBroadcastWork::Snapshot(existing)) = pending.work.back_mut() {
-            *existing = snapshot;
+        debug_assert!(!pending.stopped);
+        if matches!(
+            pending.work.back(),
+            Some(StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_))
+        ) {
+            *pending.work.back_mut().unwrap() = work;
         } else {
-            pending.enqueue(StateBroadcastWork::Snapshot(snapshot));
+            pending.enqueue(work);
         }
         self.work_available.notify_one();
     }
@@ -509,6 +525,9 @@ impl StateBroadcastMailbox {
         loop {
             if let Some(work) = pending.pop_front() {
                 return work;
+            }
+            if pending.closing {
+                return StateBroadcastWork::Drain;
             }
             pending = self
                 .work_available
@@ -601,6 +620,13 @@ fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadca
                 );
             }
         },
+        StateBroadcastWork::ImmutableSnapshot(snapshot) => {
+            forward_state_broadcast_work(
+                StateBroadcastWork::Snapshot(snapshot.materialize()),
+                senders,
+            );
+        }
+        StateBroadcastWork::Drain => panic!("drain is handled by the owned broadcaster"),
         StateBroadcastWork::Delta(event) => match serde_json::to_string(&event) {
             Ok(payload) => senders.send_delta(payload),
             Err(err) => {
@@ -1141,6 +1167,7 @@ struct AppState {
     /// still hold the state mutex. Dropped deltas surface as ordinary revision
     /// gaps to clients, which then repair from `/api/state`.
     state_broadcast_mailbox: Option<Arc<StateBroadcastMailbox>>,
+    state_broadcast_worker: Option<Arc<StateBroadcastWorker>>,
     /// Owns the optional in-process Telegram relay runtime for this app
     /// instance. Kept outside `StateInner` because it is live process state
     /// (thread handle, shutdown flag, status), not durable app data.
@@ -1479,6 +1506,9 @@ impl EngramProjectResetFences {
 /// Represents state inner.
 struct StateInner {
     metadata_predecessor: Arc<std::sync::atomic::AtomicU64>,
+    /// Process-local projections; a restored/replaced StateInner starts cold.
+    /// Access only under StateInner, never from the broadcaster worker.
+    state_projection_cache: Mutex<StateProjectionCache>,
     federation: FederationState,
     federation_durable: bool,
     federation_continuity_lost: bool,
@@ -1679,6 +1709,7 @@ impl StateInner {
     fn new() -> Self {
         Self {
             metadata_predecessor: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            state_projection_cache: Mutex::new(StateProjectionCache::default()),
             federation: FederationState::default(),
             federation_durable: false,
             federation_continuity_lost: false,

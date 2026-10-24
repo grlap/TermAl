@@ -647,6 +647,7 @@ impl AppState {
             record.clear_runtime_stop();
             if let Err(error) = outcome {
                 record.set_auto_dispatch_blocked(true);
+                inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner)?;
                 let callbacks = std::mem::take(&mut inner.sessions[index].deferred_stop_callbacks);
                 drop(inner);
@@ -656,6 +657,7 @@ impl AppState {
             }
             if !same_context {
                 record.set_auto_dispatch_blocked(true);
+                inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner)?;
                 return Err(anyhow!("dedicated reset configuration or admission changed; callbacks retained for exact retry"));
             }

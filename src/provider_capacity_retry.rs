@@ -288,6 +288,9 @@ impl AppState {
             saved: false,
             fence: None,
         });
+        // Terminal finalization uses a later lock acquisition. Other producers
+        // may publish the paused queue before then, so invalidate it now.
+        inner.stamp_session_at_index(index);
         Some(nonce)
     }
 

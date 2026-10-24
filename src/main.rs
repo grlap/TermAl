@@ -227,6 +227,7 @@ async fn run_server() -> Result<()> {
     // race the same window — graceful shutdown only covers the
     // user-initiated restart path.
     shutdown_state.shutdown_persist_blocking();
+    shutdown_state.shutdown_state_broadcast_blocking();
 
     // Drop the AppState (which contains reqwest::blocking::Client) on a
     // regular thread so its internal Tokio runtime isn't dropped inside our
@@ -1106,6 +1107,7 @@ include!("session_markers.rs");
 include!("turn_dispatch.rs");
 include!("session_crud.rs");
 include!("sse_broadcast.rs");
+include!("state_broadcast_worker.rs");
 include!("shared_codex_mgr.rs");
 include!("shared_codex_profile.rs");
 include!("workspace_queries.rs");

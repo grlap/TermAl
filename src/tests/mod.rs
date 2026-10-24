@@ -69,6 +69,7 @@ mod delegation_wait;
 mod delegation_worker;
 mod delegation_worker_handoff;
 mod delegations;
+mod deferred_state_snapshot;
 mod engram_authority_fence_phases;
 mod engram_authority_fixture;
 mod engram_batch_binds;
@@ -940,6 +941,7 @@ fn test_app_state() -> AppState {
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         state_broadcast_mailbox: None,
+        state_broadcast_worker: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),

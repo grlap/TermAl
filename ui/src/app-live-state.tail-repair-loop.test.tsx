@@ -1442,6 +1442,27 @@ describe("streaming tail-repair hypothesis schedules", () => {
     h.expectTailCount(1);
   });
 
+  it("exact commit-cut snapshots before their following deltas cause no global-gap fetch", async () => {
+    const h = setup();
+    await h.visible(true);
+    await h.resolveTail(0, 101, "a");
+    const initialFetches = vi.mocked(api.fetchState).mock.calls.length;
+    const initialActions = h.revisionAction.mock.results.length;
+    for (let index = 0; index < 3; index++) {
+      const snapshotRevision = 102 + index * 2;
+      const state = summary(snapshotRevision);
+      state.sessions[0].sessionMutationStamp = snapshotRevision - 1;
+      h.emit("state", state);
+      h.emit("delta", textDelta(snapshotRevision + 1, index + 1));
+      await flush(16);
+    }
+    expect(h.current().messages[19]).toEqual(message("axxx"));
+    expect(h.revisionAction.mock.results.slice(initialActions).map(result => result.value)).toEqual(["apply", "apply", "apply"]);
+    expect(vi.mocked(api.fetchState).mock.calls).toHaveLength(initialFetches);
+    expect(h.recoveryCalls).toEqual([]);
+    h.expectTailCount(1);
+  });
+
   it("H3: summaries advancing the unseen session stamp rearm one visible tail per advance with count unchanged", async () => {
     const h = setup();
     await h.visible(true);

@@ -101,6 +101,7 @@ impl AppState {
         record.session.status = SessionStatus::Idle;
         record.session.live_activity = None;
         record.set_auto_dispatch_blocked(true);
+        inner.stamp_session_at_index(index);
         true
     }
 
@@ -207,6 +208,7 @@ impl AppState {
             if dispatch.is_some() {
                 record.session.status = SessionStatus::Active;
                 record.set_auto_dispatch_blocked(false);
+                inner.stamp_session_at_index(index);
             }
             dispatch
         };

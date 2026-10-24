@@ -13,7 +13,7 @@
 // (`StateBroadcastSenders::stream_events`, which `/api/events` reads):
 //
 // - **State snapshots** — the metadata-first `StateResponse` shape, queued
-//   once per commit and pushed by the ordered broadcaster thread. Used by
+//   after coalescing general commits by the owned broadcaster thread. Used by
 //   new SSE clients and remote proxies that need a ground-truth
 //   snapshot after reconnect.
 // - **Delta events** (`DeltaEvent` in `wire.rs`) — narrow per-field
@@ -45,15 +45,11 @@
 // (watermarks, readiness cache eviction, etc.) that shouldn't tick
 // the client-visible revision uses [`Self::persist_internal_locked`].
 //
-// Snapshot serialization offload. `publish_state_locked` builds the
-// `StateResponse` *inside* the state lock (required — snapshot
-// fields read `inner`) but hands the owned snapshot off to a
-// dedicated broadcaster thread for JSON serialization via `publish_snapshot_locked`.
-// Snapshots and owned typed deltas enter the same mailbox before releasing the
-// lock that allocated their revision. It coalesces adjacent snapshots without
-// moving a delta across them; retained queue order equals commit order. The
-// worker serializes both kinds after releasing the mailbox mutex and holds no
-// StateInner guard. The bounded queue retains the base eviction policy: drop
+// General commits capture immutable metadata at the commit's exact revision.
+// Session projections are cached by mutation stamp; unchanged summaries share
+// Arcs across captures. The worker materializes the full DTO and serializes it
+// outside StateInner. Adjacent snapshots coalesce without crossing any delta.
+// The bounded queue retains the base eviction policy: drop
 // the oldest pending work rather than block a producer under the state mutex.
 // An overflow also sets a lagged flag kept outside the bounded queue, which the
 // worker takes before the next retained item and forwards as a lagged marker:
@@ -267,7 +263,8 @@ impl AppState {
     /// quiesce their producers before invoking this method.
     fn shutdown_persist_blocking(&self) {
         #[cfg(test)]
-        self.federation_executor_wake_signal.observe("persistShutdown");
+        self.federation_executor_wake_signal
+            .observe("persistShutdown");
         let mut guard = self
             .persist_thread_handle
             .lock()
@@ -475,8 +472,11 @@ impl AppState {
         );
         event.normalize_body_sequence_pair();
         if let Some(mailbox) = &self.state_broadcast_mailbox {
-            mailbox.publish_delta(event);
-            return;
+            // Stopped can change only under this same StateInner mutex.
+            if !mailbox.is_stopped() {
+                mailbox.publish_delta(event);
+                return;
+            }
         }
         if let Ok(payload) = serde_json::to_string(&event) {
             self.state_broadcast_senders.send_delta(payload);
@@ -568,17 +568,17 @@ impl AppState {
         self.record_file_change_captures(changes);
     }
 
-    /// Fire-and-forget metadata-first snapshot broadcast, paired with
-    /// [`Self::publish_delta_locked`] for deltas; serialization errors are logged but
-    /// do not propagate.
-    ///
-    /// The snapshot is built from `inner` while the caller still holds
-    /// the state mutex (required — `inner` fields are read here), but
-    /// JSON serialization is offloaded to a dedicated broadcaster
-    /// thread via [`Self::publish_snapshot_locked`]. This keeps the state mutex off
-    /// the serialization critical path for requests (e.g.,
-    /// `put_workspace_layout`) that commit under the lock.
+    /// Captures an immutable metadata cut at this commit's actual revision.
+    /// Unchanged session projections are shared; DTO cloning is worker-owned.
     fn publish_state_locked(&self, inner: &StateInner) {
+        if let Some(mailbox) = &self.state_broadcast_mailbox {
+            if !mailbox.is_stopped() {
+                mailbox.publish_snapshot_work(StateBroadcastWork::ImmutableSnapshot(
+                    self.immutable_state_snapshot_locked(inner),
+                ));
+                return;
+            }
+        }
         let snapshot = self.snapshot_from_inner(inner);
         self.publish_snapshot_locked(inner, snapshot);
     }
@@ -600,8 +600,10 @@ impl AppState {
             "snapshot enqueue requires the commit lock"
         );
         if let Some(mailbox) = &self.state_broadcast_mailbox {
-            mailbox.publish_snapshot(snapshot);
-            return;
+            if !mailbox.is_stopped() {
+                mailbox.publish_snapshot(snapshot);
+                return;
+            }
         }
 
         match serde_json::to_string(&snapshot) {

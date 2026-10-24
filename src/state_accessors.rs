@@ -42,6 +42,12 @@ const SESSION_OVERVIEW_DEFAULT_BUCKETS: usize = 200;
 const SESSION_OVERVIEW_MAX_BUCKETS: usize = 512;
 const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 
+#[cfg(test)]
+thread_local! {
+    static TEST_BEFORE_SESSION_SUMMARY_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_BEFORE_STATE_SNAPSHOT_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+}
+
 fn bounded_live_activity_summary_text(value: &str) -> String {
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.chars().count() <= SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS {
@@ -729,10 +735,18 @@ impl AppState {
         session
     }
 
+    /// Projection-cache inputs: stamped record metadata and local instance
+    /// domain. Every field is also checked by the borrowed hit validator;
+    /// new projection inputs must update it. Writers still use stamping
+    /// accessors so persistence observes their changes.
     fn wire_session_summary_from_record(
         local_instance_id: &str,
         record: &SessionRecord,
     ) -> StateSessionSummary {
+        #[cfg(test)]
+        TEST_BEFORE_SESSION_SUMMARY_PROJECT.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() { hook(); }
+        });
         let session = &record.session;
         let mut summary = StateSessionSummary {
             mailbox_participant_id: record.federation_mailbox_binding.as_ref().map(FederationMailboxBinding::participant_key),
@@ -1378,6 +1392,22 @@ impl AppState {
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,
     ) -> StateResponse {
+        #[cfg(test)]
+        TEST_BEFORE_STATE_SNAPSHOT_PROJECT.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook();
+            }
+        });
+        let sessions = inner.sessions.iter().filter(|record| !record.hidden)
+            .map(|record| Self::wire_session_summary_from_record(&self.server_instance_id, record))
+            .collect();
+        self.snapshot_header_from_inner(inner, agent_readiness, sessions)
+    }
+
+    fn snapshot_header_from_inner(
+        &self, inner: &StateInner, agent_readiness: Vec<AgentReadiness>,
+        sessions: Vec<StateSessionSummary>,
+    ) -> StateResponse {
         StateResponse {
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
@@ -1387,14 +1417,7 @@ impl AppState {
             projects: inner.projects.clone(),
             orchestrators: inner.orchestrator_instances.clone(),
             workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
-            sessions: inner
-                .sessions
-                .iter()
-                .filter(|record| !record.hidden)
-                .map(|record| {
-                    Self::wire_session_summary_from_record(&self.server_instance_id, record)
-                })
-                .collect(),
+            sessions,
             delegations: inner
                 .delegations
                 .iter()
