@@ -219,7 +219,6 @@ fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathB
     pruned
 }
 
-#[cfg(not(test))]
 fn workspace_file_changes_from_notify_event(
     event: &NotifyEvent,
     watch_scopes: &[WorkspaceFileWatchScope],
@@ -232,11 +231,51 @@ fn workspace_file_changes_from_notify_event(
         .paths
         .iter()
         .filter(|path| !is_ignored_workspace_file_event_path(path))
+        .filter(|path| !workspace_directory_metadata_hint(&event.kind, path))
         .flat_map(|path| workspace_file_changes_from_path(path, kind, watch_scopes))
         .collect()
 }
 
-#[cfg(not(test))]
+/// Windows reports attribute/security changes as Modify(Any), including for
+/// directories. A directory's metadata hint is not a write to its children:
+/// those have their own paths. Keep namespace events even when a replacement
+/// directory already exists, and never excuse a file write from equal endpoint
+/// contents (a real write may have been restored before notification handling).
+fn workspace_directory_metadata_hint(kind: &NotifyEventKind, path: &FsPath) -> bool {
+    if !matches!(
+        kind,
+        NotifyEventKind::Modify(
+            notify::event::ModifyKind::Any | notify::event::ModifyKind::Metadata(_)
+        )
+    ) || !path.is_absolute()
+        || path
+            .components()
+            .any(|part| part == std::path::Component::ParentDir)
+    {
+        return false;
+    }
+    // Classify the entry without following a link. Also refuse an alias in
+    // any ancestor: observing a plain target directory is not evidence that
+    // its namespace did not change through a symlink or junction.
+    for entry in path.ancestors() {
+        let Ok(metadata) = fs::symlink_metadata(entry) else {
+            return false;
+        };
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn workspace_file_change_kind(kind: &NotifyEventKind) -> Option<WorkspaceFileChangeKind> {
     match kind {
         NotifyEventKind::Access(_) => None,

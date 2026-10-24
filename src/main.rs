@@ -46,11 +46,9 @@ use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Local;
+use notify::{Event as NotifyEvent, EventKind as NotifyEventKind};
 #[cfg(not(test))]
-use notify::{
-    Config as NotifyConfig, Event as NotifyEvent, EventKind as NotifyEventKind, RecommendedWatcher,
-    RecursiveMode, Watcher,
-};
+use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

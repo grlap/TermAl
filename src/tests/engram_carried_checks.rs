@@ -41,6 +41,9 @@ mod overlap_cause;
 #[path = "engram_cargo_target_sibling.rs"]
 mod cargo_target_sibling;
 
+#[path = "engram_watcher_metadata.rs"]
+mod watcher_metadata;
+
 // A Codex test carried past its turn until its end is reported, a child
 // module so this file does not grow further.
 #[path = "engram_reported_ends.rs"]

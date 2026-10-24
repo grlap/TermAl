@@ -724,6 +724,14 @@ check recorded after an evaluation's evidence basis makes it stale), so
 request it after the checkpoint that records the gate. The full rules are in
 [the Engram host adapter's carried background gates](features/engram-host-adapter.md#carried-background-gates).
 
+The watcher omits `Modify(Any)` and metadata-only notifications whose path
+currently identifies a plain directory, with readable, non-link ancestors.
+Windows can emit these for directory attributes or security metadata without
+changing a child file. This is not a `.claude` exclusion: child-file events,
+creation, deletion, rename, unknown events and unreadable or linked paths
+remain observable. A file write followed by a restore still fences the run;
+equal final hashes or old mtimes do not cancel an observed file event.
+
 One carried gate can also be recorded for every item of a commit that lands
 several items: hold each item's claim, name each item's source root to the
 gate's worktree, and give each item a granted turn on its own claim on the
