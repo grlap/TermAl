@@ -157,6 +157,7 @@ fn fresh_same_key_start(runtime: bool, bound: bool) {
         );
         assert_eq!(line.matches("diagnostic tracking").count(), 1);
     });
+    let fresh = turn.record(|record| record.engram.pending_launch_diagnostics.first().cloned());
     turn.wait_for_snapshots();
     diagnostic_finish(&turn, "reused", DETACHED_GATE, EngramCommandExit::Code(0));
     turn.record(|record| {
@@ -164,9 +165,12 @@ fn fresh_same_key_start(runtime: bool, bound: bool) {
         if bound {
             assert_eq!(record.engram.carried_checks.len(), 1);
             assert_eq!(record.engram.carried_checks[0].check.key, "reused");
+            assert!(record.engram.carried_checks[0].ambiguous,
+                "the old launch window still protects the fresh authorised carry");
+            assert_diagnostic_windows(record, &[old.clone()]);
         } else {
             assert!(record.engram.carried_checks.is_empty());
-            assert_eq!(record.engram.carried_unmatched_launches.len(), 1);
+            assert_diagnostic_windows(record, &[old.clone(), fresh.clone().unwrap()]);
             assert!(
                 record
                     .engram
@@ -203,6 +207,7 @@ fn fresh_runtime_same_key_can_start_and_complete_its_own_diagnostic() {
 fn a_current_finish_scan_retires_stale_identity_once_without_fabricating_outcome() {
     let turn = CheckedTurn::start("correction-stale-finish", false);
     diagnostic_start(&turn, "stale", DETACHED_GATE);
+    let original = turn.record(|record| record.engram.pending_launch_diagnostics[0].clone());
     replace_identity(&turn, false);
     diagnostic_finish(
         &turn,
@@ -212,7 +217,7 @@ fn a_current_finish_scan_retires_stale_identity_once_without_fabricating_outcome
     );
     let line = turn.record(|record| {
         assert!(record.engram.pending_launch_diagnostics.is_empty());
-        assert!(record.engram.carried_unmatched_launches.is_empty());
+        assert_diagnostic_windows(record, &[original.clone()]);
         let line = record
             .engram
             .pending_source_root_line
@@ -242,7 +247,7 @@ fn an_enabled_matched_completion_reports_command_mismatch_once() {
     diagnostic_finish(&turn, "mismatch", GATE, EngramCommandExit::NotFinished);
     let line = turn.record(|record| {
         assert!(record.engram.pending_launch_diagnostics.is_empty());
-        assert!(record.engram.carried_unmatched_launches.is_empty());
+        assert_diagnostic_windows(record, &[mark.clone()]);
         let line = record
             .engram
             .pending_source_root_line

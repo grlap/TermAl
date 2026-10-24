@@ -16,6 +16,15 @@ use super::*;
 const GATE: &str = "node scripts/test-launcher.mjs full";
 const DETACHED_GATE: &str = "node scripts/test-launcher.mjs full --detach";
 
+#[path = "engram_quoted_pipe_carry.rs"]
+mod quoted_pipe;
+
+#[path = "engram_launch_window_retirement.rs"]
+mod launch_window_retirement;
+
+#[path = "engram_description_window_retirement.rs"]
+mod description_window_retirement;
+
 #[path = "test_run_restart_evidence.rs"]
 mod test_run_restart_evidence;
 
@@ -3552,6 +3561,7 @@ fn launch_claude_background_gate(turn: &CheckedTurn, worktree: &FsPath, key: &st
         EngramRecorderObservation::CommandFinished {
             key,
             command: &line,
+            reported_command: Some(&line),
             output: "Command running in background with ID: b1.",
             exit: Some(EngramCommandExit::NotFinished),
             runtime_output_cut: false,
@@ -3693,6 +3703,7 @@ fn any_other_outstanding_work_still_refuses_a_claude_background_gate() {
         EngramRecorderObservation::CommandFinished {
             key: "gate-2",
             command: &line,
+            reported_command: Some(&line),
             output: "Command running in background with ID: b2.",
             exit: Some(EngramCommandExit::NotFinished),
             runtime_output_cut: false,

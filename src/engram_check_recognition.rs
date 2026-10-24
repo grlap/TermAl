@@ -14,16 +14,22 @@ struct EngramCheckCommand {
     /// One command has one verification kind; output cannot relabel it.
     kind: EngramVerificationKind,
     /// The command line with one shell wrapper removed and whitespace runs
-    /// collapsed; its SHA-256 is the check fingerprint.
+    /// collapsed, except qualified pipe text keeps its Bash escapes intact;
+    /// its SHA-256 is the check fingerprint.
     normalized: String,
     /// Whether the exit status is the check's own: one simple command with
-    /// no pipe, list, redirection or substitution that could mask it.
+    /// no unquoted pipe, list, redirection or substitution that could mask it.
     simple: bool,
     /// The program, lower-cased and without an extension, which names the
     /// toolchain.
     program: String,
-    /// The shell the wrapper named, which decides how the line's arguments
-    /// reach the runner.
+    /// The argument vector recognition used. Verification consumers must use
+    /// this same reading instead of choosing another shell's decoder.
+    argv: Vec<String>,
+    /// A literal pipe qualified by known runtime Bash on an unwrapped line.
+    /// Retained for end/description association; a wrapper never grants it.
+    literal_pipe: bool,
+    /// The wrapper dialect, or known runtime Bash for a qualified pipe.
     dialect: EngramShellDialect,
     /// The absolute directory a one-call line changes to before its test
     /// (`pushd "DIR" && TEST`, `engram_one_call_prefix`): the test runs
@@ -52,25 +58,55 @@ enum EngramShellDialect {
 /// (`cd x && cargo test`) is not recognised; a recognised one with a pipe or
 /// a list is recorded, but only as unknown.
 fn engram_check_command(command: &str) -> Option<EngramCheckCommand> {
+    engram_check_command_in(command, EngramShellDialect::Unknown)
+}
+
+/// The reader's runtime dialect, independent of any wrapper in the text.
+/// Only Claude's Bash-tool ingress currently supplies known Bash.
+fn engram_check_command_in(
+    command: &str,
+    runtime: EngramShellDialect,
+) -> Option<EngramCheckCommand> {
     let command = command.trim();
     if let Some((directory, test)) = engram_one_call_prefix(command) {
         // The test after the change is one simple command of its own: a
         // wrapper would start another shell, and a pipe or a list could mask
         // its exit status or run something elsewhere. It is read as a plain
         // line, never as another one-call line, so nesting cannot recurse.
-        return engram_plain_check_command(test)
-            .filter(|check| check.simple && check.dialect == EngramShellDialect::Unknown)
+        let unwrapped = engram_unwrap_shell_command(test).1 == EngramShellDialect::Unknown;
+        return engram_plain_check_command_in(test, runtime)
+            .filter(|check| check.simple && unwrapped)
             .map(|check| EngramCheckCommand {
                 directory: Some(directory),
                 ..check
             });
     }
-    engram_plain_check_command(command)
+    engram_plain_check_command_in(command, runtime)
+}
+
+/// Re-read a later description/end using the qualification fixed at start.
+/// Equality also compares argv, so normalization cannot hide a changed token.
+fn engram_check_command_like(
+    command: &str,
+    started: &EngramCheckCommand,
+) -> Option<EngramCheckCommand> {
+    engram_check_command_in(command, if started.literal_pipe {
+        EngramShellDialect::Bash
+    } else {
+        EngramShellDialect::Unknown
+    })
 }
 
 /// `engram_check_command` for a line read as it stands, without the
 /// one-call form: the test it runs, with one shell wrapper removed.
 fn engram_plain_check_command(command: &str) -> Option<EngramCheckCommand> {
+    engram_plain_check_command_in(command, EngramShellDialect::Unknown)
+}
+
+fn engram_plain_check_command_in(
+    command: &str,
+    runtime: EngramShellDialect,
+) -> Option<EngramCheckCommand> {
     let command = command.trim();
     let (line, dialect) = engram_unwrap_shell_command(command);
     // A script of several lines is several commands; read as one, the
@@ -78,12 +114,46 @@ fn engram_plain_check_command(command: &str) -> Option<EngramCheckCommand> {
     if engram_has_unquoted_line_break(&line) {
         return None;
     }
-    let simple =
-        !(line.contains(['|', '&', ';', '<', '>', '`', '\n', '\r']) || line.contains("$("));
-    let normalized = engram_collapse_whitespace(&line);
+    // Wrapper text can be transformed by an outer shell or by cmd's /c
+    // quote removal. It never proves containment. Unknown runtime text also
+    // cannot choose between incompatible shell quoting rules.
+    let has_pipe = line.contains('|');
+    let pipe_words = (has_pipe && dialect == EngramShellDialect::Unknown
+        && runtime == EngramShellDialect::Bash
+        // Variables, ANSI-C and locale quotes are outside this bounded
+        // grammar; path admission already refuses these expansion values.
+        && !line.contains('$'))
+        .then(|| engram_scan_shell_words(&line, EngramShellDialect::Bash))
+        .flatten()
+        .filter(|scan| !scan.unquoted_pipe && !scan.ambiguous_quote_escape
+            && !scan.unquoted_expression)
+        .map(|scan| scan.words.into_iter().map(|(_, word)| word).collect::<Vec<_>>())
+        .filter(|words| engram_pipe_argv_keeps_native_boundary(words));
+    let simple = (!has_pipe || pipe_words.is_some())
+        && !(line.contains(['&', ';', '<', '>', '`', '\n', '\r']) || line.contains("$("));
+    let literal_pipe = has_pipe && simple;
+    // Keep qualified text intact: the legacy whitespace normalizer has no
+    // Bash escape model, while argv above was read from the original bytes.
+    let normalized = if literal_pipe {
+        line.trim().to_owned()
+    } else {
+        engram_collapse_whitespace(&line)
+    };
     // The first command of the line decides what runs as the test; what
     // follows it can only mask its exit status, which `simple` records.
-    let words = engram_shell_words(engram_first_command(&normalized))?;
+    let words = if literal_pipe { pipe_words? } else {
+        // An explicit Bash wrapper may still be observed as a compound Test;
+        // decoding its tokens supplies no eligible exit or pipe exemption.
+        let prefix = engram_check_line(&normalized, simple);
+        if has_pipe && dialect == EngramShellDialect::Bash {
+            // Prefix truncation may leave a dangling Bash escape. Keep the
+            // legacy observation in that case; `simple` is already false,
+            // so neither reading can lend the command an eligible exit.
+            engram_shell_words_as(prefix, true).or_else(|| engram_shell_words(prefix))?
+        } else {
+            engram_shell_words(prefix)?
+        }
+    };
     let program = engram_program_name(&words[0]);
     let kind = if engram_is_test_command(&program, &words[1..]) {
         EngramVerificationKind::Test
@@ -97,9 +167,42 @@ fn engram_plain_check_command(command: &str) -> Option<EngramCheckCommand> {
         normalized,
         simple,
         program,
-        dialect,
+        argv: words,
+        literal_pipe,
+        dialect: if literal_pipe { EngramShellDialect::Bash } else { dialect },
         directory: None,
     })
+}
+
+// Bash quotes protect only the first argv boundary. Batch programs and
+// package-manager script shells can reinterpret those literal arguments.
+// Resolve no PATH or user script configuration from a lexical observation.
+fn engram_pipe_argv_keeps_native_boundary(words: &[String]) -> bool {
+    let Some(executable) = words.first() else {
+        return false;
+    };
+    let filename = executable
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(executable)
+        .to_ascii_lowercase();
+    if filename.ends_with(".cmd") || filename.ends_with(".bat") {
+        return false;
+    }
+    match engram_program_name(executable).as_str() {
+        "npm" | "pnpm" | "yarn" | "npx" => false,
+        "node"
+            if words.get(1).is_some_and(|script| {
+                script.replace('\\', "/").ends_with("test-launcher.mjs")
+            }) && words.get(2).is_some_and(|mode| mode == "focused") =>
+        {
+            words.iter()
+                .position(|word| word == "--")
+                .and_then(|separator| words.get(separator + 1..))
+                .is_some_and(engram_pipe_argv_keeps_native_boundary)
+        }
+        _ => true,
+    }
 }
 
 /// Whether `line` breaks onto another line outside quotes.
@@ -129,6 +232,18 @@ fn engram_first_command(line: &str) -> &str {
         }
     }
     line
+}
+
+/// A proven simple line is already one command. Do not let the older prefix
+/// reader reinterpret an escaped quote and cut a literal pipe out of it.
+/// Recognition, placement, toolchain and stage checks share this same view;
+/// a compound line keeps the existing first-command observation only.
+fn engram_check_line(line: &str, simple: bool) -> &str {
+    if simple {
+        line
+    } else {
+        engram_first_command(line)
+    }
 }
 
 /// `line` with its ends trimmed and each run of whitespace outside quotes
@@ -202,18 +317,55 @@ fn engram_shell_word_spans(line: &str) -> Option<Vec<(usize, String)>> {
 
 /// `engram_shell_words_as`, each word with the byte offset it starts at.
 fn engram_shell_word_spans_as(line: &str, bash: bool) -> Option<Vec<(usize, String)>> {
+    let dialect = if bash {
+        EngramShellDialect::Bash
+    } else {
+        EngramShellDialect::Unknown
+    };
+    engram_scan_shell_words(line, dialect).map(|scan| scan.words)
+}
+
+/// Word decoding stays the existing Windows/Bash grammar. The additional
+/// observations let recognition distinguish quoted pipes without another
+/// quote parser. They never change the words returned to existing callers.
+struct EngramShellWordScan {
+    words: Vec<(usize, String)>,
+    unquoted_pipe: bool,
+    ambiguous_quote_escape: bool,
+    /// Syntax that can expand or evaluate before the runner sees argv.
+    /// Observational only for legacy decoder APIs; qualification refuses it.
+    unquoted_expression: bool,
+}
+
+fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<EngramShellWordScan> {
+    let bash = dialect == EngramShellDialect::Bash;
     let mut words = Vec::new();
+    let mut unquoted_pipe = false;
+    let mut unquoted_expression = false;
+    // PowerShell also recognizes typographic quotes, which this decoder does
+    // not model. Without explicit Bash context they cannot prove containment.
+    let mut ambiguous_quote_escape = dialect != EngramShellDialect::Bash
+        && line.chars().any(|character| matches!(character, '\u{2018}'..='\u{201f}'));
     let mut current = String::new();
     let mut start = None;
     let mut chars = line.char_indices().peekable();
     while let Some((index, character)) = chars.next() {
         match character {
             '\'' => {
+                // cmd treats apostrophes as ordinary characters, including
+                // double quotes inside them. Unknown must also be safe under
+                // cmd; only known Bash/PowerShell can use this quote proof.
+                ambiguous_quote_escape |= matches!(dialect,
+                    EngramShellDialect::Cmd | EngramShellDialect::Unknown);
                 start.get_or_insert(index);
                 loop {
                     match chars.next()?.1 {
                         '\'' => break,
-                        other => current.push(other),
+                        other => {
+                            // cmd's operator grammar does not quote with '.
+                            unquoted_pipe |= other == '|' && dialect == EngramShellDialect::Cmd;
+                            current.push(other);
+                        }
                     }
                 }
             }
@@ -239,6 +391,11 @@ fn engram_shell_word_spans_as(line: &str, bash: bool) -> Option<Vec<(usize, Stri
                             if matches!(chars.peek(), Some((_, '"'))) {
                                 current.extend(std::iter::repeat_n('\\', run / 2));
                                 if run % 2 == 1 {
+                                    // A native Windows argument reader treats
+                                    // this quote as escaped; PowerShell/cmd do
+                                    // not. With no Bash dialect, refuse to
+                                    // infer a pipe's protection from it.
+                                    ambiguous_quote_escape = true;
                                     current.push(chars.next().expect("peeked quote").1);
                                 }
                             } else {
@@ -252,7 +409,11 @@ fn engram_shell_word_spans_as(line: &str, bash: bool) -> Option<Vec<(usize, Stri
             '\\' if bash => {
                 start.get_or_insert(index);
                 if let Some((_, escaped)) = chars.next() {
+                    // Escaped but unquoted pipes stay conservatively refused.
+                    unquoted_pipe |= escaped == '|';
                     current.push(escaped);
+                } else {
+                    ambiguous_quote_escape = true;
                 }
             }
             whitespace if whitespace.is_whitespace() => {
@@ -261,7 +422,19 @@ fn engram_shell_word_spans_as(line: &str, bash: bool) -> Option<Vec<(usize, Stri
                 }
             }
             other => {
+                let word_start = start.is_none();
                 start.get_or_insert(index);
+                unquoted_pipe |= other == '|';
+                unquoted_expression |= matches!(other,
+                    '(' | ')' | '{' | '}' | '`' | '^' | '*' | '?' | '[' | ']')
+                    || (word_start && matches!(other, '@' | '~'));
+                if other == '\\'
+                    && dialect == EngramShellDialect::Unknown
+                    && matches!(chars.peek(), Some((_, '\'' | '"')))
+                {
+                    // An unwrapped line may be Bash or a Windows shell.
+                    ambiguous_quote_escape = true;
+                }
                 current.push(other);
             }
         }
@@ -269,7 +442,12 @@ fn engram_shell_word_spans_as(line: &str, bash: bool) -> Option<Vec<(usize, Stri
     if let Some(start) = start {
         words.push((start, current));
     }
-    (!words.is_empty()).then_some(words)
+    (!words.is_empty()).then_some(EngramShellWordScan {
+        words,
+        unquoted_pipe,
+        ambiguous_quote_escape,
+        unquoted_expression,
+    })
 }
 
 /// A program's name as recognition compares it: the last path component,
@@ -828,10 +1006,7 @@ fn engram_check_showed_passing_tests(
         "node" => {
             let live = ["engram-live".to_owned()];
             let test_stages: &[String] =
-                match engram_shell_words(engram_first_command(&check.normalized))
-                    .as_ref()
-                    .and_then(|words| words.get(2))
-                    .map(String::as_str)
+                match check.argv.get(2).map(String::as_str)
                 {
                     // Never a focused run's stage under a full gate's command.
                     Some("full") if launcher_test_stages != ["focused"] => {

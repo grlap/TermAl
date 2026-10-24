@@ -123,6 +123,10 @@ struct EngramCarriedCheck {
     /// When the host first read its run as terminal, on the interference
     /// clock (`engram_claude_interference.rs`).
     terminal_at: Option<u64>,
+    /// Wall clock when a terminal digest was first retained. A launch
+    /// observed later cannot own this already-finished run (allowing the
+    /// same bounded stamp lag used by run matching).
+    terminal_observed_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Claude work that may have written in its worktree after its run was
     /// read as terminal (`engram_claude_interference.rs`): the earliest such
     /// registration on the interference clock, with its cause. It is kept,
@@ -269,7 +273,7 @@ fn engram_launcher_words(check: &EngramCheckCommand) -> Option<Vec<String>> {
     if check.program != "node" {
         return None;
     }
-    let words = engram_shell_words(&check.normalized)?;
+    let words = check.argv.clone();
     words
         .get(1)
         .is_some_and(|script| script.replace('\\', "/").ends_with("test-launcher.mjs"))
@@ -305,10 +309,29 @@ const ENGRAM_LAUNCH_DROP_COMPOUND: &str = concat!(
 /// Why a detached launch that failed is dropped.
 const ENGRAM_LAUNCH_DROP_FAILED: &str = "its detached launch failed, so no run started";
 
+/// Generic full-run stages do not validate a qualified invocation's argv.
+const ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE: &str = concat!(
+    "its qualified pipe argv has no full-gate validator; launch the gate without ",
+    "a pipe argument, two minutes or more after this launch"
+);
+
+/// A reused command key cannot transfer a different invocation's start.
+const ENGRAM_LAUNCH_DROP_ASSOCIATION: &str = concat!(
+    "its completion does not match the command that started, so its run cannot ",
+    "be associated; launch the gate again two minutes or more after this launch"
+);
+
+/// These refusals do not prove that no run started. Keep their launch window
+/// so a later ordinary gate cannot borrow a refused invocation's run.
+fn engram_dropped_launch_may_have_run(why: &str) -> bool {
+    matches!(why, ENGRAM_LAUNCH_DROP_COMPOUND | ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE
+        | ENGRAM_LAUNCH_DROP_ASSOCIATION)
+}
+
 /// Why an ambiguous carried check is refused (`EngramCarriedCheck::ambiguous`).
 const ENGRAM_CARRIED_AMBIGUOUS: &str = concat!(
-    "another background gate launched in the same worktree less than two minutes before it ",
-    "had no run matched to it, so the host cannot tell their runs apart; launch the gate ",
+    "another background gate launched in the same worktree within two minutes of it ",
+    "has unresolved run ownership, so the host cannot tell their runs apart; launch the gate ",
     "again two minutes or more after the last launch there"
 );
 
@@ -349,6 +372,9 @@ fn engram_launch_disposition(
     }
     if !check.simple {
         return EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_COMPOUND);
+    }
+    if check.literal_pipe {
+        return EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE);
     }
     let launched = matches!(
         exit,
@@ -1557,13 +1583,7 @@ fn engram_carry_check(
         return None;
     };
     let root_key = engram_path_key(&launched.target.root);
-    let launched_at = engram_parse_time(&launched.started_at);
-    let recent = |at: &str| match (engram_parse_time(at), launched_at) {
-        (Some(at), Some(launched)) => {
-            (launched - at).num_seconds() <= ENGRAM_CARRIED_AMBIGUITY_SECONDS
-        }
-        _ => true,
-    };
+    let recent = |at: &str| engram_launch_window_is_recent(at, &launched.started_at);
     // A carried Codex test has no run, so it can be confused with none.
     let ambiguous = engram.carried_checks.iter().any(|carried| {
         !carried.ends_by_report
@@ -1573,7 +1593,11 @@ fn engram_carry_check(
     }) || engram
         .carried_unmatched_launches
         .iter()
-        .any(|(root, at)| *root == root_key && recent(at));
+        .any(|(root, at)| *root == root_key && recent(at))
+        || engram.pending_launch_diagnostics.iter().any(|mark| {
+            mark.root.as_ref().is_some_and(|root| engram_path_key(root) == root_key)
+                && recent(&mark.started_at)
+        });
     // A change the watcher saw while the gate was being launched fences it.
     let fence = launched
         .watcher_fence
@@ -1616,6 +1640,7 @@ fn engram_new_carried_check(
         ruled_out_runs: std::collections::BTreeSet::new(),
         fence: None,
         terminal_at: None,
+        terminal_observed_at: None,
         potential: None,
         bind_targets: Vec::new(),
     }
@@ -1675,12 +1700,77 @@ fn engram_note_consumed_runs(record: &mut SessionRecord, used: Vec<PathBuf>) {
 /// later launch there within the run search time is refused as ambiguous
 /// rather than taking that run (`engram_carry_check`).
 fn engram_note_unmatched_launch(record: &mut SessionRecord, root: &FsPath, launched_at: &str) {
+    let root_key = engram_path_key(root);
+    // Diagnostic retirement can arrive after another carry was constructed,
+    // or even after it matched this run. Revoke eligibility before any later
+    // poll/checkpoint can settle it; a saved run identity is not authority.
+    for carried in &mut record.engram.carried_checks {
+        if !carried.ends_by_report
+            && engram_path_key(&carried.check.target.root) == root_key
+            && engram_retired_launch_may_own_run(carried, launched_at)
+        {
+            carried.ambiguous = true;
+        }
+    }
     let unmatched = &mut record.engram.carried_unmatched_launches;
-    unmatched.push((engram_path_key(root), launched_at.to_owned()));
+    unmatched.push((root_key, launched_at.to_owned()));
     let excess = unmatched
         .len()
         .saturating_sub(ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT);
     unmatched.drain(..excess);
+}
+
+/// Retirement can arrive in either order. Limit retroactive revocation to
+/// nearby starts, and never revoke a run already known terminal before the
+/// other launch could have started. Unknown timestamps remain conservative.
+fn engram_retired_launch_may_own_run(carried: &EngramCarriedCheck, retired_at: &str) -> bool {
+    let (Some(retired), Some(launched)) = (
+        engram_parse_time(retired_at),
+        engram_parse_time(&carried.check.started_at),
+    ) else {
+        return true;
+    };
+    if (launched - retired).abs() > chrono::Duration::seconds(ENGRAM_CARRIED_AMBIGUITY_SECONDS) {
+        return false;
+    }
+    carried.terminal_observed_at.is_none_or(|terminal| {
+        retired <= terminal + chrono::Duration::seconds(ENGRAM_CARRIED_LAUNCH_SLACK_SECONDS)
+    })
+}
+
+fn engram_launch_window_is_recent(unmatched_at: &str, launched_at: &str) -> bool {
+    match (engram_parse_time(unmatched_at), engram_parse_time(launched_at)) {
+        (Some(unmatched), Some(launched)) => {
+            (launched - unmatched).num_seconds() <= ENGRAM_CARRIED_AMBIGUITY_SECONDS
+        }
+        _ => true,
+    }
+}
+
+/// Retires the open check whose command or place changed. A full launch may
+/// already have started a run, so its original target and timestamp protect
+/// later launches even though this check can no longer supply verification.
+/// Its holder is told why an immediate relaunch may be ambiguous. Ordinary
+/// checks leave no full-run ambiguity window or launch-retirement notice.
+fn engram_retire_changed_check(record: &mut SessionRecord, key: &str, sequence: usize) {
+    while let Some(position) = record.engram.active_turn_checks.iter().position(|check| {
+        check.key == key && check.sequence == sequence && check.end.is_none()
+    }) {
+        let retired = record.engram.active_turn_checks.remove(position);
+        if engram_check_is_launcher_full(&retired.command) {
+            engram_note_unmatched_launch(record, &retired.target.root, &retired.started_at);
+            let line = format!(
+                "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} command check {} observed starting at {} \
+                 was retired because its command or place changed; it may already have started \
+                 a run, so launch the gate again two minutes or more after the last launch \
+                 in that worktree.",
+                engram_check_fingerprint(&retired.command),
+                retired.started_at,
+            );
+            eprintln!("engram> session={} {line}", record.session.id);
+            record.engram.set_pending_source_root_line(line);
+        }
+    }
 }
 
 /// Whether `command` is the test launcher's full gate, whose launch may be
@@ -1967,6 +2057,12 @@ fn engram_take_settled_carried_checks(
         // this checkpoint copied the check to settle it.
         if carried.terminal_conflict {
             lines.push(carried.refusal_line(ENGRAM_CARRIED_TERMINAL_CONFLICT));
+            continue;
+        }
+        // Retirement may revoke this live carry after the off-lock copy
+        // was settled. Reject before either focus deferral or publication.
+        if !carried.ends_by_report && carried.ambiguous {
+            lines.push(carried.refusal_line(ENGRAM_CARRIED_AMBIGUOUS));
             continue;
         }
         // Six hours after its launch a gate is refused, whatever a
@@ -2321,6 +2417,7 @@ fn engram_note_carried_run_read(
             carried.launcher_gone = launcher_gone && digest.is_none();
             if digest.is_some() {
                 carried.terminal_at = Some(engram_interference_tick());
+                carried.terminal_observed_at = Some(chrono::Utc::now());
             }
             carried.terminal_digest = digest;
         }

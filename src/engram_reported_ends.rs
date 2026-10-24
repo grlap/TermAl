@@ -45,6 +45,28 @@ struct EngramEndReading {
     parsed: Option<(EngramCheckCommand, Vec<String>, bool)>,
 }
 
+/// Off-lock work still belongs to this exact grant, sequence and invocation.
+fn engram_check_start_matches(
+    check: &EngramTurnCheck,
+    starting_check: Option<&EngramTurnCheck>,
+) -> bool {
+    starting_check.is_some_and(|start| {
+        start.grant_id == check.grant_id && start.sequence == check.sequence
+            && start.command == check.command && start.target == check.target
+    })
+}
+
+/// The off-lock reading belongs to this exact start and names its command.
+/// Qualified foreground ends require actual reported command text.
+fn engram_check_end_matches(
+    check: &EngramTurnCheck,
+    reading: &EngramEndReading,
+    starting_check: Option<&EngramTurnCheck>,
+) -> bool {
+    engram_check_start_matches(check, starting_check) && reading.parsed.as_ref()
+        .is_some_and(|(finished, _, _)| finished == &check.command)
+}
+
 /// Reads, off the state lock, what the end of `command` with `output` and
 /// `exit` says about `starting_check`, the check its key started, if one is
 /// running: its result lines and the build or focused Node Test completion
@@ -52,14 +74,17 @@ struct EngramEndReading {
 fn engram_read_check_end(
     starting_check: Option<&EngramTurnCheck>,
     session_id: &str,
-    command: &str,
+    reported_command: Option<&str>,
     output: &str,
     exit: Option<EngramCommandExit>,
 ) -> EngramEndReading {
+    // No command is different from a command that failed recognition. A
+    // display title cannot satisfy the qualified completion association.
+    let command = reported_command.unwrap_or("");
     let build_completion = starting_check
         .filter(|check| check.command.kind == EngramVerificationKind::Build)
         .map(|check| {
-            if engram_check_command(command).as_ref() != Some(&check.command) {
+            if engram_check_command_like(command, &check.command).as_ref() != Some(&check.command) {
                 (
                     EngramCommandExit::Unknown,
                     Vec::new(),
@@ -80,7 +105,7 @@ fn engram_read_check_end(
     let node_completion = starting_check
         .filter(|check| engram_is_focused_node_check(&check.command))
         .map(|check| {
-            if engram_check_command(command).as_ref() != Some(&check.command) {
+            if engram_check_command_like(command, &check.command).as_ref() != Some(&check.command) {
                 (EngramCommandExit::Unknown, Vec::new(), false, None)
             } else {
                 engram_focused_node_completion(
@@ -107,9 +132,7 @@ fn engram_read_check_end(
             && engram_launcher_words(&check.command).is_some()
     }) && engram_launcher_output_ran_no_stage(output);
     let parsed = starting_check
-        .is_some()
-        .then(|| engram_check_command(command))
-        .flatten()
+        .and_then(|check| engram_check_command_like(command, &check.command))
         .map(|finished| {
             let result_lines = engram_check_result_lines(&finished.program, output);
             let showed_passing_tests =
@@ -139,6 +162,7 @@ fn engram_record_check_end(
     workers: &Arc<std::sync::atomic::AtomicUsize>,
     provenance: EngramRootCapture,
 ) {
+    let qualified_command_matches = engram_check_end_matches(check, &reading, starting_check);
     let EngramEndReading {
         build_completion,
         node_completion,
@@ -169,16 +193,41 @@ fn engram_record_check_end(
             && start.target == check.target
     });
     let mut build_diagnostic = None;
-    let check_exit = if let Some((node_exit, node_lines, node_passed, node_diagnostic)) =
+    let check_exit = if check.command.literal_pipe && !qualified_command_matches {
+        result_lines.clear();
+        showed_passing_tests = false;
+        let observed = exit.unwrap_or(EngramCommandExit::Unknown);
+        build_diagnostic = Some(match check.command.kind {
+            EngramVerificationKind::Test => EngramBuildDiagnostic::test_rejected(
+                observed, EngramBuildRejection::Association,
+            ),
+            EngramVerificationKind::Build => EngramBuildDiagnostic::rejected(
+                observed, EngramBuildRejection::Association,
+            ),
+        });
+        EngramCommandExit::Unknown
+    } else if let Some((node_exit, node_lines, node_passed, node_diagnostic)) =
         node_completion.filter(|_| same_start)
     {
         result_lines = node_lines;
         showed_passing_tests = node_passed;
         build_diagnostic = node_diagnostic;
         node_exit
-    } else if engram_is_focused_node_check(&check.command) {
+    } else if engram_is_focused_node_check(&check.command)
+        || (check.command.literal_pipe
+            && check.command.kind == EngramVerificationKind::Test
+            && check.command.program == "node")
+    {
+        // A qualified launcher line must take the focused validator. No
+        // generic stage/count record can substitute for a rejected argv or
+        // missing focused completion.
         result_lines.clear();
         showed_passing_tests = false;
+        if check.command.literal_pipe {
+            build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
+                exit.unwrap_or(EngramCommandExit::Unknown), EngramBuildRejection::Argv,
+            ));
+        }
         EngramCommandExit::Unknown
     } else if let Some((build_exit, build_lines, diagnostic)) =
         build_completion.filter(|_| same_start)
@@ -191,6 +240,15 @@ fn engram_record_check_end(
         build_diagnostic = Some(EngramBuildDiagnostic::rejected(
             exit.unwrap_or(EngramCommandExit::Unknown),
             EngramBuildRejection::Association,
+        ));
+        EngramCommandExit::Unknown
+    } else if !check.command.simple && check.command.normalized.contains('|') {
+        // Keep the observed command exit diagnostic, without lending a
+        // pipeline/wrapper's status to the test or generic passing text.
+        result_lines.clear();
+        showed_passing_tests = false;
+        build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
+            exit.unwrap_or(EngramCommandExit::Unknown), engram_pipe_rejection(&check.command),
         ));
         EngramCommandExit::Unknown
     } else {
@@ -246,7 +304,7 @@ fn engram_record_check_end(
 /// whose item has no id: such a key names no one run, so a later end under it
 /// cannot be taken as this check's.
 fn engram_check_key_is_its_line(check: &EngramTurnCheck) -> bool {
-    check.keyed_by_line || engram_check_command(&check.key).as_ref() == Some(&check.command)
+    check.keyed_by_line || engram_check_command_like(&check.key, &check.command).as_ref() == Some(&check.command)
 }
 
 /// At the close of a Codex session's turn, carries each of its checks whose
@@ -697,7 +755,7 @@ impl AppState {
             return false;
         };
         let reading =
-            engram_read_check_end(Some(&started), session_id, command, output, Some(exit));
+            engram_read_check_end(Some(&started), session_id, Some(command), output, Some(exit));
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return false;

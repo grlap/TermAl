@@ -317,7 +317,7 @@ fn engram_one_call_git_bash_dir(line: &str) -> Option<bool> {
 fn engram_one_call_template(check: &EngramCheckCommand, measured_in: &FsPath) -> Option<String> {
     let root = engram_source_root_display(&measured_in.to_string_lossy());
     let carried = check.simple
-        && check.dialect == EngramShellDialect::Unknown
+        && (check.dialect == EngramShellDialect::Unknown || check.literal_pipe)
         && engram_one_call_reads(&root);
     carried.then(|| {
         if check.normalized.len() <= ENGRAM_ONE_CALL_REMEDY_TEST_MAX_BYTES {
@@ -487,8 +487,8 @@ fn engram_uncredited_test_line(
 /// A recognized check placed inside its root was refused by argument guards.
 /// Feedback explains that refusal; it never changes what the guards admit.
 fn engram_uncredited_arguments_line(check: &EngramCheckCommand) -> String {
-    let (reason, remedy) = if engram_has_unquoted_expression(engram_first_command(
-        &check.normalized,
+    let (reason, remedy) = if !check.literal_pipe && engram_has_unquoted_expression(engram_check_line(
+        &check.normalized, check.simple,
     )) {
         (
             "unquoted shell expression or escape",

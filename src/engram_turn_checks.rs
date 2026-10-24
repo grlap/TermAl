@@ -807,7 +807,7 @@ fn engram_late_end_line(
         Some(EngramCommandExit::NotFinished) => "moved to the background".to_owned(),
         Some(EngramCommandExit::Unknown) | None => "no exit status".to_owned(),
     };
-    let ended = match engram_check_command(ended) {
+    let ended = match engram_check_command_like(ended, closed) {
         Some(command) => engram_check_label(&command),
         None => format!(
             "a command (text fingerprint {})",
@@ -1625,7 +1625,13 @@ impl AppState {
         // Observe this command's boundary before off-lock target/capture work.
         // The launcher still must start at or after this correlated event.
         let started_at = engram_command_started_at();
-        let recognised = ran.and_then(engram_check_command);
+        // The Claude reader records commands only from its Bash tool. Other
+        // readers supply Ambient provenance, which establishes no dialect.
+        let dialect = match provenance {
+            EngramObservationProvenance::Claude(_) => EngramShellDialect::Bash,
+            EngramObservationProvenance::Ambient => EngramShellDialect::Unknown,
+        };
+        let recognised = ran.and_then(|ran| engram_check_command_in(ran, dialect));
         let unsupported_focused = recognised
             .is_none()
             .then(|| ran.and_then(engram_unsupported_focused_line))
@@ -2122,8 +2128,9 @@ impl AppState {
                 // started no longer says what ran where, and no new one can
                 // for the rest of the command, since it would begin its
                 // record after writes the old one saw.
-                engram.active_turn_checks.remove(position);
-                engram.withheld_command_keys.insert(key.to_owned());
+                let sequence = check.sequence;
+                engram_retire_changed_check(record, key, sequence);
+                record.engram.withheld_command_keys.insert(key.to_owned());
                 return;
             }
             // A repeated start that names no test adds nothing.
@@ -2358,7 +2365,7 @@ impl AppState {
                     Some(ran) if *declared => {
                         engram_declared_candidate(ran).map(|(named, _)| named)
                     }
-                    Some(ran) => engram_check_command(ran),
+                    Some(ran) => engram_check_command_like(ran, command),
                     None => Some(command.clone()),
                 };
                 named.is_some_and(|named| {
@@ -2463,9 +2470,7 @@ impl AppState {
             // It names another test or another place now: the check no
             // longer says what ran where, and no new one can for the rest
             // of the command.
-            record.engram.active_turn_checks.retain(|check| {
-                !(check.key == key && check.sequence == sequence && check.end.is_none())
-            });
+            engram_retire_changed_check(record, key, sequence);
             record.engram.withheld_command_keys.insert(key.to_owned());
         }
         if let Some(worktrees) = worktrees
@@ -2529,6 +2534,7 @@ impl AppState {
         );
     }
 
+    #[cfg(test)]
     fn note_engram_command_finished_with_capture(
         &self,
         session_id: &str,
@@ -2539,7 +2545,25 @@ impl AppState {
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
     ) {
-        self.observe_test_command_description(session_id, provenance, key, Some(command), None);
+        self.note_engram_command_finished_reported(
+            session_id, provenance, key, command, Some(command), output, exit, runtime_output_cut,
+        );
+    }
+
+    /// Preserves an ACP completion's actual command absence independently of
+    /// the label shown in its transcript card.
+    fn note_engram_command_finished_reported(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        command: &str,
+        reported_command: Option<&str>,
+        output: &str,
+        exit: Option<EngramCommandExit>,
+        runtime_output_cut: bool,
+    ) {
+        self.observe_test_command_description(session_id, provenance, key, reported_command, None);
         // Record the provider boundary before artifact capture can retain a
         // terminal result. Only this boundary may finalize native host proof.
         self.observe_test_command_end(session_id, provenance, key, exit);
@@ -2591,7 +2615,7 @@ impl AppState {
             )
         });
         let reading =
-            engram_read_check_end(starting_check.as_ref(), session_id, command, output, exit);
+            engram_read_check_end(starting_check.as_ref(), session_id, reported_command, output, exit);
         // The session's worktree, resolved off the lock for overlap marking,
         // and those of the writers not resolved yet.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
@@ -2699,6 +2723,7 @@ impl AppState {
             &EngramRecorderObservation::CommandFinished {
                 key,
                 command,
+                reported_command,
                 output,
                 exit,
                 runtime_output_cut,
@@ -2748,10 +2773,25 @@ impl AppState {
         // A launcher full gate whose result marks only its launch is carried
         // past this turn until its run settles, or dropped when it can earn
         // no credit (`engram_carried_checks.rs`).
-        match engram_launch_disposition(
+        let launch = engram_launch_disposition(
             &record.engram.active_turn_checks[position].command,
             exit.unwrap_or(EngramCommandExit::Unknown),
-        ) {
+        );
+        let launch = match launch {
+            EngramLaunchDisposition::Carry => {
+                let check = &record.engram.active_turn_checks[position];
+                // An ordinary ACP launch may end without command text. Its
+                // unchanged captured start still identifies the launch. An
+                // explicitly reported command must match, even if unrecognized.
+                let matches = engram_check_end_matches(check, &reading, starting_check.as_ref())
+                    || (reported_command.is_none() && !check.command.literal_pipe
+                        && engram_check_start_matches(check, starting_check.as_ref()));
+                if matches { EngramLaunchDisposition::Carry }
+                else { EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_ASSOCIATION) }
+            }
+            other => other,
+        };
+        match launch {
             EngramLaunchDisposition::Ordinary => {}
             EngramLaunchDisposition::Carry => {
                 let mut launched = record.engram.active_turn_checks.remove(position);
@@ -2770,8 +2810,8 @@ impl AppState {
             }
             EngramLaunchDisposition::Drop(why) => {
                 let dropped = record.engram.active_turn_checks.remove(position);
-                // A compound launch may still have started a run.
-                if why == ENGRAM_LAUNCH_DROP_COMPOUND {
+                // A refused invocation may still have started a run.
+                if engram_dropped_launch_may_have_run(why) {
                     engram_note_unmatched_launch(record, &dropped.target.root, &dropped.started_at);
                 }
                 let line = engram_dropped_launch_line(&dropped.command, why);
@@ -2800,7 +2840,8 @@ impl AppState {
     /// was denied): it no longer counts as running beside later checks, a
     /// check it started is dropped, since it never ran and would otherwise
     /// stay open to writes until the next grant, and a `cd` it would have made
-    /// moves nothing.
+    /// moves nothing. A missing-authority full-launch diagnostic cannot prove
+    /// that no run started, so its known root/start window is retained.
     fn note_engram_command_abandoned(
         &self,
         session_id: &str,
@@ -2816,16 +2857,27 @@ impl AppState {
                 disposition,
                 &EngramRecorderObservation::CommandAbandoned { key },
             );
+            let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
             let record = &mut inner.sessions[index];
             let runtime = record.runtime.runtime_token();
             let turn_generation = record.active_turn_generation;
-            let engram = &mut record.engram;
             if disposition == ClaudeObservationDisposition::Current {
-                engram.pending_launch_diagnostics.retain(|mark| {
-                    !(mark.key == key && mark.runtime == runtime
-                        && mark.turn_generation == turn_generation)
-                });
+                let mut position = 0;
+                while position < record.engram.pending_launch_diagnostics.len() {
+                    let mark = &record.engram.pending_launch_diagnostics[position];
+                    if mark.key == key && mark.runtime == runtime
+                        && mark.turn_generation == turn_generation
+                    {
+                        let mark = record.engram.pending_launch_diagnostics.remove(position);
+                        if diagnostics_enabled {
+                            engram_keep_launch_diagnostic_window(record, &mark);
+                        }
+                    } else {
+                        position += 1;
+                    }
+                }
             }
+            let engram = &mut record.engram;
             engram.running_command_keys.remove(key);
             engram.withheld_command_keys.remove(key);
             engram.uncredited_command_notice_keys.remove(key);

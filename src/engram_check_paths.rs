@@ -882,23 +882,30 @@ fn engram_check_worktree_in(
     if engram_exact_path_key(&engram_worktree_root_path(&directory)) != root_key {
         return None;
     }
-    let line = engram_first_command(&check.normalized);
-    if engram_has_unquoted_expression(line) {
+    let line = engram_check_line(&check.normalized, check.simple);
+    // Qualified pipes already passed this check in the same Bash scan that
+    // produced argv, including escaped quotes. Do not reinterpret that proof
+    // with the legacy quote-toggle reader.
+    if !check.literal_pipe && engram_has_unquoted_expression(line) {
         return None;
     }
     // Each argument as the shell running the line passes it on, which is
     // what the runner resolves: bash takes its backslash escapes away
     // (`lin\ked` is `linked`), PowerShell and cmd keep them (Windows paths).
     // A line no wrapper names may run under either, so both readings count.
-    let readings = match check.dialect {
-        EngramShellDialect::Bash => vec![engram_shell_words_as(line, true)?],
-        EngramShellDialect::PowerShell | EngramShellDialect::Cmd => {
-            vec![engram_shell_words(line)?]
+    let readings = if check.literal_pipe {
+        vec![check.argv.clone()]
+    } else {
+        match check.dialect {
+            EngramShellDialect::Bash => vec![engram_shell_words_as(line, true)?],
+            EngramShellDialect::PowerShell | EngramShellDialect::Cmd => {
+                vec![check.argv.clone()]
+            }
+            EngramShellDialect::Unknown => vec![
+                check.argv.clone(),
+                engram_shell_words_as(line, true)?,
+            ],
         }
-        EngramShellDialect::Unknown => vec![
-            engram_shell_words(line)?,
-            engram_shell_words_as(line, true)?,
-        ],
     };
     let leads_out = |value: &str| {
         value.starts_with('~')

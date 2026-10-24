@@ -53,11 +53,21 @@ fn engram_launch_diagnostic_root(
     observed
 }
 
+// Losing diagnostic correlation does not prove that the full gate never ran.
+// Keep only its observed location/time, under the existing unmatched bound;
+// this marker grants no check or verification authority.
+fn engram_keep_launch_diagnostic_window(record: &mut SessionRecord, mark: &EngramLaunchDiagnostic) {
+    if let Some(root) = mark.root.as_ref() {
+        engram_note_unmatched_launch(record, root, &mark.started_at);
+    }
+}
+
 fn engram_launch_diagnostic_tracking_loss(
     record: &mut SessionRecord,
     mark: &EngramLaunchDiagnostic,
     why: &str,
 ) {
+    engram_keep_launch_diagnostic_window(record, mark);
     let line = format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} command check {} observed starting at {}: {why}.",
         engram_check_fingerprint(&mark.command),
@@ -154,7 +164,7 @@ fn engram_finish_launch_diagnostic(
     if !enabled {
         return;
     }
-    if engram_check_command(command).as_ref() != Some(&mark.command) {
+    if engram_check_command_like(command, &mark.command).as_ref() != Some(&mark.command) {
         engram_launch_diagnostic_tracking_loss(
             record,
             &mark,
@@ -178,10 +188,10 @@ fn engram_finish_launch_diagnostic(
             },
             true,
         ),
-        EngramLaunchDisposition::Drop(why) => (why, why == ENGRAM_LAUNCH_DROP_COMPOUND),
+        EngramLaunchDisposition::Drop(why) => (why, engram_dropped_launch_may_have_run(why)),
     };
-    if unmatched && let Some(root) = mark.root {
-        engram_note_unmatched_launch(record, &root, &mark.started_at);
+    if unmatched {
+        engram_keep_launch_diagnostic_window(record, &mark);
     }
     let line = engram_dropped_launch_line(&mark.command, why);
     eprintln!("engram> session={} {line}", record.session.id);

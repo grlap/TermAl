@@ -488,6 +488,14 @@ fn assert_no_verification_state(turn: &CheckedTurn) {
     });
 }
 
+fn assert_diagnostic_windows(record: &SessionRecord, marks: &[EngramLaunchDiagnostic]) {
+    let expected = marks.iter().filter_map(|mark| {
+        Some((engram_path_key(mark.root.as_ref()?), mark.started_at.clone()))
+    }).collect::<Vec<_>>();
+    assert_eq!(record.engram.carried_unmatched_launches, expected,
+        "retirement must preserve exactly the observed roots and original starts");
+}
+
 #[test]
 fn duplicate_start_and_delayed_finish_keep_original_time_and_reason() {
     let turn = CheckedTurn::start("outcome-delayed", true);
@@ -691,6 +699,7 @@ fn foreign_replaced_and_unowned_results_do_not_consume_current_diagnostics() {
         turn.record(|record| {
             assert_eq!(record.engram.pending_launch_diagnostics.len(), 1);
             assert!(record.engram.pending_source_root_line.is_none());
+            assert!(record.engram.carried_unmatched_launches.is_empty());
         });
     }
     turn.record_mut(|record| {
@@ -703,6 +712,7 @@ fn foreign_replaced_and_unowned_results_do_not_consume_current_diagnostics() {
     turn.record(|record| {
         assert_eq!(record.engram.pending_launch_diagnostics.len(), 1);
         assert!(record.engram.pending_source_root_line.is_none());
+        assert!(record.engram.carried_unmatched_launches.is_empty());
     });
     turn.record_mut(|record| record.unmediated_claude_turn = None);
     diagnostic_finish(&turn, "owned", DETACHED_GATE, EngramCommandExit::Code(0));
@@ -743,13 +753,14 @@ fn excluded_starts_create_no_diagnostic_and_a_new_turn_cannot_borrow_a_key() {
     turn.record_mut(|record| record.unmediated_claude_turn = None);
     assert!(turn.record(|record| record.engram.pending_launch_diagnostics.is_empty()));
     diagnostic_start(&turn, "reused", DETACHED_GATE);
+    let original = turn.record(|record| record.engram.pending_launch_diagnostics[0].clone());
     turn.record_mut(|record| record.active_turn_generation += 1);
     diagnostic_finish(&turn, "reused", DETACHED_GATE, EngramCommandExit::Code(0));
     turn.record(|record| {
         assert!(record.engram.pending_source_root_line.as_ref().unwrap().contains(
             "its runtime or turn ended before its launch result; diagnostic tracking dropped"
         ));
-        assert!(record.engram.carried_unmatched_launches.is_empty());
+        assert_diagnostic_windows(record, &[original.clone()]);
         assert!(record.engram.pending_launch_diagnostics.is_empty());
     });
     assert_no_verification_state(&turn);
@@ -759,6 +770,7 @@ fn excluded_starts_create_no_diagnostic_and_a_new_turn_cannot_borrow_a_key() {
 fn changed_command_with_the_same_key_cannot_borrow_a_launch_start() {
     let turn = CheckedTurn::start("outcome-changed-command", false);
     diagnostic_start(&turn, "changed", DETACHED_GATE);
+    let original = turn.record(|record| record.engram.pending_launch_diagnostics[0].clone());
     diagnostic_finish(&turn, "changed", GATE, EngramCommandExit::NotFinished);
     turn.record(|record| {
         assert!(
@@ -769,7 +781,7 @@ fn changed_command_with_the_same_key_cannot_borrow_a_launch_start() {
                 .unwrap()
                 .contains("its command at completion did not match its start")
         );
-        assert!(record.engram.carried_unmatched_launches.is_empty());
+        assert_diagnostic_windows(record, &[original.clone()]);
         assert!(record.engram.pending_launch_diagnostics.is_empty());
     });
     assert_no_verification_state(&turn);
@@ -779,6 +791,7 @@ fn changed_command_with_the_same_key_cannot_borrow_a_launch_start() {
 fn abandonment_retires_only_its_own_runtime_and_turn_start() {
     let turn = CheckedTurn::start("outcome-abandoned", false);
     diagnostic_start(&turn, "abandoned", DETACHED_GATE);
+    let original = turn.record(|record| record.engram.pending_launch_diagnostics[0].clone());
     let original_generation = turn.record(|record| record.active_turn_generation);
     turn.record_mut(|record| record.active_turn_generation += 1);
     turn.state.note_engram_command_abandoned(
@@ -790,6 +803,7 @@ fn abandonment_retires_only_its_own_runtime_and_turn_start() {
         turn.record(|record| record.engram.pending_launch_diagnostics.len()),
         1
     );
+    turn.record(|record| assert!(record.engram.carried_unmatched_launches.is_empty()));
     turn.record_mut(|record| record.active_turn_generation = original_generation);
     turn.state.note_engram_command_abandoned(
         &turn.session_id,
@@ -805,7 +819,7 @@ fn abandonment_retires_only_its_own_runtime_and_turn_start() {
     turn.record(|record| {
         assert!(record.engram.pending_launch_diagnostics.is_empty());
         assert!(record.engram.pending_source_root_line.is_none());
-        assert!(record.engram.carried_unmatched_launches.is_empty());
+        assert_diagnostic_windows(record, &[original.clone()]);
     });
     assert_no_verification_state(&turn);
 }
@@ -814,6 +828,7 @@ fn abandonment_retires_only_its_own_runtime_and_turn_start() {
 fn a_replacement_runtime_cannot_take_a_pending_start_with_the_same_key() {
     let turn = CheckedTurn::start("outcome-replaced-runtime", false);
     diagnostic_start(&turn, "reused", DETACHED_GATE);
+    let original = turn.record(|record| record.engram.pending_launch_diagnostics[0].clone());
     turn.record_mut(|record| {
         let SessionRuntime::Codex(runtime) = &mut record.runtime else {
             panic!("fixture starts a Codex runtime");
@@ -825,7 +840,7 @@ fn a_replacement_runtime_cannot_take_a_pending_start_with_the_same_key() {
         assert!(record.engram.pending_source_root_line.as_ref().unwrap().contains(
             "its runtime or turn ended before its launch result; diagnostic tracking dropped"
         ));
-        assert!(record.engram.carried_unmatched_launches.is_empty());
+        assert_diagnostic_windows(record, &[original.clone()]);
         assert!(record.engram.pending_launch_diagnostics.is_empty());
     });
     assert_no_verification_state(&turn);
@@ -834,7 +849,9 @@ fn a_replacement_runtime_cannot_take_a_pending_start_with_the_same_key() {
 #[test]
 fn diagnostic_cap_reports_tracking_loss_without_inventing_a_launch_outcome() {
     let turn = CheckedTurn::start("outcome-cap", false);
-    for index in 0..=ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT {
+    diagnostic_start(&turn, "cap-0", DETACHED_GATE);
+    let oldest = turn.record(|record| record.engram.pending_launch_diagnostics[0].clone());
+    for index in 1..=ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT {
         diagnostic_start(&turn, &format!("cap-{index}"), DETACHED_GATE);
     }
     let tracking_loss = turn.record(|record| {
@@ -845,7 +862,7 @@ fn diagnostic_cap_reports_tracking_loss_without_inventing_a_launch_outcome() {
             marks.last().unwrap().key,
             format!("cap-{}", ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT)
         );
-        assert!(record.engram.carried_unmatched_launches.is_empty());
+        assert_diagnostic_windows(record, &[oldest.clone()]);
         let line = record
             .engram
             .pending_source_root_line
@@ -861,10 +878,8 @@ fn diagnostic_cap_reports_tracking_loss_without_inventing_a_launch_outcome() {
         turn.record(|record| record.engram.pending_source_root_line.clone()),
         Some(tracking_loss)
     );
-    assert_eq!(
-        turn.record(|record| record.engram.carried_unmatched_launches.len()),
-        0
-    );
+    turn.record(|record| assert_diagnostic_windows(record, &[oldest.clone()]));
+    let newest = turn.record(|record| record.engram.pending_launch_diagnostics.last().unwrap().clone());
     diagnostic_finish(
         &turn,
         &format!("cap-{}", ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT),
@@ -876,7 +891,7 @@ fn diagnostic_cap_reports_tracking_loss_without_inventing_a_launch_outcome() {
             record.engram.pending_launch_diagnostics.len(),
             ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT - 1
         );
-        assert_eq!(record.engram.carried_unmatched_launches.len(), 1);
+        assert_diagnostic_windows(record, &[oldest.clone(), newest.clone()]);
         assert!(
             record
                 .engram

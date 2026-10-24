@@ -80,8 +80,7 @@ fn engram_focused_node_words(program: &str, args: &[String]) -> Option<Vec<Strin
 
 fn engram_is_focused_node_check(check: &EngramCheckCommand) -> bool {
     check.kind == EngramVerificationKind::Test
-        && engram_shell_words(&check.normalized)
-            .is_some_and(|words| engram_focused_node_words(&check.program, &words[1..]).is_some())
+        && engram_focused_node_words(&check.program, &check.argv[1..]).is_some()
 }
 
 /// A matched terminal stage and coherent native-runner counts are both needed.
@@ -106,9 +105,12 @@ fn engram_focused_node_completion(
         // A pipe, list, redirection or substitution, as TermAl reads the line,
         // could mask the launcher's exit, so the exit cannot be the test's.
         if !check.command.simple {
-            return Err(Rejected::Compound);
+            // Diagnostics only: a wholly quoted-looking pipe may be a
+            // single command, but wrapper/unknown runtime text proves no
+            // containment. Do not falsely call that command a real pipeline.
+            return Err(engram_pipe_rejection(&check.command));
         }
-        let words = engram_shell_words(&check.command.normalized).ok_or(Rejected::Argv)?;
+        let words = &check.command.argv;
         let node = engram_focused_node_words(&check.command.program, &words[1..])
             .ok_or(Rejected::Argv)?;
         let (native, stage) =

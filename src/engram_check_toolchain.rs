@@ -27,7 +27,7 @@ fn engram_cargo_toolchain_selector(check: &EngramCheckCommand) -> Option<Option<
     if check.program != "cargo" {
         return None;
     }
-    let words = engram_shell_words(engram_first_command(&check.normalized))?;
+    let words = &check.argv;
     if words[0].contains(['/', '\\', ':']) {
         return None;
     }

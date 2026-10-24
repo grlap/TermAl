@@ -1640,8 +1640,10 @@ reports.
   current drive), then `&&` and
   one simple
   recognised test on its own, with nothing piped, redirected or chained
-  after it (such a test could not pass anyway: a pipe hides its exit
-  status). Bash, PowerShell 7 and cmd all run this line
+  after it (a real pipeline can hide the test's exit status). A quoted pipe
+  inside an argument follows the bounded [runtime-context rule](../test.md#quoted-test-filters);
+  a shell wrapper never proves
+  its containment. Bash, PowerShell 7 and cmd all run this line
   as a change of their own directory, across drives too, and run the test
   only once it succeeded, so the test runs in DIR; its check fingerprint is
   the test's own. A non-zero exit may come from the change or the shell's
@@ -1731,7 +1733,15 @@ reports.
   what runs now, test or not, and a check stands only while the starts name
   the same test in the same place: one that moves it elsewhere, even within
   the worktree, drops it, and the call starts no check again until it ends,
-  since a new one would begin its record after writes the old one saw. A
+  since a new one would begin its record after writes the old one saw. If
+  the dropped check was a full-gate launch, its original root and start time
+  stay in the bounded unmatched-launch window: a later gate must not borrow
+  a run it may already have started. Its check-credit notice names the
+  original fingerprint and start, explains that its command or place changed,
+  and advises launching again two minutes or more after the last launch in
+  that worktree. A matching repeated start preserves the
+  original check and adds no window; an ordinary test adds no full-run window.
+  A
   test a call names only after it started (a title, then an update) began
   before its first snapshot, so its outcome is unknown. An
   ACP update without a status, and the one that ends the call, count the
@@ -1772,14 +1782,29 @@ reports.
 - **Check fingerprint.** The producer observation's action fingerprint, which
   a `--bind N=test:FINGERPRINT` pin must equal, is the lowercase hex SHA-256
   of the UTF-8 bytes of the normalised command line: the wrapper removed,
-  whitespace runs outside quotes collapsed to one space, trimmed. For
-  example
+  whitespace runs outside quotes collapsed to one space, trimmed. A qualified
+  known-Bash literal-pipe command instead preserves its original text after
+  trimming, including repeated spaces, tabs and Bash escapes. In the one-call
+  form, only the test text after `pushd "DIR" &&` is fingerprinted by this
+  same rule. For a pipe-free example,
   `cargo test --test source_file_size -- --nocapture` hashes exactly that
   string.
 - **Outcome.** Only a simple command's own exit status can succeed or fail:
-  a line with a pipe, a list, a redirection, a backtick or a `$(`
+  a line with an unquoted pipe, a list, a redirection, a backtick or a `$(`
   substitution is reported as unknown, since `cargo test | tail` exits 0
-  when tests fail. Codex and ACP report the exit code (0 succeeded,
+  when tests fail. A quoted pipe is eligible only on an unwrapped line with
+  known runtime Bash context, using one retained argv across the check's
+  consumers. Wrapper and unknown-runtime pipe forms stay unknown; see
+  [test filter quoting](../test.md#quoted-test-filters) for the supported form
+  and workaround.
+  A full launcher invocation with a qualified pipe argument cannot be carried:
+  generic terminal stages do not validate that invocation's argv. A carried
+  launch's explicitly reported completion command must match its start. If
+  ACP omits command text at completion, the unchanged captured start and
+  runtime key identify an ordinary launch; its display title supplies no
+  command identity. Qualified foreground checks still require matching
+  reported command text.
+  Codex and ACP report the exit code (0 succeeded,
   otherwise failed; none, unknown). Claude reports none: a Bash result
   without `is_error` succeeded, one whose text starts `Exit code N` failed,
   and any other error, or an interrupted command, is unknown. A background
@@ -2068,7 +2093,12 @@ its launch (`src/engram_carried_checks.rs`).
   its start`. At the bounded pending-command cap, oldest-first eviction says
   `the pending-command tracking limit dropped that command's diagnostic
   tracking`. These loss lines name the original command fingerprint and
-  start time, not a fabricated launch outcome. Disabled or non-Current
+  start time, not a fabricated launch outcome. Each retirement preserves
+  the original known root/start in the bounded unmatched-launch window,
+  including command mismatch, runtime/turn pruning and pending-cap eviction.
+  An enabled own abandonment preserves that window silently. The window
+  prevents a later gate from borrowing the retired launch's run; it creates
+  no verification, and an unknown root creates no window. Disabled or non-Current
   observations cannot emit these loss notices or gain cleanup authority;
   an exact disabled completion remains silent. Diagnostics are not persisted
   across restarts.

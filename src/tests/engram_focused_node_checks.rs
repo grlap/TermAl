@@ -9,6 +9,9 @@ mod launcher_notice;
 #[path = "engram_refused_admission.rs"]
 mod refused_admission;
 
+#[path = "engram_quoted_pipe_recognition.rs"]
+mod quoted_pipe;
+
 const NODE_TEST: &str = "node scripts/test-launcher.mjs focused -- node --test --test-name-pattern \"selected case\" fixture.test.mjs";
 
 #[test]
@@ -225,6 +228,7 @@ fn engram_node_launcher_native_result_and_parser_controls() {
 /// source captures and checkpoint. They are not live producer/test evidence.
 struct FocusedNodeFixture {
     turn: CheckedTurn,
+    provenance: EngramObservationProvenance,
     command: String,
     directory: PathBuf,
     request: Value,
@@ -251,15 +255,39 @@ impl FocusedNodeFixture {
     /// `test` run as a plain line, or in the one-call form, with matched
     /// launcher records whose stage ran `node` with `args`.
     fn with_test(label: &str, native: i64, one_call: bool, test: &str, args: &[&str]) -> Self {
+        Self::with_test_provenance(label, native, one_call, test, args, false)
+    }
+
+    /// Models the existing Claude reader's Bash-only command ingress. The
+    /// fixture supplies matching reader provenance, not an inferred agent label.
+    /// Callers assert `assert_started` at their explicit liveness boundary.
+    fn with_bash_test(label: &str, native: i64, one_call: bool, test: &str, args: &[&str]) -> Self {
+        Self::with_test_provenance(label, native, one_call, test, args, true)
+    }
+
+    fn with_test_provenance(
+        label: &str, native: i64, one_call: bool, test: &str, args: &[&str], known_bash: bool,
+    ) -> Self {
         let _placement = TestTempRootDirectoryScope::repository_local();
         let turn = CheckedTurn::start(label, true);
+        let provenance = if known_bash {
+            turn.record(|record| EngramObservationProvenance::Claude(ClaudeObservationProvenance {
+                token: record.runtime.runtime_token().expect("matching fixture runtime"),
+                origin: ClaudeWorkOrigin::Attempt { turn_generation: record.active_turn_generation },
+            }))
+        } else {
+            EngramObservationProvenance::Ambient
+        };
+        assert_eq!(turn.record(|record| claude_observation_disposition(record, &provenance)),
+            ClaudeObservationDisposition::Current);
         let command = if one_call {
             format!("pushd \"{}\" && {test}", turn.root.display())
         } else {
             test.to_owned()
         };
-        turn.recorder()
-            .command_started_in(
+        let mut recorder = turn.recorder();
+        recorder.set_observation_provenance(provenance.clone());
+        recorder.command_started_in(
                 "node",
                 &command,
                 Some(&command),
@@ -267,7 +295,9 @@ impl FocusedNodeFixture {
             )
             .unwrap();
         turn.wait_for_snapshots();
-        assert!(turn.record(|record| record.engram.active_turn_checks.len() == 1));
+        if !known_bash {
+            assert!(turn.record(|record| record.engram.active_turn_checks.len() == 1));
+        }
         let run = format!("test-{}", Uuid::new_v4());
         let directory = engram_git_run_directory(&turn.root).unwrap().join(&run);
         fs::create_dir_all(&directory).unwrap();
@@ -291,6 +321,7 @@ impl FocusedNodeFixture {
         );
         Self {
             turn,
+            provenance,
             command,
             directory,
             request,
@@ -298,6 +329,11 @@ impl FocusedNodeFixture {
             input: json!({"fingerprint":fingerprint}),
             output,
         }
+    }
+
+    fn assert_started(&self) {
+        assert_eq!(self.turn.record(|record| record.engram.active_turn_checks.len()), 1,
+            "the runtime-qualified command must start a Test observation");
     }
 
     fn finish(self, exit: EngramCommandExit) -> Value {
@@ -312,9 +348,9 @@ impl FocusedNodeFixture {
             )
             .unwrap();
         }
-        self.turn
-            .recorder()
-            .command_completed_with_exit(
+        let mut recorder = self.turn.recorder();
+        recorder.set_observation_provenance(self.provenance.clone());
+        recorder.command_completed_with_exit(
                 "node",
                 &self.command,
                 &self.output,
@@ -633,12 +669,11 @@ fn engram_node_records_without_provenance_fields_are_refused_with_the_native_exi
     }
 }
 
-/// A quoted `|` in a name pattern makes the line compound as TermAl reads it
-/// today, so its exit cannot be the test's own. Even with complete launcher
-/// provenance the run is refused, and the refusal says why.
+/// An actual pipeline can mask the test's exit. Even with complete launcher
+/// provenance and a quoted alternation, the run is refused with its cause.
 #[test]
 fn engram_node_compound_command_is_refused_with_the_native_exit() {
-    let test = "node scripts/test-launcher.mjs focused -- node --test --test-name-pattern=\"a|b\" fixture.test.mjs";
+    let test = "node scripts/test-launcher.mjs focused -- node --test --test-name-pattern=\"a|b\" fixture.test.mjs | cat";
     let args = ["--test", "--test-name-pattern=a|b", "fixture.test.mjs"];
     for native in [0, 1] {
         let fixture = FocusedNodeFixture::with_test(

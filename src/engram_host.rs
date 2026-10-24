@@ -54,7 +54,10 @@ pub(crate) enum EngramRecorderObservation<'a> {
     /// The command `key` ended, with what the runtime said about its end.
     CommandFinished {
         key: &'a str,
+        /// Transcript label, which may be only a provider's tool title.
         command: &'a str,
+        /// Actual command text supplied at completion, separate from its label.
+        reported_command: Option<&'a str>,
         output: &'a str,
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
@@ -95,15 +98,17 @@ impl EngramHost<'_> {
             EngramRecorderObservation::CommandFinished {
                 key,
                 command,
+                reported_command,
                 output,
                 exit,
                 runtime_output_cut,
             } => {
-                self.state.note_engram_command_finished_with_capture(
+                self.state.note_engram_command_finished_reported(
                     session_id,
                     provenance,
                     key,
                     command,
+                    reported_command,
                     output,
                     exit,
                     runtime_output_cut,

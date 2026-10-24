@@ -63,12 +63,13 @@ fn engram_build_toolchain_command(check: &EngramCheckCommand) -> EngramCheckComm
     let mut toolchain = check.clone();
     if check.kind == EngramVerificationKind::Build
         && check.program == "node"
-        && let Some(words) = engram_shell_words(&check.normalized)
-        && let Some(build) = engram_focused_build_words(&check.program, &words[1..])
+        && let Some(build) = engram_focused_build_words(&check.program, &check.argv[1..])
         && build[0] == "cargo"
     {
         toolchain.program = "cargo".to_owned();
         toolchain.normalized = build.join(" ");
+        toolchain.argv = build;
+        toolchain.literal_pipe = false;
     }
     toolchain
 }
@@ -91,6 +92,7 @@ enum EngramBuildRejection {
     Input,
     Association,
     Compound,
+    PipeContainment,
     Runner,
     Counts,
 }
@@ -109,9 +111,22 @@ impl EngramBuildRejection {
             Self::Input => "input",
             Self::Association => "association",
             Self::Compound => "compound command",
+            Self::PipeContainment => "pipe containment",
             Self::Runner => "runner",
             Self::Counts => "counts",
         }
+    }
+}
+
+/// A diagnostic distinction only; neither alternative supplies pipe proof
+/// or an eligible test exit. The prefix view never selects verification.
+fn engram_pipe_rejection(check: &EngramCheckCommand) -> EngramBuildRejection {
+    if check.normalized.contains('|')
+        && engram_first_command(&check.normalized).len() == check.normalized.len()
+    {
+        EngramBuildRejection::PipeContainment
+    } else {
+        EngramBuildRejection::Compound
     }
 }
 
@@ -216,10 +231,7 @@ fn engram_build_completion(
     ) {
         return rejected(EngramBuildRejection::Terminal);
     }
-    let words = engram_shell_words(&check.command.normalized);
-    let build = words
-        .as_ref()
-        .and_then(|words| engram_focused_build_words(&check.command.program, &words[1..]));
+    let build = engram_focused_build_words(&check.command.program, &check.command.argv[1..]);
     let Some(build) = build else {
         return rejected(EngramBuildRejection::Argv);
     };
@@ -246,7 +258,7 @@ fn engram_focused_build_exit(
     output: &str,
     exit: EngramCommandExit,
 ) -> Option<i64> {
-    let words = engram_shell_words(&check.command.normalized)?;
+    let words = &check.command.argv;
     let build = engram_focused_build_words(&check.command.program, &words[1..])?;
     engram_validated_focused_stage(check, session_id, output, exit, &build)
         .map(|(native, _)| native)

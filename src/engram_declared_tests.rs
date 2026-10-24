@@ -368,6 +368,8 @@ fn engram_declared_candidate(command: &str) -> Option<(EngramCheckCommand, Vec<S
             normalized: engram_collapse_whitespace(&line),
             simple: true,
             program: engram_program_name(&words[0]),
+            argv: words.clone(),
+            literal_pipe: false,
             dialect,
             directory,
             kind: EngramVerificationKind::Test,

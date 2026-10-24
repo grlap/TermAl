@@ -805,7 +805,7 @@ fn test_run_registration_view(inner: &StateInner, disk: &TestRunDisk) -> TestRun
                 disk.results.as_ref().is_some_and(|results| {
                     test_run_terminal_digest_matches(Some(&results.digest), digest)
                 })
-            }) && !carried.terminal_conflict
+            }) && !carried.terminal_conflict && !carried.ambiguous
         });
     if carried {
         view.restart_would_void_evidence = Some(true);

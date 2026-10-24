@@ -251,6 +251,22 @@ struct SessionRecorder {
 }
 
 impl SessionRecorder {
+    /// ACP may end a tool call with only a display title. Keep the actual
+    /// command's presence separate so a title is never execution identity.
+    fn command_completed_with_reported_command(
+        &mut self,
+        key: &str,
+        command: &str,
+        reported_command: Option<&str>,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        recorder_command_completed_reported(
+            self, key, command, reported_command, output, status, Some(exit), false,
+        )
+    }
+
     /// Creates a new instance.
     fn new(state: AppState, session_id: String) -> Self {
         Self {
@@ -905,6 +921,22 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     exit: Option<EngramCommandExit>,
     runtime_output_cut: bool,
 ) -> Result<()> {
+    recorder_command_completed_reported(
+        recorder, key, command, Some(command), output, status, exit, runtime_output_cut,
+    )
+}
+
+/// Records the transcript label without promoting an absent provider command.
+fn recorder_command_completed_reported<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    key: &str,
+    command: &str,
+    reported_command: Option<&str>,
+    output: &str,
+    status: CommandStatus,
+    exit: Option<EngramCommandExit>,
+    runtime_output_cut: bool,
+) -> Result<()> {
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
     let state_for_entry = state.clone();
@@ -921,6 +953,7 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
         recorder.observe(EngramRecorderObservation::CommandFinished {
             key,
             command,
+            reported_command,
             output,
             exit,
             runtime_output_cut,

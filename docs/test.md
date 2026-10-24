@@ -655,6 +655,14 @@ root generation takes precedence. With no binding, or while the run is
 nonterminal, no claim mismatch is invented; existing fence, generation,
 conflict and six-hour expiry rules still apply. Credit requires the exact
 same claim.
+A full-gate check retired because a later description or repeated start
+changes its command or place keeps its original root/start ambiguity window.
+A check-credit notice names the original fingerprint and start, explains the
+command-or-place change and that a run may already have started, and advises
+waiting two minutes or more after the last launch in that worktree.
+A later gate there cannot borrow the retired launch's run. A matching
+description or repeated start keeps the original check; retiring an ordinary
+test adds no full-run window.
 An enabled Current full-gate start without a binding or active grant retains
 only bounded diagnostic correlation. A matching detached/background result
 reports `it began without a binding to claimed work, so it was not carried`
@@ -666,7 +674,18 @@ identities can start independently. Diagnostic loss is reported once with
 the original fingerprint/time: `the pending-command tracking limit dropped
 that command's diagnostic tracking`, `its runtime or turn ended before its
 launch result; diagnostic tracking dropped`, or `its command at completion
-did not match its start`. These lines claim no launch outcome; disabled or
+did not match its start`. Each such retirement keeps a known root and its
+original start in the bounded unmatched-launch window; an enabled own
+abandonment keeps that window silently. This prevents a later gate from
+borrowing a run whose diagnostic was lost. Unknown roots add no window.
+Retirement also rechecks existing carried gates, including saved run matches,
+and the final checkpoint lock rechecks that eligibility after off-lock
+settlement. Retroactive revocation applies only to starts within two minutes
+in either direction. A run already read as terminal before the other start
+keeps its eligibility, allowing the existing ten-second launch-stamp slack.
+Missing timestamps remain ambiguous. An ambiguous saved match cannot supply
+passing evidence or batch-member bindings.
+These lines claim no launch outcome; disabled or
 non-Current observations gain no loss-reporting or cleanup authority.
 A failed run with a complete record is recorded as failed; a run that was
 stopped or interrupted, or whose launcher died without a result, is
@@ -792,6 +811,39 @@ arbitrary inner scripts are not native Test forms. An unsupported foreground
 focused command receives a command-identifying notice that no Test record will
 follow. Ordinary unrelated Node commands receive no launcher-specific notice;
 recognized Build commands retain their separate Build lifecycle.
+
+### Quoted test filters
+
+A quoted pipe in a test filter qualifies only on an unwrapped command whose
+runtime dialect is known. Currently that is Claude's Bash tool, whose reader
+supplies Bash provenance; single, double and mixed quotes use that Bash
+argument reading, including the test in the supported one-call form. Codex
+and ACP observations do not establish a dialect. A `bash -c`, `pwsh -Command`
+or `cmd /c` wrapper containing a pipe remains ineligible, even when its text
+looks quoted: an outer shell or wrapper may transform those quotes. Unknown
+runtime lines also remain ineligible. A `.cmd` or `.bat` program
+(case-insensitive, including a
+path-qualified runner) never qualifies: `cmd.exe` can parse the literal pipe
+again. Bare or executable `npm`, `pnpm`, `yarn`, and `npx` also stay ineligible
+because their downstream script shell or shim is not established by Bash
+provenance. The same restriction applies to the wrapped runner after a
+test launcher's `focused --`. A native `cargo`/`cargo.exe` or the supported
+Node test invocation keeps its quoted-filter behavior. No PATH resolution,
+package-manager version, or script-shell configuration is inferred here.
+The parsed argv is retained through recognition, placement and verification;
+focused Node evidence still needs
+its matching owner, argv, interval and input artifacts and cannot fall back to
+generic stage/count text. Full gates with a qualified pipe argument are not
+carried, and a detached completion must match its started invocation.
+This bounded form refuses any `$`, `&`, `;`, `<`, `>`, backtick, CR or LF
+anywhere in the command, including inside quotes. It also refuses unquoted
+`*`, `?`, `[`, `]`, `{`, `}`, `(`, `)`, `^`, and word-leading `~` or `@`,
+escaped unquoted pipes, incomplete escapes and unterminated quotes. Thus
+filters such as `'a$|b$'` and `'a;b|c'` do not qualify. Real pipelines and
+unsupported ANSI-C/locale quotes remain refused. Use supported
+repeated filter flags or separate independent commands where this bounded
+form does not apply. This requires a host containing the recognition change.
+See the [host adapter's test evidence contract](features/engram-host-adapter.md#test-evidence).
 
 ## Backend Testing Guidelines
 

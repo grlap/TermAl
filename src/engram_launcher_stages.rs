@@ -206,8 +206,7 @@ fn engram_focused_stage_line_missing(
     launcher_test_stages: &[String],
 ) -> bool {
     check.program == "node"
-        && engram_shell_words(engram_first_command(&check.normalized))
-            .is_some_and(|words| words.get(2).map(String::as_str) == Some("focused"))
+        && check.argv.get(2).map(String::as_str) == Some("focused")
         && launcher_test_stages == [ENGRAM_LAUNCHER_FOCUSED_STAGE]
         && !result_lines.iter().any(|line| {
             line.strip_prefix(ENGRAM_LAUNCHER_FOCUSED_STAGE)
