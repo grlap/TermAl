@@ -27,7 +27,12 @@ async fn federation_attest_central(
     channel: &FederationChannel,
     io: &mut FederationControlIo,
 ) -> Result<(Arc<FederationSecurityContext>, FederationControlGuard), ApiError> {
-    federation_attest_central_started(channel, io, tokio::time::Instant::now()).await
+    let started = if channel.control.clock.io_deadlines {
+        tokio::time::Instant::from_std(channel.control.clock.now())
+    } else {
+        tokio::time::Instant::now()
+    };
+    federation_attest_central_started(channel, io, started).await
 }
 
 async fn federation_prove_central(
@@ -90,7 +95,7 @@ async fn federation_attest_satellite(
             false,
         )
     })?;
-    let (context, tag) = match tokio::time::timeout(
+    let (context, tag) = match channel.control.clock.timeout(
         channel.control.attest_timeout,
         federation_prove_satellite(channel, io, owner),
     )
@@ -138,7 +143,7 @@ async fn federation_attest_satellite(
                 false,
             )
         })?;
-    tokio::time::timeout(
+    channel.control.clock.timeout(
         channel.control.attest_timeout,
         federation_write_frame(io, &federation_encode(b"termal-hello-proof-v1", &[&tag])),
     )

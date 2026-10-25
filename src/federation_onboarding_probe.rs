@@ -68,23 +68,45 @@ fn federation_local_execution_profile(
     directory: &FsPath,
     image: &FederationProcessImage,
 ) -> Result<FederationExecutionProfile, ApiError> {
-    let FederationImageObservation::Known(identity) = image.observe() else {
-        return Err(ApiError::from_status(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "running image identity unknown",
-        ));
+    federation_execution_profile_with_probe(directory, image, federation_probe_command)
+}
+
+fn federation_execution_profile_with_probe(
+    directory: &FsPath,
+    image: &FederationProcessImage,
+    probe: impl Fn(&str, &[&str], &FsPath) -> Result<String, ApiError>,
+) -> Result<FederationExecutionProfile, ApiError> {
+    let binary_sha256 = match image.observe() {
+        FederationImageObservation::Known(identity) => identity.sha256,
+        FederationImageObservation::Unknown => String::new(),
     };
-    let toolchain_identity = federation_probe_command("rustc", &["--version"], directory)?;
+    // A compiler is useful evidence, not a prerequisite for an installed host.
+    let toolchain_identity =
+        federation_toolchain_observation(probe("rustc", &["--version"], directory));
     Ok(FederationExecutionProfile {
         protocol_version: u32::from(FEDERATION_PROTOCOL_VERSION),
-        schema_version: SQLITE_SCHEMA_VERSION.to_owned(),
-        binary_sha256: identity.sha256,
+        schema_version: FEDERATION_PROFILE_SCHEMA_VERSION.to_owned(),
+        binary_sha256,
         toolchain_identity,
     })
 }
 
 fn federation_local_platform_probe(
     directory: &FsPath,
+) -> Result<FederationPlatformProbe, ApiError> {
+    federation_platform_probe_with(directory, federation_probe_command)
+}
+
+fn federation_toolchain_observation(observed: Result<String, ApiError>) -> String {
+    observed
+        .ok()
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| "unavailable".to_owned())
+}
+
+fn federation_platform_probe_with(
+    directory: &FsPath,
+    probe: impl Fn(&str, &[&str], &FsPath) -> Result<String, ApiError>,
 ) -> Result<FederationPlatformProbe, ApiError> {
     let directory = fs::canonicalize(directory).map_err(|_| {
         ApiError::from_status(
@@ -103,8 +125,9 @@ fn federation_local_platform_probe(
     );
     #[cfg(not(windows))]
     let (program, args, dialect) = ("/bin/sh", vec!["-c", "printf TERMAL_PROBE_WAKE"], "posix");
-    let output = federation_probe_command(program, &args, &directory)?;
-    let toolchain_identity = federation_probe_command("rustc", &["--version"], &directory)?;
+    let output = probe(program, &args, &directory)?;
+    let toolchain_identity =
+        federation_toolchain_observation(probe("rustc", &["--version"], &directory));
     Ok(FederationPlatformProbe {
         platform: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),

@@ -76,6 +76,7 @@ pub(super) fn peer(port: u16) -> FederationPeerRecord {
         },
         membership: FederationMembershipState::Enrolled,
         verification: None,
+        requalification: None,
         last_observed: None,
     }
 }

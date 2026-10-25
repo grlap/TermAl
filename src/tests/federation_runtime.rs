@@ -68,7 +68,7 @@ async fn federation_initial_durability_hold_retries_after_settlement() {
     assert!(fixture.event(|e| matches!(e, Event::Credentials)).await);
     assert!(
         fixture
-            .event(|e| matches!(e, Event::Attempt(StatusCode::CONFLICT)))
+            .event(|e| matches!(e, Event::Attempt(StatusCode::LOCKED)))
             .await
     );
     fixture.app.inner.lock().unwrap().federation_durable = true;

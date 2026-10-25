@@ -29,11 +29,21 @@ impl FederationRpcClient {
         if port == 0 {
             return Err(ApiError::bad_request("invalid federation forward port"));
         }
-        let client = reqwest::Client::builder()
+        let builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
-            .no_gzip()
-            .timeout(Duration::from_secs(10))
+            .no_gzip();
+        #[cfg(test)]
+        let builder = if channel.control.clock.io_deadlines {
+            // The fixture's channel clock owns the same request budget; an
+            // independent reqwest wall timer must not race its controlled time.
+            builder
+        } else {
+            builder.timeout(Duration::from_secs(10))
+        };
+        #[cfg(not(test))]
+        let builder = builder.timeout(Duration::from_secs(10));
+        let client = builder
             .build()
             .map_err(|_| ApiError::internal("failed to initialize federation HTTP client"))?;
         Ok(Self {
@@ -53,6 +63,11 @@ impl FederationRpcClient {
         self.channel.current_lease()
     }
     async fn health(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
+        self.authenticated_health(lease).await?;
+        self.requalify(lease).await
+    }
+
+    async fn authenticated_health(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
         let response = self
             .request(FederationRpcRoute::Health(lease.clone()))
             .await?;

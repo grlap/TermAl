@@ -32,11 +32,12 @@ async fn federation_onboarding_two_process_fake_link_operator_verify() {
     })
     .await
     .unwrap();
-    let channel = FederationChannel::for_app(
+    let mut channel = FederationChannel::for_app(
         snapshot,
         FederationPairCapability::new("a".repeat(64)).unwrap(),
         app.clone(),
     );
+    channel.control.clock = FederationControlClock::scripted_io();
     let checked = channel.clone();
     let check: FederationAuthorityCheck = Arc::new(move || checked.current_authority().map(|_| ()));
     let rpc = FederationRpcClient::new(ready.port, channel.clone(), check.clone()).unwrap();

@@ -36,6 +36,11 @@ fn federation_attestation_error(
     error: ApiError,
     crypto_refusal: bool,
 ) -> ApiError {
+    #[cfg(test)]
+    eprintln!(
+        "FEDERATION_ATTESTATION_FAILURE peer={} stage={stage} reason={reason} status={} error={}",
+        channel.snapshot.peer.host_id, error.status, error.message
+    );
     channel.observe_attestation_failure(owner, stage, reason, crypto_refusal);
     error
 }
@@ -64,7 +69,7 @@ async fn federation_attest_central_started(
         // startup. A partial prefix/body cannot start or extend proof time.
         federation_read_frame(io).await
     };
-    let hello = match tokio::time::timeout_at(
+    let hello = match channel.control.clock.timeout_at(
         started + channel.control.link_startup_timeout,
         startup,
     )
@@ -102,7 +107,7 @@ async fn federation_attest_central_started(
             ));
         }
     };
-    let context = match tokio::time::timeout(
+    let context = match channel.control.clock.timeout(
         channel.control.attest_timeout,
         federation_prove_central(channel, io, owner, hello),
     )

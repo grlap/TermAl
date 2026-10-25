@@ -88,6 +88,10 @@ mod engram_source_roots;
 mod engram_verification_bind;
 mod evaluator_tool_access;
 mod federation_onboarding;
+mod federation_build_compatibility;
+mod federation_build_requalification_controls;
+mod federation_build_recovery_availability;
+mod federation_build_recovery_races;
 mod federation_entrypoints;
 mod federation_entrypoints_child;
 mod federation_entrypoints_control;
@@ -99,6 +103,7 @@ mod federation_onboarding_boundaries;
 mod federation_onboarding_child;
 mod federation_onboarding_external;
 mod federation_onboarding_fixture;
+mod federation_onboarding_deadlines;
 #[cfg(windows)]
 mod federation_onboarding_image;
 mod federation_onboarding_image_controls;

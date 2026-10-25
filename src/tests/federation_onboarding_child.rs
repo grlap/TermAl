@@ -155,12 +155,13 @@ async fn federation_onboarding_satellite_child() {
     record.endpoint.satellite_federation_port = port;
     record.endpoint.satellite_reverse_forward_port = setup.central_port;
     app.enroll_federation_peer(record).unwrap();
-    let channel = FederationChannel::for_app(
+    let mut channel = FederationChannel::for_app(
         app.federation_peer_snapshot(&setup.central.host_id)
             .unwrap(),
         FederationPairCapability::new("a".repeat(64)).unwrap(),
         app.clone(),
     );
+    channel.control.clock = FederationControlClock::scripted_io();
     let checked = channel.clone();
     let check: FederationAuthorityCheck = Arc::new(move || checked.current_authority().map(|_| ()));
     let rpc = FederationRpcClient::new(setup.central_port, channel.clone(), check.clone()).unwrap();

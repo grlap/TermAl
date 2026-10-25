@@ -46,6 +46,7 @@ impl AppState {
                 .unwrap_or(1);
             peer.membership = FederationMembershipState::Enrolled;
             peer.verification = None;
+            peer.requalification = None;
             peer.validate()?;
             domain.links.remove(&id);
             domain.peers.insert(id, peer.clone());
@@ -98,6 +99,7 @@ impl AppState {
         let updated = self.mutate_federation_with_install_receipt(
             false,
             |domain, _| {
+                let requalification = federation_requalification_capture(domain, expected);
                 let peer = domain
                     .peers
                     .get_mut(&expected.peer.host_id)
@@ -106,6 +108,7 @@ impl AppState {
                     return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
                 }
                 if domain.links.get(&peer.identity.host_id) != Some(&incarnation) {
+                    peer.requalification = requalification;
                     peer.record_generation = federation_next_generation(peer.record_generation)?;
                     peer.transport_generation =
                         federation_next_generation(peer.transport_generation)?;
@@ -159,6 +162,10 @@ impl AppState {
         finish: impl FnOnce(&mut FederationState) -> Result<(), ApiError>,
     ) -> Result<(), ApiError> {
         self.ensure_federation_peer_current(expected)?;
+        #[cfg(test)]
+        if let Some(peer) = self.federation_peer_handle(&expected.peer.host_id) {
+            peer.channel.control.observe("verificationChecked", 0);
+        }
         self.mutate_federation(|domain, _| {
             let peer = domain
                 .peers
@@ -230,6 +237,7 @@ impl AppState {
             peer.membership = next;
             peer.record_generation = federation_next_generation(peer.record_generation)?;
             if next == FederationMembershipState::Revoked {
+                peer.requalification = None;
                 peer.transport_generation = federation_next_generation(peer.transport_generation)?;
                 peer.verification = None;
                 domain.links.remove(&peer.identity.host_id);

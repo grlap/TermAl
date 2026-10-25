@@ -23,7 +23,9 @@ fn complete_report() -> FederationOnboardingReport {
             .collect(),
         probe_session_id: Some(Uuid::new_v4().to_string()),
         wake_outcome_id: Some(Uuid::new_v4().to_string()),
+        retained_probe: None,
         running_image: federation_onboarding_fixture::image(),
+        reverse_running_image: federation_onboarding_fixture::image(),
         engram: None,
     }
 }

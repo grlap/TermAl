@@ -19,7 +19,15 @@ async fn verify_federation_satellite(
     app: AppState,
     id: String,
 ) -> Result<FederationOnboardingReport, ApiError> {
-    let (mut report, record, engram_enabled) = {
+    verify_federation_satellite_mode(app, id, false).await
+}
+
+async fn verify_federation_satellite_mode(
+    app: AppState,
+    id: String,
+    automatic: bool,
+) -> Result<FederationOnboardingReport, ApiError> {
+    let (mut report, record, engram_enabled, retained) = {
         let inner = app.inner.lock().expect("state mutex poisoned");
         let expected = federation_snapshot_locked(&inner, &id)?;
         if expected.local_role != FederationRole::Central
@@ -38,6 +46,18 @@ async fn verify_federation_satellite(
             .get(&id)
             .ok_or_else(federation_stale_link)?
             .clone();
+        let retained = if automatic {
+            let recovery = record
+                .requalification
+                .as_ref()
+                .ok_or_else(federation_stale_link)?;
+            if !recovery.matches(&record, &expected) || !recovery.qualified_probe.valid() {
+                return Err(federation_stale_link());
+            }
+            Some(recovery.qualified_probe.clone())
+        } else {
+            None
+        };
         let report = FederationOnboardingReport {
             attempt_id: Uuid::new_v4().to_string(),
             basis: record.verification_basis(),
@@ -53,13 +73,25 @@ async fn verify_federation_satellite(
                 .collect(),
             probe_session_id: None,
             wake_outcome_id: None,
+            retained_probe: None,
             running_image: FederationImageObservation::Unknown,
-            engram: None,
+            reverse_running_image: FederationImageObservation::Unknown,
+            engram: if automatic {
+                inner
+                    .federation
+                    .onboarding
+                    .reports
+                    .get(&id)
+                    .and_then(|previous| previous.engram.clone())
+            } else {
+                None
+            },
         };
         (
             report,
             record,
             inner.federation.onboarding.engram_enabled.contains(&id),
+            retained,
         )
     };
     if let Some(peer) = app.federation_peer_handle(&id) {
@@ -74,6 +106,7 @@ async fn verify_federation_satellite(
                     &record,
                     engram_enabled,
                     &mut report,
+                    retained.as_ref(),
                 )
                 .await;
             }
@@ -102,6 +135,12 @@ async fn verify_federation_satellite(
     let saved = report.clone();
     let expected = report.expected.clone();
     let complete = report.termal_complete();
+    #[cfg(test)]
+    if automatic {
+        if let Some(peer) = app.federation_peer_handle(&id) {
+            peer.channel.control.observe("requalificationFinalize", 0);
+        }
+    }
     // A complete report and its membership proof commit in one candidate.
     // Incomplete or older attempts cannot overwrite a successor's proof report.
     tokio::task::spawn_blocking(move || {
@@ -114,10 +153,19 @@ async fn verify_federation_satellite(
                 {
                     return Err(federation_stale_link());
                 }
+                federation_requalification_finish(domain, &id, &expected)?;
                 domain.onboarding.reports.insert(id, saved);
                 Ok(())
             })?;
         } else {
+            #[cfg(test)]
+            if automatic {
+                if let Some(peer) = app.federation_peer_handle(&id) {
+                    peer.channel
+                        .control
+                        .observe("incompleteVerificationChecked", 0);
+                }
+            }
             app.save_federation_onboarding_report(saved)?;
         }
         Ok::<_, ApiError>(())
@@ -133,14 +181,21 @@ async fn run_federation_onboarding_checks(
     record: &FederationPeerRecord,
     engram_enabled: bool,
     report: &mut FederationOnboardingReport,
+    retained: Option<&FederationQualifiedProbe>,
 ) {
     use FederationOnboardingCheck as Check;
-    let reachable = rpc.health(lease).await.is_ok();
+    let health = rpc.authenticated_health(lease).await;
+    let health_refused = health
+        .as_ref()
+        .is_err_and(federation_onboarding_authority_refusal);
+    let reachable = health.is_ok();
     report.observe(
         Check::Reachability,
         reachable,
         if reachable {
             "authenticatedHealth"
+        } else if health_refused {
+            "healthAuthorityRefused"
         } else {
             "healthFailed"
         },
@@ -174,6 +229,7 @@ async fn run_federation_onboarding_checks(
         .await;
     let mut identity_ok = false;
     let mut version_ok = false;
+    let mut platform_ok = false;
     match identity {
         Ok(identity) => {
             let image_ok = identity
@@ -188,10 +244,10 @@ async fn run_federation_onboarding_checks(
                 && identity.central == report.expected.central
                 && identity.enrollment_generation == report.expected.enrollment_generation
                 && identity.link_incarnation == report.link_incarnation;
-            version_ok = image_ok
-                && identity.profile == record.profile
+            version_ok = identity.profile.compatible_with(&record.profile)
                 && identity.profile.protocol_version == u32::from(FEDERATION_PROTOCOL_VERSION)
-                && identity.profile.schema_version == SQLITE_SCHEMA_VERSION;
+                && identity.profile.schema_version == FEDERATION_PROFILE_SCHEMA_VERSION;
+            platform_ok = identity.platform == record.platform && identity.arch == record.arch;
             report.observe(Check::ForwardRpc, true, "authenticatedIdentityResponse");
             report.observe(
                 Check::QualifiedIdentity,
@@ -205,17 +261,23 @@ async fn run_federation_onboarding_checks(
             report.observe(
                 Check::VersionSchema,
                 version_ok,
-                if !image_ok {
-                    "runningImageUnknownOrMismatched"
-                } else if version_ok {
-                    "executionProfileMatched"
+                if version_ok {
+                    "protocolSchemaMatched"
                 } else {
-                    "versionSchemaOrBuildMismatch"
+                    "protocolSchemaMismatch"
                 },
             );
         }
-        Err(_) => {
-            report.observe(Check::ForwardRpc, false, "forwardRpcFailed");
+        Err(error) => {
+            report.observe(
+                Check::ForwardRpc,
+                false,
+                if federation_onboarding_authority_refusal(&error) {
+                    "forwardAuthorityRefused"
+                } else {
+                    "forwardRpcFailed"
+                },
+            );
             report.observe(Check::QualifiedIdentity, false, "identityUnavailable");
             report.observe(Check::VersionSchema, false, "versionSchemaUnavailable");
         }
@@ -228,29 +290,61 @@ async fn run_federation_onboarding_checks(
             }),
         ))
         .await;
+    let reverse_refused = reverse
+        .as_ref()
+        .is_err_and(federation_onboarding_authority_refusal);
+    let reverse_received = reverse.is_ok();
     let reverse_ok = reverse.is_ok_and(|reverse| {
+        report.reverse_running_image = if reverse
+            .identity
+            .running_image
+            .matches_profile(&reverse.identity.profile, &reverse.identity.platform)
+        {
+            reverse.identity.running_image.clone()
+        } else {
+            FederationImageObservation::Unknown
+        };
         reverse.attempt_id == report.attempt_id
             && reverse.identity.host == report.expected.local
             && reverse.identity.central == report.expected.central
             && reverse.identity.enrollment_generation == report.expected.enrollment_generation
             && reverse.identity.link_incarnation == report.link_incarnation
             && reverse.identity.profile.protocol_version == u32::from(FEDERATION_PROTOCOL_VERSION)
-            && reverse.identity.profile.schema_version == SQLITE_SCHEMA_VERSION
-            && reverse
-                .identity
-                .running_image
-                .matches_profile(&reverse.identity.profile, &reverse.identity.platform)
+            && reverse.identity.profile.schema_version == FEDERATION_PROFILE_SCHEMA_VERSION
     });
     report.observe(
         Check::ReverseRpc,
         reverse_ok,
         if reverse_ok {
             "authenticatedReverseResponse"
+        } else if reverse_received {
+            "reverseIdentityMismatch"
+        } else if reverse_refused {
+            "reverseAuthorityRefused"
         } else {
             "reverseRpcFailed"
         },
     );
-    if reachable && identity_ok && version_ok {
+    if let Some(probe) = retained {
+        // These two checks belong to initial qualification. A fresh signed
+        // health/identity/reverse exchange renews transport authority, not the
+        // old child or its wake. No new wake can consume the retirement archive.
+        report.probe_session_id = Some(probe.session_id.clone());
+        report.wake_outcome_id = Some(probe.outcome_id.clone());
+        report.retained_probe = Some(probe.clone());
+        report.observe(Check::IsolatedWake, true, "previouslyQualifiedProbe");
+        report.observe(
+            Check::PlatformPathsSupervisor,
+            platform_ok,
+            if platform_ok {
+                "previouslyQualifiedPlatform"
+            } else if identity_ok {
+                "platformIdentityMismatch"
+            } else {
+                "platformIdentityUnavailable"
+            },
+        );
+    } else if reachable && identity_ok && version_ok {
         let prepared = rpc
             .request::<FederationProbeSession>(FederationRpcRoute::Onboarding(
                 lease.clone(),
@@ -287,7 +381,6 @@ async fn run_federation_onboarding_checks(
                     let platform_ok = wake.platform.as_ref().is_some_and(|platform| {
                         platform.platform == record.platform
                             && platform.arch == record.arch
-                            && platform.toolchain_identity == record.profile.toolchain_identity
                             && platform.paths_resolved
                             && platform.child_spawned_and_reaped
                             && matches!(
@@ -326,7 +419,7 @@ async fn run_federation_onboarding_checks(
             report.observe(Check::IsolatedWake, false, "probeSessionUnavailable");
         }
     }
-    if engram_enabled {
+    if engram_enabled && retained.is_none() {
         report.engram = Some(
             rpc.request(FederationRpcRoute::Onboarding(
                 lease.clone(),
@@ -336,4 +429,11 @@ async fn run_federation_onboarding_checks(
             .unwrap_or_else(|_| FederationEngramOnboardingOutcome::unavailable()),
         );
     }
+}
+
+fn federation_onboarding_authority_refusal(error: &ApiError) -> bool {
+    matches!(
+        error.status,
+        StatusCode::CONFLICT | StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED
+    )
 }

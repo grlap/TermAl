@@ -33,6 +33,10 @@ enum FederationImageFileIdentity {
 }
 
 impl FederationImageObservation {
+    fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown)
+    }
+
     fn valid_identity(&self) -> bool {
         let Self::Known(image) = self else {
             return false;

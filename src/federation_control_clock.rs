@@ -6,6 +6,8 @@ struct FederationControlClock {
     clock: EngramBudgetClock,
     #[cfg(test)]
     changed: Arc<tokio::sync::watch::Sender<u64>>,
+    #[cfg(test)]
+    io_deadlines: bool,
 }
 
 impl Default for FederationControlClock {
@@ -14,11 +16,52 @@ impl Default for FederationControlClock {
             clock: EngramBudgetClock::Real,
             #[cfg(test)]
             changed: Arc::new(tokio::sync::watch::channel(0).0),
+            #[cfg(test)]
+            io_deadlines: false,
         }
     }
 }
 
 impl FederationControlClock {
+    // Production keeps Tokio's original deadlines. Only an explicitly opted-in
+    // fixture drives protocol deadlines with the existing per-channel clock.
+    async fn timeout<F: std::future::Future>(
+        &self,
+        duration: Duration,
+        future: F,
+    ) -> Result<F::Output, ()> {
+        #[cfg(test)]
+        if self.io_deadlines {
+            return self.scripted_timeout(self.now() + duration, future).await;
+        }
+        tokio::time::timeout(duration, future).await.map_err(|_| ())
+    }
+
+    async fn timeout_at<F: std::future::Future>(
+        &self,
+        until: tokio::time::Instant,
+        future: F,
+    ) -> Result<F::Output, ()> {
+        #[cfg(test)]
+        if self.io_deadlines {
+            return self.scripted_timeout(until.into_std(), future).await;
+        }
+        tokio::time::timeout_at(until, future).await.map_err(|_| ())
+    }
+
+    #[cfg(test)]
+    async fn scripted_timeout<F: std::future::Future>(
+        &self,
+        until: std::time::Instant,
+        future: F,
+    ) -> Result<F::Output, ()> {
+        tokio::select! {
+            biased;
+            result = future => Ok(result),
+            () = self.deadline(until) => Err(()),
+        }
+    }
+
     fn now(&self) -> std::time::Instant {
         self.clock.now()
     }
@@ -44,7 +87,13 @@ impl FederationControlClock {
         Self {
             clock: EngramBudgetClock::scripted(),
             changed: Arc::new(tokio::sync::watch::channel(0).0),
+            io_deadlines: false,
         }
+    }
+
+    #[cfg(test)]
+    fn scripted_io() -> Self {
+        Self { io_deadlines: true, ..Self::scripted() }
     }
 
     #[cfg(test)]

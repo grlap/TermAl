@@ -14,9 +14,19 @@ TermAl host stores credential references rather than secret values.
 
 Configure one M1 registry entry with the satellite's stable host identity,
 endpoint, pinned host-key and capability references, expected protocol, schema,
-binary hash, OS, architecture, toolchain and capacity limits. Configure the
+OS, architecture and capacity limits. Binary hash and toolchain are recorded
+diagnostics, not compatibility or delivery gates. Configure the
 satellite with the matching central host identity. Enrollment creates an
 Enrolled entry. Existing executor-proxy sessions are not adopted.
+
+The execution profile's `schemaVersion` is the federation data and behavior
+contract, currently `"2"`. It is versioned independently of the local SQLite
+layout (`2-metadata-units-2`) and the mailbox message schema. A local storage
+migration does not rewrite enrolled profiles. Once both hosts run this contract,
+an existing profile `"2"` reconnects through fresh authenticated qualification;
+it needs no profile refresh or re-enrollment. Unknown profile schemas are
+refused, including a local SQLite layout identifier used as a profile schema.
+Local storage migration and compatibility checks remain enforced separately.
 
 The order, each step on the named host:
 
@@ -51,8 +61,8 @@ and reverse forwards. It records each check by name:
 - Reachability, pinned host key and pair-capability exchange.
 - TermAl version/schema and qualified host identity.
 - Forward and reverse authenticated RPC round trips.
-- OS, architecture, toolchain, paths and process supervision in an isolated
-  probe session.
+- OS, architecture, paths and process supervision in an isolated probe session,
+  with a best-effort toolchain observation (`unavailable` when it cannot run).
 - Wake delivery to that probe session, with a distinct durable outcome.
 
 The probe session accepts metadata only. It cannot name a user's session,
@@ -76,8 +86,31 @@ Every TermAl check must pass. Missing responses, partial results and named
 failures leave the entry unverified. A configuration, identity or link change
 while checks run invalidates those results; the central host cannot attach old
 results to a fresh snapshot. A successful checklist moves Enrolled to Verified.
-Activation remains a separate operator action. Changes to the verification
-basis require verification again.
+Initial activation remains a separate operator action. Changes to protocol,
+schema, keys, host identity, enrollment or configuration remove prior authority
+and require explicit verification or enrollment as appropriate.
+
+Ordinary reconnects, including a restart after a hash-only rebuild, automatically
+re-attest the fresh link with authenticated health, forward identity and reverse
+RPC. They restore only the peer's prior Verified, Active or Draining state and
+the exact prior epoch's unfinished placement/binding intents. Old HTTP leases
+remain fenced. Re-enrollment, settings changes, revocation and continuity resets
+clear this recovery authority; admission quarantine still blocks restoration.
+The report explicitly retains the original isolated probe's snapshot, basis and
+IDs in `retainedProbe`, with `previouslyQualifiedProbe` and
+`previouslyQualifiedPlatform` outcomes. Reconnects create no isolated wake and
+cannot consume the unresolved-probe archive. Initial onboarding still runs the
+full checklist. No recurring operator refresh is required for a binary or
+toolchain observation change. The first rollout needs this behavior on both
+hosts; a host still running the old strict comparison can refuse a new image.
+
+The fresh identity must still match the enrolled platform and architecture.
+Material identity or protocol/schema mismatches retire the link and use the
+normal reconnect backoff. Temporary persistence settling returns HTTP 423 at
+snapshot and mutation boundaries, including during report finalization; it
+holds admission without retiring an unchanged link. Placement and onboarding
+clients may retry the original intent after settling. Continuity loss or stale
+authority remains HTTP 409 and cannot inherit this retry treatment.
 
 The running image is captured by a read-only file handle at process startup.
 The first enabled identity probe hashes that retained handle once, off the
@@ -85,13 +118,16 @@ state lock. Replacing the installed file before a restart cannot change the
 running process's reported identity. The report records the SHA-256, size and
 handle file identity (Windows volume/file index or Unix device/inode).
 `pathAtStart` is diagnostic text, not the image identity. An unavailable handle
-or failed hash is `unknown` and cannot produce Verified; there is no path-based
-fallback. Disabled federation performs no image hashing.
+or failed hash is `unknown`; it does not prevent Verified. There is no path-based
+fallback. Both directions validate observed image metadata before recording it.
+Disabled federation performs no image hashing.
 
 If Engram sync is enabled for that host/profile, invoke Engram's read-only
 onboarding verification and record its named result separately. It gates Engram
 sync readiness. A failed or unavailable Engram check cannot prevent TermAl
 Verified or Active; a TermAl-only satellite needs no Engram check.
+Automatic reconnect retains the separately recorded Engram outcome without
+rerunning the external probe; it does not establish new Engram readiness.
 
 Both host profiles explicitly opt in with the enrollment request's
 `engramEnabled`. The satellite's own operator may also configure

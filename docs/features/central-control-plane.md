@@ -596,14 +596,23 @@ Engram verification.
 C keeps one registry entry per satellite: its host id and enrollment epoch,
 platform (OS and architecture), transport endpoint, references to its pinned
 host key and pair capability (never the secrets themselves), its verified
-protocol, binary and toolchain identity (TermAl build hash and schema version),
+protocol and schema, diagnostic binary and toolchain observations,
 declared limits (maximum concurrent sessions, build and gate slots) with current
-allocations, its lifecycle state, and last-observed liveness. The protocol,
-binary and toolchain identity is verified at onboarding and again on every
-reconnect; a changed identity or execution profile removes placement
-eligibility until the satellite is verified again. That per-reconnect check is
-the identity check only; the full onboarding checklist re-runs when the
-verification basis changes (see the next section).
+allocations, its lifecycle state, and last-observed liveness. Protocol/schema,
+host identity, enrollment and pair authority are checked on a fresh authenticated
+link after reconnect. A hash-only rebuild or toolchain observation change never
+requires a profile refresh or re-enrollment. The central monitor automatically
+restores previously qualified membership and unfinished placements after fresh
+bidirectional identity proof. It retains initial platform/wake evidence with
+explicit provenance rather than creating another isolated wake. See
+[satellite onboarding](satellite-onboarding.md) for the clearing events and
+quarantine fence. Old transport leases never regain authority.
+
+The execution profile schema is the independently versioned federation
+contract `"2"`, not the local SQLite layout version. Upgrading local storage
+preserves enrolled profile `"2"`; it neither refreshes the profile nor permits
+unknown contract versions. Both hosts must run the compatible federation code
+before their fresh authenticated reconnect can restore previous authority.
 
 - Membership, state and placement changes serialize at C.
 - A registry entry creates no executable session and grants no stop, start,
@@ -651,8 +660,9 @@ Onboarding has two parts:
 Reachability alone, or an SSH shell exiting with zero, proves nothing. A passed
 checklist is bound to the full configuration and identity of the entry and
 moves it to Verified; an incomplete or failed one leaves it Enrolled, and it
-can never become Active silently. The checklist runs again after any change to
-that basis, and on reconnect after an epoch change.
+cannot initially become Active without operator activation. A material change to
+that authority requires the checklist again; an ordinary reconnect automatically
+restores only the membership already authorized, after fresh link proof.
 
 Engram's own onboarding check (an Engram binary and automated Git exchange on
 that platform) is a separately recorded step, run only for a host with Engram

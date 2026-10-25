@@ -10,8 +10,14 @@ fn federation_snapshot_locked(
     if !settings.enabled || settings.role == FederationRole::Standalone {
         return Err(ApiError::conflict("federation is disabled"));
     }
-    if !inner.federation_durable || inner.federation_continuity_lost {
+    if inner.federation_continuity_lost {
         return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+    }
+    if !inner.federation_durable {
+        return Err(ApiError::from_status(
+            StatusCode::LOCKED,
+            "federation persistence is settling; retry",
+        ));
     }
     let local = inner
         .federation

@@ -238,7 +238,8 @@ impl FederationRpcClient {
                     StatusCode::LOCKED
                     | StatusCode::TOO_MANY_REQUESTS
                     | StatusCode::CONFLICT
-                    | StatusCode::FORBIDDEN => {
+                    | StatusCode::FORBIDDEN
+                    | StatusCode::UNAUTHORIZED => {
                         ApiError::from_status(status, "authenticated federation transport refusal")
                     }
                     _ => federation_transport_unavailable(),
@@ -249,9 +250,24 @@ impl FederationRpcClient {
             context.settle(counter);
             Ok(Ok(decoded))
         };
-        match tokio::time::timeout(Duration::from_secs(10), request).await {
+        #[cfg(test)]
+        let request_started_at = std::time::Instant::now();
+        match self.channel.control.clock.timeout(Duration::from_secs(10), request).await {
             Ok(Ok(result)) => result,
-            _ => {
+            _failure => {
+                #[cfg(test)]
+                {
+                    let reason = if let Ok(Err(error)) = &_failure {
+                        format!("inner_error status={} error={}", error.status, error.message)
+                    } else {
+                        "deadline_expired".to_owned()
+                    };
+                    eprintln!(
+                        "FEDERATION_RPC_FENCED peer={} path={path} elapsed_ms={} reason={reason}",
+                        self.channel.snapshot.peer.host_id,
+                        request_started_at.elapsed().as_millis()
+                    );
+                }
                 self.channel
                     .fence_security(context.owner, &context.incarnation);
                 Err(route.response_failure(federation_transport_unavailable()))

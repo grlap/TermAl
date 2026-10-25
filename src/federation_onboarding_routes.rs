@@ -90,9 +90,6 @@ async fn federation_probe_reverse(
         .await?;
     lease.with_current(&host.app, |inner, current| {
         if identity.host != current.central
-            || !identity
-                .running_image
-                .matches_profile(&identity.profile, &identity.platform)
             || identity.central != current.central
             || identity.enrollment_generation != current.enrollment_generation
             || identity.link_incarnation != lease.incarnation
@@ -100,8 +97,9 @@ async fn federation_probe_reverse(
                 .federation
                 .peers
                 .get(&current.peer.host_id)
-                .map(|record| &record.profile)
-                != Some(&identity.profile)
+                .is_none_or(|record| !record.profile.compatible_with(&identity.profile))
+            || identity.profile.protocol_version != u32::from(FEDERATION_PROTOCOL_VERSION)
+            || identity.profile.schema_version != FEDERATION_PROFILE_SCHEMA_VERSION
         {
             return Err(federation_stale_link());
         }

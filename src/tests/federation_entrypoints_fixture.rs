@@ -165,7 +165,6 @@ impl Pair {
             .await
             .unwrap();
         let mut central = federation_mailboxes::central_store();
-        start_writer(&mut central);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let central_port = listener.local_addr().unwrap().port();
         let (mut child, native) = tokio::task::spawn_blocking(Satellite::start).await.unwrap();
@@ -178,6 +177,11 @@ impl Pair {
         record.endpoint.satellite_federation_port = native.port;
         record.endpoint.satellite_reverse_forward_port = central_port;
         central.enroll_federation_peer(record).unwrap();
+        // Enrollment is fixture setup, not the entrypoint under test. Commit
+        // it through the real synchronous test fallback before starting the
+        // queued writer, so setup does not race its five-second fence budget.
+        // Every operation exercised by the test still uses the queued writer.
+        start_writer(&mut central);
         let snapshot = central
             .federation_peer_snapshot(&native.host.host_id)
             .unwrap();

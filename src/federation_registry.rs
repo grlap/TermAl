@@ -2,6 +2,10 @@
 // Does not own transport, credentials, onboarding probes or scheduling policy.
 // New foundation; durable writes reuse the existing state persist worker.
 
+// The federation data/behavior contract is independent of local SQLite layout
+// and of the mailbox subprotocol's separately versioned message schema.
+const FEDERATION_PROFILE_SCHEMA_VERSION: &str = "2";
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationExecutionProfile {
@@ -9,6 +13,14 @@ struct FederationExecutionProfile {
     schema_version: String,
     binary_sha256: String,
     toolchain_identity: String,
+}
+
+impl FederationExecutionProfile {
+    // A different image/toolchain is evidence, not a different wire contract.
+    fn compatible_with(&self, other: &Self) -> bool {
+        self.protocol_version == other.protocol_version
+            && self.schema_version == other.schema_version
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -78,6 +90,8 @@ struct FederationPeerRecord {
     capacity: FederationCapacity,
     membership: FederationMembershipState,
     verification: Option<FederationVerification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    requalification: Option<FederationRequalification>,
     #[serde(default)]
     last_observed: Option<FederationLiveness>,
 }
@@ -125,11 +139,27 @@ impl FederationPeerRecord {
             serde_json::to_vec(&json!({
                 "identity": self.identity, "enrollmentGeneration": self.enrollment_generation,
                 "platform": self.platform, "arch": self.arch, "endpoint": self.endpoint,
-                "pairCapabilityRef": self.pair_capability_ref, "profile": self.profile,
+                "pairCapabilityRef": self.pair_capability_ref,
+                "profile": {"protocolVersion": self.profile.protocol_version,
+                    "schemaVersion": self.profile.schema_version},
                 "capacity": self.capacity,
             }))
             .expect("registry fields serialize")
             .as_slice(),
+        )
+    }
+
+    // Read-only migration witness for a pre-upgrade verification. Never used
+    // to admit traffic: fresh authenticated qualification is still required.
+    fn legacy_verification_basis(&self) -> String {
+        sha256_hex(
+            &serde_json::to_vec(&json!({
+                "identity": self.identity, "enrollmentGeneration": self.enrollment_generation,
+                "platform": self.platform, "arch": self.arch, "endpoint": self.endpoint,
+                "pairCapabilityRef": self.pair_capability_ref, "profile": self.profile,
+                "capacity": self.capacity,
+            }))
+            .expect("registry fields serialize"),
         )
     }
 

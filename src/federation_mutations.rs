@@ -143,6 +143,7 @@ fn apply_federation_settings(
             peer.record_generation = federation_next_generation(peer.record_generation)?;
             peer.transport_generation = federation_next_generation(peer.transport_generation)?;
             peer.verification = None;
+            peer.requalification = None;
             if peer.membership != FederationMembershipState::Revoked {
                 peer.membership = FederationMembershipState::Enrolled;
             }
@@ -258,9 +259,14 @@ impl AppState {
                     &lease.incarnation,
                 )?;
             }
-            if !inner.federation_durable || (inner.federation_continuity_lost && !reset_continuity)
-            {
+            if inner.federation_continuity_lost && !reset_continuity {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+            }
+            if !inner.federation_durable {
+                return Err(ApiError::from_status(
+                    StatusCode::LOCKED,
+                    "federation persistence is settling; retry",
+                ));
             }
             let context = FederationMutationContext::locked(&inner);
             let mut candidate = inner.federation.clone();
@@ -362,11 +368,17 @@ impl AppState {
                 .ok_or_else(|| {
                     #[cfg(test)]
                     reference_publication_observe_error("durability.fence_deadline", &"no fence receipt before existing deadline");
+                    #[cfg(test)]
+                    eprintln!("FEDERATION_DURABILITY_PROGRESS budget_ms={} {}",
+                        budget.as_millis(), waiter.progress().describe());
                     ApiError::internal("federation durability unresolved; admission remains held")
                 })?
                 .map_err(|error| {
                     #[cfg(test)]
                     reference_publication_observe_error("durability.fence_error", &error);
+                    #[cfg(test)]
+                    eprintln!("FEDERATION_DURABILITY_PROGRESS budget_ms={} {}",
+                        budget.as_millis(), waiter.progress().describe());
                     #[cfg(not(test))]
                     let _ = error;
                     ApiError::internal("federation durability failed; admission remains held")
@@ -471,6 +483,7 @@ impl AppState {
                 peer.transport_generation = federation_next_generation(peer.transport_generation)?;
                 peer.membership = FederationMembershipState::Revoked;
                 peer.verification = None;
+                peer.requalification = None;
             }
             if settings.role == FederationRole::Central {
                 settings.central = Some(local);

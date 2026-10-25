@@ -10,6 +10,12 @@ async fn federation_authenticate_message(
     // dispatch and bounded response collection. Mailbox handler expiry is an
     // authenticated unknown outcome, not evidence of transport failure.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    #[cfg(test)]
+    let deadline = if state.channel.control.clock.io_deadlines {
+        tokio::time::Instant::from_std(state.channel.control.clock.now()) + Duration::from_secs(5)
+    } else {
+        deadline
+    };
     let (mut parts, body) = request.into_parts();
     let mailbox_request =
         parts.method == axum::http::Method::POST && parts.uri.path() == "/federation/v1/mailbox";
@@ -43,7 +49,7 @@ async fn federation_authenticate_message(
     let (counter, tag) = federation_parse_mac(&parts.headers, &context, direction)?;
     state.channel.control.observe("requestBody", counter);
     let body =
-        match tokio::time::timeout_at(deadline, axum::body::to_bytes(body, request_limit)).await {
+        match state.channel.control.clock.timeout_at(deadline, axum::body::to_bytes(body, request_limit)).await {
             Ok(body) => body.map_err(|_| federation_auth_refused())?,
             Err(_) => return Ok(federation_request_timeout()),
         };
@@ -131,7 +137,7 @@ async fn federation_authenticate_message(
                 });
                 let request =
                     axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
-                let response = match tokio::time::timeout_at(deadline, next.run(request)).await {
+                let response = match state.channel.control.clock.timeout_at(deadline, next.run(request)).await {
                     Ok(response) => response,
                     Err(_) if binding_request => {
                         federation_binding_unknown_outcome().into_response()
@@ -159,7 +165,7 @@ async fn federation_authenticate_message(
     };
     let (mut parts, body) = response.into_parts();
     let body =
-        match tokio::time::timeout_at(deadline, axum::body::to_bytes(body, response_limit)).await {
+        match state.channel.control.clock.timeout_at(deadline, axum::body::to_bytes(body, response_limit)).await {
             Ok(body) => body.map_err(|_| federation_transport_unavailable())?,
             Err(_) => return Ok(federation_request_timeout()),
         };

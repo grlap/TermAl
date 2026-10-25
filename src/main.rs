@@ -859,6 +859,7 @@ include!("federation_image_identity.rs");
 include!("federation_onboarding_engram.rs");
 include!("federation_onboarding_routes.rs");
 include!("federation_onboarding_verify.rs");
+include!("federation_requalification.rs");
 include!("federation_onboarding_api.rs");
 include!("federation_snapshots.rs");
 include!("federation_mutations.rs");

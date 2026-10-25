@@ -68,22 +68,29 @@ async fn federation_central_monitor(
                     result.map_err(|_| federation_transport_unavailable())?.map_err(|_| federation_transport_unavailable())?;
                 },
             }
+            let mut first_probe = true;
             loop {
-                tokio::select! {
+                if !first_probe { tokio::select! {
                     _ = federation_wait_stop(stop) => return Ok(()),
                     result = &mut task => {
                         joined = true;
                         return result.map_err(|_| federation_transport_unavailable())?;
                     },
                     _ = tokio::time::sleep(io.probe_interval) => {},
-                }
+                }}
+                first_probe = false;
+                if *stop.borrow() || stop.has_changed().is_err() { return Ok(()); }
                 if server.is_finished() || process.child_exited()? { return Err(federation_transport_unavailable()); }
                 if let Err(error) = client.channel.current_authority() {
                     if error.status == StatusCode::LOCKED { continue; }
                     return Err(error);
                 }
                 let lease = client.channel.current_lease()?;
-                match client.health(&lease).await {
+                let outcome = tokio::select! {
+                    _ = federation_wait_stop(stop) => return Ok(()),
+                    result = client.health(&lease) => result,
+                };
+                match outcome {
                     Ok(()) => retry.reset(),
                     Err(error) if matches!(error.status, StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) => {},
                     Err(error) => return Err(error),
