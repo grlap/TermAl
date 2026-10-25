@@ -78,13 +78,22 @@ impl AppState {
             };
             let terminal = result.as_ref().err().is_some_and(|error|
                 error.kind == Some(ApiErrorKind::FederationExecutorAssociationRetired));
-            let retired = terminal || {
+            // `retired` releases this work's claim. The same-boot activation
+            // ends only for a permanent retirement or a settled association:
+            // a hand-off record still being saved by another drive settles by
+            // itself, and if it fails the head needs this activation again.
+            let (retired, ends_activation) = if terminal { (true, true) } else {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                federation_executor_operation_retired(&inner, &operation)
-                    || inner.find_session_index(&operation.session_id).is_some_and(|index|
-                        federation_executor_association_retired(&inner.sessions[index], &operation))
+                let permanent = federation_executor_operation_retired(&inner, &operation);
+                let record = inner.find_session_index(&operation.session_id)
+                    .map(|index| &inner.sessions[index]);
+                let association = record.is_some_and(|record|
+                    federation_executor_association_retired(record, &operation));
+                let in_flight = record.is_some_and(|record|
+                    federation_executor_hand_off_in_flight(record, &operation));
+                (permanent || association, permanent || (association && !in_flight))
             };
-            if retired {
+            if ends_activation {
                 signal.live.lock().expect("live activation mutex poisoned").remove(&key);
             }
             // Release the admission credit at durable queue ownership, before

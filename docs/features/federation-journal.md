@@ -7,6 +7,10 @@ reservation scan, or creates a persisted object. See the
 [control-plane configuration](central-control-plane.md#local-operator-configuration)
 and the [API catalog](../architecture.md).
 
+For one exact operation's queue association and the recipient's live pending
+queue metadata, use [executor operation diagnostics](executor-operation-diagnostics.md).
+That separate local read does not change this journal's evidence redaction.
+
 Use `stream=operations` (the default) or `stream=wakes`, with `limit` from 1
 to 100 (default 100). The response has `stream`, `entries`, `nextCursor` and
 `dispatchScan`. Follow a non-null `nextCursor` using the same stream and

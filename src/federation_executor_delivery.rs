@@ -28,6 +28,16 @@ fn federation_executor_association_retired(record: &SessionRecord, operation: &F
                 || !record.queued_prompts.iter().any(|entry| entry.pending_prompt.id == prompt)))
 }
 
+/// Whether the root's receipt for `operation` is a hand-off record still being
+/// saved, for the queue entry that is still queued: not yet settled.
+fn federation_executor_hand_off_in_flight(record: &SessionRecord, operation: &FederationExecutorOperation) -> bool {
+    let prompt = operation.queue_identity();
+    record.prompt_deliveries.get(&prompt).is_some_and(|receipt|
+        receipt.federation_operation.as_ref() == Some(operation)
+            && receipt.disposition == PromptDeliveryDisposition::HandingOff)
+        && record.queued_prompts.iter().any(|entry| entry.pending_prompt.id == prompt)
+}
+
 impl AppState {
     fn federation_executor_live_key(operation: &FederationExecutorOperation) -> (String, String, String) {
         (operation.central_host_id.clone(), operation.operation_key.clone(), operation.session_id.clone())
@@ -70,21 +80,33 @@ impl AppState {
             { live.remove(&key); return; }
             // An unsettled durability/settings/quarantine hold is retryable.
             if federation_executor_target_locked(&inner, operation).is_err() { return; }
-            let current = intent.server_instance_id == self.server_instance_id
-                && intent.stop_generation == record.runtime_stop_generation
-                && intent.pause_epoch == record.auto_dispatch_pause_epoch
-                && !record.orchestrator_auto_dispatch_blocked && !record.runtime_stop_in_progress
-                && record.prompt_deliveries.get(&prompt).is_some_and(|receipt|
-                    receipt.disposition == PromptDeliveryDisposition::Pending
-                        && receipt.federation_operation.as_ref() == Some(operation));
-            if !current { live.remove(&key); return; }
+            match record.prompt_deliveries.get(&prompt) {
+                Some(receipt) if receipt.federation_operation.as_ref() == Some(operation) =>
+                    match receipt.disposition {
+                        PromptDeliveryDisposition::Pending => {}
+                        // A hand-off record in flight settles by itself: its
+                        // acknowledgement drains the queue, and its failure
+                        // returns the head to pending for a later drive.
+                        PromptDeliveryDisposition::HandingOff => return,
+                        // Accepted, rejected or ambiguous evidence is never
+                        // permission to hand the wake off again.
+                        PromptDeliveryDisposition::Accepted
+                        | PromptDeliveryDisposition::Rejected
+                        | PromptDeliveryDisposition::Ambiguous => { live.remove(&key); return; }
+                    },
+                _ => { live.remove(&key); return; }
+            }
             let Some(queue) = EngramQueuedAdmissionOwner::capture(record).filter(|owner| owner.prompt_id == prompt)
             else { return; };
-            let owner = FederationExecutorLiveOwner { queue, operation: operation.clone(),
+            // The same-boot intent stays until the receipt settles or a fence
+            // above ends it, not merely until this drive: a hand-off record
+            // that fails, or an attempt that ends unsent, returns the head to
+            // pending, and the receiver's recovery pass drives that same queue
+            // entry again under the same fences. The queue entry and its
+            // receipt are keyed by the operation, so a drive never adds a wake.
+            FederationExecutorLiveOwner { queue, operation: operation.clone(),
                 stop_generation: intent.stop_generation, pause_epoch: intent.pause_epoch,
-                signal: self.federation_executor_wake_signal.clone() };
-            live.remove(&key);
-            owner
+                signal: self.federation_executor_wake_signal.clone() }
         };
         if let Err(error) = self.revalidate_queued_mailbox_wakeups_before_dispatch(&operation.session_id) {
             eprintln!("remote wake activation remains held: {error:#}");
@@ -163,9 +185,16 @@ impl AppState {
                     // Accepted, ambiguous, rejected or handed-off evidence is
                     // never permission to recreate a queue entry.
                     let accepted = receipt.disposition == PromptDeliveryDisposition::Accepted;
+                    // A hand-off record still being saved settles by itself;
+                    // if it fails, the head returns to pending and needs this
+                    // same-boot activation to be driven again. Only a settled
+                    // receipt ends it (`dispatch_federation_executor_live_activation`).
+                    let settled = receipt.disposition != PromptDeliveryDisposition::HandingOff;
                     drop(inner);
-                    self.federation_executor_wake_signal.live.lock().expect("live activation mutex poisoned")
-                        .remove(&Self::federation_executor_live_key(operation));
+                    if settled {
+                        self.federation_executor_wake_signal.live.lock().expect("live activation mutex poisoned")
+                            .remove(&Self::federation_executor_live_key(operation));
+                    }
                     if accepted {
                         self.sync_federation_executor_runtime_receipt(&operation.session_id, &prompt_id);
                     }

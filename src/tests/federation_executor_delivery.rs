@@ -331,3 +331,8 @@ mod recovery_regressions {
     use super::*;
     include!("federation_executor_recovery_regressions.rs");
 }
+
+mod observation {
+    use super::*;
+    include!("federation_executor_observation.rs");
+}
