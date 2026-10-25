@@ -261,6 +261,10 @@ On startup:
    local messages, receipts, board data and cursors. It adds only coordination
    store identity and relay metadata, not primary-state or mailbox-body replicas.
    See [native relay storage](native-mailbox-relay.md#storage-and-validation-scope).
+   The current reader floor is `6-executor-outcomes-1`: the relay floor
+   upgrades by adding only central's remote wake outcome table, keeping its
+   relay store identity, and exact historical schemas 1–5 upgrade in the same
+   locked transaction, gaining the relay storage and the outcome table. See [central control plane](central-control-plane.md).
    Every other existing file must match the current
    schema version and canonical schema definitions, including column types and
    constraints, foreign keys, and named indexes. Only a genuinely absent or

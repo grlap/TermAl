@@ -553,8 +553,9 @@ there, rather than silently accepted without a matching local runtime proof.
 
 Before either coordination store or the HTTP listener is available, TermAl
 initializes an empty `coordination.sqlite` with the current schema, atomically
-upgrades exact historical versions 1 through 5 to `5-mailbox-relay-1`, adding receipt, delivery,
-executor, continuation-audit and native relay storage as needed without changing messages,
+upgrades exact historical versions 1 through 5 and the relay floor `5-mailbox-relay-1` to
+`6-executor-outcomes-1`, adding receipt, delivery, executor, continuation-audit, native relay
+and central executor-outcome storage as needed without changing messages,
 cursors, delivery or executor records, or validates
 that an existing file already has the exact current version and canonical
 schema definitions, including column types and constraints, foreign keys, and

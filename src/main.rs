@@ -839,6 +839,7 @@ include!("federation_executor_effects.rs");
 include!("federation_executor_routes.rs");
 include!("federation_executor_recovery.rs");
 include!("federation_executor_operation_view.rs");
+include!("federation_executor_outcomes.rs");
 include!("federation_delivery.rs");
 include!("federation_delivery_replay.rs");
 include!("federation_delivery_intents.rs");

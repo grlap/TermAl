@@ -37,7 +37,8 @@ fn federation_delivery_version_two_upgrade_preserves_messages_cursors_and_read_r
         let connection = state.mailbox_store.connection().unwrap();
         connection
             .execute_batch(
-                "DROP TABLE mailbox_relay_notifications;
+                "DROP TABLE federation_executor_outcomes;
+             DROP TABLE mailbox_relay_notifications;
              DROP TABLE mailbox_relay_wakes;
              DROP TABLE mailbox_relay_intents;
              DROP TABLE mailbox_relay_associations;

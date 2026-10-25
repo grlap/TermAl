@@ -74,6 +74,7 @@ impl FederationRpcClient {
             FederationRpcRoute::Onboarding(lease, probe) => (lease, probe.path()),
             FederationRpcRoute::Mailbox(lease, _) => (lease, "/federation/v1/mailbox"),
             FederationRpcRoute::ExecutorWake(lease, _) => (lease, FEDERATION_EXECUTOR_WAKE_ROUTE),
+            FederationRpcRoute::ExecutorOutcome(lease, _) => (lease, FEDERATION_EXECUTOR_OUTCOME_ROUTE),
             FederationRpcRoute::NativeBinding(lease, _) => {
                 (lease, "/federation/v1/mailbox/native-binding")
             }
@@ -93,6 +94,7 @@ impl FederationRpcClient {
             FederationRpcRoute::Onboarding(_, probe) => probe.request(&self.client, url),
             FederationRpcRoute::Mailbox(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::ExecutorWake(_, body) => self.client.post(url).json(body),
+            FederationRpcRoute::ExecutorOutcome(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::NativeBinding(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::Binding(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::MailboxRelay(_, body) => self.client.post(url).json(body),
@@ -105,7 +107,7 @@ impl FederationRpcClient {
             .to_vec();
         let limit = match &route {
             FederationRpcRoute::Mailbox(_, _) | FederationRpcRoute::MailboxRelay(_, _) => FEDERATION_MAILBOX_REQUEST_BYTES,
-            FederationRpcRoute::ExecutorWake(_, _) => 32 * 1024,
+            FederationRpcRoute::ExecutorWake(_, _) | FederationRpcRoute::ExecutorOutcome(_, _) => 32 * 1024,
             _ => 4096,
         };
         if body.len() > limit {

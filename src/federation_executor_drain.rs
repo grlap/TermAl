@@ -9,6 +9,14 @@ struct FederationExecutorWakeSignal {
     activation_after: Mutex<Option<(String, String, String)>>,
     #[cfg(test)]
     lifecycle_hook: Mutex<Option<FederationExecutorLifecycleHook>>,
+    // Holds the next outcome poll before its RPC, once, as a stalled receiver
+    // would: signals entry, then waits for release.
+    #[cfg(test)]
+    outcome_poll_hold: Mutex<Option<(std::sync::mpsc::Sender<()>, Arc<tokio::sync::Notify>)>>,
+    // On a receiver: holds its next outcome answer's blocking read, once, as
+    // a slow read would: signals entry, then waits until released or dropped.
+    #[cfg(test)]
+    outcome_answer_hold: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
     generation: AtomicU64,
     notify: tokio::sync::Notify,
     live: Mutex<BTreeMap<(String, String, String), FederationExecutorLiveActivation>>,
@@ -35,6 +43,9 @@ struct FederationExecutorWakeDrain {
     observed_kick: u64,
     pending: Option<tokio::sync::oneshot::Receiver<(String, bool)>>,
     task: Option<tokio::task::JoinHandle<()>>,
+    // Outcome polling has its own single owned pass, never on the dispatch
+    // path: a slow receiver answer cannot delay the next wake dispatch.
+    outcome_poll: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl FederationExecutorWakeDrain {
@@ -44,6 +55,8 @@ impl FederationExecutorWakeDrain {
 
     fn tick_inner(&mut self, app: &AppState, fallback: bool) {
         if app.federation_executor_wake_signal.is_stopping() { return; }
+        // Outcomes are due by backoff, not by appends: the fallback tick polls.
+        if fallback { self.start_outcome_poll(app); }
         let mut more = false;
         if let Some(pending) = &mut self.pending {
             match pending.try_recv() {
@@ -73,9 +86,19 @@ impl FederationExecutorWakeDrain {
         self.pending = Some(receive);
     }
 
+    /// Starts one pass of settled wakes' outcome polling unless one runs.
+    fn start_outcome_poll(&mut self, app: &AppState) {
+        if self.outcome_poll.as_ref().is_some_and(|task| !task.is_finished()) { return; }
+        let app = app.clone();
+        self.outcome_poll = Some(tokio::spawn(async move { app.poll_federation_executor_outcomes().await; }));
+    }
+
     async fn shutdown(self) {
         if let Some(task) = self.task {
             if let Err(error) = task.await { eprintln!("remote wake drain failed: {error}"); }
+        }
+        if let Some(task) = self.outcome_poll {
+            if let Err(error) = task.await { eprintln!("remote wake outcome polling failed: {error}"); }
         }
     }
 }

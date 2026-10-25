@@ -1,6 +1,9 @@
 //! Owns idle history projection cost witnesses; no live-store inputs or latency thresholds.
 use super::*;
 
+#[path = "test_run_lifecycle_lock.rs"]
+mod lifecycle_lock;
+
 fn populated_history(count: usize) -> RunFixture {
     let fixture = RunFixture::new("idle-history-projection");
     let session = create_test_project_session(

@@ -148,6 +148,18 @@ so; runtime-only eligibility changes without selection or a revision bump may
 retain detail until the next revision or the 10-second idle rescan. Failed
 compaction/removal writes retain retry eligibility.
 
+A lifecycle revalidation after a named-root read builds no full-history
+projection while it holds the state lock. Each changed row publishes the
+first run of its own execution id, or else of its artifact's run id and run
+directory, selected from only those identities' summaries through one
+borrowed candidate index per batch, so many changed rows cost one pass over
+the retained rows, not one per row. This is the same first match the full
+list gives; receipt settlement uses the same lookup. The revalidation does not select compaction
+itself: it marks the examined revision stale, so the idle step (every 2 s)
+selects at the new cut and compacts any run the revalidation made eligible.
+Receipt settlement keeps its inline selection. The scan of retained
+associations itself is still linear in history.
+
 Host-observed native exits are execution observations. When the existing declared
 artifact adapter judges a result, its verdict updates the row while retaining the
 native exit code separately; exit zero cannot override a failing TRX. A restart or

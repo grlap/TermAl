@@ -484,6 +484,44 @@ fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
     );
 }
 
+/// A revalidation that makes an old run eligible selects nothing under its
+/// own hold; the existing idle compaction step compacts it at the new cut.
+#[test]
+fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
+    let (fixture, id, store, binding, report) = evidence_fixture("compaction-revalidation-deferred");
+    fixture
+        .state
+        .settle_test_run_verification_receipt(&report, &exact_receipt(), &store, &binding);
+    let session = fixture.state.inner.lock().unwrap().test_run_observations[&id]
+        .summary
+        .owner_session_id
+        .clone()
+        .unwrap();
+    fill_safe(&fixture, &session, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
+    let compacted = |fixture: &RunFixture| {
+        fixture.state.inner.lock().unwrap().test_run_compacted.get(&id).is_some_and(|row| row.compacted)
+    };
+    // Its lifecycle is not yet completed, so the run keeps its detail.
+    fixture.state.step_test_run_compaction();
+    assert!(!compacted(&fixture), "an unrevalidated run is not eligible");
+    let read = serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
+    fixture
+        .state
+        .revalidate_test_run_lifecycle(&store, &binding, &read);
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert!(inner.test_run_observations.contains_key(&id), "the revalidating hold selects nothing");
+        assert_eq!(inner.test_runs.compaction_examined_revision, None, "the next idle step must select");
+    }
+    assert!(!compacted(&fixture));
+    fixture.state.step_test_run_compaction();
+    assert!(compacted(&fixture), "the idle step compacts the now-eligible run");
+    let inner = fixture.state.inner.lock().unwrap();
+    let proof = &inner.test_run_compacted[&id].observations[0].evidence[0];
+    assert_eq!(proof.binding, binding);
+    assert_eq!(proof.verification_record_id, Some("e".repeat(64)));
+}
+
 #[test]
 fn failed_compaction_persistence_retains_all_preexisting_detail_and_identity() {
     let mut fixture = RunFixture::new("compaction-persistence-failure");

@@ -49,11 +49,18 @@ impl MailboxStore {
             "SELECT state FROM federation_mailbox_wake_obligations WHERE message_id=?1",
             [message], |row| row.get(0)).optional()?;
         if state.as_deref() == Some("settled") {
-            let mirror: bool = connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM federation_executor_operations WHERE operation_key=?1)",
-                [format!("mailbox-wake:{message}")], |row| row.get(0))?;
-            return Ok(if mirror { "remote receiver durably owns wake recovery" }
-                else { "legacy settled wake; receiver state unknown" }.into());
+            let key = format!("mailbox-wake:{message}");
+            let mirror: Option<String> = connection.query_row(
+                "SELECT central_host_id FROM federation_executor_operations WHERE operation_key=?1",
+                [&key], |row| row.get(0)).optional()?;
+            // The receiver's answer, when one was verified, is the outcome;
+            // without one the wake is pending, never reported as not woken.
+            return Ok(match mirror {
+                Some(central) => federation_executor_outcome_cause(
+                    self.federation_executor_outcome_on(connection, &central, &key)?.as_ref(),
+                    chrono::Utc::now()),
+                None => "legacy settled wake; receiver state unknown".into(),
+            });
         }
         if state.as_deref() != Some("pending") { return Ok("remote wake state unknown".into()); }
         let binding: String = connection.query_row(
@@ -139,6 +146,9 @@ impl MailboxStore {
                 "UPDATE federation_mailbox_wake_obligations SET state='settled' WHERE message_id=?1 AND state='pending'",
                 [&request.wake.message_id],
             )? != 1 { return Err(federation_executor_conflict()); }
+            // The receiver now owns the wake: its outcome is polled from now,
+            // so the outcome's age counts from this settlement.
+            seed_federation_executor_outcome(&transaction, operation, chrono::Utc::now())?;
         }
         let _authority = authorize()?;
         #[cfg(test)]

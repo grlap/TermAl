@@ -17,6 +17,7 @@ enum FederationRpcRoute {
     Mailbox(FederationLinkLease, FederationMailboxRequest),
     NativeBinding(FederationLinkLease, FederationNativeBindingRequest),
     ExecutorWake(FederationLinkLease, FederationExecutorWakeRequest),
+    ExecutorOutcome(FederationLinkLease, FederationExecutorOutcomeRequest),
     Binding(FederationLinkLease, FederationBindingCommand),
     MailboxRelay(FederationLinkLease, MailboxRelayRequest),
 }

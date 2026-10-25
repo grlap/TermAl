@@ -310,7 +310,7 @@ impl AppState {
         }
         inner.test_runs.lifecycle_revalidated.extend(validated);
         let compacted = self.revalidate_test_run_compacted_locked(&mut inner, store, binding, &read);
-        self.persist_test_run_evidence_batch_locked(&mut inner, changed, compacted);
+        self.persist_test_run_evidence_batch_deferring_compaction_locked(&mut inner, changed, compacted);
     }
 }
 

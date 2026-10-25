@@ -21,9 +21,14 @@ async fn federation_authenticate_message(
         parts.method == axum::http::Method::POST && parts.uri.path() == "/federation/v1/mailbox";
     let relay_request = parts.method == axum::http::Method::POST && parts.uri.path() == MAILBOX_RELAY_RPC_ROUTE;
     let executor_request = parts.method == axum::http::Method::POST
-        && parts.uri.path() == FEDERATION_EXECUTOR_WAKE_ROUTE;
+        && (parts.uri.path() == FEDERATION_EXECUTOR_WAKE_ROUTE
+            || parts.uri.path() == FEDERATION_EXECUTOR_OUTCOME_ROUTE);
     let binding_request = parts.method == axum::http::Method::POST
         && parts.uri.path() == "/federation/v1/mailbox/binding";
+    // The read-only outcome query is polled regularly: a slow answer is a
+    // retryable refusal, never a reason to fence the pair's link.
+    let outcome_request = parts.method == axum::http::Method::POST
+        && parts.uri.path() == FEDERATION_EXECUTOR_OUTCOME_ROUTE;
     let durable_request = mailbox_request || relay_request || binding_request || executor_request;
     let request_limit = if executor_request {
         32 * 1024
@@ -147,6 +152,8 @@ async fn federation_authenticate_message(
                         StatusCode::SERVICE_UNAVAILABLE,"native mailbox relay handler deadline").into_response(),
                     Err(_) if mailbox_request => federation_mailbox_unknown_response(
                         mailbox_intent.as_ref(), "handler_deadline"),
+                    Err(_) if outcome_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
+                        "remote wake outcome query handler deadline").into_response(),
                     Err(_) => {
                         state
                             .channel

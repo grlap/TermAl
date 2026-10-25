@@ -6,6 +6,11 @@
 #[cfg(test)]
 thread_local! {
     static TEST_TEST_RUN_ASSOCIATION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Full-history summary projections built on this thread.
+    static TEST_TEST_RUN_FULL_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Rows, entries and retained records a single-identity lookup examines,
+    // counted before any predicate filters them.
+    static TEST_TEST_RUN_IDENTITY_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -677,14 +682,37 @@ impl AppState {
     }
 
     // Receipt settlement and lifecycle reads can update many retained rows at
-    // once. Persist their final images together and project the public index
-    // once, rather than repeating both history scans after every association.
-    // Other single-row observation writers retain their existing commit path.
+    // once. Persist their final images together and look up only the changed
+    // rows' runs, never projecting unrelated history. Other single-row
+    // observation writers retain their existing commit path.
     fn persist_test_run_evidence_batch_locked(
         &self,
         inner: &mut StateInner,
         observations: Vec<TestRunCommandObservation>,
         compacted: Vec<TestRunCompacted>,
+    ) {
+        self.persist_test_run_evidence_batch_with_compaction_locked(inner, observations, compacted, true);
+    }
+
+    // A lifecycle revalidation leaves compaction selection to the idle
+    // compaction step, which selects again at the revision this batch commits
+    // (test_runs.rs ticks it every 2 s), so the revalidating hold never builds
+    // the full history projection that selection needs.
+    fn persist_test_run_evidence_batch_deferring_compaction_locked(
+        &self,
+        inner: &mut StateInner,
+        observations: Vec<TestRunCommandObservation>,
+        compacted: Vec<TestRunCompacted>,
+    ) {
+        self.persist_test_run_evidence_batch_with_compaction_locked(inner, observations, compacted, false);
+    }
+
+    fn persist_test_run_evidence_batch_with_compaction_locked(
+        &self,
+        inner: &mut StateInner,
+        observations: Vec<TestRunCommandObservation>,
+        compacted: Vec<TestRunCompacted>,
+        compact_inline: bool,
     ) {
         if observations.is_empty() && compacted.is_empty() {
             return;
@@ -762,36 +790,15 @@ impl AppState {
             }
         }
         if !ids.is_empty() {
-            let runs = test_run_summaries_locked(inner);
-            // Preserve first-match selection for both execution and artifact
-            // identities without another full index search per changed row.
-            let mut by_id = HashMap::new();
-            let mut by_artifact = HashMap::new();
-            for run in &runs {
-                by_id.entry(run.run_id.as_str()).or_insert(run);
-                by_artifact
-                    .entry((run.run_id.as_str(), test_run_path_key(&run.run_dir)))
-                    .or_insert(run);
-            }
-            for id in ids {
-                let Some(row) = inner.test_run_observations.get(&id) else {
-                    continue;
-                };
-                let run = by_id
-                    .get(id.as_str())
-                    .copied()
-                    .or_else(|| {
-                        row.artifact.as_ref().and_then(|artifact| {
-                            by_artifact
-                                .get(&(
-                                    artifact.run_id.as_str(),
-                                    test_run_path_key(&artifact.run_directory),
-                                ))
-                                .copied()
-                        })
-                    })
-                    .cloned()
-                    .unwrap_or_else(|| test_run_observation_summary(inner, row));
+            // One borrowed index for the whole batch, then publication: the
+            // summaries are all taken at this cut, as one projection was.
+            let runs: Vec<_> = {
+                let mut index = TestRunIdentityIndex::new(inner);
+                ids.iter()
+                    .filter_map(|id| inner.test_run_observations.get(id).map(|row| index.changed_row(id, row)))
+                    .collect()
+            };
+            for run in runs {
                 // Global deltas need distinct revisions: same-revision rows
                 // are discarded by clients. Only the first emits a persist
                 // dispatch; later revisions use the existing delta allocator,
@@ -808,7 +815,13 @@ impl AppState {
         for row in compacted {
             self.publish_test_run_compact_risk_locked(inner, &row);
         }
-        self.compact_test_runs_locked(inner);
+        if compact_inline {
+            self.compact_test_runs_locked(inner);
+        } else {
+            // Force the next idle step to select, even where this batch
+            // published no revision of its own (a compacted-only proof).
+            inner.test_runs.compaction_examined_revision = None;
+        }
     }
 
     fn step_test_command_observation_persistence(&self) {
@@ -1259,6 +1272,8 @@ fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestR
 }
 
 fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
+    #[cfg(test)]
+    TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.set(count.get() + 1));
     let projection = TestRunProjection::new(inner);
     let mut runs = inner.test_runs.summaries();
     // Cached summaries cannot serve an old 'safe' value after lifecycle changes.
@@ -1308,6 +1323,183 @@ fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
             .then_with(|| left.run_id.cmp(&right.run_id))
     });
     runs
+}
+
+// Borrowed candidate selection for one locked batch of changed rows, built in
+// one pass and dropped with that hold. It only narrows which rows each run id
+// visits: every candidate still passes the full projection's own predicates,
+// and each identity's runs are built once per batch however many rows share it.
+struct TestRunIdentityIndex<'a> {
+    inner: &'a StateInner,
+    entries: HashMap<&'a str, Vec<&'a TestRunEntry>>,
+    artifact_rows: HashMap<&'a str, Vec<&'a TestRunCommandObservation>>,
+    summary_rows: HashMap<&'a str, Vec<&'a TestRunCommandObservation>>,
+    // Retained fallback keys by the run id their fallback carries.
+    retained_keys: HashMap<&'a str, std::collections::BTreeSet<&'a String>>,
+    compacted: HashMap<&'a str, Vec<&'a TestRunCompacted>>,
+    artifact_runs: HashMap<String, (Vec<TestRunSummary>, HashSet<String>)>,
+}
+
+impl<'a> TestRunIdentityIndex<'a> {
+    fn new(inner: &'a StateInner) -> Self {
+        #[cfg(test)]
+        TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.set(count.get()
+            + inner.test_runs.entries.len() + inner.test_run_observations.len()
+            + inner.test_run_registrations.len() + inner.test_run_compacted.len()));
+        let mut entries: HashMap<&str, Vec<_>> = HashMap::new();
+        for entry in &inner.test_runs.entries {
+            entries.entry(entry.summary.run_id.as_str()).or_default().push(entry);
+        }
+        let mut artifact_rows: HashMap<&str, Vec<_>> = HashMap::new();
+        let mut summary_rows: HashMap<&str, Vec<_>> = HashMap::new();
+        for row in inner.test_run_observations.values() {
+            if let Some(artifact) = &row.artifact {
+                artifact_rows.entry(artifact.run_id.as_str()).or_default().push(row);
+            }
+            summary_rows.entry(row.summary.run_id.as_str()).or_default().push(row);
+        }
+        // A retained fallback carries its row's own run id, not necessarily
+        // its key; a registration decides a key it shares with a compaction.
+        let mut retained_keys: HashMap<&str, std::collections::BTreeSet<_>> = HashMap::new();
+        for (key, row) in &inner.test_run_registrations {
+            retained_keys.entry(row.run_id.as_str()).or_default().insert(key);
+        }
+        let mut compacted: HashMap<&str, Vec<_>> = HashMap::new();
+        for (key, row) in &inner.test_run_compacted {
+            if !inner.test_run_registrations.contains_key(key) {
+                retained_keys.entry(row.summary.run_id.as_str()).or_default().insert(key);
+            }
+            compacted.entry(row.summary.run_id.as_str()).or_default().push(row);
+        }
+        Self { inner, entries, artifact_rows, summary_rows, retained_keys, compacted,
+            artifact_runs: HashMap::new() }
+    }
+
+    fn rows(map: &HashMap<&'a str, Vec<&'a TestRunCommandObservation>>, id: &str)
+        -> Vec<&'a TestRunCommandObservation>
+    {
+        let rows = map.get(id).cloned().unwrap_or_default();
+        #[cfg(test)]
+        TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.set(count.get() + rows.len()));
+        rows
+    }
+
+    // The artifact runs that test_run_full_summaries_locked builds for one run
+    // id, before observation summaries: indexed entries, then retained
+    // fallbacks in key order, each enriched exactly as there, with the
+    // execution ids they merge.
+    fn artifact_runs(&mut self, run_id: &str) -> &(Vec<TestRunSummary>, HashSet<String>) {
+        if !self.artifact_runs.contains_key(run_id) {
+            let built = self.build_artifact_runs(run_id);
+            self.artifact_runs.insert(run_id.to_owned(), built);
+        }
+        &self.artifact_runs[run_id]
+    }
+
+    fn build_artifact_runs(&self, run_id: &str) -> (Vec<TestRunSummary>, HashSet<String>) {
+        let inner = self.inner;
+        let observations = Self::rows(&self.artifact_rows, run_id);
+        let indexed = self.entries.get(run_id).map(Vec::as_slice).unwrap_or(&[]);
+        let first = indexed.first().copied();
+        let mut runs: Vec<_> = first.into_iter().flat_map(|first| {
+            indexed.iter().map(|entry| {
+                let mut run = entry.summary.clone();
+                run.registration = test_run_registration_view_from_observations(
+                    inner, &first.disk, observations.iter().copied(),
+                );
+                run.project_id = test_run_effective_project_id(inner, first);
+                run
+            }).collect::<Vec<_>>()
+        }).collect();
+        for key in self.retained_keys.get(run_id).into_iter().flatten() {
+            if self.entries.contains_key(key.as_str()) {
+                continue;
+            }
+            let rows = if key.as_str() == run_id { observations.clone() } else {
+                Self::rows(&self.artifact_rows, key)
+            };
+            if let Some(run) = test_run_artifact_fallback_from_observations(inner, key, rows) {
+                if run.run_id == run_id {
+                    runs.push(run);
+                }
+            }
+        }
+        let mut merged = HashSet::new();
+        for run in &mut runs {
+            merged.extend(test_run_enrich_artifact_summary_from_observations(
+                inner, run, first.map(|entry| entry.disk.as_ref()), observations.iter().copied(),
+            ));
+        }
+        (runs, merged)
+    }
+
+    // The elements of test_run_summaries_locked(inner) whose run id is
+    // `run_id`, in the same order. An observation is merged only by runs of
+    // its own artifact's id, so its artifact runs decide it.
+    fn identity(&mut self, run_id: &str) -> Vec<TestRunSummary> {
+        let inner = self.inner;
+        let mut runs = self.artifact_runs(run_id).0.clone();
+        for row in Self::rows(&self.summary_rows, run_id) {
+            let merged = row.artifact.as_ref().is_some_and(|artifact| {
+                self.artifact_runs(&artifact.run_id).1.contains(&row.execution_id)
+            });
+            if !merged {
+                runs.push(test_run_observation_summary(inner, row));
+            }
+        }
+        test_run_sort_by_start(&mut runs);
+        // Compacted summaries appear only for identities the full list lacks.
+        if runs.is_empty() {
+            runs.extend(self.compacted.get(run_id).into_iter().flatten()
+                .filter(|row| test_run_compact_is_installed(inner, row))
+                .map(|row| test_run_compacted_summary(inner, row))
+                .filter(|run| run.registration.restart_would_void_evidence != Some(false)));
+            test_run_sort_by_start(&mut runs);
+        }
+        runs
+    }
+
+    // The run a changed observation row publishes: the first run of the full
+    // list with the row's execution id, else the first with its artifact's
+    // run id and run directory, else the row itself; the full list's first
+    // match, from only those identities' summaries.
+    fn changed_row(&mut self, id: &str, row: &TestRunCommandObservation) -> TestRunSummary {
+        self.identity(id)
+            .into_iter()
+            .next()
+            .or_else(|| {
+                row.artifact.as_ref().and_then(|artifact| {
+                    let directory = test_run_path_key(&artifact.run_directory);
+                    self.identity(&artifact.run_id)
+                        .into_iter()
+                        .find(|run| test_run_path_key(&run.run_dir) == directory)
+                })
+            })
+            .unwrap_or_else(|| test_run_observation_summary(self.inner, row))
+    }
+}
+
+fn test_run_sort_by_start(runs: &mut [TestRunSummary]) {
+    runs.sort_by(|left, right| {
+        right
+            .started_at
+            .cmp(&left.started_at)
+            .then_with(|| left.run_id.cmp(&right.run_id))
+    });
+}
+
+#[cfg(test)]
+fn test_run_identity_summaries_locked(inner: &StateInner, run_id: &str) -> Vec<TestRunSummary> {
+    TestRunIdentityIndex::new(inner).identity(run_id)
+}
+
+#[cfg(test)]
+fn test_run_changed_row_summary_locked(
+    inner: &StateInner,
+    id: &str,
+    row: &TestRunCommandObservation,
+) -> TestRunSummary {
+    TestRunIdentityIndex::new(inner).changed_row(id, row)
 }
 
 fn test_run_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {

@@ -63,7 +63,7 @@ fn mailbox_relay_schema_historical_one_through_five_preserve_history_and_acknowl
             connection.execute_batch("INSERT INTO mailbox_read_pages VALUES('old-receipt','mailbox-old','session-old',0,1);").unwrap();
         }
         ensure_sqlite_coordination_schema(&connection).unwrap();
-        assert_eq!(version(&connection), "5-mailbox-relay-1");
+        assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
         let identity = mailbox_relay_store_id(&connection).unwrap();
         assert!(mailbox_relay_uuid(&identity));
         assert_eq!(
@@ -211,4 +211,37 @@ fn mailbox_relay_schema_partial_unknown_or_malformed_target_is_not_repaired() {
         assert_eq!(version(&connection), marker);
         assert_eq!(coordination_schema_objects(&connection).unwrap(), schema);
     }
+}
+
+// Coordination step 6 adds central's executor outcome table. The relay floor
+// upgrades in place: its store identity and records are kept, never minted
+// again, and a newer unknown floor is refused rather than adopted.
+#[test]
+fn executor_outcome_floor_upgrades_the_relay_floor_and_refuses_unknown_futures() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
+    connection.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL).unwrap();
+    connection.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL).unwrap();
+    connection.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL).unwrap();
+    connection.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL).unwrap();
+    initialize_mailbox_relay_schema(&connection).unwrap();
+    connection.execute("INSERT INTO meta VALUES('coordination_schema_version','5-mailbox-relay-1')", []).unwrap();
+    validate_coordination_schema_version(&connection, "5-mailbox-relay-1").unwrap();
+    let identity = mailbox_relay_store_id(&connection).unwrap();
+    ensure_sqlite_coordination_schema(&connection).unwrap();
+    assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
+    assert_eq!(COORDINATION_SQLITE_SCHEMA_VERSION, "6-executor-outcomes-1");
+    assert_eq!(mailbox_relay_store_id(&connection).unwrap(), identity, "the relay store identity is kept");
+    assert_eq!(connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='federation_executor_outcomes'",
+        [], |row| row.get::<_, u64>(0)).unwrap(), 1);
+    ensure_sqlite_coordination_schema(&connection).unwrap();
+    assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION, "reopening the current floor is a no-op");
+
+    for future in ["7", "6", "6-executor-outcomes-2", "7-direct-prompt-1"] {
+        assert!(expected_coordination_schema_objects_for_version(future).is_err(), "{future}");
+    }
+    connection.execute("UPDATE meta SET value='7-direct-prompt-1' WHERE key='coordination_schema_version'", []).unwrap();
+    let refused = ensure_sqlite_coordination_schema(&connection).unwrap_err();
+    assert!(format!("{refused:#}").contains("unsupported coordination database schema"), "{refused:#}");
 }

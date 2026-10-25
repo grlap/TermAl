@@ -12,6 +12,8 @@ mod round_four;
 mod round_five;
 #[path = "federation_executor_live_wake.rs"]
 mod live_wake;
+#[path = "federation_executor_outcomes.rs"]
+mod outcomes;
 
 fn append_wake(fixture: &Fixture, name: &str, topic: &str) -> String {
     let (sender, _) = federation_mailboxes::local_participant(&fixture.central, name);

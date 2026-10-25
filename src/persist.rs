@@ -559,9 +559,13 @@ fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
 #[cfg(windows)]
 fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
     reject_existing_windows_state_path_redirection(path)?;
-    reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-wal"))?;
-    reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-shm"))?;
-    reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-journal"))?;
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = sqlite_sidecar_path(path, suffix);
+        reject_windows_state_path_metadata_redirection(
+            &sidecar,
+            windows_sqlite_sidecar_symlink_metadata(&sidecar),
+        )?;
+    }
     Ok(())
 }
 
@@ -575,6 +579,55 @@ fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
     Ok(())
 }
 
+#[cfg(all(test, windows))]
+thread_local! {
+    static WINDOWS_STATE_PATH_METADATA_FAILURES: std::cell::RefCell<std::collections::VecDeque<(PathBuf, i32)>> = const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    static WINDOWS_STATE_PATH_METADATA_PAUSES: std::cell::RefCell<Vec<Duration>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(windows)]
+fn windows_state_path_symlink_metadata(path: &FsPath) -> io::Result<fs::Metadata> {
+    #[cfg(test)]
+    if let Some(code) = WINDOWS_STATE_PATH_METADATA_FAILURES.with(|slot| {
+        let mut failures = slot.borrow_mut();
+        if failures.front().is_some_and(|(target, _)| target == path) {
+            failures.pop_front().map(|(_, code)| code)
+        } else {
+            None
+        }
+    }) {
+        return Err(io::Error::from_raw_os_error(code));
+    }
+    fs::symlink_metadata(path)
+}
+
+#[cfg(windows)]
+const WINDOWS_SQLITE_SIDECAR_INSPECTION_BACKOFF_MS: [u64; 4] = [1, 4, 16, 64];
+
+#[cfg(windows)]
+fn windows_sqlite_sidecar_symlink_metadata(path: &FsPath) -> io::Result<fs::Metadata> {
+    // Sidecar inspection can briefly fail before writer admission. A denial
+    // is never proof of absence or a safe path.
+    // Reinspect only these transient Windows errors, with a fixed attempt cap;
+    // main-file and directory checks keep their original one-shot behavior.
+    let is_contention = |err: &io::Error| matches!(err.raw_os_error(), Some(5 | 32));
+    let first_error = match windows_state_path_symlink_metadata(path) {
+        Err(err) if is_contention(&err) => err,
+        result => return result,
+    };
+    for delay_ms in WINDOWS_SQLITE_SIDECAR_INSPECTION_BACKOFF_MS {
+        let delay = Duration::from_millis(delay_ms);
+        #[cfg(test)]
+        WINDOWS_STATE_PATH_METADATA_PAUSES.with(|slot| slot.borrow_mut().push(delay));
+        std::thread::sleep(delay);
+        match windows_state_path_symlink_metadata(path) {
+            Err(err) if is_contention(&err) => {}
+            result => return result,
+        }
+    }
+    Err(first_error)
+}
+
 /// Rejects Windows reparse points before SQLite can open the TermAl state
 /// directory, database, or sidecars. A reparse point can redirect persisted
 /// session history through a symlink, junction, or mount point; this is path
@@ -584,11 +637,19 @@ fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
 /// Windows API crate only for this metadata bit.
 #[cfg(windows)]
 fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
+    reject_windows_state_path_metadata_redirection(path, windows_state_path_symlink_metadata(path))
+}
+
+#[cfg(windows)]
+fn reject_windows_state_path_metadata_redirection(
+    path: &FsPath,
+    metadata: io::Result<fs::Metadata>,
+) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
 
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
-    match fs::symlink_metadata(path) {
+    match metadata {
         Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 => {
             Err(anyhow!(
                 "refusing to follow redirected state path `{}`",

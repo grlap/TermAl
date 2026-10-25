@@ -146,7 +146,38 @@ commit in one SQLite transaction. The immutable domain append receipt reports
 `durableButNotWoken` at that commit point, for both remote and central native
 recipients. It does not wait for notification or dispatch finalization; an exact
 duplicate returns the same committed message identity without waiting either.
-Later wake ownership is shown separately in message details. For a central native
+Later wake ownership is shown separately in message details. For a remote
+recipient, central's mirror records only that the receiver durably owns the
+wake; that mirror and the append receipt never change. Central then learns what
+the receiver did with it: the wake drain owner asks the receiver, over the
+authenticated pair (`POST /federation/v1/executor/outcome`, with the exact
+operation identity and payload digest), and the receiver answers read-only from
+its own journal and the root's queue and delivery state: received, queued, queued
+behind an active turn, held behind a paused queue, no longer queued with its state
+unknown, woken (its runtime accepted this wake), rejected, handed off with the
+outcome unconfirmed, or the mail processed without this wake (another turn's
+continuation handled it, and this wake, once queued, is no longer queued or
+handing off; a wake not yet queued, or still queued, after the mail's ACK is
+answered by its queue state, since it may yet run). Only positive runtime acceptance is woken. The receiver
+answers only its configured central over the current lease, and only for an
+operation whose journal identity, digest and target binding are current; any
+other query is refused. Central creates the wake's outcome row when it settles
+and keeps the answer there (`federation_executor_outcomes`), under the same
+authority fences as the mirror; an answer those fences refuse is dropped, but the
+attempt and its backoff still count. A terminal answer (woken, rejected,
+unconfirmed, processed without this wake) is final and ends polling; other
+answers are polled again with backoff, at most a bounded number of times and
+within a bounded age from settlement, only on reachable peers. Polling runs one
+pass at a time in its own task, started by the drain owner's fallback tick and
+never on the wake dispatch path, so a slow receiver answer cannot delay wake
+dispatch; a pass starts no new poll after its time budget, and each poll uses
+one of the peer's RPC slots under the transport's own bound. A receiver whose
+answer misses its handler deadline returns an authenticated retryable refusal,
+which counts only as an attempt; unlike other executor requests, it never
+fences the pair's link. Message details show a terminal
+answer as the outcome, a non-terminal one as "wake outcome pending; last seen:
+... at T", no answer as "wake outcome pending", and add "no longer polled" once
+either bound has ended polling; never "not woken". For a central native
 recipient, an owned worker in the federation supervisor reads the committed
 obligation, revalidates the exact target binding while queuing, and uses ordinary
 queue coalescing and dispatch. It is kicked after commitment, falls back to a

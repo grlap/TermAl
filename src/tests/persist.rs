@@ -1096,6 +1096,125 @@ fn assert_windows_state_redirection_rejected(error: anyhow::Error) {
 }
 
 #[cfg(windows)]
+struct WindowsStatePathMetadataFailures;
+
+#[cfg(windows)]
+impl WindowsStatePathMetadataFailures {
+    fn install(path: &FsPath, codes: &[i32]) -> Self {
+        WINDOWS_STATE_PATH_METADATA_FAILURES.with(|slot| {
+            let mut failures = slot.borrow_mut();
+            assert!(failures.is_empty());
+            failures.extend(codes.iter().map(|code| (path.to_owned(), *code)));
+        });
+        WINDOWS_STATE_PATH_METADATA_PAUSES.with(|slot| slot.borrow_mut().clear());
+        Self
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsStatePathMetadataFailures {
+    fn drop(&mut self) {
+        WINDOWS_STATE_PATH_METADATA_FAILURES.with(|slot| slot.borrow_mut().clear());
+        WINDOWS_STATE_PATH_METADATA_PAUSES.with(|slot| slot.borrow_mut().clear());
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sqlite_state_redirection_rechecks_transient_sidecar_inspection_denial() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let root = TestTempRoot::create("termal-windows-sidecar-inspection-denial");
+    let db = root.join("termal.sqlite");
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = sqlite_sidecar_path(&db, suffix);
+        fs::write(&sidecar, b"sidecar").unwrap();
+        // Reproduce the reported metadata error, not an assumed OS cause.
+        // A later attempt must inspect the actual remaining file safely.
+        for codes in [vec![5], vec![32], vec![5, 32, 5, 32]] {
+            let _fault = WindowsStatePathMetadataFailures::install(&sidecar, &codes);
+            let result = reject_existing_sqlite_state_path_redirection(&db);
+            assert!(
+                result.is_ok(),
+                "transient {suffix} denial must be reinspected: {result:?}"
+            );
+            assert_eq!(fs::read(&sidecar).unwrap(), b"sidecar");
+            WINDOWS_STATE_PATH_METADATA_FAILURES.with(|slot| assert!(slot.borrow().is_empty()));
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sqlite_state_redirection_bounds_sidecar_reinspection_and_preserves_typed_error() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let root = TestTempRoot::create("termal-windows-sidecar-denial-bound");
+    let db = root.join("termal.sqlite");
+    let sidecar = sqlite_sidecar_path(&db, "-wal");
+    let _fault = WindowsStatePathMetadataFailures::install(&sidecar, &[5, 32, 5, 32, 32, 5]);
+    let error = reject_existing_sqlite_state_path_redirection(&db).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<io::Error>().unwrap().raw_os_error(),
+        Some(5)
+    );
+    assert!(format!("{error:#}").contains(sidecar.to_str().unwrap()));
+    WINDOWS_STATE_PATH_METADATA_FAILURES.with(|slot| {
+        assert_eq!(slot.borrow().len(), 1, "exactly five metadata attempts");
+    });
+    WINDOWS_STATE_PATH_METADATA_PAUSES.with(|slot| {
+        assert_eq!(
+            *slot.borrow(),
+            [1, 4, 16, 64].map(Duration::from_millis),
+            "fixed bounded backoff, independent of wall-clock scheduling"
+        );
+    });
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sqlite_state_redirection_does_not_retry_other_errors_or_non_sidecars() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let root = TestTempRoot::create("termal-windows-sidecar-denial-scope");
+    let db = root.join("termal.sqlite");
+    let sidecar = sqlite_sidecar_path(&db, "-wal");
+    for (path, codes, expected) in [
+        (sidecar.as_path(), vec![87, 5], 87),
+        (sidecar.as_path(), vec![5, 87, 5], 87),
+        (db.as_path(), vec![5, 5], 5),
+        (root.as_ref(), vec![5, 5], 5),
+    ] {
+        let _fault = WindowsStatePathMetadataFailures::install(path, &codes);
+        let error = reject_existing_sqlite_state_path_redirection(&db).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<io::Error>().unwrap().raw_os_error(),
+            Some(expected)
+        );
+        WINDOWS_STATE_PATH_METADATA_FAILURES.with(|slot| assert_eq!(slot.borrow().len(), 1));
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sqlite_state_redirection_reinspects_missing_or_redirected_sidecar_after_denial() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let root = TestTempRoot::create("termal-windows-sidecar-reinspection");
+    let db = root.join("termal.sqlite");
+    let sidecar = sqlite_sidecar_path(&db, "-wal");
+    {
+        let _fault = WindowsStatePathMetadataFailures::install(&sidecar, &[5]);
+        reject_existing_sqlite_state_path_redirection(&db).unwrap();
+        WINDOWS_STATE_PATH_METADATA_FAILURES.with(|slot| assert!(slot.borrow().is_empty()));
+    }
+    let target = root.join("target");
+    fs::write(&target, b"must not be changed").unwrap();
+    if create_windows_file_symlink_or_skip(&target, &sidecar) {
+        let _fault = WindowsStatePathMetadataFailures::install(&sidecar, &[5]);
+        let error = reject_existing_sqlite_state_path_redirection(&db).unwrap_err();
+        assert_windows_state_redirection_rejected(error);
+        assert_eq!(fs::read(&target).unwrap(), b"must not be changed");
+    }
+}
+
+#[cfg(windows)]
 #[test]
 fn windows_sqlite_state_redirection_rejects_main_database_link() {
     let state_root = TestTempRoot::create("termal-windows-main-redirection");
