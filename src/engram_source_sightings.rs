@@ -364,8 +364,15 @@ fn hold_source_observation_admission(record: &mut SessionRecord) -> bool {
     let preview = if record.engram.source_observation_delete_requested {
         SOURCE_OBSERVATION_DELETE_RETAINED
     } else { "Engram: retained source observation requires explicit Resume before another admission." };
-    let changed = !record.orchestrator_auto_dispatch_blocked || record.session.preview != preview;
+    // Setting the in-memory hold changes the session's projected queue hold
+    // (`engram_automatic_retry_hold`), so it counts as a change: after a
+    // restart the latch and preview are already in place, and only this
+    // makes the caller stamp and publish the paused queue.
+    let changed = !record.orchestrator_auto_dispatch_blocked
+        || record.session.preview != preview
+        || !record.engram.source_observation_admission_held;
     record.set_auto_dispatch_blocked(true);
+    record.engram.source_observation_admission_held = true;
     record.session.preview = preview.to_owned();
     changed
 }

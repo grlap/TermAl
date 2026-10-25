@@ -674,7 +674,10 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             }
             const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
             assert.equal(result.state, "passed");
-            assert.deepEqual(result.preflight.map(({ name, code }) => ({ name, code })), [{ name: "cargo", code: 0 }]);
+            assert.deepEqual(result.preflight.map(({ name, code }) => ({ name, code })), [
+              ...(detached ? [{ name: "ui-dependencies", code: 0 }] : []),
+              { name: "cargo", code: 0 },
+            ]);
             return runDir;
           })();
           // Completion races receipt rather than a timer: on the unchanged

@@ -2494,9 +2494,19 @@ provider) and keeps the prompt interrupted for explicit removal, as a Stop
 of a waiting admission does. The abort record is saved with the session: a restart after
 its acknowledgement was saved rebuilds the retry, which the tick admits when
 due; a restart before it (the record written by the failed admission, or the
-settlement saved but not yet acknowledged) keeps the interrupted hold. A mailbox wake to a session held this
-way reports `heldBehindPausedQueue`
+settlement saved but not yet acknowledged) keeps the interrupted hold. While
+an automatic retry owns the head with a due time (an admission,
+begin-preparation, abort or bind retry, matched to the head as its next
+attempt requires, with no operator pause and control not disabled), a mailbox
+wake to the session reports `waitingForAutomaticRetry` and the session's API
+state carries `queueHold` with the retry's cause code and next due time
+(`src/engram_retry_hold.rs`); the latch, and so `queuePaused`, is unchanged.
+A session held any other way, an interrupted hold that no due retry owns
+included, reports
+`heldBehindPausedQueue`
 ([agent mailboxes](agent-mailboxes.md#dispatch-outcome-versus-notification-state)).
+A remote proxy session's own record carries no retry records, so it reports
+no `queueHold`.
 A delegation whose child holds a retained prompt reports `held`, with the
 reason these states give it: `retryScheduled` while an acknowledged abort record
 holds the head, `persistenceUnknown` before the acknowledgement, `stopped` after a

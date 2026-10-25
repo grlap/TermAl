@@ -44,6 +44,9 @@ mod cargo_target_sibling;
 #[path = "engram_watcher_metadata.rs"]
 mod watcher_metadata;
 
+#[path = "engram_watcher_provenance.rs"]
+mod watcher_provenance;
+
 // A Codex test carried past its turn until its end is reported, a child
 // module so this file does not grow further.
 #[path = "engram_reported_ends.rs"]

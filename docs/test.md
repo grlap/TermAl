@@ -75,6 +75,27 @@ Vitest use their JavaScript entrypoints rather than `.cmd` shims. All commands,
 working directories and required files are preflighted, and a missing
 prerequisite leaves every stage explicitly unrun.
 
+Before those five stages, the full launcher prepares private UI dependencies
+with `npm ci --include=dev --no-audit --no-fund` in the candidate's `ui/`
+directory, using its tracked `package.json` and `package-lock.json`. A fresh
+worktree needs no manual dependency setup. An existing installation is reused
+only when npm's installed lock metadata and package manifests match the source
+lock and required entrypoints exist. A stale or partial installation fails setup
+without modification; the launcher never reinstalls over an existing directory,
+which may be used through inbound links from other worktrees. An outbound
+`node_modules` symlink or junction is refused.
+The launcher invokes npm's JavaScript entrypoint with its own Node executable,
+without installing global tools or building the production UI.
+
+Setup is recorded as the `ui-dependencies` preflight entry and, once npm
+starts, `preflight-ui-dependencies.log`. Setup failure produces a terminal
+failure with `setupFailure.kind: "ui-dependencies"`, the failing phase, and
+every gate stage unrun. A detached full launch announces `STARTED` only after
+setup and preflight succeed, so that command waits for a cold install to finish.
+Cancellation is recorded as interruption. Recovery refuses while an owned setup
+process may still be cleaning up and imports its nonce-matched cleanup ledger
+after it exits. Focused commands retain their existing dependency requirements.
+
 ### Git prerequisite and remote runners
 
 The launcher's minimum Git capability for locating run artifacts is

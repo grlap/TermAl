@@ -255,6 +255,7 @@ impl StateInner {
                 pending_prompts: Vec::new(),
                 prompt_deliveries: Vec::new(),
                 queue_paused: false,
+                queue_hold: None,
                 provider_capacity_waiting: false,
                 source_tracking_recovery: false,
                 queue_projection_hash: None,

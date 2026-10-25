@@ -1048,6 +1048,7 @@ include!("engram_admission_retry.rs");
 include!("engram_begin_replay.rs");
 include!("engram_begin_boot.rs");
 include!("engram_retry_schedule.rs");
+include!("engram_retry_hold.rs");
 include!("provider_capacity_retry.rs");
 include!("message_sequence.rs");
 include!("messages.rs");

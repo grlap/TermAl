@@ -294,9 +294,19 @@ impl EngramHost<'_> {
 
     /// The watcher saw `changes` in a workspace. Its one caller, the watcher
     /// thread, is not built into tests, which call the handler directly.
-    #[cfg_attr(test, allow(dead_code))]
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn workspace_files_changed(&self, changes: &[WorkspaceFileChangeEvent]) {
         self.state.note_engram_workspace_file_changes(changes);
+    }
+
+    pub(crate) fn observed_workspace_files_changed(
+        &self,
+        changes: &[WorkspaceFileChangeEvent],
+        observation: &str,
+    ) {
+        self.state
+            .note_engram_observed_workspace_file_changes(changes, observation);
     }
 
     /// The test-run index ticked: a carried gate's terminal record is read as

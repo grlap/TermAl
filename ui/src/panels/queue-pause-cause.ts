@@ -1,15 +1,19 @@
-// Owns: naming why a session's queue is paused, from the session preview the
-// backend writes when it pauses the queue, and the card text for that cause.
+// Owns: naming why a session's queue is paused, from the typed queue hold the
+// backend projects for a due automatic Engram retry or else from the session
+// preview it writes when it pauses the queue, and the card text for that
+// cause.
 // Does not own: whether the queue is paused, which cards appear, their
 // actions, or anything that holds or releases the queue.
 // New module; its text was fixed inline in session-activity-cards.tsx and
 // AgentSessionPanel.tsx before.
 //
-// The backend has no typed pause cause yet, so the cause is read from the
-// preview strings it writes: the automatic-retry preview of a parked Engram
-// admission, the Stop preview, and Engram's own hold previews.
+// The backend types one pause cause, `Session.queueHold`, while a due
+// automatic Engram retry owns the queue head; it wins over the preview. Every
+// other cause is read from the preview strings the backend writes: the
+// automatic-retry preview of a parked Engram admission, the Stop preview, and
+// Engram's own hold previews.
 
-import type { Session } from "../types";
+import type { Session, SessionQueueHold } from "../types";
 
 /** The start of the preview of a parked Engram admission whose automatic
  * re-admission is scheduled (backend `ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX`). */
@@ -24,6 +28,9 @@ const ENGRAM_RETRY_PREVIEW = new RegExp(
 const STOPPED_BY_USER_PREVIEW = "Turn stopped by user.";
 
 export type QueuePauseCause =
+  /** A due automatic Engram retry owns the queue head (`Session.queueHold`):
+   * `cause` is the retry's code and `nextAt` its next attempt, local time. */
+  | { kind: "automaticRetry"; preview: string; cause: string; nextAt: string }
   /** Engram retries the parked admission on its own. `retry` is absent when
    * the preview does not carry a readable attempt and time. */
   | { kind: "engramRetrying"; preview: string; retry: { attempt: number; nextAt: string } | null }
@@ -34,7 +41,18 @@ export type QueuePauseCause =
   /** Anything else; the preview, when there is one, names it. */
   | { kind: "other"; preview: string };
 
-export function resolveQueuePauseCause(preview: string): QueuePauseCause {
+export function resolveQueuePauseCause(
+  preview: string,
+  queueHold?: SessionQueueHold | null,
+): QueuePauseCause {
+  if (queueHold?.kind === "automaticRetry") {
+    return {
+      kind: "automaticRetry",
+      preview,
+      cause: queueHold.cause,
+      nextAt: localTime(queueHold.retryAt),
+    };
+  }
   if (preview.startsWith(ENGRAM_RETRY_PREVIEW_PREFIX)) {
     return { kind: "engramRetrying", preview, retry: parseEngramRetry(preview) };
   }
@@ -60,6 +78,12 @@ function parseEngramRetry(preview: string): { attempt: number; nextAt: string } 
   return { attempt, nextAt: due.toLocaleTimeString() };
 }
 
+/** `at` (RFC 3339) as a local time, or as written when it does not parse. */
+function localTime(at: string): string {
+  const due = new Date(at);
+  return Number.isNaN(due.getTime()) ? at : due.toLocaleTimeString();
+}
+
 /** The paused-queue card's heading, the cause line under it (if any), and the
  * line with the waiting prompts. A cause that needs nobody asks for nothing. */
 export function queuePausedCardText(
@@ -71,6 +95,12 @@ export function queuePausedCardText(
     queuedCount === 1 ? "1 prompt waiting" : `${queuedCount} prompts waiting`;
   const resumeHint = `${waitingLabel}. Send a new prompt or resume the queue to continue.`;
   switch (cause.kind) {
+    case "automaticRetry":
+      return {
+        heading: "Retrying automatically; no action is needed",
+        detail: `Cause: ${cause.cause}. Next attempt at ${cause.nextAt}.`,
+        waiting: `${waitingLabel}.`,
+      };
     case "engramRetrying":
       return {
         heading: "Waiting for Engram admission; retrying automatically",
@@ -103,6 +133,9 @@ export function queuePausedCardText(
 /** The retained-prompt card's text for a retained head that is not
  * interrupted. */
 export function retainedPromptHoldText(cause: QueuePauseCause): string {
+  if (cause.kind === "automaticRetry") {
+    return `Engram admission is retrying automatically (${cause.cause}, next at ${cause.nextAt}). Cancel drops the retained prompt.`;
+  }
   if (cause.kind === "engramRetrying") {
     return cause.retry
       ? `Engram admission is retrying automatically (attempt ${cause.retry.attempt}, next at ${cause.retry.nextAt}). Cancel drops the retained prompt.`

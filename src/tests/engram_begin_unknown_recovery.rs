@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[path = "engram_begin_preparation_retry.rs"]
 mod begin_preparation_retry;
 
+#[path = "engram_retry_hold_producers.rs"]
+mod retry_hold_producers;
+
 /// One durability or wire boundary, in the order the writer acknowledged a
 /// fence and the producer received a begin.
 #[derive(Clone, Debug)]

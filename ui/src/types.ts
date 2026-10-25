@@ -432,6 +432,9 @@ export type Session = {
    * Stop leaves behind; nothing starts until the user resumes the queue or
    * sends a new prompt. */
   queuePaused?: boolean;
+  /** Why the paused queue is held and when it moves on by itself, while a
+   * due automatic Engram retry owns its head; absent for any other hold. */
+  queueHold?: SessionQueueHold | null;
   providerCapacityWaiting?: boolean;
   /** Delete retained the original session; Resume recovers tracking only. */
   sourceTrackingRecovery?: boolean;
@@ -442,6 +445,14 @@ export type Session = {
   /** Upstream per-session body snapshot sequence; absent on older peers. */
   bodySeq?: number;
   bodySeqEpoch?: string;
+};
+
+/** A queue hold that a due automatic Engram retry owns: the retry's code and
+ * its next due time (RFC 3339). The backend's `SessionQueueHold`. */
+export type SessionQueueHold = {
+  kind: "automaticRetry";
+  cause: string;
+  retryAt: string;
 };
 
 /** Transcript-free metadata returned by broad state snapshots and summary
@@ -1206,6 +1217,8 @@ export type MessageCreatedEvent = {
   sessionQueue?: {
     pendingPrompts: PendingPrompt[];
     queuePaused: boolean;
+    /** Absent when no due automatic retry owns the head. */
+    queueHold?: SessionQueueHold | null;
     queueProjectionHash?: string | null;
   } | null;
   sessionMutationStamp?: number | null;

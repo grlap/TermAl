@@ -45,6 +45,7 @@ import {
 import { focusedCountSummaryLines, focusedTestCounts } from "./test-counts.mjs";
 import { runOwnedCommand } from "./test-process-owner.mjs";
 import { watchCommandProgress } from "./test-command-progress.mjs";
+import { bootstrapUiDependencies } from "./test-ui-bootstrap.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
@@ -55,6 +56,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
+  "scripts/test-ui-bootstrap.test.mjs",
   "scripts/test-launcher-git-path.test.mjs",
   "scripts/test-temp-root.test.mjs",
   "scripts/vitest-resource-preflight.test.mjs",
@@ -95,6 +97,8 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-process-owner-windows.cs",
   "scripts/test-command-progress.mjs",
   "scripts/test-run-registration.mjs",
+  "scripts/test-ui-bootstrap.mjs",
+  "scripts/test-ui-bootstrap-fixtures.mjs",
   "scripts/test-temp-root.mjs",
   "scripts/vitest-resource-preflight.mjs",
 ]);
@@ -265,6 +269,8 @@ const validUiProjects = (value) => value === undefined || value === "all" ||
 export function requiredFiles(root = repository) {
   return [
     join(root, "scripts", "test-rust.sh"),
+    join(root, "ui", "package.json"),
+    join(root, "ui", "package-lock.json"),
     ...[...helperTestFiles, ...helperSupportFiles].map((path) => join(root, path)),
     join(root, "ui", "node_modules", "typescript", "bin", "tsc"),
     join(root, "ui", "node_modules", "vitest", "vitest.mjs"),
@@ -810,7 +816,7 @@ export function saveProgressObservation(resultPath, result, entry, observation, 
   }
 }
 
-export async function executeRun(runDir, env = process.env, { onReady, diskSpace, signal, progress, commandPhase } = {}) {
+export async function executeRun(runDir, env = process.env, { onReady, diskSpace, signal, progress, commandPhase, uiSetup } = {}) {
   // Exclusive admission: an interrupted run is not a retryable test command.
   closeSync(openSync(join(runDir, "execution.lock"), "wx"));
   const resultPath = join(runDir, "results.json");
@@ -837,7 +843,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
   }
   if (result.state === "failed") {
     try {
-      await onReady?.();
+      if (!request.full) await onReady?.();
     } catch (error) {
       result.error = `${result.error ? `${result.error}; ` : ""}detached readiness failed: ${error.message}`;
       attachFailureInvestigation(result, runDir);
@@ -871,11 +877,40 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     result.owner = request.owner;
     result.preflight = [];
     save(resultPath, result);
-    await onReady?.();
+    if (!request.full) await onReady?.();
     result.diskSpace = diskSpacePreflight(request, runDir, childEnv, diskSpace);
     save(resultPath, result);
     for (const warning of result.diskSpace.warnings) console.error(warning);
     if (result.diskSpace.error) throw new Error(result.diskSpace.error);
+    if (request.full) {
+      let setupEntry;
+      const releaseCommandPhase = commandPhase?.();
+      try {
+        await bootstrapUiDependencies(request.root, {
+          env: childEnv,
+          log: join(runDir, "preflight-ui-dependencies.log"),
+          // Injection is limited to API fixtures; the CLI always uses the
+          // maintained owned runner and native npm discovery.
+          ...uiSetup,
+          run: uiSetup?.run ?? ((command, args, options) => runOwnedCommand(command, args, {
+            ...options, signal,
+            onOwner: (owner) => { setupEntry.processOwner = owner; save(resultPath, result); },
+            onStart: (pid) => { setupEntry.pid = pid; save(resultPath, result); },
+          })),
+          observe: (entry) => {
+            if (!setupEntry) result.preflight.push(entry);
+            setupEntry = entry;
+            save(resultPath, result);
+          },
+        });
+      } finally {
+        releaseCommandPhase?.();
+        if (setupEntry && existsSync(setupEntry.log)) {
+          setupEntry.diagnostics = await diagnostics(setupEntry.log, setupEntry.state === "failed");
+          save(resultPath, result);
+        }
+      }
+    }
     for (const path of request.prerequisiteFiles ?? []) requiredFile(path);
     let cargo;
     if (request.needsCargo) {
@@ -955,6 +990,12 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       result.limitations = "Windows: untracked executable modes and filesystem symlink properties are unverified.";
     }
     save(resultPath, result);
+    // A full gate's detached STARTED receipt means setup and preflight have
+    // succeeded. Setup failure closes with durable evidence, never READY.
+    if (request.full) {
+      try { await onReady?.(); }
+      catch (error) { throw new Error(`detached readiness failed: ${error.message}`); }
+    }
     for (let index = 0; index < request.stages.length; index += 1) {
       const stage = request.stages[index];
       const entry = result.stages[index];
@@ -1063,6 +1104,10 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     result.state = "failed";
     result.exitCode = 1;
     result.error = error.message;
+    if (signal?.aborted || error.interrupted) {
+      result.interrupted = true;
+      result.error = `interrupted: ${String(signal?.reason ?? error.message)}`;
+    } else if (error.setupFailure) result.setupFailure = error.setupFailure;
     for (const stage of result.stages) {
       if (stage.state === "running") {
         stage.state = "failed";
@@ -1100,7 +1145,7 @@ export async function summarize(runDir) {
   // Failure excerpts get first use of the shared budget; earlier successful
   // commands may emit warnings but must not crowd out the actual failure.
   const entries = [
-    ...(result.preflight ?? []).filter((probe) => probe.diagnostics?.text).map((probe) => ({
+    ...(result.preflight ?? []).filter((probe) => probe.diagnostics?.text || probe.error || probe.cleanup).map((probe) => ({
       ...probe,
       failed: probe.code !== 0 || Boolean(probe.error),
       header: `preflight ${probe.name}: exit=${probe.code} log=${probe.log}`,
@@ -1281,6 +1326,14 @@ export async function recoverRun(runDir, env = process.env, {
     return current;
   };
   let result = readResult();
+  const commandEntries = () => [...(result.preflight ?? []), ...result.stages];
+  const requireOwnersExited = () => {
+    for (const entry of commandEntries()) {
+      if (entry.state === "running" && Number.isSafeInteger(entry.processOwner?.pid) && isAlive(entry.processOwner.pid)) {
+        throw new Error(`process owner pid ${entry.processOwner.pid} may still be cleaning up; wait before recovering. If this PID was reused, the run stays UNKNOWN: start a new run instead of editing its evidence (docs/test.md).`);
+      }
+    }
+  };
   let settled = false;
   if (!isTerminal(result)) {
     if (!Number.isSafeInteger(result.pid) || result.pid <= 0) {
@@ -1289,11 +1342,7 @@ export async function recoverRun(runDir, env = process.env, {
     if (isAlive(result.pid)) {
       throw new Error(`worker pid ${result.pid} may still be running; wait for its completion, or see docs/test.md if that pid now belongs to another process`);
     }
-    for (const stage of result.stages) {
-      if (stage.state === "running" && Number.isSafeInteger(stage.processOwner?.pid) && isAlive(stage.processOwner.pid)) {
-        throw new Error(`process owner pid ${stage.processOwner.pid} may still be cleaning up; wait before recovering. If this PID was reused, the run stays UNKNOWN: start a new run instead of editing its evidence (docs/test.md).`);
-      }
-    }
+    requireOwnersExited();
     const lock = join(runDir, "recovery.lock");
     let locked = false;
     try {
@@ -1310,8 +1359,9 @@ export async function recoverRun(runDir, env = process.env, {
         throw new Error(`another recovery of this run is in progress, or one was killed before releasing ${lock}`);
       }
       if (!isTerminal(result)) {
+        requireOwnersExited();
         const interruption = `worker ${result.pid} exited without saving a terminal result`;
-        for (const stage of result.stages) {
+        for (const stage of commandEntries()) {
           if (stage.state === "running") {
             if (stage.processOwner) {
               try {
@@ -1323,7 +1373,9 @@ export async function recoverRun(runDir, env = process.env, {
               }
             }
             stage.state = "failed";
-            stage.error = `interrupted: ${interruption}; this stage's outcome is unknown`;
+            stage.interrupted = true;
+            stage.ended = new Date().toISOString();
+            stage.error = `interrupted: ${interruption}; this command's outcome is unknown`;
           }
         }
         Object.assign(result, {

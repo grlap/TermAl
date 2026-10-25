@@ -28,6 +28,34 @@ describe("body sequence observations", () => {
   });
 });
 
+// The queue hold is derived from retry state that can change without a new
+// mutation stamp, so an equal stamp must not hide its arrival, change or
+// removal, in a full snapshot or in a summary.
+describe("queue hold under an unchanged mutation stamp", () => {
+  const hold: NonNullable<Session["queueHold"]> = { kind: "automaticRetry", cause: "dispatch_budget_exhausted", retryAt: "2026-10-25T04:00:00Z" };
+  const cases: Array<[string, Session["queueHold"], Session["queueHold"]]> = [
+    ["added", undefined, hold],
+    ["changed", hold, { ...hold, retryAt: "2026-10-25T04:00:02Z" }],
+    ["removed", hold, undefined],
+  ];
+  for (const [label, before, after] of cases) {
+    for (const messagesLoaded of [true, false]) {
+      it(`adopts a hold ${label} under the same stamp (messagesLoaded=${messagesLoaded})`, () => {
+        const previous = makeSession("a", { messagesLoaded, queuePaused: true, sessionMutationStamp: 42, queueHold: before });
+        const next = makeSession("a", { messagesLoaded, queuePaused: true, sessionMutationStamp: 42, queueHold: after });
+        const merged = reconcileSingleSession(previous, next);
+        expect(merged).not.toBe(previous);
+        expect(merged.queueHold).toEqual(after);
+      });
+    }
+  }
+  it("keeps the session object when the stamp and the hold are unchanged", () => {
+    const previous = makeSession("a", { queuePaused: true, sessionMutationStamp: 42, queueHold: hold });
+    const next = makeSession("a", { queuePaused: true, sessionMutationStamp: 42, queueHold: { ...hold } });
+    expect(reconcileSingleSession(previous, next)).toBe(previous);
+  });
+});
+
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
     id,

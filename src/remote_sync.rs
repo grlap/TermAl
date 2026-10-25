@@ -939,6 +939,10 @@ fn localize_remote_session_summary(
         pending_prompts: Vec::new(),
         prompt_deliveries: Vec::new(),
         queue_paused: remote_session.queue_paused,
+        // Projected from the local record, which holds no retry records for
+        // a remote proxy (`engram_automatic_retry_hold`); the remote's own
+        // hold is not carried.
+        queue_hold: None,
         provider_capacity_waiting: remote_session.provider_capacity_waiting,
         source_tracking_recovery: remote_session.source_tracking_recovery,
         queue_projection_hash: remote_session.queue_projection_hash.clone(),

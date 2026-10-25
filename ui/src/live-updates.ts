@@ -5,6 +5,7 @@ import type {
   ParallelAgentsMessage,
   Session,
   SessionLiveActivity,
+  SessionQueueHold,
   PendingPrompt,
   TextMessage,
 } from "./types";
@@ -372,24 +373,27 @@ export function applyMetadataOnlySessionDelta(
     delta.type === "messageCreated"
       ? pendingPromptsAfterMessageCreated(session, delta)
       : session.pendingPrompts;
-  const base = {
-    ...session,
-    liveActivity: liveActivityAfterTranscriptDelta(session, delta),
-    messageCount: delta.messageCount,
-    pendingPrompts,
-    queuePaused:
-      delta.type === "messageCreated" && delta.sessionQueue
-        ? delta.sessionQueue.queuePaused
-        : session.queuePaused,
-    queueProjectionHash:
-      delta.type === "messageCreated" && delta.sessionQueue
-        ? delta.sessionQueue.queueProjectionHash ?? session.queueProjectionHash
-        : session.queueProjectionHash,
-    sessionMutationStamp: resolveSessionMutationStamp(
-      session,
-      delta.sessionMutationStamp,
-    ),
-  };
+  const base = withQueueHoldFromDelta(
+    {
+      ...session,
+      liveActivity: liveActivityAfterTranscriptDelta(session, delta),
+      messageCount: delta.messageCount,
+      pendingPrompts,
+      queuePaused:
+        delta.type === "messageCreated" && delta.sessionQueue
+          ? delta.sessionQueue.queuePaused
+          : session.queuePaused,
+      queueProjectionHash:
+        delta.type === "messageCreated" && delta.sessionQueue
+          ? delta.sessionQueue.queueProjectionHash ?? session.queueProjectionHash
+          : session.queueProjectionHash,
+      sessionMutationStamp: resolveSessionMutationStamp(
+        session,
+        delta.sessionMutationStamp,
+      ),
+    },
+    delta.type === "messageCreated" ? delta.sessionQueue : null,
+  );
 
   switch (delta.type) {
     case "messageCreated":
@@ -413,6 +417,35 @@ export function applyMetadataOnlySessionDelta(
         preview: delta.preview,
       };
   }
+}
+
+/** `next` with the queue hold a queue delta carries: the delta's `queueHold`,
+ * a missing one clearing the session's. A delta with no queue changes
+ * nothing, and a session that had no hold keeps its shape. */
+function withQueueHoldFromDelta(
+  next: Session,
+  sessionQueue: { queueHold?: SessionQueueHold | null } | null | undefined,
+): Session {
+  if (!sessionQueue) {
+    return next;
+  }
+  if (sessionQueue.queueHold) {
+    return { ...next, queueHold: sessionQueue.queueHold };
+  }
+  if (next.queueHold == null) {
+    return next;
+  }
+  const cleared = { ...next };
+  delete cleared.queueHold;
+  return cleared;
+}
+
+/** The queue hold a session has after a queue delta. */
+function queueHoldAfterQueueDelta(
+  session: Session,
+  sessionQueue: { queueHold?: SessionQueueHold | null } | null | undefined,
+): SessionQueueHold | null {
+  return sessionQueue ? sessionQueue.queueHold ?? null : session.queueHold ?? null;
 }
 
 function serializedValuesMatch(left: unknown, right: unknown) {
@@ -569,7 +602,11 @@ function messageCreatedDeltaIsNoOp(
       pendingPromptsAfterMessageCreated(session, delta),
     ) &&
     (delta.sessionQueue?.queuePaused ?? session.queuePaused) ===
-      session.queuePaused
+      session.queuePaused &&
+    serializedValuesMatch(
+      queueHoldAfterQueueDelta(session, delta.sessionQueue),
+      session.queueHold ?? null,
+    )
   );
 }
 
@@ -655,30 +692,33 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     delta.messageCount,
   );
 
-  return {
-    ...session,
-    messages: updatedMessages,
-    messagesLoaded:
-      updatedMessages.length >= nextMessageCount
-        ? true
-        : false,
-    messageStartIndex:
-      updatedMessages.length >= nextMessageCount
-        ? 0
-        : retainedTranscriptStartIndex(session),
-    messageCount: nextMessageCount,
-    pendingPrompts,
-    queuePaused: delta.sessionQueue?.queuePaused ?? session.queuePaused,
-    queueProjectionHash:
-      delta.sessionQueue?.queueProjectionHash ?? session.queueProjectionHash,
-    preview: delta.preview,
-    status: delta.status,
-    liveActivity: liveActivityAfterTranscriptDelta(session, delta),
-    sessionMutationStamp: resolveSessionMutationStamp(
-      session,
-      delta.sessionMutationStamp,
-    ),
-  };
+  return withQueueHoldFromDelta(
+    {
+      ...session,
+      messages: updatedMessages,
+      messagesLoaded:
+        updatedMessages.length >= nextMessageCount
+          ? true
+          : false,
+      messageStartIndex:
+        updatedMessages.length >= nextMessageCount
+          ? 0
+          : retainedTranscriptStartIndex(session),
+      messageCount: nextMessageCount,
+      pendingPrompts,
+      queuePaused: delta.sessionQueue?.queuePaused ?? session.queuePaused,
+      queueProjectionHash:
+        delta.sessionQueue?.queueProjectionHash ?? session.queueProjectionHash,
+      preview: delta.preview,
+      status: delta.status,
+      liveActivity: liveActivityAfterTranscriptDelta(session, delta),
+      sessionMutationStamp: resolveSessionMutationStamp(
+        session,
+        delta.sessionMutationStamp,
+      ),
+    },
+    delta.sessionQueue,
+  );
 }
 
 type RetainedMessageTargetResult =

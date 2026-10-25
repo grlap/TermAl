@@ -458,16 +458,41 @@ impl AppState {
         self.finish_mailbox_append_and_notify(sender_session_id, &input.target_session_id, &input, appended)
     }
 
+    /// The disposition of a mailbox wake whose dispatch was held before
+    /// provider hand-off: waiting for the due automatic Engram retry that now
+    /// owns its head, if one does; otherwise `None`, recorded as before.
+    fn mailbox_held_wake_disposition(&self, target_session_id: &str) -> Option<&'static str> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(target_session_id)
+            .map(|index| &inner.sessions[index])
+            .and_then(mailbox_wake_disposition_behind_automatic_retry)
+    }
+
     /// The disposition of a mailbox wake that was queued rather than started:
     /// behind a turn that is running, or held, when no turn runs and the
     /// session's queue is paused (a retained prompt, a Stop, or a failed
     /// mailbox turn). A held wake waits for that hold to clear, not for a
-    /// turn to end.
+    /// turn to end; a hold that a due automatic Engram retry owns clears by
+    /// itself and is named as that retry (`engram_retry_hold.rs`).
     fn mailbox_queued_wake_disposition(&self, target_session_id: &str) -> &'static str {
         let inner = self.inner.lock().expect("state mutex poisoned");
         if inner.find_session_index(target_session_id).is_some_and(|index|
             inner.sessions[index].provider_capacity_retry.as_ref().is_some_and(|retry| retry.due_at.is_some() || (retry.recovering && !retry.dispatched))) {
             return "waitingForProviderCapacity";
+        }
+        if let Some(disposition) = inner
+            .find_session_index(target_session_id)
+            .map(|index| &inner.sessions[index])
+            .filter(|record| {
+                !matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                )
+            })
+            .and_then(mailbox_wake_disposition_behind_automatic_retry)
+        {
+            return disposition;
         }
         let held = inner
             .find_session_index(target_session_id)
@@ -1853,6 +1878,27 @@ impl MailboxStore {
         message_id: &str,
         dispatch_outcome: &str,
     ) -> Result<MailboxDispatchOutcomeRecord> {
+        self.record_initial_dispatch_outcome_advancing(message_id, dispatch_outcome, true)
+    }
+
+    /// Records the receipt's immutable `dispatch_outcome` only, leaving the
+    /// row's wake lifecycle state `durableButNotWoken`, so the never-woken
+    /// recovery still covers it: a wake held before hand-off is not woken,
+    /// whatever its receipt names as the reason (`engram_retry_hold.rs`).
+    fn record_held_dispatch_outcome(
+        &self,
+        message_id: &str,
+        dispatch_outcome: &str,
+    ) -> Result<MailboxDispatchOutcomeRecord> {
+        self.record_initial_dispatch_outcome_advancing(message_id, dispatch_outcome, false)
+    }
+
+    fn record_initial_dispatch_outcome_advancing(
+        &self,
+        message_id: &str,
+        dispatch_outcome: &str,
+        advance_state: bool,
+    ) -> Result<MailboxDispatchOutcomeRecord> {
         let result = (|| {
             let _write_guard = self.lock_internal_writer();
             let mut connection = self.connection()?;
@@ -1895,15 +1941,19 @@ impl MailboxStore {
                     dispatch_outcome: existing_outcome,
                 });
             }
-            let state_advanced = transaction
-                .execute(
-                    "UPDATE mailbox_messages
-                     SET notification_disposition = ?2
-                     WHERE id = ?1
-                       AND notification_disposition = 'durableButNotWoken'",
-                    rusqlite::params![message_id, dispatch_outcome],
-                )
-                .context("failed to advance initial mailbox notification state")?;
+            let state_advanced = if advance_state {
+                transaction
+                    .execute(
+                        "UPDATE mailbox_messages
+                         SET notification_disposition = ?2
+                         WHERE id = ?1
+                           AND notification_disposition = 'durableButNotWoken'",
+                        rusqlite::params![message_id, dispatch_outcome],
+                    )
+                    .context("failed to advance initial mailbox notification state")?
+            } else {
+                0
+            };
             transaction.commit().map_err(|err| {
                 mailbox_sqlite_write_error(
                     "committing initial mailbox dispatch outcome update",

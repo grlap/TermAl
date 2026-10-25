@@ -163,6 +163,30 @@ fn source_observation_pre_intent_conflict_retains_the_new_measurement_before_clo
         request.request["operation"] == "turn_checkpoint").count(), 2);
 }
 
+/// A retired source observation settles its head for an abort retry and holds
+/// admission until an explicit Resume: the retry tick stops at that barrier.
+/// So the head is reported as a paused queue, not as an automatic retry,
+/// both before and after its retry falls due.
+#[test]
+fn source_observation_recovery_hold_is_not_reported_as_an_automatic_retry() {
+    let (claimed, _next) = pre_intent_conflict_fixture("source-observation-hold-projection", false);
+    let due = {
+        let inner = claimed.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&claimed.session_id).unwrap()];
+        let retry = record.engram.abort_retry.as_ref().expect("the retired capture settles an abort retry");
+        assert_eq!(retry.reason, EngramAbortReason::SourceObservation);
+        chrono::DateTime::parse_from_rfc3339(&retry.due_at).unwrap().with_timezone(&chrono::Utc)
+    };
+    crate::tests::engram_retry_hold_projection::assert_plain_pause(
+        &claimed.state, &claimed.session_id, "source observation hold before due");
+    let past = due + chrono::Duration::milliseconds(1);
+    claimed.state.engram_abort_retry_tick(past);
+    claimed.state.engram_abort_retry_tick(past);
+    assert!(claimed.runtime_rx.try_recv().is_err(), "the barrier begins nothing");
+    crate::tests::engram_retry_hold_projection::assert_plain_pause(
+        &claimed.state, &claimed.session_id, "source observation hold after due");
+}
+
 #[test]
 fn source_observation_ambiguous_initial_close_survives_settings_replacement_and_restart() {
     let (claimed, next) = pre_intent_conflict_fixture("source-observation-ambiguous-close", true);

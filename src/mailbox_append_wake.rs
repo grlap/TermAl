@@ -65,6 +65,9 @@ impl AppState {
             }),
         };
 
+        // A wake held before hand-off is not woken: its row stays recoverable
+        // whatever its receipt names (`record_held_dispatch_outcome`).
+        let mut held_before_hand_off = false;
         let disposition = match self.dispatch_turn(target_runtime_session_id, notification_request)
         {
             Ok(DispatchTurnResult::Dispatched(dispatch)) => {
@@ -93,7 +96,10 @@ impl AppState {
                                 error.message
                             );
                         }
-                        None
+                        held_before_hand_off = true;
+                        // A head an automatic retry now owns is named as that
+                        // retry; any other hold stays durable but not woken.
+                        self.mailbox_held_wake_disposition(target_runtime_session_id)
                     }
                     TurnDispatchDeliveryOutcome::Superseded => None,
                 }
@@ -124,7 +130,8 @@ impl AppState {
                                 error.message
                             );
                         }
-                        None
+                        held_before_hand_off = true;
+                        self.mailbox_held_wake_disposition(target_runtime_session_id)
                     }
                     TurnDispatchDeliveryOutcome::Superseded => None,
                 }
@@ -145,10 +152,14 @@ impl AppState {
             }
         };
         let disposition = disposition.unwrap_or("durableButNotWoken");
-        match self
-            .mailbox_store
-            .record_initial_dispatch_outcome(&receipt.message_id, disposition)
-        {
+        let recorded = if held_before_hand_off {
+            self.mailbox_store
+                .record_held_dispatch_outcome(&receipt.message_id, disposition)
+        } else {
+            self.mailbox_store
+                .record_initial_dispatch_outcome(&receipt.message_id, disposition)
+        };
+        match recorded {
             Ok(MailboxDispatchOutcomeRecord::Recorded { .. }) => {
                 receipt.notification_disposition = disposition.to_owned();
             }

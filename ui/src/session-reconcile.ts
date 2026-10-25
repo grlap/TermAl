@@ -266,6 +266,7 @@ function sameSessionSummary(previous: Session, next: Session) {
       (next.liveActivity?.commandStatus ?? null) &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.queueProjectionHash === next.queueProjectionHash &&
+    sameQueueHold(previous.queueHold, next.queueHold) &&
     previous.engramBootRecoveryPending === next.engramBootRecoveryPending &&
     previous.status === next.status &&
     previous.preview === next.preview &&
@@ -274,6 +275,16 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.parentDelegationId === next.parentDelegationId &&
     (previous.messageCount ?? null) === (next.messageCount ?? null) &&
     sameConversationMarkers(previous.markers, next.markers)
+  );
+}
+
+// The queue projection hash covers the latch and the prompts, not the hold's
+// cause or due time, so the hold is compared on its own.
+function sameQueueHold(previous: Session["queueHold"], next: Session["queueHold"]) {
+  return (
+    (previous?.kind ?? null) === (next?.kind ?? null) &&
+    (previous?.cause ?? null) === (next?.cause ?? null) &&
+    (previous?.retryAt ?? null) === (next?.retryAt ?? null)
   );
 }
 
@@ -328,6 +339,8 @@ function reconcileSession(
     previous.sessionMutationStamp === nextSession.sessionMutationStamp &&
     previous.remoteId === nextSession.remoteId &&
     sameOptionalStringArray(previous.promptHistory, nextSession.promptHistory) &&
+    // The hold is derived from retry state that can change under one stamp.
+    sameQueueHold(previous.queueHold, nextSession.queueHold) &&
     (nextSession.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
@@ -374,7 +387,9 @@ function reconcileSummarySession(
     previous.sessionMutationStamp !== undefined &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.remoteId === next.remoteId &&
-    sameOptionalStringArray(previous.promptHistory, next.promptHistory)
+    sameOptionalStringArray(previous.promptHistory, next.promptHistory) &&
+    // The hold is derived from retry state that can change under one stamp.
+    sameQueueHold(previous.queueHold, next.queueHold)
   ) {
     return previous;
   }

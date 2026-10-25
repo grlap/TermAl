@@ -263,6 +263,14 @@ fn stop_begin_before_transmission(
 fn begin_stopped_before_transmission_is_replayed_exactly_and_delivered_once() {
     let (claimed, mut writer, grant, prepared) =
         stop_begin_before_transmission("begin-unsent-replay");
+    // While the replay is due, a wake and the session report it as that
+    // automatic retry, never as a paused queue.
+    crate::tests::engram_retry_hold_projection::assert_automatic_retry_hold(
+        &claimed.state,
+        &claimed.session_id,
+        Some(ENGRAM_BEGIN_REPLAY_CODE),
+        "unsent begin replay",
+    );
     let state = claimed.state.clone();
     let session = claimed.session_id.clone();
     writer.serve(&claimed, |_| false, move || replay_when_due(&state, &session));
@@ -277,6 +285,11 @@ fn begin_stopped_before_transmission_is_replayed_exactly_and_delivered_once() {
     assert!(
         record_of(&claimed, |record| record.queued_prompts.is_empty()),
         "the head was handed to the provider"
+    );
+    crate::tests::engram_retry_hold_projection::assert_no_hold(
+        &claimed.state,
+        &claimed.session_id,
+        "after the replay delivered",
     );
 }
 

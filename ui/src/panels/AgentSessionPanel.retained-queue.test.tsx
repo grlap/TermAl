@@ -1372,6 +1372,53 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(copy).not.toMatch(/resume/i);
     });
 
+    it("names a typed automatic-retry hold by its cause and next time, whatever the preview says", () => {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("session-retry-hold", {
+          status: "idle",
+          queuePaused: true,
+          queueHold: { kind: "automaticRetry", cause: "dispatch_budget_exhausted", retryAt: RETRY_DUE_AT },
+          preview: HELD_PREVIEW,
+          pendingPrompts: [{ id: "held-head", timestamp: "10:00", text: "Held head prompt" }],
+        }),
+        onResumeSessionQueue: vi.fn(),
+        onCancelQueuedPrompt: vi.fn(),
+      });
+
+      expect(screen.getByText("Retrying automatically; no action is needed")).toBeInTheDocument();
+      expect(
+        screen.getByText(`Cause: dispatch_budget_exhausted. Next attempt at ${RETRY_LOCAL_TIME}.`),
+      ).toBeInTheDocument();
+      expect(pausedCardCopy()).not.toMatch(/stopped|holding the queue/i);
+    });
+
+    it("tells an interrupted retained head that an automatic retry owns it, instead of asking to cancel or reconcile", () => {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("session-abort-retry", {
+          status: "idle",
+          queuePaused: true,
+          queueHold: { kind: "automaticRetry", cause: "beginPreparation", retryAt: RETRY_DUE_AT },
+          preview: "Engram: delivery not attempted; retrying automatically.",
+          pendingPrompts: [{
+            id: "abort-head",
+            timestamp: "10:00",
+            text: "Abort retry head",
+            isEngramRetained: true,
+            engramInterrupted: true,
+          }],
+        }),
+        onResumeSessionQueue: vi.fn(),
+        onCancelQueuedPrompt: vi.fn(),
+      });
+
+      expect(
+        screen.getByText(
+          `Engram admission is retrying automatically (beginPreparation, next at ${RETRY_LOCAL_TIME}). Cancel drops the retained prompt.`,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Delivery is interrupted or unknown/)).toBeNull();
+    });
+
     it("shows an automatic retry preview it cannot parse as it is, still asking for nothing", () => {
       const preview = "Engram: waiting for admission; retrying automatically soon.";
       renderPausedQueue(preview, false);

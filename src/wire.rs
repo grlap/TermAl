@@ -817,6 +817,11 @@ struct Session {
     /// distinguish "paused, waiting for the user" from "about to start".
     #[serde(default)]
     queue_paused: bool,
+    /// Why the paused queue is held and when it moves on by itself, while a
+    /// due automatic Engram retry owns its head (`engram_retry_hold.rs`).
+    /// Absent for every other hold, which `queue_paused` alone reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_hold: Option<SessionQueueHold>,
     #[serde(default)]
     provider_capacity_waiting: bool,
     /// Derived from the original session's retained Delete recovery mode.
@@ -884,6 +889,7 @@ impl Session {
             pending_prompts: self.pending_prompts.clone(),
             prompt_deliveries: self.prompt_deliveries.clone(),
             queue_paused: self.queue_paused.clone(),
+            queue_hold: self.queue_hold.clone(),
             provider_capacity_waiting: self.provider_capacity_waiting.clone(),
             source_tracking_recovery: self.source_tracking_recovery.clone(),
             queue_projection_hash: self.queue_projection_hash.clone(),
@@ -976,6 +982,8 @@ struct StateSessionSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     markers: Vec<ConversationMarker>,
     queue_paused: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_hold: Option<SessionQueueHold>,
     #[serde(default)]
     provider_capacity_waiting: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -3438,7 +3446,21 @@ struct SessionQueueDelta {
     pending_prompts: Vec<PendingPrompt>,
     queue_paused: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_hold: Option<SessionQueueHold>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     queue_projection_hash: Option<String>,
+}
+
+/// Why a session's paused queue is held and when it moves on by itself,
+/// while a due automatic Engram retry owns its head: `kind` is
+/// `automaticRetry`, `cause` the retry's code and `retryAt` its next due time
+/// (RFC 3339). Built only by `engram_automatic_retry_hold`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionQueueHold {
+    kind: String,
+    cause: String,
+    retry_at: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

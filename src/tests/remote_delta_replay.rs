@@ -840,6 +840,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
             session_queue: Some(SessionQueueDelta {
                 pending_prompts: Vec::new(),
                 queue_paused: true,
+                queue_hold: None,
                 queue_projection_hash: Some("queue-replay".to_owned()),
             }),
             session_mutation_stamp: Some(11),

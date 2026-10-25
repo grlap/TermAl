@@ -446,6 +446,11 @@ impl AppState {
                         held_changes.push(session_id);
                     }
                     EngramAbortRetryStep::Due => {
+                        // The gates below (and those of each step) are
+                        // mirrored, read-only, by `engram_automatic_retry_hold`
+                        // (engram_retry_hold.rs), which tells a wake and the UI
+                        // whether this retry moves on by itself: keep the two
+                        // in step.
                         if engram_source_observation_holds_admission(&inner, index) {
                             if hold_source_observation_admission(&mut inner.sessions[index]) {
                                 inner.stamp_session_at_index(index);

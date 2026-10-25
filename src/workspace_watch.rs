@@ -13,6 +13,8 @@
 // Extracted from state.rs into its own `include!()` fragment so state.rs
 // stays focused on the core state model.
 
+include!("workspace_watch_observation.rs");
+
 #[cfg(not(test))]
 const WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS: Duration = Duration::from_secs(2);
 #[cfg(not(test))]
@@ -28,10 +30,14 @@ struct WorkspaceFileWatchScope {
 
 #[cfg(not(test))]
 fn run_workspace_file_watcher(state: AppState) {
-    let (event_tx, event_rx) = mpsc::channel::<notify::Result<NotifyEvent>>();
+    let (event_tx, event_rx) = mpsc::channel();
     let mut watcher = match RecommendedWatcher::new(
-        move |result| {
-            let _ = event_tx.send(result);
+        move |result: notify::Result<NotifyEvent>| {
+            let received = result.map(|event| {
+                let observation = WorkspaceWatchObservation::capture(&event);
+                (event, observation)
+            });
+            let _ = event_tx.send(received);
         },
         NotifyConfig::default(),
     ) {
@@ -61,10 +67,9 @@ fn run_workspace_file_watcher(state: AppState) {
         }
 
         match event_rx.recv_timeout(WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS) {
-            Ok(Ok(event)) => {
-                let changes = workspace_file_changes_from_notify_event(&event, &watch_scopes);
-                state.record_active_turn_file_changes(&changes);
-                state.engram_host().workspace_files_changed(&changes);
+            Ok(Ok((event, observation))) => {
+                let changes =
+                    state.process_workspace_watch_event(&event, &observation, &watch_scopes);
                 for change in changes {
                     let key = workspace_file_change_event_key(&change);
                     pending_changes

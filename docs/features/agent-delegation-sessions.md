@@ -1363,7 +1363,9 @@ Receipt `notificationDisposition` is the immutable original dispatch outcome:
 `deliveredToIdleSession`, `queuedBehindActiveTurn`, `heldBehindPausedQueue`
 (no turn runs and the target's queue is paused, see
 [agent mailboxes](agent-mailboxes.md#dispatch-outcome-versus-notification-state)),
-or `durableButNotWoken`; durability does not depend on successful wake delivery.
+`waitingForAutomaticRetry` (the pause is a due automatic Engram retry that
+clears by itself), `waitingForProviderCapacity`, or `durableButNotWoken`;
+durability does not depend on successful wake delivery.
 Mailbox reads expose the evolving wake lifecycle separately as
 `notificationState`, which can additionally be `recoveredWake` and can advance
 to `deliveredToIdleSession`. A duplicate retry with the same stable intent

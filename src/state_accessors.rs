@@ -287,6 +287,7 @@ mod visible_session_hydration_error_tests {
             message_count: 0,
             markers: Vec::new(),
             queue_paused: false,
+            queue_hold: None,
             provider_capacity_waiting: false,
             source_tracking_recovery: false,
             queue_projection_hash: Some("remote-queue-projection".to_owned()),
@@ -675,6 +676,9 @@ impl AppState {
         // derives the projection from it so no code path can publish a
         // stale `queuePaused`, whichever site last flipped the latch.
         session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        // Why it is held, when a due automatic retry owns the head; derived
+        // from the same record authority.
+        session.queue_hold = engram_automatic_retry_hold(record);
         session.source_tracking_recovery = if record.is_local_session() {
             record.engram.source_observation_delete_requested
         } else { record.session.source_tracking_recovery };
@@ -802,6 +806,7 @@ impl AppState {
             // card even before targeted detail hydrates the prompt bodies.
             // Derived from record authority, like the full projection.
             queue_paused: record.orchestrator_auto_dispatch_blocked,
+            queue_hold: engram_automatic_retry_hold(record),
             provider_capacity_waiting: session.provider_capacity_waiting,
             source_tracking_recovery: if record.is_local_session() {
                 record.engram.source_observation_delete_requested
@@ -872,6 +877,7 @@ impl AppState {
         );
         debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
         debug_assert_eq!(summary.queue_paused, full.queue_paused);
+        debug_assert_eq!(summary.queue_hold, full.queue_hold);
         debug_assert_eq!(summary.queue_projection_hash, full.queue_projection_hash);
         debug_assert_eq!(summary.opencode_current_mode, full.opencode_current_mode);
         debug_assert_eq!(summary.opencode_mode_options, full.opencode_mode_options);

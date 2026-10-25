@@ -106,6 +106,7 @@ impl AppState {
             message_count,
             markers,
             queue_paused,
+            queue_hold,
             provider_capacity_waiting,
             source_tracking_recovery,
             queue_projection_hash,
@@ -176,6 +177,9 @@ impl AppState {
             && *engram_boot_recovery_pending == record.engram_boot_recovery_pending
             && *message_count == session_message_count(record)
             && *queue_paused == record.orchestrator_auto_dispatch_blocked
+            // Derived from the record's retry state, which can change without
+            // a mutation stamp (`engram_automatic_retry_hold`).
+            && *queue_hold == engram_automatic_retry_hold(record)
             && *source_tracking_recovery
                 == if local {
                     record.engram.source_observation_delete_requested

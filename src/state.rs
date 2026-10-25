@@ -2275,8 +2275,10 @@ impl SessionRecord {
             self.auto_dispatch_pause_epoch = self.auto_dispatch_pause_epoch.wrapping_add(1);
         }
         if !blocked {
-            // Lifting the pause lifts an operator's pause with it.
+            // Lifting the pause lifts an operator's pause with it, and the
+            // source-observation hold that only an explicit Resume lifts.
             self.engram.operator_paused = false;
+            self.engram.source_observation_admission_held = false;
         }
     }
 

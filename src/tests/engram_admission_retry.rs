@@ -198,11 +198,13 @@ fn dedicated_rework_retry_cleanup_case(predecessor: bool) {
         let before = admission_retry(&state, &session).unwrap();
         let requests = transport.requests().len();
         let preview = with_record(&state, &session, |record| record.session.preview.clone());
-        let (admission_step, bind_step, mut bind_record) = {
+        let (admission_step, bind_step, mut bind_record, held_hold, held_disposition, bind_hold) = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
             let record = &mut inner.sessions[index];
             if predecessor { record.runtime = SessionRuntime::None; }
+            let held_hold = engram_automatic_retry_hold(record);
+            let held_disposition = mailbox_wake_disposition_behind_automatic_retry(record);
             let now = due_time(&before) + chrono::Duration::milliseconds(1);
             assert!(!engram_admission_retry_releases(record, Some(&before.authority)), "cleanup cannot release an admission captured by an earlier tick");
             let admission_step = engram_admission_retry_step(record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
@@ -220,8 +222,9 @@ fn dedicated_rework_retry_cleanup_case(predecessor: bool) {
                 attempts: 1, due_at: before.due_at.clone(), acknowledged: true, held_since: None,
             });
             bind_record.engram.abort_retry_acknowledged = true;
+            let bind_hold = engram_automatic_retry_hold(&bind_record);
             let bind_step = engram_bind_retry_step(&mut bind_record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
-            (admission_step, bind_step, bind_record)
+            (admission_step, bind_step, bind_record, held_hold, held_disposition, bind_hold)
         };
         tick_at(&state, &session, due_time(&before) + chrono::Duration::milliseconds(1));
         let after_tick = admission_retry(&state, &session);
@@ -234,6 +237,7 @@ fn dedicated_rework_retry_cleanup_case(predecessor: bool) {
         retained.tree.terminate(&retained.process, retained.label).unwrap();
         let mut confirmed_record = with_record(&state, &session, |record| record.clone());
         let now = due_time(&before) + chrono::Duration::milliseconds(1);
+        let confirmed_hold = engram_automatic_retry_hold(&confirmed_record);
         let confirmed_admission = engram_admission_retry_step(&mut confirmed_record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
         let confirmed_bind = engram_bind_retry_step(&mut bind_record, Some(&before.authority), now, std::time::Instant::now() + Duration::from_secs(3600));
         {
@@ -253,6 +257,17 @@ fn dedicated_rework_retry_cleanup_case(predecessor: bool) {
         assert_eq!(admission_step, EngramAbortRetryStep::Wait, "cleanup hold must prevent external replay, predecessor={predecessor}");
         assert_eq!(bind_step, EngramAbortRetryStep::Wait, "bind retry must wait for cleanup, predecessor={predecessor}");
         assert_eq!(confirmed_admission, EngramAbortRetryStep::Due, "confirmed cleanup releases the due admission");
+        // The cleanup barrier waits for a Stop or a Delete, so the held queue
+        // is reported as paused, never as an automatic retry; confirmed
+        // cleanup gives the retry its hold back.
+        assert_eq!(held_hold, None, "a cleanup hold is no automatic retry, predecessor={predecessor}");
+        assert_eq!(held_disposition, None, "a wake behind cleanup keeps the paused disposition, predecessor={predecessor}");
+        assert_eq!(bind_hold, None, "a bind retry behind cleanup is no automatic retry, predecessor={predecessor}");
+        assert_eq!(
+            confirmed_hold.map(|hold| (hold.kind, hold.cause, hold.retry_at)),
+            Some(("automaticRetry".to_owned(), before.code.clone(), before.due_at.clone())),
+            "confirmed cleanup projects the due admission retry, predecessor={predecessor}"
+        );
         if !predecessor { assert_eq!(confirmed_bind, EngramAbortRetryStep::Due, "confirmed current owner releases the due bind retry"); }
         assert_eq!(admission_retry(&state, &session), Some(before));
         assert_eq!(with_record(&state, &session, |record| record.session.preview.clone()), preview);
@@ -582,6 +597,34 @@ fn a_defer_returned_by_a_replay_parks_as_a_defer_does() {
     let sent = transport.requests().len();
     tick_at(&state, &session, chrono::Utc::now() + chrono::Duration::hours(2));
     assert_eq!(transport.requests().len(), sent, "a Defer is not replayed by this schedule");
+}
+
+/// The Defer's card delta carries the queue that ended the automatic retry,
+/// with no retry hold: the head now waits for an explicit Resume. (The
+/// replay runs with the latch lifted, so the Defer's latch changes the queue
+/// projection hash here; the card path also attaches the queue whenever the
+/// derived hold alone changes.)
+#[test]
+fn a_defer_returned_by_a_replay_publishes_the_ended_retry_hold() {
+    let (state, session, _receiver, _transport) =
+        parked_after_deadline([defer_reply("authority_busy")]);
+    let mut deltas = state.subscribe_delta_events();
+    tick_past_due(&state, &session);
+    let mut card_queues = Vec::new();
+    while let Ok(payload) = deltas.try_recv() {
+        let delta: Value = serde_json::from_str(&payload).expect("delta should deserialize");
+        if delta["type"] == "messageCreated"
+            && delta["sessionId"] == session.as_str()
+            && delta["message"]["type"] == "engramControl"
+        {
+            card_queues.push(delta["sessionQueue"].clone());
+        }
+    }
+    assert_eq!(card_queues.len(), 1, "one Defer card is published");
+    let queue = &card_queues[0];
+    assert!(queue.is_object(), "the card delta carries the queue whose hold changed: {queue}");
+    assert_eq!(queue["queuePaused"], true);
+    assert!(queue["queueHold"].is_null(), "the ended retry is no longer projected: {queue}");
 }
 
 /// Criterion 2: one attempt per head. While another admission of the head

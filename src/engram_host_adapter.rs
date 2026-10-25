@@ -2928,6 +2928,13 @@ struct EngramSessionState {
     /// stopped rather than as an unknown delivery. Saved with the session; a
     /// different head makes it stale.
     stopped_prompt_id: Option<String>,
+    /// A retained source observation holds admission until an explicit
+    /// Resume (`hold_source_observation_admission`): no retry passes it, so
+    /// none is reported as automatic (`engram_automatic_retry_hold`). Cleared
+    /// with the latch, as an operator's pause is. In memory only: after a
+    /// restart the tick's next pass that meets the hold sets it again, and
+    /// counts that as a change so the session is stamped and republished.
+    source_observation_admission_held: bool,
 }
 
 impl Default for EngramSessionState {
@@ -3021,6 +3028,7 @@ impl Default for EngramSessionState {
             abort_retry_saved: false,
             abort_retry_fence: None,
             stopped_prompt_id: None,
+            source_observation_admission_held: false,
         }
     }
 }
@@ -7002,6 +7010,8 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             let queue_projection_before = Self::queue_projection_hash(record);
+            // The hold is derived from retry state the hash does not cover.
+            let queue_hold_before = engram_automatic_retry_hold(record);
             let defer_is_held = defer_was_decided
                 && record
                     .engram
@@ -7147,12 +7157,15 @@ impl AppState {
             }
             let message_index = push_message_on_record(record, message);
             let mut creates = message_created_delta_parts_for_indices(record, vec![message_index]);
-            let queue_projection_changed =
-                queue_projection_before != Self::queue_projection_hash(record);
+            let queue_hold = engram_automatic_retry_hold(record);
+            let queue_projection_changed = queue_projection_before
+                != Self::queue_projection_hash(record)
+                || queue_hold_before != queue_hold;
             if queue_projection_changed && let Some(created) = creates.last_mut() {
                 created.session_queue = Some(SessionQueueDelta {
                     pending_prompts: record.session.pending_prompts.clone(),
                     queue_paused: record.session.queue_paused,
+                    queue_hold,
                     queue_projection_hash: Some(Self::queue_projection_hash(record)),
                 });
             }

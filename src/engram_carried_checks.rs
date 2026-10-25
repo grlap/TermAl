@@ -2526,6 +2526,21 @@ fn engram_scratch_fence_detail(
     )
 }
 
+// Called only for the first event that actually fences this check. There is
+// no additional event history, durable state, or filesystem access here.
+fn engram_watcher_fence_diagnostic(cause: &str, facts: &str, check: &EngramTurnCheck) -> String {
+    format!(
+        "watcher provenance: {} cause_sha256={} check_key_sha256={} grant_sha256={} check_sequence={} check_started={} fenced={}",
+        engram_truncate_utf8(facts, 900),
+        sha256_hex(cause.as_bytes()),
+        sha256_hex(check.key.as_bytes()),
+        sha256_hex(check.grant_id.as_bytes()),
+        check.sequence,
+        engram_truncate_utf8(&check.started_at, 40),
+        engram_interference_tick(),
+    )
+}
+
 impl AppState {
     /// The workspace watcher saw the files in `changes` change (its ignored
     /// directories, such as `.git`, `target` and `node_modules`, already left
@@ -2537,7 +2552,19 @@ impl AppState {
     /// worktrees are resolved off the state lock, once per distinct directory,
     /// and only while some carried
     /// check is unfenced.
+    #[cfg(test)]
     fn note_engram_workspace_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
+        self.note_engram_observed_workspace_file_changes(
+            changes,
+            &workspace_watch_unknown_observation(),
+        );
+    }
+
+    fn note_engram_observed_workspace_file_changes(
+        &self,
+        changes: &[WorkspaceFileChangeEvent],
+        observation: &str,
+    ) {
         if changes.is_empty() {
             return;
         }
@@ -2679,6 +2706,23 @@ impl AppState {
         if placed.is_empty() && cargo_candidates.is_empty() {
             return;
         }
+        // Prepare bounded routing diagnostics off-lock. Keep the same first
+        // representative event per root and the same conservative fallback.
+        let placed = placed
+            .into_iter()
+            .map(|(worktree, path)| {
+                let root = worktree.as_deref().unwrap_or("unknown");
+                let facts = format!(
+                    "{} routed_root_sha256={} delivered={} routed_root={:?}",
+                    engram_truncate_utf8(observation, 600),
+                    sha256_hex(root.as_bytes()),
+                    engram_interference_tick(),
+                    engram_truncate_utf8(root, 120),
+                );
+                (worktree, path, facts)
+            })
+            .collect::<Vec<_>>();
+        let mut diagnostics = Vec::new();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         for record in inner.sessions.iter_mut() {
             for (worktree, candidate) in &cargo_candidates {
@@ -2711,16 +2755,25 @@ impl AppState {
                     }
                 }
             }
-            for (worktree, path) in &placed {
+            for (worktree, path, facts) in &placed {
                 // The watcher reports late, so its change may have landed
                 // while the run was going, even when the run has ended since.
                 let cause = format!("a file in its worktree changed: {path}");
-                engram_fence_carried_checks_in(
-                    record,
-                    std::slice::from_ref(worktree),
-                    &cause,
-                    true,
-                );
+                for carried in &mut record.engram.carried_checks {
+                    if carried.fence.is_none()
+                        && engram_worktrees_may_hold(
+                            std::slice::from_ref(worktree),
+                            &engram_path_key(&carried.check.target.root),
+                        )
+                    {
+                        let diagnostic = engram_watcher_fence_diagnostic(
+                            &cause, facts, &carried.check,
+                        );
+                        carried.check.watcher_provenance = Some(diagnostic.clone());
+                        diagnostics.push(diagnostic);
+                        carried.fence = Some(cause.clone());
+                    }
+                }
                 // A full gate still being launched carries the change into its
                 // fence once carried.
                 for check in &mut record.engram.active_turn_checks {
@@ -2732,11 +2785,16 @@ impl AppState {
                             &engram_path_key(&check.target.root),
                         )
                     {
+                        let diagnostic = engram_watcher_fence_diagnostic(&cause, facts, check);
+                        check.watcher_provenance = Some(diagnostic.clone());
+                        diagnostics.push(diagnostic);
                         check.watcher_fence = Some(cause.clone());
                     }
                 }
             }
         }
+        drop(inner);
+        self.publish_workspace_watch_diagnostics(diagnostics);
     }
 
     /// Finds the run of every carried check not yet read as terminal, and

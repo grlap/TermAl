@@ -1244,6 +1244,7 @@ const SessionConversationPage = memo(
       <QueuePausedIndicator
         agent={session.agent}
         preview={session.preview}
+        queueHold={session.queueHold}
         queuedCount={actionableQueuedCount}
         onResume={() => onResumeSessionQueue?.(session.id)}
       />
@@ -1272,9 +1273,11 @@ const SessionConversationPage = memo(
                 <div className="card-label">Prompt retained</div>
                 <p>{session.sourceTrackingRecovery
                   ? "Prompt retained during source tracking recovery. Recovery does not send this prompt."
-                  : prompt.engramInterrupted
+                  : prompt.engramInterrupted && !session.queueHold
                   ? "Delivery is interrupted or unknown. Cancel this retained prompt or reconcile it before continuing."
-                  : retainedPromptHoldText(resolveQueuePauseCause(session.preview))}</p>
+                  : retainedPromptHoldText(
+                      resolveQueuePauseCause(session.preview, session.queueHold),
+                    )}</p>
                 {!retainedBodyIsVisible ? (
                   <PendingPromptCard
                     prompt={prompt}

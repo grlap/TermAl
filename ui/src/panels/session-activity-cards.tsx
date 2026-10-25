@@ -68,20 +68,23 @@ export function SessionActivityStrip(options: SessionActivityOptions) {
 
 // A paused queue is actionable transcript content, not transient activity.
 // Keep Resume beside the queued prompts until the backend releases its latch.
-// The text names why the queue is paused, from the session preview.
+// The text names why the queue is paused, from the typed queue hold a due
+// automatic retry carries, else from the session preview.
 export function QueuePausedIndicator({
   agent,
   preview,
+  queueHold,
   queuedCount,
   onResume,
 }: {
   agent: Session["agent"];
   preview: string;
+  queueHold?: Session["queueHold"];
   queuedCount: number;
   onResume?: () => void;
 }) {
   const { heading, detail, waiting } = queuePausedCardText(
-    resolveQueuePauseCause(preview),
+    resolveQueuePauseCause(preview, queueHold),
     agent,
     queuedCount,
   );

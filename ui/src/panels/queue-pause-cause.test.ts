@@ -106,3 +106,46 @@ describe("retainedPromptHoldText", () => {
     }
   });
 });
+
+describe("a typed automatic-retry hold", () => {
+  // The session's `queueHold`, which the backend projects while a due
+  // automatic Engram retry owns the queue head.
+  const HOLD = { kind: "automaticRetry", cause: "begin_preparation_pending", retryAt: DUE_AT } as const;
+  // A real retry preview the preview parser cannot read.
+  const PREPARATION = `Engram: waiting for admission; retrying automatically (the prepared begin awaits its durable acknowledgement; nothing sent), attempt 1, next at ${DUE_AT}. Automatic recovery ends at ${DUE_AT}.`;
+
+  it("names the cause and the next attempt from the hold, whatever the preview says", () => {
+    for (const preview of [PREPARATION, HELD, ""]) {
+      expect(resolveQueuePauseCause(preview, HOLD)).toEqual({
+        kind: "automaticRetry",
+        preview,
+        cause: "begin_preparation_pending",
+        nextAt: LOCAL_TIME,
+      });
+    }
+  });
+
+  it("tells the paused-queue card that nobody needs to act", () => {
+    expect(queuePausedCardText(resolveQueuePauseCause(HELD, HOLD), "Claude", 1)).toEqual({
+      heading: "Retrying automatically; no action is needed",
+      detail: `Cause: begin_preparation_pending. Next attempt at ${LOCAL_TIME}.`,
+      waiting: "1 prompt waiting.",
+    });
+  });
+
+  it("tells the retained-prompt card the same, without asking for Resume", () => {
+    expect(retainedPromptHoldText(resolveQueuePauseCause(PREPARATION, HOLD))).toBe(
+      `Engram admission is retrying automatically (begin_preparation_pending, next at ${LOCAL_TIME}). Cancel drops the retained prompt.`,
+    );
+  });
+
+  it("reads the preview as before when there is no hold", () => {
+    expect(resolveQueuePauseCause(HELD, null)).toEqual({ kind: "engramHeld", preview: HELD });
+    expect(resolveQueuePauseCause(RETRY, undefined)).toEqual({
+      kind: "engramRetrying",
+      preview: RETRY,
+      retry: { attempt: 3, nextAt: LOCAL_TIME },
+    });
+    expect(resolveQueuePauseCause("Turn stopped by user.", null)).toEqual({ kind: "stopped" });
+  });
+});

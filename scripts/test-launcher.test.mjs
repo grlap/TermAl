@@ -56,6 +56,7 @@ import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 import { registerLauncherRegistrationTests, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
 import { registerLauncherLifecycleTests } from "./test-launcher-lifecycle-tests.mjs";
+import { writeUiBootstrapFixture } from "./test-ui-bootstrap-fixtures.mjs";
 
 const fixtureEnv = {
   ...process.env,
@@ -69,7 +70,7 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 // Both private launcher copies must include its complete runtime dependency
 // closure, including the native helpers selected only when a stage executes.
 const copiedLauncherFiles = Object.freeze([
-  "test-launcher.mjs", "test-run-registration.mjs", "review-freeze-fingerprint.mjs",
+  "test-launcher.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs", "review-freeze-fingerprint.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
   "test-categories-plan.mjs", "test-counts.mjs", "test-process-owner.mjs",
   "test-command-progress.mjs", "test-process-owner-posix.mjs",
@@ -154,7 +155,8 @@ async function repository(t, callback, sourceEnv = fixtureEnv, directory = testT
     execFileSync("git", ["config", name, value], { cwd: root, env });
   }
   writeFileSync(join(root, "tracked.txt"), "baseline\n");
-  execFileSync("git", ["add", "tracked.txt"], { cwd: root, env });
+  Object.assign(env, writeUiBootstrapFixture(root, join(root, ".git")));
+  execFileSync("git", ["add", "--", "tracked.txt", ".gitignore", "ui/package.json", "ui/package-lock.json"], { cwd: root, env });
   execFileSync("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "baseline"], {
     cwd: root,
     env,
@@ -308,6 +310,29 @@ for (const [label, statfs] of [
   });
 }
 
+test("detached setup failure closes before readiness and sends one named terminal failure", async (t) => {
+  await isolatedDetachedRepository(t, async (root, sourceEnv, notificationMarker) => {
+    const env = { ...sourceEnv, FIXTURE_UI_MODE: "fail" };
+    const marker = join(root, ".git", "must-not-run");
+    const runDir = await createRun({ root, full: true, detached: true,
+      stages: [stage("typescript", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`)],
+      notifyTo: "fixture-coordinator",
+    }, env);
+    writeDiskCapacityFixture(root, 200n * GiB);
+    await assert.rejects(startDetachedRun(runDir, env), /closed before readiness.*UI dependency setup failed/su);
+    const saved = json(join(runDir, "results.json"));
+    assert.equal(saved.setupFailure.phase, "npm-ci");
+    assert.equal(saved.preflight.find(({ name }) => name === "ui-dependencies").code, 23);
+    assert.deepEqual(saved.stages.map(({ state }) => state), ["unrun"]);
+    const notifications = readFileSync(notificationMarker, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(notifications.length, 1);
+    assert.match(notifications[0].body, /^FAIL /u);
+    assert.match(notifications[0].body, /UI dependency setup failed \(npm-ci\)/u);
+    assert.match(readFileSync(join(runDir, "launcher.log"), "utf8"), /UI dependency setup failed/u);
+    assert.equal(existsSync(marker), false);
+  });
+});
+
 for (const detached of [false, true]) {
   for (const unavailable of [false, true]) {
     test(`disk space refusal leaves ${detached ? "detached" : "foreground"} full gate unrun: ${unavailable ? "unknown" : "below floor"}`, async (t) => {
@@ -324,8 +349,7 @@ for (const detached of [false, true]) {
         if (detached) {
           // The real detached worker gets a native-fs fixture, not an env bypass.
           writeDiskCapacityFixture(root, unavailable ? null : 49n * GiB);
-          const worker = await startDetachedRun(runDir, env);
-          assert.deepEqual(await workerExit(worker), { code: 1, signal: null });
+          await assert.rejects(startDetachedRun(runDir, env), /closed before readiness/u);
           const notifications = readFileSync(notificationMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
           assert.equal(notifications.length, 1);
           assert.match(notifications[0].body, /^FAIL /u);
@@ -922,7 +946,7 @@ test("a whole-suite live stage is judged by its exit alone, as before", async (t
 test("stage cwd controls the real child directory and relative file lookup", async (t) => {
   await repository(t, async (root, registrationFixtureEnv) => {
     const ui = join(root, "ui");
-    mkdirSync(ui);
+    mkdirSync(ui, { recursive: true });
     writeFileSync(join(ui, "relative-fixture.txt"), "ui-relative\n");
     const source = `
       const assert = require('node:assert/strict');
