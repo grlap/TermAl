@@ -38,6 +38,11 @@ mod credit_outcomes {
 #[path = "engram_overlap_cause.rs"]
 mod overlap_cause;
 
+// How a watcher-seen change is judged by its own time against a gate's
+// launch, a child module so this file does not grow further.
+#[path = "engram_watcher_change_time.rs"]
+mod watcher_change_time;
+
 #[path = "engram_cargo_target_sibling.rs"]
 mod cargo_target_sibling;
 
@@ -3426,7 +3431,8 @@ fn a_tmp_naming_path_that_fences_states_the_scratch_tests_inputs_in_the_cause() 
             fence,
             format!(
                 "a file in its worktree changed: {} (not left out as scratch: routed to {}; \
-                 worktree root {}; directory {}, which {existed} when resolved)",
+                 worktree root {}; directory {}, which {existed} when resolved); \
+                 modification time unknown",
                 path.to_string_lossy(),
                 engram_path_key(&root),
                 engram_exact_path_key(&root),

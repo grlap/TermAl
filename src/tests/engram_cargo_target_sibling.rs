@@ -221,6 +221,109 @@ fn cargo_target_sibling_arriving_after_off_lock_settlement_is_not_credited() {
 }
 
 #[test]
+fn cargo_target_sibling_notified_before_the_launch_but_handled_in_settlement_is_deferred() {
+    // The same delivery during off-lock settlement as above, but of a
+    // notification that reached the host before the launch: the settlement
+    // already under way never judged it, so the gate stays carried for the
+    // next one, which credits it because target/ is a directory.
+    let (turn, worktree) = named_turn("cargo-target-prelaunch-late");
+    fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
+    fs::create_dir(worktree.join("target")).unwrap();
+    let before = engram_watcher_arrival_now();
+    launch_gate(&turn, &worktree, false);
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let runtime_token = turn.record(|record| record.runtime.runtime_token().unwrap());
+    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
+    let finishing = {
+        let state = turn.state.clone();
+        let session_id = turn.session_id.clone();
+        std::thread::spawn(move || {
+            state
+                .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
+                .unwrap();
+        })
+    };
+    gate.wait_until_claimed();
+    let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
+    turn.state.note_engram_workspace_file_changes_observed(
+        &[change(
+            &watched.join("targetAb1234"),
+            WorkspaceFileChangeKind::Deleted,
+        )],
+        Some(before),
+    );
+    gate.release();
+    finishing.join().unwrap();
+    let checkpoint = turn
+        .transport
+        .requests()
+        .into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .unwrap()
+        .request;
+    assert!(
+        checkpoint.get("verification_evidence").is_none(),
+        "the settlement that missed the candidate credits nothing: {checkpoint:#}"
+    );
+    let carried = turn.record(|record| record.engram.carried_checks[0].clone());
+    assert!(
+        carried.fence.is_none()
+            && carried.check.watcher_exempted.is_none()
+            && carried
+                .check
+                .watcher_cargo_candidates
+                .iter()
+                .any(|candidate| candidate.before_launch),
+        "the gate stays carried with the pre-launch candidate for its next settlement"
+    );
+    match engram_settle_carried_check(
+        &carried,
+        &Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        std::time::Instant::now() + DEADLOCK_GUARD,
+    ) {
+        Ok(Some(_)) => {}
+        Ok(None) => panic!("the next settlement's snapshots were not ready"),
+        Err(why) => panic!("target/ is a directory, so the candidate is credited: {why}"),
+    }
+}
+
+#[test]
+fn cargo_target_sibling_notified_after_registration_but_before_a_late_stamp_is_credited() {
+    // The run registers, Cargo makes its temporary sibling, and only then is
+    // the delayed command start stamped: the notification falls between the
+    // run's registration and the stamp. A sibling takes no timing exemption;
+    // it is judged by target/ at terminal settlement as always.
+    let (turn, worktree) = named_turn("cargo-target-between-registration-and-stamp");
+    fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
+    let directory = review_runs(&worktree).join("test-carried");
+    fs::create_dir_all(&directory).unwrap();
+    engram_note_run_registered(&fs::canonicalize(&directory).unwrap());
+    let arrival = engram_watcher_arrival_now();
+    launch_gate(&turn, &worktree, false);
+    let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
+    let sibling = watched.join("targetAb1234");
+    fs::create_dir(&sibling).unwrap();
+    fs::rename(&sibling, watched.join("target")).unwrap();
+    turn.state.note_engram_workspace_file_changes_observed(
+        &[change(&sibling, WorkspaceFileChangeKind::Created)],
+        Some(arrival),
+    );
+    assert!(
+        turn.record(|record| record.engram.carried_checks[0].fence.is_none()
+            && record.engram.carried_checks[0]
+                .check
+                .watcher_exempted
+                .is_none()),
+        "a sibling is kept as a candidate, not exempted"
+    );
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    let checkpoint = turn.finish();
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+}
+
+#[test]
 fn cargo_target_sibling_similar_source_names_still_fence_a_carried_gate() {
     for relative in [
         "targets.txt",

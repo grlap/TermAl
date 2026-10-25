@@ -549,6 +549,9 @@ impl AppState {
                 inner
                     .test_run_registrations
                     .insert(request.run_id.clone(), registration.clone());
+                // The launcher fingerprints its input and runs its stages
+                // only after this; a replay keeps the first registration's place.
+                EngramHost::note_test_run_registered(&run_directory);
                 registration
             };
             diagnostics.enter("persist_enqueue");

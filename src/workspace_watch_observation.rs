@@ -97,11 +97,15 @@ impl AppState {
     }
 
     // The production watcher and tests use the same conversion and handoff.
-    // UI publication/coalescing remains owned by the watcher loop.
+    // UI publication/coalescing remains owned by the watcher loop. `arrival`
+    // is when the notification reached the host, taken in the notify callback
+    // (`EngramHost::watcher_arrival_now`); the Engram fence orders it against
+    // a check's launch. The observation stays diagnostic only.
     fn process_workspace_watch_event(
         &self,
         event: &notify::Event,
         observation: &WorkspaceWatchObservation,
+        arrival: EngramWatcherArrival,
         scopes: &[WorkspaceFileWatchScope],
     ) -> Vec<WorkspaceFileChangeEvent> {
         let processed = engram_interference_tick();
@@ -113,7 +117,7 @@ impl AppState {
         let facts = observation.processing(processed, started_at);
         self.record_active_turn_file_changes(&changes);
         self.engram_host()
-            .observed_workspace_files_changed(&changes, &facts);
+            .observed_workspace_files_changed(&changes, &facts, Some(arrival));
         changes
     }
 }

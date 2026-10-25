@@ -204,8 +204,13 @@ change twelve existing source files: the last two call sites above
   loss only from a revision gap, and only if a later event arrives.
 - **Two consumers run per watcher event under the state lock.** The watcher
   thread calls `record_active_turn_file_changes` and
-  `note_engram_workspace_file_changes` for every notify event
-  (`workspace_watch.rs:66`, `:67`), before its 250 ms coalescing (`:19`).
+  `EngramHost::workspace_files_changed` (which delegates to
+  `note_engram_workspace_file_changes_observed`) for every notify event, before
+  its 250 ms coalescing. The notify callback stamps each event's arrival in the
+  host's watcher order (`EngramHost::watcher_arrival_now`,
+  `engram_watcher_order.rs`) before the event waits behind earlier ones, so a
+  change notified before a gate's launch is judged by that arrival, not by
+  when it was handled.
 
 ### 2.6 Check facts the design must keep
 

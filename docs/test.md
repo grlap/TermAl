@@ -725,7 +725,20 @@ claim's named source root, not every worktree on the host); by a file edit
 reported by another session that works there; by any
 file edit the holding session reports; and by any file change TermAl's
 workspace watcher sees there, except under the worktree's own `.tmp/`
-scratch directory. Once the gate is carried, another session being in a turn
+scratch directory and except a change whose notification reached TermAl
+before both the gate's launch and its run's registration with TermAl (which
+the launcher makes before it fingerprints its input or runs any stage): the
+run then never read the tree before the change, however long the
+notification waited to be handled. The changed file's own modification time
+is not trusted for this, since tools and renames can give it an old one, nor
+is the wall clock, which can step backward: TermAl orders notifications,
+launches and registrations on its own counter, held in memory only, so a
+run registered before a TermAl restart takes no such exemption. A gate
+settled by its reported end, such as a Codex test still running when its
+turn closed, takes none either. A refusal for a watcher change outside
+Cargo's temporary target siblings names the file's modification time, or
+says it is unknown, and when the notification reached TermAl. Once the gate
+is carried, another session being in a turn
 refuses nothing by itself. At the launch it does: a gate launched while
 another writable session is in a turn in that worktree, or while another
 command of the holder is running, is not carried at all. TermAl says which

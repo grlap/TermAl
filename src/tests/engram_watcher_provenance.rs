@@ -29,9 +29,13 @@ fn watcher_provenance_source_refusal_retains_available_and_unknown_facts() {
     let fence = turn
         .record(|record| record.engram.carried_checks[0].fence.clone())
         .expect("the uncertain source event must still fence the run");
+    // No arrival and no modification time: the cause says both are unknown.
     assert_eq!(
         fence,
-        format!("a file in its worktree changed: {}", path.display())
+        format!(
+            "a file in its worktree changed: {}; modification time unknown",
+            path.display()
+        )
     );
     let diagnostic = turn
         .record(|record| {
@@ -96,12 +100,18 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
     let private_info = "private backend detail".repeat(10_000);
     event.attrs.set_info(&private_info);
     // Receipt can precede check registration while handling is delayed.
-    // This is diagnostic ordering only, not a safe credit exemption.
+    // The observation's receipt clock is diagnostic ordering only, not a
+    // credit exemption. The Engram arrival given here follows the launch, so
+    // the change fences; an arrival before a launch is judged by its own
+    // order (src/tests/engram_watcher_change_time.rs).
     let observation = WorkspaceWatchObservation::capture(&event);
     launch_gate(&turn, &worktree, false);
-    let changes = turn
-        .state
-        .process_workspace_watch_event(&event, &observation, &[]);
+    let changes = turn.state.process_workspace_watch_event(
+        &event,
+        &observation,
+        EngramHost::watcher_arrival_now(),
+        &[],
+    );
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].kind, WorkspaceFileChangeKind::Modified);
     let delivered_path = normalize_user_facing_path(&path);
@@ -110,9 +120,14 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
     let legacy_fence = turn
         .record(|record| record.engram.carried_checks[0].fence.clone())
         .unwrap();
-    assert_eq!(
-        legacy_fence,
-        format!("a file in its worktree changed: {}", delivered_path.display())
+    // The converted event carries the file's modification time and the
+    // notification's arrival, both named in the cause.
+    assert!(
+        legacy_fence.starts_with(&format!(
+            "a file in its worktree changed: {}; modified at ",
+            delivered_path.display()
+        )) && legacy_fence.contains(", seen at "),
+        "{legacy_fence}"
     );
     let fence = turn
         .record(|record| {
@@ -162,6 +177,7 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
     turn.state.process_workspace_watch_event(
         &another,
         &WorkspaceWatchObservation::capture(&another),
+        EngramHost::watcher_arrival_now(),
         &[],
     );
     assert_eq!(
@@ -224,6 +240,7 @@ fn watcher_provenance_real_source_edits_replacements_and_renames_remain_fenced()
         turn.state.process_workspace_watch_event(
             &event,
             &WorkspaceWatchObservation::capture(&event),
+            EngramHost::watcher_arrival_now(),
             &[],
         );
         finish_run(&worktree, "passed", &"f".repeat(64));
@@ -241,6 +258,7 @@ fn watcher_provenance_other_worktree_and_access_events_do_not_gain_a_fence() {
     turn.state.process_workspace_watch_event(
         &elsewhere,
         &WorkspaceWatchObservation::capture(&elsewhere),
+        EngramHost::watcher_arrival_now(),
         &[],
     );
     let access = notify::Event::new(notify::EventKind::Access(notify::event::AccessKind::Any))
@@ -250,6 +268,7 @@ fn watcher_provenance_other_worktree_and_access_events_do_not_gain_a_fence() {
             .process_workspace_watch_event(
                 &access,
                 &WorkspaceWatchObservation::capture(&access),
+                EngramHost::watcher_arrival_now(),
                 &[]
             )
             .is_empty()

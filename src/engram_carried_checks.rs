@@ -1095,6 +1095,15 @@ fn engram_settle_carried_check(
         if let Some(candidate) = carried.check.watcher_cargo_candidates.first() {
             return Err(format!("a file in its worktree changed: {}", candidate.path));
         }
+        // A watcher change exempted while it launched holds only against a
+        // run's registration, which a test settled by its reported end has
+        // none of: it refuses the test, as an inherited candidate does.
+        if let Some((exempted, _)) = &carried.check.watcher_exempted {
+            return Err(format!(
+                "{exempted} (notified before the launch was stamped, but a test settled by \
+                 its reported end has no run registration to show the change preceded it)"
+            ));
+        }
         return engram_settle_reported_end(carried, deadline);
     }
     if carried.ambiguous {
@@ -1119,6 +1128,22 @@ fn engram_settle_carried_check(
         return Err("its run was not found".to_owned());
     };
     let verdict = engram_read_carried_run(directory, digest).map_err(str::to_owned)?;
+    // A watcher change whose notification arrived before the launch stamp did
+    // not fence the gate. The stamp can lag the launcher's own start, so that
+    // holds only when the run registered with this host after the latest
+    // such arrival, in the watcher order: the launcher registers before it
+    // fingerprints its input or runs any stage, so the run never read the
+    // tree before the change. No wall clock decides this; a run this process
+    // never saw register, as before a restart, takes no exemption.
+    if let Some((exempted, latest)) = &carried.check.watcher_exempted {
+        let registered = engram_run_registration_order(directory);
+        if !registered.is_some_and(|registered| *latest < registered) {
+            return Err(format!(
+                "{exempted} (notified before the launch was stamped, but not before its run \
+                 registered with this host, so the change may have reached it)"
+            ));
+        }
+    }
     // A test may hold this settlement's snapshot and decide its deadline
     // (`install_test_engram_settlement_hold`).
     #[cfg(test)]
@@ -1831,21 +1856,12 @@ fn engram_fence_carried_checks(
     worktrees: &[Option<String>],
     cause: &str,
 ) {
-    engram_fence_carried_checks_in(record, worktrees, cause, false);
-}
-
-/// As `engram_fence_carried_checks`, fencing a check read as terminal too
-/// when `even_after_end`: for a write reported late, which may have landed
-/// while the run was going (the workspace watcher's).
-fn engram_fence_carried_checks_in(
-    record: &mut SessionRecord,
-    worktrees: &[Option<String>],
-    cause: &str,
-    even_after_end: bool,
-) {
+    // The workspace watcher's late reports fence ended checks too, judged by
+    // when their notification reached the host
+    // (`note_engram_workspace_file_changes_observed`).
     for carried in &mut record.engram.carried_checks {
         if carried.fence.is_none()
-            && (even_after_end || !carried.ended())
+            && !carried.ended()
             && engram_worktrees_may_hold(worktrees, &engram_path_key(&carried.check.target.root))
         {
             carried.fence = Some(cause.to_owned());
@@ -2142,6 +2158,39 @@ fn engram_take_settled_carried_checks(
             // root loss, terminal conflict and six-hour expiry were checked
             // above, on every checkpoint, before this deferral.
         }
+        // Settlement ran off-lock. A watcher change exempted since was not
+        // judged against the run's registration by that copy, so the check stays
+        // carried: the next checkpoint settles it with the exemption visible.
+        // Only notifications that arrived before the launch are exempted, so
+        // this defers a bounded number of times.
+        let exempted_since = matches!(
+            &outcome,
+            Some(Ok(Some(resolved)))
+                if carried.check.watcher_exempted.is_some()
+                    && carried.check.watcher_exempted != resolved.check.watcher_exempted
+        );
+        // Likewise a Cargo sibling candidate that arrived since, when every
+        // such candidate was notified before the launch: the next checkpoint
+        // judges it by `target/`. Any other new candidate refuses below.
+        let candidates_since = matches!(
+            &outcome,
+            Some(Ok(Some(resolved)))
+                if carried.check.watcher_cargo_candidates
+                    != resolved.check.watcher_cargo_candidates
+                    && carried
+                        .check
+                        .watcher_cargo_candidates
+                        .iter()
+                        .filter(|candidate| {
+                            !resolved.check.watcher_cargo_candidates.contains(candidate)
+                        })
+                        .all(|candidate| candidate.before_launch)
+        );
+        let outcome = if exempted_since || candidates_since {
+            None
+        } else {
+            outcome
+        };
         match outcome {
             Some(Ok(Some(resolved))) if same_claim == Some(true) => {
                 // Settlement ran off-lock. A newly arrived candidate was not
@@ -2154,6 +2203,7 @@ fn engram_take_settled_carried_checks(
                         .iter()
                         .find(|candidate| {
                             !resolved.check.watcher_cargo_candidates.contains(candidate)
+                                && !candidate.before_launch
                         })
                         .map(|candidate| candidate.path.as_str())
                         .unwrap_or("an unknown path");
@@ -2485,6 +2535,12 @@ fn engram_is_cargo_target_sibling(worktree: &str, directory_key: &str, name: Opt
 struct EngramCargoTargetCandidate {
     root: String,
     path: String,
+    /// On a check: its notification arrived before that check's launch stamp
+    /// (`engram_watcher_change_may_follow_launch`). Such a candidate that
+    /// reaches a gate while its settlement runs off the lock defers that
+    /// settlement rather than refusing it; it is judged by `target/` at the
+    /// next one, like any candidate. False for every other arrival.
+    before_launch: bool,
 }
 
 /// Same bound as the watcher's directory batch, applied across notifications
@@ -2542,28 +2598,47 @@ fn engram_watcher_fence_diagnostic(cause: &str, facts: &str, check: &EngramTurnC
 }
 
 impl AppState {
-    /// The workspace watcher saw the files in `changes` change (its ignored
-    /// directories, such as `.git`, `target` and `node_modules`, already left
-    /// out): a carried check whose worktree holds one of them is fenced, with
-    /// the path. A change under the `.tmp/` of its own worktree is left out
-    /// too (`engram_is_worktree_scratch`). Cargo's root-level temporary
-    /// target-directory siblings are kept pending until terminal settlement
-    /// (`engram_is_cargo_target_sibling`). The
-    /// worktrees are resolved off the state lock, once per distinct directory,
-    /// and only while some carried
-    /// check is unfenced.
+    /// As `note_engram_observed_workspace_file_changes`, with no diagnostic
+    /// observation and an unknown arrival: it fences as any change.
     #[cfg(test)]
     fn note_engram_workspace_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
+        self.note_engram_workspace_file_changes_observed(changes, None);
+    }
+
+    /// As `note_engram_observed_workspace_file_changes`, with no diagnostic
+    /// observation, for a notification that arrived at `arrival`.
+    #[cfg(test)]
+    fn note_engram_workspace_file_changes_observed(
+        &self,
+        changes: &[WorkspaceFileChangeEvent],
+        arrival: Option<EngramWatcherArrival>,
+    ) {
         self.note_engram_observed_workspace_file_changes(
             changes,
             &workspace_watch_unknown_observation(),
+            arrival,
         );
     }
 
+    /// The workspace watcher saw the files in `changes` change, in a
+    /// notification that arrived at `arrival` (its ignored directories, such
+    /// as `.git`, `target` and `node_modules`, already left out): a carried
+    /// check whose worktree holds one of them is fenced, with the path,
+    /// unless the notification arrived before the check's launch
+    /// (`engram_watcher_change_may_follow_launch`), when the change is kept
+    /// as exempted for settlement to judge. A change under the `.tmp/` of
+    /// its own worktree is left out too (`engram_is_worktree_scratch`).
+    /// Cargo's root-level temporary target-directory siblings are kept
+    /// pending until terminal settlement (`engram_is_cargo_target_sibling`).
+    /// The worktrees are resolved off the state lock, once per distinct
+    /// directory, and only while some carried check is unfenced. A fence
+    /// records the bounded watcher `observation` as its provenance
+    /// (`engram_watcher_fence_diagnostic`); the observation decides nothing.
     fn note_engram_observed_workspace_file_changes(
         &self,
         changes: &[WorkspaceFileChangeEvent],
         observation: &str,
+        arrival: Option<EngramWatcherArrival>,
     ) {
         if changes.is_empty() {
             return;
@@ -2600,7 +2675,11 @@ impl AppState {
         let mut cargo_candidates = Vec::new();
         let placed = if directories.len() > ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT {
             // Too many places to resolve: any carried check may be touched.
-            vec![(None, format!("{} files changed at once", changes.len()))]
+            vec![(
+                None,
+                format!("{} files changed at once", changes.len()),
+                engram_watcher_changes_latest_mtime(changes),
+            )]
         } else {
             // Each directory once: its worktree key for routing the fence.
             let resolved: Vec<(PathBuf, String)> = directories
@@ -2629,7 +2708,9 @@ impl AppState {
             // fences states all of these in its cause, so the holder sees why
             // the exemption did not apply without the host's stderr.
             let mut exact: Vec<(PathBuf, String, String, String, bool)> = Vec::new();
-            let mut placed: Vec<(Option<String>, String)> = Vec::new();
+            // Per worktree: its key, the change its cause names, and that
+            // change's modification time.
+            let mut placed: Vec<(Option<String>, String, Option<u64>)> = Vec::new();
             for change in changes {
                 let path = FsPath::new(&change.path);
                 let directory = path.parent().unwrap_or(path);
@@ -2678,6 +2759,7 @@ impl AppState {
                             EngramCargoTargetCandidate {
                                 root: root_exact.clone(),
                                 path: change.path.clone(),
+                                before_launch: false,
                             },
                         ));
                         continue;
@@ -2693,12 +2775,20 @@ impl AppState {
                         ));
                     }
                 }
-                if !placed
-                    .iter()
-                    .any(|(known, _)| known.as_deref() == Some(worktree.as_str()))
+                let shown = shown.unwrap_or_else(|| change.path.clone());
+                match placed
+                    .iter_mut()
+                    .find(|(known, ..)| known.as_deref() == Some(worktree.as_str()))
                 {
-                    let shown = shown.unwrap_or_else(|| change.path.clone());
-                    placed.push((Some(worktree.clone()), shown));
+                    // The cause names a worktree's latest change; whether it
+                    // fences a check is decided by the notification's arrival.
+                    Some(entry) => {
+                        if engram_watcher_change_is_later(change.mtime_ms, entry.2) {
+                            entry.1 = shown;
+                            entry.2 = change.mtime_ms;
+                        }
+                    }
+                    None => placed.push((Some(worktree.clone()), shown, change.mtime_ms)),
                 }
             }
             placed
@@ -2710,7 +2800,7 @@ impl AppState {
         // representative event per root and the same conservative fallback.
         let placed = placed
             .into_iter()
-            .map(|(worktree, path)| {
+            .map(|(worktree, path, mtime_ms)| {
                 let root = worktree.as_deref().unwrap_or("unknown");
                 let facts = format!(
                     "{} routed_root_sha256={} delivered={} routed_root={:?}",
@@ -2719,13 +2809,17 @@ impl AppState {
                     engram_interference_tick(),
                     engram_truncate_utf8(root, 120),
                 );
-                (worktree, path, facts)
+                (worktree, path, mtime_ms, facts)
             })
             .collect::<Vec<_>>();
         let mut diagnostics = Vec::new();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         for record in inner.sessions.iter_mut() {
             for (worktree, candidate) in &cargo_candidates {
+                // A Cargo sibling is judged by `target/` at terminal
+                // settlement, whenever it was notified, so it takes no
+                // watcher exemption; it is only marked when notified before
+                // the check's launch (`EngramCargoTargetCandidate::before_launch`).
                 for carried in &mut record.engram.carried_checks {
                     if carried.fence.is_none()
                         && engram_worktrees_may_hold(
@@ -2733,13 +2827,24 @@ impl AppState {
                             &engram_path_key(&carried.check.target.root),
                         )
                     {
-                        carried.fence = if carried.ends_by_report {
+                        if carried.ends_by_report {
                             // Reported-end tests keep their existing watcher
                             // fence; only launcher gates judge candidates.
-                            Some(format!("a file in its worktree changed: {}", candidate.path))
+                            carried.fence = Some(format!(
+                                "a file in its worktree changed: {}",
+                                candidate.path
+                            ));
                         } else {
-                            engram_note_cargo_target_candidate(&mut carried.check, candidate)
-                        };
+                            let candidate = EngramCargoTargetCandidate {
+                                before_launch: !engram_watcher_change_may_follow_launch(
+                                    arrival,
+                                    carried.check.started_order,
+                                ),
+                                ..candidate.clone()
+                            };
+                            carried.fence =
+                                engram_note_cargo_target_candidate(&mut carried.check, &candidate);
+                        }
                     }
                 }
                 for check in &mut record.engram.active_turn_checks {
@@ -2751,14 +2856,28 @@ impl AppState {
                             &engram_path_key(&check.target.root),
                         )
                     {
-                        check.watcher_fence = engram_note_cargo_target_candidate(check, candidate);
+                        let candidate = EngramCargoTargetCandidate {
+                            before_launch: !engram_watcher_change_may_follow_launch(
+                                arrival,
+                                check.started_order,
+                            ),
+                            ..candidate.clone()
+                        };
+                        check.watcher_fence = engram_note_cargo_target_candidate(check, &candidate);
                     }
                 }
             }
-            for (worktree, path, facts) in &placed {
+            for (worktree, path, mtime_ms, facts) in &placed {
+                let cause = engram_watcher_change_cause(path, *mtime_ms, arrival);
                 // The watcher reports late, so its change may have landed
                 // while the run was going, even when the run has ended since.
-                let cause = format!("a file in its worktree changed: {path}");
+                // A notification that reached the host before a launch gate's
+                // start stamp reports a write in the launch's source snapshot
+                // instead, however late it is handled here, provided the run
+                // itself started after that stamp: the stamp can lag the
+                // launcher (`ENGRAM_CARRIED_LAUNCH_SLACK_SECONDS`), so such a
+                // change is kept as exempted and judged again at settlement.
+                // Only a change that fences records its watcher provenance.
                 for carried in &mut record.engram.carried_checks {
                     if carried.fence.is_none()
                         && engram_worktrees_may_hold(
@@ -2766,12 +2885,27 @@ impl AppState {
                             &engram_path_key(&carried.check.target.root),
                         )
                     {
-                        let diagnostic = engram_watcher_fence_diagnostic(
-                            &cause, facts, &carried.check,
-                        );
-                        carried.check.watcher_provenance = Some(diagnostic.clone());
-                        diagnostics.push(diagnostic);
-                        carried.fence = Some(cause.clone());
+                        // A reported-end test has no run start to show that
+                        // it began after its stamp, so no change exempts it.
+                        if carried.ends_by_report
+                            || engram_watcher_change_may_follow_launch(
+                                arrival,
+                                carried.check.started_order,
+                            )
+                        {
+                            let diagnostic = engram_watcher_fence_diagnostic(
+                                &cause, facts, &carried.check,
+                            );
+                            carried.check.watcher_provenance = Some(diagnostic.clone());
+                            diagnostics.push(diagnostic);
+                            carried.fence = Some(cause.clone());
+                        } else {
+                            engram_note_watcher_exemption(
+                                &mut carried.check.watcher_exempted,
+                                &cause,
+                                arrival,
+                            );
+                        }
                     }
                 }
                 // A full gate still being launched carries the change into its
@@ -2785,10 +2919,18 @@ impl AppState {
                             &engram_path_key(&check.target.root),
                         )
                     {
-                        let diagnostic = engram_watcher_fence_diagnostic(&cause, facts, check);
-                        check.watcher_provenance = Some(diagnostic.clone());
-                        diagnostics.push(diagnostic);
-                        check.watcher_fence = Some(cause.clone());
+                        if engram_watcher_change_may_follow_launch(arrival, check.started_order) {
+                            let diagnostic = engram_watcher_fence_diagnostic(&cause, facts, check);
+                            check.watcher_provenance = Some(diagnostic.clone());
+                            diagnostics.push(diagnostic);
+                            check.watcher_fence = Some(cause.clone());
+                        } else {
+                            engram_note_watcher_exemption(
+                                &mut check.watcher_exempted,
+                                &cause,
+                                arrival,
+                            );
+                        }
                     }
                 }
             }

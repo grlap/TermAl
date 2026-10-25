@@ -30,14 +30,21 @@ struct WorkspaceFileWatchScope {
 
 #[cfg(not(test))]
 fn run_workspace_file_watcher(state: AppState) {
-    let (event_tx, event_rx) = mpsc::channel();
+    // Each event carries when its notification reached the host, before it
+    // waits behind earlier events: the Engram fence judges a change by it.
+    // The diagnostic observation is captured beside it and authorizes nothing.
+    let (event_tx, event_rx) = mpsc::channel::<(
+        EngramWatcherArrival,
+        notify::Result<(NotifyEvent, WorkspaceWatchObservation)>,
+    )>();
     let mut watcher = match RecommendedWatcher::new(
         move |result: notify::Result<NotifyEvent>| {
+            let arrival = EngramHost::watcher_arrival_now();
             let received = result.map(|event| {
                 let observation = WorkspaceWatchObservation::capture(&event);
                 (event, observation)
             });
-            let _ = event_tx.send(received);
+            let _ = event_tx.send((arrival, received));
         },
         NotifyConfig::default(),
     ) {
@@ -67,9 +74,13 @@ fn run_workspace_file_watcher(state: AppState) {
         }
 
         match event_rx.recv_timeout(WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS) {
-            Ok(Ok((event, observation))) => {
-                let changes =
-                    state.process_workspace_watch_event(&event, &observation, &watch_scopes);
+            Ok((arrival, Ok((event, observation)))) => {
+                let changes = state.process_workspace_watch_event(
+                    &event,
+                    &observation,
+                    arrival,
+                    &watch_scopes,
+                );
                 for change in changes {
                     let key = workspace_file_change_event_key(&change);
                     pending_changes
@@ -84,7 +95,7 @@ fn run_workspace_file_watcher(state: AppState) {
                     last_change_at = Some(std::time::Instant::now());
                 }
             }
-            Ok(Err(err)) => {
+            Ok((_, Err(err))) => {
                 eprintln!("file watch> workspace watcher error: {err}");
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}

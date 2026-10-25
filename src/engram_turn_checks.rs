@@ -379,6 +379,11 @@ struct EngramTurnCheck {
     /// cannot relabel it.
     toolchain: Arc<EngramToolchainCapture>,
     started_at: String,
+    /// Its start's point in the watcher order (`engram_watcher_order_tick`),
+    /// taken with `started_at` before its source snapshot: a watcher
+    /// notification that arrived before it cannot fence it. `None` fences on
+    /// every notification.
+    started_order: Option<u64>,
     /// The Codex sandbox mode the turn ran under, when known. Other
     /// runtimes' approval modes are not sandboxes, so they have none.
     sandbox: Option<String>,
@@ -413,6 +418,14 @@ struct EngramTurnCheck {
     /// Exact-root Cargo sibling events awaiting a carried gate's terminal
     /// settlement. Kept on the check so launch-time events carry with it.
     watcher_cargo_candidates: Vec<EngramCargoTargetCandidate>,
+    /// For a launcher full gate: the cause of the first watcher change that
+    /// did not fence it because its notification arrived before the gate's
+    /// start stamp (`started_order`), and the latest such arrival in the
+    /// watcher order. The stamp can lag the launcher's own start, so
+    /// settlement refuses the gate with this cause unless its run's
+    /// registration with this host came after that arrival
+    /// (`engram_settle_carried_check`).
+    watcher_exempted: Option<(String, u64)>,
     /// The runtime supplied only part of the output. Diagnostic metadata,
     /// never passing evidence; the persisted file path is not retained.
     runtime_output_cut: bool,
@@ -1628,6 +1641,7 @@ impl AppState {
         // Observe this command's boundary before off-lock target/capture work.
         // The launcher still must start at or after this correlated event.
         let started_at = engram_command_started_at();
+        let started_order = engram_watcher_order_tick();
         // The Claude reader records commands only from its Bash tool. Other
         // readers supply Ambient provenance, which establishes no dialect.
         let dialect = match provenance {
@@ -2241,6 +2255,7 @@ impl AppState {
             target,
             toolchain,
             started_at,
+            started_order: Some(started_order),
             sandbox,
             start_basis,
             overlapped,
@@ -2249,6 +2264,7 @@ impl AppState {
             watcher_fence: None,
             watcher_provenance: None,
             watcher_cargo_candidates: Vec::new(),
+            watcher_exempted: None,
             runtime_output_cut: false,
             end: None,
             ended_at: None,

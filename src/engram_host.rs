@@ -292,6 +292,22 @@ impl EngramHost<'_> {
         engram_parse_time(value)
     }
 
+    /// The host accepted the first registration of the launcher run in
+    /// `run_directory`, already canonical: its place in the watcher order,
+    /// which a watcher change exempted from that run's gate must precede
+    /// (`engram_note_run_registered`). Reads no file.
+    pub(crate) fn note_test_run_registered(run_directory: &FsPath) {
+        engram_note_run_registered(run_directory);
+    }
+
+    /// When a watcher notification reaching the host now arrived. The
+    /// watcher's notify callback takes it before the event waits behind
+    /// earlier events (`engram_watcher_arrival_now`).
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn watcher_arrival_now() -> EngramWatcherArrival {
+        engram_watcher_arrival_now()
+    }
+
     /// The watcher saw `changes` in a workspace. Its one caller, the watcher
     /// thread, is not built into tests, which call the handler directly.
     #[cfg(test)]
@@ -300,13 +316,17 @@ impl EngramHost<'_> {
         self.state.note_engram_workspace_file_changes(changes);
     }
 
+    /// The watcher saw `changes` in a workspace, with its bounded diagnostic
+    /// `observation`, in a notification that arrived at `arrival` (`None`
+    /// when unknown: such a change fences as any change).
     pub(crate) fn observed_workspace_files_changed(
         &self,
         changes: &[WorkspaceFileChangeEvent],
         observation: &str,
+        arrival: Option<EngramWatcherArrival>,
     ) {
         self.state
-            .note_engram_observed_workspace_file_changes(changes, observation);
+            .note_engram_observed_workspace_file_changes(changes, observation, arrival);
     }
 
     /// The test-run index ticked: a carried gate's terminal record is read as
