@@ -23,7 +23,7 @@ impl FederationRpcRoute {
 
     fn response_limit(&self) -> usize {
         match self {
-            Self::Mailbox(_, _) => FEDERATION_MAILBOX_RESPONSE_BYTES,
+            Self::Mailbox(_, _) | Self::MailboxRelay(_, _) => FEDERATION_MAILBOX_RESPONSE_BYTES,
             Self::ExecutorWake(_, _) => 32 * 1024,
             Self::Binding(_, _) => FEDERATION_FRAME_LIMIT,
             _ => 64 * 1024,
@@ -36,6 +36,8 @@ impl FederationRpcRoute {
         if let Self::Mailbox(_, request) = self {
             federation_mailbox_read_advice(request,
                 federation_mailbox_unknown_outcome(error.status, &error.message))
+        } else if matches!(self, Self::MailboxRelay(_, _)) {
+            federation_mailbox_unknown_outcome(error.status, "native mailbox relay transport/response unavailable")
         } else if matches!(self, Self::Binding(_, _)) {
             federation_binding_unknown_outcome()
         } else {

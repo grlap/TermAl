@@ -551,7 +551,7 @@ fn app_router_with_acceptance_policy_limiter(
             post(resolve_agent_command),
         )
         .route("/api/sessions/{id}/messages", post(send_message))
-        .route("/api/sessions/{id}/mailboxes", get(list_mailboxes))
+        .route("/api/sessions/{id}/mailboxes", get(list_mailboxes_api))
         .route("/api/sessions/{id}/mailbox-references", get(list_federation_mailbox_references).post(provision_federation_mailbox_reference))
         .route("/api/sessions/{id}/mailbox-references/{reference}/resolve", get(resolve_federation_mailbox_reference))
         .route("/api/sessions/{id}/mailboxes/protocol", get(negotiate_federation_mailboxes))
@@ -810,6 +810,14 @@ include!("process_limits.rs");
 include!("remote_authority.rs");
 include!("federation_identity.rs");
 include!("federation_mailbox_protocol.rs");
+include!("mailbox_relay_protocol.rs");
+include!("mailbox_relay_schema.rs");
+include!("mailbox_relay_store.rs");
+include!("mailbox_relay_rpc.rs");
+include!("mailbox_relay_local_history.rs");
+include!("mailbox_relay_dispatch.rs");
+include!("mailbox_relay_wakes.rs");
+include!("mailbox_relay_routes.rs");
 include!("federation_mailbox_errors.rs");
 include!("federation_mailbox_reads.rs");
 include!("federation_delivery_schema.rs");

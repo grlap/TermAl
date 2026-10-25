@@ -828,7 +828,7 @@ fn mailbox_revalidation_leaves_an_acknowledged_entry_untouched() {
 
     fixture
         .state
-        .revalidate_queued_mailbox_wakeups_before_dispatch(&fixture.session);
+        .revalidate_queued_mailbox_wakeups_before_dispatch(&fixture.session).unwrap();
     let _ = fixture.state.refresh_acknowledged_mailbox_wakeups(
         &fixture.session,
         "mailbox-durability",

@@ -625,8 +625,9 @@ fn validate_coordination_cli_output(
                 .cloned()
                 .ok_or_else(|| unusable("`mailboxes` is missing".to_owned()))?;
             serde_json::from_value::<Vec<MailboxSummary>>(mailboxes)
-                .map(|_| ())
-                .map_err(|err| unusable(format!("mailboxes: {err}")))
+                .map_err(|err| unusable(format!("mailboxes: {err}")))?;
+            coordination_cli_mailbox_unavailability(output)?;
+            Ok(())
         }
         CoordinationCliCommand::MailboxSend { .. } => {
             serde_json::from_value::<MailboxAppendReceipt>(output.clone())
@@ -904,6 +905,33 @@ fn render_coordination_cli_message(message: &Value, out: &mut impl Write) -> Res
     Ok(())
 }
 
+fn coordination_cli_mailbox_unavailability(output: &Value) -> Result<Vec<String>> {
+    let mut lines = Vec::new();
+    let describe = |entry: &Value, identity: &str, label: &str| -> Result<String> {
+        let host = entry.get(identity).and_then(|identity| {
+            if identity.get("host").is_some() { identity.get("host") } else { Some(identity) }
+        }).and_then(|host|host.get("hostId")).and_then(Value::as_str)
+            .filter(|host|!host.trim().is_empty())
+            .ok_or_else(||anyhow!("the server returned an unusable response: missing unavailable {label} identity"))?;
+        let status = entry.get("status").and_then(Value::as_u64).filter(|status|(400..600).contains(status))
+            .ok_or_else(||anyhow!("the server returned an unusable response: invalid unavailable {label} status"))?;
+        let error = entry.get("error").and_then(Value::as_str).filter(|error|!error.trim().is_empty())
+            .ok_or_else(||anyhow!("the server returned an unusable response: missing unavailable {label} error"))?;
+        if entry.get("availability").and_then(Value::as_str) != Some("unavailable_unverified") {
+            return Err(anyhow!("the server returned an unusable response: invalid unavailable {label} classification"));
+        }
+        Ok(format!("unavailable {label} {}: HTTP {status} {}", sanitize_coordination_cli_text(host,false),sanitize_coordination_cli_text(error,false)))
+    };
+    if let Some(homes) = output.get("unavailableRelayHomes") {
+        let homes = homes.as_array().ok_or_else(||anyhow!("the server returned an unusable response: unavailableRelayHomes is not an array"))?;
+        for home in homes { lines.push(describe(home,"home","relay home")?); }
+    }
+    if let Some(domain) = output.get("unavailableCentralDomain").filter(|value|!value.is_null()) {
+        lines.push(describe(domain,"central","central domain")?);
+    }
+    Ok(lines)
+}
+
 /// Concise human rendering used when `--json` is absent. The JSON form is the
 /// stable contract; this text may change.
 fn render_coordination_cli_output(
@@ -935,12 +963,16 @@ fn render_coordination_cli_output(
             }
         }
         CoordinationCliCommand::MailboxList { as_session } => {
+            let unavailable = coordination_cli_mailbox_unavailability(output)?;
             let mailboxes = output
                 .get("mailboxes")
                 .and_then(Value::as_array)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            if mailboxes.is_empty() {
+            if !unavailable.is_empty() {
+                writeln!(out,"partial mailbox list for {as_session}; unavailable authority is not empty history")?;
+                for refusal in unavailable { writeln!(out,"{refusal}")?; }
+            } else if mailboxes.is_empty() {
                 writeln!(out, "no mailboxes for {as_session}")?;
             }
             for mailbox in mailboxes {

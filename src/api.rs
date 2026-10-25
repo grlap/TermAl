@@ -104,7 +104,7 @@ fn record_rejected_turn_dispatch_with_federation(
         }
     }
     if let Some(notification) = mailbox_notification {
-        if let Err(err) = state.requeue_rejected_mailbox_notification(notification) {
+        if let Err(err) = state.requeue_mailbox_notification_with_rejection(notification, true) {
             eprintln!(
                 "mailbox> failed restoring rejected wake for `{}` / `{}`: {err:#}",
                 notification.session_id, notification.mailbox_id
@@ -595,10 +595,25 @@ fn handoff_prepared_turn_dispatch(
         Ok(handoff) => handoff,
         Err(error) => return reject_federation(error),
     };
-    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let relay_handoff = match mailbox_notification.as_ref().map(|notification|
+        state.prepare_mailbox_relay_dispatch_authority(notification)).transpose() {
+        Ok(authority) => authority.flatten(),
+        Err(error) => return reject_federation(error),
+    };
+    let admission = match relay_handoff.as_ref().map(|authority|authority.lock()).transpose() {
+        Ok(admission) => admission,
+        Err(error) => return reject_federation(mailbox_api_error(error)),
+    };
+    // Keep this exact relay admission ordered with disable/revoke and the
+    // unbounded provider enqueue, not merely with an earlier off-lock read.
+    let (mut inner, relay_link) = match admission {
+        Some(admission) => (admission._inner, admission._link),
+        None => (state.inner.lock().expect("state mutex poisoned"), None),
+    };
     if let Some((operation, _, _)) = &federation_handoff {
         if let Err(error) = federation_executor_target_locked(&inner, operation) {
             drop(inner);
+            drop(relay_link);
             return reject_federation(error);
         }
     }
@@ -606,7 +621,7 @@ fn handoff_prepared_turn_dispatch(
     let mut opening_diagnostic_delivery = None;
     let mut source_root_notice_delivery = Vec::new();
     let guarded =
-        engram_generation.is_some() || federation_handoff.is_some()
+        engram_generation.is_some() || federation_handoff.is_some() || relay_handoff.is_some()
             || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
     if guarded {
         let Some(index) = index else {
@@ -656,6 +671,7 @@ fn handoff_prepared_turn_dispatch(
     if *host_shutdown {
         drop(host_shutdown);
         drop(inner);
+        drop(relay_link);
         state.hold_unsent_dispatch_for_shutdown(&dispatch);
         return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
     }
@@ -717,6 +733,7 @@ fn handoff_prepared_turn_dispatch(
     drop(host_shutdown);
     if let Err(error) = sent {
         drop(inner);
+        drop(relay_link);
         let detail = format!("failed to queue prompt for {agent} session: {error}");
         let rejected = record_rejected_turn_dispatch_with_federation(
             state,
@@ -766,6 +783,7 @@ fn handoff_prepared_turn_dispatch(
         }
     }
     drop(inner);
+    drop(relay_link);
     state.acknowledge_engram_context_nudge_delivery(&session_id, active_turn_generation);
     state.acknowledge_engram_source_root_line_delivery(&session_id, active_turn_generation);
     if let Some(notification) = mailbox_notification.as_ref() {

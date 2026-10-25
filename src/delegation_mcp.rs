@@ -1367,10 +1367,12 @@ impl TermalDelegationMcpBridge {
 
     fn tool_list_mailboxes(&self, _arguments: Value) -> Result<Value> {
         let mailboxes = self.get_json_with_safe_replay(&format!(
-            "/api/sessions/{}/mailboxes",
+            "/api/sessions/{}/mailboxes?includeRelayAvailability=true",
             self.serving_session_id
         ))?;
-        Ok(json!({ "mailboxes": mailboxes }))
+        // Older hosts return the legacy array; new hosts explicitly separate
+        // unavailable remote homes without inventing unread counts/history.
+        if mailboxes.is_array() { Ok(json!({ "mailboxes": mailboxes })) } else { Ok(mailboxes) }
     }
 
     fn tool_board_list(&self, arguments: Value) -> Result<Value> {
@@ -1591,8 +1593,9 @@ impl TermalDelegationMcpBridge {
     /// fail-safe caller-eligibility lookup and caches that immutable classification for the
     /// bridge lifetime, so sustained exact-id traffic does not serialize full state per
     /// message. The sender id remains path-validated by bridge construction, the target id is
-    /// sent only as JSON, and the mailbox backend authoritatively rejects self,
-    /// delegation-child, hidden, remote-proxy, and nonexistent targets. Names still require
+    /// sent only as JSON. The backend validates native peers, or resolves a remote
+    /// proxy through authenticated relay proof; hidden/child/missing targets are refused.
+    /// Names still require
     /// the live root-session inventory for case-insensitive and ambiguity-aware resolution.
     fn resolve_session_reference(&self, reference: &str) -> Result<String> {
         if let Some(handle) = mailbox_reference_handle(reference)? {
@@ -1609,7 +1612,7 @@ impl TermalDelegationMcpBridge {
             }
             return Ok(participant.to_owned());
         }
-        if reference.starts_with("domain-session-") {
+        if reference.starts_with("domain-session-") || reference.starts_with("relay-principal-") {
             return Ok(reference.to_owned());
         }
         if reference.starts_with("session-") {

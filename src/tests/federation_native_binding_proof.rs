@@ -6,6 +6,7 @@
 use super::*;
 
 mod references;
+mod relay;
 
 const PROOF_PATH: &str = "/federation/v1/mailbox/native-binding";
 

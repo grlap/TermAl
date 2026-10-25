@@ -1050,7 +1050,9 @@ impl AppState {
                 "mailbox> failed reconciling notifications before workflow recovery for `{session_id}`: {err:#}"
             );
         }
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        if let Err(error) = self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id) {
+            return consume_mailbox_relay_hold(Err(error));
+        }
 
         let Some(started) = self.start_next_queued_turn_off_lock(session_id, false, true)? else {
             return Ok(None);
@@ -1170,10 +1172,21 @@ impl AppState {
                 "mailbox> failed reconciling notifications before queue drain for `{session_id}`: {err:#}"
             );
         }
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        if let Err(error) = self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id) {
+            return consume_mailbox_relay_hold(Err(error));
+        }
         Ok(self
             .start_next_queued_turn_off_lock(session_id, allow_blocked_dispatch, false)?
             .map(|started| started.dispatch))
+    }
+
+    fn dispatch_next_queued_turn_for_mailbox_relay(
+        &self, session_id: &str, owner: MailboxRelayDrainOwner,
+    ) -> Result<Option<TurnDispatch>> {
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
+        Ok(self.start_next_queued_turn_off_lock_for_owner(
+            session_id, false, false, Some(QueuedDrainOwner::MailboxRelay(owner)),
+        )?.map(|started| started.dispatch))
     }
 
     /// The retried admission of a prompt whose delivery was withheld before
@@ -1193,7 +1206,7 @@ impl AppState {
                  `{session_id}`: {err:#}"
             );
         }
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
         Ok(self
             .start_next_queued_turn_off_lock_for_owner(
                 session_id,
@@ -1211,7 +1224,7 @@ impl AppState {
         session_id: &str,
         owner: EngramQueuedAdmissionOwner,
     ) -> Result<Option<TurnDispatch>> {
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
         Ok(self
             .start_next_queued_turn_off_lock_for_owner(
                 session_id,
@@ -1236,7 +1249,7 @@ impl AppState {
                 "mailbox> failed reconciling notifications before the bound resume for                  `{session_id}`: {err:#}"
             );
         }
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
         Ok(self
             .start_next_queued_turn_off_lock_for_owner(
                 session_id,
@@ -1291,7 +1304,7 @@ impl AppState {
                 owner.clone(),
             )
         });
-        let result = self.settle_unstarted_queued_turn(result);
+        let result = self.settle_unstarted_queued_turn(consume_mailbox_relay_hold(result));
         // A promotion that started nothing may have left a delegation child
         // held (a failed promotion, a parked queued admission); a started turn
         // reaches the delivery path, which refreshes it there.
@@ -1540,6 +1553,10 @@ impl AppState {
             Some(QueuedDrainOwner::FederationWake(owner)) => Some(owner.clone()),
             _ => None,
         };
+        let relay_owner = match &owner {
+            Some(QueuedDrainOwner::MailboxRelay(owner)) => Some(owner.clone()),
+            _ => None,
+        };
         let bypass_owner = match owner {
             Some(
                 QueuedDrainOwner::AbortRetry(owner)
@@ -1547,7 +1564,7 @@ impl AppState {
                 | QueuedDrainOwner::BindRetry(owner)
                 | QueuedDrainOwner::AdmissionRetry(owner),
             ) => Some(owner),
-            Some(QueuedDrainOwner::FederationWake(_)) => None,
+            Some(QueuedDrainOwner::FederationWake(_) | QueuedDrainOwner::MailboxRelay(_)) => None,
             None => allow_blocked_dispatch
                 .then(|| {
                     let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1562,8 +1579,11 @@ impl AppState {
         // queue-drain path. With base integration absent or disabled, the
         // pre-Engram zero-transport behavior remains intact.
         {
+            let relay_authority = self.prepare_front_mailbox_relay_authority(session_id).map_err(|error|mailbox_relay_admission_held(error.message))?;
             let mut context_admission_retries = 0;
-            let mut inner = loop {
+            let (_relay_link, mut inner) = loop {
+                let relay_link = relay_authority.as_ref().map(|(_, authority)| authority.lock_link()).transpose()
+                    .map_err(mailbox_relay_admission_held)?;
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 let context_refresh_raced_prompt_admission =
                     matches!(context_preparation, EngramContextNudgePreparation::Ready)
@@ -1571,22 +1591,28 @@ impl AppState {
                             inner.sessions[index].engram.context_needs_preparation()
                         });
                 if !context_refresh_raced_prompt_admission {
-                    break inner;
+                    break (relay_link, inner);
                 }
                 context_admission_retries += 1;
                 if context_admission_retries >= ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES {
                     eprintln!(
                         "engram> session={session_id} context refresh kept racing queued prompt admission; dispatching without further delay"
                     );
-                    break inner;
+                    break (relay_link, inner);
                 }
                 drop(inner);
+                drop(relay_link);
                 context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
             };
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
+            self.validate_front_mailbox_relay_authority_locked(&inner, session_id, relay_authority.as_ref())
+                .map_err(|error|mailbox_relay_admission_held(error.message))?;
             if live_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+                return Ok(None);
+            }
+            if relay_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
                 return Ok(None);
             }
             if allow_blocked_dispatch
@@ -1731,6 +1757,9 @@ impl AppState {
                     return Ok(None);
                 };
                 if live_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+                    return Ok(None);
+                }
+                if relay_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
                     return Ok(None);
                 }
                 if allow_blocked_dispatch
@@ -1898,14 +1927,20 @@ impl AppState {
                     snapshot.0.source,
                 ),
             };
+            let relay_authority = self.prepare_front_mailbox_relay_authority(session_id)
+                .map_err(|error| mailbox_relay_admission_held(error.message))?;
             let pending_engram = self.evaluate_engram_turn_off_lock(&intent);
+            #[cfg(test)]
+            if let Some(hook) = TEST_MAILBOX_RELAY_AFTER_EVALUATE.with(|hook| hook.borrow_mut().take()) { hook(); }
 
+            let relay_link = relay_authority.as_ref().map(|(_, authority)| authority.lock_link()).transpose();
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
             let unchanged = inner.sessions[index].engram.dispatch_generation == snapshot.1
                 && live_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
+                && relay_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
                 && (!allow_blocked_dispatch
                     || bypass_owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index])))
                 && inner.sessions[index]
@@ -1951,6 +1986,17 @@ impl AppState {
                     return Ok(None);
                 }
                 continue;
+            }
+            let relay_refusal = relay_link.as_ref().err().map(|error| anyhow!("{error:#}"))
+                .or_else(|| self.validate_front_mailbox_relay_authority_locked(
+                    &inner, session_id, relay_authority.as_ref(),
+                ).err().map(|error| anyhow!(error.message)));
+            if let Some(error) = relay_refusal {
+                // Preserve the exact preparation using the existing abandon /
+                // rebind protocol; a late authority loss is not a new turn.
+                abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram);
+                self.commit_locked(&mut inner)?;
+                return Err(mailbox_relay_admission_held(error.context("relay authority lost before queue promotion")));
             }
             let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
             let queued_after_evaluation = inner.sessions[index]
@@ -2139,10 +2185,34 @@ impl AppState {
                 );
             }
         }
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        let relay_before_revalidation = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).and_then(|index| {
+                let record = &inner.sessions[index];
+                record.queued_prompts.front().and_then(|head| head.pending_prompt.source.as_ref())
+                    .and_then(|source| source.mailbox.as_ref())
+                    .filter(|source| source.mailbox_id.starts_with("relay-mailbox-"))
+                    .and_then(|_| EngramQueuedAdmissionOwner::capture(record))
+            })
+        };
+        let mut refused_relay_head = match self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id) {
+            Ok(()) => None,
+            Err(error) if request.source_mailbox.is_none() => {
+                eprintln!("native relay> preserving fenced carrier during ordinary prompt admission: {error:#}");
+                relay_before_revalidation
+            }
+            Err(error) => return Err(mailbox_api_error(error)),
+        };
+        #[cfg(test)]
+        if let Some(hook) = TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION.with(|hook| hook.borrow_mut().take()) { hook(); }
         let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
         let mut context_admission_retries = 0;
-        let mut inner = loop {
+        // Capture outside StateInner, then hold link -> state through all
+        // direct promotions. A pre-context proof alone cannot authorize them.
+        let relay_authority = self.prepare_front_mailbox_relay_authority(session_id);
+        let (relay_link, mut inner) = loop {
+            let relay_link = relay_authority.as_ref().ok().and_then(|authority|authority.as_ref())
+                .map(|(_,authority)| authority.lock_link()).transpose();
             let inner = self.inner.lock().expect("state mutex poisoned");
             let context_refresh_raced_prompt_admission =
                 matches!(context_preparation, EngramContextNudgePreparation::Ready)
@@ -2152,21 +2222,36 @@ impl AppState {
                             inner.sessions[index].engram.context_needs_preparation()
                         });
             if !context_refresh_raced_prompt_admission {
-                break inner;
+                break (relay_link, inner);
             }
             context_admission_retries += 1;
             if context_admission_retries >= ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES {
                 eprintln!(
                     "engram> session={session_id} context refresh kept racing prompt admission; dispatching without further delay"
                 );
-                break inner;
+                break (relay_link, inner);
             }
             drop(inner);
+            drop(relay_link);
             context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
         };
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let late_relay_refused = relay_authority.is_err() || relay_link.is_err()
+            || self.validate_front_mailbox_relay_authority_locked(
+                &inner, session_id, relay_authority.as_ref().ok().and_then(|authority|authority.as_ref()),
+            ).is_err();
+        if late_relay_refused {
+            // Qualify the refusal against the exact current metadata carrier;
+            // the existing ordinary-user path keeps it and preserves FIFO.
+            if inner.sessions[index].queued_prompts.front()
+                .and_then(|queued|queued.pending_prompt.source.as_ref())
+                .and_then(|source|source.mailbox.as_ref())
+                .is_some_and(|source|source.mailbox_id.starts_with("relay-mailbox-")) {
+                refused_relay_head = EngramQueuedAdmissionOwner::capture(&inner.sessions[index]);
+            }
+        }
         if inner.sessions[index].engram_boot_recovery_pending {
             drop(inner);
             self.request_engram_boot_recovery_retry(session_id);
@@ -2309,6 +2394,40 @@ impl AppState {
                 || capacity_automatic_prompt);
 
         let mut message_id = inner.next_message_id();
+        let still_refused = refused_relay_head.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]));
+        let record = &inner.sessions[index];
+        let bypass_refused_carrier = still_refused && !session_is_busy
+            && !capacity_automatic_prompt && record.provider_capacity_retry.is_none()
+            && queued_prompt_source == QueuedPromptSource::User
+            && !queued_head_held_for_durability(record)
+            && record.engram.pending_dispatch.is_none() && record.engram.admission_in_progress.is_none()
+            && record.engram.source_observation_preparations == 0
+            && record.engram.active_grant_id.is_none() && record.engram.uncertain_grant_id.is_none()
+            && record.queued_prompts.front().is_some_and(|head|
+                !head.is_engram_retained() && head.promoted_message_index.is_none());
+        // Scheduling isolation only: use the existing explicit-user priority
+        // paths without changing the persisted Stop/pause latch. The exact
+        // refused carrier remains queued; ordinary-user FIFO is preserved.
+        let orchestrator_auto_dispatch_blocked = orchestrator_auto_dispatch_blocked || bypass_refused_carrier;
+        let manual_can_overtake = bypass_refused_carrier || (!session_is_busy && orchestrator_auto_dispatch_blocked
+            && !blocked_queue_contains_user_prompt && !capacity_automatic_prompt
+            && queued_prompt_source == QueuedPromptSource::User
+            && !queued_head_held_for_durability(&inner.sessions[index])
+            && !inner.sessions[index].queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained));
+        if still_refused && !manual_can_overtake {
+            // Admission of ordinary work is separate from authority to promote
+            // the retained relay carrier. Keep FIFO/durability and resume gates;
+            // the relay worker will re-drive the carrier when authority returns.
+            queue_prompt_on_record_with_source(&mut inner.sessions[index], PendingPrompt {
+                engram_interrupted:false, is_engram_retained:false,
+                attachments:attachments.iter().map(|attachment|attachment.metadata.clone()).collect(),
+                id:message_id.clone(), timestamp:stamp_now(), text:prompt,
+                expanded_text:expanded_prompt, source,
+            }, attachments, queued_prompt_source);
+            self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+                .map_err(|error|ApiError::internal(format!("failed to persist ordinary prompt behind retained relay: {error:#}")))?;
+            return Ok(DispatchTurnResult::Queued);
+        }
         // S0 ("off means off") keeps the pre-adapter dispatch algorithm
         // intact. In particular, an unconfigured project must not pay the
         // extra queue commit needed to release the state mutex around Engram
@@ -2636,6 +2755,10 @@ impl AppState {
             return Ok(DispatchTurnResult::Dispatched(started.dispatch));
         }
 
+        // The gated path below drops StateInner for preparation and uses its
+        // own exact late authority guard. Never retain this link across it.
+        drop(relay_link);
+
         if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
             if let Some(mailbox_id) = source
                 .as_ref()
@@ -2806,6 +2929,8 @@ impl AppState {
 /// in advance.
 #[derive(Clone)]
 enum QueuedDrainOwner {
+    /// A metadata wake can re-drive only its captured boundary, never a successor.
+    MailboxRelay(MailboxRelayDrainOwner),
     /// Same-process activation of one durable remote wake; never a pause bypass.
     FederationWake(FederationExecutorLiveOwner),
     /// An explicit Resume of the head its caller checked.

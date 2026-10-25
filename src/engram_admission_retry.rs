@@ -570,7 +570,7 @@ impl AppState {
         session_id: &str,
         owner: EngramQueuedAdmissionOwner,
     ) -> Result<Option<TurnDispatch>> {
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
         Ok(self
             .start_next_queued_turn_off_lock_for_owner(
                 session_id,

@@ -119,15 +119,17 @@ Session-scoped routes resolve the session's remote mapping:
 - Codex thread actions
 - agent-command discovery
 
-Planned cross-host coordination does not follow project or session routing.
-It is designed separately in
+Cross-host coordination does not follow project or session routing.
+Its separate domain contract is described in
 [Central control plane, satellite hosts and cross-host mailboxes](central-control-plane.md):
 one central TermAl host is the only home of every mailbox in its domain, and
 enrolled satellite hosts run native sessions and reach it through its API over
 OpenSSH. The remote-backed proxy sessions described here stay a distinct
 executor-proxy kind; enrolling a host never converts them, and an executor
-binding never proves domain membership. None of this is implemented yet:
-current mailbox eligibility is local-only and rejects remote-backed proxies.
+binding never proves domain membership. For routine messages, a known remote
+root proxy can serve as an identity-bound locator for the independent
+[native mailbox relay](native-mailbox-relay.md). It is never a local mailbox
+participant, and the relay does not dispatch executor prompts through it.
 
 The UI passes canonical local project/session ids. Remote-native ids stay inside
 the backend mapping layer.

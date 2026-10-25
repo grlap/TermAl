@@ -86,7 +86,10 @@ impl AppState {
             live.remove(&key);
             owner
         };
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(&operation.session_id);
+        if let Err(error) = self.revalidate_queued_mailbox_wakeups_before_dispatch(&operation.session_id) {
+            eprintln!("remote wake activation remains held: {error:#}");
+            return;
+        }
         match self.start_next_queued_turn_off_lock_for_owner(&operation.session_id, false, false,
             Some(QueuedDrainOwner::FederationWake(owner)))
         {

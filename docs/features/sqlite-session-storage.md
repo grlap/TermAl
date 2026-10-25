@@ -256,6 +256,11 @@ On startup:
    all messages, board data and cursors. Unacknowledged pre-upgrade reads must
    be repeated to establish issuance; no live database reset is required for
    this upgrade. See [mailbox acknowledgements](agent-mailboxes.md#reading-and-acknowledgement).
+   The native mailbox relay's reader floor is `5-mailbox-relay-1`; exact
+   historical schemas 1–5 upgrade in the same locked transaction, preserving
+   local messages, receipts, board data and cursors. It adds only coordination
+   store identity and relay metadata, not primary-state or mailbox-body replicas.
+   See [native relay storage](native-mailbox-relay.md#storage-and-validation-scope).
    Every other existing file must match the current
    schema version and canonical schema definitions, including column types and
    constraints, foreign keys, and named indexes. Only a genuinely absent or

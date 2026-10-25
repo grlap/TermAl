@@ -2021,7 +2021,7 @@ fn delegation_mcp_acknowledgement_unusable_success_prescribes_cursor_reconciliat
 fn delegation_mcp_mailbox_tools_list_read_exact_and_acknowledge() {
     let (base_url, requests, server) = spawn_test_mcp_http_server(4, move |request| {
         match (request.method.as_str(), request.path.as_str()) {
-            ("GET", "/api/sessions/session-parent/mailboxes") => (
+            ("GET", "/api/sessions/session-parent/mailboxes?includeRelayAvailability=true") => (
                 200,
                 json!([{
                     "id": "mailbox-1",
@@ -2109,6 +2109,26 @@ fn delegation_mcp_mailbox_tools_list_read_exact_and_acknowledge() {
         requests.lock().expect("request log mutex poisoned").len(),
         4
     );
+}
+
+#[test]
+fn delegation_mcp_mailbox_relay_list_preserves_unavailable_home_without_fabricating_counts() {
+    let expected = json!({"mailboxes":[{"id":"mailbox-local","participants":[],"unreadCount":1,"latestSequence":1}],
+        "unavailableRelayHomes":[{"home":{"host":{"hostId":"home","hostGeneration":1},"storeId":"store"},
+            "availability":"unavailable_unverified","status":503,"error":"home unavailable"}],
+        "unavailableCentralDomain":{"central":{"hostId":"central","hostGeneration":1},
+            "availability":"unavailable_unverified","status":409,"error":"domain authority changed"}});
+    let response = expected.clone();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.path, "/api/sessions/session-parent/mailboxes?includeRelayAvailability=true");
+        (200, response.clone())
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+    assert_eq!(bridge.tool_list_mailboxes(json!({})).unwrap(), expected);
+    server.join().unwrap();
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "GET");
 }
 
 #[test]
@@ -2347,6 +2367,40 @@ fn delegation_mcp_own_mailbox_body_is_retrievable_without_changing_receipts() {
         .tool_acknowledge_mailbox(json!({"mailboxId": "mailbox-one", "receipt": page["receipt"]}))
         .unwrap();
     server.join().unwrap();
+}
+
+#[test]
+fn mailbox_relay_mcp_preserves_reply_principal_and_opaque_read_ack_handles_without_discovery() {
+    let home=MailboxRelayHome { host:FederationHostIdentity { host_id:Uuid::new_v4().to_string(),host_generation:1 },store_id:Uuid::new_v4().to_string() };
+    let mailbox=MailboxRelayLocator::encode(&home,&format!("mailbox-{}",Uuid::new_v4()),false).unwrap();
+    let message=MailboxRelayLocator::encode(&home,&format!("mailbox-message-{}",Uuid::new_v4()),true).unwrap();
+    let peer=format!("relay-principal-{}","a".repeat(64));
+    let expected_mailbox=mailbox.clone();let expected_message=message.clone();let expected_peer=peer.clone();
+    let (base_url,requests,server)=spawn_test_mcp_http_server(3,move |request| {
+        let body:Value=serde_json::from_str(&request.body).unwrap();
+        if request.path.ends_with("/send") {
+            assert_eq!(body["targetSessionId"],expected_peer);
+            assert_eq!(body["idempotencyKey"],"same-relay-key");
+            return (202,json!({"mailboxId":expected_mailbox,"messageId":expected_message,"sequence":1,"unreadDepth":1,
+                "notificationDisposition":"durableButNotWoken","duplicate":false,"senderProcessedThrough":1,"senderCursorAdvanced":true}));
+        }
+        if request.path.ends_with("/read") {
+            assert_eq!(request.path,format!("/api/sessions/session-parent/mailboxes/{expected_mailbox}/read"));
+            assert_eq!(body["issueReceipt"],true);
+            return (200,json!({"messages":[],"afterSequence":1,"processedThrough":1,"receipt":"relay-page","hasMore":false}));
+        }
+        assert_eq!(request.path,format!("/api/sessions/session-parent/mailboxes/{expected_mailbox}/acknowledge"));
+        assert_eq!(body,json!({"receipt":"relay-page"}));
+        (200,json!({"id":expected_mailbox,"participants":[],"latestSequence":1,"unreadCount":0}))
+    });
+    let bridge=TermalDelegationMcpBridge::new("session-parent".into(),base_url).unwrap();
+    let sent=bridge.tool_send_to_session(json!({"sessionId":peer,"message":"routine reply","idempotencyKey":"same-relay-key"})).unwrap();
+    assert_eq!(sent["mailboxId"],mailbox);
+    assert_eq!(sent["messageId"],message);
+    let page=bridge.tool_read_mailbox(json!({"mailboxId":mailbox})).unwrap();
+    bridge.tool_acknowledge_mailbox(json!({"mailboxId":mailbox,"receipt":page["receipt"]})).unwrap();
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(),3,"no state/name discovery or hidden re-send");
 }
 
 #[test]

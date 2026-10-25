@@ -32,6 +32,7 @@ fn federation_router(
         .merge(federation_onboarding_routes())
         .layer(DefaultBodyLimit::max(4096))
         .merge(federation_mailbox_routes())
+        .merge(mailbox_relay_rpc_routes())
         .merge(federation_executor_routes())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

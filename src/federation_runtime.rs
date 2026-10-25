@@ -106,6 +106,7 @@ async fn federation_supervise(
     let mut wake_drain = FederationExecutorWakeDrain::default();
     let mut activation = FederationExecutorActivationWorker::default();
     let mut native_wakes = FederationMailboxWakeWorker::default();
+    let mut relay_wakes = MailboxRelayWakeWorker::default();
     let mut sender_recovery = FederationExecutorSenderRecovery::default();
     loop {
         if *stop.borrow() || *host_stop.borrow() || app.federation_executor_wake_signal.is_stopping() {
@@ -116,6 +117,7 @@ async fn federation_supervise(
         wake_drain.tick(&app);
         activation.tick(&app, true).await;
         native_wakes.tick(&app, true).await;
+        relay_wakes.tick(&app, true).await;
         sender_recovery.tick(&app).await;
         if app.federation_executor_wake_signal.is_stopping() { break; }
         // The snapshot API releases StateInner before returning. Disabled and
@@ -127,7 +129,7 @@ async fn federation_supervise(
                 // A failed authoritative read is not an empty registry. In
                 // particular, a pending durability fence must not tear down
                 // a healthy channel and invalidate verification in a loop.
-                if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut stop,
+                if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut stop,
                     &mut host_stop, io.reconcile_interval).await { break; }
                 continue;
             }
@@ -233,10 +235,11 @@ async fn federation_supervise(
                 },
             );
         }
-        if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut stop,
+        if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut stop,
             &mut host_stop, io.reconcile_interval).await { break; }
     }
     app.federation_executor_wake_signal.stop();
+    relay_wakes.shutdown().await;
     native_wakes.shutdown().await;
     wake_drain.shutdown().await;
     #[cfg(test)]
@@ -280,6 +283,7 @@ async fn federation_supervise(
 async fn federation_wait_supervisor_tick(
     app: &AppState, drain: &mut FederationExecutorWakeDrain, activation: &mut FederationExecutorActivationWorker,
     native_wakes: &mut FederationMailboxWakeWorker,
+    relay_wakes: &mut MailboxRelayWakeWorker,
     stop: &mut tokio::sync::watch::Receiver<bool>,
     host_stop: &mut tokio::sync::watch::Receiver<bool>, interval: Duration,
 ) -> bool {
@@ -294,6 +298,7 @@ async fn federation_wait_supervisor_tick(
                 drain.tick_inner(app, false);
                 activation.tick(app, false).await;
                 native_wakes.tick(app, false).await;
+                relay_wakes.tick(app, false).await;
             },
         }
     }

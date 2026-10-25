@@ -18,6 +18,7 @@ enum FederationRpcRoute {
     NativeBinding(FederationLinkLease, FederationNativeBindingRequest),
     ExecutorWake(FederationLinkLease, FederationExecutorWakeRequest),
     Binding(FederationLinkLease, FederationBindingCommand),
+    MailboxRelay(FederationLinkLease, MailboxRelayRequest),
 }
 
 impl FederationRpcClient {

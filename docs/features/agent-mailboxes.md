@@ -35,9 +35,10 @@ For legacy numeric acknowledgements these fields refresh the expected cursor
 without another list call. They are snapshots, not protection against a
 concurrent send or acknowledgement.
 
-1. TermAl resolves and validates both participants as local root sessions.
-   Remote-backed root proxies remain outside the shipped eligibility rule; see
-   [Planned remote access](#planned-remote-access).
+1. TermAl validates a native root caller and a root peer. Local conversations
+   retain their existing storage. A known remote-root proxy can locate the
+   [authenticated native relay](native-mailbox-relay.md); it never becomes a
+   local participant or executor through that operation.
 2. The body is committed to SQLite with the next dense mailbox sequence.
 3. Only after commit, TermAl best-effort wakes the receiver with mailbox
    metadata (mailbox id, latest sequence, unread count, latest inbound sender,
@@ -470,14 +471,21 @@ Legacy numeric acknowledgement remains a forward-only compare-and-swap:
   an acknowledgement whose `processedThrough` is already satisfied succeeds
   idempotently, which recovers a commit whose response was lost.
 
-## Planned remote access
+## Cross-host access
 
-Cross-host mailboxes are designed in
+The native routine relay is described in
+[Native cross-host routine mailbox relay](native-mailbox-relay.md). It accepts
+a known remote-root proxy through the existing send tool and routes subsequent
+reads, replies and receipt acknowledgements to one immutable central home.
+Both hosts must implement that protocol and have an enrolled, authenticated
+pair. No implicit migration of standalone history or domain enrollment occurs.
+
+The separately bound central-domain protocol is designed in
 [Central control plane, satellite hosts and cross-host mailboxes](central-control-plane.md),
-which is the authoritative contract; this section only summarizes how it relates
-to the shipped mailbox contract above. It is a design contract, not shipped
-behavior: today mailbox eligibility is local-only, and remote-backed proxy
-sessions are rejected.
+which remains its authoritative contract. Its qualified participants, explicit
+bindings and outbox are distinct from native relay principals and metadata pins.
+The following summarizes that domain design, not a promise that the native
+relay queues payloads offline:
 
 - **One home.** One explicitly configured central TermAl host is the only home
   of every mailbox in its coordination domain. A mailbox is never duplicated,
@@ -539,14 +547,14 @@ caller can safely replay them. WAL still permits concurrent readers.
 External-process or OS-level lock exhaustion uses the same retryable
 classification instead of an internal-error `500`.
 
-Coverage applies to standalone local mailboxes. Central-domain mailboxes retain
+Coverage applies to standalone local mailboxes. Central-domain and native relay mailboxes retain
 their receipt-only protocol and owed wakes; `noContinuation: true` is refused
 there, rather than silently accepted without a matching local runtime proof.
 
 Before either coordination store or the HTTP listener is available, TermAl
 initializes an empty `coordination.sqlite` with the current schema, atomically
-upgrades exact versions 1 through 4 to version 5, adding receipt, delivery,
-executor and continuation-audit storage as needed without changing messages,
+upgrades exact historical versions 1 through 5 to `5-mailbox-relay-1`, adding receipt, delivery,
+executor, continuation-audit and native relay storage as needed without changing messages,
 cursors, delivery or executor records, or validates
 that an existing file already has the exact current version and canonical
 schema definitions, including column types and constraints, foreign keys, and

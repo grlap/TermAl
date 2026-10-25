@@ -14,6 +14,24 @@ use super::delegation_mcp_tests::spawn_test_mcp_http_server;
 use super::*;
 
 #[test]
+fn mailbox_relay_review_r2_cli_partial_lists_never_claim_empty_history() {
+    let command=CoordinationCliCommand::MailboxList { as_session:"session-root".into() };
+    for local in [false,true] {
+        let output=json!({"mailboxes":if local {json!([{"id":"mailbox-local","participants":[],"latestSequence":1,"unreadCount":1}])}else{json!([])},
+            "unavailableRelayHomes":[{"home":{"host":{"hostId":"remote-home","hostGeneration":1},"storeId":"store"},"availability":"unavailable_unverified","status":503,"error":"home unavailable"}],
+            "unavailableCentralDomain":{"central":{"hostId":"central","hostGeneration":1},"availability":"unavailable_unverified","status":409,"error":"domain authority changed"}});
+        validate_coordination_cli_output(&command,&output).unwrap();
+        let mut bytes=Vec::new();
+        render_coordination_cli_output(&command,&output,&mut bytes).unwrap();
+        let text=String::from_utf8(bytes).unwrap();
+        assert!(!text.contains("no mailboxes"),"{text}");
+        assert!(text.contains("remote-home")&&text.contains("503")&&text.contains("home unavailable"),"{text}");
+        assert!(text.contains("central")&&text.contains("409")&&text.contains("domain authority changed"),"{text}");
+        assert!(text.contains("partial"),"{text}");
+    }
+}
+
+#[test]
 fn mailbox_no_continuation_cli_forwards_only_receipt_declaration() {
     let invocation = parse_coordination_cli_args(cli_args(&[
         "mailbox",
@@ -164,13 +182,13 @@ fn coordination_cli_mailbox_round_trip_uses_environment_identity_default() {
                 }),
             );
         }
-        assert_eq!(request.path, "/api/sessions/session-env/mailboxes");
+        assert_eq!(request.path, "/api/sessions/session-env/mailboxes?includeRelayAvailability=true");
         (200, json!({ "mailboxes": [] }))
     });
     let output = execute_coordination_cli(&invocation.command, &base_url)
         .expect("environment-only identity should reach the mailbox bridge");
     server.join().expect("test server should join");
-    assert_eq!(output, json!({ "mailboxes": { "mailboxes": [] } }));
+    assert_eq!(output, json!({ "mailboxes": [] }));
     assert_eq!(requests.lock().expect("requests lock").len(), 2);
 }
 
@@ -1275,7 +1293,7 @@ fn coordination_cli_rejects_malformed_successful_responses() {
     let (base_url, _requests, server) = spawn_test_mcp_http_server(2, |request| {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/api/state") => (200, root_inventory_state()),
-            ("GET", "/api/sessions/session-root/mailboxes") => (200, json!({ "nope": 1 })),
+            ("GET", "/api/sessions/session-root/mailboxes?includeRelayAvailability=true") => (200, json!({ "mailboxes": { "nope": 1 } })),
             _ => (404, json!({ "error": "unexpected" })),
         }
     });

@@ -78,6 +78,7 @@ impl FederationRpcClient {
                 (lease, "/federation/v1/mailbox/native-binding")
             }
             FederationRpcRoute::Binding(lease, _) => (lease, "/federation/v1/mailbox/binding"),
+            FederationRpcRoute::MailboxRelay(lease, _) => (lease, MAILBOX_RELAY_RPC_ROUTE),
         };
         lease.with_incarnation(|| Ok(()))?;
         let context = self.channel.security_context()?;
@@ -94,6 +95,7 @@ impl FederationRpcClient {
             FederationRpcRoute::ExecutorWake(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::NativeBinding(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::Binding(_, body) => self.client.post(url).json(body),
+            FederationRpcRoute::MailboxRelay(_, body) => self.client.post(url).json(body),
         };
         let mut prepared = builder.build().map_err(|_| federation_auth_refused())?;
         let body = prepared
@@ -102,7 +104,7 @@ impl FederationRpcClient {
             .unwrap_or_default()
             .to_vec();
         let limit = match &route {
-            FederationRpcRoute::Mailbox(_, _) => FEDERATION_MAILBOX_REQUEST_BYTES,
+            FederationRpcRoute::Mailbox(_, _) | FederationRpcRoute::MailboxRelay(_, _) => FEDERATION_MAILBOX_REQUEST_BYTES,
             FederationRpcRoute::ExecutorWake(_, _) => 32 * 1024,
             _ => 4096,
         };
@@ -227,6 +229,15 @@ impl FederationRpcClient {
                 // An authenticated transport refusal settles only this attempt;
                 // application uncertainty and its idempotency key remain owned.
                 context.settle(counter);
+                if matches!(&route, FederationRpcRoute::MailboxRelay(_, _)) {
+                    return Ok(Err(if status == StatusCode::NOT_FOUND && serde_json::from_slice::<ErrorResponse>(&bytes).is_ok() {
+                        ApiError::not_found("authenticated native mailbox resource or membership not found")
+                    } else if status == StatusCode::NOT_FOUND {
+                        ApiError::conflict("native mailbox relay capability or membership unavailable; both hosts must support the relay protocol; no local fallback")
+                    } else if status.is_client_error() {
+                        ApiError::from_status(status,"authenticated native mailbox relay refused; check original identity, home and request")
+                    } else { federation_mailbox_unknown_outcome(status,"native mailbox relay response unavailable") }));
+                }
                 if matches!(&route, FederationRpcRoute::Binding(_, _)) {
                     return Ok(Err(federation_binding_rpc_error(status)));
                 }

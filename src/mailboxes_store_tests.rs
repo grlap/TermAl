@@ -379,7 +379,12 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
             .connection()
             .unwrap()
             .execute_batch(
-                "DROP TABLE mailbox_continuation_declarations;
+                "DROP TABLE mailbox_relay_notifications;
+             DROP TABLE mailbox_relay_wakes;
+             DROP TABLE mailbox_relay_intents;
+             DROP TABLE mailbox_relay_associations;
+             DROP TABLE mailbox_relay_store;
+             DROP TABLE mailbox_continuation_declarations;
              DROP TABLE federation_executor_operations;
              DROP TABLE federation_mailbox_wake_obligations;
              DROP TABLE federation_mailbox_dedup;
@@ -441,7 +446,12 @@ fn mailbox_version_two_upgrade_preserves_receipts_and_cursor_without_coverage() 
             .connection()
             .unwrap()
             .execute_batch(
-                "DROP TABLE mailbox_continuation_declarations;
+                "DROP TABLE mailbox_relay_notifications;
+             DROP TABLE mailbox_relay_wakes;
+             DROP TABLE mailbox_relay_intents;
+             DROP TABLE mailbox_relay_associations;
+             DROP TABLE mailbox_relay_store;
+             DROP TABLE mailbox_continuation_declarations;
              DROP TABLE federation_executor_operations;
              DROP TABLE federation_mailbox_wake_obligations;
              DROP TABLE federation_mailbox_dedup;
@@ -496,7 +506,12 @@ fn mailbox_version_three_upgrade_preserves_delivery_records_and_receipts() {
         store.acknowledge_page("session-target", &message.mailbox_id, &receipt).unwrap();
         let connection = store.connection().unwrap();
         connection.execute_batch(
-            "DROP TABLE mailbox_continuation_declarations;
+            "DROP TABLE mailbox_relay_notifications;
+             DROP TABLE mailbox_relay_wakes;
+             DROP TABLE mailbox_relay_intents;
+             DROP TABLE mailbox_relay_associations;
+             DROP TABLE mailbox_relay_store;
+             DROP TABLE mailbox_continuation_declarations;
              DROP TABLE federation_executor_operations;
              UPDATE meta SET value='3' WHERE key='coordination_schema_version';
              INSERT INTO federation_mailbox_intents

@@ -175,7 +175,7 @@ impl AppState {
     /// Synthetic projects use the non-executable `engram-fixture` sentinel and
     /// model already-consumed context. Tests exercising context subprocesses
     /// opt in with an actual fixture executable; their behavior is untouched.
-    fn install_control_test_transport(&self, control: Arc<dyn EngramControlTransport>) {
+    pub(super) fn install_control_test_transport(&self, control: Arc<dyn EngramControlTransport>) {
         install_control_only_transport(self, control);
     }
 }

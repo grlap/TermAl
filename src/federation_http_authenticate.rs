@@ -19,21 +19,22 @@ async fn federation_authenticate_message(
     let (mut parts, body) = request.into_parts();
     let mailbox_request =
         parts.method == axum::http::Method::POST && parts.uri.path() == "/federation/v1/mailbox";
+    let relay_request = parts.method == axum::http::Method::POST && parts.uri.path() == MAILBOX_RELAY_RPC_ROUTE;
     let executor_request = parts.method == axum::http::Method::POST
         && parts.uri.path() == FEDERATION_EXECUTOR_WAKE_ROUTE;
     let binding_request = parts.method == axum::http::Method::POST
         && parts.uri.path() == "/federation/v1/mailbox/binding";
-    let durable_request = mailbox_request || binding_request || executor_request;
+    let durable_request = mailbox_request || relay_request || binding_request || executor_request;
     let request_limit = if executor_request {
         32 * 1024
-    } else if mailbox_request {
+    } else if mailbox_request || relay_request {
         FEDERATION_MAILBOX_REQUEST_BYTES
     } else {
         4096
     };
     let response_limit = if executor_request {
         32 * 1024
-    } else if mailbox_request {
+    } else if mailbox_request || relay_request {
         FEDERATION_MAILBOX_RESPONSE_BYTES
     } else {
         FEDERATION_FRAME_LIMIT
@@ -96,7 +97,7 @@ async fn federation_authenticate_message(
             // An earlier delivery of this authenticated counter may have
             // committed and lost its reply. This transport refusal settles
             // the counter, while the application key still needs recovery.
-            return Err(if mailbox_request {
+            return Err(if mailbox_request || relay_request {
                 federation_mailbox_unknown_outcome(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "authenticated mailbox transport counter refused",
@@ -142,6 +143,8 @@ async fn federation_authenticate_message(
                     Err(_) if binding_request => {
                         federation_binding_unknown_outcome().into_response()
                     }
+                    Err(_) if relay_request => federation_mailbox_unknown_outcome(
+                        StatusCode::SERVICE_UNAVAILABLE,"native mailbox relay handler deadline").into_response(),
                     Err(_) if mailbox_request => federation_mailbox_unknown_response(
                         mailbox_intent.as_ref(), "handler_deadline"),
                     Err(_) => {
@@ -156,6 +159,8 @@ async fn federation_authenticate_message(
                     Err(_) if binding_request => {
                         federation_binding_unknown_outcome().into_response()
                     }
+                    Err(_) if relay_request => federation_mailbox_unknown_outcome(
+                        StatusCode::SERVICE_UNAVAILABLE,"native mailbox relay authority changed").into_response(),
                     Err(_) if mailbox_request => federation_mailbox_unknown_response(
                         mailbox_intent.as_ref(), "authority_changed"),
                     Err(error) => error.into_response(),

@@ -16,7 +16,7 @@ This brief is the accepted cross-host design in the repository's own words. It
 replaces the earlier plan, in which remote-backed proxy records joined
 mailboxes as local sessions and remote servers relayed coordination through a
 configured upstream, leaving remote participants second-class; see
-[Durable agent mailboxes — Planned remote access](agent-mailboxes.md#planned-remote-access)
+[Durable agent mailboxes — Cross-host access](agent-mailboxes.md#cross-host-access)
 for how that page now points here.
 
 ## Foundation mailbox protocol

@@ -90,7 +90,12 @@ fn populated_v4() -> (TestTempRoot, PathBuf) {
     {
         let connection = store.connection().unwrap();
         connection.execute_batch(
-            "DROP TABLE mailbox_continuation_declarations;
+            "DROP TABLE mailbox_relay_notifications;
+             DROP TABLE mailbox_relay_wakes;
+             DROP TABLE mailbox_relay_intents;
+             DROP TABLE mailbox_relay_associations;
+             DROP TABLE mailbox_relay_store;
+             DROP TABLE mailbox_continuation_declarations;
              UPDATE meta SET value='4' WHERE key='coordination_schema_version';
              INSERT INTO federation_mailbox_intents
               (sender_session_id,idempotency_key,sender_host_id,owner_session_id,owner_creation_id,
@@ -124,7 +129,7 @@ fn mailbox_version_four_upgrade_preserves_exact_executor_and_mailbox_records() {
     assert_eq!(executor.stage, "received");
     ensure_sqlite_coordination_schema(&connection).unwrap();
     validate_current_coordination_schema(&connection).unwrap();
-    assert_eq!(version(&connection), "5");
+    assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
     assert_eq!(retained_rows(&connection), before);
     // Contract specimen of the old exact-v4 guard, not an old binary run.
     assert!(validate_coordination_schema_version(&connection, "4").is_err());
@@ -178,7 +183,7 @@ fn mailbox_version_four_failed_upgrade_rolls_back_schema_marker_and_records() {
         *slot.borrow_mut() = Some(Box::new(move |transaction| {
             witness.store(true, Ordering::SeqCst);
             validate_current_coordination_schema(transaction)?;
-            assert_eq!(version(transaction), "5");
+            assert_eq!(version(transaction), COORDINATION_SQLITE_SCHEMA_VERSION);
             bail!("injected coordination migration failure before COMMIT")
         }));
     });
@@ -189,7 +194,7 @@ fn mailbox_version_four_failed_upgrade_rolls_back_schema_marker_and_records() {
     assert_eq!(version(&connection), "4");
     assert_eq!(retained_rows(&connection), before);
     ensure_sqlite_coordination_schema(&connection).unwrap();
-    assert_eq!(version(&connection), "5");
+    assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
     assert_eq!(retained_rows(&connection), before);
 }
 
@@ -207,7 +212,7 @@ fn mailbox_version_four_concurrent_opener_rechecks_current_schema() {
             // source validation and the first opener's Immediate transaction.
             let other = rusqlite::Connection::open(&other_path).unwrap();
             ensure_sqlite_coordination_schema(&other).unwrap();
-            assert_eq!(version(&other), "5");
+            assert_eq!(version(&other), COORDINATION_SQLITE_SCHEMA_VERSION);
             witness.store(true, Ordering::SeqCst);
         }));
     });
