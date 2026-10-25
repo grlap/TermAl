@@ -1473,6 +1473,10 @@ fn collect_workspace_layout_summaries<'a>(
 struct EngramProjectResetFences {
     next_generation: u64,
     owners: HashMap<String, u64>,
+    /// When each held fence was claimed, for the waiting reason a fenced
+    /// session shows (`engram_project_reset_wait.rs`). In memory only, one
+    /// entry per held fence.
+    claimed_at: HashMap<String, chrono::DateTime<chrono::Utc>>,
 }
 
 impl EngramProjectResetFences {
@@ -1487,7 +1491,14 @@ impl EngramProjectResetFences {
         self.next_generation = self.next_generation.wrapping_add(1).max(1);
         let generation = self.next_generation;
         self.owners.insert(project_id.to_owned(), generation);
+        self.claimed_at
+            .insert(project_id.to_owned(), chrono::Utc::now());
         Some(generation)
+    }
+
+    /// When the fence held for `project_id` was claimed, if one is held.
+    fn claimed_at(&self, project_id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.claimed_at.get(project_id).copied()
     }
 
     fn is_owned_by(&self, project_id: &str, generation: u64) -> bool {
@@ -1499,6 +1510,7 @@ impl EngramProjectResetFences {
             return false;
         }
         self.owners.remove(project_id);
+        self.claimed_at.remove(project_id);
         true
     }
 }

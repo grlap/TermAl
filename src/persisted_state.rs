@@ -827,6 +827,8 @@ impl PersistedSessionRecord {
         session.session_mutation_stamp = None;
         session.external_session_id = self.external_session_id.clone();
         session.live_activity = None;
+        // No project-reset fence survives a restart (`engram_project_reset_wait.rs`).
+        session.preview = engram_project_reset_wait_preview_after_restart(session.preview);
         if session.agent.acp_runtime().is_none() {
             session.model_options.clear();
             session.opencode_effort_options.clear();

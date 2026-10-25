@@ -2154,6 +2154,12 @@ impl AppState {
                         project_reset_generation,
                     )
                 };
+            // While this branch holds the project fence, each step goes to host
+            // stderr, as in the reset below (`engram_project_reset_wait.rs`).
+            let mut reset_timer = project_reset_generation
+                .map(|generation| EngramProjectResetTimer::new(&project_id, generation));
+            let preflight_phase =
+                engram_project_reset_phase(&reset_timer, "authority preflight", None);
 
             // Store identity resolution may touch a local or network
             // filesystem. Retirement caused by this mutation holds the
@@ -2187,12 +2193,16 @@ impl AppState {
                 retired_authority_entries.clone(),
             ) {
                 if let Some(generation) = project_reset_generation {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    inner.engram_project_resets.release(&project_id, generation);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        generation,
+                        &affected_session_ids,
+                    );
                 }
                 return Err(error);
             }
 
+            drop(preflight_phase);
             #[cfg(test)]
             apply_engram_quarantine_precommit_transition(self, &project_id);
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -2202,7 +2212,12 @@ impl AppState {
                 .position(|project| project.id == project_id)
             else {
                 if let Some(generation) = project_reset_generation {
-                    inner.engram_project_resets.release(&project_id, generation);
+                    drop(inner);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        generation,
+                        &affected_session_ids,
+                    );
                 }
                 return Err(ApiError::not_found("project not found"));
             };
@@ -2224,7 +2239,12 @@ impl AppState {
                     .is_some_and(|expected| inner.preferences.engram != *expected)
             {
                 if let Some(generation) = project_reset_generation {
-                    inner.engram_project_resets.release(&project_id, generation);
+                    drop(inner);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        generation,
+                        &affected_session_ids,
+                    );
                 }
                 return Err(ApiError::conflict(
                     "project changed while Engram settings were being validated",
@@ -2253,6 +2273,11 @@ impl AppState {
                         })?,
                 );
             }
+            if reset_timer.is_none() {
+                reset_timer = project_reset_generation
+                    .map(|generation| EngramProjectResetTimer::new(&project_id, generation));
+            }
+            let commit_phase = engram_project_reset_phase(&reset_timer, "commit", None);
             let reset_target_candidates = if immediate_mcp_runtime_teardown {
                 let generation = project_reset_generation
                     .expect("immediate Engram teardown must own the project reset fence");
@@ -2282,7 +2307,12 @@ impl AppState {
                     Ok(candidates) => candidates.into_iter().flatten().collect::<Vec<_>>(),
                     Err(error) => {
                         if let Some(generation) = project_reset_generation {
-                            inner.engram_project_resets.release(&project_id, generation);
+                            drop(inner);
+                            self.release_engram_project_reset_fence(
+                                &project_id,
+                                generation,
+                                &affected_session_ids,
+                            );
                         }
                         return Err(error);
                     }
@@ -2295,7 +2325,12 @@ impl AppState {
                 &inner.engram_retired_work_authority_grants,
             ) {
                 if let Some(generation) = project_reset_generation {
-                    inner.engram_project_resets.release(&project_id, generation);
+                    drop(inner);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        generation,
+                        &affected_session_ids,
+                    );
                 }
                 return Err(error);
             }
@@ -2305,7 +2340,12 @@ impl AppState {
                 &inner.projects,
             ) {
                 if let Some(generation) = project_reset_generation {
-                    inner.engram_project_resets.release(&project_id, generation);
+                    drop(inner);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        generation,
+                        &affected_session_ids,
+                    );
                 }
                 return Err(error);
             }
@@ -2316,7 +2356,12 @@ impl AppState {
                 retired_authority_entries,
             ) {
                 if let Some(generation) = project_reset_generation {
-                    inner.engram_project_resets.release(&project_id, generation);
+                    drop(inner);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        generation,
+                        &affected_session_ids,
+                    );
                 }
                 return Err(error);
             }
@@ -2340,9 +2385,12 @@ impl AppState {
                 rollback_engram_mcp_rotation_notices_locked(&mut inner, &rotation_notice_rollbacks);
                 rollback_engram_mcp_runtime_revocations_locked(&mut inner, &revocation_batch);
                 if let Some(project_reset_generation) = project_reset_generation {
-                    inner
-                        .engram_project_resets
-                        .release(&project_id, project_reset_generation);
+                    drop(inner);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        project_reset_generation,
+                        &affected_session_ids,
+                    );
                 }
                 return Err(ApiError::internal(format!(
                     "failed to persist Engram project settings: {err:#}"
@@ -2364,6 +2412,7 @@ impl AppState {
                 }
             }
             drop(inner);
+            drop(commit_phase);
             #[cfg(test)]
             if project_reset_generation.is_some() {
                 notify_engram_project_reset_fenced(&project_id);
@@ -2377,7 +2426,9 @@ impl AppState {
             if immediate_mcp_runtime_teardown {
                 let owner_generation = project_reset_generation
                     .expect("immediate Engram revocation must own the project fence");
-                match self.claim_engram_project_reset_checkpoints(
+                let claims_phase =
+                    engram_project_reset_phase(&reset_timer, "checkpoint claims", None);
+                let claims = self.claim_engram_project_reset_checkpoints(
                     &project_id,
                     owner_generation,
                     reset_target_candidates,
@@ -2387,7 +2438,9 @@ impl AppState {
                             && project.engram.as_ref() == Some(&settings)
                     },
                     "project changed while immediate Engram revocation was checkpointing",
-                ) {
+                );
+                drop(claims_phase);
+                match claims {
                     Ok(claims) => {
                         for target in claims.timed_out {
                             let error = EngramTransportError::deadline(
@@ -2402,6 +2455,11 @@ impl AppState {
                                 .push(format!("session {}: {error}", target.connection.session_id));
                         }
                         for target in claims.claimed {
+                            let _checkpoint_phase = engram_project_reset_phase(
+                                &reset_timer,
+                                "checkpoint",
+                                Some(&target.connection.session_id),
+                            );
                             let started_at = std::time::Instant::now();
                             match target.checkpoint_for_project_reset_off_lock() {
                                 Ok(()) => checkpointed.push((
@@ -2437,6 +2495,8 @@ impl AppState {
                     checkpoint_failures.push(error.message);
                 }
             }
+            let revocation_phase =
+                engram_project_reset_phase(&reset_timer, "authority revocation", None);
             let authority_revocation_failure = self.finish_engram_authority_revocation_attempts(
                 revoke_project_engram_authority_off_lock(
                     &authority_revocation_targets,
@@ -2445,12 +2505,15 @@ impl AppState {
                     &self.engram_host_launch_workdir(),
                 ),
             );
+            drop(revocation_phase);
             let authority_revoke_succeeded = authority_revocation_failure.is_none();
             let (mut revocation_outcome, revocation_release_batch) = if deferred_authority_rotation
                 && authority_revoke_succeeded
             {
                 (None, Some(revocation_batch))
             } else if authority_runtime_fence_required {
+                let _runtime_phase =
+                    engram_project_reset_phase(&reset_timer, "MCP runtime shutdown", None);
                 let shutdowns = self.shutdown_revoked_engram_mcp_runtimes(
                     revocation_batch,
                     if authority_revoke_succeeded {
@@ -2491,6 +2554,7 @@ impl AppState {
             if revocation_release_batch.is_some() {
                 wait_at_engram_project_reset_release_gate(&project_id);
             }
+            let release_phase = engram_project_reset_phase(&reset_timer, "release and drain", None);
             let revocation_release = match (project_reset_generation, revocation_release_batch) {
                 (Some(project_reset_generation), Some(batch)) => {
                     Some(self.release_engram_project_and_runtime_revocation_fences(
@@ -2513,6 +2577,10 @@ impl AppState {
                 }
                 (None, None) => None,
             };
+            drop(release_phase);
+            if let Some(timer) = &reset_timer {
+                timer.released();
+            }
             if let Some(outcome) = revocation_outcome.as_mut() {
                 self.resume_revoked_engram_mcp_sessions(outcome);
             }
@@ -2602,6 +2670,10 @@ impl AppState {
                 authority_revocation_targets,
             )
         };
+        // Every step until the fence is released goes to host stderr, so a
+        // reset that keeps the fence names the step it is in
+        // (`engram_project_reset_wait.rs`).
+        let reset_timer = EngramProjectResetTimer::new(&project_id, project_reset_generation);
         let mut authority_revocation_targets = authority_revocation_targets;
         extend_with_unconfirmed_engram_authority_targets(
             &mut authority_revocation_targets,
@@ -2638,7 +2710,9 @@ impl AppState {
         notify_engram_project_reset_fenced(&project_id);
         #[cfg(test)]
         wait_at_engram_project_reset_fence_gate(&project_id);
+        let quiescence_phase = reset_timer.phase("quiescence", None);
         if let Err(error) = self.wait_for_engram_project_reset_quiescence(&session_ids) {
+            drop(quiescence_phase);
             self.release_engram_project_reset_fence(
                 &project_id,
                 project_reset_generation,
@@ -2646,7 +2720,9 @@ impl AppState {
             );
             return Err(error);
         }
+        drop(quiescence_phase);
 
+        let checkpoint_claims_phase = reset_timer.phase("checkpoint claims", None);
         let checkpoint_claims = match self.claim_engram_project_reset_checkpoints(
             &project_id,
             project_reset_generation,
@@ -2668,6 +2744,7 @@ impl AppState {
                 return Err(error);
             }
         };
+        drop(checkpoint_claims_phase);
         let reset_targets = checkpoint_claims.claimed;
         let timed_out_reset_targets = checkpoint_claims.timed_out;
 
@@ -2691,6 +2768,7 @@ impl AppState {
         let mut checkpoint_failures = Vec::new();
         let mut checkpoint_recovery = Vec::new();
         let mut checkpointed = Vec::new();
+        let timed_out_phase = reset_timer.phase("timed-out checkpoints", None);
         let (mut timed_out_failures, mut timed_out_recovery) = self
             .handle_timed_out_engram_project_reset_checkpoints(
                 &project_id,
@@ -2698,11 +2776,14 @@ impl AppState {
                 best_effort_checkpoint_cleanup,
                 preserve_checkpoint_recovery,
             );
+        drop(timed_out_phase);
         checkpoint_failures.append(&mut timed_out_failures);
         checkpoint_recovery.append(&mut timed_out_recovery);
         let mut absent_session_evidence = Vec::new();
         let mut absence_budget = EngramAbsenceInspectionBudget::default();
         for target in &reset_targets {
+            let _checkpoint_phase =
+                reset_timer.phase("checkpoint", Some(&target.connection.session_id));
             let checkpoint_started_at = std::time::Instant::now();
             match target.checkpoint_for_project_reset_off_lock() {
                 Ok(()) => checkpointed.push((
@@ -2800,6 +2881,7 @@ impl AppState {
                 return Err(error);
             }
         }
+        let commit_phase = reset_timer.phase("commit", None);
         let (adapter, final_session_ids, revocation_batch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let reset_still_in_progress = inner
@@ -2990,6 +3072,9 @@ impl AppState {
                         // The admission that owns a receipted attempt still
                         // settles it when its guard is released.
                         admission_attempt: record.engram.admission_attempt.take(),
+                        // The waiting reason the fence still holds keeps the
+                        // preview it replaced (`engram_project_reset_wait.rs`).
+                        project_reset_wait_preview: record.engram.project_reset_wait_preview.take(),
                         ..EngramSessionState::default()
                     };
                     for line in carried_lines {
@@ -3091,9 +3176,19 @@ impl AppState {
                         }
                     }
                 }
-                inner
-                    .engram_project_resets
-                    .release(&project_id, project_reset_generation);
+                // The release clears the waiting reason a wake showed while the
+                // fence was held, and drains what the fence held.
+                let fenced_session_ids = session_ids
+                    .iter()
+                    .chain(&final_session_ids)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                drop(inner);
+                self.release_engram_project_reset_fence(
+                    &project_id,
+                    project_reset_generation,
+                    &fenced_session_ids,
+                );
                 return Err(ApiError::internal(format!(
                     "failed to persist Engram project settings: {err:#}"
                 )));
@@ -3104,10 +3199,12 @@ impl AppState {
                 revocation_batch,
             )
         };
+        drop(commit_phase);
 
         // Capability revocation and process teardown are deliberately off-lock.
         // Revoke the grant first: Engram revalidates it on every mutation, so
         // even an unconfirmed agent interruption cannot keep mutating work.
+        let revocation_phase = reset_timer.phase("authority revocation", None);
         let authority_revocation_failure = self.finish_engram_authority_revocation_attempts(
             revoke_project_engram_authority_off_lock(
                 &authority_revocation_targets,
@@ -3116,10 +3213,13 @@ impl AppState {
                 &self.engram_host_launch_workdir(),
             ),
         );
+        drop(revocation_phase);
         for session_id in &final_session_ids {
+            let _shutdown_phase = reset_timer.phase("control shutdown", Some(session_id));
             adapter.shutdown_session(session_id);
         }
         let authority_revoke_succeeded = authority_revocation_failure.is_none();
+        let runtime_shutdown_phase = reset_timer.phase("MCP runtime shutdown", None);
         let (runtime_shutdowns, revocation_release_batch) =
             if deferred_authority_rotation && authority_revoke_succeeded {
                 (None, Some(revocation_batch))
@@ -3139,6 +3239,7 @@ impl AppState {
             } else {
                 (None, None)
             };
+        drop(runtime_shutdown_phase);
         let fresh_targets = if settings.enabled {
             let inner = self.inner.lock().expect("state mutex poisoned");
             final_session_ids
@@ -3176,6 +3277,7 @@ impl AppState {
         };
         for target in fresh_targets {
             let session_id = target.connection.session_id.clone();
+            let _bind_phase = reset_timer.phase("fresh bind", Some(&session_id));
             // A retry head is bound only under the retry cap, or by its own
             // attempt (`EngramRetryHeadPermit`).
             let _permit = match self.engram_retry_head_permit(&session_id) {
@@ -3192,6 +3294,7 @@ impl AppState {
                 eprintln!("engram> session={session_id} post-reconfigure bind degraded: {error}");
             }
         }
+        let finalize_phase = reset_timer.phase("MCP runtime finalize", None);
         let mut revocation_outcome = if let Some(runtime_shutdowns) = runtime_shutdowns {
             let mut outcome = self.finalize_revoked_engram_mcp_runtimes(runtime_shutdowns);
             if let Some(failure) = authority_revocation_failure {
@@ -3217,10 +3320,13 @@ impl AppState {
         } else {
             None
         };
+        drop(finalize_phase);
         #[cfg(test)]
         if revocation_release_batch.is_some() {
             wait_at_engram_project_reset_release_gate(&project_id);
         }
+        // The release drains the affected sessions' queues before it returns.
+        let release_phase = reset_timer.phase("release and drain", None);
         let revocation_release = if let Some(batch) = revocation_release_batch {
             Some(self.release_engram_project_and_runtime_revocation_fences(
                 &project_id,
@@ -3236,6 +3342,8 @@ impl AppState {
             );
             None
         };
+        drop(release_phase);
+        reset_timer.released();
         if let Some(outcome) = revocation_outcome.as_mut() {
             self.resume_revoked_engram_mcp_sessions(outcome);
         }
@@ -3555,19 +3663,8 @@ impl AppState {
         {
             return;
         }
-        let mut affected_session_ids = session_ids.to_vec();
-        affected_session_ids.extend(
-            inner
-                .sessions
-                .iter()
-                .filter(|record| {
-                    engram_project_for_session_locked(&inner, &record.session.id)
-                        .is_some_and(|project| project.id == project_id)
-                })
-                .map(|record| record.session.id.clone()),
-        );
-        affected_session_ids.sort();
-        affected_session_ids.dedup();
+        let affected_session_ids =
+            engram_project_reset_affected_sessions_locked(&inner, project_id, session_ids);
         for session_id in &affected_session_ids {
             if let Some(index) = inner.find_session_index(session_id) {
                 let record = inner
@@ -3579,25 +3676,14 @@ impl AppState {
                     .clear_checkpoint_if_owned_by(Some(owner_generation));
             }
         }
-        drop(inner);
-        for session_id in affected_session_ids {
-            match self.dispatch_next_queued_turn(&session_id, false) {
-                Ok(Some(dispatch)) => {
-                    if let Err(error) = deliver_turn_dispatch(self, dispatch)
-                        .into_background_result("session activation queue drain")
-                    {
-                        eprintln!(
-                            "engram> session={session_id} failed delivering queued turn after project-reset release: {}",
-                            error.message
-                        );
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => eprintln!(
-                    "engram> session={session_id} failed resuming queue after project-reset release: {error:#}"
-                ),
-            }
+        if self.clear_engram_project_reset_waits_locked(&mut inner, &affected_session_ids) {
+            self.commit_engram_project_reset_wait_locked(
+                &mut inner,
+                &format!("project={project_id}"),
+            );
         }
+        drop(inner);
+        self.drain_engram_project_reset_sessions(affected_session_ids, "project-reset release");
     }
 
     /// Releases one project-reset generation together with its exact runtime
@@ -3617,19 +3703,10 @@ impl AppState {
             .engram_project_resets
             .release(project_id, owner_generation);
         let mut affected_session_ids = session_ids.to_vec();
+        let mut waits_cleared = false;
         if !project_fence_release_failed {
-            affected_session_ids.extend(
-                inner
-                    .sessions
-                    .iter()
-                    .filter(|record| {
-                        engram_project_for_session_locked(&inner, &record.session.id)
-                            .is_some_and(|project| project.id == project_id)
-                    })
-                    .map(|record| record.session.id.clone()),
-            );
-            affected_session_ids.sort();
-            affected_session_ids.dedup();
+            affected_session_ids =
+                engram_project_reset_affected_sessions_locked(&inner, project_id, session_ids);
             for session_id in &affected_session_ids {
                 if let Some(index) = inner.find_session_index(session_id) {
                     let record = inner
@@ -3641,6 +3718,8 @@ impl AppState {
                         .clear_checkpoint_if_owned_by(Some(owner_generation));
                 }
             }
+            waits_cleared =
+                self.clear_engram_project_reset_waits_locked(&mut inner, &affected_session_ids);
         }
         let (mut release, runtime_changed) =
             release_engram_mcp_runtime_revocations_without_teardown_locked(&mut inner, batch);
@@ -3650,29 +3729,22 @@ impl AppState {
                 "engram> project={project_id} lost reset generation {owner_generation} while releasing runtime revocation fences; exact runtime fences were still released"
             );
         }
-        if runtime_changed {
+        // One revision carries the restored previews and the runtime release,
+        // so a client adopts both (`engram_project_reset_wait.rs`).
+        if waits_cleared {
+            self.commit_engram_project_reset_wait_locked(
+                &mut inner,
+                &format!("project={project_id}"),
+            );
+        } else if runtime_changed {
             self.publish_state_locked(&inner);
         }
         drop(inner);
         if !project_fence_release_failed {
-            for session_id in affected_session_ids {
-                match self.dispatch_next_queued_turn(&session_id, false) {
-                    Ok(Some(dispatch)) => {
-                        if let Err(error) = deliver_turn_dispatch(self, dispatch)
-                            .into_background_result("session runtime queue drain")
-                        {
-                            eprintln!(
-                                "engram> session={session_id} failed delivering queued turn after project-reset/runtime-fence release: {}",
-                                error.message
-                            );
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(error) => eprintln!(
-                        "engram> session={session_id} failed resuming queue after project-reset/runtime-fence release: {error:#}"
-                    ),
-                }
-            }
+            self.drain_engram_project_reset_sessions(
+                affected_session_ids,
+                "project-reset/runtime-fence release",
+            );
         }
         release
     }
@@ -3702,6 +3774,10 @@ impl AppState {
                     .clear_checkpoint_if_owned_by(Some(owner_generation));
             }
         }
+        // The commit below carries the restored previews at a new revision.
+        let affected =
+            engram_project_reset_affected_sessions_locked(&inner, project_id, session_ids);
+        self.clear_engram_project_reset_waits_locked(&mut inner, &affected);
         for (session_id, grant_id) in checkpointed {
             if let Some(index) = inner.find_session_index(session_id) {
                 let record = inner
@@ -3713,12 +3789,16 @@ impl AppState {
                 }
             }
         }
-        self.commit_locked(&mut inner).map_err(|err| {
+        let committed = self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!(
                 "failed persisting partial Engram project reset: {err:#}"
             ))
-        })?;
-        Ok(())
+        });
+        drop(inner);
+        // The aborted change no longer holds these queues: what it held starts
+        // now, as after a release (`engram_project_reset_wait.rs`).
+        self.drain_engram_project_reset_sessions(affected, "an aborted project-reset");
+        committed.map(|_| ())
     }
 
     /// Creates a new session (local or remote-backed) from a
@@ -4543,6 +4623,9 @@ impl AppState {
                 authority_revocation_targets,
             )
         };
+        // Deleting holds the same fence: its steps go to host stderr too
+        // (`engram_project_reset_wait.rs`).
+        let reset_timer = EngramProjectResetTimer::new(&project_id, project_reset_generation);
         let mut authority_revocation_targets = authority_revocation_targets;
         let retired_work_authority_grants = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -4588,7 +4671,9 @@ impl AppState {
             );
             return Err(error);
         }
+        let quiescence_phase = reset_timer.phase("quiescence", None);
         if let Err(error) = self.wait_for_engram_project_reset_quiescence(&session_ids) {
+            drop(quiescence_phase);
             self.release_engram_project_reset_fence(
                 &project_id,
                 project_reset_generation,
@@ -4596,14 +4681,18 @@ impl AppState {
             );
             return Err(error);
         }
+        drop(quiescence_phase);
 
-        let checkpoint_claims = match self.claim_engram_project_reset_checkpoints(
+        let claims_phase = reset_timer.phase("checkpoint claims", None);
+        let checkpoint_claims = self.claim_engram_project_reset_checkpoints(
             &project_id,
             project_reset_generation,
             reset_target_candidates,
             |project| project_matches_engram_reset_snapshot(project, &project_snapshot),
             "project changed while Engram deletion was being fenced",
-        ) {
+        );
+        drop(claims_phase);
+        let checkpoint_claims = match checkpoint_claims {
             Ok(claims) => claims,
             Err(error) => {
                 self.release_engram_project_reset_fence(
@@ -4628,6 +4717,8 @@ impl AppState {
             })
             .collect::<Vec<_>>();
         for target in &reset_targets {
+            let _checkpoint_phase =
+                reset_timer.phase("checkpoint", Some(&target.connection.session_id));
             match target.checkpoint_for_project_reset_off_lock() {
                 Ok(()) => checkpointed.push((
                     target.connection.session_id.clone(),
@@ -4655,6 +4746,7 @@ impl AppState {
             )));
         }
 
+        let commit_phase = reset_timer.phase("commit", None);
         let (
             adapter,
             final_session_ids,
@@ -4785,6 +4877,9 @@ impl AppState {
                         // The admission that owns a receipted attempt still
                         // settles it when its guard is released.
                         admission_attempt: record.engram.admission_attempt.take(),
+                        // So the waiting reason can still restore the preview
+                        // it replaced (`engram_project_reset_wait.rs`).
+                        project_reset_wait_preview: record.engram.project_reset_wait_preview.take(),
                         ..EngramSessionState::default()
                     };
                 }
@@ -4866,9 +4961,14 @@ impl AppState {
                         }
                     }
                     inner.engram_retired_work_authority_grants = previous_retired_authority_grants;
-                    inner
-                        .engram_project_resets
-                        .release(&project_id, project_reset_generation);
+                    // The release clears the waiting reason a wake showed while
+                    // the fence was held, and drains what the fence held.
+                    drop(inner);
+                    self.release_engram_project_reset_fence(
+                        &project_id,
+                        project_reset_generation,
+                        &session_ids,
+                    );
                     return Err(ApiError::internal(format!(
                         "failed to remove project after draining Engram: {error:#}"
                     )));
@@ -4882,7 +4982,9 @@ impl AppState {
                 mcp_runtime_reset_required,
             )
         };
+        drop(commit_phase);
 
+        let revocation_phase = reset_timer.phase("authority revocation", None);
         let authority_revocation_failure = self.finish_engram_authority_revocation_attempts(
             revoke_project_engram_authority_off_lock(
                 &authority_revocation_targets,
@@ -4891,10 +4993,13 @@ impl AppState {
                 &self.engram_host_launch_workdir(),
             ),
         );
+        drop(revocation_phase);
         for session_id in &final_session_ids {
+            let _shutdown_phase = reset_timer.phase("control shutdown", Some(session_id));
             adapter.shutdown_session(session_id);
         }
         let mut revocation_outcome = if mcp_runtime_reset_required {
+            let _runtime_phase = reset_timer.phase("MCP runtime shutdown", None);
             let shutdowns = self.shutdown_revoked_engram_mcp_runtimes(
                 revocation_batch,
                 "deleted project Engram MCP configuration",
@@ -4924,11 +5029,14 @@ impl AppState {
         } else {
             None
         };
+        let release_phase = reset_timer.phase("release and drain", None);
         self.release_engram_project_reset_fence(
             &project_id,
             project_reset_generation,
             &final_session_ids,
         );
+        drop(release_phase);
+        reset_timer.released();
         if let Some(outcome) = revocation_outcome.as_mut() {
             self.resume_revoked_engram_mcp_sessions(outcome);
         }

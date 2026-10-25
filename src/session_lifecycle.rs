@@ -366,6 +366,11 @@ impl AppState {
         // begin found first, so that one wins.
         record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
+        // An emptied queue has nothing a project settings change holds; the
+        // commit below carries the restored preview (`engram_project_reset_wait.rs`).
+        if record.queued_prompts.is_empty() {
+            clear_engram_project_reset_wait(record);
+        }
 
         let lifecycle = reconcile_removed_followup_prompt_locked(&mut inner, session_id, prompt_id);
         let detached = if lifecycle.is_some() {

@@ -477,23 +477,24 @@ impl AppState {
         inner: &mut StateInner,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
-        read: &EngramNamedRootReadResponse,
-    ) {
+        read: &Arc<EngramNamedRootReadResponse>,
+    ) -> Vec<TestRunCompacted> {
+        let generation = read.latest_event.as_ref().map(|event| event.generation);
         let mut changed = Vec::new();
         let mut validated = Vec::new();
         for row in inner.test_run_compacted.values_mut() {
             let mut updated = false;
             for observation in &mut row.observations {
-                for association in &mut observation.evidence {
-                    if &association.store == store
-                        && association.binding.root_execution_id == binding.root_execution_id
-                        && association.binding.work_id == binding.work_id
-                        && association.binding.run_id == binding.run_id
-                        && association.binding.claim_id == binding.claim_id
-                        && read.latest_event.as_ref().map(|event| event.generation)
-                            == association.source_basis.source_root_generation
+                let Some(first) = observation.evidence.iter().position(|association| {
+                    test_run_lifecycle_binding_matches(association, store, binding)
+                }) else {
+                    continue;
+                };
+                for association in &mut observation.evidence[first..] {
+                    if test_run_lifecycle_binding_matches(association, store, binding)
+                        && generation == association.source_basis.source_root_generation
                     {
-                        association.lifecycle_read = Some(read.clone());
+                        association.lifecycle_read = Some(Arc::clone(read));
                         validated.push((
                             observation.execution_id.clone(),
                             association.producer_observation_id.clone(),
@@ -507,11 +508,8 @@ impl AppState {
             }
         }
         inner.test_runs.lifecycle_revalidated.extend(validated);
-        for row in changed {
-            let id = row.summary.run_id.clone();
-            inner.test_runs.compactions_revalidating.insert(id.clone());
-            let _ = self.persist_test_run_compacted_locked(inner, row.clone());
-            self.publish_test_run_compact_risk_locked(inner, &row);
-        }
+        // The caller persists live and compacted changes together, retaining
+        // the same per-row exact fences and revalidation flags.
+        changed
     }
 }

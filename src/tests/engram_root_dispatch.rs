@@ -43,6 +43,9 @@ mod receipted_admission;
 #[path = "engram_capacity_retry_admission.rs"]
 mod capacity_retry_admission;
 
+#[path = "engram_project_reset_wait.rs"]
+mod project_reset_wait;
+
 #[test]
 fn root_known_defer_resume_uses_new_evaluation_identity() {
     let (state, session, receiver, transport) = root_fixture([

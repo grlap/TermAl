@@ -2872,6 +2872,10 @@ struct EngramSessionState {
     /// Ephemeral settings-transition fence. New turns remain queued while the
     /// old connection drains and checkpoints, then use the committed config.
     project_reset_in_progress: bool,
+    /// The preview a fenced, idle session showed before the project-reset
+    /// waiting reason replaced it, restored when the reason goes
+    /// (`engram_project_reset_wait.rs`). Runtime only.
+    project_reset_wait_preview: Option<String>,
     disabled_reason: Option<String>,
     /// Base-tier context is injected on the first prompt in this TermAl
     /// process and again after an observed agent compaction.
@@ -2996,6 +3000,7 @@ impl Default for EngramSessionState {
             pending_dispatch: None,
             rebind_required: false,
             project_reset_in_progress: false,
+            project_reset_wait_preview: None,
             disabled_reason: None,
             context_nudge_pending: true,
             context_nudge_in_progress: false,

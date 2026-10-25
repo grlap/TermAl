@@ -18,8 +18,40 @@ struct TestRunEvidenceAssociation {
     checkpoint_id: Option<String>,
     #[serde(default)]
     confirmed_cursor: Option<i64>,
-    #[serde(default)]
-    lifecycle_read: Option<EngramNamedRootReadResponse>,
+    #[serde(default, with = "test_run_shared_lifecycle_read")]
+    lifecycle_read: Option<Arc<EngramNamedRootReadResponse>>,
+}
+
+// Share a canonical response across its associations without changing its
+// persisted object/null representation or requiring serde's global rc feature.
+mod test_run_shared_lifecycle_read {
+    use super::*;
+
+    pub fn serialize<S: serde::Serializer>(
+        value: &Option<Arc<EngramNamedRootReadResponse>>,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        value.as_deref().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Option<Arc<EngramNamedRootReadResponse>>, D::Error> {
+        Option::<EngramNamedRootReadResponse>::deserialize(deserializer)
+            .map(|value| value.map(Arc::new))
+    }
+}
+
+fn test_run_lifecycle_binding_matches(
+    association: &TestRunEvidenceAssociation,
+    store: &EngramAuthorityStoreKey,
+    binding: &EngramControlWorkBinding,
+) -> bool {
+    &association.store == store
+        && association.binding.root_execution_id == binding.root_execution_id
+        && association.binding.work_id == binding.work_id
+        && association.binding.run_id == binding.run_id
+        && association.binding.claim_id == binding.claim_id
 }
 
 fn test_run_object_id_valid(value: &str) -> bool {
@@ -47,7 +79,7 @@ impl AppState {
         else {
             return;
         };
-        let mut updates = Vec::new();
+        let mut updates = BTreeMap::new();
         for check in checks
             .iter()
             .filter(|check| check.check.command.kind == EngramVerificationKind::Test)
@@ -115,11 +147,13 @@ impl AppState {
                     lifecycle_read: None,
                 });
             }
-            updates.push(row.clone());
+            updates.insert(row.execution_id.clone(), row.clone());
         }
-        for row in updates {
-            self.persist_test_command_observation_locked(inner, row);
-        }
+        self.persist_test_run_evidence_batch_locked(
+            inner,
+            updates.into_values().collect(),
+            Vec::new(),
+        );
     }
 
     fn settle_test_run_verification_receipt(
@@ -154,8 +188,16 @@ impl AppState {
         {
             return;
         }
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let mut changed = BTreeMap::new();
+        // Resolve the report once before taking StateInner. Keep the first
+        // producer and the original input order, including repeated references:
+        // an already-settled association may match a later receipt input.
+        let mut producers = HashMap::new();
+        for producer in &report.observations {
+            producers
+                .entry(producer.observation_id.as_str())
+                .or_insert(producer);
+        }
+        let mut settlements = HashMap::<_, Vec<_>>::new();
         for (input, record_id) in report
             .verification_evidence
             .iter()
@@ -166,20 +208,38 @@ impl AppState {
             }
             let EngramObservationReference::ObservationId { observation_id } =
                 &input.producer_observation;
-            let Some(producer) = report
-                .observations
-                .iter()
-                .find(|producer| &producer.observation_id == observation_id)
-            else {
+            let Some(producer) = producers.get(observation_id.as_str()) else {
                 continue;
             };
-            for row in inner.test_run_observations.values_mut() {
-                let mut updated = false;
-                for association in &mut row.evidence {
-                    if &association.producer_observation_id != observation_id
-                        || &association.store != store
-                        || &association.binding != binding
-                        || association.action_fingerprint != producer.action_fingerprint
+            settlements
+                .entry(observation_id.as_str())
+                .or_default()
+                .push((*producer, record_id));
+        }
+        if settlements.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut changed = Vec::new();
+        for row in inner.test_run_observations.values_mut() {
+            // Most retained history belongs to another store or binding.
+            let Some(first) = row.evidence.iter().position(|association| {
+                &association.store == store && &association.binding == binding
+            }) else {
+                continue;
+            };
+            let mut updated = false;
+            for association in &mut row.evidence[first..] {
+                if &association.store != store || &association.binding != binding {
+                    continue;
+                }
+                let Some(candidates) =
+                    settlements.get(association.producer_observation_id.as_str())
+                else {
+                    continue;
+                };
+                for (producer, record_id) in candidates {
+                    if association.action_fingerprint != producer.action_fingerprint
                         || association.reported_outcome != producer.outcome
                     {
                         continue;
@@ -192,23 +252,22 @@ impl AppState {
                     if association
                         .verification_record_id
                         .as_ref()
-                        .is_some_and(|earlier| earlier != record_id)
+                        .is_some_and(|earlier| earlier != *record_id)
                     {
                         continue;
                     }
-                    association.verification_record_id = Some(record_id.clone());
+                    association.verification_record_id = Some((*record_id).clone());
                     association.checkpoint_id = Some(checkpoint.clone());
                     association.confirmed_cursor = Some(receipt._confirmed_cursor);
                     updated = true;
-                }
-                if updated {
-                    changed.insert(row.execution_id.clone(), row.clone());
+                    break;
                 }
             }
+            if updated {
+                changed.push(row.clone());
+            }
         }
-        for (_, row) in changed {
-            self.persist_test_command_observation_locked(&mut inner, row);
-        }
+        self.persist_test_run_evidence_batch_locked(&mut inner, changed, Vec::new());
     }
 
     fn revalidate_test_run_lifecycle(
@@ -220,23 +279,25 @@ impl AppState {
         if read.validate_authority(store, binding).is_err() {
             return;
         }
+        let generation = read.latest_event.as_ref().map(|event| event.generation);
+        let read = Arc::new(read.clone());
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let mut changed = Vec::new();
         let mut validated = Vec::new();
         for row in inner.test_run_observations.values_mut() {
+            let Some(first) = row.evidence.iter().position(|association| {
+                test_run_lifecycle_binding_matches(association, store, binding)
+            }) else {
+                continue;
+            };
             let mut updated = false;
-            for association in &mut row.evidence {
-                if &association.store != store
-                    || association.binding.root_execution_id != binding.root_execution_id
-                    || association.binding.work_id != binding.work_id
-                    || association.binding.run_id != binding.run_id
-                    || association.binding.claim_id != binding.claim_id
-                    || read.latest_event.as_ref().map(|event| event.generation)
-                        != association.source_basis.source_root_generation
+            for association in &mut row.evidence[first..] {
+                if !test_run_lifecycle_binding_matches(association, store, binding)
+                    || generation != association.source_basis.source_root_generation
                 {
                     continue;
                 }
-                association.lifecycle_read = Some(read.clone());
+                association.lifecycle_read = Some(Arc::clone(&read));
                 validated.push((
                     row.execution_id.clone(),
                     association.producer_observation_id.clone(),
@@ -248,10 +309,8 @@ impl AppState {
             }
         }
         inner.test_runs.lifecycle_revalidated.extend(validated);
-        for row in changed {
-            self.persist_test_command_observation_locked(&mut inner, row);
-        }
-        self.revalidate_test_run_compacted_locked(&mut inner, store, binding, read);
+        let compacted = self.revalidate_test_run_compacted_locked(&mut inner, store, binding, &read);
+        self.persist_test_run_evidence_batch_locked(&mut inner, changed, compacted);
     }
 }
 

@@ -1106,6 +1106,7 @@ include!("session_config.rs");
 include!("session_markers.rs");
 include!("turn_dispatch.rs");
 include!("session_crud.rs");
+include!("engram_project_reset_wait.rs");
 include!("sse_broadcast.rs");
 include!("state_broadcast_worker.rs");
 include!("shared_codex_mgr.rs");

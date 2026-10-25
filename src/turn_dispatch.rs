@@ -1615,13 +1615,11 @@ impl AppState {
                 }
                 return Ok(None);
             }
-            let project_reset_fenced = inner.sessions[index].engram.project_reset_in_progress
-                || engram_project_for_session_locked(&inner, session_id)
-                    .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
-            if project_reset_fenced {
+            if self.engram_project_reset_holds_drain_locked(&mut inner, index, session_id) {
                 // A settings transaction has not yet committed the authority
                 // that should govern this prompt. Keep the queue head durable
-                // until the exact project-reset owner releases its fence.
+                // until the exact project-reset owner releases its fence; an
+                // idle session says why it waits (`engram_project_reset_wait.rs`).
                 return Ok(None);
             }
             if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
@@ -1809,13 +1807,10 @@ impl AppState {
                     }
                     return Ok(None);
                 }
-                let record = &inner.sessions[index];
-                let project_reset_fenced = record.engram.project_reset_in_progress
-                    || engram_project_for_session_locked(&inner, session_id)
-                        .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
-                if project_reset_fenced {
+                if self.engram_project_reset_holds_drain_locked(&mut inner, index, session_id) {
                     return Ok(None);
                 }
+                let record = &inner.sessions[index];
                 if record.runtime_stop_in_progress {
                     return Ok(None);
                 }
@@ -2055,6 +2050,28 @@ impl AppState {
     }
 
     fn dispatch_turn_with_followup(
+        &self,
+        session_id: &str,
+        request: SendMessageRequest,
+        followup: Option<&DelegationRecord>,
+    ) -> std::result::Result<DispatchTurnResult, ApiError> {
+        let result = self.dispatch_or_queue_turn_with_followup(session_id, request, followup);
+        if matches!(result, Ok(DispatchTurnResult::Queued)) {
+            // A prompt a project settings change holds is queued here, not
+            // drained: an idle session says why it waits
+            // (`engram_project_reset_wait.rs`).
+            // A remote proxy shows its host's preview; it is not fenced here.
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(session_id)
+                && inner.sessions[index].remote_id.is_none()
+            {
+                self.engram_project_reset_holds_drain_locked(&mut inner, index, session_id);
+            }
+        }
+        result
+    }
+
+    fn dispatch_or_queue_turn_with_followup(
         &self,
         session_id: &str,
         request: SendMessageRequest,

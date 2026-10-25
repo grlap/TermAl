@@ -642,6 +642,141 @@ impl AppState {
         self.compact_test_runs_locked(inner);
     }
 
+    // Receipt settlement and lifecycle reads can update many retained rows at
+    // once. Persist their final images together and project the public index
+    // once, rather than repeating both history scans after every association.
+    // Other single-row observation writers retain their existing commit path.
+    fn persist_test_run_evidence_batch_locked(
+        &self,
+        inner: &mut StateInner,
+        observations: Vec<TestRunCommandObservation>,
+        compacted: Vec<TestRunCompacted>,
+    ) {
+        if observations.is_empty() && compacted.is_empty() {
+            return;
+        }
+        for row in &observations {
+            inner.test_runs.observations_durable.remove(&row.execution_id);
+            inner.test_runs.observations_failed.remove(&row.execution_id);
+        }
+        for row in &compacted {
+            inner
+                .test_runs
+                .compactions_revalidating
+                .insert(row.summary.run_id.clone());
+        }
+        // Live observation saves have a visible revision, including on write
+        // failure. A compacted-only proof save remains private until its delta.
+        let mut first_revision = None;
+        let dispatch = if observations.is_empty() {
+            self.persist_internal_locked_with_dispatch(inner).ok()
+        } else {
+            let result = self.commit_persisted_delta_locked_with_dispatch(inner);
+            first_revision = Some(inner.revision);
+            result.ok().map(|(_, dispatch)| dispatch)
+        };
+        let mut ids = Vec::with_capacity(observations.len());
+        for row in observations {
+            let id = row.execution_id.clone();
+            ids.push(id.clone());
+            match dispatch {
+                Some(PersistDispatch::Synchronous) => {
+                    inner.test_runs.observations_durable.insert(id);
+                }
+                Some(PersistDispatch::BackgroundQueued) => {
+                    let (fence, waiter) = PersistFence::new(
+                        PersistFenceTarget::TestRunObservation(Box::new(row.clone())),
+                        std::time::Instant::now() + Duration::from_secs(5),
+                    );
+                    if self
+                        .persist_tx
+                        .send(PersistRequest::Fence(Box::new(fence)))
+                        .is_ok()
+                    {
+                        inner
+                            .test_runs
+                            .observation_persistence
+                            .0
+                            .lock()
+                            .expect("test observation mutex poisoned")
+                            .insert(id, (row, waiter));
+                    } else {
+                        inner.test_runs.observations_failed.insert(id);
+                    }
+                }
+                None => {
+                    inner.test_runs.observations_failed.insert(id);
+                }
+            }
+        }
+        for row in &compacted {
+            match dispatch {
+                Some(PersistDispatch::Synchronous) => {
+                    inner
+                        .test_runs
+                        .compactions_durable
+                        .insert(row.summary.run_id.clone());
+                    inner
+                        .test_runs
+                        .compactions_revalidating
+                        .remove(&row.summary.run_id);
+                }
+                Some(PersistDispatch::BackgroundQueued) => {
+                    self.queue_test_run_compaction_fence(inner, row.clone());
+                }
+                None => {}
+            }
+        }
+        if !ids.is_empty() {
+            let runs = test_run_summaries_locked(inner);
+            // Preserve first-match selection for both execution and artifact
+            // identities without another full index search per changed row.
+            let mut by_id = HashMap::new();
+            let mut by_artifact = HashMap::new();
+            for run in &runs {
+                by_id.entry(run.run_id.as_str()).or_insert(run);
+                by_artifact
+                    .entry((run.run_id.as_str(), test_run_path_key(&run.run_dir)))
+                    .or_insert(run);
+            }
+            for id in ids {
+                let Some(row) = inner.test_run_observations.get(&id) else {
+                    continue;
+                };
+                let run = by_id
+                    .get(id.as_str())
+                    .copied()
+                    .or_else(|| {
+                        row.artifact.as_ref().and_then(|artifact| {
+                            by_artifact
+                                .get(&(
+                                    artifact.run_id.as_str(),
+                                    test_run_path_key(&artifact.run_directory),
+                                ))
+                                .copied()
+                        })
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| test_run_observation_summary(inner, row));
+                // Global deltas need distinct revisions: same-revision rows
+                // are discarded by clients. Only the first emits a persist
+                // dispatch; later revisions use the existing delta allocator,
+                // including its post-shutdown synchronous durability fallback.
+                let revision = match first_revision.take() {
+                    Some(revision) => Some(revision),
+                    None => self.commit_delta_locked(inner).ok(),
+                };
+                if let Some(revision) = revision {
+                    self.publish_delta_locked(inner, DeltaEvent::TestRunChanged { revision, run });
+                }
+            }
+        }
+        for row in compacted {
+            self.publish_test_run_compact_risk_locked(inner, &row);
+        }
+        self.compact_test_runs_locked(inner);
+    }
+
     fn step_test_command_observation_persistence(&self) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let obsolete: Vec<_> = inner
