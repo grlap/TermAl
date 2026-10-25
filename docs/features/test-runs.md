@@ -209,9 +209,17 @@ project root. It indexes `<common>/review-runs/*` for the main worktree and
 directory is indexed once, however many projects share it.
 
 A run's `projectId` is chosen in this order:
-1. the project whose root equals the run's worktree (`request.json` `root`);
-2. otherwise, the project with the longest root containing that worktree;
-3. otherwise, the project with the smallest id that shares the common directory.
+1. the project captured by an exact, durable launcher registration, when present;
+2. otherwise, the project whose root equals the run's worktree (`request.json` `root`);
+3. otherwise, the project with the longest root containing that worktree;
+4. otherwise, the project with the smallest id that shares the common directory.
+
+Registration must match the request identity, owner and canonical native run
+directory. Its host-captured locator digest is independent of display spelling
+(macOS public/private aliases and Windows verbatim/UNC paths). A pending or
+mismatched registration does not override discovery. If the registered project
+was deleted, the surviving filesystem discovery determines the project. The notification recipient
+only routes completion mail; it never changes the registered run's project.
 
 Remote projects are not indexed in slice 1.
 
@@ -844,6 +852,15 @@ of the reviewed `/review-changes` contract.
   wait on runs.
   - The caller need not be the owner: a coordinator may wait on a run it did
     not start.
+  - Each new wait pins the request identity and a digest of the canonical native
+    run directory, plus the frozen
+    input fingerprint if launcher preflight has already published it. The
+    request identity and fingerprint appear in the resume prompt. A replaced
+    request, locator or
+    pinned fingerprint cannot supply a PASS for that wait; it settles UNKNOWN
+    because the original identity is no longer indexed. A matching completed
+    run can be consumed through a new wait even if completion mail went to
+    another session. Project isolation still applies.
   - If an id is not in the index, the tool first forces one rescan, waited on
     for at most 1 s; a longer one finishes in the background and the call
     proceeds with the index as it is. Only then does an unknown id (404) or a
@@ -877,7 +894,7 @@ A run is settled for a wait when it is `passed` or `failed`, or `unknown` with
 `unknownReason` of `processGone`, confirmed by the post-liveness reread.
 
 A run that left the index after the wait was registered settles as `UNKNOWN
-(not indexed)` only when it cannot come back:
+(not indexed)` when its original identity cannot come back:
 
 - its `request.json` is gone (with its directory or alone) or cannot be read,
   checked on disk without the state lock; or
@@ -886,11 +903,16 @@ A run that left the index after the wait was registered settles as `UNKNOWN
   session stays, without a project, and the index stops scanning that
   repository.
 
-A run that left the index while still readable on disk is not settled. A
-rescan that was already running when the wait was registered started without
-the wait's retention exemption, and may drop a terminal run past the
-per-project cap. The next scan indexes it again, and it settles with its real
-verdict.
+For a fenced wait, a readable replacement also settles UNKNOWN: a changed
+run ID, request digest, canonical native locator or pinned fingerprint, or
+an unsupported request, cannot stand in for the original. A same-ID index
+entry with a mismatched identity likewise settles UNKNOWN.
+
+A matching pinned original that is still readable and supported remains
+pending for reindexing. Unfenced legacy labels retain the readable-request
+rule. A rescan that started before registration may lack the wait's retention
+exemption and drop a terminal run past the per-project cap; the next scan
+indexes the matching original again, and it settles with its real verdict.
 
 An `unknown` run with `noPid`, `heartbeatStale`, `resultsUnreadable`, or with
 no reason is not settled: the run may still finish, and the index retries.
@@ -969,6 +991,10 @@ type TestRunWaitRunLabel = {
   worktree: string;
   ownerSessionId: string | null;
   startedAt: string | null;
+  requestIdentity?: string;     // immutable request digest
+  expectedFingerprint?: string;// frozen input if published before the wait
+  locatorIdentity?: string;     // SHA-256 of canonical native path bytes,
+                                // never display text
 };
 
 type TestRunWaitConsumedReason =

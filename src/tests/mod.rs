@@ -1906,6 +1906,9 @@ fn test_run_wait_record(id: &str, session_id: &str) -> TestRunWaitRecord {
             worktree: "/repo".to_owned(),
             owner_session_id: None,
             started_at: None,
+            request_identity: None,
+            expected_fingerprint: None,
+            locator_identity: None,
         }],
     }
 }

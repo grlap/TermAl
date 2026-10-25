@@ -66,6 +66,7 @@ fn test_run_exact_query(
         let entry = indexed.expect("matching captured index entry");
         let mut run = entry.summary.clone();
         run.registration = test_run_registration_view(&inner, &entry.disk);
+        run.project_id = test_run_effective_project_id(&inner, entry);
         test_run_enrich_artifact_summary(&inner, &mut run, Some(&entry.disk));
         return Ok(Some(TestRunExactQuery {
             run,

@@ -20,6 +20,9 @@ struct TestRunRegistration {
     #[serde(default)]
     project_id: Option<String>,
     run_directory: String,
+    // Host-captured canonical native bytes, independent of wire path spelling.
+    #[serde(default)]
+    locator_identity: Option<String>,
     worktree: String,
     request_identity: String,
     initiating_session_id: String,
@@ -427,6 +430,9 @@ impl AppState {
         diagnostics.enter("index_request");
         let disk = TestRunDisk::read(&run_directory, None)
             .ok_or_else(|| ApiError::bad_request("test run request cannot be indexed"))?;
+        if disk.locator_identity.is_none() {
+            return Err(ApiError::bad_request("test run native locator identity is unavailable"));
+        }
         let request_identity = test_run_registration_identity(&value)?;
         diagnostics.request_digest = Some(request_identity.clone());
         if disk.request_identity.as_ref() != Some(&request_identity) {
@@ -463,6 +469,7 @@ impl AppState {
                 run_id: request.run_id.clone(),
                 project_id: Some(project.id.clone()),
                 run_directory: test_run_display_path(&run_directory),
+                locator_identity: disk.locator_identity.clone(),
                 worktree: disk.worktree.clone(),
                 request_identity,
                 initiating_session_id: session_id.to_owned(),
@@ -505,6 +512,7 @@ impl AppState {
                         ApiError::conflict("retained run identity has no registration to replay")
                     })?;
                     if earlier.request_identity != registration.request_identity
+                        || earlier.locator_identity != registration.locator_identity
                         || earlier.run_directory != registration.run_directory
                         || earlier.initiating_session_id != session_id
                     {
@@ -528,6 +536,7 @@ impl AppState {
             let expected = if let Some(earlier) = inner.test_run_registrations.get(&request.run_id)
             {
                 if earlier.request_identity != registration.request_identity
+                    || earlier.locator_identity != registration.locator_identity
                     || earlier.run_directory != registration.run_directory
                     || earlier.initiating_session_id != session_id
                 {
@@ -705,8 +714,10 @@ fn test_run_registration_view(inner: &StateInner, disk: &TestRunDisk) -> TestRun
         .test_run_registrations
         .get(&disk.run_id)
         .filter(|registration| {
-            test_run_path_key(&registration.run_directory)
-                == test_run_path_key(&test_run_display_path(&disk.run_dir))
+            registration.locator_identity.is_some()
+                && registration.locator_identity == disk.locator_identity
+                && test_run_path_key(&registration.run_directory)
+                    == test_run_path_key(&test_run_display_path(&disk.run_dir))
                 && disk.owner.as_deref() == Some(&registration.initiating_session_id)
                 && disk.request_identity.as_ref() == Some(&registration.request_identity)
         });

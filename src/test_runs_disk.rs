@@ -126,7 +126,8 @@ fn test_runs_directories(
     runs
 }
 
-/// `path` as a comparison key: forward slashes, no trailing slash, no Windows
+/// Display/discovery key only, never a native locator fence: forward slashes,
+/// no trailing slash, no Windows
 /// verbatim prefix, and lower case on Windows, whose paths ignore case.
 fn test_run_path_key(path: &str) -> String {
     let path = path
@@ -141,12 +142,39 @@ fn test_run_path_key(path: &str) -> String {
     }
 }
 
-/// A path as the wire shows it: forward slashes, no verbatim prefix.
+/// User-facing path; Windows uses forward slashes and no verbatim prefix.
+/// Unix literal backslashes remain part of the filename.
 fn test_run_display_path(path: &FsPath) -> String {
+    let path = normalize_user_facing_path(path);
     let text = path.to_string_lossy();
-    text.strip_prefix(r"\\?\")
-        .unwrap_or(&text)
-        .replace('\\', "/")
+    #[cfg(windows)]
+    { text.replace('\\', "/") }
+    #[cfg(not(windows))]
+    { text.into_owned() }
+}
+
+// Native bytes, not display text, fence identity. Called only on canonical
+// paths; canonicalization and artifact reads remain outside StateInner.
+fn test_run_native_path_key(path: &FsPath) -> String {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        digest.update(path.as_os_str().as_bytes());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        for word in path.as_os_str().encode_wide() {
+            digest.update(word.to_le_bytes());
+        }
+    }
+    format!("{:x}", digest.finalize())
+}
+
+fn test_run_locator_identity(path: &FsPath) -> Option<String> {
+    fs::canonicalize(path).ok().map(|path| test_run_native_path_key(&path))
 }
 
 fn test_run_truncate(text: &str, max: usize) -> String {
@@ -393,6 +421,10 @@ impl TestRunRead {
 struct TestRunDisk {
     run_id: String,
     request_identity: Option<String>,
+    // Added by launcher preflight after durable registration; deliberately
+    // separate from the immutable registration request digest.
+    expected_fingerprint: Option<String>,
+    locator_identity: Option<String>,
     run_dir: PathBuf,
     request_stamp: TestRunFileStamp,
     results_stamp: TestRunFileStamp,
@@ -613,6 +645,12 @@ impl TestRunDisk {
         TestRunRead::Run(Self {
             run_id,
             request_identity: test_run_registration_identity(&request).ok(),
+            expected_fingerprint: request
+                .get("expectedFingerprint")
+                .and_then(Value::as_str)
+                .filter(|value| test_run_object_id_valid(value))
+                .map(str::to_owned),
+            locator_identity: test_run_locator_identity(run_dir),
             run_dir: run_dir.to_path_buf(),
             request_stamp,
             results_stamp,

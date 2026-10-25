@@ -656,12 +656,8 @@ fn pending_waits_are_persisted_and_reload() {
 fn a_run_named_by_a_pending_wait_stays_indexed_past_retention() {
     let fixture = WaitFixture::new("retention");
     let old = fixture.write("test-a-old", Some(running(7)));
-    fixture.scan(&[7]);
-    fixture.register(&["test-a-old"], "all").unwrap();
-    // It finishes behind 50 newer terminal runs.
-    let mut results = passed();
-    results["runId"] = json!("test-a-old");
-    fs::write(old.join("results.json"), results.to_string()).unwrap();
+    // Establish its older immutable request before registering the wait.
+    // Completion changes results, never the request identity being awaited.
     fs::write(
         old.join("request.json"),
         json!({ "runId": "test-a-old", "root": fixture.root.to_string_lossy(),
@@ -669,6 +665,12 @@ fn a_run_named_by_a_pending_wait_stays_indexed_past_retention() {
         .to_string(),
     )
     .unwrap();
+    fixture.scan(&[7]);
+    fixture.register(&["test-a-old"], "all").unwrap();
+    // It finishes behind 50 newer terminal runs.
+    let mut results = passed();
+    results["runId"] = json!("test-a-old");
+    fs::write(old.join("results.json"), results.to_string()).unwrap();
     for index in 0..TEST_RUN_TERMINAL_RUNS_PER_PROJECT {
         fixture.write(&format!("test-newer-{index:02}"), Some(passed()));
     }
@@ -743,6 +745,9 @@ fn wait_on(summaries: &[TestRunSummary]) -> TestRunWaitRecord {
                 worktree: summary.worktree.clone(),
                 owner_session_id: None,
                 started_at: None,
+                request_identity: None,
+                expected_fingerprint: None,
+                locator_identity: None,
             })
             .collect(),
     }
@@ -828,11 +833,13 @@ fn a_label_run_dir_names_its_directory() {
             test_run_fs_path(&display(r"\\?\C:\repo\.git\review-runs\test-a")),
             PathBuf::from("C:/repo/.git/review-runs/test-a")
         );
-        // Displayed as `UNC/server/...`, which alone would be relative.
+        // Ordinary and historical UNC displays name the same native directory.
         assert_eq!(
             test_run_fs_path(&display(r"\\?\UNC\server\share\repo\.git\review-runs\test-a")),
             PathBuf::from(r"\\?\UNC\server\share\repo\.git\review-runs\test-a")
         );
+        assert_eq!(test_run_fs_path("UNC/server/share/repo/.git/review-runs/test-a"),
+            test_run_fs_path("//server/share/repo/.git/review-runs/test-a"));
     }
 }
 
@@ -852,6 +859,9 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
             worktree: "/repo".to_owned(),
             owner_session_id: None,
             started_at: None,
+            request_identity: None,
+            expected_fingerprint: None,
+            locator_identity: None,
         }],
     };
     let value = serde_json::to_value(&wait).unwrap();

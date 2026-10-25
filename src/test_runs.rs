@@ -177,6 +177,8 @@ struct TestRunDetailResponse {
 struct TestRunEntry {
     disk: Arc<TestRunDisk>,
     summary: TestRunSummary,
+    // Preserve scanner fallback separately from the live registration override.
+    discovered_project_id: Option<String>,
 }
 
 /// The runtime-only test-run index kept in `StateInner`, in list order. It
@@ -333,8 +335,8 @@ fn test_run_resolve_session(inner: &StateInner, reference: &str) -> Option<Strin
 /// sharing its Git common directory.
 fn test_run_project_id(
     worktree_key: &str,
-    projects: &[(String, String, Option<String>)],
-    common_key: &str,
+    projects: &[(String, String, Option<PathBuf>)],
+    common_key: &FsPath,
 ) -> Option<String> {
     if let Some((id, _, _)) = projects.iter().find(|(_, root, _)| root == worktree_key) {
         return Some(id.clone());
@@ -353,6 +355,21 @@ fn test_run_project_id(
         .min()
 }
 
+fn test_run_registered_project_id(inner: &StateInner, disk: &TestRunDisk) -> Option<String> {
+    (test_run_registration_view(inner, disk).registration_state.as_deref() == Some("registered"))
+        .then(|| inner.test_run_registrations.get(&disk.run_id))
+        .flatten()
+        .and_then(|row| row.project_id.clone())
+        .filter(|id| inner.projects.iter().any(|project| &project.id == id))
+}
+
+// Registration can become durable between scans. Read/wait boundaries must
+// derive authority from that current proof, not the scanner's older summary.
+fn test_run_effective_project_id(inner: &StateInner, entry: &TestRunEntry) -> Option<String> {
+    test_run_registered_project_id(inner, &entry.disk)
+        .or_else(|| entry.discovered_project_id.clone())
+}
+
 fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSummary {
     if let Some(compacted) = inner.test_run_compacted.get(&scanned.disk.run_id)
         .filter(|row| row.compacted && test_run_compact_is_installed(inner, row)) {
@@ -361,12 +378,18 @@ fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSumm
     let disk = &scanned.disk;
     let results = disk.results.as_ref();
     let stages = disk.stages();
+    let registration = test_run_registration_view(inner, disk);
+    // A durable registration captures the initiating project's authority.
+    // Filesystem discovery can choose another project with an overlapping
+    // root/common directory; notification routing does not transfer ownership.
+    let project_id = test_run_registered_project_id(inner, disk)
+        .or_else(|| scanned.project_id.clone());
     // Found among all stages, so a running stage past the kept ones counts.
     let current_stage = results.and_then(|results| results.current_stage.clone());
     let mut summary = TestRunSummary {
-        registration: test_run_registration_view(inner, disk),
+        registration,
         run_id: disk.run_id.clone(),
-        project_id: scanned.project_id.clone(),
+        project_id,
         worktree: disk.worktree.clone(),
         run_dir: test_run_display_path(&disk.run_dir),
         preset: disk.preset,
@@ -565,15 +588,16 @@ impl AppState {
             ready();
         }
         let mut projects = Vec::new();
-        let mut common_dirs: BTreeMap<String, PathBuf> = BTreeMap::new();
+        let mut common_dirs: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
         for (id, root) in roots {
-            let common = test_runs_git_common_dir(FsPath::new(&root));
-            let common_key = common.as_ref().map(|common| {
-                test_run_path_key(
-                    &fs::canonicalize(common)
-                        .unwrap_or_else(|_| common.clone())
-                        .to_string_lossy(),
-                )
+            // Enumerate the canonical directory itself, not just a canonical
+            // map key. A linked worktree's commondir contains ../..; keeping
+            // that spelling would change run locators when another project
+            // stops supplying the shared repository's scan root.
+            let common_key = test_runs_git_common_dir(FsPath::new(&root))
+                .map(|common| fs::canonicalize(&common).unwrap_or(common));
+            let common = common_key.as_ref().map(|canonical| {
+                normalize_user_facing_path(canonical)
             });
             if let (Some(common), Some(key)) = (&common, &common_key) {
                 common_dirs
@@ -620,6 +644,7 @@ impl AppState {
                 let disk = match earlier {
                     Some(disk)
                         if disk.read_failures == 0
+                            && disk.locator_identity.is_some()
                             && disk.request_stamp == request_stamp
                             && disk.results_stamp == results_stamp =>
                     {
@@ -768,6 +793,7 @@ impl AppState {
             .map(|run| TestRunEntry {
                 summary: test_run_summary(&inner, run),
                 disk: run.disk.clone(),
+                discovered_project_id: run.project_id.clone(),
             })
             .collect();
         for entry in &entries {

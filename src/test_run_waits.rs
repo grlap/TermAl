@@ -44,6 +44,12 @@ struct TestRunWaitRunLabel {
     worktree: String,
     owner_session_id: Option<String>,
     started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    request_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    locator_identity: Option<String>,
 }
 
 /// A pending run wait. It exists only while pending.
@@ -145,29 +151,29 @@ fn test_run_wait_verdicts(
 }
 
 /// The directory a label's `runDir` names. That is the wire's display path
-/// (`test_run_display_path`: no verbatim prefix, forward slashes), which is
-/// an absolute path as it stands except a verbatim UNC path on Windows:
-/// `\\?\UNC\server\share\...` displays as `UNC/server/share/...`, relative
-/// on its own.
+/// (`test_run_display_path`: native Unix names; forward slashes on Windows).
+/// Reconstruct Windows UNC as verbatim for filesystem reads, accepting both
+/// current `//server/share/...` and historical `UNC/server/share/...` displays.
 fn test_run_fs_path(display: &str) -> PathBuf {
     #[cfg(windows)]
-    if let Some(rest) = display.strip_prefix("UNC/") {
+    if let Some(rest) = display.strip_prefix("//").or_else(|| display.strip_prefix("UNC/")) {
         return PathBuf::from(format!(r"\\?\UNC\{}", rest.replace('/', r"\")));
     }
     PathBuf::from(display)
 }
 
-/// Whether a run that left the index is gone from disk: its request.json,
-/// which is what indexes it, is missing (with its directory or alone) or
-/// cannot be read. The launcher writes it by rename, and only while creating
-/// the run: a non-terminal run then, which the index keeps through a failed
-/// read. So one found unreadable here stays unreadable. A run still readable
-/// on disk is indexed again by a later scan.
-fn test_run_wait_run_gone(run_dir: &FsPath) -> bool {
-    !matches!(
-        test_run_read_json(&run_dir.join("request.json")),
-        TestRunJson::Parsed(..)
-    )
+/// A missing index entry stays pending only while its original request can
+/// still be indexed. A readable replacement is not evidence for that request.
+/// This complete label and disk comparison runs outside StateInner.
+fn test_run_wait_run_gone(label: &TestRunWaitRunLabel) -> bool {
+    let run_dir = test_run_fs_path(&label.run_dir);
+    if label.request_identity.is_some() {
+        return TestRunDisk::read(&run_dir, None).is_none_or(|disk| {
+            disk.run_id != label.run_id || !test_run_wait_identity_matches(label, &disk)
+        });
+    }
+    // Unfenced old labels retain their existing readable-request grace.
+    !matches!(test_run_read_json(&run_dir.join("request.json")), TestRunJson::Parsed(..))
 }
 
 fn test_run_wait_verdict_label(verdict: Option<TestRunWaitVerdict>) -> String {
@@ -242,6 +248,12 @@ fn test_run_wait_run_section(
         ),
         format!("- Run directory: `{run_dir}`"),
     ];
+    if let Some(identity) = &label.request_identity {
+        lines.push(format!("- Request identity: `{identity}`"));
+    }
+    if let Some(fingerprint) = &label.expected_fingerprint {
+        lines.push(format!("- Frozen input fingerprint: `{fingerprint}`"));
+    }
     match verdict {
         Some(TestRunWaitVerdict::Fail) => {
             // The read names a preflight check or a stage past the summary's
@@ -424,10 +436,33 @@ fn test_run_wait_summaries<'a>(
     inner: &'a StateInner,
     wait: &TestRunWaitRecord,
 ) -> Vec<Option<&'a TestRunSummary>> {
-    wait.run_ids
+    wait.runs
         .iter()
-        .map(|run_id| inner.test_runs.find(run_id).map(|entry| &entry.summary))
+        .map(|label| {
+            inner
+                .test_runs
+                .find(&label.run_id)
+                .filter(|entry| test_run_wait_identity_matches(label, &entry.disk))
+                .map(|entry| &entry.summary)
+        })
         .collect()
+}
+
+fn test_run_wait_identity_matches(label: &TestRunWaitRunLabel, disk: &TestRunDisk) -> bool {
+    // Legacy waits have no content fence. New waits never accept a copied or
+    // replaced request, locator or known frozen input under the same run id.
+    label
+        .request_identity
+        .as_ref()
+        .is_none_or(|identity| {
+            disk.request_identity.as_ref() == Some(identity)
+                && label.locator_identity.is_some()
+                && label.locator_identity == disk.locator_identity
+        })
+        && label
+            .expected_fingerprint
+            .as_ref()
+            .is_none_or(|fingerprint| disk.expected_fingerprint.as_ref() == Some(fingerprint))
 }
 
 /// Removes every pending run wait of a session whose turn the user stopped.
@@ -542,10 +577,15 @@ impl AppState {
                     return Err(TestRunWaitValidation::Unknown(run_id.clone()));
                 };
                 let summary = &entry.summary;
-                if summary.project_id.as_deref() != Some(project_id.as_str()) {
+                if test_run_effective_project_id(inner, entry).as_deref() != Some(project_id.as_str()) {
                     return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(format!(
                         "test run `{run_id}` is not in the waiting session's project"
                     ))));
+                }
+                if entry.disk.locator_identity.is_none() {
+                    return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                        "test run native locator identity is unavailable"
+                    )));
                 }
                 runs.push(TestRunWaitRunLabel {
                     run_id: run_id.clone(),
@@ -554,6 +594,9 @@ impl AppState {
                     worktree: summary.worktree.clone(),
                     owner_session_id: summary.owner_session_id.clone(),
                     started_at: summary.started_at.clone(),
+                    request_identity: entry.disk.request_identity.clone(),
+                    expected_fingerprint: entry.disk.expected_fingerprint.clone(),
+                    locator_identity: entry.disk.locator_identity.clone(),
                 });
             }
             let wait = TestRunWaitRecord {
@@ -686,13 +729,13 @@ impl AppState {
             if !inner.test_runs.scanned_once || inner.test_run_waits.is_empty() {
                 return TestRunWaitRefresh::default();
             }
-            let mut checks: BTreeMap<String, PathBuf> = BTreeMap::new();
+            let mut checks: Vec<(String, TestRunWaitRunLabel)> = Vec::new();
             let mut reads: BTreeMap<String, PathBuf> = BTreeMap::new();
             for wait in &inner.test_run_waits {
                 let summaries = test_run_wait_summaries(&inner, wait);
                 for (label, summary) in wait.runs.iter().zip(&summaries) {
                     if summary.is_none() {
-                        checks.insert(label.run_id.clone(), test_run_fs_path(&label.run_dir));
+                        checks.push((wait.id.clone(), label.clone()));
                     }
                 }
                 let verdicts = test_run_wait_verdicts(wait, &summaries, |_| true);
@@ -710,10 +753,10 @@ impl AppState {
             (checks, reads)
         };
         after_pick();
-        let gone: HashSet<String> = checks
+        let gone: HashSet<(String, String)> = checks
             .into_iter()
-            .filter(|(_, run_dir)| test_run_wait_run_gone(run_dir))
-            .map(|(run_id, _)| run_id)
+            .filter(|(_, label)| test_run_wait_run_gone(label))
+            .map(|(wait_id, label)| (wait_id, label.run_id))
             .collect();
         let failures: HashMap<String, TestRunCardFailureRead> = reads
             .into_iter()
@@ -751,7 +794,16 @@ impl AppState {
                     .and_then(|index| inner.sessions[index].session.project_id.as_deref())
                     .is_none_or(|project_id| inner.find_project(project_id).is_none());
                 let verdicts = test_run_wait_verdicts(&wait, &summaries, |run_id| {
-                    project_removed || gone.contains(run_id)
+                    project_removed
+                        || gone.contains(&(wait.id.clone(), run_id.to_owned()))
+                        || wait
+                            .runs
+                            .iter()
+                            .find(|label| label.run_id == run_id)
+                            .zip(inner.test_runs.find(run_id))
+                            .is_some_and(|(label, entry)| {
+                                !test_run_wait_identity_matches(label, &entry.disk)
+                            })
                 });
                 if !test_run_wait_satisfied(&wait, &verdicts) {
                     remaining.push(wait);

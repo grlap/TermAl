@@ -10,6 +10,9 @@ mod identity;
 #[path = "test_run_exact_query.rs"]
 mod exact_query;
 
+#[path = "test_run_wait_ownership.rs"]
+mod wait_ownership;
+
 #[path = "test_run_observation_review.rs"]
 mod observation_review;
 

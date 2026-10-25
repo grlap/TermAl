@@ -1165,6 +1165,7 @@ fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
     for run in &mut runs {
         if let Some(entry) = inner.test_runs.find(&run.run_id) {
             run.registration = test_run_registration_view(inner, &entry.disk);
+            run.project_id = test_run_effective_project_id(inner, entry);
         }
     }
     let retained: std::collections::BTreeSet<_> = inner
