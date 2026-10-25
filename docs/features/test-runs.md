@@ -136,6 +136,18 @@ as unknown after boot until existing canonical reads revalidate it. This bounds
 resolved detail and normal payload/reparsing work, not total identity storage:
 unresolved obligations and minimal immutable identity records remain lossless.
 
+Bulk history projections (state snapshots, rescans and compaction selection)
+build a temporary, borrowed index of artifact IDs to observation candidates.
+The index lasts only for that locked read: every candidate still passes the
+existing owner, directory, request/digest, durability and lifecycle checks.
+It is not a cached verdict. A compaction completion revalidates its own exact
+summary and proof rather than rebuilding all unrelated summaries. Idle ticks
+still poll pending persistence fences, but skip history selection at a revision
+already examined. Mutation paths that select directly and all rescans still do
+so; runtime-only eligibility changes without selection or a revision bump may
+retain detail until the next revision or the 10-second idle rescan. Failed
+compaction/removal writes retain retry eligibility.
+
 Host-observed native exits are execution observations. When the existing declared
 artifact adapter judges a result, its verdict updates the row while retaining the
 native exit code separately; exit zero cannot override a failing TRX. A restart or

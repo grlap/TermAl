@@ -1303,6 +1303,28 @@ fn stale_recovery_probe_cannot_cross_a_submission_attempt_boundary() {
 }
 
 #[test]
+fn idle_history_unchanged_review_recovery_probe_does_not_commit_again() {
+    let (mut state, _root, parent) = mailbox_test_state();
+    let (delegation, child) = install_required_review_delegation(&state, &parent);
+    let (tx, rx) = mpsc::channel();
+    state.persist_tx = tx;
+    state.state_broadcast_mailbox = Some(Arc::new(StateBroadcastMailbox::default()));
+    state.record_delegation_review_recovery_probe(&child, &delegation, &parent, 1, None).unwrap();
+    let revision = state.inner.lock().unwrap().revision;
+    assert!(rx.try_recv().is_ok(), "changed probe must enqueue persistence");
+    for _ in 0..3 {
+        state.record_delegation_review_recovery_probe(&child, &delegation, &parent, 1, None).unwrap();
+    }
+    assert_eq!(state.inner.lock().unwrap().revision, revision);
+    assert!(rx.try_recv().is_err(), "unchanged probes must return before persistence");
+    state.record_delegation_review_recovery_probe(
+        &child, &delegation, &parent, 1, Some("quarantined envelope".to_owned()),
+    ).unwrap();
+    assert_eq!(state.inner.lock().unwrap().revision, revision + 1);
+    assert!(rx.try_recv().is_ok(), "a changed diagnostic still persists");
+}
+
+#[test]
 fn structured_review_result_enforces_aggregate_mailbox_envelope_limit() {
     let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
     let (_delegation_id, child_session_id) =

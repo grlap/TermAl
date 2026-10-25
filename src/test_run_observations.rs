@@ -3,6 +3,11 @@
 // artifact validation, verification credit and tracker lifecycle stay with
 // their existing adapters. A native exit never constitutes verification.
 
+#[cfg(test)]
+thread_local! {
+    static TEST_TEST_RUN_ASSOCIATION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct TestRunCommandObservation {
@@ -138,6 +143,35 @@ struct TestRunObservedArtifact {
     run_directory: String,
     request_identity: Option<String>,
     terminal_digest: Option<String>,
+}
+
+// Borrowed candidate selection for one locked projection, never cached proof.
+// Every selected row still passes the exact owner/path/request-or-digest and
+// current durability/lifecycle predicates. Rebuilding at each cut also sees
+// unstamped in-memory changes; run-id equality alone never grants authority.
+struct TestRunProjection<'a> {
+    entries: HashMap<&'a str, &'a TestRunEntry>,
+    observations: HashMap<&'a str, Vec<&'a TestRunCommandObservation>>,
+}
+
+impl<'a> TestRunProjection<'a> {
+    fn new(inner: &'a StateInner) -> Self {
+        let mut entries = HashMap::new();
+        for entry in &inner.test_runs.entries {
+            entries.entry(entry.summary.run_id.as_str()).or_insert(entry);
+        }
+        let mut observations: HashMap<&str, Vec<_>> = HashMap::new();
+        for row in inner.test_run_observations.values() {
+            if let Some(artifact) = &row.artifact {
+                observations.entry(artifact.run_id.as_str()).or_default().push(row);
+            }
+        }
+        Self { entries, observations }
+    }
+
+    fn observations(&self, run_id: &str) -> &[&'a TestRunCommandObservation] {
+        self.observations.get(run_id).map(Vec::as_slice).unwrap_or(&[])
+    }
 }
 
 // Waiters are process-local and never part of the persisted authority image.
@@ -1020,6 +1054,8 @@ fn test_run_observation_matches_run(
     disk: Option<&TestRunDisk>,
     row: &TestRunCommandObservation,
 ) -> bool {
+    #[cfg(test)]
+    TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.set(count.get() + 1));
     row.artifact.as_ref().is_some_and(|artifact| {
         run.owner_session_id == row.summary.owner_session_id
             && test_run_path_key(&run.worktree) == test_run_path_key(&row.summary.worktree)
@@ -1047,10 +1083,20 @@ fn test_run_enrich_artifact_summary(
     run: &mut TestRunSummary,
     disk: Option<&TestRunDisk>,
 ) -> HashSet<String> {
+    test_run_enrich_artifact_summary_from_observations(
+        inner, run, disk, inner.test_run_observations.values(),
+    )
+}
+
+fn test_run_enrich_artifact_summary_from_observations<'a>(
+    inner: &StateInner,
+    run: &mut TestRunSummary,
+    disk: Option<&TestRunDisk>,
+    observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
+) -> HashSet<String> {
     let mut merged = HashSet::new();
-    let associations: Vec<_> = inner
-        .test_run_observations
-        .values()
+    let associations: Vec<_> = observations
+        .into_iter()
         .filter(|row| test_run_observation_matches_run(inner, run, disk, row))
         .collect();
     if associations.is_empty() {
@@ -1141,8 +1187,16 @@ fn test_run_enrich_artifact_summary(
 }
 
 fn test_run_artifact_fallback(inner: &StateInner, run_id: &str) -> Option<TestRunSummary> {
+    test_run_artifact_fallback_from_observations(inner, run_id, inner.test_run_observations.values())
+}
+
+fn test_run_artifact_fallback_from_observations<'a>(
+    inner: &StateInner,
+    run_id: &str,
+    observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
+) -> Option<TestRunSummary> {
     let run = if let Some(row) = inner.test_run_registrations.get(run_id) {
-        test_run_registered_fallback(inner, row)
+        test_run_registered_fallback_from_observations(inner, row, observations)
     } else {
         let row = inner.test_run_compacted.get(run_id)?;
         if (row.compacted && test_run_compact_is_installed(inner, row))
@@ -1159,12 +1213,60 @@ fn test_run_artifact_fallback(inner: &StateInner, run_id: &str) -> Option<TestRu
     Some(test_run_unavailable_artifact(run))
 }
 
+// The same selection as the full history projection for one compaction
+// identity. Completing one fence must not rebuild every unrelated summary.
+// Candidate filtering is not proof: exact matching and risk are still fresh.
+fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestRunSummary> {
+    let observations = || inner.test_run_observations.values().filter(|row| {
+        row.artifact.as_ref().is_some_and(|artifact| artifact.run_id == run_id)
+    });
+    let artifact = if let Some(entry) = inner.test_runs.find(run_id) {
+        let mut run = entry.summary.clone();
+        run.registration = test_run_registration_view_from_observations(
+            inner, &entry.disk, observations(),
+        );
+        run.project_id = test_run_effective_project_id(inner, entry);
+        test_run_enrich_artifact_summary_from_observations(
+            inner, &mut run, Some(&entry.disk), observations(),
+        );
+        Some(run)
+    } else {
+        test_run_artifact_fallback_from_observations(inner, run_id, observations())
+            .map(|mut run| {
+                test_run_enrich_artifact_summary_from_observations(inner, &mut run, None, observations());
+                run
+            })
+    };
+    if artifact.is_some() {
+        return artifact;
+    }
+    let row = inner.test_run_observations.get(run_id)?;
+    if let Some(artifact) = &row.artifact {
+        // An observation merged into an artifact is absent from full summaries.
+        // Artifact ids are distinct from execution ids; do not recurse through
+        // an arbitrary user-supplied/corrupt observation association chain.
+        let indexed = inner.test_runs.find(&artifact.run_id);
+        let target = indexed.map(|entry| entry.summary.clone()).or_else(|| {
+            test_run_artifact_fallback(inner, &artifact.run_id)
+        });
+        if target.as_ref().is_some_and(|run| {
+            test_run_observation_matches_run(inner, run, indexed.map(|entry| entry.disk.as_ref()), row)
+        }) {
+            return None;
+        }
+    }
+    Some(test_run_observation_summary(inner, row))
+}
+
 fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
+    let projection = TestRunProjection::new(inner);
     let mut runs = inner.test_runs.summaries();
     // Cached summaries cannot serve an old 'safe' value after lifecycle changes.
     for run in &mut runs {
-        if let Some(entry) = inner.test_runs.find(&run.run_id) {
-            run.registration = test_run_registration_view(inner, &entry.disk);
+        if let Some(entry) = projection.entries.get(run.run_id.as_str()) {
+            run.registration = test_run_registration_view_from_observations(
+                inner, &entry.disk, projection.observations(&run.run_id).iter().copied(),
+            );
             run.project_id = test_run_effective_project_id(inner, entry);
         }
     }
@@ -1174,19 +1276,23 @@ fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
         .chain(inner.test_run_compacted.keys())
         .collect();
     runs.extend(retained.into_iter().filter_map(|id| {
-        if inner.test_runs.find(id).is_none() {
-            test_run_artifact_fallback(inner, id)
+        if !projection.entries.contains_key(id.as_str()) {
+            test_run_artifact_fallback_from_observations(
+                inner, id, projection.observations(id).iter().copied(),
+            )
         } else {
             None
         }
     }));
     let mut merged = HashSet::new();
     for run in &mut runs {
-        let disk = inner
-            .test_runs
-            .find(&run.run_id)
+        let disk = projection.entries
+            .get(run.run_id.as_str())
             .map(|entry| entry.disk.as_ref());
-        merged.extend(test_run_enrich_artifact_summary(inner, run, disk));
+        let observations = projection.observations(&run.run_id);
+        merged.extend(test_run_enrich_artifact_summary_from_observations(
+            inner, run, disk, observations.iter().copied(),
+        ));
     }
     runs.extend(
         inner

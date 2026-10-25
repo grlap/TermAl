@@ -683,11 +683,23 @@ fn test_run_registration_final_observation<'a>(
     observations: &'a BTreeMap<String, TestRunCommandObservation>,
     durable: Option<&HashSet<String>>,
 ) -> Option<&'a TestRunCommandObservation> {
+    test_run_registration_final_observation_from_candidates(registration, observations.values(), durable)
+}
+
+fn test_run_registration_final_observation_from_candidates<'a>(
+    registration: &TestRunRegistration,
+    observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
+    durable: Option<&HashSet<String>>,
+) -> Option<&'a TestRunCommandObservation> {
     if !registration.validated_unbound || registration.work_binding.is_some() {
         return None;
     }
     let candidates: Vec<_> = observations
-        .values()
+        .into_iter()
+        .inspect(|_| {
+            #[cfg(test)]
+            TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.set(count.get() + 1));
+        })
         .filter(|row| {
             row.summary.owner_session_id.as_deref() == Some(&registration.initiating_session_id)
                 && row.summary.project_id == registration.project_id
@@ -713,17 +725,31 @@ fn test_run_registration_final_observation<'a>(
 }
 
 fn test_run_registration_view(inner: &StateInner, disk: &TestRunDisk) -> TestRunRegistrationView {
-    let registration = inner
-        .test_run_registrations
-        .get(&disk.run_id)
-        .filter(|registration| {
-            registration.locator_identity.is_some()
-                && registration.locator_identity == disk.locator_identity
-                && test_run_path_key(&registration.run_directory)
-                    == test_run_path_key(&test_run_display_path(&disk.run_dir))
-                && disk.owner.as_deref() == Some(&registration.initiating_session_id)
-                && disk.request_identity.as_ref() == Some(&registration.request_identity)
-        });
+    test_run_registration_view_from_observations(inner, disk, inner.test_run_observations.values())
+}
+
+// Shared exact locator/content match. Project attribution needs this match
+// and the durable registration marker, not the unrelated restart-risk scan.
+fn test_run_matching_registration<'a>(
+    inner: &'a StateInner,
+    disk: &TestRunDisk,
+) -> Option<&'a TestRunRegistration> {
+    inner.test_run_registrations.get(&disk.run_id).filter(|registration| {
+        registration.locator_identity.is_some()
+            && registration.locator_identity == disk.locator_identity
+            && test_run_path_key(&registration.run_directory)
+                == test_run_path_key(&test_run_display_path(&disk.run_dir))
+            && disk.owner.as_deref() == Some(&registration.initiating_session_id)
+            && disk.request_identity.as_ref() == Some(&registration.request_identity)
+    })
+}
+
+fn test_run_registration_view_from_observations<'a>(
+    inner: &StateInner,
+    disk: &TestRunDisk,
+    observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
+) -> TestRunRegistrationView {
+    let registration = test_run_matching_registration(inner, disk);
     let durable = registration.is_some() && inner.test_runs.registered.contains(&disk.run_id);
     let mut view = TestRunRegistrationView {
         registration_state: Some(
@@ -789,9 +815,9 @@ fn test_run_registration_view(inner: &StateInner, disk: &TestRunDisk) -> TestRun
             row.validated_unbound
                 && row.work_binding.is_none()
                 && if disk.is_terminal() {
-                    test_run_registration_final_observation(
+                    test_run_registration_final_observation_from_candidates(
                         row,
-                        &inner.test_run_observations,
+                        observations,
                         Some(&inner.test_runs.observations_durable),
                     )
                     .is_some()
@@ -829,11 +855,19 @@ fn test_run_registration_view(inner: &StateInner, disk: &TestRunDisk) -> TestRun
 }
 
 fn test_run_registered_fallback(inner: &StateInner, row: &TestRunRegistration) -> TestRunSummary {
+    test_run_registered_fallback_from_observations(inner, row, inner.test_run_observations.values())
+}
+
+fn test_run_registered_fallback_from_observations<'a>(
+    inner: &StateInner,
+    row: &TestRunRegistration,
+    observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
+) -> TestRunSummary {
     let durable = inner.test_runs.registered.contains(&row.run_id);
     let failed = inner.test_runs.registration_failures.contains(&row.run_id);
-    let terminal = test_run_registration_final_observation(
+    let terminal = test_run_registration_final_observation_from_candidates(
         row,
-        &inner.test_run_observations,
+        observations,
         Some(&inner.test_runs.observations_durable),
     );
     let unbound = durable && terminal.is_some();

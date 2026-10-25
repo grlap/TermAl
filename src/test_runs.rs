@@ -185,6 +185,9 @@ struct TestRunEntry {
 /// mirrors disk and is never persisted.
 #[derive(Clone, Debug, Default)]
 struct TestRunIndex {
+    /// Scheduling hint only. Proof predicates are always recomputed when
+    /// selection runs; mutation writers and rescans also select explicitly.
+    compaction_examined_revision: Option<u64>,
     compactions_durable: HashSet<String>,
     compactions_revalidating: HashSet<String>,
     compaction_persistence: TestRunCompactionPersistence,
@@ -356,9 +359,8 @@ fn test_run_project_id(
 }
 
 fn test_run_registered_project_id(inner: &StateInner, disk: &TestRunDisk) -> Option<String> {
-    (test_run_registration_view(inner, disk).registration_state.as_deref() == Some("registered"))
-        .then(|| inner.test_run_registrations.get(&disk.run_id))
-        .flatten()
+    test_run_matching_registration(inner, disk)
+        .filter(|_| inner.test_runs.registered.contains(&disk.run_id))
         .and_then(|row| row.project_id.clone())
         .filter(|id| inner.projects.iter().any(|project| &project.id == id))
 }
@@ -370,7 +372,16 @@ fn test_run_effective_project_id(inner: &StateInner, entry: &TestRunEntry) -> Op
         .or_else(|| entry.discovered_project_id.clone())
 }
 
+#[cfg(test)]
 fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSummary {
+    test_run_summary_from_observations(inner, scanned, inner.test_run_observations.values())
+}
+
+fn test_run_summary_from_observations<'a>(
+    inner: &StateInner,
+    scanned: &TestRunScanned,
+    observations: impl IntoIterator<Item = &'a TestRunCommandObservation> + Clone,
+) -> TestRunSummary {
     if let Some(compacted) = inner.test_run_compacted.get(&scanned.disk.run_id)
         .filter(|row| row.compacted && test_run_compact_is_installed(inner, row)) {
         return test_run_compacted_summary(inner, compacted);
@@ -378,7 +389,7 @@ fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSumm
     let disk = &scanned.disk;
     let results = disk.results.as_ref();
     let stages = disk.stages();
-    let registration = test_run_registration_view(inner, disk);
+    let registration = test_run_registration_view_from_observations(inner, disk, observations.clone());
     // A durable registration captures the initiating project's authority.
     // Filesystem discovery can choose another project with an overlapping
     // root/common directory; notification routing does not transfer ownership.
@@ -416,7 +427,7 @@ fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSumm
         error: results.and_then(|results| results.error.clone()),
         detail_version: results.map(|results| results.digest.clone()),
     };
-    test_run_enrich_artifact_summary(inner, &mut summary, Some(disk));
+    test_run_enrich_artifact_summary_from_observations(inner, &mut summary, Some(disk), observations);
     summary
 }
 
@@ -788,14 +799,18 @@ impl AppState {
         }
         inner.test_runs.parsed = parsed;
         inner.test_runs.tracked_dirs = tracked_dirs;
+        let projection = TestRunProjection::new(&inner);
         let entries: Vec<TestRunEntry> = scanned
             .iter()
             .map(|run| TestRunEntry {
-                summary: test_run_summary(&inner, run),
+                summary: test_run_summary_from_observations(
+                    &inner, run, projection.observations(&run.disk.run_id).iter().copied(),
+                ),
                 disk: run.disk.clone(),
                 discovered_project_id: run.project_id.clone(),
             })
             .collect();
+        drop(projection);
         for entry in &entries {
             if entry.summary.registration.restart_would_void_evidence == Some(false)
                 || !entry.summary.registration.superseded_run_ids.is_empty()

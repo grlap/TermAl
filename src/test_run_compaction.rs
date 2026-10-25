@@ -180,10 +180,8 @@ fn test_run_compaction_eligible(inner: &StateInner, run: &TestRunSummary) -> boo
         .0
         .lock()
         .expect("test observation mutex poisoned");
-    inner
-        .test_run_observations
-        .values()
-        .filter(|row| ids.contains(row.execution_id.as_str()))
+    ids.iter()
+        .filter_map(|id| inner.test_run_observations.get(*id))
         .all(|row| {
             index.observations_durable.contains(&row.execution_id)
                 && !index.observations_failed.contains(&row.execution_id)
@@ -292,6 +290,7 @@ impl AppState {
                 .then_with(|| a.run_id.cmp(&b.run_id))
         });
         let mut kept = HashMap::<Option<String>, usize>::new();
+        let mut retry = false;
         for run in runs {
             if !test_run_compaction_eligible(inner, &run) {
                 continue;
@@ -310,11 +309,10 @@ impl AppState {
             {
                 continue;
             }
-            let ids: HashSet<_> = test_run_summary_ids(&run).collect();
-            let observations = inner
-                .test_run_observations
-                .values()
-                .filter(|row| ids.contains(row.execution_id.as_str()))
+            let ids: std::collections::BTreeSet<_> = test_run_summary_ids(&run).collect();
+            // Preserve the canonical execution order in the durable proof.
+            let observations = ids.iter()
+                .filter_map(|id| inner.test_run_observations.get(*id))
                 .cloned()
                 .map(test_run_minimal_observation)
                 .collect();
@@ -343,11 +341,12 @@ impl AppState {
                 .insert(id.clone(), compacted.clone());
             match self.persist_test_run_compacted_locked(inner, compacted.clone()) {
                 Ok(true) => {
-                    self.finish_test_run_compaction_locked(inner, &compacted);
+                    retry |= !self.finish_test_run_compaction_locked(inner, &compacted);
                     self.publish_test_run_compact_risk_locked(inner, &compacted);
                 }
                 Ok(false) => {}
                 Err(_) => {
+                    retry = true;
                     if let Some(previous) = previous {
                         inner.test_run_compacted.insert(id, previous);
                     } else {
@@ -356,25 +355,24 @@ impl AppState {
                 }
             }
         }
+        inner.test_runs.compaction_examined_revision = (!retry).then_some(inner.revision);
     }
 
     fn finish_test_run_compaction_locked(
         &self,
         inner: &mut StateInner,
         expected: &TestRunCompacted,
-    ) {
+    ) -> bool {
         let id = &expected.summary.run_id;
         if inner.test_run_compacted.get(id) != Some(expected) {
-            return;
+            return false;
         }
-        let current = test_run_full_summaries_locked(inner)
-            .into_iter()
-            .find(|run| &run.run_id == id);
+        let current = test_run_compaction_summary(inner, id);
         if !current.as_ref().is_some_and(|run| {
             test_run_compaction_eligible(inner, run)
                 && test_run_minimal_summary(run.clone()) == expected.summary
         }) {
-            return;
+            return false;
         }
         if expected.observations.iter().any(|row| {
             inner
@@ -382,7 +380,7 @@ impl AppState {
                 .get(&row.execution_id)
                 .is_none_or(|actual| test_run_minimal_observation(actual.clone()) != *row)
         }) {
-            return;
+            return false;
         }
         if expected.registration.as_ref().is_some_and(|row| {
             inner.test_run_registrations.get(id).is_none_or(|actual| {
@@ -391,7 +389,7 @@ impl AppState {
                 actual != *row
             })
         }) {
-            return;
+            return false;
         }
         // The exact survivor/proofs are already durable. A subsequent removal
         // commit may fail; then retain all old detail and retry on a later tick.
@@ -412,7 +410,7 @@ impl AppState {
                     .test_run_observations
                     .insert(row.execution_id.clone(), row);
             }
-            return;
+            return false;
         }
         let index = &mut inner.test_runs;
         index.entries.retain(|entry| &entry.summary.run_id != id);
@@ -422,6 +420,7 @@ impl AppState {
             index.observations_durable.remove(&row.execution_id);
             index.observations_failed.remove(&row.execution_id);
         }
+        true
     }
 
     fn step_test_run_compaction(&self) {
@@ -438,6 +437,7 @@ impl AppState {
                     .map(|result| (id.clone(), row.clone(), result))
             })
             .collect();
+        let had_completions = !completed.is_empty();
         for (id, row, result) in completed {
             pending
                 .0
@@ -447,11 +447,19 @@ impl AppState {
             if result.is_ok() && inner.test_run_compacted.get(&id) == Some(&row) {
                 inner.test_runs.compactions_revalidating.remove(&id);
                 inner.test_runs.compactions_durable.insert(id);
+                // Even a refused finish is followed by fresh selection below;
+                // its exact current inputs decide whether to retain/retry it.
                 self.finish_test_run_compaction_locked(&mut inner, &row);
                 self.publish_test_run_compact_risk_locked(&mut inner, &row);
             }
         }
-        self.compact_test_runs_locked(&mut inner);
+        // Only select again when inputs may have changed. Fences are polled
+        // above even at an unchanged revision. Some mutation paths select
+        // directly. Runtime-only eligibility changes without selection/revision
+        // may retain detail until the next revision or the 10-second rescan.
+        if had_completions || inner.test_runs.compaction_examined_revision != Some(inner.revision) {
+            self.compact_test_runs_locked(&mut inner);
+        }
     }
 
     fn publish_test_run_compact_risk_locked(&self, inner: &mut StateInner, row: &TestRunCompacted) {

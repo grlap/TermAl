@@ -17,6 +17,9 @@ mod test_run_registration;
 #[path = "test_run_listing.rs"]
 mod test_run_listing;
 
+#[path = "idle_state_lock.rs"]
+mod idle_state_lock;
+
 struct RunFixture {
     state: AppState,
     root: PathBuf,

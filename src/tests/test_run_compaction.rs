@@ -506,6 +506,9 @@ fn failed_compaction_persistence_retains_all_preexisting_detail_and_identity() {
             }
         }
         inner.test_runs.compactions_durable.clear();
+        // Manual restoration changes selection inputs without a commit.
+        // Force the worker to attempt the failing write at this boundary.
+        inner.test_runs.compaction_examined_revision = None;
         inner
             .test_run_observations
             .keys()
@@ -517,6 +520,11 @@ fn failed_compaction_persistence_retains_all_preexisting_detail_and_identity() {
     fixture.state.persistence_path = Arc::new(invalid);
     fixture.state.step_test_run_compaction();
     let inner = fixture.state.inner.lock().unwrap();
+    assert_eq!(
+        inner.test_runs.compaction_examined_revision,
+        None,
+        "failed persistence must leave compaction eligible to retry"
+    );
     assert_eq!(
         inner
             .test_run_observations
