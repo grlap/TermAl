@@ -366,6 +366,96 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
     assert.doesNotMatch(failure.message, /[\r\n]/u);
   }
 
+  for (const boundary of ["registration", "preflight_confirmation"]) {
+    test(`registration confirmation reissues one pre-Response reset at ${boundary}`, async (t) => {
+      await pendingRepository(t, async (root, originalEnv) => {
+        await registrationHost(async (host) => {
+          const env = { ...originalEnv, TERMAL_BASE_URL: host.url };
+          const plan = { root, full: false, scope: "focused", stages: [
+            stage("focused", "throw new Error('confirmation test must not execute stages')"),
+          ] };
+          let runDir;
+          if (boundary === "preflight_confirmation") runDir = await createRun(plan, env);
+          const originalFetch = globalThis.fetch;
+          const queries = [];
+          const diagnostics = [];
+          t.mock.method(console, "log", (...values) => diagnostics.push(values.join(" ")));
+          t.mock.method(globalThis, "fetch", (url, options = {}) => {
+            if ((options.method ?? "GET") !== "GET") return originalFetch(url, options);
+            queries.push({ url: String(url), options });
+            if (queries.length === 1) {
+              return Promise.reject(new TypeError("injected pre-Response reset", { cause: { code: "ECONNRESET" } }));
+            }
+            return originalFetch(url, options);
+          });
+          if (boundary === "registration") runDir = await createRun(plan, env);
+          else await validateRunRegistration(JSON.parse(readFileSync(join(runDir, "request.json"), "utf8")), env, runDir);
+          assert.equal(queries.length, 2, "one reset permits exactly one confirmation reread");
+          assert.equal(queries[0].url, queries[1].url);
+          assert.equal(queries[0].options.signal, queries[1].options.signal, "the original abort deadline is shared");
+          assert.deepEqual(queries[0].options.headers, queries[1].options.headers);
+          assert.equal(queries[1].options.redirect, "error");
+          assert.equal(host.requests.length, 1, "a query reset cannot replay the immutable POST");
+          assert.equal(host.queries.length, boundary === "registration" ? 1 : 2);
+          assert.ok(diagnostics.some((line) => line.includes(`operation=${boundary};`)
+            && line.includes("queryAttempt=2;") && line.includes("transportResets=1;")),
+          "successful confirmation retains bounded reset and attempt evidence");
+          const saved = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+          assert.ok(saved.stages.every(({ state }) => state === "unrun"));
+        }, { autoAcknowledge: true });
+      });
+    });
+
+    for (const fault of ["persistent reset", "other transport", "lookalike reset", "abort", "expired budget"]) {
+      test(`registration confirmation stops on ${fault} at ${boundary}`, async (t) => {
+        await pendingRepository(t, async (root, originalEnv) => {
+          await registrationHost(async (host) => {
+            const env = { ...originalEnv, TERMAL_BASE_URL: host.url };
+            const plan = { root, full: false, scope: "focused", stages: [
+              stage("focused", "throw new Error('failed confirmation must not execute stages')"),
+            ] };
+            let runDir;
+            if (boundary === "preflight_confirmation") runDir = await createRun(plan, env);
+            const originalFetch = globalThis.fetch;
+            const originalNow = Date.now;
+            let expired = false;
+            let queries = 0;
+            if (fault === "expired budget") t.mock.method(Date, "now", () => originalNow() + (expired ? 8001 : 0));
+            t.mock.method(globalThis, "fetch", (url, options = {}) => {
+              if ((options.method ?? "GET") !== "GET") return originalFetch(url, options);
+              queries += 1;
+              expired = fault === "expired budget";
+              const error = new TypeError("injected confirmation fault", {
+                cause: { code: fault === "other transport" ? "ETIMEDOUT"
+                  : fault === "lookalike reset" ? "ECONNRESET!" : "ECONNRESET" },
+              });
+              if (fault === "abort") error.name = "AbortError";
+              return Promise.reject(error);
+            });
+            let failure;
+            try {
+              if (boundary === "registration") await createRun({ ...plan,
+                onRunCreated: (directory) => { runDir = directory; } }, env);
+              else await validateRunRegistration(JSON.parse(readFileSync(join(runDir, "request.json"), "utf8")), env, runDir);
+            } catch (error) { failure = error; }
+            assert.ok(failure, "an unconfirmed run cannot be admitted");
+            assert.equal(queries, fault === "persistent reset" ? 2 : 1);
+            assert.equal(host.requests.length, 1, "GET failure cannot replay POST");
+            assert.equal(host.queries.length, boundary === "registration" ? 0 : 1);
+            if (fault === "persistent reset") {
+              assert.match(failure.message, /queryAttempt=2; transportResets=2;/u);
+            }
+            if (fault === "expired budget") assert.match(failure.message, /budgetMs=8000;.*remainingMs=0;/u);
+            if (fault === "abort") assert.match(failure.message, /category=aborted;/u);
+            const saved = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+            assert.ok(saved.stages.every(({ state }) => state === "unrun"));
+            if (boundary === "registration") assertNoExecution(root, runDir);
+          }, { autoAcknowledge: true });
+        });
+      });
+    }
+  }
+
   for (const phase of ["POST", "GET"]) {
     for (const fault of ["abort", "transport"]) {
       test(`registration diagnostics distinguish ${phase} ${fault} before execution`, async (t) => {
@@ -386,7 +476,8 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             const failure = await registrationFailure(root, { ...originalEnv, TERMAL_BASE_URL: host.url });
             assert.match(failure.message, new RegExp(`${phase} send ${fault === "abort" ? "aborted" : "transport failure"}`, "u"));
             assertDiagnostic(failure, phase, "headers", fault === "abort" ? "aborted" : "transport_failure", "unavailable");
-            assert.equal(faults, phase === "POST" ? 2 : 1, "existing immutable POST retry bound is unchanged");
+            assert.equal(faults, phase === "POST" || fault === "transport" ? 2 : 1,
+              "POST keeps its bound; only pre-Response GET resets permit one reread");
             if (phase === "GET") assert.equal(host.requests.length, 1, "a query failure cannot retry POST");
             t.mock.restoreAll();
           }, { autoAcknowledge: true });

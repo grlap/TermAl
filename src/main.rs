@@ -170,6 +170,9 @@ async fn run_server() -> Result<()> {
     // base URL, while health and state routes begin serving without waiting for
     // Engram CLI work-binding calls.
     let _post_listen_boot_worker = state.start_post_listen_boot()?;
+    // Bound, with recovery started: the journal's own thread records this boot
+    // and, from then on, how this instance ends.
+    let host_lifecycle = HostLifecycle::start(&state);
     let federation_runtime = start_federation_runtime(state.clone());
 
     println!("TermAl backend");
@@ -226,6 +229,10 @@ async fn run_server() -> Result<()> {
     // user-initiated restart path.
     shutdown_state.shutdown_persist_blocking();
     shutdown_state.shutdown_state_broadcast_blocking();
+    if let Some(lifecycle) = host_lifecycle {
+        let outcome = if result.is_ok() { HostShutdownOutcome::Graceful } else { HostShutdownOutcome::Fatal };
+        lifecycle.finish(outcome);
+    }
 
     // Drop the AppState (which contains reqwest::blocking::Client) on a
     // regular thread so its internal Tokio runtime isn't dropped inside our
@@ -298,6 +305,7 @@ fn app_router_with_acceptance_policy_limiter(
     Router::new()
         .route("/api/health", get(health))
         .route("/api/diagnostics/persistence", get(get_persistence_diagnostics))
+        .route("/api/diagnostics/host-lifecycle", get(get_host_lifecycle_diagnostics))
         .route(
             "/api/federation/peers/{id}/enroll",
             post(enroll_federation_satellite),
@@ -1077,6 +1085,7 @@ include!("persist.rs");
 include!("persist_fence.rs");
 include!("persist_tick_timings.rs");
 include!("persist_observer.rs");
+include!("host_lifecycle.rs");
 include!("coordination_persist.rs");
 include!("mailboxes.rs");
 include!("mailbox_acknowledged_wake.rs");

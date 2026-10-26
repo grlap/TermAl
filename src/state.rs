@@ -221,10 +221,19 @@ fn default_state_mutex_diagnostic_reporter() -> StateMutexDiagnosticReporter {
     Arc::new(|_| {})
 }
 
+/// The longest hold at or above the warning threshold since it was last taken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StateMutexLongHold {
+    held: Duration,
+    location: &'static std::panic::Location<'static>,
+}
+
 struct StateMutex<T> {
     inner: Mutex<T>,
     diagnostic_reporter: StateMutexDiagnosticReporter,
     warn_after: Duration,
+    // Set only on the existing over-threshold report path, never per lock.
+    longest_hold: Mutex<Option<StateMutexLongHold>>,
     /// Test-only owner tracking distinguishes a callback that re-enters this
     /// exact mutex on the same thread from harmless contention by a fixture's
     /// background thread. That makes lock-scope assertions deterministic.
@@ -247,9 +256,18 @@ impl<T> StateMutex<T> {
             inner: Mutex::new(value),
             diagnostic_reporter: default_state_mutex_diagnostic_reporter(),
             warn_after: STATE_MUTEX_WARN_AFTER,
+            longest_hold: Mutex::new(None),
             #[cfg(test)]
             owner_thread: Mutex::new(None),
         }
+    }
+
+    /// The longest over-threshold hold since the previous call, then reset.
+    fn take_longest_hold(&self) -> Option<StateMutexLongHold> {
+        self.longest_hold
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
     #[cfg(test)]
@@ -262,6 +280,7 @@ impl<T> StateMutex<T> {
             inner: Mutex::new(value),
             diagnostic_reporter,
             warn_after,
+            longest_hold: Mutex::new(None),
             owner_thread: Mutex::new(None),
         }
     }
@@ -277,6 +296,7 @@ impl<T> StateMutex<T> {
                 caller,
                 self.warn_after,
                 Arc::clone(&self.diagnostic_reporter),
+                &self.longest_hold,
                 #[cfg(test)]
                 &self.owner_thread,
             )),
@@ -286,6 +306,7 @@ impl<T> StateMutex<T> {
                 caller,
                 self.warn_after,
                 Arc::clone(&self.diagnostic_reporter),
+                &self.longest_hold,
                 #[cfg(test)]
                 &self.owner_thread,
             ))),
@@ -309,6 +330,7 @@ impl<T> StateMutex<T> {
             caller,
             self.warn_after,
             Arc::clone(&self.diagnostic_reporter),
+            &self.longest_hold,
             #[cfg(test)]
             &self.owner_thread,
         ))
@@ -334,6 +356,7 @@ struct StateMutexGuard<'a, T> {
     diagnostic_reporter: StateMutexDiagnosticReporter,
     waited: Duration,
     warn_after: Duration,
+    longest_hold: &'a Mutex<Option<StateMutexLongHold>>,
     #[cfg(test)]
     owner_thread: &'a Mutex<Option<std::thread::ThreadId>>,
 }
@@ -345,6 +368,7 @@ impl<'a, T> StateMutexGuard<'a, T> {
         caller: &'static std::panic::Location<'static>,
         warn_after: Duration,
         diagnostic_reporter: StateMutexDiagnosticReporter,
+        longest_hold: &'a Mutex<Option<StateMutexLongHold>>,
         #[cfg(test)] owner_thread: &'a Mutex<Option<std::thread::ThreadId>>,
     ) -> Self {
         let acquired_at = std::time::Instant::now();
@@ -372,6 +396,7 @@ impl<'a, T> StateMutexGuard<'a, T> {
             diagnostic_reporter,
             waited,
             warn_after,
+            longest_hold,
             #[cfg(test)]
             owner_thread,
         }
@@ -414,6 +439,15 @@ impl<T> Drop for StateMutexGuard<'_, T> {
         }
         drop(self.guard.take());
         if held >= self.warn_after {
+            // After release, on the rare over-threshold path only.
+            let mut longest = self
+                .longest_hold
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if longest.is_none_or(|longest| held > longest.held) {
+                *longest = Some(StateMutexLongHold { held, location: self.caller });
+            }
+            drop(longest);
             (self.diagnostic_reporter)(StateMutexDiagnostic::Held {
                 held,
                 waited,

@@ -148,6 +148,7 @@ mod persist_delta;
 mod persist_message_delta;
 mod persist_fence;
 mod persist_observer;
+mod host_lifecycle;
 mod project_creation_races;
 mod project_digest;
 mod projects;

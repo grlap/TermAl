@@ -180,6 +180,207 @@ fn measure<T>(label: &str, action: impl FnOnce() -> T) -> (T, usize) {
 }
 
 #[test]
+fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() {
+    let visits = |count| {
+        let fixture = populated_history(count);
+        let mut inner = fixture.state.inner.lock().unwrap();
+        for row in inner.test_run_observations.values_mut() {
+            row.summary.state = TestRunState::Passed;
+            row.summary.ended_at = Some("2026-10-25T00:01:00Z".to_owned());
+            row.summary.exit_code = Some(0);
+        }
+        let before = inner.test_run_observations.clone();
+        TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
+        TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.set(0));
+        fixture
+            .state
+            .retain_test_command_artifact_terminals_locked(&mut inner);
+        let visited = TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get());
+        let inspected = TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get());
+        let preparation = TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.get());
+        assert_eq!(inner.test_run_observations, before);
+        assert_eq!(
+            preparation,
+            (1, count, count),
+            "build one linear projection per pass"
+        );
+        assert_eq!(
+            inspected, count,
+            "completed rows must not be scanned once per entry"
+        );
+        assert_eq!(
+            TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.get()),
+            0
+        );
+        eprintln!(
+            "terminal_retention_profile completed_history={count} preparation={preparation:?} inspected_rows={inspected} unfinished_candidates={visited}"
+        );
+        visited
+    };
+    let small = visits(1);
+    let large = visits(64);
+    assert_eq!(
+        large, small,
+        "unrelated completed history must not add candidates"
+    );
+    assert_eq!(
+        large, 0,
+        "an unchanged completed population needs no retention matching"
+    );
+}
+
+#[test]
+fn terminal_retention_matches_only_the_unfinished_exact_association() {
+    for count in [1, 65] {
+        let mut fixture = populated_history(count);
+        // Keep actual observation persistence queued, without acknowledging it.
+        let (persist_tx, _persist_rx) = mpsc::channel();
+        fixture.state.persist_tx = persist_tx;
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let id = "observed-history-0000";
+        for row in inner.test_run_observations.values_mut() {
+            if row.execution_id != id {
+                row.summary.ended_at = Some("2026-10-25T00:01:00Z".to_owned());
+                row.summary.state = TestRunState::Passed;
+            }
+        }
+        let before = inner.test_run_observations.clone();
+        let terminal = inner.test_runs.entries[0].summary.clone();
+        assert!(before[id].summary.ended_at.is_none());
+        assert!(test_run_observation_matches_run(
+            &inner,
+            &terminal,
+            Some(&inner.test_runs.entries[0].disk),
+            &before[id]
+        ));
+        TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        fixture
+            .state
+            .retain_test_command_artifact_terminals_locked(&mut inner);
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
+            1
+        );
+        let after = &inner.test_run_observations[id];
+        assert_eq!(after.execution_id, before[id].execution_id);
+        assert_eq!(after.summary.run_id, before[id].summary.run_id);
+        assert_eq!(
+            after.summary.owner_session_id,
+            before[id].summary.owner_session_id
+        );
+        assert_eq!(after.runtime_identity, before[id].runtime_identity);
+        assert_eq!(after.tool_identity, before[id].tool_identity);
+        assert_eq!(after.work_binding, before[id].work_binding);
+        assert_eq!(after.source_root, before[id].source_root);
+        assert_eq!(after.final_unbound_proof, before[id].final_unbound_proof);
+        assert_eq!(after.summary.state, terminal.state);
+        assert_eq!(after.summary.ended_at, terminal.ended_at);
+        assert_eq!(after.summary.detail_version, terminal.detail_version);
+        assert_eq!(
+            after.artifact.as_ref().unwrap().terminal_digest.as_deref(),
+            terminal
+                .detail_version
+                .as_deref()
+                .and_then(|version| version.strip_prefix("sha256:"))
+        );
+        for (other_id, row) in &before {
+            if other_id != id {
+                assert_eq!(inner.test_run_observations.get(other_id), Some(row));
+            }
+        }
+        assert!(!inner.test_runs.observations_durable.contains(id));
+        assert!(inner
+            .test_runs
+            .observation_persistence
+            .0
+            .lock()
+            .unwrap()
+            .contains_key(id));
+        TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        fixture
+            .state
+            .retain_test_command_artifact_terminals_locked(&mut inner);
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
+            0
+        );
+    }
+}
+
+#[test]
+fn terminal_retention_refuses_wrong_identity_and_preserves_native_terminal_proof() {
+    for mismatch in ["owner", "worktree", "directory", "request", "run", "digest"] {
+        let fixture = populated_history(1);
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let row = inner.test_run_observations.values_mut().next().unwrap();
+        match mismatch {
+            "owner" => row.summary.owner_session_id = Some("another-owner".to_owned()),
+            "worktree" => row.summary.worktree.push_str("-another-worktree"),
+            "directory" => row
+                .artifact
+                .as_mut()
+                .unwrap()
+                .run_directory
+                .push_str("-another-directory"),
+            "request" => {
+                row.artifact.as_mut().unwrap().request_identity = Some("another-request".to_owned())
+            }
+            "run" => row
+                .artifact
+                .as_mut()
+                .unwrap()
+                .run_id
+                .push_str("-another-run"),
+            "digest" => {
+                row.artifact.as_mut().unwrap().terminal_digest = Some("another-digest".to_owned())
+            }
+            _ => unreachable!(),
+        }
+        let before = inner.test_run_observations.clone();
+        fixture
+            .state
+            .retain_test_command_artifact_terminals_locked(&mut inner);
+        assert_eq!(inner.test_run_observations, before, "mismatch: {mismatch}");
+    }
+    let fixture = registered_history(1);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let before = inner.test_run_observations.clone();
+    assert!(before.values().all(|row| row.final_unbound_proof.is_some()));
+    fixture
+        .state
+        .retain_test_command_artifact_terminals_locked(&mut inner);
+    assert_eq!(inner.test_run_observations, before);
+}
+
+#[test]
+fn terminal_retention_failed_persistence_keeps_fact_for_explicit_writer_retry() {
+    let mut fixture = populated_history(1);
+    let original_path = fixture.state.persistence_path.clone();
+    fixture.state.persistence_path = Arc::new(fixture.root.clone());
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let id = "observed-history-0000";
+    fixture
+        .state
+        .retain_test_command_artifact_terminals_locked(&mut inner);
+    let retained = inner.test_run_observations[id].clone();
+    assert_eq!(retained.summary.state, TestRunState::Passed);
+    assert!(retained.summary.ended_at.is_some());
+    assert!(inner.test_runs.observations_failed.contains(id));
+    assert!(!inner.test_runs.observations_durable.contains(id));
+    drop(inner);
+    fixture.state.persistence_path = original_path;
+    let mut inner = fixture.state.inner.lock().unwrap();
+    fixture
+        .state
+        .persist_test_command_observation_locked(&mut inner, retained.clone());
+    assert_eq!(inner.test_run_observations[id], retained);
+    assert!(!inner.test_runs.observations_failed.contains(id));
+    assert!(inner.test_runs.observations_durable.contains(id));
+}
+
+#[test]
 fn idle_history_profile_and_projection_has_no_cartesian_association_scan() {
     let mut fixture = populated_history(1024);
     // Production-style queued persistence/broadcast: do not profile the test

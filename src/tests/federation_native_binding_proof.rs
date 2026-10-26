@@ -5,6 +5,7 @@
 // proof requests use the actual MAC-authenticated domain HTTP listener.
 use super::*;
 
+mod fixture_clock;
 mod references;
 mod relay;
 
@@ -101,21 +102,26 @@ impl Fixture {
         remote.identity = central_host.clone();
         remote.display_name = "Central".to_owned();
         satellite.enroll_federation_peer(remote).unwrap();
-        let satellite_channel = FederationChannel::for_app(
+        let mut satellite_channel = FederationChannel::for_app(
             satellite.federation_peer_snapshot(&central_host.host_id).unwrap(),
             FederationPairCapability::new("a".repeat(64)).unwrap(),
             satellite.clone(),
         );
+        // Protocol deadlines, the attestation window included, measure a
+        // scripted clock, as in the onboarding fixture: elapsed wall time on a
+        // loaded host never expires them; only a test that advances it does.
+        satellite_channel.control.clock = FederationControlClock::scripted_io();
         let check = satellite_channel.clone();
         let server = DomainServer::start(wrap(federation_router(
             satellite_channel.clone(),
             Arc::new(move || check.current_authority().map(|_| ())),
         ))).await;
-        let channel = FederationChannel::for_app(
+        let mut channel = FederationChannel::for_app(
             central.federation_peer_snapshot(&satellite_host.host_id).unwrap(),
             FederationPairCapability::new("a".repeat(64)).unwrap(),
             central.clone(),
         );
+        channel.control.clock = FederationControlClock::scripted_io();
         let check = channel.clone();
         let rpc = FederationRpcClient::new(
             server.port,

@@ -5,6 +5,12 @@
 // guess by PID/time/command similarity, scan processes, mint verification or
 // final host proof, or manufacture a launcher registration ACK.
 
+#[cfg(test)]
+thread_local! {
+    static TEST_TEST_RUN_TERMINAL_RETENTION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TEST_TEST_RUN_TERMINAL_RETENTION_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) {
     row.summary.state = TestRunState::Unknown;
     row.summary.unknown_reason = Some(TestRunUnknownReason::ResultsUnreadable);
@@ -17,6 +23,10 @@ impl AppState {
     // same positive association as API/SSE alias suppression, with no I/O or
     // evidence settlement here. A native terminal proof is never rewritten.
     fn retain_test_command_artifact_terminals_locked(&self, inner: &mut StateInner) {
+        // Reuse the fresh per-cut projection's candidate index and BTreeMap
+        // row order. Its linear preparation still sees completed history,
+        // but only unfinished same-run candidates reach exact matching.
+        let projection = TestRunProjection::new(inner);
         let mut terminal = Vec::new();
         for entry in &inner.test_runs.entries {
             if !entry.disk.is_terminal()
@@ -35,15 +45,19 @@ impl AppState {
             else {
                 continue;
             };
-            for row in inner.test_run_observations.values() {
-                if row.summary.ended_at.is_none()
-                    && test_run_observation_matches_run(
-                        inner,
-                        &entry.summary,
-                        Some(&entry.disk),
-                        row,
-                    )
-                {
+            for row in projection
+                .observations(&entry.summary.run_id)
+                .iter()
+                .copied()
+                .filter(|row| {
+                    #[cfg(test)]
+                    TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(count.get() + 1));
+                    row.summary.ended_at.is_none()
+                })
+            {
+                #[cfg(test)]
+                TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(count.get() + 1));
+                if test_run_observation_matches_run(inner, &entry.summary, Some(&entry.disk), row) {
                     terminal.push((
                         row.execution_id.clone(),
                         entry.summary.clone(),
@@ -52,6 +66,7 @@ impl AppState {
                 }
             }
         }
+        drop(projection);
         for (id, terminal, digest) in terminal {
             let Some(row) = inner.test_run_observations.get_mut(&id) else {
                 continue;

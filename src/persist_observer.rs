@@ -204,6 +204,18 @@ struct PersistObserverState {
     active: Option<PersistObservedActive>,
     recent: std::collections::VecDeque<PersistObservedTick>,
     slowest: Vec<PersistObservedTick>,
+    // Since the host lifecycle heartbeat last took them.
+    heartbeat_payload_bytes: u64,
+    heartbeat_longest_tick_us: u64,
+}
+
+/// The writer's totals and its since-last-heartbeat payload and slowest tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PersistHeartbeatCounters {
+    completed_ticks: u64,
+    failed_ticks: u64,
+    payload_bytes: u64,
+    longest_tick_us: u64,
 }
 
 #[derive(Default)]
@@ -314,6 +326,13 @@ impl PersistObserver {
             p.acknowledge_us = persist_observed_us(timings.acknowledge);
             state.completed_ticks = state.completed_ticks.saturating_add(1);
             state.failed_ticks = state.failed_ticks.saturating_add(u64::from(!success));
+            let counts = &active.tick.counts;
+            let payload = [counts.metadata_bytes, counts.session_metadata_bytes, counts.message_bytes,
+                counts.prompt_history_bytes, counts.delegation_bytes]
+                .into_iter()
+                .fold(0u64, |total, bytes| total.saturating_add(bytes as u64));
+            state.heartbeat_payload_bytes = state.heartbeat_payload_bytes.saturating_add(payload);
+            state.heartbeat_longest_tick_us = state.heartbeat_longest_tick_us.max(active.tick.loop_wall_us);
             if state.recent.len() == PERSIST_OBSERVER_RECENT_LIMIT {
                 state.recent.pop_front();
             }
@@ -326,6 +345,17 @@ impl PersistObserver {
             state.slowest.truncate(PERSIST_OBSERVER_SLOWEST_LIMIT);
             state.recent.push_back(active.tick);
         });
+    }
+
+    /// Totals plus the payload and slowest tick since the previous call,
+    /// which resets those two. Only the observer mutex is taken.
+    fn take_heartbeat_counters(&self) -> PersistHeartbeatCounters {
+        self.with_state(|state| PersistHeartbeatCounters {
+            completed_ticks: state.completed_ticks,
+            failed_ticks: state.failed_ticks,
+            payload_bytes: std::mem::take(&mut state.heartbeat_payload_bytes),
+            longest_tick_us: std::mem::take(&mut state.heartbeat_longest_tick_us),
+        })
     }
 
     fn snapshot_at(&self, now: std::time::Instant) -> PersistObserverSnapshot {

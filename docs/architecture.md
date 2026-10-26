@@ -357,6 +357,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 |--------|------|---------|
 | GET | `/api/health` | Health check + capability probe |
 | GET | `/api/diagnostics/persistence` | Read bounded, passive [persistence writer diagnostics](features/persistence-diagnostics.md) |
+| GET | `/api/diagnostics/host-lifecycle` | Read how the previous instance ended, from the [host lifecycle journal](features/host-lifecycle-journal.md) |
 | GET | `/api/file?path=...` | Read file content |
 | PUT | `/api/file` | Write file content |
 | GET | `/api/fs?path=...` | List directory entries |

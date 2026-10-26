@@ -66,6 +66,15 @@ the host configuration, acknowledgement or query cannot be confirmed. A lost
 POST reply may be retried with the same run identity and immutable request;
 definitive refusals and malformed ACKs are not retried. A detached worker checks
 the saved receipt, immutable request and host visibility again before preflight.
+Each exact confirmation GET permits at most one reissue when the transport
+reports `ECONNRESET` before `fetch` delivers a response. Both attempts share the
+original abort signal and eight-second total deadline; the GET cannot replay
+the registration POST. HTTP status, response-body, identity and abort failures
+remain terminal, as does a second reset. Diagnostics retain `queryAttempt` and
+`transportResets`, including when the second read succeeds. This is an
+idempotent-read contract, not proof of a stale pooled socket or of zero bytes
+received internally by the transport. Both reads must confirm the same exact
+durable registration before any stage can run.
 Only a standalone invocation with no `TERMAL_BASE_URL`, `TERMAL_SESSION_ID` or
 `TERMAL_CLI` environment variables may execute as `UNTRACKED`; a partial context
 fails closed. Registration and its receipt never establish test credit.

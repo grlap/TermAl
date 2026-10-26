@@ -84,13 +84,17 @@ function failureCategory(error, signal) {
     ? "aborted" : "transport_failure";
 }
 
-function transportCode(error) {
-  // Never copy exception messages, URLs, stacks or request/response bodies.
+function transportErrorCode(error) {
   let cause = error;
   for (let depth = 0; cause && depth < 4; depth += 1, cause = cause.cause) {
-    if (typeof cause.code === "string") return cause.code.replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 80);
+    if (typeof cause.code === "string") return cause.code;
   }
-  return "unavailable";
+}
+
+function transportCode(error) {
+  // Never copy exception messages, URLs, stacks or request/response bodies.
+  const code = transportErrorCode(error);
+  return code === undefined ? "unavailable" : code.replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 80);
 }
 
 // Advisory timings only. The original Date.now deadline, exact request bytes,
@@ -110,6 +114,8 @@ class RegistrationDiagnostics {
     this.attempt = 1;
     this.status = "unavailable";
     this.spans = [];
+    this.queryAttempt = 0;
+    this.transportResets = 0;
   }
 
   enter(phase, status = this.status) {
@@ -126,7 +132,8 @@ class RegistrationDiagnostics {
     return `phase=${this.phase}; category=${category}; runId=${this.runId}; attempt=${this.attempt}; httpStatus=${this.status}; `
       + `operationId=${this.operationId}; operation=${this.operation}; requestDigest=${this.requestDigest}; `
       + `elapsedMs=${(now - this.started).toFixed(1)}; phaseElapsedMs=${(now - this.phaseStarted).toFixed(1)}; `
-      + `budgetMs=${registrationBudgetMs}; deadlineEpochMs=${this.deadline}; remainingMs=${Math.max(0, this.deadline - Date.now())}; spans=${this.spans.join(",").slice(0, 224)}`;
+      + `budgetMs=${registrationBudgetMs}; deadlineEpochMs=${this.deadline}; remainingMs=${Math.max(0, this.deadline - Date.now())}; `
+      + `queryAttempt=${this.queryAttempt}; transportResets=${this.transportResets}; spans=${this.spans.join(",").slice(0, 224)}`;
   }
 
   failure(error, signal) {
@@ -215,10 +222,33 @@ async function queryRegisteredRun(request, runDirectory, configuration, deadline
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), remaining);
   try {
-    const response = await fetch(new URL(`/api/test-runs/${encodeURIComponent(request.runId)}`, configuration.base), {
+    const url = new URL(`/api/test-runs/${encodeURIComponent(request.runId)}`, configuration.base);
+    const options = {
       signal: controller.signal, redirect: "error",
       headers: { "x-termal-registration-operation": diagnostics.operationId, "x-termal-registration-attempt": String(diagnostics.attempt) },
-    });
+    };
+    let response;
+    // This is an idempotent exact read, not a new registration. A reset before
+    // fetch delivers a Response permits one reread under the original budget.
+    // It does not prove a stale pooled socket or that no wire bytes arrived.
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      diagnostics.queryAttempt = attempt;
+      if (attempt > 1) diagnostics.enter("get_headers", "unavailable");
+      if (controller.signal.aborted || Date.now() >= deadline) {
+        throw responseFailure("aborted", "GET query budget exhausted; no tests started");
+      }
+      try {
+        response = await fetch(url, options);
+        break;
+      } catch (error) {
+        const reset = failureCategory(error, controller.signal) === "transport_failure"
+          && transportErrorCode(error) === "ECONNRESET";
+        if (reset) diagnostics.transportResets += 1;
+        if (attempt !== 1 || !reset || controller.signal.aborted || Date.now() >= deadline) throw error;
+        diagnostics.enter("get_reset", "unavailable");
+      }
+    }
+    // Once a Response exists, status, body and identity failures are terminal.
     diagnostics.enter("get_body", response.status);
     if (!response.ok) {
       throw await httpFailure(response, diagnostics, controller.signal);

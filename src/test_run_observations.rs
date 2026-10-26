@@ -11,6 +11,8 @@ thread_local! {
     // Rows, entries and retained records a single-identity lookup examines,
     // counted before any predicate filters them.
     static TEST_TEST_RUN_IDENTITY_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Fresh projection builds, entry rows, observation rows.
+    static TEST_TEST_RUN_PROJECTION_WORK: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -161,12 +163,27 @@ struct TestRunProjection<'a> {
 
 impl<'a> TestRunProjection<'a> {
     fn new(inner: &'a StateInner) -> Self {
+        #[cfg(test)]
+        TEST_TEST_RUN_PROJECTION_WORK.with(|count| {
+            let (builds, entries, observations) = count.get();
+            count.set((builds + 1, entries, observations));
+        });
         let mut entries = HashMap::new();
         for entry in &inner.test_runs.entries {
+            #[cfg(test)]
+            TEST_TEST_RUN_PROJECTION_WORK.with(|count| {
+                let (builds, entries, observations) = count.get();
+                count.set((builds, entries + 1, observations));
+            });
             entries.entry(entry.summary.run_id.as_str()).or_insert(entry);
         }
         let mut observations: HashMap<&str, Vec<_>> = HashMap::new();
         for row in inner.test_run_observations.values() {
+            #[cfg(test)]
+            TEST_TEST_RUN_PROJECTION_WORK.with(|count| {
+                let (builds, entries, observations) = count.get();
+                count.set((builds, entries, observations + 1));
+            });
             if let Some(artifact) = &row.artifact {
                 observations.entry(artifact.run_id.as_str()).or_default().push(row);
             }

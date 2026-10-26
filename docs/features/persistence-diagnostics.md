@@ -13,7 +13,9 @@ prefer the newest tick. `recentLimit` and `slowestLimit` expose those bounds.
 Both histories contain full samples, including failed ticks, and can overlap.
 A spike stays in `slowest` after leaving `recent` until eight slower ticks
 replace it. `completedTicks` and `failedTicks` are process-lifetime
-counters. A restart resets everything; correlate with `serverInstanceId`.
+counters. A restart resets everything; correlate with `serverInstanceId`. The
+durable [host lifecycle journal](host-lifecycle-journal.md) keeps per-minute
+totals from this observer across restarts and resets.
 Microsecond durations saturate at u64::MAX. Failed or abandoned ticks are also
 retained. An abandoned scope has incomplete phase timings, not a successful
 write. Empty history means no observed tick, not proven writer health.
