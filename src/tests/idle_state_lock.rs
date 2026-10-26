@@ -424,18 +424,130 @@ fn idle_history_compaction_tick_does_not_reproject_unchanged_history() {
         visits, 0,
         "idle compaction must not reconstruct every historical summary"
     );
+    // Another subsystem's commit moves the revision but reports no test-run
+    // change: the step leaves selection to the next rescan.
     fixture.state.inner.lock().unwrap().revision += 1;
-    let (_, visits) = measure("changed_revision_compaction_tick", || {
+    let (_, visits) = measure("unrelated_revision_compaction_tick", || {
+        fixture.state.step_test_run_compaction()
+    });
+    assert_eq!(
+        visits, 0,
+        "an unrelated revision must not reconstruct every historical summary"
+    );
+    // A writer that changed selection inputs asks for a fresh selection.
+    fixture.state.inner.lock().unwrap().test_runs.compaction_examined_revision = None;
+    let (_, visits) = measure("requested_compaction_tick", || {
         fixture.state.step_test_run_compaction()
     });
     assert!(
         visits > 0,
-        "a new revision must recheck eligibility rather than reuse old safety"
+        "a requested selection rechecks eligibility rather than reuse old safety"
     );
     let (_, visits) = measure("idle_again_compaction_tick", || {
         fixture.state.step_test_run_compaction()
     });
     assert_eq!(visits, 0);
+}
+
+// Installed compacted history beside `count` indexed runs, as on a host whose
+// older runs were compacted: three compacted identities per indexed run, and
+// eight pending waits on indexed runs.
+fn compacted_history(count: usize) -> RunFixture {
+    let fixture = populated_history(count);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let template = inner.test_runs.entries[0].clone();
+    for ordinal in 0..count * 3 {
+        let mut summary = template.summary.clone();
+        summary.run_id = format!("test-compacted-{ordinal:05}");
+        summary.run_dir = test_run_display_path(&fixture.runs_dir().join(&summary.run_id));
+        let id = summary.run_id.clone();
+        inner.test_run_compacted.insert(
+            id.clone(),
+            TestRunCompacted {
+                compacted: true,
+                request_identity: None,
+                request_stamp: template.disk.request_stamp,
+                results_stamp: template.disk.results_stamp,
+                registration: None,
+                observations: Vec::new(),
+                artifact_unavailable: false,
+                artifact_conflict: false,
+                summary: test_run_minimal_summary(summary),
+                reason: "fixture installed compaction".to_owned(),
+            },
+        );
+        inner.test_runs.compactions_durable.insert(id);
+    }
+    let waits: Vec<_> = (0..8)
+        .map(|ordinal| {
+            let mut wait = test_run_wait_record(&format!("wait-{ordinal}"), "session-waiting");
+            wait.run_ids = vec![format!("test-history-{ordinal:04}")];
+            wait
+        })
+        .collect();
+    inner.test_run_waits = waits.into();
+    drop(inner);
+    fixture
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct HistoryPassWork {
+    projections: usize,
+    finds: usize,
+    wait_visits: usize,
+}
+
+fn history_pass_work(action: impl FnOnce()) -> HistoryPassWork {
+    TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.set(0));
+    TEST_TEST_RUN_INDEX_FINDS.with(|count| count.set(0));
+    TEST_TEST_RUN_WAIT_VISITS.with(|count| count.set(0));
+    action();
+    HistoryPassWork {
+        projections: TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.get()),
+        finds: TEST_TEST_RUN_INDEX_FINDS.with(|count| count.get()),
+        wait_visits: TEST_TEST_RUN_WAIT_VISITS.with(|count| count.get()),
+    }
+}
+
+/// Work a requested selection pass, an unrelated revision tick and a list
+/// read do at one history size.
+fn compacted_history_work(count: usize) -> [HistoryPassWork; 3] {
+    let fixture = compacted_history(count);
+    fixture.state.inner.lock().unwrap().test_runs.compaction_examined_revision = None;
+    let selection = history_pass_work(|| fixture.state.step_test_run_compaction());
+    fixture.state.inner.lock().unwrap().revision += 1;
+    let unrelated = history_pass_work(|| fixture.state.step_test_run_compaction());
+    let list = history_pass_work(|| {
+        let inner = fixture.state.inner.lock().unwrap();
+        let runs = test_run_summaries_locked(&inner);
+        let history = test_run_history_locked(&inner, None);
+        assert_eq!(runs.len(), count, "installed compacted rows are safe and omitted");
+        assert_eq!(history.compacted_count, count * 3);
+    });
+    eprintln!(
+        "compacted_history_work count={count} selection={selection:?} unrelated={unrelated:?} list={list:?}"
+    );
+    [selection, unrelated, list]
+}
+
+#[test]
+fn compaction_selection_and_list_work_is_linear_in_compacted_history() {
+    let [selection, unrelated, list] = compacted_history_work(64);
+    let [selection_4x, unrelated_4x, list_4x] = compacted_history_work(256);
+    assert_eq!(selection.projections, 1, "a requested pass projects history once");
+    assert_eq!(
+        selection.wait_visits, 8,
+        "each wait record is read once per pass, not once per candidate run"
+    );
+    assert_eq!(
+        unrelated,
+        HistoryPassWork { projections: 0, finds: 0, wait_visits: 0 },
+        "an unrelated revision neither projects nor rereads history"
+    );
+    // Linear entry lookups made per compacted row would grow with history.
+    assert_eq!(selection_4x, selection, "selection lookups do not grow with history");
+    assert_eq!(unrelated_4x, unrelated);
+    assert_eq!(list_4x, list, "list lookups do not grow with history");
 }
 
 // Deliberately unindexed reference projection retained only for small tests.

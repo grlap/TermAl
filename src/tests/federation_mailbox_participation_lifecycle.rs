@@ -193,7 +193,8 @@ async fn unavailable_unrelated_peer_does_not_hide_the_central_directory() {
     let sent = public_send(&pair.central, &c, &exact, "healthy-exact-pair", "exact local target").await.unwrap();
     let stored_target: String = pair.central.mailbox_store.connection().unwrap().query_row(
         "SELECT target_session_id FROM mailbox_messages WHERE id=?1", [&sent.message_id], |row| row.get(0)).unwrap();
-    assert_eq!(stored_target, local_binding.participant_key());
+    assert_eq!(stored_target, local_binding.identity.session_id,
+        "a self-host native locator uses the existing local mailbox namespace");
     let message_count: u64 = pair.central.mailbox_store.connection().unwrap().query_row(
         "SELECT COUNT(*) FROM mailbox_messages", [], |row| row.get(0)).unwrap();
     assert_eq!(message_count, 1, "only the exact healthy target may append");

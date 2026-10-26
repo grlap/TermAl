@@ -79,11 +79,33 @@ fn test_run_summary_ids(run: &TestRunSummary) -> impl Iterator<Item = &str> {
 }
 
 fn test_run_compact_is_installed(inner: &impl TestRunProjectionSource, row: &TestRunCompacted) -> bool {
+    test_run_compact_is_installed_with(inner, row, |id| {
+        inner.projection_index().find(id).is_some()
+    })
+}
+
+/// The run ids of the indexed entries, built once by a pass over history rows
+/// so each row's installation check is not a linear entry lookup.
+fn test_run_indexed_ids(index: &TestRunIndex) -> HashSet<&str> {
+    index
+        .entries
+        .iter()
+        .map(|entry| entry.summary.run_id.as_str())
+        .collect()
+}
+
+/// `indexed(run_id)` answers whether the run is an indexed entry, exactly as
+/// `TestRunIndex::find(run_id).is_some()` would.
+fn test_run_compact_is_installed_with(
+    inner: &impl TestRunProjectionSource,
+    row: &TestRunCompacted,
+    indexed: impl FnOnce(&str) -> bool,
+) -> bool {
     let index = inner.projection_index();
     let registrations = inner.projection_registrations();
     (!row.compacted
         || (index.compactions_durable.contains(&row.summary.run_id)
-            && index.find(&row.summary.run_id).is_none()))
+            && !indexed(&row.summary.run_id)))
         && !registrations.contains_key(&row.summary.run_id)
         && row
             .observations
@@ -142,6 +164,29 @@ fn test_run_compacted_summary(inner: &impl TestRunProjectionSource, row: &TestRu
 }
 
 fn test_run_compaction_eligible(inner: &StateInner, run: &TestRunSummary) -> bool {
+    test_run_compaction_eligible_with(inner, run, &test_run_waited_ids(inner))
+}
+
+/// Every run id some wait names, read once per selection pass rather than
+/// once per candidate run.
+fn test_run_waited_ids(inner: &StateInner) -> HashSet<String> {
+    inner
+        .test_run_waits
+        .iter()
+        .flat_map(|wait| {
+            #[cfg(test)]
+            TEST_TEST_RUN_WAIT_VISITS.with(|count| count.set(count.get() + 1));
+            wait.run_ids.iter().cloned()
+        })
+        .collect()
+}
+
+/// `waited` is `test_run_waited_ids` of the same state.
+fn test_run_compaction_eligible_with(
+    inner: &StateInner,
+    run: &TestRunSummary,
+    waited: &HashSet<String>,
+) -> bool {
     let index = &inner.test_runs;
     if !matches!(run.state, TestRunState::Passed | TestRunState::Failed)
         || run.ended_at.is_none()
@@ -150,10 +195,7 @@ fn test_run_compaction_eligible(inner: &StateInner, run: &TestRunSummary) -> boo
         return false;
     }
     let ids: HashSet<_> = test_run_summary_ids(run).collect();
-    if inner
-        .test_run_waits
-        .iter()
-        .any(|wait| wait.run_ids.iter().any(|id| ids.contains(id.as_str())))
+    if ids.iter().any(|id| waited.contains(*id))
         || inner
             .test_run_cards
             .get(&run.run_id)
@@ -204,8 +246,11 @@ fn test_run_history_locked(inner: &StateInner, project: Option<&str>) -> TestRun
     };
     let mut compacted_count = 0;
     let mut omitted_count = 0;
+    let indexed = test_run_indexed_ids(&inner.test_runs);
     for row in inner.test_run_compacted.values().filter(|row| {
-        row.compacted && test_run_compact_is_installed(inner, row) && included(&row.summary)
+        row.compacted
+            && test_run_compact_is_installed_with(inner, row, |id| indexed.contains(id))
+            && included(&row.summary)
     }) {
         compacted_count += 1;
         omitted_count += usize::from(
@@ -280,8 +325,10 @@ impl AppState {
         });
         let mut kept = HashMap::<Option<String>, usize>::new();
         let mut retry = false;
+        // Nothing below changes a wait, so one read serves the whole pass.
+        let waited = test_run_waited_ids(inner);
         for run in runs {
-            if !test_run_compaction_eligible(inner, &run) {
+            if !test_run_compaction_eligible_with(inner, &run, &waited) {
                 continue;
             }
             let count = kept.entry(run.project_id.clone()).or_default();
@@ -442,11 +489,14 @@ impl AppState {
                 self.publish_test_run_compact_risk_locked(&mut inner, &row);
             }
         }
-        // Only select again when inputs may have changed. Fences are polled
-        // above even at an unchanged revision. Some mutation paths select
-        // directly. Runtime-only eligibility changes without selection/revision
-        // may retain detail until the next revision or the 10-second rescan.
-        if had_completions || inner.test_runs.compaction_examined_revision != Some(inner.revision) {
+        // Select again only after a completion or when a writer or a failed
+        // pass asked for it (`compaction_examined_revision` cleared). Fences
+        // are polled above on every tick. Another subsystem's revision does
+        // not select: every rescan selects (test_runs.rs), so an eligibility
+        // change no writer reported keeps its detail until the next rescan,
+        // at most 10 s idle and one 2 s tick while a run is running. Deferring
+        // a selection never removes detail.
+        if had_completions || inner.test_runs.compaction_examined_revision.is_none() {
             self.compact_test_runs_locked(&mut inner);
         }
     }

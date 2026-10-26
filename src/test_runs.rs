@@ -244,7 +244,11 @@ impl TestRunIndex {
             .collect()
     }
 
+    /// A linear lookup for a single run. Loops over history rows use a set
+    /// built once per pass (`test_run_indexed_ids`) instead.
     fn find(&self, run_id: &str) -> Option<&TestRunEntry> {
+        #[cfg(test)]
+        TEST_TEST_RUN_INDEX_FINDS.with(|count| count.set(count.get() + 1));
         self.entries
             .iter()
             .find(|entry| entry.summary.run_id == run_id)
@@ -590,9 +594,16 @@ impl AppState {
                 retained_runs,
                 published_versions,
                 inner.test_runs.cards_enabled && inner.test_runs.cards_reevaluate,
-                inner.test_run_compacted.values().filter(|row| row.compacted && test_run_compact_is_installed(&inner, row))
+                {
+                    let indexed = test_run_indexed_ids(&inner.test_runs);
+                    inner.test_run_compacted.values().filter(|row| {
+                        row.compacted
+                            && test_run_compact_is_installed_with(&*inner, row, |id| indexed.contains(id))
+                    })
                     .filter(|row| !row.summary.run_dir.is_empty())
-                    .map(|row| (test_run_path_key(&row.summary.run_dir), row.clone())).collect::<HashMap<_, _>>(),
+                    .map(|row| (test_run_path_key(&row.summary.run_dir), row.clone()))
+                    .collect::<HashMap<_, _>>()
+                },
                 inner.test_runs.compaction_stamps.clone(),
             )
         };

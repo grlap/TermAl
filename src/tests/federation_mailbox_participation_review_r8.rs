@@ -4,6 +4,89 @@ use super::*;
 use super::regressions::public_send;
 use crate::tests::federation_native_binding_proof::DomainServer;
 
+#[test]
+fn qualified_bridge_listing_preserves_metadata_without_cross_host_or_ambiguous_matches() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = federation_mailboxes::central_store();
+    let (caller_id, caller) = federation_mailboxes::local_participant(&state, "Caller");
+    let (local_id, local) = federation_mailboxes::local_participant(&state, "Worker");
+    let remote_host = Uuid::new_v4().to_string();
+    let remote = |native: &str| {
+        let mut row = local.clone();
+        row.host_name = "Remote".into();
+        row.binding.identity.host_id = remote_host.clone();
+        row.binding.identity.session_id = native.into();
+        row.session_id = row.binding.participant_key();
+        row
+    };
+    let collision = remote(&local_id);
+    let exact = remote("session-remote");
+    let ambiguous = remote("session-ambiguous");
+    let child = remote("session-child");
+    let snapshot = json!({
+        "preferences":{"federation":{"enabled":true,"role":"central","central":caller.binding.central}},
+        "sessions":[
+            {"id":caller_id,"name":"Caller"},
+            // The snapshot predates automatic participation: no principal hint.
+            {"id":local_id,"name":"Worker","agent":"Codex","status":"active",
+                "workdir":"local-root","preview":"Local work","projectId":"project-local"},
+            {"id":"session-proxy","remoteId":"remote-config","mailboxParticipantId":exact.session_id,
+                "name":"Worker","agent":"Claude","status":"idle","workdir":"remote-root",
+                "preview":"Remote work","projectId":"project-remote"},
+            {"id":"session-duplicate-a","mailboxParticipantId":ambiguous.session_id,"status":"active"},
+            {"id":"session-duplicate-b","mailboxParticipantId":ambiguous.session_id,"status":"idle"},
+            {"id":"session-child","mailboxParticipantId":child.session_id,
+                "parentDelegationId":"delegation-child","status":"active"}
+        ],
+        "delegations":[]
+    });
+    let directory = json!({"participants":[caller,local,collision,exact,ambiguous,child],"unavailableHosts":[]});
+    let expected_path = format!("/api/sessions/{caller_id}/mailboxes/directory");
+    let (base_url, requests, server) = crate::delegation_mcp_tests::spawn_test_mcp_http_server(2, move |request| {
+        assert_eq!(request.method, "GET");
+        if request.path == "/api/state" {
+            (200, snapshot.clone())
+        } else {
+            assert_eq!(request.path, expected_path);
+            (200, directory.clone())
+        }
+    });
+    let bridge = TermalDelegationMcpBridge::new(caller_id, base_url).unwrap();
+    let listing = bridge.tool_list_sessions(json!({}));
+    server.join().unwrap();
+    let listing = listing.unwrap();
+    let rows = listing["sessions"].as_array().unwrap();
+    let find = |id: &str| rows.iter().find(|row| row["sessionId"] == id).unwrap();
+    let local_row = find(&local.session_id);
+    assert_eq!(local_row["agent"], "Codex");
+    assert_eq!(local_row["status"], "active");
+    assert_eq!(local_row["workdir"], "local-root");
+    assert_eq!(local_row["preview"], "Local work");
+    assert_eq!(local_row["projectId"], "project-local");
+    assert_eq!(local_row["name"], format!("host:{}::{local_id}", local.binding.identity.host_id));
+    assert_eq!(local_row["localName"], "Worker");
+    assert_eq!(local_row["creationId"], local.binding.identity.creation_id);
+    assert!(local_row.get("nativeWakeRequiresActivation").is_none(),
+        "ordinary native routing has no activation prerequisite");
+    let exact_row = find(&exact.session_id);
+    assert_eq!(exact_row["agent"], "Claude");
+    assert_eq!(exact_row["status"], "idle");
+    assert_eq!(exact_row["workdir"], "remote-root");
+    assert_eq!(exact_row["preview"], "Remote work");
+    assert_eq!(exact_row["projectId"], "project-remote");
+    assert!(exact_row.get("nativeWakeRequiresActivation").is_none(),
+        "ordinary native routing has no activation prerequisite");
+    for unknown in [&collision, &ambiguous, &child] {
+        let row = find(&unknown.session_id);
+        for field in ["agent", "status", "workdir", "preview", "projectId"] {
+            assert_eq!(row.get(field), Some(&Value::Null), "{field} must stay unknown for {}", unknown.session_id);
+        }
+        assert_eq!(row["hostId"], unknown.binding.identity.host_id);
+        assert_eq!(row["localSessionId"], unknown.binding.identity.session_id);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 2, "metadata adds no HTTP fan-out");
+}
+
 async fn superseded_sender_retry(unknown: bool) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let pair = qualified_pair().await;
@@ -112,7 +195,9 @@ fn offline_bridge_listing(status: u16) {
     let central = Uuid::new_v4().to_string();
     let state = json!({"preferences":{"federation":{"enabled":true,"role":"satellite",
         "central":{"hostId":central,"hostGeneration":1}}},"sessions":[
-        {"id":"session-parent","name":"Caller"}, {"id":"session-local","name":"Reviewer"},
+        {"id":"session-parent","name":"Caller"},
+        {"id":"session-local","name":"Reviewer","agent":"Codex","status":"active",
+            "workdir":"fixture-root","preview":"Existing local work","projectId":"project-local"},
         {"id":"session-child","name":"Child","parentDelegationId":"delegation-x"},
         {"id":"session-proxy","name":"Projection","remoteId":"remote-x"}],"delegations":[]});
     let (base_url, _, server) = crate::delegation_mcp_tests::spawn_test_mcp_http_server(4, move |request| {
@@ -142,6 +227,11 @@ fn offline_bridge_listing(status: u16) {
     let name = local["name"].as_str().unwrap().to_owned();
     assert_eq!(name, "session-local", "an offline listed name must remain a usable native locator");
     assert_eq!(local["localName"], "Reviewer");
+    assert_eq!(local["agent"], "Codex");
+    assert_eq!(local["status"], "active");
+    assert_eq!(local["workdir"], "fixture-root");
+    assert_eq!(local["preview"], "Existing local work");
+    assert_eq!(local["projectId"], "project-local");
     let (base_url, _, server) = crate::delegation_mcp_tests::spawn_test_mcp_http_server(1, |request| {
         assert_eq!(request.path, "/api/sessions/session-parent/mailboxes/send");
         let body: Value = serde_json::from_str(&request.body).unwrap();

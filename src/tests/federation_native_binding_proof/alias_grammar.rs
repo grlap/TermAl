@@ -82,7 +82,8 @@ async fn federation_mailbox_alias_grammar_real_directory_rpc_and_mcp_retain_inve
         let stored_target: String = pair.central.mailbox_store.connection().unwrap()
             .query_row("SELECT target_session_id FROM mailbox_messages WHERE id=?1",
                 [receipt["messageId"].as_str().unwrap()], |row| row.get(0)).unwrap();
-        assert_eq!(stored_target, target.session_id, "the listed name appends to that exact principal");
+        assert_eq!(stored_target, target.binding.identity.session_id,
+            "the listed self-host native locator appends to that exact local root");
         assert_eq!(listed_name, format!("host:{}::{}",
             target.binding.identity.host_id, target.binding.identity.session_id));
         if target.name.starts_with("session-") || target.name.contains('/') {

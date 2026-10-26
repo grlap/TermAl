@@ -18,8 +18,11 @@ impl AppState {
                 mailbox_message_for_idempotency_key(&connection, &native, &request.idempotency_key).map_err(mailbox_api_error)?
             };
             let Some(stored) = stored else { return Ok(None); };
+            let target_matches = stored.target_session_id == request.target_session_id
+                || app.canonical_local_native_mailbox_target(&request.target_session_id)?
+                    .as_deref() == Some(stored.target_session_id.as_str());
             if request.class.as_deref().is_some_and(|class| class != "routine")
-                || stored.target_session_id != request.target_session_id || stored.body != request.message
+                || !target_matches || stored.body != request.message
                 || stored.topic != request.topic || stored.state_stamp != request.state_stamp {
                 return Err(ApiError::conflict("idempotency key belongs to a different original native mailbox message"));
             }

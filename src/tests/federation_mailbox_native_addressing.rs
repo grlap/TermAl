@@ -268,6 +268,69 @@ async fn ordinary_local_to_local_send_keeps_the_existing_public_path() {
     assert!(duplicate.duplicate);
 }
 
+#[tokio::test]
+async fn self_host_qualified_sends_keep_the_local_pair_wake_and_retry_owner() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = federation_mailboxes::central_store();
+    let (sender, _) = federation_mailboxes::local_participant(&state, "Local sender");
+    let (target, _) = federation_mailboxes::local_participant(&state, "Local target");
+    let qualified = address(&state, &target);
+
+    let plain = ordinary(&state, &sender, &target, "local-spelling").await.unwrap();
+    receive_and_ack(&state, &target, &plain).await.unwrap();
+    let sent = ordinary(&state, &sender, &qualified, "qualified-spelling").await.unwrap();
+    assert_eq!(sent.mailbox_id, plain.mailbox_id);
+    assert_eq!(sent.sequence, plain.sequence + 1);
+    assert!(!sent.duplicate);
+    assert_eq!(sent.notification_disposition, "queuedBehindActiveTurn");
+    let stored = state.mailbox_store.read_message(&target, &sent.message_id).unwrap();
+    assert_eq!(stored.target_session_id, target);
+    let queued = {
+        let inner = state.inner.lock().unwrap();
+        let root = &inner.sessions[inner.find_session_index(&target).unwrap()];
+        assert!(root.queued_prompts.iter().any(|prompt|
+            prompt.pending_prompt.text.contains(&sent.mailbox_id)
+                && prompt.pending_prompt.text.contains(&format!("Latest inbound: #{}", sent.sequence))));
+        root.queued_prompts.iter().map(|prompt| prompt.pending_prompt.id.clone()).collect::<Vec<_>>()
+    };
+    for spelling in [&qualified, &target] {
+        let retry = ordinary(&state, &sender, spelling, "qualified-spelling").await.unwrap();
+        assert!(retry.duplicate);
+        assert_eq!((&retry.mailbox_id, &retry.message_id), (&sent.mailbox_id, &sent.message_id));
+        assert_eq!(retry.sequence, sent.sequence);
+    }
+    let alias_retry = ordinary(&state, &sender, &qualified, "local-spelling").await.unwrap();
+    assert!(alias_retry.duplicate);
+    assert_eq!(alias_retry.message_id, plain.message_id);
+    let changed = super::regressions::public_send(
+        &state, &sender, &qualified, "qualified-spelling", "changed body",
+    ).await.unwrap_err();
+    assert_eq!(changed.status, StatusCode::CONFLICT);
+    {
+        let inner = state.inner.lock().unwrap();
+        let root = &inner.sessions[inner.find_session_index(&target).unwrap()];
+        assert_eq!(root.queued_prompts.iter().map(|prompt| prompt.pending_prompt.id.clone())
+            .collect::<Vec<_>>(), queued, "duplicate spelling does not enqueue another wake");
+    }
+    assert_eq!(messages(&state), 2);
+
+    // An already retained domain intent keeps its original pair and key.
+    let delivery = state.prepare_federation_delivery(&sender, FederationMailboxOperation::Send {
+        target: qualified.clone(), message: "retained-self-domain".into(),
+        key: "retained-self-domain".into(), topic: None, state_stamp: None,
+    }).await.unwrap();
+    let domain = state.send_prepared_federation_delivery(&sender, delivery).await.unwrap();
+    assert_ne!(domain.mailbox_id, sent.mailbox_id);
+    let retry = ordinary(&state, &sender, &qualified, "retained-self-domain").await.unwrap();
+    assert!(retry.duplicate);
+    assert_eq!((retry.mailbox_id, retry.message_id), (domain.mailbox_id, domain.message_id));
+    receive_and_ack(&state, &target, &sent).await.unwrap();
+    assert_eq!(messages(&state), 3);
+    let connection = state.mailbox_store.connection().unwrap();
+    assert_eq!(connection.query_row("SELECT COUNT(*) FROM mailbox_relay_intents", [],
+        |row| row.get::<_, u64>(0)).unwrap(), 0);
+}
+
 #[test]
 fn mcp_send_preserves_the_explicit_native_locator_without_directory_resolution() {
     let target = format!("host:{}::session-2", Uuid::new_v4());

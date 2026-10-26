@@ -1245,7 +1245,7 @@ async fn send_mailbox_message(
     if !matches!(mailbox_reference_handle(&request.target_session_id), Ok(None)) {
         return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
     }
-    if state.is_local_native_mailbox_target(&request.target_session_id)? {
+    if let Some(target) = state.local_native_mailbox_target(&request.target_session_id)? {
         let app = state.clone();
         let native = sender_session_id.clone();
         let key = request.idempotency_key.clone();
@@ -1260,6 +1260,8 @@ async fn send_mailbox_message(
         // A retained domain intent owns its key; a local spelling cannot
         // turn its retry into a new native append, including during an outage.
         if !retained_domain {
+            let mut request = request;
+            request.target_session_id = target;
             let receipt = run_blocking_api(move || state.append_native_mailbox_message_and_notify(
                 &sender_session_id, request, NativeMailboxNamespace::Local,
             )).await?;

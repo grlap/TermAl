@@ -83,15 +83,28 @@ impl TermalDelegationMcpBridge {
                 .map(|row| row.binding.identity.host_id.clone())
         };
         let mut local_host = caller_host(state);
+        let mut refreshed_state = None;
         if satellite && local_host.is_none() {
             // The first metadata read may precede the directory's automatic
             // admission. Re-read that existing projection once; never infer
             // the host from a native id that can recur on several hosts.
             if let Ok(refreshed) = self.get_json_with_safe_replay("/api/state") {
                 local_host = caller_host(&refreshed);
+                refreshed_state = Some(refreshed);
             }
         }
         let central_host = state["preferences"]["federation"]["central"]["hostId"].as_str();
+        let metadata_state = refreshed_state.as_ref().unwrap_or(state);
+        let delegation_child_ids = delegation_child_session_ids(metadata_state);
+        // A central's validated settings identify its own host even when the
+        // first summary predates automatic mailbox participation.
+        let metadata_local_host = local_host.as_deref().or_else(|| {
+            if state["preferences"]["federation"]["role"] == "central" {
+                central_host
+            } else {
+                None
+            }
+        });
         Ok(Some((directory.participants.into_iter().map(|row| {
             let alias = format!("host:{}::{}", row.binding.identity.host_id, row.binding.identity.session_id);
             let native_locator = matches!(FederationMailboxAlias::parse(&alias, None), Ok(FederationMailboxAlias::HostNative { .. }))
@@ -108,13 +121,52 @@ impl TermalDelegationMcpBridge {
             } else {
                 row.session_id.clone()
             };
-            json!({
-                "sessionId":row.session_id,"name":name,
-                "localName":row.name,"hostName":row.host_name,"hostId":row.binding.identity.host_id,
-                "localSessionId":row.binding.identity.session_id,"creationId":row.binding.identity.creation_id
-            })
+            let summary = mailbox_participant_summary(
+                metadata_state, &delegation_child_ids, &row, metadata_local_host,
+            );
+            let mut listed = mailbox_peer_session_row(summary.unwrap_or(&Value::Null));
+            listed["sessionId"] = row.session_id.into();
+            listed["name"] = name.into();
+            listed["localName"] = row.name.into();
+            listed["hostName"] = row.host_name.into();
+            listed["hostId"] = row.binding.identity.host_id.into();
+            listed["localSessionId"] = row.binding.identity.session_id.into();
+            listed["creationId"] = row.binding.identity.creation_id.into();
+            listed
         }).collect(), directory.unavailable_hosts, directory.alias_basis)))
     }
+}
+
+fn mailbox_participant_summary<'a>(
+    state: &'a Value,
+    delegation_child_ids: &HashSet<&str>,
+    participant: &FederationMailboxParticipant,
+    local_host: Option<&str>,
+) -> Option<&'a Value> {
+    let mut matches = state["sessions"].as_array().into_iter().flatten()
+        .filter(|session| is_root_peer_session(session, delegation_child_ids))
+        .filter(|session| match session["mailboxParticipantId"].as_str() {
+            Some(principal) => principal == participant.session_id,
+            None => local_host == Some(participant.binding.identity.host_id.as_str())
+                && session.get("remoteId").is_none_or(Value::is_null)
+                && session["id"].as_str() == Some(participant.binding.identity.session_id.as_str()),
+        });
+    let first = matches.next()?;
+    // Metadata is display-only. Ambiguous or absent summaries stay unknown;
+    // a repeated native id on another host never supplies this row's status.
+    matches.next().is_none().then_some(first)
+}
+
+fn mailbox_peer_session_row(session: &Value) -> Value {
+    json!({
+        "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
+        "name": session.get("name").cloned().unwrap_or(Value::Null),
+        "agent": session.get("agent").cloned().unwrap_or(Value::Null),
+        "status": session.get("status").cloned().unwrap_or(Value::Null),
+        "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
+        "preview": session.get("preview").cloned().unwrap_or(Value::Null),
+        "projectId": session.get("projectId").cloned().unwrap_or(Value::Null),
+    })
 }
 
 fn mailbox_peer_session_listing(state: &Value, native_only: bool) -> Vec<Value> {
@@ -123,14 +175,7 @@ fn mailbox_peer_session_listing(state: &Value, native_only: bool) -> Vec<Value> 
         .filter(|session| is_root_peer_session(session, &delegation_child_ids))
         .filter(|session| !native_only || session.get("remoteId").is_none_or(Value::is_null))
         .map(|session| {
-            let mut row = json!({
-                "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
-                "name": session.get("name").cloned().unwrap_or(Value::Null),
-                "agent": session.get("agent").cloned().unwrap_or(Value::Null),
-                "status": session.get("status").cloned().unwrap_or(Value::Null),
-                "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
-                "preview": session.get("preview").cloned().unwrap_or(Value::Null),
-            });
+            let mut row = mailbox_peer_session_row(session);
             if native_only {
                 row["localName"] = row["name"].clone();
                 row["name"] = row["sessionId"].clone();

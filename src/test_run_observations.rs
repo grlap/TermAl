@@ -15,6 +15,10 @@ thread_local! {
     static TEST_TEST_RUN_IDENTITY_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     // Fresh projection builds, entry rows, observation rows.
     static TEST_TEST_RUN_PROJECTION_WORK: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+    // Linear `TestRunIndex::find` lookups made on this thread.
+    static TEST_TEST_RUN_INDEX_FINDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Run wait records read by compaction eligibility on this thread.
+    static TEST_TEST_RUN_WAIT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -949,6 +953,9 @@ impl AppState {
             }
             if result.is_ok() {
                 inner.test_runs.observations_durable.insert(id.clone());
+                // Durable detail can make its run compaction-eligible: ask the
+                // next compaction step to select, as the batch writer does.
+                inner.test_runs.compaction_examined_revision = None;
             } else {
                 inner.test_runs.observations_failed.insert(id.clone());
             }
@@ -1228,19 +1235,27 @@ fn test_run_enrich_artifact_summary_from_observations<'a>(
 }
 
 fn test_run_artifact_fallback(inner: &StateInner, run_id: &str) -> Option<TestRunSummary> {
-    test_run_artifact_fallback_from_observations(inner, run_id, inner.test_run_observations.values())
+    test_run_artifact_fallback_from_observations(
+        inner,
+        run_id,
+        inner.test_run_observations.values(),
+        |id| inner.test_runs.find(id).is_some(),
+    )
 }
 
+/// `indexed(run_id)` answers whether the run is an indexed entry, as
+/// `test_run_compact_is_installed_with` takes it.
 fn test_run_artifact_fallback_from_observations<'a>(
     inner: &StateInner,
     run_id: &str,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
+    indexed: impl FnOnce(&str) -> bool,
 ) -> Option<TestRunSummary> {
     let run = if let Some(row) = inner.test_run_registrations.get(run_id) {
         test_run_registered_fallback_from_observations(inner, row, observations)
     } else {
         let row = inner.test_run_compacted.get(run_id)?;
-        if (row.compacted && test_run_compact_is_installed(inner, row))
+        if (row.compacted && test_run_compact_is_installed_with(inner, row, indexed))
             || inner.test_run_observations.contains_key(run_id)
         {
             return None;
@@ -1272,11 +1287,16 @@ fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestR
         );
         Some(run)
     } else {
-        test_run_artifact_fallback_from_observations(inner, run_id, observations())
-            .map(|mut run| {
-                test_run_enrich_artifact_summary_from_observations(inner, &mut run, None, observations());
-                run
-            })
+        test_run_artifact_fallback_from_observations(
+            inner,
+            run_id,
+            observations(),
+            |id| inner.test_runs.find(id).is_some(),
+        )
+        .map(|mut run| {
+            test_run_enrich_artifact_summary_from_observations(inner, &mut run, None, observations());
+            run
+        })
     };
     if artifact.is_some() {
         return artifact;
@@ -1321,7 +1341,10 @@ fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
     runs.extend(retained.into_iter().filter_map(|id| {
         if !projection.entries.contains_key(id.as_str()) {
             test_run_artifact_fallback_from_observations(
-                inner, id, projection.observations(id).iter().copied(),
+                inner,
+                id,
+                projection.observations(id).iter().copied(),
+                |id| projection.entries.contains_key(id),
             )
         } else {
             None
@@ -1446,7 +1469,9 @@ impl<'a> TestRunIdentityIndex<'a> {
             let rows = if key.as_str() == run_id { observations.clone() } else {
                 Self::rows(&self.artifact_rows, key)
             };
-            if let Some(run) = test_run_artifact_fallback_from_observations(inner, key, rows) {
+            if let Some(run) = test_run_artifact_fallback_from_observations(inner, key, rows, |id| {
+                self.entries.contains_key(id)
+            }) {
                 if run.run_id == run_id {
                     runs.push(run);
                 }
@@ -1533,12 +1558,14 @@ fn test_run_changed_row_summary_locked(
 fn test_run_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
     let mut runs = test_run_full_summaries_locked(inner);
     let known: HashSet<_> = runs.iter().map(|run| run.run_id.clone()).collect();
+    let indexed = test_run_indexed_ids(&inner.test_runs);
     runs.extend(
         inner
             .test_run_compacted
             .values()
             .filter(|row| {
-                test_run_compact_is_installed(inner, row) && !known.contains(&row.summary.run_id)
+                test_run_compact_is_installed_with(inner, row, |id| indexed.contains(id))
+                    && !known.contains(&row.summary.run_id)
             })
             .map(|row| test_run_compacted_summary(inner, row))
             .filter(|run| run.registration.restart_would_void_evidence != Some(false)),

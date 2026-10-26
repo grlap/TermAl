@@ -23,11 +23,27 @@ fn native_mailbox_local_target_error(mut error: ApiError) -> ApiError {
     error
 }
 impl AppState {
-    fn is_local_native_mailbox_target(&self, target: &str) -> Result<bool, ApiError> {
-        if !target.starts_with("session-") { return Ok(false); }
+    // Normalize spelling only: retained native receipts do not require the
+    // original recipient to remain live. Fresh sends validate the root below.
+    fn canonical_local_native_mailbox_target(&self, target: &str) -> Result<Option<String>, ApiError> {
+        if target.starts_with("session-") { return Ok(Some(target.to_owned())); }
+        if !target.starts_with("host:") { return Ok(None); }
+        let alias = FederationMailboxAlias::parse(target, None)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        if let FederationMailboxAlias::HostNative { host, session_id } = alias {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.federation.local.as_ref().is_some_and(|local| local.host_id == host.to_string()) {
+                return Ok(Some(session_id.to_owned()));
+            }
+        }
+        Ok(None)
+    }
+
+    fn local_native_mailbox_target(&self, target: &str) -> Result<Option<String>, ApiError> {
+        let Some(target) = self.canonical_local_native_mailbox_target(target)? else { return Ok(None); };
         let inner = self.inner.lock().expect("state mutex poisoned");
-        federation_mailbox_root_locked(&inner, target).map_err(native_mailbox_local_target_error)?;
-        Ok(true)
+        federation_mailbox_root_locked(&inner, &target).map_err(native_mailbox_local_target_error)?;
+        Ok(Some(target))
     }
 
     fn native_mailbox_creations(&self, sessions: [&str; 2], namespace: NativeMailboxNamespace)
