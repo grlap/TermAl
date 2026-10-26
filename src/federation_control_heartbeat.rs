@@ -84,6 +84,9 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
             let _ = terminal.frame_failure(failure);
             break;
         }
+        // Central sends this authenticated challenge only after its durable
+        // install. Keep incoming control live while ordinary RPCs await it.
+        context.outgoing_rpc_ready.store(true, Ordering::SeqCst);
         settings.observe("requestAccepted", sequence);
     }
     // The owned guard withdraws only this context/UUID, including EOF and
