@@ -27,6 +27,10 @@ enum EngramRemoteApplication {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramCausalFailure {
+    // Fresh control-process/RPC evidence only. Local preparation deadlines
+    // and restored diagnostics cannot authorize ordinary availability.
+    #[serde(skip)]
+    control_availability: bool,
     // Visibility is process-local; only the persistence clone clears this
     // before the exact message is acknowledged by the durable writer.
     #[serde(skip)]
@@ -137,6 +141,7 @@ impl EngramCausalFailure {
         boundary: &str,
     ) -> Self {
         let mut cause = Self::request(error, request);
+        cause.control_availability = false;
         if error.causal_failure.is_none() {
             cause.boundary = boundary.to_owned();
             cause.remote_application = EngramRemoteApplication::NotStarted;
@@ -146,6 +151,7 @@ impl EngramCausalFailure {
 
     fn local(error: &EngramTransportError, operation: &str, boundary: &str) -> Self {
         let mut cause = Self::error(error, operation, None, &[]);
+        cause.control_availability = false;
         if error.causal_failure.is_none() {
             cause.boundary = boundary.to_owned();
             // This preparation did not send its request; a prior replay may
@@ -183,6 +189,13 @@ impl EngramCausalFailure {
             EngramTransportErrorKind::Backoff => EngramCausalFailureClass::Backoff,
         };
         Self {
+            control_availability: error.process_never_started
+                && matches!(
+                    error.kind,
+                    EngramTransportErrorKind::Transport
+                        | EngramTransportErrorKind::Deadline
+                        | EngramTransportErrorKind::Backoff
+                ),
             publication_pending: false,
             operation: operation.to_owned(),
             failure_class,

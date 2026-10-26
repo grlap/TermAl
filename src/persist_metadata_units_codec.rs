@@ -298,7 +298,7 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
             "cannot read metadata storage version: {error}"
         )))?;
     match version.as_deref() {
-        Some(version @ ("2" | "2-metadata-units-1" | SQLITE_SCHEMA_VERSION)) => Ok(version.to_owned()),
+        Some(version @ ("2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION | SQLITE_SCHEMA_VERSION)) => Ok(version.to_owned()),
         Some(version) => Err(reject_unsupported_state_schema(format!(
             "unsupported metadata storage version `{version}`"
         ))),
@@ -344,7 +344,7 @@ fn read_persisted_metadata_field(
     field: &str,
 ) -> Result<Option<Value>> {
     let version = persisted_metadata_storage_version(connection)?;
-    if version != SQLITE_SCHEMA_VERSION {
+    if !matches!(version.as_str(), SQLITE_METADATA_UNITS_VERSION | SQLITE_SCHEMA_VERSION) {
         return read_persisted_metadata_json(connection)?
             .map(|encoded| -> Result<Option<Value>> {
                 let mut value: Value = serde_json::from_str(&encoded)?;

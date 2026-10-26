@@ -1483,6 +1483,7 @@ fn failed_mailbox_recovery_moves_a_covering_newer_wake_ahead_of_successors() {
             .session_mut_by_index(index)
             .expect("target index should be valid");
         record.queued_prompts.push_front(QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,
             promotion_disposition_known: true,
@@ -1873,6 +1874,7 @@ fn a_mailbox_wake_to_a_held_engram_head_reports_a_held_disposition() {
             .expect("Codex target should exist");
         target.session.status = SessionStatus::Idle;
         target.queued_prompts.push_front(QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,
             promotion_disposition_known: true,

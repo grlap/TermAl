@@ -13713,6 +13713,11 @@ impl BoundedBootRecoveryFixture {
                 {
                     record.engram.routing_token = Some(format!("stale-{}", record.session.id));
                     record.engram.rebind_required = true;
+                    // All thirteen targets must be eager: idle settled roots
+                    // intentionally wait for their first admission instead.
+                    if parent_session_ids.contains(&record.session.id) {
+                        record.session.status = SessionStatus::Active;
+                    }
                 }
             }
             state

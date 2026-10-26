@@ -277,6 +277,7 @@ fn queue_delegation_child_prompt(state: &AppState, child_session_id: &str, text:
     inner.sessions[child_index]
         .queued_prompts
         .push_back(QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,
             promotion_disposition_known: true,
@@ -3841,6 +3842,7 @@ fn delegation_result_completion_clears_child_follow_up_queue() {
         inner.sessions[child_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -3926,6 +3928,7 @@ fn delegation_failed_result_clears_child_follow_up_queue() {
         inner.sessions[child_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -6301,6 +6304,7 @@ fn delegation_cancel_clears_queued_child_prompts() {
         inner.sessions[child_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -6634,6 +6638,7 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
             },
         );
         child.queued_prompts.push_back(QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,
             promotion_disposition_known: true,

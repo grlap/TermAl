@@ -57,6 +57,7 @@ fn queue_durable_orchestrator_prompt_on_record(
     attachments: Vec<PromptImageAttachment>,
 ) -> String {
     let queued = QueuedPromptRecord {
+        engram_ordinary_handoff: false,
         engram_waiting: false,
         promoted_message_index: None,
         promotion_disposition_known: true,

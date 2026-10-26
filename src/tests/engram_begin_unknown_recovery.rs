@@ -5,6 +5,9 @@
 //! clock and tick helpers it uses.
 
 use super::*;
+
+#[path = "engram_prepared_resume_contract.rs"]
+mod prepared_resume_contract;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[path = "engram_begin_preparation_retry.rs"]

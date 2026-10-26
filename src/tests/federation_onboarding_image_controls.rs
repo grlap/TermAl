@@ -17,7 +17,6 @@ fn federation_onboarding_real_profile_uses_federation_contract_not_storage_layou
     );
     assert_eq!(actual.schema_version, "2");
     assert_eq!(actual.schema_version, FEDERATION_PROFILE_SCHEMA_VERSION);
-    assert_eq!(SQLITE_SCHEMA_VERSION, "2-metadata-units-2");
     assert_ne!(actual.schema_version, SQLITE_SCHEMA_VERSION);
 }
 

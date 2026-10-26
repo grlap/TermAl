@@ -27,8 +27,9 @@ A root session binds and requests `observe`, `communicate` and `mutate_local`,
 because it edits its own workspace; a child mediates `mutate_local` only when
 its write policy lets it write (a shared or isolated worktree), so a read-only
 child never requests mutation. A session keeps the set it was bound with until
-its next bind, and every restart rebinds, so a changed set takes effect on the
-first bind after an upgrade. A session still bound under an earlier set, such
+its next bind. After a restart, unsettled sessions rebind during recovery;
+settled idle roots wait until their first admission. A changed set takes effect
+on that first bind after an upgrade. A session still bound under an earlier set, such
 as one whose retained bind was replayed across the upgrade, is refused with
 `control_assurance_insufficient` naming an effect its declared set lacks;
 when the current set includes that effect and it needs no more assurance than
@@ -55,13 +56,55 @@ observation is judged against that grant's effects, which Engram checks it
 against, not against the session's current set, so a turn that changed
 source under such a grant reports nothing.
 Evaluate grants do not dispatch a provider prompt until begin succeeds, and
-successful completion checkpoints the begun grant. Refusal, deferral, unavailable
-binding, and failed recovery withhold the prompt rather than bypassing control.
+successful completion checkpoints the begun grant. Refusal, deferral and failed
+Begin recovery withhold the prompt.
+For a fresh ordinary root User or Mailbox prompt, an availability failure at
+the initial bind or evaluation can instead deliver the prompt without a grant
+only when its causal evidence certifies `NotStarted`. A lost response with
+unknown remote application keeps its exact retained request and replay; it
+may conceal a policy decision or an issued grant.
+Its Degraded card retains the cause and says `sent_without_grant`; that turn
+has no Engram checkpoint or verification credit and starts no admission retry.
+This exception excludes delegated/orchestrator work, earlier retries, active or
+uncertain grants, prepared Begin, authority changes and local write failures.
+Local preparation deadlines and exhausted dispatch budgets remain holds even
+when no control request was sent. Only fresh control-process or RPC evidence
+can certify the availability exception; restored diagnostic cards cannot.
+An ordinary preparation retains its exact process-local owner while Stop
+arbitrates, including before the marker acknowledgement. A failed runtime
+shutdown preserves that unsent attempt, but provider enqueue still requires
+the successful marker acknowledgement; a successful Stop retires it.
+Once Begin is prepared, its exact recovery owns the prompt even if a later
+local acknowledgement misses its deadline. Explicit Resume can release the
+matching uncertain Prepared Begin after that local hold, preserving its key,
+grant, delivery tokens and authority. Only the producer's accepted receipt
+permits delivery; a producer refusal proving it never began permits a fresh
+evaluation. A mismatch, active attempt or different authority keeps the hold.
 Base-only and disabled projects retain ordinary ungated dispatch.
 Queue promotion rechecks the evaluated intent fingerprint, not just the queue
 entry ID: mailbox coalescing may change its sequence while evaluation is off-lock.
 An obsolete issued grant is repaired before fresh admission. Stop's successor
 path likewise leaves a changed head queued instead of using the old grant.
+
+Ordinary degraded handoff saves a marker on the queue head and waits for its
+local durability acknowledgement before sending to the provider. Permission
+to perform that handoff is process-local and belongs to the exact head and
+turn. A marker loaded after restart means provider delivery is unknown;
+neither Resume nor disabling control makes it replayable. The primary reader floor
+`2-metadata-units-2-handoff-1` protects this meaning from older readers.
+Supported primary-2 and units-1 stores first normalize transactionally to
+`2-metadata-units-2`; a second transaction advances only the semantic floor.
+Both stages finish before recovery or handoff, preserving session JSON, units,
+authority and uncertain Begin records. If the second stage fails, the store
+remains at units-2 without exposing the new handoff feature;
+newer or unknown formats are refused before recovery or rewriting.
+
+Boot recovery retains eager work for open or uncertain grants, exact retained
+operations and legacy records that may hide an unrecorded Begin. Existing
+delegation recovery rules remain in force. A settled idle local root with an
+empty queue and only a saved routing token or rebind flag creates no boot
+readiness fence or control process. Its first real admission follows the
+existing status/rebind path before evaluation and Begin.
 
 Remote proxy sessions never enter either local tier. The global
 `TERMAL_ENGRAM_DISABLED` kill switch and the per-project Enabled switch stop

@@ -735,8 +735,12 @@ fn root_causal_public_stop_preserves_cause_and_distinct_operator_hold() {
         .request_stop_session(&fixture.session)
         .unwrap();
     {
-        let inner = fixture.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
+        // Assert on an owned snapshot: a failed assertion must not poison the
+        // writer's state lock and trigger another panic from fixture teardown.
+        let record = {
+            let inner = fixture.state.inner.lock().unwrap();
+            inner.sessions[inner.find_session_index(&fixture.session).unwrap()].clone()
+        };
         assert!(record.engram.operator_paused);
         assert!(record.orchestrator_auto_dispatch_blocked);
         assert!(record.engram.admission_retry.is_none());

@@ -2750,6 +2750,9 @@ struct EngramSessionState {
     /// only; kept across turns, as the shell is.
     shell_directory: Option<EngramShellDirectory>,
     active_grant_id: Option<String>,
+    /// One live ordinary preparation; only its durable phase permits send.
+    /// Never restored from disk.
+    ordinary_handoff: Option<EngramOrdinaryHandoff>,
     /// The intent fingerprint of the turn `active_grant_id` was issued for,
     /// reported as the action fingerprint of the execution observation on
     /// that turn's end-of-turn checkpoint. In memory only: a grant that
@@ -2968,6 +2971,7 @@ impl Default for EngramSessionState {
             next_turn_check_sequence: 0,
             shell_directory: None,
             active_grant_id: None,
+            ordinary_handoff: None,
             active_turn_intent_fingerprint: None,
             active_turn_start_basis: None,
             active_turn_start_observed_at: None,
@@ -3142,6 +3146,9 @@ enum EngramDispatchRecordFinish {
 
 #[derive(Clone, Debug)]
 enum EngramDispatchEvaluation {
+    /// Only a fresh ordinary root admission can produce this, before Begin
+    /// and before refusal healing or any automatic retry.
+    OrdinaryUnavailable { code: String, detail: String },
     /// Produced only by the live pre-evaluate binding boundary. A degraded
     /// card alone never establishes that a provider delivery was not attempted.
     RetainedBindFailure {
@@ -3354,7 +3361,8 @@ enum EngramControlCardDecision {
 #[serde(rename_all = "snake_case")]
 enum EngramControlCardDispatch {
     SentOnGrant,
-    /// Retained only so previously persisted shadow-mode cards still decode.
+    /// Ordinary root dispatch after optional control became unavailable
+    /// before Begin; also decodes historical shadow-mode cards.
     SentWithoutGrant,
     Withheld,
     Queued,
@@ -4035,6 +4043,25 @@ impl AppState {
             .iter()
             .filter(|record| Self::engram_boot_recovery_candidate_locked(record))
             .filter_map(|record| {
+                // A settled idle root has no remote effect to close. Keep its
+                // token/rebind marker for the first real admission instead of
+                // launching a control process merely because it bound before.
+                // Legacy records, queued work and delegated sessions retain
+                // their existing recovery obligations.
+                if record.session.parent_delegation_id.is_none()
+                    && !matches!(record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+                    && record.engram.begins_recorded
+                    && record.queued_prompts.is_empty()
+                    && record.engram.active_grant_id.is_none()
+                    && record.engram.uncertain_grant_id.is_none()
+                    && record.engram.abort_retry.is_none()
+                    && record.engram.admission_retry.is_none()
+                    && record.engram.bind_retry.is_none()
+                    && record.engram.retained_checkpoint.is_none()
+                {
+                    return None;
+                }
                 let finished = finished_children.get(record.session.id.as_str()).copied();
                 let unsettled = !record.engram.begins_recorded
                     && finished.is_some_and(|status| status != DelegationStatus::Completed);
@@ -5473,6 +5500,10 @@ impl AppState {
             (pending, target, EngramQueuedAdmissionOwner::capture(record))
         };
         let (pending, mut binding_target, admission_owner) = snapshot;
+        if matches!(pending.evaluated, EngramDispatchEvaluation::OrdinaryUnavailable { .. }) {
+            return self.prepare_ordinary_engram_handoff(session_id, &pending,
+                binding_target.as_ref(), admission_owner.as_ref());
+        }
         if let Some(target) = binding_target.as_mut() {
             target.admission_started_at = Some(pending.started_at);
         }
@@ -6514,7 +6545,8 @@ impl AppState {
                         EngramControlFailMode::Enforced,
                     );
                 }
-                EngramDispatchEvaluation::Degraded { code, detail }
+                EngramDispatchEvaluation::OrdinaryUnavailable { code, detail }
+                | EngramDispatchEvaluation::Degraded { code, detail }
                 | EngramDispatchEvaluation::RetainedBindFailure { code, detail, .. } => {
                     let _ = detail;
                     break (
@@ -6998,6 +7030,7 @@ impl AppState {
                     EngramDispatchRecordFinish::Superseded
                 };
             }
+            let ordinary_handoff = card.dispatch == EngramControlCardDispatch::SentWithoutGrant;
             let message_id = inner.next_message_id();
             let defer_was_decided = card.decision == EngramControlCardDecision::Defer;
             let message = Message::EngramControl {
@@ -7012,6 +7045,14 @@ impl AppState {
             let queue_projection_before = Self::queue_projection_hash(record);
             // The hold is derived from retry state the hash does not cover.
             let queue_hold_before = engram_automatic_retry_hold(record);
+            if ordinary_handoff {
+                let head = record.queued_prompts.front_mut().expect("ordinary handoff head");
+                head.engram_ordinary_handoff = true;
+                head.engram_interrupted = true;
+                head.engram_waiting = false;
+                record.engram.begin_preparation_lineage = None;
+                sync_pending_prompts(record);
+            }
             let defer_is_held = defer_was_decided
                 && record
                     .engram
@@ -7351,11 +7392,12 @@ impl AppState {
                 let record = &inner.sessions[index];
                 record.runtime_stop_in_progress
                     && record.engram.dispatch_generation == dispatch_generation
-                    && record
+                    && (record
                         .engram
                         .pending_dispatch
                         .as_ref()
                         .is_some_and(|pending| pending.dispatch_generation == dispatch_generation)
+                        || engram_ordinary_handoff_owned(record))
             };
             if !still_waiting {
                 return true;
@@ -8550,6 +8592,11 @@ impl AppState {
         let clock = self.engram_budget_clock();
         let started_at = clock.now();
         let bind_phase_proof = self.capture_engram_bind_retry_proof(intent);
+        let ordinary_candidate = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(&intent.session_id).is_some_and(|index|
+                engram_ordinary_admission_candidate(&inner.sessions[index]))
+        };
         let (disabled_reason, admission_owner) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(&intent.session_id);
@@ -8631,6 +8678,9 @@ impl AppState {
                     dispatch_generation: intent.dispatch_generation,
                     intent_fingerprint: intent.intent_fingerprint.clone(),
                     evaluated: match bind_proof {
+                        _ if ordinary_candidate && engram_ordinary_availability_cause(
+                            &EngramCausalFailure::error(&error, "admission_binding", None, &[])) =>
+                            EngramDispatchEvaluation::OrdinaryUnavailable { code, detail: error.message },
                         Some(proof) => EngramDispatchEvaluation::RetainedBindFailure {
                             proof,
                             code,
@@ -8705,7 +8755,7 @@ impl AppState {
         let mut evaluated_work_binding = None;
         let mut causal_failure = None;
         let mut admission_fence_ms: Option<u64> = None;
-        let evaluated = loop {
+        let mut evaluated = loop {
             let routing_token = target
                 .routing_token
                 .clone()
@@ -8855,6 +8905,9 @@ impl AppState {
                     if engram_evaluation_refusal_heals_by_rebind(&directive, &target.effects)
                         && !stale_retry_used =>
                 {
+                    // A refusal has already made a policy decision. Every
+                    // later healing outcome must remain on the gated path.
+                    stale_retry_used = true;
                     if directive.code == "stale_fence" {
                         self.note_engram_request_binding_refused(
                             &intent.session_id,
@@ -8887,7 +8940,6 @@ impl AppState {
                     ) {
                         Ok(Some(refreshed)) => {
                             target = refreshed;
-                            stale_retry_used = true;
                         }
                         Ok(None) => {
                             causal_failure = Some(EngramCausalFailure::local_hold("admission_binding", "binding_unavailable", "Engram binding disappeared during Evaluate refusal healing", "refusal-healing rebind"));
@@ -8967,6 +9019,12 @@ impl AppState {
         };
         if causal_failure.is_none() && let EngramDispatchEvaluation::Degraded { code, detail } = &evaluated {
             causal_failure = Some(EngramCausalFailure::local_hold("turn_evaluate", code, detail, "Evaluate preparation"));
+        }
+        if ordinary_candidate && !stale_retry_used
+            && causal_failure.as_ref().is_some_and(engram_ordinary_availability_cause)
+            && let EngramDispatchEvaluation::Degraded { code, detail } = evaluated
+        {
+            evaluated = EngramDispatchEvaluation::OrdinaryUnavailable { code, detail };
         }
         Some(EngramPendingDispatch {
             admission_fence_ms,

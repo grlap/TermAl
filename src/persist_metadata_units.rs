@@ -288,7 +288,7 @@ fn migrate_metadata_units(connection: &rusqlite::Connection) -> Result<()> {
     }
     tx.execute(
         "UPDATE meta SET value=?1 WHERE key='schema_version'",
-        [SQLITE_SCHEMA_VERSION],
+        [SQLITE_METADATA_UNITS_VERSION],
     )?;
     tx.commit()
         .context("failed to migrate normalized metadata authority")?;

@@ -545,6 +545,7 @@ fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -797,6 +798,7 @@ fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
         record.runtime = SessionRuntime::Acp(original_runtime);
         record.session.status = SessionStatus::Active;
         record.queued_prompts.push_back(QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,
             promotion_disposition_known: true,
@@ -933,6 +935,7 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
             inner.sessions[index]
                 .queued_prompts
                 .push_back(QueuedPromptRecord {
+                    engram_ordinary_handoff: false,
                     engram_waiting: false,
                     promoted_message_index: None,
                     promotion_disposition_known: true,
@@ -1205,6 +1208,7 @@ fn stop_session_keeps_queued_prompt_idle_when_successor_start_fails() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -1324,6 +1328,7 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -1556,6 +1561,7 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,

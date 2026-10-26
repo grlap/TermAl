@@ -550,7 +550,7 @@ fn metadata_units_rollback_refuses_incomplete_or_orphan_authority_before_drop() 
         fixture.wait_record("first");
         fixture.wait_record("second");
         fixture.write(&fixture.collect()).unwrap();
-        let connection = metadata_units_connection(&fixture);
+        let connection = metadata_units_rollback_connection(&fixture);
         connection.execute_batch(fault).unwrap();
         let before = read_metadata_units_unchecked(connection).unwrap();
         assert!(
@@ -562,7 +562,7 @@ fn metadata_units_rollback_refuses_incomplete_or_orphan_authority_before_drop() 
         if !connection.is_autocommit() {
             connection.execute_batch("ROLLBACK").unwrap();
         }
-        assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION);
+        assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
         assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
         assert_eq!(
             connection
@@ -579,7 +579,7 @@ fn metadata_units_rollback_keeps_unsigned_counter_precision() {
     let mut fixture = FenceFixture::new();
     fixture.inner.lock().unwrap().next_message_number = u64::MAX - 1;
     fixture.write(&fixture.collect()).unwrap();
-    let connection = metadata_units_connection(&fixture);
+    let connection = metadata_units_rollback_connection(&fixture);
     connection
         .execute_batch(&metadata_units_rollback_sql())
         .unwrap();
@@ -616,7 +616,7 @@ fn metadata_units_rollback_preserves_non_nul_object_keys_without_prefix_collisio
             .unwrap()
             .pending_response_board_project_detachments = expected.clone();
         fixture.write(&fixture.collect()).unwrap();
-        let connection = metadata_units_connection(&fixture);
+        let connection = metadata_units_rollback_connection(&fixture);
         let actual_encoding: String = connection
             .pragma_query_value(None, "encoding", |row| row.get(0))
             .unwrap();
@@ -675,7 +675,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
             .unwrap()
             .pending_response_board_project_detachments = expected.clone();
         fixture.write(&fixture.collect()).unwrap();
-        let connection = metadata_units_connection(&fixture);
+        let connection = metadata_units_rollback_connection(&fixture);
         let actual_encoding: String = connection
             .pragma_query_value(None, "encoding", |row| row.get(0))
             .unwrap();
@@ -697,7 +697,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
         );
         assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
         assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
-        assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION);
+        assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
         assert_eq!(
             connection
                 .query_row("SELECT count(*) FROM app_state", [], |row| row
@@ -709,7 +709,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
         connection.execute_batch("ROLLBACK").unwrap();
         assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
         assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
-        assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION);
+        assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
         assert_eq!(
             connection
                 .query_row("SELECT count(*) FROM app_state", [], |row| row
@@ -752,7 +752,7 @@ fn metadata_units_rollback_late_marker_failure_restores_dropped_units_and_app_st
     let mut fixture = FenceFixture::new();
     fixture.wait_record("late-rollback-failure");
     fixture.write(&fixture.collect()).unwrap();
-    let connection = metadata_units_connection(&fixture);
+    let connection = metadata_units_rollback_connection(&fixture);
     let before = read_metadata_units_unchecked(connection).unwrap();
     let generation = metadata_unit_generation(connection).unwrap();
     connection
@@ -768,7 +768,7 @@ fn metadata_units_rollback_late_marker_failure_restores_dropped_units_and_app_st
     assert!(error.to_string().contains("injected late rollback failure"));
     assert!(!connection.is_autocommit());
     connection.execute_batch("ROLLBACK").unwrap();
-    assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION);
+    assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
     assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
     assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
     assert_eq!(

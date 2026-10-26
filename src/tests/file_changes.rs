@@ -393,6 +393,7 @@ fn file_change_capture_rollback_cannot_reuse_turn_generation() {
         let mut inner = state.inner.try_lock_now().unwrap();
         let record = &mut inner.sessions[0];
         let queued = QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,
             promotion_disposition_known: true,

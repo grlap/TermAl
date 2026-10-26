@@ -376,7 +376,9 @@ fn validate_no_legacy_embedded_state(
     Ok(persisted)
 }
 
-fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+fn sqlite_state_schema_header(
+    connection: &rusqlite::Connection,
+) -> Result<(BTreeSet<String>, String)> {
     let actual_tables = sqlite_state_user_table_names(connection)?;
     if !actual_tables.contains("meta") {
         return Err(reject_unsupported_state_schema(format!(
@@ -389,9 +391,21 @@ fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Re
         .ok_or_else(|| anyhow!("current state schema inventory is missing the `meta` table"))?;
     validate_sqlite_state_table_columns(connection, std::slice::from_ref(meta_table), false)?;
     let stored_schema_version = required_state_meta_value(connection, "schema_version")?;
-    if stored_schema_version != SQLITE_SCHEMA_VERSION {
+    Ok((actual_tables, stored_schema_version))
+}
+
+fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+    validate_sqlite_state_schema_for_version(connection, SQLITE_SCHEMA_VERSION)
+}
+
+fn validate_sqlite_state_schema_for_version(
+    connection: &rusqlite::Connection,
+    expected_version: &str,
+) -> Result<()> {
+    let (actual_tables, stored_schema_version) = sqlite_state_schema_header(connection)?;
+    if stored_schema_version != expected_version {
         return Err(reject_unsupported_state_schema(format!(
-            "found version `{stored_schema_version}`, expected `{SQLITE_SCHEMA_VERSION}`"
+            "found version `{stored_schema_version}`, expected `{expected_version}`"
         )));
     }
 
@@ -416,6 +430,61 @@ fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Re
     }
     validate_optional_federation_host_identity(connection)?;
     Ok(())
+}
+
+/// Normalize supported legacy metadata first, then install the handoff reader
+/// floor before exposing any recovered session. Each stage is atomic; a failure
+/// after normalization leaves a valid units predecessor with no handoff effects.
+fn prepare_existing_sqlite_state_reader_floor(
+    connection: &rusqlite::Connection,
+    for_load: bool,
+) -> Result<Option<PersistedState>> {
+    migrate_metadata_units(connection)?;
+    let (_, version) = sqlite_state_schema_header(connection)?;
+    if version == SQLITE_METADATA_UNITS_VERSION {
+        return advance_sqlite_state_reader_floor(connection, for_load);
+    }
+    validate_current_sqlite_state_schema(connection)?;
+    if for_load {
+        validate_no_legacy_embedded_state(connection)
+    } else {
+        // Keep already-current write-only setup bounded. Deep validation belongs
+        // to startup and to the one-time predecessor migration below.
+        Ok(None)
+    }
+}
+
+fn advance_sqlite_state_reader_floor(
+    connection: &rusqlite::Connection,
+    for_load: bool,
+) -> Result<Option<PersistedState>> {
+    let transaction =
+        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
+            .context("failed to begin state reader-floor migration")?;
+    // Another opener may have completed the migration while this one waited.
+    // All predecessor authority checks use this transaction's committed cut.
+    let (_, version) = sqlite_state_schema_header(&transaction)?;
+    let persisted = if version == SQLITE_METADATA_UNITS_VERSION {
+        validate_sqlite_state_schema_for_version(&transaction, SQLITE_METADATA_UNITS_VERSION)?;
+        let persisted = validate_no_legacy_embedded_state(&transaction)?;
+        let updated = transaction.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version' AND value = ?2",
+            rusqlite::params![SQLITE_SCHEMA_VERSION, SQLITE_METADATA_UNITS_VERSION],
+        ).context("failed to advance state reader floor")?;
+        if updated != 1 {
+            bail!("state reader-floor migration did not update its exact predecessor");
+        }
+        persisted
+    } else {
+        validate_current_sqlite_state_schema(&transaction)?;
+        if for_load {
+            validate_no_legacy_embedded_state(&transaction)?
+        } else {
+            None
+        }
+    };
+    transaction.commit().context("failed to commit state reader-floor migration")?;
+    Ok(persisted)
 }
 
 fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<bool> {
@@ -475,8 +544,7 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
 
     // Existing databases must pass every read-only compatibility check before
     // a persistent PRAGMA, CREATE/ALTER, backfill, or metadata write can run.
-    migrate_metadata_units(connection)?;
-    validate_current_sqlite_state_schema(connection)?;
+    prepare_existing_sqlite_state_reader_floor(connection, false)?;
     finish_existing_sqlite_state_schema_setup(connection)
 }
 
@@ -515,9 +583,7 @@ fn ensure_sqlite_state_schema_for_load(
 
     // Existing databases must pass every read-only compatibility and startup
     // authority check before a persistent PRAGMA or maintenance write can run.
-    migrate_metadata_units(connection)?;
-    validate_current_sqlite_state_schema(connection)?;
-    let persisted = validate_no_legacy_embedded_state(connection)?;
+    let persisted = prepare_existing_sqlite_state_reader_floor(connection, true)?;
     finish_existing_sqlite_state_schema_setup(connection)?;
     Ok(persisted)
 }

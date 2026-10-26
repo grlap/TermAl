@@ -4,7 +4,12 @@ See the [storage layout](sqlite-session-storage.md) and
 [persistence architecture](../architecture.md#persistence) for the surrounding
 session, transcript and writer contracts.
 
-The primary state format is `2-metadata-units-2`. Growing root collections
+The metadata layout is `2-metadata-units-2`. The current primary reader floor,
+`2-metadata-units-2-handoff-1`, additionally requires preserving ordinary
+provider-handoff uncertainty in normalized session rows. The metadata inventory
+and counts are unchanged; the units-2 rollback script refuses that stronger
+floor. Federation profile versioning is independent of this local reader floor.
+Growing root collections
 are stored in `state_metadata_units`, with a descriptor per root field and
 one row per member. Scalars, including allocation counters and the SSE
 revision, have their own rows. Session transcripts, prompt history and

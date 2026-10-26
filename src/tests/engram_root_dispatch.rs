@@ -4,6 +4,9 @@
 
 use super::*;
 
+#[path = "engram_admission_availability_contract.rs"]
+mod admission_availability_contract;
+
 #[path = "engram_root_causal_failure.rs"]
 mod causal_failure;
 
@@ -921,7 +924,7 @@ fn root_direct_and_queued_turns_bind_evaluate_begin_and_complete() {
 #[test]
 fn root_direct_and_queued_denials_and_failures_never_reach_provider() {
     for queued in [false, true] {
-        for failure in ["evaluate", "defer", "begin", "bind", "fatal"] {
+        for failure in ["evaluate", "defer", "begin", "bind", "protocol", "fatal"] {
             let responses = match failure {
                 "evaluate" => vec![
                     bind_reply("root-token"),
@@ -937,6 +940,9 @@ fn root_direct_and_queued_denials_and_failures_never_reach_provider() {
                 "bind" => vec![ScriptedEngramControlResponse::Reply(Err(
                     EngramTransportError::transport("unavailable"),
                 ))],
+                "protocol" => vec![ScriptedEngramControlResponse::Reply(Err(
+                    EngramTransportError::protocol("malformed binding response"),
+                ))],
                 "fatal" => vec![],
                 _ => unreachable!(),
             };
@@ -948,7 +954,7 @@ fn root_direct_and_queued_denials_and_failures_never_reach_provider() {
             }
             let dispatch = root_dispatch(&state, &session, queued);
             let delivery = deliver_turn_dispatch(&state, dispatch);
-            if matches!(failure, "defer" | "bind") {
+            if matches!(failure, "defer" | "bind" | "protocol") {
                 delivery.expect("uncertain admission remains waiting, not denied");
             } else {
                 assert_eq!(
@@ -1526,7 +1532,7 @@ fn boot_plan_excludes_unused_hidden_remote_and_base_only_sessions() {
             }
             _ => unreachable!(),
         }
-        if matches!(kind, "token" | "grant" | "rebind") {
+        if kind == "grant" {
             expected.push(id);
         }
     }
@@ -1563,6 +1569,9 @@ fn root_failed_boot_recovery_withholds_next_prompt() {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
         inner.sessions[index].engram.rebind_required = true;
+        // A legacy record can hide an unrecorded Begin, so its boot recovery
+        // stays eager even though settled idle roots are now lazy.
+        inner.sessions[index].engram.begins_recorded = false;
     }
     let plan = state.prepare_engram_sessions_for_boot_recovery().unwrap();
     assert_eq!(plan.targets.len(), 1);

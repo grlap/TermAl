@@ -343,6 +343,11 @@ impl AppState {
         if record.queued_prompts.len() == original_len {
             return Err(ApiError::not_found("queued prompt not found"));
         }
+        if record.engram.ordinary_handoff.as_ref()
+            .is_some_and(|handoff| handoff.owner.prompt_id == prompt_id)
+        {
+            record.engram.ordinary_handoff = None;
+        }
         clear_provider_capacity_retry(record);
         // A canceled head promoted for its hand-off was never sent: its
         // receipt turns terminal in the cancel's own write.
@@ -886,12 +891,13 @@ impl AppState {
                     .admission_owner
                     .as_ref()
                     .is_some_and(|owner| owner.matches(record))
-                && record
+                && (record
                     .queued_prompts
                     .front()
                     .and_then(|queued| queued.engram_evaluate.as_ref())
                     .and_then(|prepared| prepared.begun_grant_id.as_ref())
-                    .is_some_and(|grant| record.engram.active_grant_id.as_ref() == Some(grant));
+                    .is_some_and(|grant| record.engram.active_grant_id.as_ref() == Some(grant))
+                    || engram_ordinary_handoff_owned(record));
             let replay = owns_stop.then(|| {
                 let runtime_token = record.runtime.runtime_token();
                 record.clear_runtime_stop();
@@ -1204,9 +1210,9 @@ impl AppState {
         } else {
             false
         };
-        // A durable begin receipt consumes pending_dispatch before provider
-        // handoff. Retire the Stop-owned promoted head independently of that
-        // marker, before preparing any successor or closing the remote grant.
+        // A durable admission receipt consumes pending_dispatch before provider
+        // handoff. Retire the Stop-owned promoted head and ordinary permission
+        // before preparing any successor or closing the remote grant.
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1239,6 +1245,7 @@ impl AppState {
                 // A head promoted for its hand-off and retired here was never
                 // sent: its receipt turns terminal in this same write.
                 let removed_head = handing_off_head(record);
+                record.engram.ordinary_handoff = None;
                 record.queued_prompts.pop_front();
                 settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
                 record_dropped_engram_intent(record, retired_head_begin);

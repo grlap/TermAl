@@ -99,6 +99,7 @@ mod federation_entrypoints_control;
 mod federation_entrypoints_fixture;
 mod federation_entrypoints_regressions;
 mod federation_entrypoints_writer;
+mod federation_entrypoints_writer_observer;
 mod federation_onboarding_atomic;
 mod federation_onboarding_boundaries;
 mod federation_onboarding_child;

@@ -359,6 +359,7 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
         inner.sessions[planner_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -690,6 +691,7 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -1237,6 +1239,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -1399,6 +1402,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
         inner.sessions[reviewer_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -1630,6 +1634,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -1802,6 +1807,7 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -1824,6 +1830,7 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -2015,6 +2022,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -2802,6 +2810,7 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,
@@ -2959,6 +2968,7 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
         inner.sessions[reviewer_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,

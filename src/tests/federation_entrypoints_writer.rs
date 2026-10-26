@@ -9,9 +9,17 @@ pub(super) struct WriterControl {
     publish: mpsc::Sender<Value>,
     retry: mpsc::Sender<PersistRequest>,
     central_store: Mutex<Option<PathBuf>>,
+    collection_started: Mutex<Option<mpsc::Sender<()>>>,
 }
 
 impl WriterControl {
+    pub(super) fn observe_next_collection(&self) -> mpsc::Receiver<()> {
+        let (sender, receiver) = mpsc::channel();
+        let previous = self.collection_started.lock().unwrap().replace(sender);
+        assert!(previous.is_none(), "collection observation already armed");
+        receiver
+    }
+
     pub(super) fn set_central_store(&self, path: PathBuf) {
         *self.central_store.lock().unwrap() = Some(path);
     }
@@ -45,18 +53,40 @@ pub(super) fn start_writer(app: &mut AppState) -> Arc<WriterControl> {
         publish,
         retry: app.persist_tx.clone(),
         central_store: Mutex::new(None),
+        collection_started: Mutex::new(None),
     });
     let observing = control.clone();
     let inner = app.inner.clone();
     let path = app.persistence_path.clone();
+    let observer = app.persist_observer.clone();
     let worker = std::thread::spawn(move || {
         let mut cache = SqlitePersistConnectionCache::new();
         let mut fences = PersistFenceBatch::default();
         let mut watermark = 0;
         while let Ok(request) = rx.recv() {
+            let observation = observer.begin_at(std::time::Instant::now());
+            let drain_started = std::time::Instant::now();
             let shutdown = matches!(fences.accept(request), PersistWorkerWaitOutcome::Shutdown);
-            let shutdown = fences.drain(&rx, shutdown);
+            let (shutdown, drained) = fences.drain_observed(&rx, shutdown);
+            let (accepted, age_us) = fences.take_observer_acceptance();
+            observer.update(|tick| {
+                tick.phases.drain_us = persist_observed_us(drain_started.elapsed());
+                tick.counts.drained_requests = drained;
+                tick.counts.accepted_fences = accepted;
+                tick.counts.pending_fences_before = fences.pending.len();
+                tick.counts.new_fence_age_max_us = age_us;
+            });
+            fences.mark_in_tick();
+            persist_observe_phase("collect");
+            let collect_started = std::time::Instant::now();
+            if let Some(started) = observing.collection_started.lock().unwrap().take() {
+                let _ = started.send(());
+            }
             let mut delta = collect_persist_delta_from_shared_state(&inner, watermark);
+            let mut timings = PersistTickTimings {
+                collect: collect_started.elapsed(),
+                ..Default::default()
+            };
             let omit = observing.omit_binding.load(Ordering::SeqCst);
             let mut omitted = false;
             if omit {
@@ -73,7 +103,15 @@ pub(super) fn start_writer(app: &mut AppState) -> Arc<WriterControl> {
                 delta.deferred_session_ids.extend(ids);
             }
             let target = fences.pending.first().map(|fence| fence.target.clone());
-            let result = persist_delta_with_fences(&mut cache, &path, &delta, &mut fences);
+            persist_observe_delta(&delta);
+            let result = persist_delta_with_fences_timed(
+                &mut cache,
+                &path,
+                &delta,
+                &mut fences,
+                &mut timings,
+            );
+            persist_observe_phase("bookkeeping");
             if result.is_ok() && !omit {
                 watermark = delta.watermark;
             }
@@ -119,6 +157,26 @@ pub(super) fn start_writer(app: &mut AppState) -> Arc<WriterControl> {
                 // parent/child IPC and load_state round trips against a deadline.
                 observing.omit_binding.store(false, Ordering::SeqCst);
                 let _ = observing.retry.send(PersistRequest::Delta);
+            }
+            observer.update(|tick| tick.counts.pending_fences_after = fences.pending.len());
+            observation.finish(result.is_ok(), &timings);
+            if accepted > 0 || result.is_err() || timings.total() >= PERSIST_SLOW_TICK_LOG_THRESHOLD
+            {
+                let snapshot = observer.snapshot_at(std::time::Instant::now());
+                let tick = snapshot.recent.last().expect("completed fixture tick");
+                eprintln!(
+                    "FIXTURE_WRITER_TICK pid={} store={} accepted={} max_queue_age_us={} collect_wait_us={} collect_hold_us={} total_us={} phases={} ok={} pending={}",
+                    std::process::id(),
+                    path.display(),
+                    accepted,
+                    age_us,
+                    tick.phases.collect_wait_us,
+                    tick.phases.collect_hold_us,
+                    tick.loop_wall_us,
+                    timings.summary(),
+                    result.is_ok(),
+                    fences.pending.len(),
+                );
             }
             if shutdown {
                 fences.fail(PersistFenceError::WorkerStopped);

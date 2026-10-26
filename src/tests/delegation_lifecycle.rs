@@ -49,6 +49,7 @@ fn queue_delegation_child_prompt(state: &AppState, child_session_id: &str, promp
         .session_mut_by_index(child_index)
         .expect("child session index should be valid");
     child.queued_prompts.push_back(QueuedPromptRecord {
+        engram_ordinary_handoff: false,
         engram_waiting: false,
         promoted_message_index: None,
         promotion_disposition_known: true,

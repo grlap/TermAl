@@ -2305,6 +2305,7 @@ fn dedicated_reset_off_lock_case(change_context: bool) {
         record.runtime_reset_required = true;
         record.set_auto_dispatch_blocked(true);
         record.queued_prompts.push_back(QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false, promoted_message_index: None, promotion_disposition_known: true,
             engram_bind: None, engram_evaluate: None, engram_interrupted: false,
             source: QueuedPromptSource::User, attachments: Vec::new(),

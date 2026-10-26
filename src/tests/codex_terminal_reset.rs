@@ -97,6 +97,7 @@ impl Fixture {
             set_record_external_session_id(record, Some(THREAD.to_owned()));
             if queued {
                 record.queued_prompts.push_back(QueuedPromptRecord {
+                    engram_ordinary_handoff: false,
                     engram_waiting: false,
                     promoted_message_index: None,
                     promotion_disposition_known: true,

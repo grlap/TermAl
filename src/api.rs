@@ -532,8 +532,7 @@ fn handoff_prepared_turn_dispatch(
                     || record.active_turn_generation != active_turn_generation
                     || engram_generation.is_some_and(|generation| {
                         record.engram.dispatch_generation != generation
-                            || record.engram.active_grant_id.is_none()
-                            || !engram_source_observation_can_deliver(record)
+                            || !engram_provider_handoff_allowed(record)
                     })
                 {
                     return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
@@ -632,8 +631,7 @@ fn handoff_prepared_turn_dispatch(
             || record.active_turn_generation != active_turn_generation
             || engram_generation.is_some_and(|generation| {
                 record.engram.dispatch_generation != generation
-                    || record.engram.active_grant_id.is_none()
-                    || !engram_source_observation_can_deliver(record)
+                    || !engram_provider_handoff_allowed(record)
             })
         {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
@@ -653,7 +651,7 @@ fn handoff_prepared_turn_dispatch(
         if record.session.status != SessionStatus::Active {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
         }
-        if engram_generation.is_some() {
+        if engram_generation.is_some() && record.engram.active_grant_id.is_some() {
             source_root_notice_delivery =
                 refresh_engram_source_root_notices_locked(&mut inner, index);
             let record = &mut inner.sessions[index];
@@ -766,6 +764,7 @@ fn handoff_prepared_turn_dispatch(
     }
     if engram_generation.is_some() {
         let index = index.expect("guarded handoff owns session");
+        inner.sessions[index].engram.ordinary_handoff = None;
         finish_source_observation_handoff_locked(&mut inner, index);
         if inner.sessions[index]
             .queued_prompts

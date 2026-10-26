@@ -762,7 +762,7 @@ from running instances. Normalized session and delegation rows are independent
 startup failure boundaries: a malformed record is reported and skipped rather
 than aborting the process and hiding every healthy session. The primary state
 database must use the current normalized authority: all required state
-tables with their canonical column sets, `schema_version=2-metadata-units-2`,
+tables with their canonical column sets, `schema_version=2-metadata-units-2-handoff-1`,
 `prompt_history_storage_version=1`, and no metadata-embedded session,
 delegation, or prompt-history records. Unrelated extra tables are tolerated.
 Metadata units must pass complete inventory, kind, member-count and typed
@@ -775,10 +775,15 @@ Any parseable session row carrying an array-valued obsolete
 `session.promptHistory` key is rejected, including an empty array. Non-array
 values and malformed session JSON remain row-level quarantine concerns.
 Validation runs before persistent PRAGMAs or schema maintenance. Supported
-primary-2 and emergency-units-1 stores upgrade atomically; unsupported or
-partial schemas refuse with reset guidance. Older binaries refuse the new
-marker before modifying the store. Offline rollback rebuilds current metadata,
-or refuses unsafe images, as specified in the incremental metadata document.
+primary-2 and emergency-units-1 stores first normalize atomically to units-2.
+A second immediate transaction validates that committed image and advances
+only the handoff reader floor, preserving unit rows, generation, session JSON
+and raw federation state. Neither recovery nor a handoff can run between stages.
+A second-stage failure leaves valid units-2; reopening can finish the floor.
+Unsupported or partial schemas refuse with reset guidance. Older units-2
+binaries refuse the handoff floor before modifying the store. The units-2
+offline rollback artifact also refuses this stronger feature floor; reverting
+the executable or relabeling the header is not a supported rollback.
 
 Coordination bootstrap runs before the persist worker, coordination stores,
 and HTTP listener. An empty `coordination.sqlite` is initialized atomically

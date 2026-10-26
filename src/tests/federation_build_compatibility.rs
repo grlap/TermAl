@@ -3,6 +3,10 @@
 use super::federation_onboarding_fixture::{Pair, image, io, profile};
 use super::*;
 
+#[path = "federation_primary2_fixture.rs"]
+mod primary2_fixture;
+use primary2_fixture::reload_primary2_host;
+
 pub(super) fn measured(profile: Arc<Mutex<FederationExecutionProfile>>) -> FederationOnboardingIo {
     let mut measured = io();
     let reported = profile.clone();
@@ -29,67 +33,6 @@ fn legacy_enrollment_profile() -> FederationExecutionProfile {
         "binarySha256": "a".repeat(64), "toolchainIdentity": "fake-platform-rustc",
     }))
     .unwrap()
-}
-
-fn reload_primary2_host(app: &AppState) {
-    let before = {
-        let inner = app.inner.lock().unwrap();
-        (
-            inner.federation.local.clone(),
-            inner.federation.peers.clone(),
-            serde_json::to_value(&inner.federation.onboarding).unwrap(),
-        )
-    };
-    // The fixture's writer and listener have been joined. Materialize a real
-    // primary-2 metadata image, not just its marker, then use the boot loader's
-    // normal local migration. This never touches a live host or store.
-    let rollback = include_str!("../../scripts/state-metadata-units-rollback.sql")
-        .lines()
-        .filter(|line| !line.starts_with('.'))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let connection = rusqlite::Connection::open(app.persistence_path.as_path()).unwrap();
-    connection.execute_batch(&rollback).unwrap();
-    assert_eq!(
-        required_state_meta_value(&connection, "schema_version").unwrap(),
-        "2"
-    );
-    let encoded: String = connection
-        .query_row(
-            "SELECT value_json FROM app_state WHERE key='metadataState'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let primary2: Value = serde_json::from_str(&encoded).unwrap();
-    for peer in primary2["federation"]["peers"]
-        .as_object()
-        .unwrap()
-        .values()
-    {
-        assert_eq!(peer["profile"]["schemaVersion"], "2");
-    }
-    drop(connection);
-    let restored = load_state(app.persistence_path.as_path()).unwrap().unwrap();
-    assert_eq!(restored.federation.local, before.0);
-    assert_eq!(
-        serde_json::to_value(&restored.federation.onboarding).unwrap(),
-        before.2
-    );
-    for (id, old) in &before.1 {
-        let loaded = &restored.federation.peers[id];
-        assert_eq!(loaded.profile, old.profile);
-        assert_eq!(loaded.identity, old.identity);
-        assert_eq!(loaded.enrollment_generation, old.enrollment_generation);
-        assert_eq!(loaded.pair_capability_ref, old.pair_capability_ref);
-        assert_eq!(loaded.verification, old.verification);
-    }
-    let connection = rusqlite::Connection::open(app.persistence_path.as_path()).unwrap();
-    assert_eq!(
-        required_state_meta_value(&connection, "schema_version").unwrap(),
-        "2-metadata-units-2"
-    );
-    *app.inner.lock().unwrap() = restored;
 }
 
 async fn rebuilt_delivery_case(

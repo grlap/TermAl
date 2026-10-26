@@ -3598,6 +3598,7 @@ fn shared_codex_runtime_exit_clears_shared_slot_before_queued_dispatch_attempt()
         record.session.preview = "Waiting for Codex".to_owned();
         assert!(record.is_local_session());
         record.queued_prompts.push_back(QueuedPromptRecord {
+            engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,
             promotion_disposition_known: true,

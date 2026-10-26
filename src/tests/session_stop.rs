@@ -313,6 +313,7 @@ fn stop_session_recovers_an_active_session_with_no_runtime() {
             inner.sessions[index]
                 .queued_prompts
                 .push_back(QueuedPromptRecord {
+                    engram_ordinary_handoff: false,
                     engram_waiting: false,
                     promoted_message_index: None,
                     promotion_disposition_known: true,
@@ -391,6 +392,7 @@ fn stop_projects_the_paused_queue_and_resume_clears_it() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
                 promotion_disposition_known: true,

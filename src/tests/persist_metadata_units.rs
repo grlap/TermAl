@@ -675,12 +675,12 @@ fn metadata_units_old_reader(connection: &rusqlite::Connection) -> Result<Value>
     Ok(serde_json::from_str(&encoded)?)
 }
 
-fn metadata_units_rollback_sql() -> String {
-    include_str!("../../scripts/state-metadata-units-rollback.sql")
-        .lines()
-        .filter(|line| !line.starts_with('.'))
-        .collect::<Vec<_>>()
-        .join("\n")
+// This offline rollback contract is only for the pre-handoff units layout.
+fn metadata_units_rollback_connection(fixture: &FenceFixture) -> &rusqlite::Connection {
+    let connection = metadata_units_connection(fixture);
+    connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",
+        [SQLITE_METADATA_UNITS_VERSION]).unwrap();
+    connection
 }
 
 #[test]
@@ -715,7 +715,7 @@ fn metadata_units_offline_rollback_materializes_current_counters_and_collections
         inner.revision = 7001;
     }
     fixture.write(&fixture.collect()).unwrap();
-    let connection = metadata_units_connection(&fixture);
+    let connection = metadata_units_rollback_connection(&fixture);
     let expected = metadata_units_metadata(connection);
     connection
         .execute_batch(&metadata_units_rollback_sql())

@@ -19,7 +19,7 @@ mod sqlite_schema_tests {
 
     #[test]
     fn sqlite_schema_guard_rejects_noncurrent_versions_before_creating_state_tables() {
-        for unsupported_version in ["1", "3"] {
+        for unsupported_version in ["1", "3", "4", "2-metadata-units-2-handoff-2"] {
             let connection =
                 rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
             connection

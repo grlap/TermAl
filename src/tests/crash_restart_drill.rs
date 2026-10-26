@@ -16,6 +16,7 @@ const RESTART_NOTICE_PREFIX: &str = "TermAl restarted";
 
 fn crash_drill_queued_prompt(prompt_id: &str) -> QueuedPromptRecord {
     QueuedPromptRecord {
+        engram_ordinary_handoff: false,
         engram_waiting: false,
         promoted_message_index: None,
         promotion_disposition_known: true,

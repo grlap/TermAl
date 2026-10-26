@@ -1010,6 +1010,12 @@ impl PersistedSessionRecord {
         // unpromoted disposition from missing legacy evidence; only the latter
         // must fail closed once earlier transcript positions were evicted.
         for queued in &mut record.queued_prompts {
+            if queued.engram_ordinary_handoff {
+                queued.engram_interrupted = true;
+                record.engram.recovered_admission = false;
+                record.orchestrator_auto_dispatch_blocked = true;
+                record.session.queue_paused = true;
+            }
             if queued.promoted_message_index.is_some() {
                 queued.promotion_disposition_known = true;
             } else if queued.is_engram_retained() && !queued.promotion_disposition_known {

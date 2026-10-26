@@ -151,6 +151,10 @@ enum QueuedPromptSource {
 /// Represents a queued prompt record.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct QueuedPromptRecord {
+    // Saved before an ordinary degraded handoff. After a restart this means
+    // provider delivery is unknown, never permission to replay the prompt.
+    #[serde(default, skip_serializing_if = "session_flag_is_false")]
+    engram_ordinary_handoff: bool,
     // Global transcript position survives eviction from the resident window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     promoted_message_index: Option<usize>,
@@ -567,6 +571,7 @@ fn queue_prompt_on_record_with_source(
         && attachments.is_empty();
     let prompt_id = pending_prompt.id.clone();
     record.queued_prompts.push_back(QueuedPromptRecord {
+        engram_ordinary_handoff: false,
         engram_waiting: false,
         promoted_message_index: None,
         promotion_disposition_known: true,

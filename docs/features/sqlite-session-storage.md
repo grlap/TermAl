@@ -159,7 +159,7 @@ quarantine set so a later synchronous full-snapshot persistence fallback does
 not misinterpret the isolated row as a user deletion; the original SQLite row
 stays available for recovery or inspection.
 
-`meta.schema_version` is `2-metadata-units-2`, and
+`meta.schema_version` is `2-metadata-units-2-handoff-1`, and
 `meta.prompt_history_storage_version` is `1`. Existing databases must contain
 all required tables above, but may retain unrelated tables from earlier development
 builds. Each required table must have exactly the column set shown above,
@@ -185,6 +185,16 @@ move/delete reset guidance. The supported primary-2 and emergency-units-1
 formats migrate atomically to units-2 after validation; other obsolete local
 formats have no alternate hydration path. Missing optional history in units-1
 cannot be retrospectively recovered or certified by the upgrade.
+
+The units-2 layout and the handoff reader floor are separate contracts.
+An immediate transaction validates complete units-2 authority and changes only
+the primary header to `2-metadata-units-2-handoff-1`. Normalization and this
+floor change are two atomic stages, not one combined transaction. Recovery,
+provider dispatch and marker-bearing writes start only after both succeed.
+A failed floor change leaves the valid units-2 predecessor for a later reopen.
+Session JSON, raw metadata units, generation and federation state are unchanged
+by the floor-only stage. Older readers and the units-2 offline rollback script
+refuse the handoff floor; a header downgrade cannot remove delivery uncertainty.
 
 ## API Shape
 
@@ -330,7 +340,7 @@ The normalized transcript schema and bounded HTTP reads are implemented:
 - Production startup stores state in `~/.termal/termal.sqlite`.
 - SQLite stores global metadata and per-session metadata separately from
   transcript messages.
-- The current v2 schema stores transcript messages in indexed `messages` rows.
+- The current normalized schema stores transcript messages in indexed `messages` rows.
   Version 1 databases are rejected with `termal.sqlite` reset guidance rather
   than migrated or read through a compatibility path.
 - `messages` is an ordinary rowid table with

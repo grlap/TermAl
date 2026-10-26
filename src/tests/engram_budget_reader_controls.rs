@@ -32,6 +32,7 @@ fn queue_head(state: &AppState, session: &str) -> EngramQueuedAdmissionOwner {
     let index = inner.find_session_index(session).unwrap();
     let record = inner.session_mut_by_index(index).unwrap();
     record.queued_prompts.push_back(QueuedPromptRecord {
+        engram_ordinary_handoff: false,
         engram_waiting: false,
         promoted_message_index: None,
         promotion_disposition_known: true,

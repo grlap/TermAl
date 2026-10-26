@@ -232,7 +232,7 @@ fn boot_recovery_skips_finished_delegation_children_without_a_mirrored_grant() {
     let project_id = create_test_project(&state, &root, "Engram finished-child boot recovery");
     // A parent runs only a bounded number of delegations at once, so the
     // children spread over as many parents as the bound requires. Every
-    // parent is an ordinary root with a stale token.
+    // parent is an ordinary root with a stale token and queued work.
     const CHILDREN: usize = 7;
     let parents = (0..CHILDREN.div_ceil(MAX_RUNNING_DELEGATIONS_PER_PARENT))
         .map(|_| create_test_project_session(&state, Agent::Codex, &project_id, &root))
@@ -278,6 +278,17 @@ fn boot_recovery_skips_finished_delegation_children_without_a_mirrored_grant() {
         (&canceled_with_grant, DelegationStatus::Canceled),
         (&canceled_with_uncertain_grant, DelegationStatus::Canceled),
     ];
+    // Pending work keeps these roots eager on both boots. A stale token alone
+    // belongs to the separate lazy-idle-root contract.
+    for parent in &parents {
+        queue_test_engram_prompt(
+            &state,
+            parent,
+            "Retain parent work across boot recovery.",
+            QueuedPromptSource::User,
+            None,
+        );
+    }
     let settings = EngramProjectSettings {
         acceptance_evaluation: None,
         enabled: true,
@@ -317,6 +328,9 @@ fn boot_recovery_skips_finished_delegation_children_without_a_mirrored_grant() {
                 .expect("session index should be valid");
             record.engram.routing_token = Some(format!("stale-{}", record.session.id));
             record.engram.rebind_required = true;
+            if parents.contains(&record.session.id) {
+                record.session.queue_paused = true;
+            }
         }
         let index = inner
             .find_session_index(&completed_with_grant)
@@ -585,6 +599,14 @@ fn a_record_written_before_begins_were_recorded_keeps_recovering_until_a_bind_se
     // unrecorded one stays skipped rather than bringing that cost back.
     let [completed, failed, canceled] =
         <[String; 3]>::try_from(children).expect("three delegation children");
+    // The root must keep an eager obligation after the reload as well as now.
+    queue_test_engram_prompt(
+        &state,
+        &parent,
+        "Retain parent work while legacy children settle.",
+        QueuedPromptSource::User,
+        None,
+    );
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         inner
@@ -627,6 +649,8 @@ fn a_record_written_before_begins_were_recorded_keeps_recovering_until_a_bind_se
             // written before begins were recorded loads its children unsettled.
             if record.session.id != parent {
                 record.engram.begins_recorded = false;
+            } else {
+                record.session.queue_paused = true;
             }
         }
         state

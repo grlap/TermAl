@@ -75,7 +75,7 @@ impl EngramProjectSettings {
 
 impl QueuedPromptRecord {
     fn has_engram_intent(&self) -> bool {
-        self.engram_bind.is_some() || self.engram_evaluate.is_some()
+        self.engram_ordinary_handoff || self.engram_bind.is_some() || self.engram_evaluate.is_some()
     }
 
     // Stop can retain the head before the first wire request is prepared.
@@ -132,7 +132,7 @@ impl PartialEq for DeferredEngramHandoff {
 impl Eq for DeferredEngramHandoff {}
 
 // Identity of the queue head that owns an off-lock recovery operation.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct EngramQueuedAdmissionOwner {
     prompt_id: String,
     generation: u64,
@@ -420,7 +420,11 @@ impl AppState {
                 .map_or(deadline, |budget| deadline.min(budget))
         };
         self.confirm_engram_admission_durable_classified(session_id, deadline, owner)
-            .map_err(|(error, _)| error)
+            .map_err(|(error, fault)| match fault {
+                EngramAdmissionDurabilityFault::Late
+                | EngramAdmissionDurabilityFault::Fence(PersistFenceError::Deadline) => error,
+                _ => EngramTransportError::local_state(error.message),
+            })
     }
 
     /// `confirm_engram_admission_durable` waiting until `deadline`, also

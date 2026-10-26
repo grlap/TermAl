@@ -775,6 +775,10 @@ enum EngramBeginPreparationResume {
     /// begin is sent as that exact begin, never re-admitted afresh), so its
     /// grant is kept.
     ReleasablePending,
+    /// A replay was held at its local acknowledgement fence. The uncertain
+    /// grant still owns the exact Prepared request; Resume may release only
+    /// that replay, after checking its original authority.
+    ReconcilePrepared,
     /// Settings interrupted a retained bind/evaluate. Keep its original
     /// authority and recover it exactly, including the cold status check;
     /// interruption alone is not evidence that a grant was never begun.
@@ -797,7 +801,24 @@ fn engram_begin_preparation_resume(record: &SessionRecord) -> EngramBeginPrepara
     let Some(head) = record.queued_prompts.front() else {
         return EngramBeginPreparationResume::NotHeld;
     };
-    if !(unscheduled && ungranted && head.engram_interrupted && head.promotion_disposition_known) {
+    if head.engram_ordinary_handoff {
+        return EngramBeginPreparationResume::NotHeld;
+    }
+    if !(unscheduled && head.engram_interrupted && head.promotion_disposition_known) {
+        return EngramBeginPreparationResume::NotHeld;
+    }
+    if engram_begin_replay_pending(record).is_some()
+        && head.engram_evaluate.as_ref().is_some_and(|evaluate| evaluate.begun_grant_id.is_none())
+        && engram_begin_preparation_newest_cause(record)
+        && engram.disabled_reason.is_none()
+        && !engram_retry_attempt_in_flight(record)
+        && !record.runtime_stop_in_progress
+        && !matches!(record.session.status,
+            SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+    {
+        return EngramBeginPreparationResume::ReconcilePrepared;
+    }
+    if !ungranted {
         return EngramBeginPreparationResume::NotHeld;
     }
     match head.engram_evaluate.as_ref() {
@@ -1144,6 +1165,12 @@ impl AppState {
             return Ok(None);
         }
         let gated = Self::engram_session_requires_dispatch_card_locked(&inner, session_id);
+        if inner.sessions[index].queued_prompts.front()
+            .is_some_and(|head| head.engram_ordinary_handoff)
+        {
+            return Err(self.refuse_engram_queue_resume_locked(&mut inner, index,
+                "The retained ordinary prompt may already have reached its provider; inspect the transcript and cancel it before sending a replacement"));
+        }
         if !gated
             && inner.sessions[index]
                 .queued_prompts
@@ -1153,11 +1180,11 @@ impl AppState {
             return Err(self.refuse_engram_queue_resume_locked(&mut inner, index,
                 "Engram control is off for this project; enable it to reconcile the retained prompt, or cancel it"));
         }
-        let reconcile = engram_begin_preparation_resume(&inner.sessions[index])
-            == EngramBeginPreparationResume::ReconcileRetained;
+        let resume = engram_begin_preparation_resume(&inner.sessions[index]);
+        let reconcile = resume == EngramBeginPreparationResume::ReconcileRetained;
         // The original store and settings own a retained request. Never turn
         // an explicit Resume into authorization on a different authority.
-        if reconcile && gated {
+        if (reconcile || resume == EngramBeginPreparationResume::ReconcilePrepared) && gated {
             let target = Self::engram_binding_target_for_session_shape_locked(
                 &inner, session_id, true,
             )
@@ -1233,10 +1260,12 @@ impl AppState {
             }
             EngramBeginPreparationResume::Releasable
             | EngramBeginPreparationResume::ReleasablePending
+            | EngramBeginPreparationResume::ReconcilePrepared
             | EngramBeginPreparationResume::ReconcileRetained => {}
         }
-        let keep_pending = engram_begin_preparation_resume(record)
-            == EngramBeginPreparationResume::ReleasablePending;
+        let keep_pending = matches!(engram_begin_preparation_resume(record),
+            EngramBeginPreparationResume::ReleasablePending
+                | EngramBeginPreparationResume::ReconcilePrepared);
         if let Some(code) = record.engram.disabled_reason.as_deref() {
             return Err(ApiError::conflict(format!(
                 "Engram control is disabled for this session after `{code}`; the prompt stays \

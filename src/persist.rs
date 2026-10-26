@@ -30,7 +30,9 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("termal.sqlite")
 }
 
-const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2";
+// The layout and its semantic reader floor evolve independently.
+const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
+const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
@@ -1030,6 +1032,8 @@ fn ensure_sqlite_state_schema_for_load_path(
 }
 
 include!("persist_sqlite_schema_tests.rs");
+#[cfg(test)]
+include!("persist_sqlite_reader_floor_tests.rs");
 
 fn load_state_from_sqlite_with_connection(
     path: &FsPath,
