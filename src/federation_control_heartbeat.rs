@@ -15,7 +15,8 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
     let mut terminal = FederationControlEnd {
         channel: &channel,
         context: &context,
-        reason: "controlError",
+        reason: "controlTaskDropped",
+        io_kind: None,
         sequence: 0,
     };
     let mut deadline = settings.clock.now() + settings.timeout;
@@ -30,20 +31,24 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
             biased;
             _ = retired.changed() => { terminal.reason = "controlContextChanged"; break; },
             _ = settings.clock.deadline(deadline) => { terminal.reason = "controlExpired"; break; },
-            result = federation_read_frame(&mut io) => match result { Ok(frame) => frame, Err(_) => break },
+            result = federation_control_read_frame(&mut io) => match result {
+                Ok(frame) => frame,
+                Err(failure) => { let _ = terminal.frame_failure(failure); break; },
+            },
         };
         if channel.security_current(&context).is_err() {
-            terminal.reason = "controlContextChanged";
+            terminal.reason = "controlSecurityCurrentMismatch";
             break;
         }
         let fields = match federation_decode(&frame, b"termal-hb-req-v1", 3) {
             Ok(fields) => fields,
-            Err(_) => break,
+            Err(_) => { terminal.reason = "controlFrameDecodeInvalid"; break; },
         };
         let sequence = match federation_control_sequence(fields[0]) {
             Ok(value) => value,
-            Err(_) => break,
+            Err(_) => { terminal.reason = "controlSequenceInvalid"; break; },
         };
+        context.last_control_sequence.store(sequence, Ordering::SeqCst);
         let valid = fields[1].len() == 16
             && federation_verify_mac(
                 &context.keys[4],
@@ -67,15 +72,16 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
             &[b"hb-resp", &context.transcript, fields[0], fields[1]],
         ) {
             Ok(tag) => tag,
-            Err(_) => break,
+            Err(_) => { terminal.reason = "controlMacError"; break; },
         };
         let response = federation_encode(b"termal-hb-resp-v1", &[fields[0], &tag]);
         let result = tokio::select! {
             biased;
             _ = settings.clock.deadline(deadline) => { terminal.reason = "controlExpired"; break; },
-            result = federation_write_frame(&mut io, &response) => result,
+            result = federation_control_write_frame(&mut io, &response) => result,
         };
-        if result.is_err() {
+        if let Err(failure) = result {
+            let _ = terminal.frame_failure(failure);
             break;
         }
         settings.observe("requestAccepted", sequence);
@@ -97,7 +103,8 @@ async fn federation_control_central(
     let mut terminal = FederationControlEnd {
         channel: &channel,
         context: &context,
-        reason: "controlError",
+        reason: "controlTaskDropped",
+        io_kind: None,
         sequence: 0,
     };
     let mut deadline = settings.clock.now() + settings.timeout;
@@ -107,13 +114,17 @@ async fn federation_control_central(
     let mut ready = Some(ready);
     let mut retired = context.retired.subscribe();
     loop {
-        let frame = federation_read_frame(&mut reader);
+        let frame = federation_control_read_frame(&mut reader);
         tokio::pin!(frame);
         // Retain a partially read frame across the send timer. Dropping and
         // restarting read_exact here would reopen an ambiguous frame boundary.
         let frame = loop {
-            if *retired.borrow() || channel.security_current(&context).is_err() {
+            if *retired.borrow() {
                 terminal.reason = "controlContextChanged";
+                return Err(federation_auth_refused());
+            }
+            if channel.security_current(&context).is_err() {
+                terminal.reason = "controlSecurityCurrentMismatch";
                 return Err(federation_auth_refused());
             }
             tokio::select! {
@@ -122,26 +133,44 @@ async fn federation_control_central(
                 _ = retired.changed() => { terminal.reason = "controlContextChanged"; return Err(federation_auth_refused()); },
                 _ = settings.clock.deadline(deadline) => { terminal.reason = "controlExpired"; return Err(federation_transport_unavailable()); },
                 _ = settings.clock.deadline(next_send), if outstanding.is_none() => {
-                    sequence = sequence.checked_add(1).ok_or_else(federation_auth_refused)?;
+                    sequence = sequence.checked_add(1).ok_or_else(|| {
+                        terminal.reason = "controlSequenceExhausted";
+                        federation_auth_refused()
+                    })?;
                     terminal.sequence = sequence;
-                    let challenge = federation_random::<16>()?;
+                    let challenge = federation_random::<16>().map_err(|error| {
+                        terminal.reason = "controlRandomUnavailable";
+                        error
+                    })?;
                     let number = sequence.to_be_bytes();
-                    let tag = federation_mac(&context.keys[4], &[b"hb-req", &context.transcript, &number, &challenge])?;
+                    let tag = federation_mac(&context.keys[4], &[b"hb-req", &context.transcript, &number, &challenge]).map_err(|error| {
+                        terminal.reason = "controlMacError";
+                        error
+                    })?;
                     let request = federation_encode(b"termal-hb-req-v1", &[&number, &challenge, &tag]);
                     tokio::select! {
                         biased;
                         _ = federation_wait_stop(&mut stop) => { terminal.reason = "controlStopped"; return Ok(()); },
                         _ = retired.changed() => { terminal.reason = "controlContextChanged"; return Err(federation_auth_refused()); },
                         _ = settings.clock.deadline(deadline) => { terminal.reason = "controlExpired"; return Err(federation_transport_unavailable()); },
-                        result = federation_write_frame(&mut writer, &request) => result?,
+                        result = federation_control_write_frame(&mut writer, &request) => {
+                            result.map_err(|failure| terminal.frame_failure(failure))?;
+                        },
                     }
                     outstanding = Some((sequence, challenge));
                 },
-                result = &mut frame => break result?,
+                result = &mut frame => break result.map_err(|failure| terminal.frame_failure(failure))?,
             }
         };
-        let fields = federation_decode(&frame, b"termal-hb-resp-v1", 2)?;
-        let received = federation_control_sequence(fields[0])?;
+        let fields = federation_decode(&frame, b"termal-hb-resp-v1", 2).map_err(|error| {
+            terminal.reason = "controlFrameDecodeInvalid";
+            error
+        })?;
+        let received = federation_control_sequence(fields[0]).map_err(|error| {
+            terminal.reason = "controlSequenceInvalid";
+            error
+        })?;
+        context.last_control_sequence.store(received, Ordering::SeqCst);
         let valid = outstanding.as_ref().is_some_and(|(number, challenge)| {
             received == *number
                 && federation_verify_mac(
@@ -155,7 +184,10 @@ async fn federation_control_central(
             settings.observe("replyRefused", received);
             continue;
         }
-        channel.security_current(&context)?;
+        channel.security_current(&context).map_err(|error| {
+            terminal.reason = "controlSecurityCurrentMismatch";
+            error
+        })?;
         outstanding = None;
         deadline = settings.clock.now() + settings.timeout;
         next_send = settings.clock.now() + settings.interval;

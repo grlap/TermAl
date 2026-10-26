@@ -53,13 +53,22 @@ struct FederationControlEnd<'a> {
     channel: &'a FederationChannel,
     context: &'a FederationSecurityContext,
     reason: &'static str,
+    io_kind: Option<&'static str>,
     sequence: u64,
 }
 
 impl Drop for FederationControlEnd<'_> {
     fn drop(&mut self) {
         self.channel
-            .observe_terminal(self.context, "control", self.reason);
+            .observe_terminal_detail(self.context, "control", self.reason, self.io_kind);
         self.channel.control.observe(self.reason, self.sequence);
+    }
+}
+
+impl FederationControlEnd<'_> {
+    fn frame_failure(&mut self, failure: FederationControlFrameFailure) -> ApiError {
+        self.reason = failure.reason;
+        self.io_kind = failure.io_kind;
+        failure.error
     }
 }

@@ -30,7 +30,21 @@ impl FederationChannel {
         stage: &'static str,
         reason: &'static str,
     ) {
-        let mut recorded = false;
+        self.observe_terminal_detail(context, stage, reason, None);
+    }
+
+    fn observe_terminal_detail(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+        io_kind: Option<&'static str>,
+    ) {
+        // This context owns its one console line even if a newer context owns
+        // the current status. Neither diagnostic fact changes link authority.
+        if context.terminal_logged.swap(true, Ordering::SeqCst) {
+            return;
+        }
         self.update_attestation(|observation, _| {
             // Record before the owning teardown. A delayed old control task
             // cannot replace its successor, nor can cleanup hide the first cause.
@@ -43,19 +57,24 @@ impl FederationChannel {
             }
             observation.last_stage = Some(stage);
             observation.last_reason = Some(reason);
-            recorded = true;
         });
-        if recorded {
-            let role = match self.snapshot.local_role {
-                FederationRole::Central => "central",
-                FederationRole::Satellite => "satellite",
-                FederationRole::Standalone => "standalone",
-            };
-            eprintln!(
-                "federation link ended peer={} role={role} stage={stage} reason={reason} incarnation={}",
-                self.snapshot.peer.host_id, context.incarnation
-            );
-        }
+        let role = match self.snapshot.local_role {
+            FederationRole::Central => "central",
+            FederationRole::Satellite => "satellite",
+            FederationRole::Standalone => "standalone",
+        };
+        let elapsed_ms = context
+            .installed_at
+            .get()
+            .map(|installed| {
+                self.control.clock.now().saturating_duration_since(*installed).as_millis()
+            })
+            .unwrap_or(0);
+        let sequence = context.last_control_sequence.load(Ordering::SeqCst);
+        eprintln!(
+            "federation link ended peer={} role={role} stage={stage} reason={reason} ioKind={} incarnation={} elapsedMs={elapsed_ms} lastSequence={sequence}",
+            self.snapshot.peer.host_id, io_kind.unwrap_or("none"), context.incarnation
+        );
     }
 
     fn observe_attestation(&self, success: Option<u64>) {

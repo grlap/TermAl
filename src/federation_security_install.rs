@@ -134,6 +134,7 @@ impl FederationChannel {
             state.incarnation = Some(context.incarnation.clone());
             state.recorded_incarnation = Some(context.incarnation.clone());
             state.security = Some(context.clone());
+            let _ = context.installed_at.set(channel.control.clock.now());
             drop(state);
             channel.observe_attestation(Some(context.owner));
             Ok(())

@@ -123,17 +123,134 @@ async fn federation_write_frame(
     io: &mut (impl tokio::io::AsyncWrite + Unpin),
     bytes: &[u8],
 ) -> Result<(), ApiError> {
+    federation_control_write_frame(io, bytes)
+        .await
+        .map_err(|failure| failure.error)
+}
+
+// Keep framing and status mapping in this owner; callers receive fixed
+// diagnostic classifications, never frame contents or raw OS error messages.
+struct FederationControlFrameFailure {
+    error: ApiError,
+    reason: &'static str,
+    io_kind: Option<&'static str>,
+}
+
+fn federation_control_io_kind(kind: std::io::ErrorKind) -> &'static str {
+    use std::io::ErrorKind;
+    match kind {
+        ErrorKind::UnexpectedEof => "unexpectedEof",
+        ErrorKind::ConnectionReset => "connectionReset",
+        ErrorKind::ConnectionAborted => "connectionAborted",
+        ErrorKind::ConnectionRefused => "connectionRefused",
+        ErrorKind::HostUnreachable => "hostUnreachable",
+        ErrorKind::NetworkUnreachable => "networkUnreachable",
+        ErrorKind::NetworkDown => "networkDown",
+        ErrorKind::AddrInUse => "addrInUse",
+        ErrorKind::AddrNotAvailable => "addrNotAvailable",
+        ErrorKind::BrokenPipe => "brokenPipe",
+        ErrorKind::NotConnected => "notConnected",
+        ErrorKind::TimedOut => "timedOut",
+        ErrorKind::Interrupted => "interrupted",
+        ErrorKind::WouldBlock => "wouldBlock",
+        ErrorKind::PermissionDenied => "permissionDenied",
+        ErrorKind::NotFound => "notFound",
+        ErrorKind::AlreadyExists => "alreadyExists",
+        ErrorKind::Unsupported => "unsupported",
+        ErrorKind::InvalidData => "invalidData",
+        ErrorKind::InvalidInput => "invalidInput",
+        ErrorKind::WriteZero => "writeZero",
+        ErrorKind::OutOfMemory => "outOfMemory",
+        _ => "other",
+    }
+}
+
+struct FederationControlRead<'a, T> {
+    io: &'a mut T,
+    bytes: usize,
+    eof: bool,
+    error: Option<std::io::ErrorKind>,
+}
+
+impl<T: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for FederationControlRead<'_, T> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buffer: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buffer.filled().len();
+        let capacity = buffer.remaining();
+        let result = std::pin::Pin::new(&mut *self.io).poll_read(cx, buffer);
+        match &result {
+            std::task::Poll::Ready(Ok(())) => {
+                let count = buffer.filled().len() - before;
+                self.bytes += count;
+                self.eof |= capacity > 0 && count == 0;
+            }
+            std::task::Poll::Ready(Err(error)) => self.error = Some(error.kind()),
+            std::task::Poll::Pending => {}
+        }
+        result
+    }
+}
+
+async fn federation_control_read_frame(
+    io: &mut (impl tokio::io::AsyncRead + Unpin),
+) -> Result<Vec<u8>, FederationControlFrameFailure> {
+    let mut observed = FederationControlRead {
+        io,
+        bytes: 0,
+        eof: false,
+        error: None,
+    };
+    // Observe the existing reader rather than implementing another decoder.
+    federation_read_frame(&mut observed).await.map_err(|error| {
+        let eof = observed.eof || observed.error == Some(std::io::ErrorKind::UnexpectedEof);
+        let reason = if eof {
+            if observed.bytes == 0 {
+                "controlEof"
+            } else if observed.bytes < 4 {
+                "controlEofPartialLength"
+            } else {
+                "controlEofPartialFrame"
+            }
+        } else if observed.error.is_some() {
+            "controlReadIo"
+        } else {
+            "controlFrameLengthInvalid"
+        };
+        FederationControlFrameFailure {
+            error,
+            reason,
+            io_kind: observed.error.map(federation_control_io_kind),
+        }
+    })
+}
+
+async fn federation_control_write_frame(
+    io: &mut (impl tokio::io::AsyncWrite + Unpin),
+    bytes: &[u8],
+) -> Result<(), FederationControlFrameFailure> {
     use tokio::io::AsyncWriteExt;
     if bytes.is_empty() || bytes.len() > FEDERATION_FRAME_LIMIT {
-        return Err(federation_auth_refused());
+        return Err(FederationControlFrameFailure {
+            error: federation_auth_refused(),
+            reason: "controlWriteFrameLengthInvalid",
+            io_kind: None,
+        });
     }
+    let failure = |error: std::io::Error| FederationControlFrameFailure {
+        error: federation_transport_unavailable(),
+        reason: "controlWriteIo",
+        io_kind: Some(federation_control_io_kind(error.kind())),
+    };
     io.write_u32(bytes.len() as u32)
         .await
-        .map_err(|_| federation_transport_unavailable())?;
+        .map_err(failure)?;
     io.write_all(bytes)
         .await
-        .map_err(|_| federation_transport_unavailable())?;
+        .map_err(failure)?;
     io.flush()
         .await
-        .map_err(|_| federation_transport_unavailable())
+        .map_err(failure)
 }

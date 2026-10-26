@@ -38,7 +38,7 @@ async fn federation_security_owned_stream_eof_records_reason_before_withdrawing_
         "EOF cannot leave verified availability behind"
     );
     assert_eq!(observed["lastStage"], "control");
-    assert_eq!(observed["lastReason"], "controlError");
+    assert_eq!(observed["lastReason"], "controlEof");
     assert_eq!(observed["consecutiveFailures"], 0);
 }
 
