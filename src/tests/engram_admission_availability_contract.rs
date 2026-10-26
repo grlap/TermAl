@@ -8,6 +8,9 @@ mod ordinary_regressions;
 #[path = "engram_ordinary_boundary_regressions.rs"]
 mod ordinary_boundaries;
 
+#[path = "prompt_admission_observations.rs"]
+mod prompt_observations;
+
 fn inspect<T>(state: &AppState, session: &str, read: impl FnOnce(&SessionRecord) -> T) -> T {
     let inner = state.inner.lock().unwrap();
     read(&inner.sessions[inner.find_session_index(session).unwrap()])

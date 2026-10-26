@@ -23,6 +23,8 @@
 // Owns the record, its view on the wire, the promotion gate, the write-ahead
 // fence and its settlement, the explicit Resume's continuation, the outcome
 // transitions, restart settlement and the re-queue of a rejected delivery.
+// Also owns the separate bounded process-local provider-channel observation
+// view. Those rows never create receipts or authorize delivery/retry.
 // Does not own the queue or its hold
 // (session_interaction.rs, queued_prompt_durability.rs), promotion and
 // hand-off (turn_dispatch.rs, api.rs) or the runtimes' events (claude_*.rs,
@@ -263,6 +265,102 @@ struct PromptDeliveryView {
     message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+}
+
+/// Observation of a channel send, not a delivery receipt or runtime ACK.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderHandoffView {
+    prompt_id: String,
+    at: String,
+    session_id: String,
+    /// The session's project record at enqueue, not a repository/store name.
+    project_id: Option<String>,
+    source: QueuedPromptSource,
+    outcome: ProviderHandoffOutcome,
+    attempt: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ProviderHandoffOutcome {
+    Enqueued,
+    EnqueueFailed,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderHandoffHistoryView {
+    observed_since: String,
+    retention_limit: usize,
+    dropped: u64,
+    truncated: bool,
+}
+
+/// Presentation identity captured before the queue head can be removed.
+/// It grants nothing and is never consulted by the dispatch/receipt gates.
+#[derive(Clone)]
+struct ProviderHandoffPrompt {
+    prompt_id: String,
+    source: QueuedPromptSource,
+    turn_generation: u64,
+}
+
+/// Bounded process-local history beside the existing delivery owner. It is
+/// never saved, restored, retried, or used to decide whether to send a prompt.
+#[derive(Clone)]
+struct ProviderHandoffObservations {
+    prepared: Option<ProviderHandoffPrompt>,
+    rows: VecDeque<ProviderHandoffView>,
+    observed_since: String,
+    dropped: u64,
+}
+
+const PROVIDER_HANDOFF_OBSERVATION_LIMIT: usize = 256;
+
+impl Default for ProviderHandoffObservations {
+    fn default() -> Self {
+        Self {
+            prepared: None,
+            rows: VecDeque::new(),
+            observed_since: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            dropped: 0,
+        }
+    }
+}
+
+impl ProviderHandoffObservations {
+    fn history(&self) -> ProviderHandoffHistoryView {
+        ProviderHandoffHistoryView {
+            observed_since: self.observed_since.clone(),
+            retention_limit: PROVIDER_HANDOFF_OBSERVATION_LIMIT,
+            dropped: self.dropped,
+            truncated: self.dropped != 0,
+        }
+    }
+}
+
+/// Called only after the real send has returned, under its existing lock.
+/// A bounded append does no projection, persistence, retry or receipt work.
+fn observe_provider_handoff(record: &mut SessionRecord, turn_generation: u64, enqueued: bool) {
+    let observations = &mut record.provider_handoff_observations;
+    if !observations.prepared.as_ref().is_some_and(|p| p.turn_generation == turn_generation) {
+        return;
+    }
+    let prompt = observations.prepared.take().expect("matching observation identity");
+    if observations.rows.len() == PROVIDER_HANDOFF_OBSERVATION_LIMIT {
+        observations.rows.pop_front();
+        observations.dropped = observations.dropped.saturating_add(1);
+    }
+    observations.rows.push_back(ProviderHandoffView {
+        prompt_id: prompt.prompt_id,
+        at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        session_id: record.session.id.clone(),
+        project_id: record.session.project_id.clone(),
+        source: prompt.source,
+        outcome: if enqueued { ProviderHandoffOutcome::Enqueued } else { ProviderHandoffOutcome::EnqueueFailed },
+        attempt: turn_generation,
+    });
 }
 
 /// What a runtime event or a hand-off result says about a delivery.

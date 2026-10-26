@@ -72,7 +72,7 @@ fn engram_root_recovery_reader_target_locked(
         .collect::<Vec<_>>();
     readers.sort_by_key(|session_id| Some(*session_id) != namer);
     let winner = readers.first()?;
-    AppState::engram_binding_target_for_session_shape_locked(inner, winner, true)
+    AppState::engram_source_root_target_locked(inner, winner)
         .ok()
         .flatten()
 }
@@ -594,11 +594,10 @@ impl AppState {
             return false;
         };
         let record = &inner.sessions[index];
-        let current = Self::engram_binding_target_for_session_shape_locked(
-            inner,
-            &target.connection.session_id,
-            true,
-        )
+        // Canonical root evidence is also used by Base-only naming. The
+        // captured settings comparison below still rejects a control-mode
+        // change during an admitted turn; this creates no admission grant.
+        let current = Self::engram_source_root_target_locked(inner, &target.connection.session_id)
         .ok()
         .flatten();
         current.as_ref().is_some_and(|current| {
@@ -836,11 +835,7 @@ impl AppState {
                 binding,
                 deadline,
                 |inner| {
-                    Self::engram_binding_target_for_session_shape_locked(
-                        inner,
-                        &target.connection.session_id,
-                        true,
-                    )
+                    Self::engram_source_root_target_locked(inner, &target.connection.session_id)
                     .ok()
                     .flatten()
                     .is_some_and(|current| {
@@ -854,11 +849,7 @@ impl AppState {
         };
         let owner = prepared.map_err(EngramRootReconcileFailure::Infrastructure)?;
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let current = Self::engram_binding_target_for_session_shape_locked(
-            &inner,
-            &target.connection.session_id,
-            true,
-        )
+        let current = Self::engram_source_root_target_locked(&inner, &target.connection.session_id)
         .ok()
         .flatten();
         let index = inner
@@ -1117,11 +1108,7 @@ impl AppState {
                 .cloned()
                 .collect::<Vec<_>>();
             let reader_current = target.as_ref().is_some_and(|target| {
-                Self::engram_binding_target_for_session_shape_locked(
-                    &inner,
-                    &target.connection.session_id,
-                    true,
-                )
+                Self::engram_source_root_target_locked(&inner, &target.connection.session_id)
                 .ok()
                 .flatten()
                 .is_some_and(|current| {
@@ -1269,7 +1256,7 @@ impl AppState {
         let (store, runs) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(store) =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten()
                     .and_then(|target| target.settings.authority_store_key)
@@ -1502,11 +1489,7 @@ impl AppState {
         store: &EngramAuthorityStoreKey,
     ) -> Result<(), ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let current = Self::engram_binding_target_for_session_shape_locked(
-            &inner,
-            &target.connection.session_id,
-            true,
-        )
+        let current = Self::engram_source_root_target_locked(&inner, &target.connection.session_id)
         .ok()
         .flatten()
         .ok_or_else(|| ApiError::conflict("named-root reader authority disappeared"))?;

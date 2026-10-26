@@ -113,6 +113,43 @@ impl EngramBeginPreparationFailure {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramAdmissionWindow {
+    admitted_at: String,
+    deadline: String,
+}
+
+/// Read-only view of saved timing. No deadline enforcement reads this view.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptAdmissionBudgetView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    original_admitted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    original_deadline: Option<String>,
+    current_admitted_at: String,
+    current_deadline: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    renewed_at: Option<String>,
+    attempts: u32,
+    ended: bool,
+}
+
+impl From<&EngramBeginPreparationLineage> for PromptAdmissionBudgetView {
+    fn from(lineage: &EngramBeginPreparationLineage) -> Self {
+        Self {
+            original_admitted_at: lineage.original_window.as_ref().map(|w| w.admitted_at.clone()),
+            original_deadline: lineage.original_window.as_ref().map(|w| w.deadline.clone()),
+            current_admitted_at: lineage.admitted_at.clone(),
+            current_deadline: lineage.deadline.clone(),
+            renewed_at: lineage.renewed_at.clone(),
+            attempts: lineage.attempts,
+            ended: lineage.ended,
+        }
+    }
+}
+
 /// The overall automatic-recovery budget of one admitted request for a queue
 /// head (`ENGRAM_ADMISSION_BUDGET_SECONDS`). It starts when the head is
 /// accepted for control admission and stays with the head whichever retry
@@ -129,6 +166,12 @@ impl EngramBeginPreparationFailure {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramBeginPreparationLineage {
+    /// Observation only. Legacy rows cannot tell whether Resume already
+    /// replaced a window, so absence must not invent original timing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    original_window: Option<EngramAdmissionWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    renewed_at: Option<String>,
     /// The queue head it bounds; any other head drops it.
     prompt_id: String,
     /// When the head was accepted for control admission (RFC 3339).
@@ -168,6 +211,12 @@ impl EngramBeginPreparationLineage {
     /// A budget for `prompt_id` accepted at `now`.
     fn accepted(prompt_id: String, now: chrono::DateTime<chrono::Utc>) -> Self {
         Self {
+            original_window: Some(EngramAdmissionWindow {
+                admitted_at: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                deadline: (now + chrono::Duration::seconds(ENGRAM_ADMISSION_BUDGET_SECONDS))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            }),
+            renewed_at: None,
             prompt_id,
             admitted_at: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             deadline: (now + chrono::Duration::seconds(ENGRAM_ADMISSION_BUDGET_SECONDS))
@@ -187,6 +236,8 @@ impl EngramBeginPreparationLineage {
     /// pending for its exact begin.
     fn renewed_at(&self, now: chrono::DateTime<chrono::Utc>) -> Self {
         Self {
+            original_window: self.original_window.clone(),
+            renewed_at: Some(now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
             held_since: self.held_since.clone(),
             pending_grant_id: self.pending_grant_id.clone(),
             ..Self::accepted(self.prompt_id.clone(), now)

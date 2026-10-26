@@ -167,10 +167,42 @@ fn engram_session_authority_locked<'a>(
     }
 }
 
-/// The narrow reader view: the routing token and authority store key of the
-/// target `engram_binding_target_for_session_shape_locked(inner, session_id,
-/// true)` would build, or `None` when it would build none or fail. Nothing is
-/// cloned.
+// Naming and its canonical readers use Base MCP without authorizing a turn.
+// Keep the session/store safety checks even though turn gating is optional.
+fn engram_source_root_base_is_enabled_locked(inner: &StateInner, session_id: &str) -> bool {
+    let Some(record) = inner
+        .find_session_index(session_id)
+        .and_then(|index| inner.sessions.get(index))
+    else {
+        return false;
+    };
+    let Some(project) = engram_project_for_session_locked(inner, session_id) else {
+        return false;
+    };
+    record.is_local_session()
+        && record.engram.disabled_reason.is_none()
+        && !inner.engram_project_resets.contains(&project.id)
+        && project.remote_id == LOCAL_REMOTE_ID
+        && project.engram.as_ref().is_some_and(EngramProjectSettings::is_base_enabled)
+}
+
+impl AppState {
+    fn engram_source_root_target_locked(
+        inner: &StateInner,
+        session_id: &str,
+    ) -> std::result::Result<Option<EngramBindingTarget>, String> {
+        if !engram_source_root_base_is_enabled_locked(inner, session_id) {
+            return Ok(None);
+        }
+        // `false` alone also skips Base enablement and disabled_reason. The
+        // explicit guard above preserves both; the builder preserves the
+        // root/child shape, project, reset and connection validation.
+        Self::engram_binding_target_for_session_shape_locked(inner, session_id, false)
+    }
+}
+
+/// The narrow view of the Base-service naming target, or None when it would
+/// build none or fail. Nothing is cloned and no turn grant is created.
 struct EngramSessionReaderView<'a> {
     /// The session id the target's connection would carry, as the core
     /// computes it (a reader's identity for the namer preference).
@@ -183,7 +215,10 @@ fn engram_session_reader_view_locked<'a>(
     inner: &'a StateInner,
     session_id: &'a str,
 ) -> Option<EngramSessionReaderView<'a>> {
-    let authority = engram_session_authority_locked(inner, session_id, true, None)
+    if !engram_source_root_base_is_enabled_locked(inner, session_id) {
+        return None;
+    }
+    let authority = engram_session_authority_locked(inner, session_id, false, None)
         .ok()
         .flatten()?;
     Some(EngramSessionReaderView {

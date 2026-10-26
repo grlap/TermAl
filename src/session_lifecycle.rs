@@ -461,7 +461,8 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_resume_session_queue(session_id);
         }
-        if let Some(delivery) = self.resume_local_session_queue(session_id, None)? {
+        let delivery = self.resume_local_session_queue(session_id, None)?;
+        if let Some(delivery) = delivery {
             delivery.into_public_result()?;
         }
         Ok(self.snapshot())
@@ -622,7 +623,23 @@ impl AppState {
         let dispatch = self.drain_resumed_queue(session_id, owner.clone())?;
         let dispatch =
             self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
-        Ok(dispatch.map(|dispatch| deliver_turn_dispatch(self, dispatch)))
+        Ok(dispatch.map(|started| {
+            let prompt_id = started.queued.pending_prompt.id;
+            let delivery = deliver_turn_dispatch(self, started.dispatch);
+            // Delivery may restore an interrupted hold after promotion. The
+            // original checked head can have been removed by revalidation or
+            // Cancel; only the prompt this drain actually admitted is ours.
+            // Scheduled and Superseded retain their delivery semantics.
+            if matches!(delivery, TurnDispatchDeliveryOutcome::Held { error: None })
+                && let UnstartedResumeStep::Refuse(refusal) =
+                    self.unstarted_resume_step(session_id, None, Some(&prompt_id))
+            {
+                return TurnDispatchDeliveryOutcome::Held {
+                    error: Some(ApiError::conflict(refusal)),
+                };
+            }
+            delivery
+        }))
     }
 
     /// One drain of a resumed queue: bound to `owner` when given, otherwise
@@ -631,10 +648,10 @@ impl AppState {
         &self,
         session_id: &str,
         owner: Option<EngramQueuedAdmissionOwner>,
-    ) -> std::result::Result<Option<TurnDispatch>, ApiError> {
+    ) -> std::result::Result<Option<StartedQueuedTurn>, ApiError> {
         match owner {
-            Some(owner) => self.dispatch_next_queued_turn_for_resume(session_id, owner),
-            None => self.dispatch_next_queued_turn(session_id, true),
+            Some(owner) => self.dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner),
+            None => self.dispatch_next_queued_turn_with_prompt(session_id, true),
         }
         .map_err(|err| {
             ApiError::internal(format!("failed to dispatch the resumed queue head: {err:#}"))

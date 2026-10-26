@@ -1179,7 +1179,7 @@ impl AppState {
         let (target, journals) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(target) =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten()
             else {
@@ -1287,7 +1287,7 @@ impl AppState {
             }
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let current =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten();
             if !current.is_some_and(|current| {
@@ -1334,11 +1334,7 @@ impl AppState {
                     .sessions
                     .iter()
                     .filter_map(|record| {
-                        Self::engram_binding_target_for_session_shape_locked(
-                            &inner,
-                            &record.session.id,
-                            true,
-                        )
+                        Self::engram_source_root_target_locked(&inner, &record.session.id)
                         .ok()
                         .flatten()
                         .filter(|target| {
@@ -1522,11 +1518,7 @@ impl AppState {
             let target = read
                 .map(|(target, _, _)| target.clone())
                 .or_else(|| {
-                    Self::engram_binding_target_for_session_shape_locked(
-                        &inner,
-                        &event.reporter,
-                        true,
-                    )
+                    Self::engram_source_root_target_locked(&inner, &event.reporter)
                     .ok()
                     .flatten()
                 })
@@ -1543,11 +1535,7 @@ impl AppState {
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some((target, fence, _)) = read {
-            let current = Self::engram_binding_target_for_session_shape_locked(
-                &inner,
-                &target.connection.session_id,
-                true,
-            )
+            let current = Self::engram_source_root_target_locked(&inner, &target.connection.session_id)
             .ok()
             .flatten();
             if !fence.same_store(&inner, &target.project_id)
@@ -1614,7 +1602,7 @@ impl AppState {
         let prepared = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(target) =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten()
             else {
@@ -1831,13 +1819,13 @@ impl AppState {
             target
         } else {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            original_reporter = Self::engram_binding_target_for_session_shape_locked(&inner, &event.reporter, true)
+            original_reporter = Self::engram_source_root_target_locked(&inner, &event.reporter)
                 .ok().flatten().filter(|target| target.settings.authority_store_key.as_ref() == Some(&event.root.store))
                 .ok_or_else(|| ApiError::conflict("the pending named-root event needs its original reporting session's connection"))?;
             &original_reporter
         };
         let token = target.routing_token.as_deref().ok_or_else(|| {
-            ApiError::conflict("Engram session is not bound; retry naming after its next admission")
+            ApiError::conflict("Engram session is not bound; source-root naming requires an established binding")
         })?;
         if clock.now() >= deadline {
             return Err(ApiError::bad_gateway(
@@ -2032,7 +2020,7 @@ impl AppState {
     ) -> Result<(), EngramTransportError> {
         let budget = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+            Self::engram_source_root_target_locked(&inner, session_id)
                 .ok()
                 .flatten()
                 .map(|target| {
@@ -2130,7 +2118,7 @@ impl AppState {
             } => {
                 let target = {
                     let inner = self.inner.lock().expect("state mutex poisoned");
-                    Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    Self::engram_source_root_target_locked(&inner, session_id)
                         .map_err(EngramTransportError::local_state)?
                         .ok_or_else(|| {
                             EngramTransportError::local_state("source-root reader disappeared")
@@ -2192,7 +2180,7 @@ impl AppState {
         }
         if let Some(expected) = expected_connection {
             let current =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten();
             if current
@@ -2270,7 +2258,7 @@ impl AppState {
         }
         let canonical = if let (Some(store), Some(binding)) = (&store, binding) {
             let target =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten()
                     .ok_or_else(|| {

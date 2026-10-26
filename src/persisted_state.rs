@@ -805,6 +805,10 @@ fn serialize_persisted_session_view<S: serde::Serializer>(
     serializer: S,
 ) -> std::result::Result<S::Ok, S::Error> {
     let mut projected = session.clone();
+    // Provider observations are process-local, not a durable receipt ledger.
+    projected.provider_handoffs.clear();
+    projected.prompt_admission_budgets.clear();
+    projected.provider_handoff_history = None;
     for index in 0..projected.messages.len() {
         if matches!(projected.messages.get(index), Some(Message::EngramControl { card, .. })
             if card.causal_failure.as_ref().is_some_and(|cause| cause.publication_pending))
@@ -1012,6 +1016,9 @@ impl PersistedSessionRecord {
             )
         })?;
         let mut session = self.session;
+        session.provider_handoffs.clear();
+        session.prompt_admission_budgets.clear();
+        session.provider_handoff_history = None;
         normalize_persisted_session_prompt_history(&mut session);
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
         session.session_mutation_stamp = None;
@@ -1089,6 +1096,7 @@ impl PersistedSessionRecord {
             queued_peer_messages: self.queued_peer_messages,
             queued_prompt_durability_holds,
             prompt_deliveries: self.prompt_deliveries,
+            provider_handoff_observations: ProviderHandoffObservations::default(),
             message_start_index: self.message_start_index,
             message_positions: build_message_positions(&session.messages),
             remote_id: self.remote_id,

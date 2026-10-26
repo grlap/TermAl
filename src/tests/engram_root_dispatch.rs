@@ -7,6 +7,9 @@ use super::*;
 #[path = "engram_admission_availability_contract.rs"]
 mod admission_availability_contract;
 
+#[path = "engram_admission_deadline_recovery.rs"]
+mod admission_deadline_recovery;
+
 #[path = "engram_root_causal_failure.rs"]
 mod causal_failure;
 

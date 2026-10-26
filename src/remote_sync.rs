@@ -666,6 +666,7 @@ fn push_remote_proxy_session_record(
         queued_peer_messages: HashMap::new(),
         queued_prompt_durability_holds: BTreeMap::new(),
         prompt_deliveries: BTreeMap::new(),
+        provider_handoff_observations: ProviderHandoffObservations::default(),
         message_start_index: if session.messages_loaded {
             0
         } else {
@@ -827,6 +828,11 @@ fn localize_remote_session(
     remote_session: &Session,
 ) -> Session {
     let mut session = remote_session.clone();
+    // These diagnostics belong to the upstream process and its project ids.
+    // A local proxy is not another observation of those provider sends.
+    session.provider_handoffs.clear();
+    session.prompt_admission_budgets.clear();
+    session.provider_handoff_history = None;
     normalize_body_sequence_pair(&mut session.body_seq, &mut session.body_seq_epoch);
     session.id = local_session_id.to_owned();
     session.project_id = local_project_id;
@@ -940,6 +946,9 @@ fn localize_remote_session_summary(
             .collect(),
         pending_prompts: Vec::new(),
         prompt_deliveries: Vec::new(),
+        provider_handoffs: Vec::new(),
+        prompt_admission_budgets: BTreeMap::new(),
+        provider_handoff_history: None,
         queue_paused: remote_session.queue_paused,
         // Projected from the local record, which holds no retry records for
         // a remote proxy (`engram_automatic_retry_hold`); the remote's own

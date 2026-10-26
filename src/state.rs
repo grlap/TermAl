@@ -2067,6 +2067,8 @@ struct SessionRecord {
     /// Delivery receipts of receipted prompts, keyed by prompt id
     /// (`prompt_delivery.rs`). Empty for every ordinary prompt.
     prompt_deliveries: BTreeMap<String, PromptDelivery>,
+    /// Process-local observations only; no receipt or dispatch authority.
+    provider_handoff_observations: ProviderHandoffObservations,
     /// Global transcript position represented by `session.messages[0]`.
     ///
     /// Persisted sessions load only a bounded recent tail into memory. New

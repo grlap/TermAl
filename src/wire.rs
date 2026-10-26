@@ -810,6 +810,14 @@ struct Session {
     /// (`prompt_delivery.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     prompt_deliveries: Vec<PromptDeliveryView>,
+    /// Derived timing of retained admission heads, keyed by prompt id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    prompt_admission_budgets: BTreeMap<String, PromptAdmissionBudgetView>,
+    /// Actual provider-channel enqueues observed by this host process.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    provider_handoffs: Vec<ProviderHandoffView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_handoff_history: Option<ProviderHandoffHistoryView>,
     /// True while queued prompts are parked behind the explicit-resume latch:
     /// a user Stop (or a failed stop persistence) keeps user and mailbox
     /// prompts durable but refuses to auto-dispatch them until the user sends
@@ -888,6 +896,9 @@ impl Session {
             markers: self.markers.clone(),
             pending_prompts: self.pending_prompts.clone(),
             prompt_deliveries: self.prompt_deliveries.clone(),
+            prompt_admission_budgets: self.prompt_admission_budgets.clone(),
+            provider_handoffs: self.provider_handoffs.clone(),
+            provider_handoff_history: self.provider_handoff_history.clone(),
             queue_paused: self.queue_paused.clone(),
             queue_hold: self.queue_hold.clone(),
             provider_capacity_waiting: self.provider_capacity_waiting.clone(),

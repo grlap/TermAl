@@ -729,6 +729,9 @@ fn handoff_prepared_turn_dispatch(
         }
     };
     drop(host_shutdown);
+    if let Some(index) = index {
+        observe_provider_handoff(&mut inner.sessions[index], active_turn_generation, sent.is_ok());
+    }
     if let Err(error) = sent {
         drop(inner);
         drop(relay_link);
@@ -884,6 +887,10 @@ async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> 
 struct GetSessionQuery {
     #[serde(default)]
     tail: Option<usize>,
+    #[serde(default)]
+    handoff_from: Option<String>,
+    #[serde(default)]
+    handoff_to: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -926,6 +933,20 @@ async fn get_session(
 ) -> Result<Response, ApiError> {
     let Query(query) =
         query.map_err(|rejection| api_query_rejection("session query", rejection))?;
+    let parse_handoff_bound = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(|value| {
+                chrono::DateTime::parse_from_rfc3339(value)
+                    .map_err(|_| ApiError::bad_request("handoff bounds must be RFC3339 timestamps"))
+            })
+            .transpose()
+    };
+    let handoff_from = parse_handoff_bound(&query.handoff_from)?;
+    let handoff_to = parse_handoff_bound(&query.handoff_to)?;
+    if handoff_from.zip(handoff_to).is_some_and(|(from, to)| from >= to) {
+        return Err(ApiError::bad_request("handoffFrom must precede handoffTo"));
+    }
     if matches!(query.tail, Some(0)) {
         return Err(ApiError::bad_request("session tail must be at least 1"));
     }
@@ -938,10 +959,18 @@ async fn get_session(
     }
 
     let body = run_blocking_api(move || {
-        let response = state.get_session_tail(
+        let mut response = state.get_session_tail(
             &session_id,
             query.tail.unwrap_or(SESSION_TAIL_DEFAULT_MESSAGES),
         )?;
+        if handoff_from.is_some() || handoff_to.is_some() {
+            response.session.provider_handoffs.retain(|row| {
+                chrono::DateTime::parse_from_rfc3339(&row.at).is_ok_and(|at| {
+                    handoff_from.is_none_or(|from| at >= from)
+                        && handoff_to.is_none_or(|to| at < to)
+                })
+            });
+        }
         serde_json::to_vec(&response)
             .map_err(|err| ApiError::internal(format!("failed to serialize session: {err}")))
     })

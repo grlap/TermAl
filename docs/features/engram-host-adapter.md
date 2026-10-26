@@ -2456,6 +2456,22 @@ grant is then closed (Retained prompt recovery, below). Transient transport
 failures with no grant begun are replayed automatically (Automatic re-admission
 of a parked admission, below); a known Defer remains explicitly retryable.
 
+A pure structured mailbox notification on a live root can also reconcile a
+nonfatal remote Bind failure before Evaluate. The existing live admission
+owner must still match the original head, content, authority and prepared Bind.
+Recovery retains that exact request and key, waits for its local persistence
+acknowledgement and uses the existing bounded retry schedule. It does not
+acknowledge the mailbox, infer non-application, or authorize a grantless turn.
+Real user/delegation content, attachments, recovered authorization, prepared
+Begin and unresolved grants remain outside this exception.
+
+Resume checks the prompt actually admitted by its drain after delivery
+preparation, including when mailbox revalidation removed an earlier wake.
+If recovery leaves that admitted head interrupted and paused without an attempt in flight,
+Resume returns a conflict with reconciliation or cancellation guidance instead
+of an unchanged successful response. A scheduled durable continuation is
+distinct from provider delivery and keeps its existing success semantics.
+
 Queue records persist their original promoted transcript position. Trimming the
 resident transcript cannot cause a retry to append the same prompt or composer
 history again. Older retained records recover the marker from known transcript
@@ -4290,6 +4306,45 @@ The unused raw decoder preserves invalid evidence and binds immutable head input
 Its local cancellation proof requires the complete persisted queue and a hydrated
 transcript or exact persisted message lookup; a resident tail cannot establish
 non-terminal durable truth. These helpers grant no replay or admission authority.
+
+## Prompt timing and provider observations
+
+`GET /api/sessions/{id}` exposes `promptAdmissionBudgets`, keyed by retained prompt id:
+`originalAdmittedAt`, `originalDeadline`, `currentAdmittedAt`, `currentDeadline`,
+`renewedAt`, `attempts`, and `ended`. Automatic retries keep the original and
+current window. An accepted explicit Resume can renew the current window;
+it preserves the original pair and records `renewedAt`. Older saved rows omit
+unknown original timing rather than reconstructing history. These fields are
+diagnostics; admission and retry decisions continue to use their saved owner.
+These diagnostics describe native sessions on the responding host. Remote
+proxies omit the budget map and provider observation fields; sample each
+owning host under its own server instance instead of counting its enqueues
+again through a proxy with different session and project ids.
+
+The same response has a separate `providerHandoffs` array. Each item identifies
+the prompt, session, project record (`projectId`, possibly null for a session
+without one), source (`user`, `mailbox`, or `orchestrator`), RFC3339 `at`, attempt
+(the process-local turn generation), and outcome (`enqueued` or `enqueueFailed`).
+An item records the actual provider-channel send result. An `enqueued` item
+does not establish runtime acceptance or a completed turn. Preparation cards,
+including `SentWithoutGrant`, and deferred or superseded dispatches do not count
+as enqueues. `promptDeliveries` retains its existing receipt semantics.
+
+Use `?handoffFrom=<RFC3339>&handoffTo=<RFC3339>` to filter this array by the
+half-open interval `[from, to)`; either bound may be omitted. Invalid bounds or
+an interval whose end does not follow its start return HTTP 400. Filtering
+changes only the returned observations, not the stored history or queue.
+Use the `Z` timestamp form or percent-encode a positive offset's `+` as `%2B`.
+
+Observations are process-local and bounded to the latest 256 per session.
+`providerHandoffHistory` reports `observedSince`, `retentionLimit`, `dropped`,
+and `truncated`. A sampler must keep one server instance and a stable host
+without restart for its observation window, begin after `observedSince`, and
+treat truncated history as incomplete. This history is not persisted or used
+as delivery authority. Sample each enabled project record's sessions by its
+project id, rather than grouping distinct project records by repository name.
+Broad `/api/state` summaries do not include pending prompt bodies or this
+targeted observation history.
 
 ## Related
 

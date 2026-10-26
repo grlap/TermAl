@@ -1842,6 +1842,151 @@ impl AppState {
             })
     }
 
+    /// A fresh Base-only session needs a routing binding for the naming RPCs,
+    /// but must not enter the turn-admission/recovery binder to obtain it.
+    fn bind_fresh_engram_source_root_until(
+        &self,
+        target: EngramBindingTarget,
+        association: &EngramRootIntentAssociation,
+        deadline: std::time::Instant,
+    ) -> Result<EngramBindingTarget, ApiError> {
+        if target.routing_token.is_some() || target.settings.turn_gated_control {
+            return Ok(target);
+        }
+        let session_id = &target.connection.session_id;
+        let owner = Uuid::new_v4();
+        let idle = |record: &SessionRecord| {
+            let state = &record.engram;
+            state.routing_token.is_none()
+                && state.work_binding.is_none()
+                && state.active_grant_id.is_none()
+                && state.uncertain_grant_id.is_none()
+                && state.begins_recorded
+                && state.retained_checkpoint.is_none()
+                && state.admission_in_progress.is_none()
+                && !state.recovered_admission
+                && !state.checkpoint_in_progress
+                && state.pending_dispatch.is_none()
+                && state.bind_retry.is_none()
+                && state.admission_retry.is_none()
+                && state.abort_retry.is_none()
+                && !record.queued_prompts.iter().any(QueuedPromptRecord::is_engram_retained)
+        };
+        let current = |inner: &StateInner| {
+            !Self::engram_session_has_child_binding_shape_locked(inner, session_id)
+                && Self::engram_source_root_target_locked(inner, session_id)
+                    .ok().flatten().is_some_and(|now| {
+                        now.connection == target.connection
+                            && now.settings.same_admission_settings(&target.settings)
+                            && now.external_ref == target.external_ref
+                            && now.title == target.title
+                            && now.effects == target.effects
+                    })
+                && inner.find_session_index(session_id).is_some_and(|index| {
+                    Self::engram_root_runtime_is_current(
+                        &inner.sessions[index], &target.runtime_snapshot)
+                })
+        };
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if !current(&inner) {
+                return Err(ApiError::conflict("Engram naming binding changed before session bind"));
+            }
+            let index = inner.find_session_index(session_id).expect("current session");
+            let record = &mut inner.sessions[index];
+            if !idle(record) || record.engram.bind_in_progress {
+                return Err(ApiError::conflict(
+                    "source-root naming cannot replace an unresolved Engram admission or binding",
+                ));
+            }
+            record.engram.source_root_bind_owner = Some(owner);
+            record.engram.bind_in_progress = true;
+        }
+        let result = (|| {
+            self.guard_engram_root_read_classified_until(
+                &target, Some(&association.binding), deadline,
+            ).map_err(|error| match error {
+                EngramRootReconcileFailure::Infrastructure(error)
+                    if error.is_enqueued_durability_deadline() => error,
+                other => ApiError::bad_gateway(other.into_transport().to_string()),
+            })?;
+            let mut request = EngramControlRequest::SessionBind {
+                external_ref: target.external_ref.clone(),
+                title: target.title.clone(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
+                mediated_effects: target.effects.clone(),
+                capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
+                work_binding: Some(association.binding.clone()),
+                idempotency_key: String::new(),
+            };
+            // A lost bind reply can be replayed without inventing another
+            // intent. Include the connection, store and entire request so a
+            // changed identity or claim never reuses the old request's key.
+            let intent = serde_json::to_vec(&(&target.connection, &association.store, &request))
+                .map_err(|error| ApiError::internal(format!("encoding naming bind: {error}")))?;
+            if let EngramControlRequest::SessionBind { idempotency_key, .. } = &mut request {
+                *idempotency_key = format!("termal-source-root-bind:{}", sha256_hex(&intent));
+            }
+            {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                if !current(&inner) || !inner.find_session_index(session_id).is_some_and(|index| {
+                    let record = &inner.sessions[index];
+                    record.engram.source_root_bind_owner == Some(owner) && idle(record)
+                }) {
+                    return Err(ApiError::conflict("Engram naming binding changed before transmission"));
+                }
+            }
+            let binding = target.adapter.request(
+                &target.connection,
+                &request,
+                target.rpc_timeout_until(deadline)
+                    .map_err(|error| ApiError::bad_gateway(error.to_string()))?,
+            ).and_then(parse_engram_result::<EngramSessionBindingResponse>)
+                .map_err(|error| ApiError::bad_gateway(format!("binding source-root naming: {error}")))?;
+            if binding.routing_token.trim().is_empty()
+                || !engram_phase_holds_no_turn(&binding.status.phase)
+                || binding.status.open_grant_id.is_some()
+                || binding.status.open_grant_state.is_some()
+            {
+                return Err(ApiError::bad_gateway(
+                    "source-root naming bind did not return a routing token without an open turn",
+                ));
+            }
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if !current(&inner) {
+                return Err(ApiError::conflict("Engram naming binding changed while session bind was in flight"));
+            }
+            let index = inner.find_session_index(session_id).expect("current session");
+            let record = &mut inner.sessions[index];
+            if record.engram.source_root_bind_owner != Some(owner) || !idle(record) {
+                return Err(ApiError::conflict("Engram naming bind no longer owns the session"));
+            }
+            let was_rebind = record.engram.rebind_required;
+            record.engram.routing_token = Some(binding.routing_token);
+            record.engram.work_binding = Some(association.binding.clone());
+            record.engram.rebind_required = false;
+            if let Err(error) = self.persist_internal_locked(&inner) {
+                let state = &mut inner.sessions[index].engram;
+                state.routing_token = None;
+                state.work_binding = None;
+                state.rebind_required = was_rebind;
+                return Err(ApiError::internal(format!("persisting naming binding: {error:#}")));
+            }
+            Self::engram_source_root_target_locked(&inner, session_id)
+                .map_err(ApiError::conflict)?
+                .ok_or_else(|| ApiError::conflict("Engram naming binding disappeared"))
+        })();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(index) = inner.find_session_index(session_id) {
+            let state = &mut inner.sessions[index].engram;
+            if state.source_root_bind_owner == Some(owner) {
+                state.source_root_bind_owner = None;
+                state.bind_in_progress = false;
+            }
+        }
+        result
+    }
+
     fn name_engram_source_root_inner(
         &self,
         session_id: &str,
@@ -1886,7 +2031,7 @@ impl AppState {
         let (unfocused_clear, clear_selection, full_new_name) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let store =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten()
                     .and_then(|target| target.settings.authority_store_key);
@@ -1962,10 +2107,10 @@ impl AppState {
                     )
                 })?;
             let project_root = project.root_path.clone();
-            // A name counts only for turns Engram mediates, so a project or
-            // session with Engram control off names nothing.
+            // A name associates a claimed worktree with the Base service;
+            // turn-gated admission is independent of this association.
             let target =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .map_err(ApiError::conflict)?
                     .ok_or_else(|| {
                         ApiError::conflict(
@@ -2076,7 +2221,7 @@ impl AppState {
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let current =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .ok()
                     .flatten();
             if current.as_ref().is_none_or(|current| {
@@ -2095,6 +2240,11 @@ impl AppState {
             Some(claim.claim_fence),
             claim.control_binding.as_ref(),
         )?;
+        let target = engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
+            self.bind_fresh_engram_source_root_until(
+                target, &association, (clock.now() + budget).min(deadline),
+            )
+        })?;
         // The current claim's lifecycle is read explicitly. A held-claims
         // row, including its fence, cannot distinguish recovery from release.
         // For a different held claim there is no status projection on this
@@ -2317,14 +2467,14 @@ impl AppState {
             ));
         }
         // The session must still be where the name was checked: the same
-        // project, folder and Engram store, with Engram control on. A project
+        // project, folder and Engram store, with Base MCP on. A project
         // removed or reconfigured meanwhile would leave a name nobody could
         // use or clear.
         let still_there = inner.sessions[index].session.workdir == workdir
             && inner.sessions[index].session.project_id == project_id
             && engram_project_for_session_locked(&inner, session_id)
                 .is_some_and(|project| project.root_path == project_root)
-            && Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+            && Self::engram_source_root_target_locked(&inner, session_id)
                 .ok()
                 .flatten()
                 .is_some_and(|current| {
@@ -2535,7 +2685,7 @@ impl AppState {
         })?;
         if inner.sessions[index].session.workdir != workdir
             || inner.sessions[index].session.project_id != project_id
-            || !Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+            || !Self::engram_source_root_target_locked(&inner, session_id)
                 .ok()
                 .flatten()
                 .is_some_and(|current| {
@@ -2710,7 +2860,7 @@ impl AppState {
         if validated.is_none()
             && inner.sessions[index].session.workdir == workdir
             && inner.sessions[index].session.project_id == project_id
-            && Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+            && Self::engram_source_root_target_locked(&inner, session_id)
                 .ok()
                 .flatten()
                 .is_some_and(|current| {

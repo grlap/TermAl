@@ -678,6 +678,17 @@ impl AppState {
 
     fn wire_session_from_record(local_instance_id: &str, record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
+        if record.is_local_session() {
+            session.prompt_admission_budgets = engram_begin_preparation_lineage(record)
+                .map(|lineage| (lineage.prompt_id.clone(), PromptAdmissionBudgetView::from(lineage)))
+                .into_iter().collect();
+            session.provider_handoffs = record.provider_handoff_observations.rows.iter().cloned().collect();
+            session.provider_handoff_history = Some(record.provider_handoff_observations.history());
+        } else {
+            session.prompt_admission_budgets.clear();
+            session.provider_handoffs.clear();
+            session.provider_handoff_history = None;
+        }
         // The record owns remote-proxy identity; the wire field is a derived
         // UI/API projection and embedded session snapshots are not authoritative.
         session.remote_id = record.remote_id.clone();

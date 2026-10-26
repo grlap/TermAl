@@ -94,7 +94,7 @@ impl EngramRootReclamationSnapshot {
                     eligible: !inner.engram_project_resets.contains(&project.id)
                         && project.remote_id == LOCAL_REMOTE_ID
                         && project.engram.as_ref().is_some_and(|settings| {
-                            settings.is_control_enabled()
+                            settings.is_base_enabled()
                                 && settings.binary_path.is_some()
                                 && settings.home.is_some()
                         }),

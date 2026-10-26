@@ -168,6 +168,53 @@ fn clear_engram_bind_retry(record: &mut SessionRecord) {
 }
 
 impl AppState {
+    /// A structured root mailbox wake may reconcile a nonfatal remote Bind
+    /// failure using its existing live proof. This only schedules the exact
+    /// journaled Bind; it neither certifies non-application nor grants delivery.
+    fn mailbox_notification_allows_bind_reconciliation(
+        &self,
+        session_id: &str,
+        proof: &EngramBindRetryProof,
+    ) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(record) = inner
+            .find_session_index(session_id)
+            .map(|index| &inner.sessions[index])
+        else {
+            return false;
+        };
+        let Some(head) = record
+            .queued_prompts
+            .front()
+            .filter(|head| engram_bind_retry_prompt_matches(head, proof))
+        else {
+            return false;
+        };
+        head.source == QueuedPromptSource::Mailbox
+            && head
+                .pending_prompt
+                .source
+                .as_ref()
+                .is_some_and(|source| source.mailbox.is_some())
+            && head.attachments.is_empty()
+            && head.pending_prompt.attachments.is_empty()
+            && head.pending_prompt.expanded_text.is_none()
+            && head.engram_bind.is_some()
+            && head.engram_evaluate.is_none()
+            && record.session.parent_delegation_id.is_none()
+            && inner
+                .find_delegation_index_by_child_session_id(session_id)
+                .is_none()
+            && !record.engram.recovered_admission
+            && record.engram.active_grant_id.is_none()
+            && record.engram.uncertain_grant_id.is_none()
+            && record.engram.source_observation_gate.is_none()
+            && !record
+                .queued_prompt_durability_holds
+                .contains_key(&proof.prompt_id)
+            && !record.dedicated_cleanup_holds_admission()
+    }
+
     fn postpone_engram_bind_retry(
         &self,
         session_id: &str,

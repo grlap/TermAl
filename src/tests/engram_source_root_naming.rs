@@ -4070,7 +4070,185 @@ fn change_engram_settings(state: &AppState, change: impl Fn(&mut EngramProjectSe
 }
 
 #[test]
-fn a_name_is_refused_when_engram_control_is_off_or_the_project_changes_meanwhile() {
+fn source_root_base_mcp_names_and_clears_without_turn_gated_control_or_a_grant() {
+    let label = "naming-base-only";
+    let claimed = ClaimedRoot::new_scripted(label, vec![bind_reply("base-only-token")]);
+    let worktree = add_claimed_root_worktree(&claimed.root);
+    prepare_tokenless_base_naming(&claimed, label);
+    claimed.record(|record| {
+        assert!(record.engram.routing_token.is_none());
+        assert!(record.engram.work_binding.is_none());
+        assert!(record.engram.active_grant_id.is_none());
+        assert!(record.engram.active_turn_source_root.is_none());
+    });
+
+    let named = name_tokenless_base_root(&claimed, label, Some(&worktree))
+        .expect("Base MCP names a claimed root without turn admission");
+    assert!(named.root.is_some());
+    assert!(named.generation > 0);
+    assert!(named.sealed.is_none());
+    let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+    assert_eq!(saved.engram_work_source_roots.len(), 1);
+    assert_eq!(saved.engram_work_source_roots[0].generation, named.generation);
+    assert_eq!(Some(&saved.engram_work_source_roots[0].root), named.root.as_ref());
+    {
+        let inner = claimed.state.inner.lock().unwrap();
+        assert!(AppState::engram_binding_target_for_session_shape_locked(
+            &inner, &claimed.session_id, true).unwrap().is_none(),
+            "ordinary turn admission remains disabled");
+        assert!(engram_root_reclamation_session_is_reader(
+            &inner, &claimed.session_id, &saved.engram_work_source_roots[0].store));
+    }
+
+    let cleared = name_tokenless_base_root(&claimed, label, None)
+        .expect("the Base-only holder can clear its name");
+    assert!(cleared.root.is_none());
+    assert_eq!(cleared.generation, 0);
+    assert!(cleared.sealed.is_none());
+    let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(saved.engram_work_source_roots.is_empty());
+    claimed.record(|record| {
+        assert!(record.engram.active_grant_id.is_none());
+        assert!(record.engram.active_turn_source_root.is_none());
+    });
+    assert!(claimed.transport.requests().iter().all(|request| !matches!(
+        request.request["operation"].as_str(),
+        Some("turn_evaluate" | "turn_begin" | "turn_checkpoint")
+    )), "naming never manufactures a mediated turn");
+    assert_eq!(claimed.transport.requests().iter().filter(|request|
+        request.request["operation"] == "session_bind").count(), 1,
+        "a fresh session authenticates once, independently of turn admission");
+}
+
+// Configure the canonical held-claim service without installing any local
+// token or work binding. The naming API must obtain its own SessionBind.
+fn prepare_tokenless_base_naming(claimed: &ClaimedRoot, label: &str) {
+    change_engram_settings(&claimed.state, |engram| engram.turn_gated_control = false);
+    claimed_root_store(claimed);
+    let held = claimed_root_held(label);
+    claimed.transport.enable_named_roots(
+        &claimed.session_id, held.items[0].control_binding.as_ref().unwrap());
+    claimed.transport.replace_held_claims([Ok(held)]);
+}
+
+fn name_tokenless_base_root(
+    claimed: &ClaimedRoot, label: &str, path: Option<&FsPath>,
+) -> Result<EngramSourceRootResponse, ApiError> {
+    claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
+        work: format!("w-{label}"),
+        path: path.map(|path| Some(path.to_string_lossy().into_owned())),
+    })
+}
+
+#[test]
+fn source_root_base_only_lost_bind_reply_replays_the_exact_authentication_without_a_grant() {
+    let label = "base-only-lost-bind";
+    let claimed = ClaimedRoot::new_scripted(label, vec![
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport("lost bind reply"))),
+        bind_reply("base-replayed-token"),
+    ]);
+    let worktree = add_claimed_root_worktree(&claimed.root);
+    prepare_tokenless_base_naming(&claimed, label);
+    let error = name_tokenless_base_root(&claimed, label, Some(&worktree)).unwrap_err();
+    assert!(error.message.contains("lost bind reply"), "{error:?}");
+    claimed.record(|record| {
+        assert!(record.engram.routing_token.is_none());
+        assert!(record.engram.work_binding.is_none());
+        assert!(!record.engram.bind_in_progress);
+        assert!(record.engram.source_root_bind_owner.is_none());
+    });
+    assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
+    assert!(name_tokenless_base_root(&claimed, label, Some(&worktree)).unwrap().root.is_some());
+    let requests = claimed.transport.requests();
+    let binds = requests.iter().filter(|request| request.request["operation"] == "session_bind")
+        .collect::<Vec<_>>();
+    assert_eq!(binds.len(), 2);
+    assert_eq!(binds[0].request, binds[1].request, "unknown bind repeats its exact intent and key");
+    assert_eq!(binds[0].connection, binds[1].connection);
+    assert!(requests.iter().all(|request| !matches!(request.request["operation"].as_str(),
+        Some("turn_evaluate" | "turn_begin" | "turn_checkpoint"))));
+}
+
+#[test]
+fn source_root_base_only_refuses_open_turn_bind_replies_without_adopting_them() {
+    for (case, status) in [
+        ("phase", json!({"phase":"turn_open"})),
+        ("grant", json!({"phase":"ready","open_grant_id":"unsettled-grant"})),
+        ("state", json!({"phase":"ready","open_grant_state":"issued"})),
+    ] {
+        let label = format!("base-only-open-{case}");
+        let claimed = ClaimedRoot::new_scripted(&label, vec![
+            ScriptedEngramControlResponse::Reply(Ok(json!({
+                "routing_token":"must-not-be-adopted", "status":status,
+            }))),
+        ]);
+        prepare_tokenless_base_naming(&claimed, &label);
+        let error = name_tokenless_base_root(&claimed, &label, Some(&claimed.root)).unwrap_err();
+        assert!(error.message.contains("without an open turn"), "{case}: {error:?}");
+        claimed.record(|record| {
+            assert!(record.engram.routing_token.is_none());
+            assert!(record.engram.work_binding.is_none());
+            assert!(record.engram.active_grant_id.is_none());
+            assert!(!record.engram.bind_in_progress);
+        });
+        assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
+    }
+}
+
+#[test]
+fn source_root_base_only_does_not_bind_over_unresolved_turn_state() {
+    for case in ["active", "uncertain", "legacy", "checkpoint", "binding"] {
+        let label = format!("base-only-unresolved-{case}");
+        let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
+        prepare_tokenless_base_naming(&claimed, &label);
+        claimed.record(|record| match case {
+            "active" => record.engram.active_grant_id = Some("keep-active".to_owned()),
+            "uncertain" => record.engram.uncertain_grant_id = Some("keep-uncertain".to_owned()),
+            "legacy" => record.engram.begins_recorded = false,
+            "checkpoint" => record.engram.checkpoint_in_progress = true,
+            "binding" => record.engram.bind_in_progress = true,
+            _ => unreachable!(),
+        });
+        let before = claimed.record(|record| (
+            record.engram.active_grant_id.clone(), record.engram.uncertain_grant_id.clone(),
+            record.engram.begins_recorded, record.engram.checkpoint_in_progress,
+            record.engram.bind_in_progress,
+        ));
+        let error = name_tokenless_base_root(&claimed, &label, Some(&claimed.root)).unwrap_err();
+        assert!(error.message.contains("unresolved Engram"), "{case}: {error:?}");
+        assert_eq!(before, claimed.record(|record| (
+            record.engram.active_grant_id.clone(), record.engram.uncertain_grant_id.clone(),
+            record.engram.begins_recorded, record.engram.checkpoint_in_progress,
+            record.engram.bind_in_progress,
+        )));
+        assert!(claimed.transport.requests().is_empty(), "{case}: nothing sent to control");
+    }
+}
+
+#[test]
+fn source_root_base_only_preserves_disabled_reset_and_child_shape_refusals() {
+    for case in ["disabled", "reset", "child"] {
+        let label = format!("base-only-guard-{case}");
+        let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
+        prepare_tokenless_base_naming(&claimed, &label);
+        match case {
+            "disabled" => claimed.record(|record| record.engram.disabled_reason = Some("keep-disabled".to_owned())),
+            "reset" => {
+                let project_id = claimed.record(|record| record.session.project_id.clone().unwrap());
+                assert!(claimed.state.inner.lock().unwrap().engram_project_resets.claim(&project_id).is_some());
+            }
+            "child" => claimed.record(|record| record.session.parent_delegation_id = Some("missing-child-link".to_owned())),
+            _ => unreachable!(),
+        }
+        assert_eq!(name_tokenless_base_root(&claimed, &label, Some(&claimed.root))
+            .unwrap_err().status, StatusCode::CONFLICT, "{case}");
+        assert!(claimed.transport.requests().is_empty(), "{case}: nothing sent to control");
+        assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
+    }
+}
+
+#[test]
+fn a_name_is_refused_when_base_mcp_is_off_or_the_project_changes_meanwhile() {
     let label = "naming-project-fence";
     let claimed = ClaimedRoot::new_scripted(label, Vec::new());
     let worktree = add_claimed_root_worktree(&claimed.root);
@@ -4088,24 +4266,28 @@ fn a_name_is_refused_when_engram_control_is_off_or_the_project_changes_meanwhile
         assert_eq!(pending_line(claimed), None, "{case}: no host line");
     };
 
-    // A name counts only for mediated turns: with Engram control off there
-    // is nothing to name.
-    change_engram_settings(&claimed.state, |engram| engram.turn_gated_control = false);
+    // Base disablement still refuses naming, independently of turn gating.
+    change_engram_settings(&claimed.state, |engram| {
+        engram.enabled = false;
+        engram.turn_gated_control = false;
+    });
     let error = name_root(
         &claimed,
         label,
         Some(&worktree),
         vec![claimed_root_held(label)],
     )
-    .expect_err("control is off");
+    .expect_err("Base MCP is off");
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.contains("not enabled"), "{}", error.message);
-    nothing_named(&claimed, "control off");
-    change_engram_settings(&claimed.state, |engram| engram.turn_gated_control = true);
+    nothing_named(&claimed, "Base MCP off");
+    change_engram_settings(&claimed.state, |engram| {
+        engram.enabled = true;
+        engram.turn_gated_control = true;
+    });
 
-    // The project changes while the name is being checked: another store,
-    // or control turned off. Nothing is named for a store nobody could
-    // clear it in.
+    // A store or control-mode change during the read still invalidates the
+    // captured settings. Retry against one coherent project configuration.
     let changes: [(&str, fn(&mut EngramProjectSettings)); 2] = [
         ("another store", |engram| {
             if let Some(store) = engram.authority_store_key.as_mut() {

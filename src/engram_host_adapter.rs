@@ -2870,6 +2870,9 @@ struct EngramSessionState {
     /// concurrent checkpoint that it did not start.
     checkpoint_owner_generation: Option<u64>,
     bind_in_progress: bool,
+    // Runtime owner of the grant-free naming bind. A settings reset may
+    // replace the session state; an old reply must not release a new owner.
+    source_root_bind_owner: Option<Uuid>,
     pending_dispatch: Option<EngramPendingDispatch>,
     rebind_required: bool,
     /// Ephemeral settings-transition fence. New turns remain queued while the
@@ -3008,6 +3011,7 @@ impl Default for EngramSessionState {
             checkpoint_in_progress: false,
             checkpoint_owner_generation: None,
             bind_in_progress: false,
+            source_root_bind_owner: None,
             pending_dispatch: None,
             rebind_required: false,
             project_reset_in_progress: false,
@@ -8666,7 +8670,15 @@ impl AppState {
                                 EngramTransportErrorKind::Deadline
                                     | EngramTransportErrorKind::Transport
                                     | EngramTransportErrorKind::Backoff
-                            )))
+                            )
+                            || (error.kind == EngramTransportErrorKind::Remote
+                                && error.causal_failure.as_ref().is_none_or(|cause| {
+                                    cause.failure_class != EngramCausalFailureClass::ProducerRefusal
+                                })
+                                && self.mailbox_notification_allows_bind_reconciliation(
+                                    &intent.session_id,
+                                    &proof,
+                                ))))
                     .then(|| {
                         self.finish_engram_bind_retry_proof(intent, admission_owner.as_ref(), proof)
                     })

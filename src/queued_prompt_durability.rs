@@ -387,8 +387,8 @@ impl AppState {
         session_id: &str,
         owner: Option<EngramQueuedAdmissionOwner>,
         checked_head: Option<&str>,
-        drained: Option<TurnDispatch>,
-    ) -> std::result::Result<Option<TurnDispatch>, ApiError> {
+        drained: Option<StartedQueuedTurn>,
+    ) -> std::result::Result<Option<StartedQueuedTurn>, ApiError> {
         if drained.is_some() {
             return Ok(drained);
         }

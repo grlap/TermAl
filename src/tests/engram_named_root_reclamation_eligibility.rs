@@ -43,7 +43,7 @@ type ReaderFacts = Option<(Option<String>, Option<EngramAuthorityStoreKey>)>;
 /// (what the full binding target says, what the narrow reader view says).
 fn reader_facts(claimed: &ClaimedRoot, session_id: &str) -> (ReaderFacts, ReaderFacts) {
     let inner = claimed.state.inner.lock().unwrap();
-    let target = AppState::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+    let target = AppState::engram_source_root_target_locked(&inner, session_id)
         .ok()
         .flatten()
         .map(|target| (target.routing_token.clone(), target.settings.authority_store_key.clone()));
@@ -98,8 +98,15 @@ fn named_root_reclamation_reader_view_agrees_with_the_full_binding_target() {
     claimed.record(|record| record.engram.disabled_reason = None);
 
     with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = false);
-    assert_eq!(parity(&claimed, &root, "control off (root)"), None);
-    assert_eq!(parity(&claimed, &child, "control off (child)"), None);
+    assert!(parity(&claimed, &root, "control off (root)").is_some());
+    assert!(parity(&claimed, &child, "control off (child)").is_some());
+    claimed.record(|record| record.engram.disabled_reason = Some("Base-only disabled".to_owned()));
+    assert_eq!(parity(&claimed, &root, "Base-only disabled root"), None);
+    claimed.record(|record| record.engram.disabled_reason = None);
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().enabled = false);
+    assert_eq!(parity(&claimed, &root, "Base off (root)"), None);
+    assert_eq!(parity(&claimed, &child, "Base off (child)"), None);
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().enabled = true);
     with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = true);
 
     let remote = claimed.state.inner.lock().unwrap().find_project(&project_id).unwrap().remote_id.clone();
@@ -125,8 +132,39 @@ fn named_root_reclamation_reader_view_agrees_with_the_full_binding_target() {
     assert_eq!(parity(&claimed, &child, "child of a missing parent"), None);
     assert!(parity(&claimed, &root, "root beside an orphaned child").is_some());
 
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = false);
     assert!(claimed.state.inner.lock().unwrap().engram_project_resets.claim(&project_id).is_some());
-    assert_eq!(parity(&claimed, &root, "project reset in progress"), None);
+    assert_eq!(parity(&claimed, &root, "Base-only project reset in progress"), None);
+}
+
+#[test]
+fn named_root_reclamation_base_only_worker_retires_only_with_canonical_lifecycle_proof() {
+    let (claimed, entry) = settled_root("reclamation-base-only", "completed");
+    let project_id = claimed.record(|record| record.session.project_id.clone().unwrap());
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = false);
+    {
+        let inner = claimed.state.inner.lock().unwrap();
+        assert!(AppState::engram_binding_target_for_session_shape_locked(
+            &inner, &claimed.session_id, true).unwrap().is_none());
+    }
+    // A failed canonical read cannot retire a carried-over Base-only root.
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .root_read_failures.insert(entry.claim_id.clone());
+    let plan = reclamation_plan(&claimed);
+    assert_eq!(plan.len(), 1);
+    claimed.state.run_engram_root_reclamation_pass(plan);
+    assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .root_read_failures.remove(&entry.claim_id);
+    // A fresh plan uses the same exact completed-run proof as the gated case.
+    claimed.state.engram_budget_clock().advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
+    let plan = reclamation_plan(&claimed);
+    assert_eq!(plan.len(), 1);
+    claimed.state.run_engram_root_reclamation_pass(plan);
+    assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
+    assert!(claimed.transport.requests().iter().all(|request| !matches!(
+        request.request["operation"].as_str(), Some("turn_evaluate" | "turn_begin" | "turn_checkpoint")
+    )));
 }
 
 #[test]

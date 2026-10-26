@@ -999,7 +999,7 @@ fn a_head_saved_while_the_resume_drained_is_started_by_its_single_retry() {
         .finish_resume_drain(&fixture.session, None, Some(&earlier), None)
         .expect("not refused")
         .expect("the retry starts the saved head");
-    let _ = deliver_turn_dispatch(&fixture.state, dispatch);
+    let _ = deliver_turn_dispatch(&fixture.state, dispatch.dispatch);
     match recv_within_guard(&fixture.prompts, "the retry sends the saved head") {
         Ok(ClaudeRuntimeCommand::Prompt(command)) => {
             assert_eq!(command.text, "saved while the Resume drained")

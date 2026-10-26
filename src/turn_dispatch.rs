@@ -879,6 +879,14 @@ impl AppState {
         record.set_auto_dispatch_blocked(false);
         record.active_turn_file_changes.clear();
         record.active_turn_file_change_grace_deadline = None;
+        let observation_source = record.queued_prompts.front()
+            .filter(|head| head.pending_prompt.id == message_id)
+            .map(|head| head.source)
+            .unwrap_or(if source.as_ref().is_some_and(MessageSource::is_mailbox) {
+                QueuedPromptSource::Mailbox
+            } else {
+                QueuedPromptSource::User
+            });
         let message = Message::Text {
             attachments: message_attachments.clone(),
             id: message_id.clone(),
@@ -929,6 +937,11 @@ impl AppState {
             pending.dispatch_generation = record.engram.dispatch_generation;
         }
         record.engram.pending_dispatch = pending_engram;
+        record.provider_handoff_observations.prepared = Some(ProviderHandoffPrompt {
+            prompt_id: message_id.clone(),
+            source: observation_source,
+            turn_generation: active_turn_generation,
+        });
         let session_seq = record.next_body_delta_seq(&message_id);
         let message_delta = StartedTurnMessageDelta {
             session_id: record.session.id.clone(),
@@ -1167,6 +1180,18 @@ impl AppState {
         session_id: &str,
         allow_blocked_dispatch: bool,
     ) -> Result<Option<TurnDispatch>> {
+        Ok(self
+            .dispatch_next_queued_turn_with_prompt(session_id, allow_blocked_dispatch)?
+            .map(|started| started.dispatch))
+    }
+
+    /// Keeps the prompt actually admitted after mailbox revalidation, so a
+    /// Resume can report a delivery hold against that prompt's identity.
+    fn dispatch_next_queued_turn_with_prompt(
+        &self,
+        session_id: &str,
+        allow_blocked_dispatch: bool,
+    ) -> Result<Option<StartedQueuedTurn>> {
         if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
             eprintln!(
                 "mailbox> failed reconciling notifications before queue drain for `{session_id}`: {err:#}"
@@ -1175,9 +1200,7 @@ impl AppState {
         if let Err(error) = self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id) {
             return consume_mailbox_relay_hold(Err(error));
         }
-        Ok(self
-            .start_next_queued_turn_off_lock(session_id, allow_blocked_dispatch, false)?
-            .map(|started| started.dispatch))
+        self.start_next_queued_turn_off_lock(session_id, allow_blocked_dispatch, false)
     }
 
     fn dispatch_next_queued_turn_for_mailbox_relay(
@@ -1244,20 +1267,28 @@ impl AppState {
         session_id: &str,
         owner: EngramQueuedAdmissionOwner,
     ) -> Result<Option<TurnDispatch>> {
+        Ok(self
+            .dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner)?
+            .map(|started| started.dispatch))
+    }
+
+    fn dispatch_next_queued_turn_for_resume_with_prompt(
+        &self,
+        session_id: &str,
+        owner: EngramQueuedAdmissionOwner,
+    ) -> Result<Option<StartedQueuedTurn>> {
         if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
             eprintln!(
                 "mailbox> failed reconciling notifications before the bound resume for                  `{session_id}`: {err:#}"
             );
         }
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
-        Ok(self
-            .start_next_queued_turn_off_lock_for_owner(
-                session_id,
-                true,
-                false,
-                Some(QueuedDrainOwner::Resume(owner)),
-            )?
-            .map(|started| started.dispatch))
+        self.start_next_queued_turn_off_lock_for_owner(
+            session_id,
+            true,
+            false,
+            Some(QueuedDrainOwner::Resume(owner)),
+        )
     }
 
     /// Evaluates and promotes one stable queue head. The prompt snapshot and
