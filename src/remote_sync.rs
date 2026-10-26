@@ -121,7 +121,7 @@ impl RemoteSyncRollback {
     fn restore(self, inner: &mut StateInner) {
         inner.next_session_number = self.next_session_number;
         inner.sessions = self.sessions;
-        inner.orchestrator_instances = self.orchestrator_instances;
+        inner.orchestrator_instances = self.orchestrator_instances.into();
         inner.removed_session_ids = self.removed_session_ids;
     }
 }
@@ -1317,7 +1317,7 @@ fn sync_remote_orchestrators_inner(
             next_orchestrator_instances.push(localized);
         }
     }
-    inner.orchestrator_instances = next_orchestrator_instances;
+    inner.orchestrator_instances = next_orchestrator_instances.into();
 
     Ok(())
 }

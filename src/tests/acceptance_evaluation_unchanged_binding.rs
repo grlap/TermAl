@@ -147,7 +147,7 @@ fn paused_evaluation_after(
     }
     let named = named_root.then_some(entry);
     if let Some(named) = &named {
-        state.inner.lock().unwrap().engram_work_source_roots = vec![named.clone()];
+        *state.inner.lock().unwrap().engram_work_source_roots = vec![named.clone()];
     }
     // The token as the request captures it: the work's current history and
     // the binding the requested claim named, if any.
@@ -815,7 +815,7 @@ fn a_naming_away_and_back_cannot_revive_the_paused_evaluation() {
         away.root = format!("{}-away", named.root);
         away.generation = 4;
         away.named_at = "2026-09-28T00:00:00.000Z".to_owned();
-        paused.state.inner.lock().unwrap().engram_work_source_roots = vec![away.clone()];
+        *paused.state.inner.lock().unwrap().engram_work_source_roots = vec![away.clone()];
         learn(&paused.state, &paused.work_id, naming_event(&away, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
         let back = if back_exactly {
             named.clone()
@@ -825,7 +825,7 @@ fn a_naming_away_and_back_cannot_revive_the_paused_evaluation() {
             back.named_at = "2026-09-29T00:00:00.000Z".to_owned();
             back
         };
-        paused.state.inner.lock().unwrap().engram_work_source_roots = vec![back.clone()];
+        *paused.state.inner.lock().unwrap().engram_work_source_roots = vec![back.clone()];
         learn(&paused.state, &paused.work_id, naming_event(&back, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
         if back_exactly {
             assert!(

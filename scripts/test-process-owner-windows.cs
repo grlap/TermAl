@@ -63,6 +63,20 @@ public static class TestCommandOwner {
     Check(QueryInformationJobObject(job, 1, out info, (uint)Marshal.SizeOf(typeof(Accounting)), IntPtr.Zero), "query job accounting");
     return info.Active;
   }
+  static bool WaitForCleanup(IntPtr job, IntPtr process, int budget) {
+    var wait = Stopwatch.StartNew();
+    // Job membership is accounting, not a completion barrier for the command's
+    // asynchronous termination. Keep its original handle until it is signaled:
+    // in particular, an onStart cancellation can kill a suspended command whose
+    // current-directory handle would otherwise outlive a "reaped" result.
+    if (process != IntPtr.Zero) {
+      uint status = WaitForSingleObject(process, (uint)budget);
+      if (status == 258) return false;
+      Check(status == 0, "wait command cleanup");
+    }
+    while (Active(job) != 0 && wait.ElapsedMilliseconds < budget) Thread.Sleep(10);
+    return Active(job) == 0;
+  }
   static List<long> Members(IntPtr job) {
     const int bytes = 65536;
     IntPtr buffer = Marshal.AllocHGlobal(bytes);
@@ -177,18 +191,14 @@ public static class TestCommandOwner {
       // PID inventory is best effort; its failure cannot skip termination.
       try { pids = Members(job); } catch (Exception observation) { pidObservationError = observation.Message; }
       Check(TerminateJobObject(job, 1), "terminate owned job");
-      var wait = Stopwatch.StartNew();
-      while (Active(job) != 0 && wait.ElapsedMilliseconds < budget) Thread.Sleep(10);
-      cleanup = Active(job) == 0 ? "reaped" : "unresolved";
-      if (cleanup != "reaped") result["error"] = "owned job did not reach zero active processes within cleanup budget";
+      cleanup = WaitForCleanup(job, child.Process, budget) ? "reaped" : "unresolved";
+      if (cleanup != "reaped") result["error"] = "owned command or job did not finish within cleanup budget";
     } catch (Exception error) {
       result["code"] = 1; result["error"] = error.Message;
       if (job != IntPtr.Zero) {
         try {
           TerminateJobObject(job, 1);
-          var wait = Stopwatch.StartNew();
-          while (Active(job) != 0 && wait.ElapsedMilliseconds < budget) Thread.Sleep(10);
-          cleanup = Active(job) == 0 ? "reaped" : "unresolved";
+          cleanup = WaitForCleanup(job, child.Process, budget) ? "reaped" : "unresolved";
         } catch { cleanup = "unresolved"; }
       }
     } finally {

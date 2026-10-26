@@ -15,10 +15,10 @@
 // refreshes the agent-readiness cache via filesystem I/O *before*
 // locking `inner`, then reads the freshly-populated cache under the
 // lock, so the returned `StateResponse` reflects current CLI
-// availability. `snapshot_from_inner()` is the hot-path builder used
-// inside `commit_locked` / `publish_state_locked` where the lock is
-// already held and filesystem I/O is not safe — it reuses whatever
-// value `cached_agent_readiness()` happens to have. This is the
+// availability. It captures the existing immutable metadata cut under
+// that lock, then materializes the response after release. Callers of
+// `snapshot_from_inner()` already hold the lock; that builder reuses
+// `cached_agent_readiness()` without filesystem I/O. This is the
 // cache-staleness tradeoff documented in `sse_broadcast.rs`.
 //
 // Tests that need to inspect internal transcript state must call the
@@ -46,6 +46,15 @@ const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 thread_local! {
     static TEST_BEFORE_SESSION_SUMMARY_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
     static TEST_BEFORE_STATE_SNAPSHOT_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn observe_state_snapshot_projection_for_test() {
+    TEST_BEFORE_STATE_SNAPSHOT_PROJECT.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook();
+        }
+    });
 }
 
 fn bounded_live_activity_summary_text(value: &str) -> String {
@@ -924,8 +933,11 @@ impl AppState {
 
     fn summary_snapshot(&self) -> StateResponse {
         let _ = self.agent_readiness_snapshot();
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        self.snapshot_from_inner(&inner)
+        let snapshot = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            self.immutable_state_snapshot_locked(&inner)
+        };
+        snapshot.materialize()
     }
 
     /// Test-only full snapshot inspection helper.
@@ -1399,11 +1411,19 @@ impl AppState {
         agent_readiness: Vec<AgentReadiness>,
     ) -> StateResponse {
         #[cfg(test)]
-        TEST_BEFORE_STATE_SNAPSHOT_PROJECT.with(|hook| {
-            if let Some(hook) = hook.borrow_mut().as_mut() {
+        {
+            let hook = inner
+                .state_projection_cache
+                .lock()
+                .unwrap()
+                .before_materialize
+                .take();
+            if let Some(hook) = hook {
                 hook();
             }
-        });
+        }
+        #[cfg(test)]
+        observe_state_snapshot_projection_for_test();
         let sessions = inner.sessions.iter().filter(|record| !record.hidden)
             .map(|record| Self::wire_session_summary_from_record(&self.server_instance_id, record))
             .collect();

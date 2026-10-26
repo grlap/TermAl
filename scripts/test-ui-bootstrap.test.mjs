@@ -251,6 +251,61 @@ test("interrupting owned UI setup records interruption and leaves stages unrun",
   });
 });
 
+test("Windows cleanup requires command release even after job accounting is empty", {
+  skip: process.platform !== "win32",
+}, (t) => {
+  const { root, admin, env } = fixture(t);
+  const scratch = join(admin, "compiler");
+  mkdirSync(scratch);
+  const probe = join(admin, "release-order.ps1");
+  writeFileSync(probe, `
+param([string]$Source, [string]$Node, [string]$Directory)
+$ErrorActionPreference = 'Stop'
+Add-Type -Path $Source -ReferencedAssemblies 'System.dll','System.Core.dll','System.Web.Extensions.dll'
+$flags = [Reflection.BindingFlags]'Static,NonPublic'
+$native = [TestCommandOwner]
+$job = $native.GetMethod('CreateJobObjectW', $flags).Invoke($null, @([IntPtr]::Zero, [IntPtr]::Zero))
+if ($job -eq [IntPtr]::Zero) { throw 'probe job creation failed' }
+$command = [Diagnostics.Process]::new()
+try {
+  $command.StartInfo.FileName = $Node
+  $command.StartInfo.Arguments = '-e "process.stdin.resume()"'
+  $command.StartInfo.WorkingDirectory = $Directory
+  $command.StartInfo.UseShellExecute = $false
+  $command.StartInfo.CreateNoWindow = $true
+  $command.StartInfo.RedirectStandardInput = $true
+  if (-not $command.Start()) { throw 'probe command did not start' }
+  $handle = $command.Handle
+  $active = $native.GetMethod('Active', $flags).Invoke($null, @($job))
+  if ($active -ne 0) { throw 'probe requires zero active job members' }
+  $cleanup = $native.GetMethod('WaitForCleanup', $flags)
+  if ($cleanup.Invoke($null, @($job, $handle, 0))) {
+    throw 'cleanup accepted empty accounting while the command still holds its directory'
+  }
+  $command.StandardInput.Close()
+  $command.WaitForExit()
+  if (-not $cleanup.Invoke($null, @($job, $handle, 0))) {
+    throw 'cleanup refused a released command and empty job'
+  }
+  Write-Output 'empty-accounting=0; held-command=unresolved; released-command=reaped'
+} finally {
+  if ($command.Id) { $command.StandardInput.Close(); $command.WaitForExit() }
+  $command.Dispose()
+  [void]$native.GetMethod('CloseHandle', $flags).Invoke($null, @($job))
+}
+`);
+  const powershell = join(env.SystemRoot ?? env.SYSTEMROOT ?? "C:/Windows",
+    "System32/WindowsPowerShell/v1.0/powershell.exe");
+  const output = execFileSync(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive",
+    "-ExecutionPolicy", "Bypass", "-File", probe,
+    "-Source", join(sourceRoot, "scripts/test-process-owner-windows.cs"),
+    "-Node", process.execPath, "-Directory", root], {
+    cwd: sourceRoot, env: { ...env, TEMP: scratch, TMP: scratch },
+    encoding: "utf8", windowsHide: true,
+  });
+  assert.match(output, /empty-accounting=0; held-command=unresolved; released-command=reaped/u);
+});
+
 for (const matchingNonce of [false, true]) {
   test(`setup recovery waits for its owner then ${matchingNonce ? "imports exact cleanup" : "rejects a foreign cleanup ledger"}`, async (t) => {
     const { root, env, stages } = fixture(t);

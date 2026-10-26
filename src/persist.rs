@@ -1368,7 +1368,7 @@ fn persist_state_parts_via_connection(
         // Publish while writer admission is still held, even if the following
         // integrity checks fail. The receipt still fails; only a fresh coherent
         // source capture can follow this committed transaction.
-        metadata.metadata_capture.adopt_own_committed();
+        metadata.metadata_capture.adopt_own_committed(metadata);
     }
     persist_observe_metadata_commit();
     verify_federation_write(connection, metadata)?;
@@ -1736,7 +1736,7 @@ fn persist_delta_via_cache_inner(
     delta
         .metadata
         .metadata_capture
-        .adopt(committed_metadata.generation);
+        .adopt(committed_metadata.generation, &delta.metadata);
     drop(write_guard);
     // Keep post-commit redirection and owner-only permission verification
     // fatal. The chmod helper itself honors

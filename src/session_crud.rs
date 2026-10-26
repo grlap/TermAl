@@ -1529,7 +1529,7 @@ impl AppState {
             return failure;
         }
         if let Err(error) = self.commit_locked(&mut inner) {
-            inner.engram_retired_work_authority_grants = previous;
+            inner.engram_retired_work_authority_grants = previous.into();
             for (index, previous_warning, _) in cleared_project_warnings {
                 inner.projects[index].engram_cleanup_warning = previous_warning;
             }
@@ -2380,7 +2380,7 @@ impl AppState {
             };
             if let Err(err) = self.commit_locked(&mut inner) {
                 inner.projects[project_index].engram = project_snapshot.engram.clone();
-                inner.engram_retired_work_authority_grants = previous_retired_authority_grants;
+                inner.engram_retired_work_authority_grants = previous_retired_authority_grants.into();
                 restore_engram_mcp_runtime_resets_locked(&mut inner, previous_runtime_reset_flags);
                 rollback_engram_mcp_rotation_notices_locked(&mut inner, &rotation_notice_rollbacks);
                 rollback_engram_mcp_runtime_revocations_locked(&mut inner, &revocation_batch);
@@ -3135,7 +3135,7 @@ impl AppState {
                 // checkpointed with `exit` cannot be resurrected; clear only
                 // those grants and require a fresh bind on the next dispatch.
                 inner.projects[project_index].engram = project_snapshot.engram.clone();
-                inner.engram_retired_work_authority_grants = previous_retired_authority_grants;
+                inner.engram_retired_work_authority_grants = previous_retired_authority_grants.into();
                 for (session_id, previous_engram) in previous_session_engram {
                     if let Some(index) = inner.find_session_index(&session_id) {
                         let record = inner
@@ -4960,7 +4960,7 @@ impl AppState {
                                 .remove(&project_id);
                         }
                     }
-                    inner.engram_retired_work_authority_grants = previous_retired_authority_grants;
+                    inner.engram_retired_work_authority_grants = previous_retired_authority_grants.into();
                     // The release clears the waiting reason a wake showed while
                     // the fence was held, and drains what the fence held.
                     drop(inner);

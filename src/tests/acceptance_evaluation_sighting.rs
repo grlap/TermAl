@@ -55,7 +55,7 @@ fn named_root_parent() -> (AppState, String, EngramAuthorityStoreKey, String) {
     };
     {
         let mut inner = state.inner.lock().unwrap();
-        inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
+        *inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
             store: store.clone(),
             work_id: SIGHTED_WORK_ID.to_owned(),
             short_ref: "w-task".to_owned(),

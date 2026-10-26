@@ -774,10 +774,10 @@ impl AppState {
                 ),
                 Err(error) => {
                     if let Some(delegation_waits_before_stop) = delegation_waits_before_stop {
-                        inner.delegation_waits = delegation_waits_before_stop;
+                        inner.delegation_waits = delegation_waits_before_stop.into();
                     }
                     if let Some(test_run_waits_before_stop) = test_run_waits_before_stop {
-                        inner.test_run_waits = test_run_waits_before_stop;
+                        inner.test_run_waits = test_run_waits_before_stop.into();
                     }
                     if added_stopped_session_id {
                         if let Some(instance_index) = stopped_orchestrator_instance_index {

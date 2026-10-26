@@ -503,7 +503,7 @@ fn named_root_reclamation_published_notice_keeps_other_journal_protections() {
     let original_runtime = inner.sessions[index].engram.clone();
     let notice = inner.engram_work_naming_history[0].retirements[0].clone();
     for protection in ["pending-bound", "pending-ended", "pending-invalid", "binding", "capture", "evaluator", "replacement", "live-bound"] {
-        inner.engram_named_root_journal = vec![journal.clone()];
+        *inner.engram_named_root_journal = vec![journal.clone()];
         inner.sessions[index].engram = original_runtime.clone();
         match protection {
             "pending-bound" | "pending-ended" | "pending-invalid" => {
@@ -552,7 +552,7 @@ fn named_root_reclamation_published_notice_keeps_other_journal_protections() {
         inner.delegations.clear();
     }
     inner.sessions[index].engram = original_runtime;
-    inner.engram_named_root_journal = vec![journal];
+    *inner.engram_named_root_journal = vec![journal];
     engram_compact_root_journal(&mut inner);
     assert!(inner.engram_named_root_journal.is_empty(), "no protection must still make progress");
 }

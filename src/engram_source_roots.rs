@@ -2583,7 +2583,7 @@ impl AppState {
             if inner.engram_work_source_roots != previous
                 && self.commit_engram_root_locked(&mut inner).is_err()
             {
-                inner.engram_work_source_roots = previous;
+                inner.engram_work_source_roots = previous.into();
             }
             return Err(ApiError::conflict(error));
         }
@@ -2666,8 +2666,8 @@ impl AppState {
         if let Err(error) = self.commit_engram_root_locked(&mut inner) {
             // Nothing was kept, so the agent is told of nothing and the
             // running turn keeps its root unsealed.
-            inner.engram_work_source_roots = previous;
-            inner.engram_named_root_journal = previous_journal;
+            inner.engram_work_source_roots = previous.into();
+            inner.engram_named_root_journal = previous_journal.into();
             let engram = &mut inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid")

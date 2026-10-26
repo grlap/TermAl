@@ -1784,11 +1784,6 @@ impl AppState {
             {
                 self.test_engram_authority_ack_boundary("before_delta");
                 let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
-                if !image.matches_metadata(&delta.metadata) {
-                    return Err(ApiError::conflict(
-                        "named-root authority image was superseded",
-                    ));
-                }
                 let mut cache = SqlitePersistConnectionCache::new();
                 persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta)
                     .map_err(|error| {
@@ -1796,6 +1791,18 @@ impl AppState {
                             "named-root authority persistence is unconfirmed: {error:#}"
                         ))
                     })?;
+                // Sparse capture may omit this already committed image. Use
+                // the same committed proof as the connected writer's fence.
+                if !PersistFenceTarget::EngramWorkAuthority(Box::new(image.clone()))
+                    .is_already_durable(
+                        cache.connection.as_ref().expect("committed writer connection"),
+                    )
+                    .map_err(|error| ApiError::internal(format!("authority read-back failed: {error:#}")))?
+                {
+                    return Err(ApiError::conflict(
+                        "named-root authority image was superseded",
+                    ));
+                }
             }
         }
         #[cfg(test)]

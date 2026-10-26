@@ -368,7 +368,7 @@ fn stop_on_an_idle_waiting_session_drops_continuations_and_keeps_other_prompts_p
     let session_id = test_session_id(&state, Agent::Codex);
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner.delegation_waits = vec![seeded_delegation_wait("wait-mixed", &session_id)];
+        *inner.delegation_waits = vec![seeded_delegation_wait("wait-mixed", &session_id)];
         let index = inner.find_session_index(&session_id).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
         queue_seeded_prompt(record, "from-workflow", QueuedPromptSource::Orchestrator);
@@ -416,8 +416,8 @@ fn one_stop_of_a_parked_admission_also_consumes_the_sessions_other_waits() {
     let session_id = test_session_id(&state, Agent::Codex);
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner.delegation_waits = vec![seeded_delegation_wait("wait-still-pending", &session_id)];
-        inner.test_run_waits = vec![test_run_wait_record("run-wait-still-pending", &session_id)];
+        *inner.delegation_waits = vec![seeded_delegation_wait("wait-still-pending", &session_id)];
+        *inner.test_run_waits = vec![test_run_wait_record("run-wait-still-pending", &session_id)];
         let index = inner.find_session_index(&session_id).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
         // One wait's continuation is parked in Engram admission at the head;
@@ -508,8 +508,8 @@ fn stop_on_an_idle_waiting_session_restores_everything_when_its_commit_fails() {
     ];
     let baseline_record = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner.delegation_waits = baseline_waits.clone();
-        inner.test_run_waits = baseline_run_waits.clone();
+        *inner.delegation_waits = baseline_waits.clone();
+        *inner.test_run_waits = baseline_run_waits.clone();
         let index = inner.find_session_index(&session_id).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
         queue_seeded_prompt(record, "from-workflow", QueuedPromptSource::Orchestrator);

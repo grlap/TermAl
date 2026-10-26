@@ -471,10 +471,10 @@ fn consume_test_run_waits_for_stopped_session_locked(
     inner: &mut StateInner,
     session_id: &str,
 ) -> Vec<TestRunWaitRecord> {
-    let (stopped, remaining) = std::mem::take(&mut inner.test_run_waits)
+    let (stopped, remaining): (Vec<_>, Vec<_>) = std::mem::take(&mut inner.test_run_waits)
         .into_iter()
         .partition(|wait| wait.session_id == session_id);
-    inner.test_run_waits = remaining;
+    *inner.test_run_waits = remaining;
     stopped
 }
 
@@ -836,7 +836,7 @@ impl AppState {
                 refresh.queue_results.insert(wait.id.clone(), queued);
                 consumed.push((wait, TestRunWaitConsumedReason::Completed));
             }
-            inner.test_run_waits = remaining;
+            *inner.test_run_waits = remaining;
             if consumed.is_empty() {
                 return refresh;
             }

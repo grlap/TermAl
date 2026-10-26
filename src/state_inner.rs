@@ -108,7 +108,9 @@ impl StateInner {
         model: Option<String>,
     ) -> SessionRecord {
         let number = self.next_session_number;
-        self.next_session_number = self.next_session_number.checked_add(1)
+        self.next_session_number = self
+            .next_session_number
+            .checked_add(1)
             .expect("session identity space exhausted");
         let session_id = format!("session-{number}");
         let session_name =
@@ -362,7 +364,9 @@ impl StateInner {
     /// Returns the next message ID.
     fn next_message_id(&mut self) -> String {
         let id = format!("message-{}", self.next_message_number);
-        self.next_message_number = self.next_message_number.checked_add(1)
+        self.next_message_number = self
+            .next_message_number
+            .checked_add(1)
             .expect("message identity space exhausted");
         id
     }
@@ -508,7 +512,9 @@ impl StateInner {
     /// SQLite after the move to delta persistence.
     fn record_removed_session(&mut self, session_id: String) {
         if !session_id.is_empty() {
-            let retired_bindings = self.engram_work_source_roots.iter()
+            let retired_bindings = self
+                .engram_work_source_roots
+                .iter()
                 .filter(|root| root.named_by_session == session_id)
                 .filter_map(|root| {
                     engram_root_journal(
@@ -521,7 +527,9 @@ impl StateInner {
                 })
                 .collect::<Vec<_>>();
             for (store, binding) in retired_bindings {
-                if let Some(history) = self.engram_work_naming_history.iter_mut()
+                if let Some(history) = self
+                    .engram_work_naming_history
+                    .iter_mut()
                     .find(|history| history.store == store && history.work_id == binding.work_id)
                 {
                     engram_retain_recovery_run(&mut history.unresolved_runs, &binding);
@@ -588,7 +596,9 @@ impl StateInner {
     /// and affected subtree remain visible for explicit tracking recovery.
     fn remove_session_at(&mut self, index: usize) -> Option<SessionRecord> {
         let session_id = self.sessions[index].session.id.clone();
-        if self.defer_source_observation_removal(&session_id) { return None; }
+        if self.defer_source_observation_removal(&session_id) {
+            return None;
+        }
         let record = self.sessions.remove(index);
         // Its outstanding Claude work outlives it, in the same section.
         self.orphan_claude_work(&record.session.id, &record.claude_outstanding);
@@ -606,8 +616,11 @@ impl StateInner {
     where
         F: FnMut(&SessionRecord) -> bool,
     {
-        let requested: Vec<_> = self.sessions.iter().filter_map(|record|
-            (!keep(record)).then(|| record.session.id.clone())).collect();
+        let requested: Vec<_> = self
+            .sessions
+            .iter()
+            .filter_map(|record| (!keep(record)).then(|| record.session.id.clone()))
+            .collect();
         let mut deferred = Vec::new();
         for session_id in &requested {
             if self.defer_source_observation_removal(session_id) {
@@ -617,7 +630,8 @@ impl StateInner {
         let mut removed_ids: Vec<String> = Vec::new();
         let mut orphaned: Vec<(String, ClaudeOutstandingWork)> = Vec::new();
         self.sessions.retain(|record| {
-            let retained = !requested.contains(&record.session.id) || deferred.contains(&record.session.id);
+            let retained =
+                !requested.contains(&record.session.id) || deferred.contains(&record.session.id);
             if !retained {
                 removed_ids.push(record.session.id.clone());
                 if record.claude_outstanding.any() {
@@ -703,7 +717,7 @@ impl StateInner {
             .collect::<Vec<_>>();
 
         PersistDeltaPlan {
-            metadata: PersistedState::metadata_from_inner(self),
+            metadata: PersistedState::metadata_delta_from_inner(self),
             changed_sessions,
             removed_session_ids: removed_ids,
             changed_delegations,
@@ -1125,7 +1139,8 @@ fn collect_persist_delta_pass_from_shared_state(
     prompt_history_carry: &BTreeSet<String>,
     after_plan: impl FnOnce(),
 ) -> PersistDelta {
-    let mut plan = persist_collect_locked(inner, |state| state.collect_persist_delta_plan(watermark));
+    let mut plan =
+        persist_collect_locked(inner, |state| state.collect_persist_delta_plan(watermark));
     for candidate in &mut plan.changed_sessions {
         candidate.persist_prompt_history |= prompt_history_carry.contains(&candidate.session_id);
     }
@@ -1133,39 +1148,43 @@ fn collect_persist_delta_pass_from_shared_state(
 
     materialize_persist_delta_plan(
         plan,
-        |candidate| persist_collect_locked(inner, |state| {
-            let Some(record) = state
-                .sessions
-                .iter()
-                .find(|record| record.session.id == candidate.session_id)
-            else {
-                return PersistCandidateMaterialization::Changed;
-            };
-            if record.hidden || record.mutation_stamp != candidate.mutation_stamp {
-                return PersistCandidateMaterialization::Changed;
-            }
-            let mut persisted = PersistedSessionRecord::from_record(record);
-            persisted.persist_prompt_history = candidate.persist_prompt_history;
-            PersistCandidateMaterialization::Snapshot(persisted)
-        }),
-        |candidate| persist_collect_locked(inner, |state| {
-            let Some(delegation) = state
-                .delegations
-                .iter()
-                .find(|delegation| delegation.id == candidate.delegation_id)
-            else {
-                return PersistCandidateMaterialization::Changed;
-            };
-            if state
-                .delegation_mutation_stamps
-                .get(&candidate.delegation_id)
-                .copied()
-                != Some(candidate.mutation_stamp)
-            {
-                return PersistCandidateMaterialization::Changed;
-            }
-            PersistCandidateMaterialization::Snapshot(delegation.clone())
-        }),
+        |candidate| {
+            persist_collect_locked(inner, |state| {
+                let Some(record) = state
+                    .sessions
+                    .iter()
+                    .find(|record| record.session.id == candidate.session_id)
+                else {
+                    return PersistCandidateMaterialization::Changed;
+                };
+                if record.hidden || record.mutation_stamp != candidate.mutation_stamp {
+                    return PersistCandidateMaterialization::Changed;
+                }
+                let mut persisted = PersistedSessionRecord::from_record(record);
+                persisted.persist_prompt_history = candidate.persist_prompt_history;
+                PersistCandidateMaterialization::Snapshot(persisted)
+            })
+        },
+        |candidate| {
+            persist_collect_locked(inner, |state| {
+                let Some(delegation) = state
+                    .delegations
+                    .iter()
+                    .find(|delegation| delegation.id == candidate.delegation_id)
+                else {
+                    return PersistCandidateMaterialization::Changed;
+                };
+                if state
+                    .delegation_mutation_stamps
+                    .get(&candidate.delegation_id)
+                    .copied()
+                    != Some(candidate.mutation_stamp)
+                {
+                    return PersistCandidateMaterialization::Changed;
+                }
+                PersistCandidateMaterialization::Snapshot(delegation.clone())
+            })
+        },
     )
 }
 

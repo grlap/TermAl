@@ -176,7 +176,7 @@ impl AppState {
                 Ok((revision, refresh))
             }
             Err(error) => {
-                inner.delegation_waits = waits_before;
+                inner.delegation_waits = waits_before.into();
                 for (index, queue, peers, pending, stamp) in parents_before {
                     let record = &mut inner.sessions[index];
                     record.queued_prompts = queue;

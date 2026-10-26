@@ -347,6 +347,8 @@ Streaming paths (`append_text_delta`, `update_command_message`) bump revision an
 
 `sessionQueue` is authoritative client-visible state: it carries the pending-prompt projection plus `queuePaused`, including Engram retained and interrupted disposition. Mutations to that projection publish a snapshot or a matching delta at the revision they consume. Durable Engram wire bookkeeping (prepared bind/evaluate keys, retirement, and routing receipts) is persisted without advancing the client revision when it does not change that projection; clients therefore see contiguous revisions and still treat every real gap as a resnapshot trigger.
 
+Explicit state reads and action responses through `summary_snapshot()` (for example `GET /api/state`, initial SSE state and lag recovery) reuse the broadcaster's immutable snapshot owner. They refresh agent readiness before acquiring `StateInner`, capture the header and exhaustively validated session-summary Arcs at one cut, then release the guard before materializing response DTOs and serializing. Cache misses still build their summaries under the guard; header capture and validation also remain there. This boundary removes repeated response cloning from the guard without establishing a lock-duration bound or changing payload membership, revision or publication order.
+
 Internal bookkeeping that the frontend doesn't need (e.g. recording Codex sandbox mode after runtime config) uses `persist_internal_locked()` directly without bumping revision.
 
 ### HTTP API

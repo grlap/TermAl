@@ -314,13 +314,13 @@ impl AppState {
     }
 }
 
-fn test_run_evidence_impact(inner: &StateInner, row: &TestRunCommandObservation) -> Option<bool> {
+fn test_run_evidence_impact(inner: &impl TestRunProjectionSource, row: &TestRunCommandObservation) -> Option<bool> {
     if row.evidence.is_empty() {
         return None;
     }
     let mut unknown = false;
     for association in &row.evidence {
-        let revalidated = inner.test_runs.lifecycle_revalidated.contains(&(
+        let revalidated = inner.projection_index().lifecycle_revalidated.contains(&(
             row.execution_id.clone(),
             association.producer_observation_id.clone(),
         ));

@@ -6,6 +6,16 @@ type PersistMetadataUnitKey = (String, String);
 type PersistMetadataUnitValue = (String, String);
 type PersistMetadataUnits = BTreeMap<PersistMetadataUnitKey, PersistMetadataUnitValue>;
 
+include!("persist_metadata_tracking.rs");
+
+#[derive(Clone)]
+struct PersistMetadataCollectionCapture {
+    watermarks: Arc<Mutex<PersistMetadataWatermarks>>,
+    selected: PersistMetadataWatermarks,
+    omitted: BTreeSet<&'static str>,
+    image_stamps: PersistMetadataWatermarks,
+}
+
 // The source's known durable predecessor is distinct from the writer cache.
 // Capturing never samples a newer database beside an older desired image.
 #[derive(Clone, Default)]
@@ -13,15 +23,22 @@ struct PersistMetadataCapture {
     known: Arc<std::sync::atomic::AtomicU64>,
     predecessor: u64,
     applied: Arc<std::sync::atomic::AtomicU64>,
+    collections: Option<PersistMetadataCollectionCapture>,
 }
 
 impl PersistMetadataCapture {
+    fn omits(&self, field: &str) -> bool {
+        self.collections
+            .as_ref()
+            .is_some_and(|capture| capture.omitted.contains(field))
+    }
     fn new(known: Arc<std::sync::atomic::AtomicU64>) -> Self {
         let predecessor = known.load(std::sync::atomic::Ordering::Acquire);
         Self {
             known,
             predecessor,
             applied: Arc::default(),
+            collections: None,
         }
     }
 
@@ -39,22 +56,44 @@ impl PersistMetadataCapture {
             .store(generation, std::sync::atomic::Ordering::Release);
     }
 
-    fn adopt(&self, generation: u64) {
-        let _ = self.known.compare_exchange(
-            self.predecessor,
-            generation,
-            std::sync::atomic::Ordering::AcqRel,
-            std::sync::atomic::Ordering::Acquire,
-        );
+    fn adopt(&self, generation: u64, metadata: &PersistedState) {
+        let mut watermarks = self.collections.as_ref().map(|capture| {
+            capture
+                .watermarks
+                .lock()
+                .expect("metadata watermarks poisoned")
+        });
+        let adopted = self
+            .known
+            .compare_exchange(
+                self.predecessor,
+                generation,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok();
+        if adopted {
+            if let (Some(capture), Some(watermarks)) = (&self.collections, &mut watermarks) {
+                for (field, image_stamp) in &capture.image_stamps {
+                    if metadata.metadata_collection_stamp(field).as_ref() != Some(image_stamp) {
+                        // An edited snapshot no longer represents the captured
+                        // source. Select that source field again next time.
+                        watermarks.remove(field);
+                    } else if let Some(stamp) = capture.selected.get(field) {
+                        watermarks.insert(field, stamp.clone());
+                    }
+                }
+            }
+        }
     }
 
     // Only a caller still holding the authoritative StateInner may adopt a
     // synchronous snapshot. A post-commit integrity error still fails its
     // receipt; a fresh source capture can reapply it after normal checks.
-    fn adopt_own_committed(&self) {
+    fn adopt_own_committed(&self, metadata: &PersistedState) {
         let applied = self.applied.load(std::sync::atomic::Ordering::Acquire);
         if applied != 0 {
-            self.adopt(applied);
+            self.adopt(applied, metadata);
         }
     }
 }
@@ -141,6 +180,21 @@ fn write_metadata_units(
         }
         &loaded
     };
+    if let Some(collections) = capture.and_then(|capture| capture.collections.as_ref()) {
+        let omitted = collections
+            .omitted
+            .iter()
+            .copied()
+            .filter(|field| !desired.contains_key(&(field.to_string(), String::new())))
+            .collect::<BTreeSet<_>>();
+        // Reuse only the exact verified durable predecessor. These encoded
+        // units stay in the existing writer cache, outside StateInner.
+        for ((field, key), value) in previous {
+            if omitted.contains(field.as_str()) {
+                desired.insert((field.clone(), key.clone()), value.clone());
+            }
+        }
+    }
     // Preserve consumed identities even when a full snapshot was captured
     // before a newer record was materialized, or a session has been deleted.
     for name in ["revision", "nextSessionNumber", "nextMessageNumber"] {

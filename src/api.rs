@@ -859,11 +859,9 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 
 /// Gets state.
 ///
-/// Builds AND serializes the snapshot inside `spawn_blocking` so the tokio
-/// worker does not spend milliseconds-to-seconds of CPU running
-/// `serde_json::to_writer` on a `Vec<Session>` that contains every session's
-/// full `Vec<Message>`. The worker thread only handles the pre-serialized
-/// `Vec<u8>` body, which is a fixed-cost hand-off to hyper.
+/// Captures an immutable metadata cut under StateInner, then materializes and
+/// serializes after release, all inside `spawn_blocking`. The async worker
+/// hands the resulting bytes to hyper without doing that synchronous work.
 async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> {
     let body = run_blocking_api(move || {
         let snapshot = state.summary_snapshot();

@@ -349,10 +349,12 @@ fn test_run_compaction_keeps_full_detail_until_its_exact_proof_reaches_sqlite() 
         .find(|fence| matches!(&fence.target, PersistFenceTarget::TestRunCompaction(_)))
         .unwrap();
     assert!(fence.target.is_in_delta(&delta));
-    assert!(
-        delta.metadata.test_run_observations.contains_key(&oldest),
-        "the exact proof is persisted while old detail is still retained"
-    );
+    assert!(delta.metadata.metadata_collection_is_omitted("testRunObservations"));
+    let retained = read_metadata_for_fence(fixture.cache.connection.as_ref().unwrap(), &["testRunObservations"])
+        .unwrap().unwrap();
+    assert_eq!(retained.test_run_observations.get(&oldest),
+        state.inner.lock().unwrap().test_run_observations.get(&oldest),
+        "unchanged old detail remains durable while the exact proof is selected");
     assert!(
         state
             .inner

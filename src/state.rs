@@ -1552,6 +1552,7 @@ impl EngramProjectResetFences {
 /// Represents state inner.
 struct StateInner {
     metadata_predecessor: Arc<std::sync::atomic::AtomicU64>,
+    metadata_watermarks: Arc<Mutex<PersistMetadataWatermarks>>,
     /// Process-local projections; a restored/replaced StateInner starts cold.
     /// Access only under StateInner, never from the broadcaster worker.
     state_projection_cache: Mutex<StateProjectionCache>,
@@ -1617,20 +1618,20 @@ struct StateInner {
     next_session_number: usize,
     next_message_number: u64,
     /// Stable project records used by local and remote session routing.
-    projects: Vec<Project>,
+    projects: PersistTracked<Vec<Project>>,
     /// Host-level fail-closed ledger for Engram work-authority tuples that
     /// TermAl retired. Unlike project settings, this survives project deletion
     /// so recreating the same Engram store cannot reuse a retired credential.
-    engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
+    engram_retired_work_authority_grants: PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
     /// The source roots agents named for claimed Engram work
     /// (`engram_source_roots.rs`), persisted so a restart keeps them.
-    engram_work_source_roots: Vec<EngramWorkSourceRoot>,
-    engram_named_root_journal: Vec<EngramNamedRootJournal>,
-    engram_work_naming_history: Vec<EngramWorkNamingHistory>,
+    engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
+    engram_named_root_journal: PersistTracked<Vec<EngramNamedRootJournal>>,
+    engram_work_naming_history: PersistTracked<Vec<EngramWorkNamingHistory>>,
     /// The operator releases of retained named roots, newest last
     /// (`engram_named_root_release.rs`), persisted as their audit.
-    engram_named_root_release_audit: Vec<EngramNamedRootReleaseAudit>,
-    engram_source_sightings: Vec<EngramSourceSightingOwner>,
+    engram_named_root_release_audit: PersistTracked<Vec<EngramNamedRootReleaseAudit>>,
+    engram_source_sightings: PersistTracked<Vec<EngramSourceSightingOwner>>,
     engram_root_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
     engram_authority_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
     engram_root_reclamation: EngramRootReclamationSchedule,
@@ -1646,13 +1647,13 @@ struct StateInner {
     /// The dedicated cleanup worker removes an item in memory only after the
     /// fence/cascade succeeds, then wakes primary persistence to durably clear
     /// it; a crash leaves the on-disk item for the next boot.
-    pending_coordination_scope_deletions: BTreeSet<String>,
+    pending_coordination_scope_deletions: PersistTracked<BTreeSet<String>>,
     /// Durable outbox of deleted projects whose project-default response-board
     /// tabs must become ordinary custom tabs. Values retain the project's last
     /// live name so an idempotent retry cannot fall back to the creation-time
     /// tab label after the project record has disappeared.
-    pending_response_board_project_detachments: BTreeMap<String, String>,
-    ignored_discovered_codex_thread_ids: BTreeSet<String>,
+    pending_response_board_project_detachments: PersistTracked<BTreeMap<String, String>>,
+    ignored_discovered_codex_thread_ids: PersistTracked<BTreeSet<String>>,
     /// Broad remote state is metadata-only. Focused bounded-tail responses use
     /// `remote_session_transcript_applied_revisions` so a same-revision delta is
     /// suppressed only for the session whose retained suffix was materialized.
@@ -1675,7 +1676,7 @@ struct StateInner {
     /// user-deleted sessions.
     quarantined_persisted_session_ids: BTreeSet<String>,
     /// Runtime instances for orchestrator templates live beside ordinary sessions.
-    orchestrator_instances: Vec<OrchestratorInstance>,
+    orchestrator_instances: PersistTracked<Vec<OrchestratorInstance>>,
     /// Durable parent-child delegation links for ordinary sessions.
     delegations: Vec<DelegationRecord>,
     /// In-process admission owners. Terminal records remain durable and readable
@@ -1704,24 +1705,24 @@ struct StateInner {
     /// The test launcher's runs, mirrored from their run directories by the
     /// rescan in `test_runs.rs`. Memory only: disk stays the record.
     test_runs: TestRunIndex,
-    test_run_registrations: BTreeMap<String, TestRunRegistration>,
-    test_run_observations: BTreeMap<String, TestRunCommandObservation>,
-    test_run_compacted: BTreeMap<String, TestRunCompacted>,
+    test_run_registrations: PersistTracked<BTreeMap<String, TestRunRegistration>>,
+    test_run_observations: PersistTracked<BTreeMap<String, TestRunCommandObservation>>,
+    test_run_compacted: PersistTracked<BTreeMap<String, TestRunCompacted>>,
     /// When this host first ran with test-run cards; runs that started
     /// earlier never get one (`test_run_cards.rs`). Persisted, never derived
     /// from "now" again once stored.
     test_run_cards_epoch: Option<String>,
     /// Each run's card, by run id: the owner session and message. Persisted;
     /// the transcript stays the render source.
-    test_run_cards: BTreeMap<String, TestRunCardRef>,
+    test_run_cards: PersistTracked<BTreeMap<String, TestRunCardRef>>,
     /// Pending run waits (`test_run_waits.rs`). Persisted; a wait exists only
     /// while pending.
-    test_run_waits: Vec<TestRunWaitRecord>,
+    test_run_waits: PersistTracked<Vec<TestRunWaitRecord>>,
     /// Durable delegation rows isolated during startup validation. See
     /// `quarantined_persisted_session_ids` for the preservation contract.
     quarantined_persisted_delegation_ids: BTreeSet<String>,
     /// Pending parent resumes waiting on one or more child delegation results.
-    delegation_waits: Vec<DelegationWaitRecord>,
+    delegation_waits: PersistTracked<Vec<DelegationWaitRecord>>,
     /// Runtime-only mutation stamps for delegation rows. The background persist
     /// worker compares these with its watermark to upsert only delegation rows
     /// that changed since the last successful write.
@@ -1734,7 +1735,7 @@ struct StateInner {
     /// Indexes currently running read-only delegation records by `delegations` index.
     running_read_only_delegations: BTreeSet<usize>,
     /// Server-backed workspace documents keyed by workspace id.
-    workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
+    workspace_layouts: PersistTracked<BTreeMap<String, WorkspaceLayoutDocument>>,
     /// Monotonic counter used to stamp mutated session records. The persist
     /// thread uses this plus its own watermark to write only the sessions
     /// that changed since the last successful persist, so each
@@ -1757,6 +1758,7 @@ impl StateInner {
     fn new() -> Self {
         Self {
             metadata_predecessor: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            metadata_watermarks: Arc::default(),
             state_projection_cache: Mutex::new(StateProjectionCache::default()),
             federation: FederationState::default(),
             federation_durable: false,
@@ -1785,26 +1787,26 @@ impl StateInner {
             revision: 0,
             next_session_number: 1,
             next_message_number: 1,
-            projects: Vec::new(),
-            engram_retired_work_authority_grants: Vec::new(),
-            engram_work_source_roots: Vec::new(),
-            engram_named_root_journal: Vec::new(),
-            engram_work_naming_history: Vec::new(),
-            engram_named_root_release_audit: Vec::new(),
-            engram_source_sightings: Vec::new(),
+            projects: PersistTracked::default(),
+            engram_retired_work_authority_grants: PersistTracked::default(),
+            engram_work_source_roots: PersistTracked::default(),
+            engram_named_root_journal: PersistTracked::default(),
+            engram_work_naming_history: PersistTracked::default(),
+            engram_named_root_release_audit: PersistTracked::default(),
+            engram_source_sightings: PersistTracked::default(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),
             engram_source_root_generation: 0,
-            pending_coordination_scope_deletions: BTreeSet::new(),
-            pending_response_board_project_detachments: BTreeMap::new(),
-            ignored_discovered_codex_thread_ids: BTreeSet::new(),
+            pending_coordination_scope_deletions: PersistTracked::default(),
+            pending_response_board_project_detachments: PersistTracked::default(),
+            ignored_discovered_codex_thread_ids: PersistTracked::default(),
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),
             remote_session_transcript_applied_revisions: HashMap::new(),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: BTreeSet::new(),
-            orchestrator_instances: Vec::new(),
+            orchestrator_instances: PersistTracked::default(),
             delegations: Vec::new(),
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
@@ -1812,19 +1814,19 @@ impl StateInner {
             engram_turn_basis_captures_live: Arc::default(),
             engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
-            test_run_registrations: BTreeMap::new(),
-            test_run_observations: BTreeMap::new(),
-            test_run_compacted: BTreeMap::new(),
+            test_run_registrations: PersistTracked::default(),
+            test_run_observations: PersistTracked::default(),
+            test_run_compacted: PersistTracked::default(),
             test_run_cards_epoch: None,
-            test_run_cards: BTreeMap::new(),
-            test_run_waits: Vec::new(),
+            test_run_cards: PersistTracked::default(),
+            test_run_waits: PersistTracked::default(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
-            delegation_waits: Vec::new(),
+            delegation_waits: PersistTracked::default(),
             delegation_mutation_stamps: BTreeMap::new(),
             delegation_catalog_children: Mutex::new(FederationCatalogChildren::default()),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
-            workspace_layouts: BTreeMap::new(),
+            workspace_layouts: PersistTracked::default(),
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),
             claude_orphaned_work: Vec::new(),
@@ -2184,7 +2186,11 @@ impl SessionRecord {
 
     fn dedicated_cleanup_holds_admission(&self) -> bool {
         #[cfg(windows)]
-        if self.runtime_stop_owner.as_ref().is_some_and(|owner| owner.kind == RuntimeStopOwnerKind::DedicatedReset) {
+        if self
+            .runtime_stop_owner
+            .as_ref()
+            .is_some_and(|owner| owner.kind == RuntimeStopOwnerKind::DedicatedReset)
+        {
             return true;
         }
         self.runtime.dedicated_cleanup_failure().is_some() || self.dedicated_predecessor_pending()
@@ -2206,7 +2212,8 @@ impl SessionRecord {
     fn clear_runtime(&mut self) {
         self.codex_terminal_identity_unresolved = false;
         #[cfg(windows)]
-        self.retained_dedicated_owners.retain(|owner| !owner.tree.is_confirmed());
+        self.retained_dedicated_owners
+            .retain(|owner| !owner.tree.is_confirmed());
         self.runtime = SessionRuntime::None;
         self.engram_mcp_installed = None;
         // A runtime-started turn ends with its runtime.

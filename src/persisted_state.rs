@@ -16,8 +16,18 @@
 // Extracted from state.rs into its own `include!()` fragment so state.rs
 // stays focused on the runtime model rather than the serde schema.
 
+fn clone_persist_metadata_field<T: Clone>(field: &'static str, value: &T) -> T {
+    #[cfg(test)]
+    persist_observe(|observer| {
+        observer.update(|tick| tick.counts.metadata_cloned_fields.push(field));
+    });
+    #[cfg(not(test))]
+    let _ = field;
+    value.clone()
+}
+
 /// Tracks persisted state.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedState {
     #[serde(skip)]
@@ -32,52 +42,52 @@ struct PersistedState {
     revision: u64,
     next_session_number: usize,
     next_message_number: u64,
-    projects: Vec<Project>,
+    projects: PersistTracked<Vec<Project>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
+    engram_retired_work_authority_grants: PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_work_source_roots: Vec<EngramWorkSourceRoot>,
+    engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_named_root_journal: Vec<EngramNamedRootJournal>,
+    engram_named_root_journal: PersistTracked<Vec<EngramNamedRootJournal>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_work_naming_history: Vec<EngramWorkNamingHistory>,
+    engram_work_naming_history: PersistTracked<Vec<EngramWorkNamingHistory>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_named_root_release_audit: Vec<EngramNamedRootReleaseAudit>,
+    engram_named_root_release_audit: PersistTracked<Vec<EngramNamedRootReleaseAudit>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_source_sightings: Vec<EngramSourceSightingOwner>,
+    engram_source_sightings: PersistTracked<Vec<EngramSourceSightingOwner>>,
     #[serde(
         default,
         skip_serializing_if = "engram_source_root_generation_is_unset"
     )]
     engram_source_root_generation: u64,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pending_coordination_scope_deletions: BTreeSet<String>,
+    pending_coordination_scope_deletions: PersistTracked<BTreeSet<String>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pending_response_board_project_detachments: BTreeMap<String, String>,
+    pending_response_board_project_detachments: PersistTracked<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    ignored_discovered_codex_thread_ids: BTreeSet<String>,
+    ignored_discovered_codex_thread_ids: PersistTracked<BTreeSet<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    orchestrator_instances: Vec<OrchestratorInstance>,
+    orchestrator_instances: PersistTracked<Vec<OrchestratorInstance>>,
     /// Snapshot-only carrier for the normalized `delegations` table.
     /// Delegations are never read from or written into `app_state` metadata.
     #[serde(skip)]
     delegations: Vec<DelegationRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    delegation_waits: Vec<DelegationWaitRecord>,
+    delegation_waits: PersistTracked<Vec<DelegationWaitRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     test_run_cards_epoch: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    test_run_cards: BTreeMap<String, TestRunCardRef>,
+    test_run_cards: PersistTracked<BTreeMap<String, TestRunCardRef>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    test_run_registrations: BTreeMap<String, TestRunRegistration>,
+    test_run_registrations: PersistTracked<BTreeMap<String, TestRunRegistration>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    test_run_observations: BTreeMap<String, TestRunCommandObservation>,
+    test_run_observations: PersistTracked<BTreeMap<String, TestRunCommandObservation>>,
     #[serde(default)]
-    test_run_compacted: BTreeMap<String, TestRunCompacted>,
+    test_run_compacted: PersistTracked<BTreeMap<String, TestRunCompacted>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    test_run_waits: Vec<TestRunWaitRecord>,
+    test_run_waits: PersistTracked<Vec<TestRunWaitRecord>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
+    workspace_layouts: PersistTracked<BTreeMap<String, WorkspaceLayoutDocument>>,
     sessions: Vec<PersistedSessionRecord>,
     /// Runtime-only ids whose normalized SQLite rows failed startup
     /// validation. They are intentionally excluded from the healthy in-memory
@@ -89,7 +99,57 @@ struct PersistedState {
     quarantined_persisted_delegation_ids: BTreeSet<String>,
 }
 
+impl Clone for PersistedState {
+    fn clone(&self) -> Self {
+        let mut cloned = self.metadata_only();
+        cloned.sessions = self.sessions.clone();
+        cloned.delegations = self.delegations.clone();
+        cloned
+    }
+}
+
 impl PersistedState {
+    fn metadata_collection_is_omitted(&self, field: &str) -> bool {
+        if !self.metadata_capture.omits(field) {
+            return false;
+        }
+        // An explicitly edited captured image is also a writer input. Its
+        // mutable borrow promotes even an empty replacement to a selected
+        // collection; metadata_only/Clone preserve that generation.
+        let current = self.metadata_collection_stamp(field);
+        self.metadata_capture
+            .collections
+            .as_ref()
+            .is_some_and(|capture| capture.image_stamps.get(field) == current.as_ref())
+    }
+
+    fn metadata_collection_stamp(&self, field: &str) -> Option<PersistMetadataStamp> {
+        Some(match field {
+            "projects" => self.projects.stamp(),
+            "engramRetiredWorkAuthorityGrants" => self.engram_retired_work_authority_grants.stamp(),
+            "engramWorkSourceRoots" => self.engram_work_source_roots.stamp(),
+            "engramNamedRootJournal" => self.engram_named_root_journal.stamp(),
+            "engramWorkNamingHistory" => self.engram_work_naming_history.stamp(),
+            "engramNamedRootReleaseAudit" => self.engram_named_root_release_audit.stamp(),
+            "engramSourceSightings" => self.engram_source_sightings.stamp(),
+            "pendingCoordinationScopeDeletions" => {
+                self.pending_coordination_scope_deletions.stamp()
+            }
+            "pendingResponseBoardProjectDetachments" => {
+                self.pending_response_board_project_detachments.stamp()
+            }
+            "ignoredDiscoveredCodexThreadIds" => self.ignored_discovered_codex_thread_ids.stamp(),
+            "orchestratorInstances" => self.orchestrator_instances.stamp(),
+            "delegationWaits" => self.delegation_waits.stamp(),
+            "testRunCards" => self.test_run_cards.stamp(),
+            "testRunRegistrations" => self.test_run_registrations.stamp(),
+            "testRunObservations" => self.test_run_observations.stamp(),
+            "testRunCompacted" => self.test_run_compacted.stamp(),
+            "testRunWaits" => self.test_run_waits.stamp(),
+            "workspaceLayouts" => self.workspace_layouts.stamp(),
+            _ => return None,
+        })
+    }
     /// Builds the metadata-only value from inner.
     ///
     /// Keep field-list in sync with [`Self::metadata_only`], which
@@ -100,47 +160,138 @@ impl PersistedState {
     /// snapshot-from-inner path or the synchronous persist fallback
     /// path.
     fn metadata_from_inner(inner: &StateInner) -> Self {
-        Self {
-            metadata_capture: PersistMetadataCapture::new(inner.metadata_predecessor.clone()),
-            federation: inner.federation.clone(),
-            codex: inner.codex.clone(),
-            preferences: inner.preferences.clone(),
+        Self::capture_metadata(inner, false)
+    }
+
+    fn metadata_delta_from_inner(inner: &StateInner) -> Self {
+        Self::capture_metadata(inner, true)
+    }
+
+    fn capture_metadata(inner: &StateInner, changed_only: bool) -> Self {
+        // Snapshot the predecessor and the small stamp map together, then let
+        // the writer publish while payload clones run under StateInner.
+        let (metadata_capture, watermarks) = {
+            let watermarks = inner
+                .metadata_watermarks
+                .lock()
+                .expect("metadata watermarks poisoned");
+            (
+                PersistMetadataCapture::new(inner.metadata_predecessor.clone()),
+                if changed_only {
+                    watermarks.clone()
+                } else {
+                    Default::default()
+                },
+            )
+        };
+        let mut selected = PersistMetadataWatermarks::new();
+        let mut omitted = BTreeSet::new();
+        macro_rules! collection {
+            ($field:literal, $value:expr $(,)?) => {{
+                let collection = $value;
+                let stamp = collection.stamp();
+                if changed_only && watermarks.get($field) == Some(&stamp) {
+                    omitted.insert($field);
+                    Default::default()
+                } else {
+                    selected.insert($field, stamp);
+                    clone_persist_metadata_field($field, &**collection).into()
+                }
+            }};
+        }
+        let mut metadata = Self {
+            metadata_capture,
+            federation: clone_persist_metadata_field("federation", &inner.federation),
+            codex: clone_persist_metadata_field("codex", &inner.codex),
+            preferences: clone_persist_metadata_field("preferences", &inner.preferences),
             revision: inner.revision,
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
-            projects: inner.projects.clone(),
-            engram_retired_work_authority_grants: inner
-                .engram_retired_work_authority_grants
-                .clone(),
-            engram_work_source_roots: inner.engram_work_source_roots.clone(),
-            engram_named_root_journal: inner.engram_named_root_journal.clone(),
-            engram_work_naming_history: inner.engram_work_naming_history.clone(),
-            engram_named_root_release_audit: inner.engram_named_root_release_audit.clone(),
-            engram_source_sightings: inner.engram_source_sightings.clone(),
+            projects: collection!("projects", &inner.projects),
+            engram_retired_work_authority_grants: collection!(
+                "engramRetiredWorkAuthorityGrants",
+                &inner.engram_retired_work_authority_grants,
+            ),
+            engram_work_source_roots: collection!(
+                "engramWorkSourceRoots",
+                &inner.engram_work_source_roots,
+            ),
+            engram_named_root_journal: collection!(
+                "engramNamedRootJournal",
+                &inner.engram_named_root_journal,
+            ),
+            engram_work_naming_history: collection!(
+                "engramWorkNamingHistory",
+                &inner.engram_work_naming_history,
+            ),
+            engram_named_root_release_audit: collection!(
+                "engramNamedRootReleaseAudit",
+                &inner.engram_named_root_release_audit,
+            ),
+            engram_source_sightings: collection!(
+                "engramSourceSightings",
+                &inner.engram_source_sightings,
+            ),
             engram_source_root_generation: inner.engram_source_root_generation,
-            pending_coordination_scope_deletions: inner
-                .pending_coordination_scope_deletions
-                .clone(),
-            pending_response_board_project_detachments: inner
-                .pending_response_board_project_detachments
-                .clone(),
-            ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
-            orchestrator_instances: inner.orchestrator_instances.clone(),
+            pending_coordination_scope_deletions: collection!(
+                "pendingCoordinationScopeDeletions",
+                &inner.pending_coordination_scope_deletions,
+            ),
+            pending_response_board_project_detachments: collection!(
+                "pendingResponseBoardProjectDetachments",
+                &inner.pending_response_board_project_detachments,
+            ),
+            ignored_discovered_codex_thread_ids: collection!(
+                "ignoredDiscoveredCodexThreadIds",
+                &inner.ignored_discovered_codex_thread_ids,
+            ),
+            orchestrator_instances: collection!(
+                "orchestratorInstances",
+                &inner.orchestrator_instances,
+            ),
             delegations: Vec::new(),
-            delegation_waits: inner.delegation_waits.clone(),
-            test_run_cards_epoch: inner.test_run_cards_epoch.clone(),
-            test_run_cards: inner.test_run_cards.clone(),
-            test_run_registrations: inner.test_run_registrations.clone(),
-            test_run_observations: inner.test_run_observations.clone(),
-            test_run_compacted: inner.test_run_compacted.clone(),
-            test_run_waits: inner.test_run_waits.clone(),
-            workspace_layouts: inner.workspace_layouts.clone(),
+            delegation_waits: collection!("delegationWaits", &inner.delegation_waits,),
+            test_run_cards_epoch: clone_persist_metadata_field(
+                "testRunCardsEpoch",
+                &inner.test_run_cards_epoch,
+            ),
+            test_run_cards: collection!("testRunCards", &inner.test_run_cards),
+            test_run_registrations: collection!(
+                "testRunRegistrations",
+                &inner.test_run_registrations,
+            ),
+            test_run_observations: collection!("testRunObservations", &inner.test_run_observations,),
+            test_run_compacted: collection!("testRunCompacted", &inner.test_run_compacted,),
+            test_run_waits: collection!("testRunWaits", &inner.test_run_waits),
+            workspace_layouts: collection!("workspaceLayouts", &inner.workspace_layouts,),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: inner.quarantined_persisted_session_ids.clone(),
             quarantined_persisted_delegation_ids: inner
                 .quarantined_persisted_delegation_ids
                 .clone(),
-        }
+        };
+        let image_stamps = selected
+            .keys()
+            .chain(omitted.iter())
+            .map(|field| {
+                (
+                    *field,
+                    metadata
+                        .metadata_collection_stamp(field)
+                        .expect("metadata collection field"),
+                )
+            })
+            .collect();
+        // Full source snapshots also publish their written stamps. Otherwise
+        // restoring a wrapper after a synchronous write could match an older
+        // watermark even though that write persisted different content.
+        metadata.metadata_capture.collections = Some(PersistMetadataCollectionCapture {
+            watermarks: inner.metadata_watermarks.clone(),
+            selected,
+            omitted,
+            image_stamps,
+        });
+        metadata
     }
 
     /// Returns a metadata-only copy of this persisted state with empty
@@ -170,29 +321,35 @@ impl PersistedState {
             revision: self.revision,
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
-            projects: self.projects.clone(),
-            engram_retired_work_authority_grants: self.engram_retired_work_authority_grants.clone(),
-            engram_work_source_roots: self.engram_work_source_roots.clone(),
-            engram_named_root_journal: self.engram_named_root_journal.clone(),
-            engram_work_naming_history: self.engram_work_naming_history.clone(),
-            engram_named_root_release_audit: self.engram_named_root_release_audit.clone(),
-            engram_source_sightings: self.engram_source_sightings.clone(),
+            projects: self.projects.snapshot_clone(),
+            engram_retired_work_authority_grants: self
+                .engram_retired_work_authority_grants
+                .snapshot_clone(),
+            engram_work_source_roots: self.engram_work_source_roots.snapshot_clone(),
+            engram_named_root_journal: self.engram_named_root_journal.snapshot_clone(),
+            engram_work_naming_history: self.engram_work_naming_history.snapshot_clone(),
+            engram_named_root_release_audit: self.engram_named_root_release_audit.snapshot_clone(),
+            engram_source_sightings: self.engram_source_sightings.snapshot_clone(),
             engram_source_root_generation: self.engram_source_root_generation,
-            pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.clone(),
+            pending_coordination_scope_deletions: self
+                .pending_coordination_scope_deletions
+                .snapshot_clone(),
             pending_response_board_project_detachments: self
                 .pending_response_board_project_detachments
-                .clone(),
-            ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids.clone(),
-            orchestrator_instances: self.orchestrator_instances.clone(),
+                .snapshot_clone(),
+            ignored_discovered_codex_thread_ids: self
+                .ignored_discovered_codex_thread_ids
+                .snapshot_clone(),
+            orchestrator_instances: self.orchestrator_instances.snapshot_clone(),
             delegations: Vec::new(),
-            delegation_waits: self.delegation_waits.clone(),
+            delegation_waits: self.delegation_waits.snapshot_clone(),
             test_run_cards_epoch: self.test_run_cards_epoch.clone(),
-            test_run_cards: self.test_run_cards.clone(),
-            test_run_registrations: self.test_run_registrations.clone(),
-            test_run_observations: self.test_run_observations.clone(),
-            test_run_compacted: self.test_run_compacted.clone(),
-            test_run_waits: self.test_run_waits.clone(),
-            workspace_layouts: self.workspace_layouts.clone(),
+            test_run_cards: self.test_run_cards.snapshot_clone(),
+            test_run_registrations: self.test_run_registrations.snapshot_clone(),
+            test_run_observations: self.test_run_observations.snapshot_clone(),
+            test_run_compacted: self.test_run_compacted.snapshot_clone(),
+            test_run_waits: self.test_run_waits.snapshot_clone(),
+            workspace_layouts: self.workspace_layouts.snapshot_clone(),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids.clone(),
             quarantined_persisted_delegation_ids: self.quarantined_persisted_delegation_ids.clone(),
@@ -246,7 +403,7 @@ impl PersistedState {
         // committed but not yet published stays pending, so the identical
         // request still resumes and publishes it; its unpublished
         // retirement reserves the slot meanwhile.
-        let engram_named_root_release_audit = self
+        let engram_named_root_release_audit: Vec<_> = self
             .engram_named_root_release_audit
             .into_iter()
             .filter_map(|record| {
@@ -284,6 +441,7 @@ impl PersistedState {
         let delegation_catalog_children = FederationCatalogChildren::from_records(&self.delegations);
         let mut inner = StateInner {
             metadata_predecessor: self.metadata_capture.known.clone(),
+            metadata_watermarks: Arc::default(),
             state_projection_cache: Mutex::new(StateProjectionCache::default()),
             federation: self.federation,
             federation_durable: true,
@@ -309,25 +467,26 @@ impl PersistedState {
             revision: self.revision,
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
-            projects: self.projects,
-            engram_retired_work_authority_grants: self.engram_retired_work_authority_grants,
-            engram_work_source_roots: self.engram_work_source_roots,
-            engram_named_root_journal: self.engram_named_root_journal,
-            engram_work_naming_history: self.engram_work_naming_history,
-            engram_named_root_release_audit,
-            engram_source_sightings: self.engram_source_sightings,
+            projects: self.projects.into(),
+            engram_retired_work_authority_grants: self.engram_retired_work_authority_grants.into(),
+            engram_work_source_roots: self.engram_work_source_roots.into(),
+            engram_named_root_journal: self.engram_named_root_journal.into(),
+            engram_work_naming_history: self.engram_work_naming_history.into(),
+            engram_named_root_release_audit: engram_named_root_release_audit.into(),
+            engram_source_sightings: self.engram_source_sightings.into(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),
             engram_source_root_generation: self.engram_source_root_generation,
-            pending_coordination_scope_deletions: self.pending_coordination_scope_deletions,
+            pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.into(),
             pending_response_board_project_detachments: self
-                .pending_response_board_project_detachments,
-            ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
+                .pending_response_board_project_detachments
+                .into(),
+            ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids.into(),
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),
             remote_session_transcript_applied_revisions: HashMap::new(),
-            orchestrator_instances: self.orchestrator_instances,
+            orchestrator_instances: self.orchestrator_instances.into(),
             delegations: self.delegations,
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
@@ -392,13 +551,13 @@ impl PersistedState {
                     )
                 })
                 .collect(),
-            test_run_waits: self.test_run_waits,
-            delegation_waits: self.delegation_waits,
+            test_run_waits: self.test_run_waits.into(),
+            delegation_waits: self.delegation_waits.into(),
             delegation_mutation_stamps: BTreeMap::new(),
             delegation_catalog_children: Mutex::new(delegation_catalog_children),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
-            workspace_layouts: self.workspace_layouts,
+            workspace_layouts: self.workspace_layouts.into(),
             sessions: self
                 .sessions
                 .into_iter()

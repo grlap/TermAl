@@ -939,7 +939,12 @@ fn durability_pending_review_old_candidate_ack_cannot_ack_rearmed_read() {
     // Recapture the same Candidate after its real COMMIT adopted the new
     // predecessor, while its ACK still holds the worker at that crash cut.
     let candidate_replay = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
-    assert!(old_image.matches_metadata(&candidate_replay.metadata));
+    let old_target = PersistFenceTarget::EngramWorkAuthority(Box::new(old_image.clone()));
+    assert!(["engramWorkNamingHistory", "engramWorkSourceRoots", "engramNamedRootJournal"]
+        .iter().all(|field| candidate_replay.metadata.metadata_collection_is_omitted(field)));
+    assert!(!old_target.is_in_delta(&candidate_replay));
+    assert!(old_target.is_already_durable(cache.connection.as_ref().unwrap()).unwrap(),
+        "the replay retains the exact committed Candidate without cloning its unchanged collections");
     batch.finish_write(&candidate, &committed, cache.connection.as_ref());
     // Its same owner must now obtain a NEW full Prepared-image ACK.
     receive_naming_authority_fence(&rx, &mut batch, &worker);

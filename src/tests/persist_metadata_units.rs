@@ -7,6 +7,9 @@ use super::*;
 #[path = "persist_metadata_units_repair.rs"]
 mod repair;
 
+#[path = "persist_metadata_capture.rs"]
+mod capture;
+
 fn metadata_units_connection(fixture: &FenceFixture) -> &rusqlite::Connection {
     fixture.cache.connection.as_ref().unwrap()
 }
@@ -268,6 +271,48 @@ fn metadata_units_uncommitted_migration_ddl_disappears_after_connection_loss() {
             .contains("state_metadata_units")
     );
     ensure_sqlite_state_schema_for_load(&connection).unwrap();
+}
+
+#[test]
+fn metadata_collection_capture_skips_unchanged_collections() {
+    let mut fixture = FenceFixture::new();
+    {
+        let mut inner = fixture.inner.lock().unwrap();
+        inner.ignored_discovered_codex_thread_ids = (0..256)
+            .map(|index| format!("unchanged-thread-{index}"))
+            .collect();
+        inner.pending_coordination_scope_deletions = (0..256)
+            .map(|index| format!("unchanged-scope-{index}"))
+            .collect();
+    }
+    fixture.write(&fixture.collect()).unwrap();
+    fixture.wait_record("changed-wait");
+
+    let observer = Arc::new(PersistObserver::default());
+    let scope = observer.begin_at(std::time::Instant::now());
+    let _delta = fixture.collect();
+    scope.finish(true, &PersistTickTimings::default());
+    let snapshot = observer.snapshot_at(std::time::Instant::now());
+    let root_values = ["federation", "codex", "preferences", "testRunCardsEpoch"];
+    let cloned = &snapshot.recent[0].counts.metadata_cloned_fields;
+    assert_eq!(
+        cloned
+            .iter()
+            .copied()
+            .filter(|field| root_values.contains(field))
+            .collect::<Vec<_>>(),
+        root_values,
+        "small root values retain the existing federation guard snapshot"
+    );
+    assert_eq!(
+        cloned
+            .iter()
+            .copied()
+            .filter(|field| !root_values.contains(field))
+            .collect::<Vec<_>>(),
+        vec!["delegationWaits"],
+        "locked capture must clone only the changed collection"
+    );
 }
 
 #[test]

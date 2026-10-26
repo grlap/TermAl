@@ -2814,7 +2814,7 @@ fn consume_delegation_waits_for_stopped_parent_locked(
             remaining.push(wait);
         }
     }
-    inner.delegation_waits = remaining;
+    inner.delegation_waits = remaining.into();
     refresh
 }
 
@@ -2870,7 +2870,7 @@ fn refresh_delegation_waits_matching_locked(
             },
         );
     }
-    inner.delegation_waits = remaining;
+    inner.delegation_waits = remaining.into();
     refresh
 }
 

@@ -102,7 +102,7 @@ fn an_evaluation_whose_admission_learns_the_named_binding_is_still_admitted() {
         // The claim named the worktree: TermAl acknowledged the naming, and
         // the session is bound to the claim.
         let mut inner = state.inner.lock().unwrap();
-        inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
+        *inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
             store: store.clone(),
             work_id: binding.work_id.clone(),
             short_ref: "w-task".to_owned(),

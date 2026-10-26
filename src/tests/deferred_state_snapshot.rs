@@ -3,6 +3,9 @@
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
+#[path = "initial_state_snapshot.rs"]
+mod initial_state_snapshot;
+
 struct ProjectionObserver;
 
 impl ProjectionObserver {

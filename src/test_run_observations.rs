@@ -3,6 +3,8 @@
 // artifact validation, verification credit and tracker lifecycle stay with
 // their existing adapters. A native exit never constitutes verification.
 
+include!("test_run_projection.rs");
+
 #[cfg(test)]
 thread_local! {
     static TEST_TEST_RUN_ASSOCIATION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -152,7 +154,7 @@ struct TestRunObservedArtifact {
     terminal_digest: Option<String>,
 }
 
-// Borrowed candidate selection for one locked projection, never cached proof.
+// Borrowed candidate selection over a live model or owned cut, never cached proof.
 // Every selected row still passes the exact owner/path/request-or-digest and
 // current durability/lifecycle predicates. Rebuilding at each cut also sees
 // unstamped in-memory changes; run-id equality alone never grants authority.
@@ -162,14 +164,18 @@ struct TestRunProjection<'a> {
 }
 
 impl<'a> TestRunProjection<'a> {
-    fn new(inner: &'a StateInner) -> Self {
+    fn new(inner: &'a impl TestRunProjectionSource) -> Self {
+        #[cfg(test)]
+        if let Some(started) = TEST_RUN_PROJECTION_STARTED.with(|slot| slot.borrow_mut().take()) {
+            started();
+        }
         #[cfg(test)]
         TEST_TEST_RUN_PROJECTION_WORK.with(|count| {
             let (builds, entries, observations) = count.get();
             count.set((builds + 1, entries, observations));
         });
         let mut entries = HashMap::new();
-        for entry in &inner.test_runs.entries {
+        for entry in &inner.projection_index().entries {
             #[cfg(test)]
             TEST_TEST_RUN_PROJECTION_WORK.with(|count| {
                 let (builds, entries, observations) = count.get();
@@ -178,7 +184,7 @@ impl<'a> TestRunProjection<'a> {
             entries.entry(entry.summary.run_id.as_str()).or_insert(entry);
         }
         let mut observations: HashMap<&str, Vec<_>> = HashMap::new();
-        for row in inner.test_run_observations.values() {
+        for row in inner.projection_observations().values() {
             #[cfg(test)]
             TEST_TEST_RUN_PROJECTION_WORK.with(|count| {
                 let (builds, entries, observations) = count.get();
@@ -977,7 +983,7 @@ fn test_run_public_observation(
 }
 
 fn test_run_observation_risk(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     row: &TestRunCommandObservation,
     durable: bool,
 ) -> Option<bool> {
@@ -1001,7 +1007,7 @@ fn test_run_observation_risk(
 }
 
 fn test_run_observation_summary(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     row: &TestRunCommandObservation,
 ) -> TestRunSummary {
     let mut summary = row.summary.clone();
@@ -1030,14 +1036,12 @@ fn test_run_observation_summary(
         .into_iter()
         .collect();
     summary.registration.tracking_durability = Some(
-        if inner
-            .test_runs
+        if inner.projection_index()
             .observations_failed
             .contains(&row.execution_id)
         {
             "failed"
-        } else if inner
-            .test_runs
+        } else if inner.projection_index()
             .observations_durable
             .contains(&row.execution_id)
         {
@@ -1050,8 +1054,7 @@ fn test_run_observation_summary(
     summary.registration.restart_would_void_evidence = test_run_observation_risk(
         inner,
         row,
-        inner
-            .test_runs
+        inner.projection_index()
             .observations_durable
             .contains(&row.execution_id),
     );
@@ -1088,7 +1091,7 @@ fn test_run_observation_summary(
 // directory, and a positive terminal-digest or immutable-request match. Also
 // used by the handoff ledger to find a run's credited observations.
 fn test_run_observation_matches_run(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     run: &TestRunSummary,
     disk: Option<&TestRunDisk>,
     row: &TestRunCommandObservation,
@@ -1106,7 +1109,7 @@ fn test_run_observation_matches_run(
                 artifact.request_identity.as_ref().is_some_and(|identity| {
                     disk.is_some_and(|disk| disk.request_identity.as_ref() == Some(identity))
                         || (disk.is_none()
-                            && inner.test_run_compacted.get(&run.run_id).is_some_and(
+                            && inner.projection_compacted().get(&run.run_id).is_some_and(
                                 |retained| retained.request_identity.as_ref() == Some(identity),
                             ))
                 })
@@ -1128,7 +1131,7 @@ fn test_run_enrich_artifact_summary(
 }
 
 fn test_run_enrich_artifact_summary_from_observations<'a>(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     run: &mut TestRunSummary,
     disk: Option<&TestRunDisk>,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
@@ -1144,8 +1147,7 @@ fn test_run_enrich_artifact_summary_from_observations<'a>(
     // A discovery-only artifact is superseded by exact report proof. A
     // registered launch additionally requires coverage of its captured
     // binding; another lifecycle cannot discharge that association.
-    let base_covered = inner
-        .test_run_registrations
+    let base_covered = inner.projection_registrations()
         .get(&run.run_id)
         .is_none_or(|registration| {
             registration.validated_unbound

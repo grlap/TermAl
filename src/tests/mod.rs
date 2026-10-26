@@ -69,6 +69,7 @@ mod delegation_wait;
 mod delegation_worker;
 mod delegation_worker_handoff;
 mod delegations;
+// Also mounts initial_state_snapshot.rs, sharing the snapshot-cache fixtures.
 mod deferred_state_snapshot;
 mod engram_authority_fence_phases;
 mod engram_authority_fixture;
@@ -1952,7 +1953,17 @@ async fn next_sse_event<S>(stream: &mut std::pin::Pin<Box<S>>) -> String
 where
     S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
 {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    next_sse_event_with_timeout(stream, Duration::from_secs(5)).await
+}
+
+async fn next_sse_event_with_timeout<S>(
+    stream: &mut std::pin::Pin<Box<S>>,
+    limit: Duration,
+) -> String
+where
+    S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
+{
+    tokio::time::timeout(limit, async {
         let mut event = String::new();
         loop {
             let chunk = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx))

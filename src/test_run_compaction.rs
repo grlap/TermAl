@@ -78,10 +78,9 @@ fn test_run_summary_ids(run: &TestRunSummary) -> impl Iterator<Item = &str> {
     )
 }
 
-fn test_run_compact_is_installed(inner: &StateInner, row: &TestRunCompacted) -> bool {
-    let index = &inner.test_runs;
-    let registrations = &inner.test_run_registrations;
-    let observations = &inner.test_run_observations;
+fn test_run_compact_is_installed(inner: &impl TestRunProjectionSource, row: &TestRunCompacted) -> bool {
+    let index = inner.projection_index();
+    let registrations = inner.projection_registrations();
     (!row.compacted
         || (index.compactions_durable.contains(&row.summary.run_id)
             && index.find(&row.summary.run_id).is_none()))
@@ -89,11 +88,11 @@ fn test_run_compact_is_installed(inner: &StateInner, row: &TestRunCompacted) -> 
         && row
             .observations
             .iter()
-            .all(|observation| !observations.contains_key(&observation.execution_id))
+            .all(|observation| !inner.projection_has_observation(&observation.execution_id))
 }
 
-fn test_run_compacted_summary(inner: &StateInner, row: &TestRunCompacted) -> TestRunSummary {
-    let index = &inner.test_runs;
+fn test_run_compacted_summary(inner: &impl TestRunProjectionSource, row: &TestRunCompacted) -> TestRunSummary {
+    let index = inner.projection_index();
     let mut summary = row.summary.clone();
     summary.registration.history_compacted = Some(row.compacted);
     summary.registration.artifact_unavailable = if !row.compacted && !index.scanned_once {
@@ -106,19 +105,9 @@ fn test_run_compacted_summary(inner: &StateInner, row: &TestRunCompacted) -> Tes
         if summary.registration.artifact_unavailable == Some(true) {
             summary = test_run_unavailable_artifact(summary);
         }
-        summary.registration.restart_would_void_evidence = inner
-            .sessions
-            .iter()
-            .flat_map(|record| &record.engram.carried_checks)
-            .any(|check| {
-                check.run_directory.as_ref().is_some_and(|path| {
-                    test_run_path_key(&test_run_display_path(path))
-                        == test_run_path_key(&summary.run_dir)
-                }) && check.terminal_digest.as_ref().is_some_and(|digest| {
-                    test_run_terminal_digest_matches(summary.detail_version.as_deref(), digest)
-                })
-            })
-            .then_some(true);
+        summary.registration.restart_would_void_evidence = test_run_projection_carried_matches(
+            inner, FsPath::new(&summary.run_dir), summary.detail_version.as_deref(), false,
+        ).then_some(true);
         return summary;
     }
     let mut unknown = !index.compactions_durable.contains(&summary.run_id)

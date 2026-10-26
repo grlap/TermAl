@@ -12,9 +12,19 @@ delegation admission, provider delivery, SQL schema, or HTTP response policy.
 enum PersistFenceTarget {
     Federation(Value),
     FederationBindings(Box<FederationBindingsFence>),
-    ProviderCapacityRecovery { session_id: String, content: Value },
-    EngramCausalCard { session_id: String, message_id: String, content: Value },
-    EngramRecovery { session_id: String, content: Value },
+    ProviderCapacityRecovery {
+        session_id: String,
+        content: Value,
+    },
+    EngramCausalCard {
+        session_id: String,
+        message_id: String,
+        content: Value,
+    },
+    EngramRecovery {
+        session_id: String,
+        content: Value,
+    },
     EngramWorkAuthority(Box<EngramAuthorityImage>),
     /// An operator release of a retained named root: its audit record and
     /// the removal of its selection, both in the committed metadata
@@ -96,19 +106,37 @@ impl PersistFenceTarget {
     fn is_in_delta(&self, delta: &PersistDelta) -> bool {
         match self {
             Self::Federation(_) | Self::FederationBindings(_) => false,
-            Self::EngramWorkAuthority(image) => image.matches_metadata(&delta.metadata),
+            Self::EngramWorkAuthority(image) => {
+                ![
+                    "engramWorkNamingHistory",
+                    "engramWorkSourceRoots",
+                    "engramNamedRootJournal",
+                ]
+                .iter()
+                .any(|field| delta.metadata.metadata_collection_is_omitted(field))
+                    && image.matches_metadata(&delta.metadata)
+            }
             Self::EngramNamedRootRelease(audit) => {
-                engram_named_root_release_in_metadata(audit, &delta.metadata)
+                !["engramNamedRootReleaseAudit", "engramWorkSourceRoots"]
+                    .iter()
+                    .any(|field| delta.metadata.metadata_collection_is_omitted(field))
+                    && engram_named_root_release_in_metadata(audit, &delta.metadata)
             }
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
-            Self::EngramCausalCard { .. } | Self::EngramRecovery { .. } | Self::EngramAdmission { .. } | Self::EngramSourceObservation { .. }
-                | Self::EngramSourceSightingHistory(_) | Self::EngramSourceFinalization { .. }
-                | Self::EngramSourceRemoval { .. } | Self::QueuedPromptDurability { .. }
-                | Self::FederationExecutorQueue { .. }
-                | Self::FederationExecutorHandoff { .. }
-                | Self::PromptDeliveryWriteAhead { .. } | Self::ProviderCapacityRecovery { .. }
-                | Self::EngramOwedBindDecision { .. } => false,
+            Self::EngramCausalCard { .. }
+            | Self::EngramRecovery { .. }
+            | Self::EngramAdmission { .. }
+            | Self::EngramSourceObservation { .. }
+            | Self::EngramSourceSightingHistory(_)
+            | Self::EngramSourceFinalization { .. }
+            | Self::EngramSourceRemoval { .. }
+            | Self::QueuedPromptDurability { .. }
+            | Self::FederationExecutorQueue { .. }
+            | Self::FederationExecutorHandoff { .. }
+            | Self::PromptDeliveryWriteAhead { .. }
+            | Self::ProviderCapacityRecovery { .. }
+            | Self::EngramOwedBindDecision { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
                 .as_deref()
@@ -147,11 +175,27 @@ impl PersistFenceTarget {
     /// work's owner moved to a later version than the image's, and owner
     /// versions only grow. Only an authority image is superseded this way;
     /// every other target keeps waiting as before.
-    fn is_superseded_by(&self, delta: &PersistDelta) -> bool {
+    fn is_superseded_by(
+        &self,
+        delta: &PersistDelta,
+        connection: Option<&rusqlite::Connection>,
+    ) -> Result<bool> {
         let Self::EngramWorkAuthority(image) = self else {
-            return false;
+            return Ok(false);
         };
-        image.is_superseded_by_metadata(&delta.metadata)
+        if delta
+            .metadata
+            .metadata_collection_is_omitted("engramWorkNamingHistory")
+        {
+            let Some(connection) = connection else {
+                return Ok(false);
+            };
+            return Ok(
+                read_metadata_for_fence(connection, &["engramWorkNamingHistory"])?
+                    .is_some_and(|metadata| image.is_superseded_by_metadata(&metadata)),
+            );
+        }
+        Ok(image.is_superseded_by_metadata(&delta.metadata))
     }
 
     /// A request can arrive after the worker drained its channel but before
@@ -363,14 +407,41 @@ impl PersistFenceTarget {
                     .context("failed to serialize delegation fence target")?;
                 Ok(stored.as_deref() == Some(expected_json.as_str()))
             }
-            // Every successful delta reconciles the complete metadata units, including waits
-            // and the card epoch. Absence/mismatch there is already
-            // conclusive for this tick.
-            Self::WaitRegistration(_)
-            | Self::TestRunCardsEpoch(_)
-            | Self::TestRunRegistration(_)
-            | Self::TestRunObservation(_)
-            | Self::TestRunCompaction(_) => Ok(false),
+            Self::WaitRegistration(expected) => Ok(read_metadata_for_fence(
+                connection,
+                &["delegationWaits"],
+            )?
+            .is_some_and(|metadata| {
+                metadata
+                    .delegation_waits
+                    .iter()
+                    .any(|actual| actual == expected)
+            })),
+            // This eager root is present in every successful delta. Its
+            // mismatch is conclusive; only omitted collections need read-back.
+            Self::TestRunCardsEpoch(_) => Ok(false),
+            Self::TestRunRegistration(expected) => Ok(read_metadata_for_fence(
+                connection,
+                &["testRunRegistrations"],
+            )?
+            .is_some_and(|metadata| {
+                metadata.test_run_registrations.get(&expected.run_id) == Some(expected)
+            })),
+            Self::TestRunObservation(expected) => Ok(read_metadata_for_fence(
+                connection,
+                &["testRunObservations"],
+            )?
+            .is_some_and(|metadata| {
+                metadata.test_run_observations.get(&expected.execution_id)
+                    == Some(expected.as_ref())
+            })),
+            Self::TestRunCompaction(expected) => Ok(read_metadata_for_fence(
+                connection,
+                &["testRunCompacted"],
+            )?
+            .is_some_and(|metadata| {
+                metadata.test_run_compacted.get(&expected.summary.run_id) == Some(expected.as_ref())
+            })),
             // The hold's nonce and the exact queued entry must both be in the
             // committed row; a removed or replaced entry never matches.
             Self::QueuedPromptDurability {
@@ -468,14 +539,22 @@ impl PersistFenceTarget {
                     return Ok(false);
                 };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                Ok(actual.prompt_deliveries.get(prompt_id).is_some_and(|delivery| {
-                    delivery.disposition == PromptDeliveryDisposition::HandingOff
-                        && delivery.write_ahead == *write_ahead
-                }))
+                Ok(actual
+                    .prompt_deliveries
+                    .get(prompt_id)
+                    .is_some_and(|delivery| {
+                        delivery.disposition == PromptDeliveryDisposition::HandingOff
+                            && delivery.write_ahead == *write_ahead
+                    }))
             }
             // The committed row must hold this owed bind with exactly this
             // decision; a settled or redecided entry never matches.
-            Self::EngramOwedBindDecision { session_id, original, work_id, decided } => {
+            Self::EngramOwedBindDecision {
+                session_id,
+                original,
+                work_id,
+                decided,
+            } => {
                 let stored: Option<String> = connection
                     .query_row(
                         "SELECT value_json FROM sessions WHERE id = ?1",
@@ -899,7 +978,11 @@ impl PersistFenceBatch {
         self.drain_observed(rx, shutdown).0
     }
 
-    fn drain_observed(&mut self, rx: &mpsc::Receiver<PersistRequest>, mut shutdown: bool) -> (bool, usize) {
+    fn drain_observed(
+        &mut self,
+        rx: &mpsc::Receiver<PersistRequest>,
+        mut shutdown: bool,
+    ) -> (bool, usize) {
         let mut drained = 0;
         while let Ok(request) = rx.try_recv() {
             drained += 1;
@@ -909,7 +992,10 @@ impl PersistFenceBatch {
     }
 
     fn take_observer_acceptance(&mut self) -> (usize, u64) {
-        (std::mem::take(&mut self.observed_accepted), std::mem::take(&mut self.observed_age_max_us))
+        (
+            std::mem::take(&mut self.observed_accepted),
+            std::mem::take(&mut self.observed_age_max_us),
+        )
     }
 
     fn fail(&mut self, error: PersistFenceError) {
@@ -960,13 +1046,16 @@ impl PersistFenceBatch {
                 Ok(true) => fence.finish(Ok(())),
                 // The delta was collected after this fence was accepted, so a
                 // later owner in it means no future write can match.
-                Ok(false) if fence.target.is_superseded_by(delta) => {
-                    fence.finish(Err(PersistFenceError::Superseded));
-                }
-                Ok(false) => {
-                    fence.completion.progress().phase = PersistFencePhase::WrittenUnmatched;
-                    return true;
-                }
+                Ok(false) => match fence.target.is_superseded_by(delta, connection) {
+                    Ok(true) => fence.finish(Err(PersistFenceError::Superseded)),
+                    Ok(false) => {
+                        fence.completion.progress().phase = PersistFencePhase::WrittenUnmatched;
+                        return true;
+                    }
+                    Err(error) => {
+                        fence.finish(Err(PersistFenceError::WriteFailed(format!("{error:#}"))))
+                    }
+                },
                 Err(error) => {
                     // The write itself committed; a read-back error fails this
                     // fence, not the worker's successful mutation watermark.

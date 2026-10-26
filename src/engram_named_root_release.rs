@@ -753,11 +753,6 @@ impl AppState {
         #[cfg(test)]
         {
             let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
-            if !engram_named_root_release_in_metadata(audit, &delta.metadata) {
-                return Err(ApiError::conflict(
-                    "the released selection changed before its persistence was confirmed",
-                ));
-            }
             let mut cache = SqlitePersistConnectionCache::new();
             persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta).map_err(
                 |error| {
@@ -766,6 +761,18 @@ impl AppState {
                     ))
                 },
             )?;
+            // Omission cannot prove selection absence. The existing scoped
+            // fence reader checks both collections in one committed cut.
+            if !PersistFenceTarget::EngramNamedRootRelease(Box::new(audit.clone()))
+                .is_already_durable(
+                    cache.connection.as_ref().expect("committed writer connection"),
+                )
+                .map_err(|error| ApiError::internal(format!("release read-back failed: {error:#}")))?
+            {
+                return Err(ApiError::conflict(
+                    "the released selection changed before its persistence was confirmed",
+                ));
+            }
         }
         Ok(())
     }

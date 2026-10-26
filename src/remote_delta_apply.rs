@@ -1631,7 +1631,7 @@ impl AppState {
                     ) {
                         inner.next_session_number = rollback_state.0;
                         inner.sessions = rollback_state.1;
-                        inner.orchestrator_instances = rollback_state.2;
+                        inner.orchestrator_instances = rollback_state.2.into();
                         return Err(err);
                     }
                     let revision = self.commit_remote_delta_persisted_locked(&mut inner)?;

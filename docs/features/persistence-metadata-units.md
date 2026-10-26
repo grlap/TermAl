@@ -88,13 +88,23 @@ keys, paths or persisted identifiers enter this telemetry.
 
 The deterministic tests use disposable SQLite and the real capture/write/
 fence/load paths. The 3,000 ignored-thread fixture is a modeled population,
-not a measured production field distribution. The formerly observed 19.9 MB
-production breakdown remains unknown until collected through supported
-diagnostics. Source projection still traverses metadata off the state lock;
-this change does not establish a CPU or latency bound. Positional arrays
+not a measured production field distribution. Diagnostics describe encoded
+footprint, not clone time. Source capture clones changed metadata collections
+under the state lock; unit encoding runs after that lock is released. This
+does not establish a CPU or latency bound. Positional arrays
 preserve order and duplicates, so inserting or removing before their tail
 can rewrite the affected suffix. The focused fixtures do not claim a live
 physical I/O measurement or an execution of operator rollback.
+
+Collection capture uses per-field identity and mutation-generation watermarks
+in [persist_metadata_tracking.rs](../../src/persist_metadata_tracking.rs).
+An unchanged collection is omitted from the captured image; the existing
+writer retains its units from the verified durable predecessor. Successful
+delta and synchronous full writes publish the stamps they actually captured.
+The small roots `federation`, `codex`, `preferences` and `testRunCardsEpoch`
+remain eager. An omitted collection cannot prove absence: late or
+absence-sensitive fences use the existing scoped read-back on the committed
+writer connection. No new cache, storage shape or reader floor is introduced.
 
 Emergency units-1 did not record counts and its primary-2 migration allowed
 omitted default fields. Upgrade rejects its detectable corruption, including

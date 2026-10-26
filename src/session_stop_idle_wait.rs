@@ -140,8 +140,8 @@ impl AppState {
             }
             Err(error) => {
                 inner.sessions[index] = original_record;
-                inner.delegation_waits = delegation_waits_before_stop;
-                inner.test_run_waits = test_run_waits_before_stop;
+                inner.delegation_waits = delegation_waits_before_stop.into();
+                inner.test_run_waits = test_run_waits_before_stop.into();
                 Err(ApiError::internal(format!(
                     "failed to persist the stopped waits: {error:#}"
                 )))

@@ -1119,8 +1119,8 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
             .expect("Cursor session should exist");
         inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
-        inner.delegation_waits = baseline_waits.clone();
-        inner.test_run_waits = baseline_run_waits.clone();
+        *inner.delegation_waits = baseline_waits.clone();
+        *inner.test_run_waits = baseline_run_waits.clone();
         state.commit_locked(&mut inner).unwrap();
     }
 

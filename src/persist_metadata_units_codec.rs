@@ -36,9 +36,11 @@ fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUn
     let mut units = BTreeMap::new();
     macro_rules! field {
         ($name:literal, $value:expr) => {{
-            let mut one = serde_json::Map::new();
-            one.insert($name.to_owned(), serde_json::to_value($value)?);
-            units.extend(metadata_value_to_units(Value::Object(one))?);
+            if !metadata.metadata_collection_is_omitted($name) {
+                let mut one = serde_json::Map::new();
+                one.insert($name.to_owned(), serde_json::to_value($value)?);
+                units.extend(metadata_value_to_units(Value::Object(one))?);
+            }
         }};
     }
     field!("federation", &metadata.federation);
@@ -294,15 +296,22 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
             |row| row.get(0),
         )
         .optional()
-        .map_err(|error| reject_unsupported_state_schema(format!(
-            "cannot read metadata storage version: {error}"
-        )))?;
+        .map_err(|error| {
+            reject_unsupported_state_schema(format!(
+                "cannot read metadata storage version: {error}"
+            ))
+        })?;
     match version.as_deref() {
-        Some(version @ ("2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION | SQLITE_SCHEMA_VERSION)) => Ok(version.to_owned()),
+        Some(
+            version
+            @ ("2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION | SQLITE_SCHEMA_VERSION),
+        ) => Ok(version.to_owned()),
         Some(version) => Err(reject_unsupported_state_schema(format!(
             "unsupported metadata storage version `{version}`"
         ))),
-        None => Err(reject_unsupported_state_schema("missing metadata storage version")),
+        None => Err(reject_unsupported_state_schema(
+            "missing metadata storage version",
+        )),
     }
 }
 

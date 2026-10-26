@@ -6740,7 +6740,7 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
         record.session.status = SessionStatus::Active;
         // A Stop that the revocation completes consumes the session's run
         // waits, and only its own (docs/features/test-runs.md).
-        inner.test_run_waits = vec![
+        *inner.test_run_waits = vec![
             test_run_wait_record("test-run-wait-stopped-session", &session_id),
             test_run_wait_record("test-run-wait-other-session", "session-other"),
         ];

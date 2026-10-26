@@ -59,6 +59,8 @@ fn persist_commit_transaction_observed(tx: rusqlite::Transaction<'_>) -> rusqlit
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistObservedCounts {
+    #[cfg(test)]
+    metadata_cloned_fields: Vec<&'static str>,
     drained_requests: usize,
     accepted_fences: usize,
     pending_fences_before: usize,

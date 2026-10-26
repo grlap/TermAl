@@ -8,6 +8,14 @@
 // (`test_runs_disk.rs`) or HTTP (`test_runs_api.rs`), and never starts,
 // cancels or settles a run.
 
+#[cfg(test)]
+thread_local! {
+    static TEST_RUN_PROJECTION_STARTED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_RUN_SUMMARY_STARTED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_RUN_PROJECTION_PREPARED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_RUN_PROJECTION_FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The background thread's tick: it rescans on every tick while some indexed
 /// run is `running`, and otherwise stats the tracked directories on every
 /// tick and rescans when one changed. Tests drive the rescan directly and
@@ -311,26 +319,19 @@ fn test_run_rescan_due(
 /// The session id `reference` names: an id of a visible session, or the name
 /// of exactly one visible root session (not a delegation child), compared
 /// without case, as the mailbox resolves `--to`.
-fn test_run_resolve_session(inner: &StateInner, reference: &str) -> Option<String> {
+fn test_run_resolve_session(inner: &impl TestRunProjectionSource, reference: &str) -> Option<String> {
     let reference = reference.trim();
     // A mailbox-only locator cannot become an owner/notification principal by
     // matching a session's display name.
     if !matches!(mailbox_reference_handle(reference), Ok(None)) { return None; }
-    if let Some(index) = inner.find_session_index(reference) {
-        return (!inner.sessions[index].hidden).then(|| reference.to_owned());
+    if let Some(session) = inner.projection_session_by_id(reference) {
+        return (!session.hidden).then(|| reference.to_owned());
     }
-    let children: HashSet<&str> = inner
-        .delegations
-        .iter()
-        .map(|delegation| delegation.child_session_id.as_str())
-        .collect();
-    let mut matches = inner.sessions.iter().filter(|record| {
-        !record.hidden
-            && !children.contains(record.session.id.as_str())
-            && record.session.name.eq_ignore_ascii_case(reference)
+    let mut matches = inner.projection_sessions().filter(|row| {
+        !row.hidden && !row.child && row.name.eq_ignore_ascii_case(reference)
     });
     let found = matches.next()?;
-    matches.next().is_none().then(|| found.session.id.clone())
+    matches.next().is_none().then(|| found.id.to_owned())
 }
 
 /// The project a run belongs to: the project rooted at its worktree, else the
@@ -358,11 +359,11 @@ fn test_run_project_id(
         .min()
 }
 
-fn test_run_registered_project_id(inner: &StateInner, disk: &TestRunDisk) -> Option<String> {
+fn test_run_registered_project_id(inner: &impl TestRunProjectionSource, disk: &TestRunDisk) -> Option<String> {
     test_run_matching_registration(inner, disk)
-        .filter(|_| inner.test_runs.registered.contains(&disk.run_id))
+        .filter(|_| inner.projection_index().registered.contains(&disk.run_id))
         .and_then(|row| row.project_id.clone())
-        .filter(|id| inner.projects.iter().any(|project| &project.id == id))
+        .filter(|id| inner.projection_project_exists(id))
 }
 
 // Registration can become durable between scans. Read/wait boundaries must
@@ -378,11 +379,15 @@ fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSumm
 }
 
 fn test_run_summary_from_observations<'a>(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     scanned: &TestRunScanned,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation> + Clone,
 ) -> TestRunSummary {
-    if let Some(compacted) = inner.test_run_compacted.get(&scanned.disk.run_id)
+    #[cfg(test)]
+    if let Some(started) = TEST_RUN_SUMMARY_STARTED.with(|slot| slot.borrow_mut().take()) {
+        started();
+    }
+    if let Some(compacted) = inner.projection_compacted().get(&scanned.disk.run_id)
         .filter(|row| row.compacted && test_run_compact_is_installed(inner, row)) {
         return test_run_compacted_summary(inner, compacted);
     }
@@ -775,42 +780,55 @@ impl AppState {
                 || test_run_file_stamp(&path.join("results.json")).is_none()
         }).map(|row| row.summary.run_id.clone()).collect();
         trace.mark("reads_done");
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        trace.mark("commit_acquired");
-        inner.test_runs.compaction_stamps = compact_stamps;
-        let mut compact_metadata_changed = false;
-        let compact_updates: HashMap<_, _> = inner.test_runs.compaction_stamps.iter()
-            .map(|(id, (_, _, conflict))| (id.clone(), *conflict)).collect();
-        for (id, compacted) in &mut inner.test_run_compacted {
-            if compacted.compacted && !compacted.summary.run_dir.is_empty()
-                && compacted.artifact_unavailable != unavailable.contains(id) {
-                compacted.artifact_unavailable = unavailable.contains(id);
-                compact_metadata_changed = true;
-            }
-            if let Some(conflict) = compact_updates.get(id) {
-                if compacted.artifact_conflict != *conflict {
-                    compacted.artifact_conflict = *conflict;
+        let projection_scope = TestRunProjectionScope::new(&scanned);
+        let projection_cut = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            inner.test_runs.compaction_stamps = compact_stamps;
+            let mut compact_metadata_changed = false;
+            let compact_updates: HashMap<_, _> = inner.test_runs.compaction_stamps.iter()
+                .map(|(id, (_, _, conflict))| (id.clone(), *conflict)).collect();
+            for (id, compacted) in &mut inner.test_run_compacted {
+                if compacted.compacted && !compacted.summary.run_dir.is_empty()
+                    && compacted.artifact_unavailable != unavailable.contains(id) {
+                    compacted.artifact_unavailable = unavailable.contains(id);
                     compact_metadata_changed = true;
                 }
+                if let Some(conflict) = compact_updates.get(id) {
+                    if compacted.artifact_conflict != *conflict {
+                        compacted.artifact_conflict = *conflict;
+                        compact_metadata_changed = true;
+                    }
+                }
             }
+            if compact_metadata_changed {
+                let _ = self.commit_locked_with_persist_dispatch(&mut inner);
+            }
+            inner.test_runs.parsed = parsed;
+            inner.test_runs.tracked_dirs = tracked_dirs;
+            TestRunProjectionCut::capture(&inner, projection_scope)
+        };
+        trace.mark("projection_cut_taken");
+        let prepared = test_run_project_entries(&projection_cut, &scanned);
+        trace.mark("projection_ready");
+        #[cfg(test)]
+        if let Some(ready) = TEST_RUN_PROJECTION_PREPARED.with(|slot| slot.borrow_mut().take()) {
+            ready();
         }
-        if compact_metadata_changed {
-            let _ = self.commit_locked_with_persist_dispatch(&mut inner);
-        }
-        inner.test_runs.parsed = parsed;
-        inner.test_runs.tracked_dirs = tracked_dirs;
-        let projection = TestRunProjection::new(&inner);
-        let entries: Vec<TestRunEntry> = scanned
-            .iter()
-            .map(|run| TestRunEntry {
-                summary: test_run_summary_from_observations(
-                    &inner, run, projection.observations(&run.disk.run_id).iter().copied(),
-                ),
-                disk: run.disk.clone(),
-                discovered_project_id: run.project_id.clone(),
-            })
-            .collect();
-        drop(projection);
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        trace.mark("commit_acquired");
+        // Like the state broadcaster's immutable cut, preparation never owns
+        // publication. Validate actual inputs, including unstamped changes,
+        // at the locked commit. A changed cut uses the existing live projector
+        // once; it neither retries nor publishes stale authority/evidence.
+        let entries = if projection_cut.matches(&inner) {
+            trace.mark("projection_cut_reused");
+            prepared
+        } else {
+            trace.mark("projection_cut_changed");
+            #[cfg(test)]
+            TEST_RUN_PROJECTION_FALLBACKS.with(|count| count.set(count.get() + 1));
+            test_run_project_entries(&inner, &scanned)
+        };
         for entry in &entries {
             if entry.summary.registration.restart_would_void_evidence == Some(false)
                 || !entry.summary.registration.superseded_run_ids.is_empty()

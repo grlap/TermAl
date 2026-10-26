@@ -763,7 +763,7 @@ fn engram_work_naming_is_current(
 /// worker still resolving its basis conservatively protects history until
 /// that basis can be inspected without waiting under the state lock.
 fn engram_compact_root_journal(inner: &mut StateInner) {
-    let retained = inner.engram_named_root_journal.iter().filter(|journal| {
+    let retained: Vec<_> = inner.engram_named_root_journal.iter().filter(|journal| {
         if inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
             // An unacknowledged publication still needs this journal for replay.
             // Published notices carry their own proof and delivery identity.
@@ -818,7 +818,7 @@ fn engram_compact_root_journal(inner: &mut StateInner) {
                     || check.end.as_ref().is_some_and(|end| references_capture(&end.end_basis)))
         })
     }).cloned().collect();
-    inner.engram_named_root_journal = retained;
+    inner.engram_named_root_journal = retained.into();
 }
 
 /// Wire serializers may omit zero fractions or use a different UTC offset.

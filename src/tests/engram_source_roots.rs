@@ -552,7 +552,7 @@ fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
                 .inner
                 .lock()
                 .expect("state mutex poisoned")
-                .engram_work_source_roots = current.clone();
+                .engram_work_source_roots = current.clone().into();
             let target = DelegationAcceptanceEvaluation {
                 attempt_history: None,
                 selected_evidence: Vec::new(),
@@ -609,7 +609,7 @@ fn an_entry_survives_a_restart_and_one_whose_session_did_not_ends() {
         .session
         .id
         .clone();
-    inner.engram_work_source_roots = vec![
+    *inner.engram_work_source_roots = vec![
         entry("kept", "claim-kept", &session_id, 1),
         entry("orphan", "claim-orphan", "a-session-that-is-gone", 2),
         entry("quarantined", "claim-quarantined", "session-quarantined", 1),

@@ -532,7 +532,7 @@ fn failed_compaction_persistence_retains_all_preexisting_detail_and_identity() {
     let ids = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let compacted = std::mem::take(&mut inner.test_run_compacted);
-        for row in compacted.into_values() {
+        for (_, row) in compacted {
             for observation in row.observations {
                 inner
                     .test_runs

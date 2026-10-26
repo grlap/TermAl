@@ -1291,7 +1291,9 @@ fn a_late_wait_registration_is_proven_by_metadata_without_a_new_mutation() {
             .unwrap_or_default()
             .is_empty()
     );
-    assert!(next.metadata.delegation_waits.contains(&expected));
+    assert!(next.metadata.metadata_collection_is_omitted("delegationWaits"));
+    assert!(read_metadata_for_fence(fixture.cache.connection.as_ref().unwrap(), &["delegationWaits"])
+        .unwrap().unwrap().delegation_waits.contains(&expected));
     fixture.write(&next).unwrap();
     let after = {
         let state = fixture.inner.lock().unwrap();

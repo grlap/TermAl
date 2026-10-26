@@ -33,16 +33,26 @@ impl StateProjectionKey {
 struct StateProjectionCache {
     server_instance_id: String,
     sessions: HashMap<String, (StateProjectionKey, Arc<StateSessionSummary>)>,
+    #[cfg(test)]
+    before_materialize: Option<Box<dyn FnOnce() + Send>>,
 }
 
 struct ImmutableStateSnapshot {
     header: StateResponse,
     sessions: Vec<Arc<StateSessionSummary>>,
+    #[cfg(test)]
+    before_materialize: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl ImmutableStateSnapshot {
     fn materialize(mut self) -> StateResponse {
-        // No StateInner/cache guard survives the handoff to this worker.
+        #[cfg(test)]
+        if let Some(hook) = self.before_materialize.take() {
+            hook();
+        }
+        #[cfg(test)]
+        observe_state_snapshot_projection_for_test();
+        // No StateInner/cache guard survives the handoff to this consumer.
         self.header.sessions = self
             .sessions
             .into_iter()
@@ -248,6 +258,8 @@ impl AppState {
             })
             .collect();
         cache.sessions.retain(|id, _| live.contains(id.as_str()));
+        #[cfg(test)]
+        let before_materialize = cache.before_materialize.take();
         drop(cache);
         ImmutableStateSnapshot {
             header: self.snapshot_header_from_inner(
@@ -256,6 +268,8 @@ impl AppState {
                 Vec::new(),
             ),
             sessions,
+            #[cfg(test)]
+            before_materialize,
         }
     }
 

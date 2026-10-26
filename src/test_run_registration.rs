@@ -731,10 +731,10 @@ fn test_run_registration_view(inner: &StateInner, disk: &TestRunDisk) -> TestRun
 // Shared exact locator/content match. Project attribution needs this match
 // and the durable registration marker, not the unrelated restart-risk scan.
 fn test_run_matching_registration<'a>(
-    inner: &'a StateInner,
+    inner: &'a impl TestRunProjectionSource,
     disk: &TestRunDisk,
 ) -> Option<&'a TestRunRegistration> {
-    inner.test_run_registrations.get(&disk.run_id).filter(|registration| {
+    inner.projection_registrations().get(&disk.run_id).filter(|registration| {
         registration.locator_identity.is_some()
             && registration.locator_identity == disk.locator_identity
             && test_run_path_key(&registration.run_directory)
@@ -745,12 +745,12 @@ fn test_run_matching_registration<'a>(
 }
 
 fn test_run_registration_view_from_observations<'a>(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     disk: &TestRunDisk,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
 ) -> TestRunRegistrationView {
     let registration = test_run_matching_registration(inner, disk);
-    let durable = registration.is_some() && inner.test_runs.registered.contains(&disk.run_id);
+    let durable = registration.is_some() && inner.projection_index().registered.contains(&disk.run_id);
     let mut view = TestRunRegistrationView {
         registration_state: Some(
             if durable {
@@ -777,7 +777,7 @@ fn test_run_registration_view_from_observations<'a>(
         tracking_durability: Some(
             if durable {
                 "durable"
-            } else if inner.test_runs.registration_failures.contains(&disk.run_id) {
+            } else if inner.projection_index().registration_failures.contains(&disk.run_id) {
                 "failed"
             } else {
                 "unconfirmed"
@@ -807,7 +807,7 @@ fn test_run_registration_view_from_observations<'a>(
                 .to_owned(),
         ..TestRunRegistrationView::default()
     };
-    if registration.is_some() && inner.test_runs.registration_failures.contains(&disk.run_id) {
+    if registration.is_some() && inner.projection_index().registration_failures.contains(&disk.run_id) {
         view.restart_evidence_reason = "Registration persistence or query confirmation failed; no durable acknowledgement was issued.".to_owned();
     }
     if durable
@@ -818,7 +818,7 @@ fn test_run_registration_view_from_observations<'a>(
                     test_run_registration_final_observation_from_candidates(
                         row,
                         observations,
-                        Some(&inner.test_runs.observations_durable),
+                        Some(&inner.projection_index().observations_durable),
                     )
                     .is_some()
                 } else {
@@ -833,20 +833,9 @@ fn test_run_registration_view_from_observations<'a>(
     // The existing carried-check path has already correlated the exact
     // artifact locator, first terminal digest, root, owner and claim. Its
     // positive hazard outlives artifact PASS and dominates weaker guesses.
-    let carried = inner
-        .sessions
-        .iter()
-        .flat_map(|record| &record.engram.carried_checks)
-        .any(|carried| {
-            carried.run_directory.as_ref().is_some_and(|path| {
-                test_run_path_key(&test_run_display_path(path))
-                    == test_run_path_key(&test_run_display_path(&disk.run_dir))
-            }) && carried.terminal_digest.as_ref().is_some_and(|digest| {
-                disk.results.as_ref().is_some_and(|results| {
-                    test_run_terminal_digest_matches(Some(&results.digest), digest)
-                })
-            }) && !carried.terminal_conflict && !carried.ambiguous
-        });
+    let carried = test_run_projection_carried_matches(
+        inner, &disk.run_dir, disk.results.as_ref().map(|row| row.digest.as_str()), true,
+    );
     if carried {
         view.restart_would_void_evidence = Some(true);
         view.restart_evidence_reason = "Exact carried run is awaiting host verification settlement; restarting would lose its pending credit.".to_owned();

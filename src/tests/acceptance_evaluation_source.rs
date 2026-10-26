@@ -289,7 +289,7 @@ fn acceptance_requested_claim_controls_the_root_even_when_another_claim_is_bound
         };
         {
             let mut inner = state.inner.lock().unwrap();
-            inner.engram_work_source_roots = vec![named("other", &first, 1)];
+            *inner.engram_work_source_roots = vec![named("other", &first, 1)];
             if case != "unnamed" {
                 inner
                     .engram_work_source_roots
@@ -842,7 +842,7 @@ fn acceptance_request_on_a_named_source_root_runs_and_measures_the_evaluator_the
     .expect("the worktree may be named");
     {
         let mut inner = state.inner.lock().unwrap();
-        inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
+        *inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
             store: store.clone(),
             work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
             short_ref: "w-task".to_owned(),
@@ -989,7 +989,7 @@ fn acceptance_first_write_is_refused_when_the_root_is_renamed_during_the_submit_
             named_at: "2026-09-27T00:00:00.000Z".to_owned(),
             generation: 1,
         };
-        state.inner.lock().unwrap().engram_work_source_roots = vec![named.clone()];
+        *state.inner.lock().unwrap().engram_work_source_roots = vec![named.clone()];
         update_evaluation_target(&state, &delegation, |target| {
             target.source_root = Some(AcceptanceEvaluationSourceRoot::from_entry(&named));
         });
@@ -1142,7 +1142,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
                     named_at: root.named_at.clone(),
                 }
             }));
-        inner.engram_work_source_roots = now;
+        *inner.engram_work_source_roots = now;
         let error = acceptance_evaluation_spawn_admission_locked(&inner, &parent, &seed(seeded))
             .expect_err(case);
         assert_eq!(error.status, StatusCode::CONFLICT, "{case}");
@@ -1154,7 +1154,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
             error.message
         );
     }
-    inner.engram_work_source_roots = vec![named(1)];
+    *inner.engram_work_source_roots = vec![named(1)];
     inner.sessions[index].engram.named_root = Some(EngramNamedRootState::Bound {
         workspace_id: named(1).root,
         generation: 1,
@@ -1162,7 +1162,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
     });
     acceptance_evaluation_spawn_admission_locked(&inner, &parent, &seed(read_on_first))
         .expect("an unchanged root is admitted");
-    inner.engram_work_source_roots = Vec::new();
+    *inner.engram_work_source_roots = Vec::new();
     inner.sessions[index].engram.named_root = Some(EngramNamedRootState::None);
     acceptance_evaluation_spawn_admission_locked(&inner, &parent, &seed(None))
         .expect("a workdir evaluation with no root named is admitted");
@@ -1186,7 +1186,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
     };
     acceptance_evaluation_spawn_admission_locked(&inner, &parent, &on_claim)
         .expect("no root named for the recorded claim yet");
-    inner.engram_work_source_roots = vec![named(1)];
+    *inner.engram_work_source_roots = vec![named(1)];
     for (binding, case) in [(Some("claim-other"), "rebound"), (None, "unbound")] {
         inner.sessions[index].engram.work_binding =
             binding.map(|claim_id| EngramControlWorkBinding {
@@ -1253,7 +1253,7 @@ fn acceptance_submission_is_refused_when_the_work_gets_its_first_root_while_eval
         .expect("with no root named yet the workdir still measures the work");
 
     // The first name lands while the evaluator's verdicts are on their way.
-    state.inner.lock().unwrap().engram_work_source_roots = vec![EngramWorkSourceRoot {
+    *state.inner.lock().unwrap().engram_work_source_roots = vec![EngramWorkSourceRoot {
         store,
         work_id: "01a0b6c5-4b4f-7b41-9e32-edc597077acf".to_owned(),
         short_ref: "w-task".to_owned(),

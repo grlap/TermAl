@@ -614,7 +614,7 @@ fn metadata_units_rollback_preserves_non_nul_object_keys_without_prefix_collisio
             .inner
             .lock()
             .unwrap()
-            .pending_response_board_project_detachments = expected.clone();
+            .pending_response_board_project_detachments = expected.clone().into();
         fixture.write(&fixture.collect()).unwrap();
         let connection = metadata_units_rollback_connection(&fixture);
         let actual_encoding: String = connection
@@ -673,7 +673,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
             .inner
             .lock()
             .unwrap()
-            .pending_response_board_project_detachments = expected.clone();
+            .pending_response_board_project_detachments = expected.clone().into();
         fixture.write(&fixture.collect()).unwrap();
         let connection = metadata_units_rollback_connection(&fixture);
         let actual_encoding: String = connection
