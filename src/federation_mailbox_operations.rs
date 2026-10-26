@@ -214,12 +214,20 @@ impl AppState {
         delivery.validate()?;
         authority.target = Some(target.clone());
         let input = delivery.input(participant.name.clone(), target.name.clone());
+        let routing_only = std::cell::Cell::new(false);
         let appended = self.mailbox_store
-            .append_with_delivery(&input, Some(&delivery), || authority.lock())
+            .append_with_delivery_policy(&input, Some(&delivery), None, || authority.lock(), |transaction, guard| {
+                routing_only.set(settle_routing_only_mailbox_delivery(transaction, &delivery, &guard._inner)?);
+                Ok(())
+            })
             .map_err(mailbox_api_error)?;
         let MailboxAppendResult { mut receipt, finalization } = appended;
         if target.binding.identity.host_id != central.host_id {
-            receipt.notification_cause = Some(FEDERATION_REMOTE_WAKE_CAUSE.to_owned());
+            receipt.notification_cause = Some(if receipt.duplicate {
+                "duplicate delivery; original notification decision retained".to_owned()
+            } else if routing_only.get() {
+                "delivered to mailbox; automatic participation does not authorize an executor wake".to_owned()
+            } else { FEDERATION_REMOTE_WAKE_CAUSE.to_owned() });
         }
         // The committed obligation owns notification. Never put a native queue
         // commit, provider handoff or dispatch-finalization wait before this

@@ -165,6 +165,7 @@ mod federation_bootstrap;
 mod federation_registry;
 mod federation_mailbox_protocol;
 mod federation_mailboxes;
+mod federation_mailbox_participation;
 mod federation_mailbox_process;
 mod federation_mailbox_native_link;
 mod federation_mailbox_child;

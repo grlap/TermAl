@@ -57,7 +57,8 @@ impl Satellite {
             .env(CHILD_ENV, "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            // Preserve child startup failures in the launcher's complete log.
+            .stderr(Stdio::inherit());
         let child = Arc::new(host_command::spawn_shared(&mut command).unwrap());
         let input = child.take_stdin().unwrap();
         let output = child.take_stdout().unwrap();
@@ -91,14 +92,20 @@ impl Satellite {
 
     fn receive(&self, prefix: &str) -> String {
         let deadline = Instant::now() + phase_sync::DEADLOCK_GUARD;
+        let mut recent = std::collections::VecDeque::with_capacity(8);
         loop {
             let line = self
                 .lines
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .expect("entrypoint satellite must report its phase");
+                .unwrap_or_else(|error| panic!(
+                    "entrypoint satellite missing phase {prefix:?}: {error:?}; exit={:?}; recent stdout={recent:?}",
+                    self.child.try_wait(),
+                ));
             if let Some((_, body)) = line.split_once(prefix) {
                 return body.to_owned();
             }
+            if recent.len() == 8 { recent.pop_front(); }
+            recent.push_back(line.chars().take(512).collect::<String>());
         }
     }
 

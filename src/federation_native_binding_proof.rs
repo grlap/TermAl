@@ -45,7 +45,7 @@ async fn serve_federation_native_binding(
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
         let record = federation_mailbox_root_locked(inner, &request.binding.identity.session_id)?;
-        if record.federation_mailbox_binding.as_ref() != Some(&request.binding) {
+        if record.mailbox_binding() != Some(&request.binding) {
             return Err(ApiError::conflict("native binding is missing or changed"));
         }
         Ok(FederationNativeBindingProof {

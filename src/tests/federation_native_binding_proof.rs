@@ -71,6 +71,20 @@ impl Fixture {
     }
 
     async fn with_router(install_binding: bool, wrap: impl FnOnce(Router) -> Router) -> Self {
+        Self::build(install_binding, true, wrap).await
+    }
+
+    /// The deployed pair: central verifies and activates its satellite, and
+    /// the satellite's own record of its central stays enrolled.
+    async fn production_shape() -> Self {
+        Self::build(false, false, |router| router).await
+    }
+
+    async fn build(
+        install_binding: bool,
+        satellite_activates_central: bool,
+        wrap: impl FnOnce(Router) -> Router,
+    ) -> Self {
         let central = federation_mailboxes::central_store();
         let (caller, _) = federation_mailboxes::local_participant(&central, "Central");
         let base = federation_registry::domain_state();
@@ -133,10 +147,11 @@ impl Fixture {
         let attested = federation_control_fixture::attest(&channel, &satellite_channel).await;
         let lease = channel.current_lease().unwrap();
         rpc.health(&lease).await.unwrap();
-        for (app, peer_id) in [
-            (&central, &satellite_host.host_id),
-            (&satellite, &central_host.host_id),
-        ] {
+        let mut readiness = vec![(&central, &satellite_host.host_id)];
+        if satellite_activates_central {
+            readiness.push((&satellite, &central_host.host_id));
+        }
+        for (app, peer_id) in readiness {
             // Fixture-scoped readiness only, not an O1 platform/wake result.
             let peer = app.federation_peer_snapshot(peer_id).unwrap();
             app.verify_federation_peer(&peer, federation_registry::checks()).unwrap();

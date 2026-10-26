@@ -82,6 +82,23 @@ mail can produce a new notification after restart; cancelling a prompt is not
 acknowledging its mailbox. An acknowledged continuation is not reconstructed
 from a previously queued metadata marker alone after restart.
 
+Wake admission checks each host's own record of the other. Central requires
+its record of the satellite to be active. A satellite never activates or
+requalifies its record of central, which stays enrolled after enrollment and
+after every reconnect. It accepts its configured central as the satellite
+executor authority does: the same enrollment generation over the current
+link, with no quarantine, and short of revocation. Revocation, a changed
+enrollment, quarantine or a replaced target still hold the wake.
+
+A home wake that its target refuses keeps its obligation and is retried on
+each worker pass. The home logs it once per change of refusal and lists it at
+`GET /api/diagnostics/mailbox-relay-wakes`: `pendingHomeWakes` (undelivered
+obligations), `refusedHomeWakes` (message and mailbox ids, target host and
+session, attempts, last status and a bounded reason with control characters
+replaced, first and last refusal times) and `untrackedRefusals`, the refused
+attempts not kept once the list is full. These records are process-local and
+metadata only, at most 256 entries, and a delivered wake clears its own.
+
 New sends, wake admission and handoffs recheck current native identity and
 authority. Store contention or transport loss is not success, nor proof that
 an already admitted write did not commit. Retry the original send/key, read

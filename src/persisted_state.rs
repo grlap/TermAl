@@ -281,6 +281,7 @@ impl PersistedState {
                 })
             })
             .collect();
+        let delegation_catalog_children = FederationCatalogChildren::from_records(&self.delegations);
         let mut inner = StateInner {
             metadata_predecessor: self.metadata_capture.known.clone(),
             state_projection_cache: Mutex::new(StateProjectionCache::default()),
@@ -394,6 +395,7 @@ impl PersistedState {
             test_run_waits: self.test_run_waits,
             delegation_waits: self.delegation_waits,
             delegation_mutation_stamps: BTreeMap::new(),
+            delegation_catalog_children: Mutex::new(delegation_catalog_children),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: self.workspace_layouts,
@@ -531,6 +533,10 @@ fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
 struct PersistedSessionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     federation_mailbox_binding: Option<FederationMailboxBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    federation_automatic_mailbox_binding: Option<FederationMailboxBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    federation_retired_automatic_mailbox_bindings: Vec<FederationMailboxBinding>,
     #[serde(default = "new_federation_native_creation_id")]
     federation_native_creation_id: String,
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
@@ -708,9 +714,15 @@ fn normalize_persisted_session_prompt_history(session: &mut Session) {
 }
 
 impl PersistedSessionRecord {
+    fn mailbox_binding(&self) -> Option<&FederationMailboxBinding> {
+        self.federation_mailbox_binding.as_ref().or(self.federation_automatic_mailbox_binding.as_ref())
+    }
+
     fn clone_without_messages(&self) -> Self {
         Self {
             federation_mailbox_binding: self.federation_mailbox_binding.clone(),
+            federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding.clone(),
+            federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings.clone(),
             federation_native_creation_id: self.federation_native_creation_id.clone(),
             active_codex_approval_policy: self.active_codex_approval_policy.clone(),
             active_codex_reasoning_effort: self.active_codex_reasoning_effort.clone(),
@@ -764,6 +776,8 @@ impl PersistedSessionRecord {
         Self {
             active_codex_approval_policy: record.active_codex_approval_policy,
             federation_mailbox_binding: record.federation_mailbox_binding.clone(),
+            federation_automatic_mailbox_binding: record.federation_automatic_mailbox_binding.clone(),
+            federation_retired_automatic_mailbox_bindings: record.federation_retired_automatic_mailbox_bindings.clone(),
             federation_native_creation_id: record.federation_native_creation_id.clone(),
             active_codex_reasoning_effort: record.active_codex_reasoning_effort,
             active_codex_sandbox_mode: record.active_codex_sandbox_mode,
@@ -811,6 +825,23 @@ impl PersistedSessionRecord {
 
     /// Converts the value into record.
     fn into_record(self) -> Result<SessionRecord> {
+        if self.federation_mailbox_binding.is_some() && self.federation_automatic_mailbox_binding.is_some() {
+            return Err(anyhow!("persisted session has both explicit and automatic mailbox authority"));
+        }
+        if let Some(binding) = self.mailbox_binding() {
+            binding.validate().map_err(|_| anyhow!("invalid persisted mailbox binding"))?;
+            if binding.identity.session_id != self.session.id {
+                return Err(anyhow!("persisted mailbox binding has another native session"));
+            }
+        }
+        let mut retired = HashSet::new();
+        for binding in &self.federation_retired_automatic_mailbox_bindings {
+            binding.validate().map_err(|_| anyhow!("invalid retired automatic mailbox route"))?;
+            if binding.identity.session_id != self.session.id || self.mailbox_binding() == Some(binding)
+                || !retired.insert(binding.participant_key()) {
+                return Err(anyhow!("invalid retired automatic mailbox route ownership"));
+            }
+        }
         let remote_proxy_identity = validate_remote_proxy_identity(
             self.remote_id.as_deref(),
             self.remote_session_id.as_deref(),
@@ -863,6 +894,8 @@ impl PersistedSessionRecord {
             .collect();
         let mut record = SessionRecord {
             federation_mailbox_binding: self.federation_mailbox_binding,
+            federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding,
+            federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings,
             federation_native_creation_id: self.federation_native_creation_id,
             codex_delegation_release: None,
             active_codex_approval_policy: self.active_codex_approval_policy,

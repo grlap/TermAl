@@ -29,6 +29,7 @@ fn federation_router(
         .route("/federation/v1/health", get(federation_health))
         .route("/federation/v1/mailbox/native-binding", post(serve_federation_native_binding))
         .route("/federation/v1/mailbox/binding", post(serve_federation_binding_command))
+        .route("/federation/v1/mailbox/participation", post(serve_federation_participation))
         .merge(federation_onboarding_routes())
         .layer(DefaultBodyLimit::max(4096))
         .merge(federation_mailbox_routes())

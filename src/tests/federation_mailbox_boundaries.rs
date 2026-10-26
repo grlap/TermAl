@@ -23,22 +23,16 @@ fn send_request(target: &str) -> SendMailboxMessageRequest {
     }
 }
 
-#[tokio::test]
-async fn standalone_and_bound_participants_cannot_append_across_namespaces() {
+#[test]
+fn raw_standalone_append_cannot_cross_a_domain_namespace() {
     let state = central_store();
     let a = standalone(&state);
     let (b, _) = local_participant(&state, "Bound");
-    for (sender, target, expected) in [
-        (&a, &b, StatusCode::CONFLICT),
-        (&b, &a, StatusCode::NOT_FOUND),
-    ] {
-        let response = app_router(state.clone()).oneshot(Request::builder()
-            .method("POST").uri(format!("/api/sessions/{sender}/mailboxes/send"))
-            .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_vec(&json!({
-                "targetSessionId": target, "message":"boundary", "idempotencyKey":"mixed"
-            })).unwrap())).unwrap()).await.unwrap();
-        assert_eq!(response.status(), expected);
+    // The public API now qualifies native roots automatically. The raw local
+    // store must still refuse crossing that namespace in either direction.
+    for (sender, target) in [(&a, &b), (&b, &a)] {
+        let error = state.append_mailbox_message_and_notify(sender, send_request(target)).unwrap_err();
+        assert_eq!(error.status, StatusCode::CONFLICT);
     }
     let connection = state.mailbox_store.connection().unwrap();
     assert_eq!(connection.query_row("SELECT COUNT(*) FROM mailbox_messages", [],

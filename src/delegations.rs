@@ -354,10 +354,17 @@ impl StateInner {
     }
 
     fn find_delegation_index_by_child_session_id(&self, child_session_id: &str) -> Option<usize> {
+        #[cfg(test)]
+        TEST_DELEGATION_CHILD_SCAN_COUNT.with(|count| count.set(count.get() + 1));
         self.delegations
             .iter()
             .position(|record| record.child_session_id == child_session_id)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_DELEGATION_CHILD_SCAN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn running_read_only_delegation_index_entry(

@@ -867,7 +867,7 @@ impl AppState {
                 Ok((unread, peer))
             })
             .await;
-            let queued = match status {
+            let outcome = match status {
                 Ok((unread, original_peer)) => {
                     wake.unread_count = unread.map_or(0, |unread| unread.unread_count);
                     if wake.target.host == wake.conversation.home.host {
@@ -877,36 +877,47 @@ impl AppState {
                             worker.queue_native_mailbox_relay_wake(&wake, None)
                         })
                         .await
-                        .unwrap_or(false)
                     } else if let Some(handle) =
                         self.federation_peer_handle(&wake.target.host.host_id)
                     {
-                        if let Ok(lease) = handle.channel.current_lease() {
-                            let current = lease.with_current(self, |_, current| {
+                        match handle.channel.current_lease() {
+                            Ok(lease) => match lease.with_current(self, |_, current| {
                                 if !same_mailbox_relay_enrollment(&original_peer, current) {
                                     return Err(federation_stale_link());
                                 }
                                 Ok(())
-                            });
-                            if current.is_err() {
-                                false
-                            } else {
-                                self.request_mailbox_relay::<bool>(
-                                    &handle,
-                                    &lease,
-                                    MailboxRelayOperation::Wake { wake: wake.clone() },
-                                )
-                                .await
-                                .unwrap_or(false)
-                            }
-                        } else {
-                            false
+                            }) {
+                                Ok(()) => {
+                                    self.request_mailbox_relay::<bool>(
+                                        &handle,
+                                        &lease,
+                                        MailboxRelayOperation::Wake { wake: wake.clone() },
+                                    )
+                                    .await
+                                }
+                                Err(error) => Err(error),
+                            },
+                            Err(error) => Err(error),
                         }
                     } else {
-                        false
+                        Err(ApiError::conflict("native relay target host has no connected peer"))
                     }
                 }
-                Err(_) => false,
+                Err(error) => Err(error),
+            };
+            let queued = match outcome {
+                Ok(true) => {
+                    self.mailbox_store.relay_home_wake_refusals.clear(&wake.message_id);
+                    true
+                }
+                Ok(false) => {
+                    self.note_mailbox_relay_home_wake_refusal(&wake, StatusCode::CONFLICT, "wake not admitted by its target");
+                    false
+                }
+                Err(error) => {
+                    self.note_mailbox_relay_home_wake_refusal(&wake, error.status, &error.message);
+                    false
+                }
             };
             if queued {
                 let worker = self.clone();
@@ -961,4 +972,118 @@ impl AppState {
         }).await.unwrap_or(0);
         (home_next, native)
     }
+}
+
+// A refused home wake keeps its durable obligation and is retried on every
+// worker pass. These process-local, metadata-only records make the refusal
+// visible without reading message bodies or the receiver's store.
+const MAILBOX_RELAY_HOME_WAKE_REFUSALS: usize = 256;
+const MAILBOX_RELAY_HOME_WAKE_REASON_BYTES: usize = 200;
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct MailboxRelayHomeWakeRefusal {
+    message_id: String,
+    mailbox_id: String,
+    target_host_id: String,
+    target_session_id: String,
+    attempts: u64,
+    status: u16,
+    reason: String,
+    first_refused_at: String,
+    last_refused_at: String,
+}
+
+#[derive(Default)]
+struct MailboxRelayHomeWakeRefusals {
+    refused: Mutex<BTreeMap<String, MailboxRelayHomeWakeRefusal>>,
+    /// Refused attempts not kept because the bound was full. It counts
+    /// attempts, not distinct wakes.
+    untracked: AtomicU64,
+}
+
+impl MailboxRelayHomeWakeRefusals {
+    /// Records one refused attempt. True when the refusal is new or its
+    /// reason changed, so a caller logs once per change, not once per pass.
+    fn note(&self, wake: &MailboxRelayWake, status: StatusCode, reason: &str) -> bool {
+        let reason = mailbox_relay_bounded_reason(reason);
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut refused = self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(existing) = refused.get_mut(&wake.message_id) {
+            let changed = existing.status != status.as_u16() || existing.reason != reason;
+            existing.attempts = existing.attempts.saturating_add(1);
+            existing.status = status.as_u16();
+            existing.reason = reason;
+            existing.last_refused_at = now;
+            return changed;
+        }
+        if refused.len() >= MAILBOX_RELAY_HOME_WAKE_REFUSALS {
+            self.untracked.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
+        refused.insert(wake.message_id.clone(), MailboxRelayHomeWakeRefusal {
+            message_id: wake.message_id.clone(),
+            mailbox_id: wake.mailbox_id.clone(),
+            target_host_id: wake.target.host.host_id.clone(),
+            target_session_id: wake.target.native_session_id.clone(),
+            attempts: 1,
+            status: status.as_u16(),
+            reason,
+            first_refused_at: now.clone(),
+            last_refused_at: now,
+        });
+        true
+    }
+
+    fn clear(&self, message_id: &str) {
+        self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(message_id);
+    }
+
+    fn snapshot(&self) -> (Vec<MailboxRelayHomeWakeRefusal>, u64) {
+        let refused = self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        (refused.values().cloned().collect(), self.untracked.load(Ordering::Relaxed))
+    }
+}
+
+impl AppState {
+    fn note_mailbox_relay_home_wake_refusal(&self, wake: &MailboxRelayWake, status: StatusCode, reason: &str) {
+        if self.mailbox_store.relay_home_wake_refusals.note(wake, status, reason) {
+            // Metadata only: no body, locator or credential.
+            eprintln!(
+                "native relay home wake held for {}/{} ({}): {}",
+                wake.target.host.host_id,
+                wake.target.native_session_id,
+                status.as_u16(),
+                mailbox_relay_bounded_reason(reason),
+            );
+        }
+    }
+}
+
+/// A peer's refusal text, cut at a character boundary within the bound, with
+/// control characters replaced, so it cannot split or style a log line.
+fn mailbox_relay_bounded_reason(reason: &str) -> String {
+    let mut end = reason.len().min(MAILBOX_RELAY_HOME_WAKE_REASON_BYTES);
+    while !reason.is_char_boundary(end) {
+        end -= 1;
+    }
+    reason[..end].chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+}
+
+/// Undelivered home wake obligations and this process's recorded refusals.
+/// Reads one count from the coordination store; takes no state lock.
+async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let store = state.mailbox_store.clone();
+    let pending = run_blocking_api(move || {
+        store.connection().map_err(mailbox_api_error)?
+            .query_row("SELECT count(*) FROM mailbox_relay_wakes WHERE delivered=0", [], |row| row.get::<_, u64>(0))
+            .map_err(|error| mailbox_api_error(error.into()))
+    })
+    .await?;
+    let (refused, untracked) = state.mailbox_store.relay_home_wake_refusals.snapshot();
+    Ok(Json(json!({
+        "pendingHomeWakes": pending,
+        "refusedHomeWakes": refused,
+        "untrackedRefusals": untracked,
+    })))
 }

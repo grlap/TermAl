@@ -284,6 +284,7 @@ impl FederationState {
                 .map_err(|_| anyhow!("invalid persisted placement key"))?;
             if key != &placement.admission_key
                 || placement.placement_generation == 0
+                || placement.mailbox_only && (placement.build_slots != 0 || placement.gate_slots != 0)
                 || !creation_ids.insert(&placement.identity.creation_id)
                 || placement.execution_basis.len() != 64
                 || !placement

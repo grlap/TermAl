@@ -122,6 +122,23 @@ fn federation_intent_read(
         .optional()?)
 }
 
+fn federation_intent_for_owner(connection: &rusqlite::Connection,
+    owner: &str, creation: &str, key: &str) -> Result<Option<FederationIntent>>
+{
+    let mut statement = connection.prepare(
+        "SELECT sender_session_id FROM federation_mailbox_intents
+         WHERE owner_session_id=?1 AND owner_creation_id=?2 AND idempotency_key=?3 LIMIT 2")?;
+    let senders = statement.query_map(rusqlite::params![owner, creation, key], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if senders.len() > 1 {
+        return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
+            "delivery key has multiple retained authority epochs"));
+    }
+    senders.first().map(|sender| federation_intent_read(connection, sender, key)
+        .and_then(|intent| intent.ok_or_else(|| anyhow!("retained delivery intent disappeared"))))
+        .transpose()
+}
+
 impl MailboxStore {
     fn refuse_unattempted_federation_intent<G>(
         &self,
@@ -173,6 +190,9 @@ impl MailboxStore {
         let mut connection = self.connection()?;
         let transaction =
             begin_mailbox_write(&mut connection, "persisting sender delivery intent")?;
+        if mailbox_message_for_idempotency_key(&transaction, owner, &delivery.key)?.is_some() {
+            return Err(federation_delivery_conflict());
+        }
         let sender = delivery.sender.participant_key();
         transaction.execute(
             "INSERT INTO federation_mailbox_retired_namespaces(sender_session_id,retired_at)
@@ -187,7 +207,8 @@ impl MailboxStore {
         if retired {
             return Err(federation_delivery_conflict());
         }
-        if let Some(existing) = federation_intent_read(&transaction, &sender, &delivery.key)? {
+        if let Some(existing) = federation_intent_for_owner(&transaction, owner, creation, &delivery.key)? {
+            if existing.sender != sender { return Err(federation_delivery_conflict()); }
             existing.matches_owner(owner, creation)?;
             if existing.digest != delivery.digest()
                 || matches!(existing.state.as_str(), "refused" | "abandoned")

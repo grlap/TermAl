@@ -7,7 +7,7 @@ impl AppState {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let peers: Vec<Value> = inner.federation.peers.values().map(|peer| {
             let allocated: Vec<_> = inner.federation.placements.values().filter(|placement|
-                placement.identity.host_id == peer.identity.host_id && placement.state != FederationPlacementState::Completed).collect();
+                placement.identity.host_id == peer.identity.host_id && !placement.mailbox_only && placement.state != FederationPlacementState::Completed).collect();
             json!({"host":peer.identity, "enrollmentGeneration":peer.enrollment_generation,
                 "recordGeneration":peer.record_generation,
                 "transportGeneration":peer.transport_generation, "displayName":peer.display_name,

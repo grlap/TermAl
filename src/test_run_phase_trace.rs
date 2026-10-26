@@ -3,6 +3,7 @@
 // Split from test_run_registration.rs's console-only diagnostics.
 const TEST_RUN_TRACE_CAPACITY: usize = 256;
 const TEST_RUN_TRACE_PHASES: usize = 32;
+const TEST_RUN_RECENT_RESCAN_LIMIT: usize = 20;
 
 #[derive(Clone, Default)]
 struct TestRunPhaseTraces(Arc<Mutex<TestRunPhaseRing>>);
@@ -90,6 +91,20 @@ impl TestRunPhaseTraces {
             }
         }
         trace
+    }
+
+    fn recent_rescans(&self, limit: usize) -> (Vec<TestRunPhaseSnapshot>, bool) {
+        let ring = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut recent = ring
+            .entries
+            .iter()
+            .rev()
+            .filter(|entry| entry.kind == "rescan");
+        let traces = recent.by_ref().take(limit).cloned().collect();
+        (traces, recent.next().is_some())
     }
 
     fn selected(
@@ -196,6 +211,14 @@ impl Drop for TestRunPhaseTrace {
 struct TestRunPhaseQuery {
     run_id: Option<String>,
     operation_id: Option<String>,
+    recent: Option<TestRunRecentTraces>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum TestRunRecentTraces {
+    Rescans,
 }
 
 async fn get_test_run_phase_traces(
@@ -210,21 +233,46 @@ async fn get_test_run_phase_traces(
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
     };
-    if (query.run_id.is_none() && query.operation_id.is_none())
-        || query.run_id.as_deref().is_some_and(|value| !valid(value))
-        || query
-            .operation_id
-            .as_deref()
-            .is_some_and(|value| !valid(value))
-    {
-        return Err(ApiError::bad_request(
-            "an exact runId or operationId is required",
-        ));
-    }
+    let (traces, selection_limit, selection_truncated) = if query.recent.is_some() {
+        if query.run_id.is_some() || query.operation_id.is_some() {
+            return Err(ApiError::bad_request(
+                "recent rescans cannot be combined with exact identifiers",
+            ));
+        }
+        let limit = query.limit.unwrap_or(TEST_RUN_RECENT_RESCAN_LIMIT);
+        if !(1..=TEST_RUN_TRACE_CAPACITY).contains(&limit) {
+            return Err(ApiError::bad_request("limit must be between 1 and 256"));
+        }
+        let (traces, truncated) = state.test_run_phase_traces.recent_rescans(limit);
+        (traces, Some(limit), truncated)
+    } else {
+        if query.limit.is_some() {
+            return Err(ApiError::bad_request("limit requires recent=rescans"));
+        }
+        if (query.run_id.is_none() && query.operation_id.is_none())
+            || query.run_id.as_deref().is_some_and(|value| !valid(value))
+            || query
+                .operation_id
+                .as_deref()
+                .is_some_and(|value| !valid(value))
+        {
+            return Err(ApiError::bad_request(
+                "an exact runId or operationId is required",
+            ));
+        }
+        (
+            state
+                .test_run_phase_traces
+                .selected(query.run_id.as_deref(), query.operation_id.as_deref()),
+            None,
+            false,
+        )
+    };
     Ok(Json(json!({
         "serverInstanceId": state.server_instance_id,
         "capacity": TEST_RUN_TRACE_CAPACITY, "phaseLimit": TEST_RUN_TRACE_PHASES,
-        "traces": state.test_run_phase_traces.selected(query.run_id.as_deref(), query.operation_id.as_deref()),
-        "limitations": "Memory-only bounded observations; response_ready is not proof of delivery. Timings share this host's monotonic epoch and reset on restart."
+        "traces": traces,
+        "selectionLimit": selection_limit, "selectionTruncated": selection_truncated,
+        "limitations": "Memory-only bounded observations; response_ready is not proof of delivery. Timings share this host's monotonic epoch and reset on restart. Evicted traces are absent; recent rescans are newest first."
     })))
 }

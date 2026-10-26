@@ -646,7 +646,7 @@ async fn mailbox_relay_review_missing_notification_metadata_cannot_fail_open_at_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mailbox_relay_review_disabled_domain_without_relay_history_keeps_its_refusal() {
+async fn mailbox_relay_review_disabled_domain_without_history_reports_its_refusal() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::new(false).await;
     fixture
@@ -657,11 +657,23 @@ async fn mailbox_relay_review_disabled_domain_without_relay_history_keeps_its_re
         .preferences
         .federation
         .enabled = false;
-    let error = list_mailboxes_with_availability(&fixture.native, &fixture.central)
+    let listing = list_mailboxes_with_availability(&fixture.native, &fixture.central)
         .await
-        .err()
-        .expect("an unavailable domain alone is not an empty successful list");
+        .unwrap();
+    assert!(listing.mailboxes.is_empty());
+    let unavailable = listing.unavailable_central_domain
+        .expect("an empty local listing must expose the separate domain refusal");
+    assert_eq!(unavailable.status, 409);
+    assert!(!unavailable.error.is_empty());
+    let error = fixture.central.federation_mailbox_operation::<Vec<MailboxSummary>>(
+        &fixture.native, FederationMailboxOperation::List,
+    ).await.unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
+    let response = list_mailboxes_api(
+        AxumPath(fixture.native.clone()), State(fixture.central.clone()), Query(HashMap::new()),
+    ).await.unwrap();
+    assert_eq!(response.headers()["x-termal-unavailable-central-domain"], "1");
+    assert!(response.headers().contains_key("link"));
     fixture.finish().await;
 }
 

@@ -22,13 +22,15 @@ async fn join_federation_mailboxes(
 }
 
 async fn list_federation_mailbox_participants(
-    AxumPath(session): AxumPath<String>,
-    State(state): State<AppState>,
+    AxumPath(session): AxumPath<String>, State(state): State<AppState>,
 ) -> Result<Json<Vec<FederationMailboxParticipant>>, ApiError> {
-    state
-        .federation_mailbox_operation(&session, FederationMailboxOperation::Directory)
-        .await
-        .map(Json)
+    state.mailbox_directory_snapshot(&session).await.map(|snapshot| Json(snapshot.participants))
+}
+
+async fn list_federation_mailbox_directory(
+    AxumPath(session): AxumPath<String>, State(state): State<AppState>,
+) -> Result<Json<FederationMailboxDirectorySnapshot>, ApiError> {
+    state.mailbox_directory_snapshot(&session).await.map(Json)
 }
 
 #[derive(Deserialize)]
@@ -176,8 +178,19 @@ impl AppState {
     async fn federation_mailbox_operation<T: DeserializeOwned>(
         &self,
         session: &str,
-        operation: FederationMailboxOperation,
+        mut operation: FederationMailboxOperation,
     ) -> Result<T, ApiError> {
+        if let FederationMailboxOperation::GetOrCreate { target } = &operation {
+            require_domain_mailbox_target(target)?;
+        }
+        if !matches!(&operation, FederationMailboxOperation::Protocol | FederationMailboxOperation::Register) {
+            self.ensure_automatic_mailbox_participation(session,
+                matches!(&operation, FederationMailboxOperation::Directory)).await?;
+        }
+        if let FederationMailboxOperation::GetOrCreate { target } = &mut operation {
+            let role = self.inner.lock().expect("state mutex poisoned").preferences.federation.role;
+            *target = self.resolve_delivery_recipient(session, role, target).await?.session_id;
+        }
         if let FederationMailboxOperation::Read { mailbox_id, after_sequence, limit, issue_receipt } = operation {
             let page = self.read_federation_mailbox(session, mailbox_id, after_sequence,
                 limit, issue_receipt, None).await?;

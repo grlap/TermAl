@@ -101,7 +101,7 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let owner = federation_mailbox_root_locked(&inner, &row.owner)?;
         if owner.federation_native_creation_id != row.owner_creation
-            || owner.federation_mailbox_binding.as_ref() != Some(&row.owner_binding)
+            || owner.mailbox_binding() != Some(&row.owner_binding)
         {
             return Err(ApiError::conflict("reference owner namespace changed during replay"));
         }
@@ -218,7 +218,7 @@ impl AppState {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let owner = federation_mailbox_root_locked(&inner, &row.owner)?;
                 if owner.federation_native_creation_id != row.owner_creation
-                    || owner.federation_mailbox_binding.as_ref() != Some(&row.owner_binding)
+                    || owner.mailbox_binding() != Some(&row.owner_binding)
                 {
                     #[cfg(test)]
                     reference_publication_observe_error("uncertain.owner_changed", &"owner changed after receipt readback");

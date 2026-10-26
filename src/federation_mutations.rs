@@ -23,7 +23,7 @@ impl FederationMutationContext {
             bound_centrals: inner
                 .sessions
                 .iter()
-                .filter_map(|record| record.federation_mailbox_binding.as_ref())
+                .filter_map(|record| record.mailbox_binding())
                 .map(|binding| binding.central.clone())
                 .collect(),
         }
@@ -158,7 +158,7 @@ fn federation_bound_session_count(inner: &StateInner, central: &FederationHostId
     inner
         .sessions
         .iter()
-        .filter_map(|record| record.federation_mailbox_binding.as_ref())
+        .filter_map(|record| record.mailbox_binding())
         .filter(|binding| &binding.central == central)
         .count()
 }
@@ -338,10 +338,11 @@ impl AppState {
                 .iter()
                 .filter(|row| !row.hidden)
                 .filter_map(|row| {
-                    row.federation_mailbox_binding.as_ref().map(|binding| {
+                    row.mailbox_binding().map(|binding| {
                         FederationNativeBindingFence {
                             binding: binding.clone(),
                             native_creation_id: row.federation_native_creation_id.clone(),
+                            automatic: row.federation_mailbox_binding.is_none(),
                         }
                     })
                 })

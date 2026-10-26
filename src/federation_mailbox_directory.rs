@@ -3,23 +3,39 @@
 // New directory over M1's durable federation state and session placement.
 
 impl AppState {
-    /// Internal local wake adapters may read C's store for a bound C-native
-    /// session. A satellite binding never authorizes access to its local store.
-    fn local_mailbox_storage_key(&self, session_id: &str) -> Option<String> {
+    /// Native history keeps its original principal after binding. Only a
+    /// current C-native binding adds a second principal in this local store.
+    fn local_mailbox_storage_keys(&self, session_id: &str) -> Vec<String> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let record = federation_mailbox_root_locked(&inner, session_id).ok()?;
-        match &record.federation_mailbox_binding {
-            None => Some(session_id.to_owned()),
-            Some(binding) => inner
+        let Ok(record) = federation_mailbox_root_locked(&inner, session_id) else { return Vec::new(); };
+        let mut keys = vec![session_id.to_owned()];
+        if let Some(binding) = record.mailbox_binding() {
+            if binding.identity.host_id == binding.central.host_id && inner
                 .federation
                 .mailbox_directory
                 .get(&binding.participant_key())
-                .filter(|row| {
+                .is_some_and(|row| {
                     row.binding == *binding
                         && federation_mailbox_participant_current_locked(&inner, row)
                 })
-                .map(|_| binding.participant_key()),
+            { keys.push(binding.participant_key()); }
         }
+        keys
+    }
+
+    /// Choose by durable membership in this mailbox, never by alias or a
+    /// root's new routing namespace. Store I/O happens after releasing state.
+    fn local_mailbox_storage_key(&self, session_id: &str, mailbox_id: &str) -> Result<Option<String>> {
+        let keys = self.local_mailbox_storage_keys(session_id);
+        let Some(connection) = self.mailbox_store.connection_if_enabled() else { return Ok(None); };
+        for key in keys {
+            let owns = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM mailbox_participants WHERE mailbox_id=?1 AND session_id=?2)",
+                rusqlite::params![mailbox_id, key], |row| row.get::<_, bool>(0),
+            ).context("failed to select local mailbox wake owner")?;
+            if owns { return Ok(Some(key)); }
+        }
+        Ok(None)
     }
     fn register_federation_mailbox_actor(
         &self,
@@ -84,7 +100,7 @@ impl AppState {
     ) -> Result<Option<FederationMailboxActor>, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let record = federation_mailbox_root_locked(&inner, session_id)?;
-        let Some(binding) = &record.federation_mailbox_binding else {
+        let Some(binding) = record.mailbox_binding() else {
             return Ok(None);
         };
         if !inner.preferences.federation.enabled

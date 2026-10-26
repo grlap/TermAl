@@ -19,6 +19,7 @@ enum FederationRpcRoute {
     ExecutorWake(FederationLinkLease, FederationExecutorWakeRequest),
     ExecutorOutcome(FederationLinkLease, FederationExecutorOutcomeRequest),
     Binding(FederationLinkLease, FederationBindingCommand),
+    Participation(FederationLinkLease, FederationParticipationCommand),
     MailboxRelay(FederationLinkLease, MailboxRelayRequest),
 }
 

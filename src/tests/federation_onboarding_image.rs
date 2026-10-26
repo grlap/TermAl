@@ -118,13 +118,9 @@ fn federation_onboarding_running_image_identity_survives_rename_replacement() {
         let child = ImageChild::start(&binary, &folder, mode);
         assert_eq!(child.receive("IMAGE_READY "), mode);
         fs::rename(&binary, folder.join("termal-image-running.exe")).unwrap();
-        fs::copy(&source, &binary).unwrap();
-        fs::OpenOptions::new()
-            .append(true)
-            .open(&binary)
-            .unwrap()
-            .write_all(b"TERMAL_TEST_REPLACEMENT_TRAILER")
-            .unwrap();
+        let mut replacement = fs::read(&source).unwrap();
+        replacement.extend_from_slice(b"TERMAL_TEST_REPLACEMENT_TRAILER");
+        fs::write(&binary, replacement).unwrap();
         let installed = format!("{:x}", Sha256::digest(fs::read(&binary).unwrap()));
         assert_ne!(
             installed, expected,

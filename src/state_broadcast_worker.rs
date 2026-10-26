@@ -190,8 +190,7 @@ impl AppState {
             && body_seq_epoch.as_deref() == current_epoch
             && *mailbox_participant_id
                 == record
-                    .federation_mailbox_binding
-                    .as_ref()
+                    .mailbox_binding()
                     .map(FederationMailboxBinding::participant_key)
             && *live_activity
                 == (session.status == SessionStatus::Active)

@@ -508,6 +508,117 @@ no mailbox state.
 
 ## Mailboxes: one canonical store at the central host
 
+### Automatic native participation
+
+Enrollment and verification on the current authenticated link qualify a host
+for mailbox participation. Central native root sessions and qualified satellite
+native root sessions appear in the domain directory automatically, including
+sessions created before enrollment or before their first send. No explicit join,
+fresh session, per-session authorization, or executor activation is required.
+The MCP bridge discovers the domain through the caller's own host.
+
+Automatic bindings are mailbox-only. They reserve no executor session, build or
+gate capacity and do not promote Verified membership to Active. Execution still
+requires explicit Active admission; an operator placement upgrades a mailbox-only
+binding while preserving its creation identity and placement generation. Hidden
+sessions, delegation children and executor proxies are not enrolled as native
+domain principals by discovery.
+
+The satellite persists automatic routing separately from its explicit placement
+binding (`federationAutomaticMailboxBinding`). The executor receiver, recovery
+and provider handoff continue to require the explicit binding; a signed central
+wake alone cannot upgrade automatic participation. An explicit Active placement
+moves the same identity to the explicit binding in one durable transaction.
+
+Discovery uses bounded cursor steps over the authenticated channel. A cold child
+index examines at most 64 delegation links per step; routine delegation status
+updates do not invalidate it. Catalog pages scan at most 64 session records and
+return at most 32 candidates. Each discovery step admits at most one new root,
+skips already registered bindings in batches and never reinstalls a current
+binding. Satellites drive separate steps instead of nesting a domain sweep
+inside one request. A fenced root is omitted without hiding other roots.
+
+The directory endpoint (`/api/sessions/{id}/mailboxes/directory`) and MCP session
+listing return `unavailableHosts` beside healthy participants. An unsupported or
+unavailable peer is omitted and identified by host, reason and status. The older
+`participants` endpoint retains its array shape. An incomplete directory cannot
+resolve a global display-name alias; use an exact qualified id or an unambiguous
+name qualified by an available host. Alias resolution refreshes candidates before
+deciding uniqueness, including roots created since the previous directory read.
+If a satellite cannot reach its domain directory, MCP session listing still
+returns the host's local native roots and identifies the unavailable central.
+Their bare ids remain usable locally; incomplete global names remain refused.
+Local authority loss still refuses the operation. A failed domain operation is
+never retried against a local mailbox store. Draining peers retain existing
+mailbox authority but gain no new automatic bindings. Ordinary sends and lists
+revalidate automatic satellite admission after re-enrollment or re-verification;
+only obsolete automatic routing may be superseded, never an explicit grant.
+
+Mail delivered before an explicit executor grant remains mailbox data. Its wake
+obligation is settled in the append transaction and cannot become executable
+work when that root later receives an explicit placement. New mail after an
+explicit grant retains normal executor wake eligibility.
+
+Pre-existing standalone history stays in its original store with the original
+mailbox/message ids, sequence, cursors and issued receipts. Lists expose that
+history alongside domain mail; reads and ACKs select the original native owner
+before domain routing. New domain conversations use qualified participant ids;
+there is no copying or merging of historical mailbox contents. A bare native
+session id continues to locate a session on the caller's own host, never a
+same-named session on another host. Remote targets use the current domain
+directory's qualified ids or unambiguous host-qualified names.
+
+A bare native session id selects a local-to-local send in the caller's own
+store, even when either root already participates in the domain. It does not
+require a central connection or host verification and does not enroll either
+root. Domain targets still require participation; their refusal never falls
+back to a local append. Existing native receipts, relay pins and domain intents
+keep their original sender/key ownership and outcome when retried. Local and
+domain conversations remain separate, with no copying or merging of mail.
+Native reads, ACKs and wake recovery retain the native mailbox owner.
+The domain-only create and intent-preparation endpoints refuse bare native
+targets before participation; use a qualified domain participant or domain
+alias there. An ordinary send remains the entry point for local native mail.
+An intent key remains owned by its native session and creation across automatic
+route supersession. A retry under a replacement sender cannot admit another
+intent; it reports the retained prior sender and preserves the original status
+and outcome without granting access to the old domain principal.
+
+Automatic participation currently also retains the existing role and central
+replacement guards. Once roots have joined, replacing the role or central can
+be refused even though those roots hold no execution grant. Disabling and
+re-enabling the same domain preserves stored history and receipts. If fresh
+verification supersedes an automatic satellite route, that native root retains
+the old route descriptor. Mailbox listings expose `unavailablePriorDomains`
+(also returned by the MCP mailbox list) with the prior participant id, central
+and reason. The replacement identity cannot read or ACK as the retired identity;
+old messages and issued receipts remain in their original store, unavailable
+rather than silently omitted. The array API exposes the count through
+`x-termal-unavailable-prior-domains` and links to the availability response. There is
+no automatic unbind or routing-retirement workflow in this change; explicit
+execution bindings retain their replacement fences as well. Safe retirement on
+an explicit operator replacement is separate work, requiring old-domain
+unavailability to remain visible without dropping or rerouting retained mail.
+
+### Downgrade boundary for automatic participation
+
+An older satellite ignores the new optional automatic-routing field and sees no
+explicit execution binding for those roots. It cannot use their automatic domain
+participation, and cannot interpret it as an execution grant. Existing explicit
+bindings remain unchanged. No SQLite schema floor changes in this feature.
+
+Central rollback below this feature is unsupported once a mailbox-only placement
+has been persisted, including a completed placement retained as retirement
+evidence. Older `FederationPlacement` readers reject its `mailboxOnly` field
+(`deny_unknown_fields`). At base `cde926c4`, metadata decoding propagates that
+error through `load_state_for_boot` and host construction before startup; it
+does not drop the placement or create a grant. Roll forward to a supporting
+binary to recover. A rollback instead requires the operator to restore a
+complete pre-feature state backup through the existing restore procedure before
+starting the older central; disabling federation or merely deleting a session
+does not remove this persisted format boundary. No automatic downgrade rewrite
+or direct-store editing procedure is provided.
+
 Every operation of today's mailbox contract
 ([Durable agent mailboxes](agent-mailboxes.md)) keeps its meaning, operation
 for operation: get-or-create, send, list, read a page (C issues the receipt),

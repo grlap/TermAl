@@ -112,7 +112,7 @@ fn federation_delivery_target_retired_locked(
         // creation UUID. Compare domain identities, including for hidden roots;
         // a present but unbound root does not prove the old creation retired.
         return inner.find_session_index(&binding.identity.session_id).is_none_or(|index| {
-            inner.sessions[index].federation_mailbox_binding.as_ref()
+            inner.sessions[index].mailbox_binding()
                 .is_some_and(|current| current.identity != binding.identity)
         });
     }
@@ -162,7 +162,7 @@ impl MailboxStore {
                             let cursor = mailbox_processed_through(&connection, &message.mailbox_id, &sender)?;
                             FederationDeliveryOutcome::Committed(MailboxAppendReceipt {
                                 notification_cause: (delivery.target.identity.host_id != delivery.target.central.host_id)
-                                    .then(|| FEDERATION_REMOTE_WAKE_CAUSE.to_owned()),
+                                    .then(|| "duplicate delivery; original notification decision retained".to_owned()),
                                 mailbox_id: message.mailbox_id, message_id: message.message_id,
                                 sequence: message.sequence, unread_depth: message.unread_depth_at_append,
                                 notification_disposition: "durableButNotWoken".to_owned(),

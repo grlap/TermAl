@@ -53,13 +53,14 @@ impl MailboxStore {
             let mirror: Option<String> = connection.query_row(
                 "SELECT central_host_id FROM federation_executor_operations WHERE operation_key=?1",
                 [&key], |row| row.get(0)).optional()?;
-            // The receiver's answer, when one was verified, is the outcome;
-            // without one the wake is pending, never reported as not woken.
+            // A mirrored wake reports only the receiver's verified answer;
+            // without an answer it remains pending. A delivery settled
+            // without a mirror makes no receiver-outcome claim.
             return Ok(match mirror {
                 Some(central) => federation_executor_outcome_cause(
                     self.federation_executor_outcome_on(connection, &central, &key)?.as_ref(),
                     chrono::Utc::now()),
-                None => "legacy settled wake; receiver state unknown".into(),
+                None => "mailbox delivery settled".into(),
             });
         }
         if state.as_deref() != Some("pending") { return Ok("remote wake state unknown".into()); }
@@ -180,6 +181,9 @@ impl FederationExecutorMirrorAuthority<'_> {
         if federation_mailbox_central_locked(&inner).ok().as_ref() != Some(&binding.central)
             || peer.enrollment_generation != self.operation.enrollment_generation
             || !federation_mailbox_remote_in_domain(&inner.federation, &inner.preferences.federation, &peer, &binding)
+            || !inner.federation.placements.values().any(|placement|
+                placement.identity == binding.identity && placement.placement_generation == binding.placement_generation
+                    && federation_placement_authority(&inner.federation, &inner.preferences.federation, placement))
         { return Err(federation_executor_conflict()); }
         Ok(FederationMailboxAdmission { _inner: inner, _link: Some(link) })
     }

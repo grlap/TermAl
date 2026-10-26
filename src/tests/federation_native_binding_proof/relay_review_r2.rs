@@ -270,20 +270,11 @@ async fn mailbox_relay_review_r2_remote_home_reconnect_redrives_without_new_mail
     fixture.satellite.run_mailbox_relay_wake_batch(0, 0).await;
     assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
     fixture.reconnect().await;
-    // This minimal fixture has no retained onboarding report. A fresh proof
-    // therefore leaves membership Enrolled until fixture readiness is restored.
-    fixture.satellite.run_mailbox_relay_wake_batch(0, 0).await;
-    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
-    for (app, peer_id) in [
-        (&fixture.central, &fixture.channel.snapshot.peer.host_id),
-        (&fixture.satellite, &fixture.satellite_channel.snapshot.peer.host_id),
-    ] {
-        let peer = app.federation_peer_snapshot(peer_id).unwrap();
-        assert_eq!(peer.membership, FederationMembershipState::Enrolled);
-        app.verify_federation_peer(&peer, federation_registry::checks()).unwrap();
-        let peer = app.federation_peer_snapshot(peer_id).unwrap();
-        app.transition_federation_peer(&peer, FederationMembershipState::Active).unwrap();
-    }
+    // A fresh proof leaves the satellite's record of its central Enrolled, and
+    // a satellite never requalifies or activates its central. The current
+    // lease at the same enrollment is its authority, as for the executor.
+    let central = fixture.satellite.federation_peer_snapshot(&fixture.satellite_channel.snapshot.peer.host_id).unwrap();
+    assert_eq!(central.membership, FederationMembershipState::Enrolled);
     let notification = fixture.satellite.mailbox_store.mailbox_relay_notification(
         &append.target, &receipt.mailbox_id, receipt.sequence
     ).unwrap().unwrap();

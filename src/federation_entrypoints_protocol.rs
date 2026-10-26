@@ -18,6 +18,7 @@ struct FederationBindingInstallIntent {
 struct FederationNativeBindingFence {
     binding: FederationMailboxBinding,
     native_creation_id: String,
+    automatic: bool,
 }
 
 #[derive(Clone)]
@@ -45,7 +46,8 @@ impl FederationBindingsFence {
             let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
             if actual.session.id != expected.binding.identity.session_id
                 || actual.federation_native_creation_id != expected.native_creation_id
-                || actual.federation_mailbox_binding.as_ref() != Some(&expected.binding)
+                || (if expected.automatic { actual.federation_automatic_mailbox_binding.as_ref() }
+                    else { actual.federation_mailbox_binding.as_ref() }) != Some(&expected.binding)
             {
                 return Ok(false);
             }

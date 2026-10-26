@@ -33,7 +33,7 @@ async fn serve_federation_binding_command(
                         return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
                     }
                     let root = federation_mailbox_root_locked(inner, &native_session_id)?;
-                    if root.federation_mailbox_binding.is_some() {
+                    if root.mailbox_binding().is_some() {
                         return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
                     }
                     serde_json::to_value(FederationBindingPreparation {

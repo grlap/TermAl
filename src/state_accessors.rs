@@ -753,7 +753,7 @@ impl AppState {
         });
         let session = &record.session;
         let mut summary = StateSessionSummary {
-            mailbox_participant_id: record.federation_mailbox_binding.as_ref().map(FederationMailboxBinding::participant_key),
+            mailbox_participant_id: record.mailbox_binding().map(FederationMailboxBinding::participant_key),
             id: session.id.clone(),
             name: session.name.clone(),
             emoji: session.emoji.clone(),

@@ -105,6 +105,22 @@ fn validate_mailbox_relay_wake_peer(
     Ok(())
 }
 
+/// Whether `current`, this host's record of a relay conversation peer, still
+/// authorizes wake admission. Central requires its satellite to be active. A
+/// satellite never activates or requalifies its own central, so it accepts it
+/// as the executor authority does: same enrollment, short of revocation.
+fn mailbox_relay_peer_current_locked(
+    inner: &StateInner,
+    current: &FederationPeerSnapshot,
+    enrollment_generation: u64,
+) -> bool {
+    if current.local_role == FederationRole::Satellite && current.peer == current.central {
+        federation_satellite_central_current_locked(inner, &current.peer, enrollment_generation)
+    } else {
+        current.membership == FederationMembershipState::Active
+    }
+}
+
 struct MailboxRelayDispatchAuthority {
     app: AppState,
     wake: MailboxRelayWake,
@@ -126,7 +142,7 @@ impl MailboxRelayDispatchAuthority {
 
     fn validate_locked(&self, inner: &StateInner) -> Result<(), ApiError> {
         let current = federation_snapshot_locked(inner, &self.peer.peer.host_id)?;
-        if current.membership != FederationMembershipState::Active
+        if !mailbox_relay_peer_current_locked(inner, &current, self.peer.enrollment_generation)
             || !same_mailbox_relay_enrollment(&self.peer, &current)
             || inner.federation.admission_quarantine.is_some()
         {

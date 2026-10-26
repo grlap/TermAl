@@ -1626,7 +1626,10 @@ impl TermalDelegationMcpBridge {
         }
 
         let state = self.get_json("/api/state")?;
-        if let Some(participants) = self.domain_mailbox_participants(&state)? {
+        if let Some((participants, unavailable)) = self.domain_mailbox_participants(&state)? {
+            if !federation_directory_alias_available(reference, &unavailable) {
+                bail!("mailbox alias inventory is unavailable; use a known exact participant id or an available Host::Name");
+            }
             return resolve_domain_mailbox_reference(
                 &participants,
                 reference,
@@ -1693,31 +1696,10 @@ impl TermalDelegationMcpBridge {
         // Peer discovery: resolve a session by name to its id for termal_send_to_session.
         // /api/state is metadata-only (no transcripts), so this is a cheap summary read.
         let state = self.get_json("/api/state")?;
-        if let Some(participants) = self.domain_mailbox_participants(&state)? {
-            return Ok(json!({"sessions":participants}));
+        if let Some((participants, unavailable)) = self.domain_mailbox_participants(&state)? {
+            return Ok(json!({"sessions":participants,"unavailableHosts":unavailable}));
         }
-        let delegation_child_ids = delegation_child_session_ids(&state);
-        let sessions = state
-            .get("sessions")
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let listed = sessions
-            .iter()
-            // Root sessions only. The delegation row is authoritative even
-            // if an older/re-attached child temporarily lacks its parent id.
-            .filter(|session| is_root_peer_session(session, &delegation_child_ids))
-            .map(|session| {
-                json!({
-                    "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
-                    "name": session.get("name").cloned().unwrap_or(Value::Null),
-                    "agent": session.get("agent").cloned().unwrap_or(Value::Null),
-                    "status": session.get("status").cloned().unwrap_or(Value::Null),
-                    "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
-                    "preview": session.get("preview").cloned().unwrap_or(Value::Null),
-                })
-            })
-            .collect::<Vec<_>>();
+        let listed = mailbox_peer_session_listing(&state, false);
         Ok(json!({ "sessions": listed }))
     }
 

@@ -163,7 +163,7 @@ impl AppState {
         let federation_creation = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             federation_mailbox_root_locked(&inner, session_id).ok()
-                .filter(|record| record.federation_mailbox_binding.is_some())
+                .filter(|record| record.mailbox_binding().is_some())
                 .map(|record| record.federation_native_creation_id.clone())
         };
         let engram_session_ids_to_terminate = self.prepare_source_observation_delete(session_id, true)?;

@@ -8,6 +8,16 @@ struct MailboxRelayListing {
     unavailable_relay_homes: Vec<MailboxRelayUnavailableHome>,
     #[serde(skip_serializing_if = "Option::is_none")]
     unavailable_central_domain: Option<MailboxRelayUnavailableDomain>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unavailable_prior_domains: Vec<MailboxUnavailablePriorDomain>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MailboxUnavailablePriorDomain {
+    central: FederationHostIdentity,
+    participant_id: String,
+    reason: &'static str,
 }
 
 #[derive(Serialize)]
@@ -491,6 +501,7 @@ impl AppState {
             mailboxes: summaries,
             unavailable_relay_homes,
             unavailable_central_domain: None,
+            unavailable_prior_domains: Vec::new(),
         })
     }
 

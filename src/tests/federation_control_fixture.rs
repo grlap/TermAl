@@ -3,6 +3,11 @@
 
 use super::*;
 
+mod clock {
+    use super::*;
+    include!("federation_control_fixture_clock.rs");
+}
+
 pub(super) struct Attested {
     _central: FederationControlGuard,
     _satellite: FederationControlGuard,
@@ -92,12 +97,28 @@ async fn fixture_forward(
     }
 }
 
+/// The channel this fixture attests on. Fixtures prove attestation, not host
+/// scheduling, so a channel that has not opted into scripted protocol time
+/// attests on a clone whose deadlines measure a scripted clock: elapsed wall
+/// time on a loaded host never expires the window. The clone shares the
+/// channel's link state, so the proof is installed for the caller. A channel
+/// that opted in keeps its own clock, which its test may advance.
+fn fixture_attest_channel(channel: &FederationChannel) -> FederationChannel {
+    let mut channel = channel.clone();
+    if !channel.control.clock.io_deadlines {
+        channel.control.clock = FederationControlClock::scripted_io();
+    }
+    channel
+}
+
 async fn attest_over(
     central: &FederationChannel,
     satellite: &FederationChannel,
     central_io: &mut FederationControlIo,
     satellite_io: &mut FederationControlIo,
 ) -> Attested {
+    let (central, satellite) = (fixture_attest_channel(central), fixture_attest_channel(satellite));
+    let (central, satellite) = (&central, &satellite);
     let satellite_proof = async {
         let mut preface = vec![0; FEDERATION_CONTROL_PREFACE.len()];
         tokio::io::AsyncReadExt::read_exact(&mut *satellite_io, &mut preface)

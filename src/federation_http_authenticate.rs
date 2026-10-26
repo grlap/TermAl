@@ -24,7 +24,7 @@ async fn federation_authenticate_message(
         && (parts.uri.path() == FEDERATION_EXECUTOR_WAKE_ROUTE
             || parts.uri.path() == FEDERATION_EXECUTOR_OUTCOME_ROUTE);
     let binding_request = parts.method == axum::http::Method::POST
-        && parts.uri.path() == "/federation/v1/mailbox/binding";
+        && matches!(parts.uri.path(), "/federation/v1/mailbox/binding" | "/federation/v1/mailbox/participation");
     // The read-only outcome query is polled regularly: a slow answer is a
     // retryable refusal, never a reason to fence the pair's link.
     let outcome_request = parts.method == axum::http::Method::POST

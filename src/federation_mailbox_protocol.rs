@@ -231,12 +231,14 @@ fn federation_mailbox_root_locked<'a>(
         .find_session_index(session_id)
         .ok_or_else(|| ApiError::not_found("session not found"))?;
     let record = &inner.sessions[index];
+    let indexed_child = {
+        let children = inner.delegation_catalog_children.lock().expect("catalog child index poisoned");
+        children.ready(inner.delegations.len()).then(|| children.children.contains_key(session_id))
+    };
     if record.hidden
         || !record.is_local_session()
         || record.session.parent_delegation_id.is_some()
-        || inner
-            .find_delegation_index_by_child_session_id(session_id)
-            .is_some()
+        || indexed_child.unwrap_or_else(|| inner.find_delegation_index_by_child_session_id(session_id).is_some())
     {
         return Err(ApiError::bad_request(
             "mailbox participant must be a local root session",

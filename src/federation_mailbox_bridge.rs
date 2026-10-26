@@ -24,30 +24,68 @@ fn mailbox_reference_handle(reference: &str) -> Result<Option<String>> {
 }
 
 impl TermalDelegationMcpBridge {
-    fn domain_mailbox_participants(&self, state: &Value) -> Result<Option<Vec<Value>>> {
+    fn domain_mailbox_participants(&self, state: &Value) -> Result<Option<(Vec<Value>, Vec<FederationMailboxUnavailableHost>)>> {
         let caller = state["sessions"].as_array().and_then(|sessions| {
             sessions
                 .iter()
                 .find(|session| session["id"].as_str() == Some(self.serving_session_id.as_str()))
         });
-        if caller
-            .and_then(|session| session["mailboxParticipantId"].as_str())
-            .is_none()
-        {
+        let explicit = caller.and_then(|session| session["mailboxParticipantId"].as_str()).is_some();
+        let automatic = automatic_domain_mailbox_discovery(state, &self.serving_session_id);
+        if !explicit && !automatic {
             return Ok(None);
         }
-        let rows: Vec<FederationMailboxParticipant> =
-            serde_json::from_value(self.get_json_with_safe_replay(&format!(
-                "/api/sessions/{}/mailboxes/participants",
-                self.serving_session_id
-            ))?)
+        let response = self.get_json_with_safe_replay(&format!(
+            "/api/sessions/{}/mailboxes/directory", self.serving_session_id));
+        let response = match response {
+            Ok(value) => value,
+            Err(error) if automatic && state["preferences"]["federation"]["role"] == "satellite" => {
+                let central: FederationHostIdentity = serde_json::from_value(
+                    state["preferences"]["federation"]["central"].clone())
+                    .context("satellite central identity was invalid")?;
+                let status = error.downcast_ref::<TermalDelegationApiError>()
+                    .map(|error| error.status.as_u16()).unwrap_or(503);
+                // These are local native locators, never replacement domain
+                // principals. Unavailable inventory still fences global aliases.
+                return Ok(Some((mailbox_peer_session_listing(state, true), vec![FederationMailboxUnavailableHost {
+                    host_id: central.host_id, host_name: "Central".into(), status,
+                    reason: format!("central mailbox directory unavailable: {error}"),
+                }])));
+            }
+            Err(error) => return Err(error),
+        };
+        let snapshot: FederationMailboxDirectorySnapshot = serde_json::from_value(response)
             .context("central mailbox directory response shape was invalid")?;
-        Ok(Some(rows.into_iter().map(|row|json!({
+        let rows = snapshot.participants.into_iter().map(|row|json!({
             "sessionId":row.session_id,"name":format!("{}::{}",row.host_name,row.name),
             "localName":row.name,"hostName":row.host_name,"hostId":row.binding.identity.host_id,
             "localSessionId":row.binding.identity.session_id,"creationId":row.binding.identity.creation_id
-        })).collect()))
+        })).collect();
+        Ok(Some((rows, snapshot.unavailable_hosts)))
     }
+}
+
+fn mailbox_peer_session_listing(state: &Value, native_only: bool) -> Vec<Value> {
+    let delegation_child_ids = delegation_child_session_ids(state);
+    state["sessions"].as_array().into_iter().flatten()
+        .filter(|session| is_root_peer_session(session, &delegation_child_ids))
+        .filter(|session| !native_only || session.get("remoteId").is_none_or(Value::is_null))
+        .map(|session| json!({
+            "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
+            "name": session.get("name").cloned().unwrap_or(Value::Null),
+            "agent": session.get("agent").cloned().unwrap_or(Value::Null),
+            "status": session.get("status").cloned().unwrap_or(Value::Null),
+            "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
+            "preview": session.get("preview").cloned().unwrap_or(Value::Null),
+        })).collect()
+}
+
+fn automatic_domain_mailbox_discovery(state: &Value, native: &str) -> bool {
+    state["preferences"]["federation"]["enabled"] == true
+        && matches!(state["preferences"]["federation"]["role"].as_str(), Some("central" | "satellite"))
+        && state["sessions"].as_array().and_then(|sessions| sessions.iter().find(|session| session["id"] == native))
+            .is_some_and(|session| is_root_peer_session(session, &delegation_child_session_ids(state))
+                && session.get("remoteId").is_none_or(Value::is_null))
 }
 
 fn resolve_domain_mailbox_reference(

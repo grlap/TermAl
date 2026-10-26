@@ -140,6 +140,8 @@ async fn diagnostic_queries_are_exact_bounded_and_do_not_persist_state() {
     assert_eq!(response["capacity"], TEST_RUN_TRACE_CAPACITY);
     assert_eq!(response["traces"][0]["operationId"], "operation-query");
     assert_eq!(response["serverInstanceId"], state.server_instance_id);
+    assert!(response["selectionLimit"].is_null());
+    assert_eq!(response["selectionTruncated"], false);
     for uri in [
         "/api/test-run-diagnostics",
         "/api/test-run-diagnostics?runId=bad%2Fpath",
@@ -158,6 +160,249 @@ async fn diagnostic_queries_are_exact_bounded_and_do_not_persist_state() {
             .unwrap()
             .test_run_registrations
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn recent_rescans_are_discoverable_without_a_registration_or_known_operation() {
+    let state = test_app_state();
+    assert!(!state.refresh_test_runs());
+    let app = app_router(state.clone());
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .uri("/api/test-run-diagnostics?recent=rescans&limit=1")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the idle rescan must be discoverable without a registration: {response}"
+    );
+    assert_eq!(response["serverInstanceId"], state.server_instance_id);
+    assert_eq!(response["selectionLimit"], 1);
+    assert_eq!(response["selectionTruncated"], false);
+    let traces = response["traces"].as_array().unwrap();
+    assert_eq!(traces.len(), 1);
+    let trace = &traces[0];
+    assert_eq!(trace["kind"], "rescan");
+    assert!(trace["runId"].is_null());
+    assert!(!trace["traceId"].as_str().unwrap().is_empty());
+    assert!(!trace["operationId"].as_str().unwrap().is_empty());
+    assert_eq!(trace["completed"], true);
+    for phase in ["reads_done", "commit_acquired", "published", "finished"] {
+        assert!(
+            trace["phases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|point| point["phase"] == phase),
+            "missing {phase}: {trace}"
+        );
+    }
+    assert!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .is_empty()
+    );
+}
+
+async fn read_phase_diagnostics(state: &AppState, uri: &str) -> (StatusCode, Value) {
+    request_json(
+        &app_router(state.clone()),
+        Request::builder().uri(uri).body(Body::empty()).unwrap(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn recent_rescan_discovery_bounds_selection_and_preserves_exact_queries() {
+    let state = test_app_state();
+    for index in 0..TEST_RUN_TRACE_CAPACITY + 3 {
+        let trace = state.test_run_phase_traces.begin(
+            "rescan",
+            None,
+            &format!("scan-{index}"),
+            std::time::Instant::now(),
+        );
+        if index == TEST_RUN_TRACE_CAPACITY + 2 {
+            for _ in 0..TEST_RUN_TRACE_PHASES + 1 {
+                trace.mark("phase");
+            }
+        }
+        drop(trace);
+        drop(state.test_run_phase_traces.begin(
+            "registration",
+            Some("test-unrelated"),
+            "unrelated-registration",
+            std::time::Instant::now(),
+        ));
+    }
+    let revision = state.inner.lock().unwrap().revision;
+    let (status, response) =
+        read_phase_diagnostics(&state, "/api/test-run-diagnostics?recent=rescans&limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["selectionLimit"], 2);
+    assert_eq!(response["selectionTruncated"], true);
+    let traces = response["traces"].as_array().unwrap();
+    assert_eq!(traces.len(), 2);
+    for (offset, trace) in traces.iter().enumerate() {
+        assert_eq!(trace["kind"], "rescan");
+        assert!(trace["runId"].is_null());
+        assert_eq!(
+            trace["operationId"],
+            format!("scan-{}", TEST_RUN_TRACE_CAPACITY + 2 - offset)
+        );
+        assert!(trace["phases"].as_array().unwrap().len() <= TEST_RUN_TRACE_PHASES);
+        let mut keys: Vec<_> = trace
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "completed",
+                "kind",
+                "operationId",
+                "phases",
+                "runId",
+                "traceId",
+                "truncated"
+            ]
+        );
+    }
+    assert_eq!(traces[0]["truncated"], true);
+    assert_eq!(
+        traces[0]["phases"].as_array().unwrap().last().unwrap()["phase"],
+        "finished"
+    );
+    for (uri, expected_count, expected_limit) in [
+        (
+            "/api/test-run-diagnostics?recent=rescans",
+            TEST_RUN_RECENT_RESCAN_LIMIT,
+            TEST_RUN_RECENT_RESCAN_LIMIT,
+        ),
+        (
+            "/api/test-run-diagnostics?recent=rescans&limit=256",
+            TEST_RUN_TRACE_CAPACITY / 2,
+            TEST_RUN_TRACE_CAPACITY,
+        ),
+    ] {
+        let (status, response) = read_phase_diagnostics(&state, uri).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["traces"].as_array().unwrap().len(), expected_count);
+        assert_eq!(response["selectionLimit"], expected_limit);
+        assert_eq!(
+            response["selectionTruncated"],
+            expected_count == expected_limit
+        );
+    }
+    let exact = format!(
+        "/api/test-run-diagnostics?operationId=scan-{}",
+        TEST_RUN_TRACE_CAPACITY + 2
+    );
+    let (status, response) = read_phase_diagnostics(&state, &exact).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["traces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|trace| trace["traceId"] == traces[0]["traceId"])
+    );
+    assert!(
+        response["traces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|trace| trace["kind"] == "rescan")
+    );
+    assert!(response["selectionLimit"].is_null());
+    assert_eq!(response["selectionTruncated"], false);
+    let (status, response) =
+        read_phase_diagnostics(&state, "/api/test-run-diagnostics?operationId=scan-0").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(response["traces"].as_array().unwrap().is_empty());
+    assert_eq!(state.inner.lock().unwrap().revision, revision);
+    assert_eq!(
+        state.test_run_phase_traces.0.lock().unwrap().entries.len(),
+        TEST_RUN_TRACE_CAPACITY
+    );
+}
+
+#[tokio::test]
+async fn recent_rescan_discovery_rejects_ambiguous_or_unbounded_queries() {
+    let state = test_app_state();
+    for uri in [
+        "/api/test-run-diagnostics?recent=rescans&limit=0",
+        "/api/test-run-diagnostics?recent=rescans&limit=257",
+        "/api/test-run-diagnostics?recent=rescans&limit=-1",
+        "/api/test-run-diagnostics?recent=rescans&limit=not-a-number",
+        "/api/test-run-diagnostics?recent=registrations",
+        "/api/test-run-diagnostics?limit=1",
+        "/api/test-run-diagnostics?runId=test-one&limit=1",
+        "/api/test-run-diagnostics?operationId=one&limit=1",
+        "/api/test-run-diagnostics?recent=rescans&runId=test-one",
+        "/api/test-run-diagnostics?recent=rescans&operationId=one",
+        "/api/test-run-diagnostics?recent=rescans&unknown=value",
+    ] {
+        let (status, _) = read_phase_diagnostics(&state, uri).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn recent_rescan_discovery_qualifies_inflight_marks_and_restart_reset() {
+    let state = test_app_state();
+    let trace = state.test_run_phase_traces.begin(
+        "rescan",
+        None,
+        "inflight-scan",
+        std::time::Instant::now(),
+    );
+    trace.mark("commit_acquired");
+    let (status, before) =
+        read_phase_diagnostics(&state, "/api/test-run-diagnostics?recent=rescans").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(before["serverInstanceId"], state.server_instance_id);
+    assert_eq!(before["traces"][0]["completed"], false);
+    assert_eq!(
+        before["traces"][0]["phases"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["phase"],
+        "commit_acquired"
+    );
+    trace.mark("published");
+    drop(trace);
+    let (status, after) =
+        read_phase_diagnostics(&state, "/api/test-run-diagnostics?recent=rescans").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        after["traces"][0]["traceId"],
+        before["traces"][0]["traceId"]
+    );
+    assert_eq!(after["traces"][0]["completed"], true);
+    let restarted = test_app_state();
+    let (status, reset) =
+        read_phase_diagnostics(&restarted, "/api/test-run-diagnostics?recent=rescans").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(reset["serverInstanceId"], before["serverInstanceId"]);
+    assert!(reset["traces"].as_array().unwrap().is_empty());
+    assert!(
+        reset["limitations"]
+            .as_str()
+            .unwrap()
+            .contains("reset on restart")
     );
 }
 

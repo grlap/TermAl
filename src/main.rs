@@ -306,6 +306,7 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/health", get(health))
         .route("/api/diagnostics/persistence", get(get_persistence_diagnostics))
         .route("/api/diagnostics/host-lifecycle", get(get_host_lifecycle_diagnostics))
+        .route("/api/diagnostics/mailbox-relay-wakes", get(get_mailbox_relay_wake_diagnostics))
         .route(
             "/api/federation/peers/{id}/enroll",
             post(enroll_federation_satellite),
@@ -569,6 +570,7 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/sessions/{id}/mailboxes/protocol", get(negotiate_federation_mailboxes))
         .route("/api/sessions/{id}/mailboxes/domain", post(join_federation_mailboxes))
         .route("/api/sessions/{id}/mailboxes/participants", get(list_federation_mailbox_participants))
+        .route("/api/sessions/{id}/mailboxes/directory", get(list_federation_mailbox_directory))
         .route("/api/sessions/{id}/mailbox-intents", post(prepare_federation_intent_route))
         .route("/api/sessions/{id}/mailbox-intents/{key}", get(get_federation_intent_route))
         .route("/api/sessions/{id}/mailbox-intents/{key}/retry", post(retry_federation_intent_route))
@@ -855,6 +857,11 @@ include!("federation_delivery_routes.rs");
 include!("federation_mailbox_directory.rs");
 include!("federation_mailbox_identity.rs");
 include!("federation_mailbox_bindings.rs");
+include!("federation_mailbox_participation.rs");
+include!("federation_mailbox_participation_rpc.rs");
+include!("federation_mailbox_catalog.rs");
+include!("federation_mailbox_discovery.rs");
+include!("federation_mailbox_local_history.rs");
 include!("federation_entrypoints_protocol.rs");
 include!("federation_entrypoints_activation.rs");
 include!("federation_entrypoints_binding.rs");

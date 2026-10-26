@@ -121,6 +121,8 @@ impl StateInner {
 
         let record = SessionRecord {
             federation_mailbox_binding: None,
+            federation_automatic_mailbox_binding: None,
+            federation_retired_automatic_mailbox_bindings: Vec::new(),
             federation_native_creation_id: new_federation_native_creation_id(),
             codex_delegation_release: None,
             active_codex_approval_policy: None,
@@ -379,7 +381,10 @@ impl StateInner {
     }
 
     fn mark_delegation_mutated(&mut self, delegation_index: usize) -> Option<u64> {
-        let delegation_id = self.delegations.get(delegation_index)?.id.clone();
+        let record = self.delegations.get(delegation_index)?;
+        let delegation_id = record.id.clone();
+        self.delegation_catalog_children.get_mut().expect("catalog child index poisoned")
+            .observe(&delegation_id, &record.child_session_id);
         Some(self.mark_delegation_id_mutated(delegation_id))
     }
 
@@ -390,6 +395,7 @@ impl StateInner {
     }
 
     fn record_removed_delegation(&mut self, delegation_id: String) {
+        self.delegation_catalog_children.get_mut().expect("catalog child index poisoned").remove(&delegation_id);
         let stamp = self.next_mutation_stamp();
         self.delegation_mutation_stamps.remove(&delegation_id);
         self.removed_delegation_ids.insert(delegation_id, stamp);
@@ -407,6 +413,7 @@ impl StateInner {
     #[cfg_attr(not(test), allow(dead_code))]
     fn remove_delegation_at(&mut self, index: usize) -> DelegationRecord {
         let record = self.delegations.remove(index);
+        self.delegation_catalog_children.get_mut().expect("catalog child index poisoned").removed_at(index);
         self.record_removed_delegation(record.id.clone());
         self.rebuild_running_read_only_delegations();
         record

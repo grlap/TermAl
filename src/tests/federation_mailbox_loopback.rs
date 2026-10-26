@@ -4,6 +4,11 @@
 use super::federation_mailbox_process::*;
 use super::*;
 
+struct DiscoveryHandleCleanup(AppState);
+impl Drop for DiscoveryHandleCleanup {
+    fn drop(&mut self) { self.0.federation_peer_handles.lock().unwrap().clear(); }
+}
+
 async fn api(
     client: &reqwest::Client,
     port: u16,
@@ -43,6 +48,14 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
         FederationPairCapability::new("a".repeat(64)).unwrap(),
         central.clone(),
     );
+    let _handles = DiscoveryHandleCleanup(central.clone());
+    let rpc_check = channel.clone();
+    central.federation_peer_handles.lock().unwrap().insert(native.host.host_id.clone(),
+        Arc::new(FederationPeerHandle {
+            channel: channel.clone(),
+            rpc: FederationRpcClient::new(native.control_port, channel.clone(),
+                Arc::new(move || rpc_check.current_authority().map(|_| ()))).unwrap(),
+        }));
     let check = channel.clone();
     let router = federation_router(
         channel.clone(),
@@ -289,8 +302,19 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
     );
     stop.send_replace(true);
     server.await.unwrap();
+    let (status, listing) = api(
+        &client,
+        satellite_port,
+        &native.session,
+        "mailboxes?includeRelayAvailability=true",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listing["mailboxes"], json!([]));
+    assert_eq!(listing["unavailableCentralDomain"]["status"], 503);
+    assert!(listing["unavailableCentralDomain"]["error"].is_string());
     for (path, body) in [
-        ("mailboxes".to_owned(), None),
         (read_path, Some(json!({"issueReceipt":true}))),
         (format!("mailbox-messages/{}", reply.message_id), None),
         (ack_path, Some(json!({"receipt":page["receipt"]}))),

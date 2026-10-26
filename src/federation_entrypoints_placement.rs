@@ -12,7 +12,7 @@ async fn reserve_federation_mailbox_placement_route(
         .channel
         .current_lease()
         .map_err(|_| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-    let (current, prior) = lease
+    let (current, prior, automatic) = lease
         .with_current(&app, |inner, current| {
             federation_entrypoint_verified(
                 &inner.federation,
@@ -49,7 +49,18 @@ async fn reserve_federation_mailbox_placement_route(
                     .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
                 intent.ensure_authority(&inner.federation, current, placement)?;
             }
-            Ok((current.clone(), prior))
+            let automatic = inner.federation.placements.values().find(|placement|
+                placement.mailbox_only && placement.identity.host_id == id
+                    && placement.identity.session_id == request.native_session_id
+                    && placement.state != FederationPlacementState::Completed
+                    && federation_mailbox_placement_authority(&inner.federation, &inner.preferences.federation, placement)
+            ).map(|placement| {
+                let intent = inner.federation.binding_install_intents.get(&placement.admission_key)
+                    .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+                intent.ensure_authority(&inner.federation, current, placement)?;
+                Ok::<_, ApiError>(intent.clone())
+            }).transpose()?;
+            Ok((current.clone(), prior, automatic))
         })
         .map_err(|error| {
             if error.status == StatusCode::CONFLICT {
@@ -59,6 +70,10 @@ async fn reserve_federation_mailbox_placement_route(
             }
         })?;
     let native_creation_id = if let Some(intent) = &prior {
+        intent.native_creation_id.clone()
+    } else if let Some(intent) = &automatic {
+        // The explicit Active-only reservation upgrades routing authority in
+        // place. INSTALL still proves the original native creation remotely.
         intent.native_creation_id.clone()
     } else {
         let prepared: FederationBindingPreparation = handle

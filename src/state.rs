@@ -1726,6 +1726,8 @@ struct StateInner {
     /// worker compares these with its watermark to upsert only delegation rows
     /// that changed since the last successful write.
     delegation_mutation_stamps: BTreeMap<String, u64>,
+    /// Maintains bounded native-catalog child exclusion without status churn.
+    delegation_catalog_children: Mutex<FederationCatalogChildren>,
     /// Runtime-only delegation tombstones drained by the persist thread and
     /// restored on write failure, mirroring session tombstone retry behavior.
     removed_delegation_ids: BTreeMap<String, u64>,
@@ -1819,6 +1821,7 @@ impl StateInner {
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),
+            delegation_catalog_children: Mutex::new(FederationCatalogChildren::default()),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: BTreeMap::new(),
@@ -1982,6 +1985,9 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
 struct SessionRecord {
     /// Explicit domain participation; never inferred from a name or local id.
     federation_mailbox_binding: Option<FederationMailboxBinding>,
+    /// Routing only. Older receivers ignore this field and retain no grant.
+    federation_automatic_mailbox_binding: Option<FederationMailboxBinding>,
+    federation_retired_automatic_mailbox_bindings: Vec<FederationMailboxBinding>,
     federation_native_creation_id: String,
     /// Starts at zero when loaded; never persisted across server instances.
     body_sequence: SessionBodySequence,
@@ -2172,6 +2178,10 @@ struct QueuePromotionSnapshot {
 }
 
 impl SessionRecord {
+    fn mailbox_binding(&self) -> Option<&FederationMailboxBinding> {
+        self.federation_mailbox_binding.as_ref().or(self.federation_automatic_mailbox_binding.as_ref())
+    }
+
     fn dedicated_cleanup_holds_admission(&self) -> bool {
         #[cfg(windows)]
         if self.runtime_stop_owner.as_ref().is_some_and(|owner| owner.kind == RuntimeStopOwnerKind::DedicatedReset) {

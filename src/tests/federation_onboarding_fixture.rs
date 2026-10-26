@@ -105,6 +105,11 @@ impl Pair {
         let satellite_port = satellite_listener.local_addr().unwrap().port();
         let mut satellite = federation_registry::domain_state();
         if binding_writers {
+            // These hosts exercise sender-intent and ACK journals as well as
+            // binding persistence; they need the real coordination store.
+            satellite.mailbox_store = Arc::new(MailboxStore::open(
+                &resolve_coordination_persistence_path(satellite.persistence_path.as_path()),
+            ).unwrap());
             // INSTALL/placement require a queued writer and a real SQLite
             // fence; the ordinary onboarding fixture uses synchronous fallback.
             super::federation_entrypoints_writer::start_writer(&mut central);

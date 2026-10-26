@@ -1,6 +1,6 @@
 // Owns local/remote target key scope and authenticated sender namespaces.
-// Does not fake remote wake acceptance or provision transport. New controls
-// use current M1 placements and real M2 central transaction admission.
+// Does not fake remote wake acceptance. Namespace controls use current
+// placements; alias-renaming coverage uses authenticated loopback discovery.
 use super::*;
 
 pub(super) fn remote_actor(
@@ -159,9 +159,21 @@ fn federation_delivery_equal_remote_local_ids_have_distinct_durable_sender_dedup
 
 #[tokio::test]
 async fn federation_delivery_remote_rename_changes_discovery_without_changing_digest() {
-    let state = federation_mailboxes::central_store();
-    let (sender, actor) = federation_mailboxes::local_participant(&state, "Sender");
-    let (mut remote, lease) = remote_actor(&state, "Before", 48001);
+    let pair = federation_onboarding_fixture::Pair::with_enrolled_profile(
+        federation_mailboxes::central_store(), federation_onboarding_fixture::io(),
+        federation_onboarding_fixture::io(), federation_onboarding_fixture::profile(),
+    ).await;
+    assert!(pair.verify().await.unwrap().termal_complete());
+    let state = &pair.central;
+    let (sender, actor) = federation_mailboxes::local_participant(state, "Sender");
+    let remote = test_session_id(&pair.satellite, Agent::Codex);
+    {
+        let mut inner = pair.satellite.inner.lock().unwrap();
+        let index = inner.find_session_index(&remote).unwrap();
+        let root = inner.session_mut_by_index(index).unwrap();
+        root.session.name = "Before".into();
+        root.session.status = SessionStatus::Active;
+    }
     let original: MailboxAppendReceipt = state
         .federation_mailbox_operation(&sender, send("Before", "rename"))
         .await
@@ -170,13 +182,13 @@ async fn federation_delivery_remote_rename_changes_discovery_without_changing_di
         "SELECT canonical_digest FROM federation_mailbox_intents WHERE sender_session_id=?1 AND idempotency_key='rename'",
         [&actor.session_id], |row| row.get(0),
     ).expect("digest must describe exact qualified identity, not display aliases");
-    remote.name = "After".to_owned();
-    state
-        .execute_federation_mailbox(
-            request(&remote, FederationMailboxOperation::Register),
-            Some(lease),
-        )
-        .unwrap();
+    {
+        let mut inner = pair.satellite.inner.lock().unwrap();
+        let index = inner.find_session_index(&remote).unwrap();
+        inner.session_mut_by_index(index).unwrap().session.name = "After".into();
+    }
+    let _: Value = pair.satellite.federation_mailbox_operation(
+        &remote, FederationMailboxOperation::Register).await.unwrap();
     let retry: MailboxAppendReceipt = state
         .federation_mailbox_operation(&sender, send("After", "rename"))
         .await
@@ -187,4 +199,5 @@ async fn federation_delivery_remote_rename_changes_discovery_without_changing_di
         "SELECT canonical_digest FROM federation_mailbox_intents WHERE sender_session_id=?1 AND idempotency_key='rename'",
         [&actor.session_id], |row| row.get::<_, String>(0),
     ).unwrap(), digest);
+    pair.finish().await;
 }

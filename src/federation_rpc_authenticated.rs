@@ -79,6 +79,7 @@ impl FederationRpcClient {
                 (lease, "/federation/v1/mailbox/native-binding")
             }
             FederationRpcRoute::Binding(lease, _) => (lease, "/federation/v1/mailbox/binding"),
+            FederationRpcRoute::Participation(lease, _) => (lease, "/federation/v1/mailbox/participation"),
             FederationRpcRoute::MailboxRelay(lease, _) => (lease, MAILBOX_RELAY_RPC_ROUTE),
         };
         lease.with_incarnation(|| Ok(()))?;
@@ -97,6 +98,7 @@ impl FederationRpcClient {
             FederationRpcRoute::ExecutorOutcome(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::NativeBinding(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::Binding(_, body) => self.client.post(url).json(body),
+            FederationRpcRoute::Participation(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::MailboxRelay(_, body) => self.client.post(url).json(body),
         };
         let mut prepared = builder.build().map_err(|_| federation_auth_refused())?;
@@ -242,6 +244,11 @@ impl FederationRpcClient {
                 }
                 if matches!(&route, FederationRpcRoute::Binding(_, _)) {
                     return Ok(Err(federation_binding_rpc_error(status)));
+                }
+                if matches!(&route, FederationRpcRoute::Participation(_, _)) {
+                    return Ok(Err(if status == StatusCode::NOT_FOUND {
+                        ApiError::conflict("automatic mailbox participation is unavailable on the peer; both hosts must support it; no local fallback")
+                    } else { federation_binding_rpc_error(status) }));
                 }
                 if route.mailbox_lease().is_some() {
                     let FederationRpcRoute::Mailbox(_, request) = &route else { unreachable!() };

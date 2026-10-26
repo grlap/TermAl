@@ -139,6 +139,29 @@ fn federation_delivery_commit_central(
     Ok(())
 }
 
+// Called inside the append transaction after current mailbox authority is
+// locked, retaining that lock through COMMIT. A later explicit grant cannot
+// turn a routing-only append into previously authorized executor work.
+fn settle_routing_only_mailbox_delivery(
+    transaction: &rusqlite::Transaction<'_>, delivery: &FederationDelivery, inner: &StateInner,
+) -> Result<bool> {
+    if delivery.target.identity.host_id == delivery.target.central.host_id {
+        return Ok(false);
+    }
+    let executable = inner.federation.placements.values().any(|placement|
+        placement.identity == delivery.target.identity
+            && placement.placement_generation == delivery.target.placement_generation
+            && federation_placement_authority(&inner.federation, &inner.preferences.federation, placement));
+    if executable { return Ok(false); }
+    transaction.execute(
+        "UPDATE federation_mailbox_wake_obligations SET state='settled'
+         WHERE state='pending' AND message_id=(SELECT message_id FROM federation_mailbox_dedup
+         WHERE sender_host_id=?1 AND sender_session_id=?2 AND idempotency_key=?3)",
+        rusqlite::params![delivery.sender.identity.host_id, delivery.sender.participant_key(), delivery.key],
+    )?;
+    Ok(true)
+}
+
 impl MailboxStore {
     fn refuse_federation_delivery<G>(
         &self,

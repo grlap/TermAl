@@ -8,6 +8,26 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> Result<FederationMailboxParticipant, ApiError> {
+        self.join_federation_mailbox_session_with_history(session_id, false)
+    }
+
+    fn join_federation_mailbox_session_with_history(
+        &self,
+        session_id: &str,
+        preserve_history: bool,
+    ) -> Result<FederationMailboxParticipant, ApiError> {
+        // Already-admitted reads do not wait for the append writer or query
+        // standalone history. First admission revalidates again under writer.
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            federation_mailbox_central_locked(&inner)?;
+            let root = federation_mailbox_root_locked(&inner, session_id)?;
+            if let Some(binding) = root.mailbox_binding() {
+                return inner.federation.mailbox_directory.get(&binding.participant_key())
+                    .filter(|row| row.binding == *binding && federation_mailbox_participant_current_locked(&inner, row))
+                    .cloned().ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+            }
+        }
         let namespace_writer = self
             .mailbox_store
             .lock_writer("checking standalone mailbox history before binding")
@@ -20,7 +40,7 @@ impl AppState {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let central = federation_mailbox_central_locked(&inner)?;
             let record = federation_mailbox_root_locked(&inner, session_id)?;
-            if let Some(binding) = &record.federation_mailbox_binding {
+            if let Some(binding) = record.mailbox_binding() {
                 let existing = inner
                     .federation
                     .mailbox_directory
@@ -32,7 +52,9 @@ impl AppState {
                     .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
                 return Ok(existing.clone());
             }
-            refuse_standalone_mailbox_history(&history)?;
+            if !preserve_history {
+                refuse_standalone_mailbox_history(&history)?;
+            }
             let binding = FederationMailboxBinding {
                 identity: FederationSessionIdentity {
                     host_id: central.host_id.clone(),
@@ -50,10 +72,12 @@ impl AppState {
             };
             participant.validate()?;
             let index = inner.find_session_index(session_id).expect("root checked");
-            inner
-                .session_mut_by_index(index)
-                .expect("root checked")
-                .federation_mailbox_binding = Some(participant.binding.clone());
+            let root = inner.session_mut_by_index(index).expect("root checked");
+            if preserve_history {
+                root.federation_automatic_mailbox_binding = Some(participant.binding.clone());
+            } else {
+                root.federation_mailbox_binding = Some(participant.binding.clone());
+            }
             inner
                 .federation
                 .mailbox_directory
@@ -104,6 +128,19 @@ impl AppState {
         expected_native_creation_id: &str,
         lease: Option<&FederationLinkLease>,
     ) -> Result<(), ApiError> {
+        self.install_federation_mailbox_binding_preserving_history(
+            peer, binding, expected_native_creation_id, lease, false,
+        )
+    }
+
+    fn install_federation_mailbox_binding_preserving_history(
+        &self,
+        peer: &FederationPeerSnapshot,
+        binding: FederationMailboxBinding,
+        expected_native_creation_id: &str,
+        lease: Option<&FederationLinkLease>,
+        preserve_history: bool,
+    ) -> Result<(), ApiError> {
         binding.validate()?;
         let namespace_writer = self
             .mailbox_store
@@ -133,27 +170,41 @@ impl AppState {
             if record.federation_native_creation_id != expected_native_creation_id {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }
-            if record
-                .federation_mailbox_binding
-                .as_ref()
-                .is_some_and(|old| old != &binding)
+            let replacing_automatic = preserve_history && record.federation_mailbox_binding.is_none()
+                && record.federation_automatic_mailbox_binding.as_ref().is_some_and(|old|
+                    old.central == binding.central && old.identity.host_id == binding.identity.host_id
+                        && old.identity.session_id == binding.identity.session_id
+                        && binding.placement_generation > old.placement_generation);
+            if !replacing_automatic && record.mailbox_binding().is_some_and(|old| old != &binding)
             {
                 return Err(ApiError::conflict(
                     "session already has a different domain binding",
                 ));
             }
-            if record.federation_mailbox_binding.as_ref() == Some(&binding) {
+            if record.mailbox_binding() == Some(&binding)
+                && (preserve_history || record.federation_mailbox_binding.is_some()) {
                 return Ok(None);
             }
-            refuse_standalone_mailbox_history(&history)?;
+            if !preserve_history && record.federation_automatic_mailbox_binding.is_none() {
+                refuse_standalone_mailbox_history(&history)?;
+            }
             let version = federation_next_generation(inner.federation.version)?;
             let index = inner
                 .find_session_index(&binding.identity.session_id)
                 .expect("root checked");
-            inner
-                .session_mut_by_index(index)
-                .expect("root checked")
-                .federation_mailbox_binding = Some(binding);
+            let root = inner.session_mut_by_index(index).expect("root checked");
+            if preserve_history {
+                if replacing_automatic {
+                    let prior = root.federation_automatic_mailbox_binding.clone().expect("replacement checked");
+                    if !root.federation_retired_automatic_mailbox_bindings.contains(&prior) {
+                        root.federation_retired_automatic_mailbox_bindings.push(prior);
+                    }
+                }
+                root.federation_automatic_mailbox_binding = Some(binding);
+            } else {
+                root.federation_mailbox_binding = Some(binding);
+                root.federation_automatic_mailbox_binding = None;
+            }
             inner.federation.version = version;
             inner.federation_durable = false;
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));

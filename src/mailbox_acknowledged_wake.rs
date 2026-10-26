@@ -146,7 +146,7 @@ impl AppState {
         mailbox_id: &str,
         processed_through: u64,
     ) -> Result<bool> {
-        let Some(storage_key)=self.local_mailbox_storage_key(session_id) else { return Ok(false); };
+        let Some(storage_key)=self.local_mailbox_storage_key(session_id, mailbox_id)? else { return Ok(false); };
         let covered: Vec<(String, String, u64)> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {

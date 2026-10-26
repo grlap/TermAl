@@ -59,6 +59,27 @@ not survive restart. `response_ready` means the handler prepared its result,
 not that the caller received it. No request bodies, paths, commands or error
 details are stored in this ring.
 
+`GET /api/test-run-diagnostics?recent=rescans` discovers recent background
+rescans without a registration or a previously known operation ID. It returns
+only rescan metadata, newest first, with a default limit of 20. `limit=N`
+accepts 1 through 256 and applies only to this discovery mode. Discovery cannot
+be combined with exact `runId` or `operationId` filters; use the returned IDs
+in a separate exact query. `selectionLimit` reports the applied discovery limit
+(null for exact queries), and `selectionTruncated` says additional matching
+traces remain in the current ring. It does not report older traces already
+evicted from the shared 256-operation ring. Each trace's `truncated` flag still
+describes its own phase-point limit. In-flight traces may lack later marks;
+an empty response does not prove that no rescan ran. A host restart changes
+`serverInstanceId` and resets the ring and its monotonic timing epoch.
+
+For a discovered rescan, `reads_done` to `commit_acquired` measures the wait
+to acquire the commit-section StateInner guard. `commit_acquired` to
+`published` measures the instrumented guarded span, not the exact full lock
+hold: the guard is released after that mark. Missing or truncated marks cannot
+establish a duration or prove absence of a long hold. Discovery reads only the
+existing trace ring; it grants no verification and changes no admission,
+state authority, persistence or test execution.
+
 The production launcher requires this versioned ACK and an exact durable run
 query before fingerprint capture, preflight, Cargo bootstrap or any stage.
 Foreground and detached launches fail with an explicit registration error when

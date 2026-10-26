@@ -1,22 +1,34 @@
 // Owns satellite commit/effect guards over an existing native placement binding.
 // No caller can install a binding, choose another executor or adopt a proxy id.
 
+/// Whether this satellite still accepts `central`, at `enrollment_generation`,
+/// as its configured central. Only central activates a pair: a satellite's
+/// own record of its central stays enrolled, so any membership short of
+/// revoked is current here. Link and target checks stay with each caller.
+fn federation_satellite_central_current_locked(
+    inner: &StateInner,
+    central: &FederationHostIdentity,
+    enrollment_generation: u64,
+) -> bool {
+    inner.preferences.federation.enabled
+        && inner.preferences.federation.role == FederationRole::Satellite
+        && inner.federation_durable && !inner.federation_continuity_lost
+        && inner.federation.admission_quarantine.is_none()
+        && inner.preferences.federation.central.as_ref() == Some(central)
+        && inner.federation.peers.get(&central.host_id).is_some_and(|peer| peer.identity == *central
+            && peer.enrollment_generation == enrollment_generation
+            && peer.membership != FederationMembershipState::Revoked)
+}
+
 fn federation_executor_target_locked(
     inner: &StateInner,
     operation: &FederationExecutorOperation,
 ) -> Result<(), ApiError> {
     let binding = operation.mailbox_binding();
     let local = inner.federation.local.as_ref();
-    let peer = inner.federation.peers.get(&operation.central_host_id);
-    if !inner.preferences.federation.enabled
-        || inner.preferences.federation.role != FederationRole::Satellite
-        || !inner.federation_durable || inner.federation_continuity_lost
-        || inner.federation.admission_quarantine.is_some()
-        || inner.preferences.federation.central.as_ref() != Some(&binding.central)
+    if operation.central_host_id != binding.central.host_id
+        || !federation_satellite_central_current_locked(inner, &binding.central, operation.enrollment_generation)
         || local.is_none_or(|local| local.host_id != operation.target_host_id)
-        || peer.is_none_or(|peer| peer.identity != binding.central
-            || peer.enrollment_generation != operation.enrollment_generation
-            || peer.membership == FederationMembershipState::Revoked)
     {
         return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
     }

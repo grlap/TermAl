@@ -95,6 +95,64 @@ fn channel_dispatch(fixture: &Fixture, token: &RuntimeToken,
     }
 }
 
+fn retain_only_automatic_binding(fixture: &Fixture) {
+    let mut inner = fixture.satellite.inner.lock().unwrap();
+    let index = inner.find_session_index(&fixture.native).unwrap();
+    let root = inner.session_mut_by_index(index).unwrap();
+    root.federation_automatic_mailbox_binding = root.federation_mailbox_binding.take();
+    assert_eq!(root.mailbox_binding(), Some(&fixture.target));
+    assert!(root.federation_mailbox_binding.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_mailbox_binding_cannot_recover_a_retained_executor_operation() {
+    let fixture = Fixture::new();
+    let operation = fixture.operation();
+    // Seed a received journal row without a queue association, as at a crash
+    // boundary. Recovery must judge current explicit authority independently.
+    fixture.satellite.mailbox_store.admit_federation_executor_operation(&operation, || Ok(())).unwrap();
+    retain_only_automatic_binding(&fixture);
+    {
+        // Exercise the persisted shape that a restored journal encounters.
+        let mut inner = fixture.satellite.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.native).unwrap();
+        inner.sessions[index] = PersistedSessionRecord::from_record(&inner.sessions[index])
+            .into_record().unwrap();
+        assert!(inner.sessions[index].federation_mailbox_binding.is_none());
+        assert_eq!(inner.sessions[index].mailbox_binding(), Some(&fixture.target));
+    }
+    assert!(fixture.queue(&fixture.satellite).is_empty());
+    FederationExecutorRecovery::default().recover(&fixture.satellite);
+    assert!(fixture.queue(&fixture.satellite).is_empty());
+    let journal = fixture.inbox().unwrap();
+    assert!(journal.queue_entry_id.is_none());
+    assert_eq!(journal.effect_state, "not_started");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_mailbox_binding_cannot_handoff_a_prepared_executor_prompt() {
+    let fixture = Fixture::new();
+    assert_eq!(fixture.receive(&fixture.request).await.0, StatusCode::ACCEPTED);
+    let (token, sender, input) = prepare_channel(&fixture, "automatic-only-runtime", 1);
+    let dispatch = channel_dispatch(&fixture, &token, &sender, 1);
+    assert!(dispatch.federation_handoff().is_some(), "exercise the remote provider boundary");
+    retain_only_automatic_binding(&fixture);
+    {
+        let inner = fixture.satellite.inner.lock().unwrap();
+        let root = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];
+        assert!(root.runtime.matches_runtime_token(&token), "keep the prepared provider attempt current");
+        assert_eq!(root.active_turn_generation, 1);
+        assert_eq!(root.prompt_deliveries[&fixture.operation().queue_identity()].disposition,
+            PromptDeliveryDisposition::HandingOff);
+    }
+    let result = handoff_prepared_turn_dispatch(&fixture.satellite, dispatch);
+    assert!(result.is_err(), "mailbox routing must not authorize provider handoff");
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    let journal = fixture.inbox().unwrap();
+    assert_eq!(journal.effect_state, "not_started");
+    assert!(journal.runtime_ack.is_none());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_m4_review_legal_topic_cannot_poison_unrelated_wake_reservations() {
     let fixture = Fixture::new();

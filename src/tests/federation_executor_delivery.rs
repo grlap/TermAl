@@ -336,3 +336,8 @@ mod observation {
     use super::*;
     include!("federation_executor_observation.rs");
 }
+
+mod fixture_clock {
+    use super::*;
+    include!("federation_executor_fixture_clock.rs");
+}

@@ -126,7 +126,7 @@ impl AppState {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let valid = federation_mailbox_root_locked(&inner, session).is_ok_and(|record| {
             record.federation_native_creation_id == creation
-                && record.federation_mailbox_binding.as_ref() == Some(binding)
+                && record.mailbox_binding() == Some(binding)
         });
         if !valid
             || !inner.preferences.federation.enabled
@@ -186,13 +186,18 @@ impl AppState {
         // retirement. Blocking SQLite always runs off the async executor, and
         // its connection is released before authoritative alias discovery.
         let lookup_store = self.mailbox_store.clone();
-        let lookup_sender = actor.binding.participant_key();
+        let lookup_owner = session.to_owned();
+        let lookup_creation = creation.clone();
         let lookup_key = key.clone();
         let retained = run_blocking_api(move || {
             let connection = lookup_store.connection().map_err(mailbox_api_error)?;
-            federation_intent_read(&connection, &lookup_sender, &lookup_key)
+            federation_intent_for_owner(&connection, &lookup_owner, &lookup_creation, &lookup_key)
                 .map_err(mailbox_api_error)
         }).await?;
+        if retained.as_ref().is_some_and(|intent| intent.sender != actor.binding.participant_key()) {
+            return Err(ApiError::conflict(
+                "delivery key is retained under a prior domain sender; inspect its mailbox-intents status; no new delivery was admitted"));
+        }
         let exact = retained.as_ref().map(|retained| {
             retained.matches_owner(session, &creation).map_err(mailbox_api_error)?;
             retained.identity().map_err(mailbox_api_error)
@@ -286,15 +291,38 @@ impl AppState {
         role: FederationRole,
         reference: &str,
     ) -> Result<FederationMailboxParticipant, ApiError> {
-        if role == FederationRole::Central {
-            return resolve_federation_mailbox_participant_locked(
-                &self.inner.lock().expect("state mutex poisoned"), reference,
-            );
+        if reference.starts_with("session-") && matches!(role, FederationRole::Central | FederationRole::Satellite) {
+            // Exact native ids address this host only. No unrelated peer is
+            // consulted to enroll or resolve a local native root.
+            self.ensure_automatic_mailbox_participation(reference, false).await?;
+            let qualified = self.automatic_local_mailbox_target(reference)?;
+            if role == FederationRole::Central {
+                return resolve_federation_mailbox_participant_locked(
+                    &self.inner.lock().expect("state mutex poisoned"), &qualified,
+                );
+            }
+            let rows: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
+                session, FederationMailboxOperation::Directory,
+            ).await?;
+            return resolve_federation_delivery_target(&rows, &qualified);
         }
-        let rows: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
-            session, FederationMailboxOperation::Directory,
-        ).await?;
-        resolve_federation_delivery_target(&rows, reference)
+        if reference.starts_with("domain-session-") {
+            if role == FederationRole::Central {
+                return resolve_federation_mailbox_participant_locked(
+                    &self.inner.lock().expect("state mutex poisoned"), reference);
+            }
+            let rows: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
+                session, FederationMailboxOperation::Directory).await?;
+            return resolve_federation_delivery_target(&rows, reference);
+        }
+        // Aliases require a fresh inventory even when an older row matches.
+        // An unavailable host cannot silently disappear from uniqueness checks.
+        let snapshot = self.mailbox_directory_snapshot(session).await?;
+        if !federation_directory_alias_available(reference, &snapshot.unavailable_hosts) {
+            return Err(ApiError::conflict(
+                "mailbox alias inventory is unavailable; use a known exact participant id or an available Host::Name"));
+        }
+        resolve_federation_delivery_target(&snapshot.participants, reference)
     }
 
     async fn send_prepared_federation_delivery(
@@ -403,31 +431,12 @@ impl AppState {
         key: &str,
     ) -> Result<FederationIntent, ApiError> {
         let creation = self.federation_intent_owner(session)?;
-        let connection = self.mailbox_store.connection().map_err(mailbox_api_error)?;
-        let mut statement = connection
-            .prepare(
-                "SELECT sender_session_id FROM federation_mailbox_intents
-             WHERE owner_session_id=?1 AND owner_creation_id=?2 AND idempotency_key=?3",
-            )
-            .map_err(|error| mailbox_api_error(error.into()))?;
-        let senders = statement
-            .query_map(rusqlite::params![session, creation, key], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|error| mailbox_api_error(error.into()))?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| mailbox_api_error(error.into()))?;
-        if senders.len() > 1 {
-            return Err(ApiError::conflict(
-                "delivery key has multiple retained authority epochs",
-            ));
-        }
-        let sender = senders
-            .first()
-            .ok_or_else(|| ApiError::not_found("delivery intent not found"))?;
-        let result = federation_intent_read(&connection, sender, key)
-            .map_err(mailbox_api_error)?
-            .ok_or_else(|| ApiError::not_found("delivery intent not found"))?;
+        let result = {
+            let connection = self.mailbox_store.connection().map_err(mailbox_api_error)?;
+            federation_intent_for_owner(&connection, session, &creation, key)
+                .map_err(mailbox_api_error)?
+                .ok_or_else(|| ApiError::not_found("delivery intent not found"))?
+        };
         let inner = self.inner.lock().expect("state mutex poisoned");
         if !federation_mailbox_root_locked(&inner, session)
             .is_ok_and(|record| record.federation_native_creation_id == creation)
@@ -503,6 +512,7 @@ async fn prepare_federation_intent_route(
     State(state): State<AppState>,
     Json(request): Json<PrepareFederationIntentRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    require_domain_mailbox_target(&request.target_session_id)?;
     if request
         .class
         .as_deref()

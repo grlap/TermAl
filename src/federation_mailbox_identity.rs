@@ -46,7 +46,7 @@ fn federation_mailbox_remote_in_domain(
             placement.identity == binding.identity
                 && placement.placement_generation == binding.placement_generation
                 && placement.state != FederationPlacementState::Completed
-                && federation_placement_authority(domain, settings, placement)
+                && federation_mailbox_placement_authority(domain, settings, placement)
         })
 }
 
@@ -62,7 +62,7 @@ fn federation_mailbox_participant_current_locked(
     if participant.binding.identity.host_id == participant.binding.central.host_id {
         return federation_mailbox_root_locked(inner, &participant.binding.identity.session_id)
             .is_ok_and(|record| {
-                record.federation_mailbox_binding.as_ref() == Some(&participant.binding)
+                record.mailbox_binding() == Some(&participant.binding)
             });
     }
     federation_snapshot_locked(inner, &participant.binding.identity.host_id).is_ok_and(|peer| {
