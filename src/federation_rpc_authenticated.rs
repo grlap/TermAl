@@ -72,7 +72,10 @@ impl FederationRpcClient {
         let (lease, path) = match &route {
             FederationRpcRoute::Health(lease) => (lease, "/federation/v1/health"),
             FederationRpcRoute::Onboarding(lease, probe) => (lease, probe.path()),
-            FederationRpcRoute::Mailbox(lease, _) => (lease, "/federation/v1/mailbox"),
+            FederationRpcRoute::Mailbox(lease, request) => (lease,
+                if matches!(request.operation, FederationMailboxOperation::Directory { alias_basis: true }) {
+                    "/federation/v1/mailbox?aliasBasis=true"
+                } else { "/federation/v1/mailbox" }),
             FederationRpcRoute::ExecutorWake(lease, _) => (lease, FEDERATION_EXECUTOR_WAKE_ROUTE),
             FederationRpcRoute::ExecutorOutcome(lease, _) => (lease, FEDERATION_EXECUTOR_OUTCOME_ROUTE),
             FederationRpcRoute::NativeBinding(lease, _) => {

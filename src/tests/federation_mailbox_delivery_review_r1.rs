@@ -167,8 +167,8 @@ fn federation_delivery_review_r1_satellite_exact_canonical_id_wins_over_alias_co
 fn federation_delivery_review_r1_control_satellite_qualified_aliases_keep_the_exact_binding() {
     let state = federation_mailboxes::central_store();
     let (_, target) = federation_mailboxes::local_participant(&state, "Visible target");
-    for reference in [target.session_id.clone(), format!("{}::{}", target.host_name, target.name),
-        format!("{}::{}", target.binding.identity.host_id, target.name)] {
+    for reference in [target.session_id.clone(), format!("host:{}::{}", target.host_name, target.name),
+        format!("host:{}::{}", target.binding.identity.host_id, target.name)] {
         let found = resolve_federation_delivery_target(&[target.clone()], &reference).unwrap();
         assert_eq!(found.binding, target.binding);
     }

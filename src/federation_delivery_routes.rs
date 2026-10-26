@@ -302,27 +302,31 @@ impl AppState {
                 );
             }
             let rows: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
-                session, FederationMailboxOperation::Directory,
+                session, FederationMailboxOperation::Directory { alias_basis: false },
             ).await?;
             return resolve_federation_delivery_target(&rows, &qualified);
         }
-        if reference.starts_with("domain-session-") {
+        let exact_native = matches!(FederationMailboxAlias::parse(reference, None),
+            Ok(FederationMailboxAlias::HostNative { .. }));
+        if reference.starts_with("domain-session-") || exact_native {
+            // Exact selection reads existing current participants. It must not
+            // admit this target or unrelated roots through alias discovery.
             if role == FederationRole::Central {
                 return resolve_federation_mailbox_participant_locked(
                     &self.inner.lock().expect("state mutex poisoned"), reference);
             }
             let rows: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
-                session, FederationMailboxOperation::Directory).await?;
+                session, FederationMailboxOperation::Directory { alias_basis: false }).await?;
             return resolve_federation_delivery_target(&rows, reference);
         }
         // Aliases require a fresh inventory even when an older row matches.
         // An unavailable host cannot silently disappear from uniqueness checks.
         let snapshot = self.mailbox_directory_snapshot(session).await?;
-        if !federation_directory_alias_available(reference, &snapshot.unavailable_hosts) {
+        if !federation_directory_alias_available(reference, &snapshot.unavailable_hosts, snapshot.alias_basis.as_ref()) {
             return Err(ApiError::conflict(
-                "mailbox alias inventory is unavailable; use a known exact participant id or an available Host::Name"));
+                "mailbox alias inventory is unavailable; use a known exact participant id or an explicit host: target on an available host"));
         }
-        resolve_federation_delivery_target(&snapshot.participants, reference)
+        resolve_federation_delivery_target_with_basis(&snapshot.participants, reference, snapshot.alias_basis.as_ref())
     }
 
     async fn send_prepared_federation_delivery(
@@ -451,33 +455,15 @@ fn resolve_federation_delivery_target(
     rows: &[FederationMailboxParticipant],
     reference: &str,
 ) -> Result<FederationMailboxParticipant, ApiError> {
-    if !matches!(mailbox_reference_handle(reference), Ok(None)) {
-        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
-    }
-    if let Some(exact) = rows.iter().find(|row| row.session_id == reference) {
-        exact.validate()?;
-        return Ok(exact.clone());
-    }
-    // Canonical ids and bare native ids never fall through to display aliases.
-    if reference.starts_with("domain-session-") || reference.starts_with("session-") {
-        return Err(ApiError::not_found(
-            "qualified id required; use the directory sessionId or exact Host::Name",
-        ));
-    }
-    let mut matches = rows.iter().filter(|row| {
-        row.name.eq_ignore_ascii_case(reference)
-            || format!("{}::{}", row.host_name, row.name).eq_ignore_ascii_case(reference)
-            || format!("{}::{}", row.binding.identity.host_id, row.name)
-                .eq_ignore_ascii_case(reference)
-    });
-    let first = matches
-        .next()
-        .ok_or_else(|| ApiError::not_found("qualified mailbox participant not found"))?;
-    if matches.next().is_some() {
-        return Err(ApiError::bad_request(
-            "mailbox participant alias is ambiguous",
-        ));
-    }
+    resolve_federation_delivery_target_with_basis(rows, reference, None)
+}
+
+fn resolve_federation_delivery_target_with_basis(
+    rows: &[FederationMailboxParticipant],
+    reference: &str,
+    basis: Option<&FederationMailboxAliasBasis>,
+) -> Result<FederationMailboxParticipant, ApiError> {
+    let first = select_federation_mailbox_alias(rows, reference, basis, federation_mailbox_alias_row)?;
     first.validate()?;
     Ok(first.clone())
 }

@@ -569,7 +569,7 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/sessions/{id}/mailbox-references/{reference}/resolve", get(resolve_federation_mailbox_reference))
         .route("/api/sessions/{id}/mailboxes/protocol", get(negotiate_federation_mailboxes))
         .route("/api/sessions/{id}/mailboxes/domain", post(join_federation_mailboxes))
-        .route("/api/sessions/{id}/mailboxes/participants", get(list_federation_mailbox_participants))
+        .route("/api/sessions/{id}/mailboxes/participants", get(list_federation_mailbox_participants_with_basis))
         .route("/api/sessions/{id}/mailboxes/directory", get(list_federation_mailbox_directory))
         .route("/api/sessions/{id}/mailbox-intents", post(prepare_federation_intent_route))
         .route("/api/sessions/{id}/mailbox-intents/{key}", get(get_federation_intent_route))
@@ -877,6 +877,7 @@ include!("federation_mailbox_reference_routes.rs");
 include!("federation_mailbox_store.rs");
 include!("federation_mailbox_rpc.rs");
 include!("federation_mailbox_bridge.rs");
+include!("federation_mailbox_alias.rs");
 include!("mailbox_append_wake.rs");
 include!("federation_registry.rs");
 include!("federation_onboarding_record.rs");

@@ -1,5 +1,5 @@
 // Public routine-mail routing into the authenticated, immutable native home.
-// Remote proxies are locators only; this facade never invokes a provider or joins a domain.
+// Explicit native locators reuse this facade; it never invokes a provider or joins a domain.
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +61,11 @@ fn public_mailbox_relay_receipt(
 ) -> Result<MailboxAppendReceipt, ApiError> {
     receipt.mailbox_id = MailboxRelayLocator::encode(home, &receipt.mailbox_id, false)?;
     receipt.message_id = MailboxRelayLocator::encode(home, &receipt.message_id, true)?;
+    if receipt.notification_disposition == "durableButNotWoken" && receipt.notification_cause.is_none() {
+        receipt.notification_cause = Some(
+            "native mail is durable; wake requires central activation of the satellite; if it is only Verified, ask the central operator to activate the host".into(),
+        );
+    }
     Ok(receipt)
 }
 
@@ -162,14 +167,29 @@ impl AppState {
         Ok(value)
     }
 
-    fn mailbox_relay_proxy_locator(
+    fn mailbox_relay_locator(
         &self,
         target: &str,
     ) -> Result<Option<(String, FederationPeerSnapshot)>, ApiError> {
+        if target.starts_with("host:") {
+            let alias = FederationMailboxAlias::parse(target, None)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            if let FederationMailboxAlias::HostNative { host, session_id } = alias {
+                let host = host.to_string();
+                let local = self.inner.lock().expect("state mutex poisoned")
+                    .federation.local.as_ref().map(|local| local.host_id.clone());
+                if local.as_deref() == Some(host.as_str()) {
+                    return Ok(None);
+                }
+                return self.federation_peer_snapshot(&host)
+                    .map(|peer| Some((session_id.to_owned(), peer)));
+            }
+            return Ok(None);
+        }
         if !target.starts_with("session-") {
             return Ok(None);
         }
-        let Some(proxy) = self.remote_session_target(target)? else {
+        let Some(proxy) = self.remote_session_target(target).map_err(native_mailbox_local_target_error)? else {
             return Ok(None);
         };
         if !proxy.remote.enabled || proxy.remote.transport != RemoteTransport::Ssh {
@@ -194,7 +214,10 @@ impl AppState {
                 "remote mailbox host locator is ambiguous",
             ));
         }
-        Ok(Some((proxy.remote_session_id, peer)))
+        Err(ApiError::not_found(format!(
+            "a bare session id selects a local root, not a remote projection; use host:{}::{} for the remote native session",
+            peer.peer.host_id, proxy.remote_session_id,
+        )))
     }
 
     async fn send_native_mailbox_relay(
@@ -205,17 +228,25 @@ impl AppState {
         let app = self.clone();
         let session_owned = session.to_owned();
         let key = request.idempotency_key.clone();
-        let pin = run_blocking_api(move || {
-            app.mailbox_store
-                .mailbox_relay_intent(&session_owned, &key)
-                .map_err(mailbox_api_error)
-        })
-        .await?;
+        let (pin, retained_domain) = run_blocking_api(move || {
+            let pin = app.mailbox_store.mailbox_relay_intent(&session_owned, &key)
+                .map_err(mailbox_api_error)?;
+            let retained_domain = if pin.is_none() {
+                let creation = {
+                    let inner = app.inner.lock().expect("state mutex poisoned");
+                    federation_mailbox_root_locked(&inner, &session_owned)?.federation_native_creation_id.clone()
+                };
+                app.mailbox_store.native_sender_has_domain_intent(&session_owned, &creation, &key)
+                    .map_err(mailbox_api_error)?
+            } else { false };
+            Ok((pin, retained_domain))
+        }).await?;
+        if retained_domain { return Ok(None); }
         let relay_reference = request.target_session_id.starts_with("relay-principal-");
         // Existing pins are resolved before looking at a mutable proxy or taking
         // any legacy route. An unchanged retry always reaches the original home.
         let locator = if pin.is_none() && !relay_reference {
-            self.mailbox_relay_proxy_locator(&request.target_session_id)?
+            self.mailbox_relay_locator(&request.target_session_id)?
         } else {
             None
         };
@@ -315,10 +346,10 @@ impl AppState {
                     "authenticated remote mailbox descriptor mismatch",
                 ));
             }
-            // Re-resolve the locator after the proof; no changed proxy/config may
+            // Re-resolve the exact locator after the proof; no changed peer may
             // publish a send admitted under an older endpoint snapshot.
             let current = self
-                .mailbox_relay_proxy_locator(&request.target_session_id)?
+                .mailbox_relay_locator(&request.target_session_id)?
                 .ok_or_else(|| ApiError::conflict("remote mailbox locator changed"))?;
             if current.0 != native || !current.1.same_transport_as(&peer) {
                 return Err(ApiError::conflict(
@@ -474,14 +505,7 @@ impl AppState {
             for row in rows {
                 row.conversation.require_home(&conversation.home)?;
                 row.conversation.require_member(&actor)?;
-                let names: [String; 2] = row.conversation.participants.clone().map(|principal| {
-                    row.summary
-                        .participants
-                        .iter()
-                        .find(|participant| participant.session_id == principal.participant_key())
-                        .map(|participant| participant.display_name.clone())
-                        .unwrap_or_else(|| principal.native_session_id.clone())
-                });
+                let names = row.participant_names();
                 let app = self.clone();
                 let saved = row.conversation.clone();
                 let mailbox = row.summary.id.clone();
@@ -505,6 +529,37 @@ impl AppState {
         })
     }
 
+    async fn recover_native_mailbox_relay_association(
+        &self, actor: &MailboxRelayPrincipal, locator: &MailboxRelayLocator,
+    ) -> Result<MailboxRelayConversation, ApiError> {
+        let handle = self.federation_peer_handle(&locator.home.host.host_id)
+            .ok_or_else(|| ApiError::conflict("original native mailbox home is unavailable"))?;
+        let lease = handle.channel.current_lease()?;
+        lease.with_current(self, |_, peer| {
+            if peer.local != actor.host || peer.peer != locator.home.host
+                || peer.central != locator.home.host || peer.local_role != FederationRole::Satellite {
+                return Err(ApiError::conflict("native mailbox recovery requires its configured central home"));
+            }
+            Ok(())
+        })?;
+        let rows: Vec<MailboxRelaySummary> = self.request_mailbox_relay(&handle, &lease,
+            MailboxRelayOperation::List { actor: actor.clone(), home: locator.home.clone() }).await?;
+        let row = rows.into_iter().find(|row| row.summary.id == locator.id)
+            .ok_or_else(|| ApiError::not_found("native mailbox is not owned by this recipient at its original home"))?;
+        row.conversation.require_home(&locator.home)?;
+        row.conversation.require_member(actor)?;
+        let names = row.participant_names();
+        let conversation = row.conversation;
+        let authority = MailboxRelayAuthority {
+            app: self.clone(), lease, native: vec![actor.clone()], home: None,
+        };
+        let app = self.clone();
+        let saved = conversation.clone();
+        let mailbox = locator.id.clone();
+        run_blocking_api(move || app.mailbox_store.remember_mailbox_relay(
+            &saved, &mailbox, &names, || authority.lock()).map_err(mailbox_api_error)).await?;
+        Ok(conversation)
+    }
     async fn read_native_mailbox_relay(
         &self,
         session: &str,
@@ -524,13 +579,11 @@ impl AppState {
             app.mailbox_store
                 .mailbox_relay_association(&captured, &mailbox)
                 .map_err(mailbox_api_error)
-        })
-        .await?
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "native mailbox association missing; list the original home to recover it",
-            )
-        })?;
+        }).await?;
+        let conversation = match conversation {
+            Some(conversation) => conversation,
+            None => self.recover_native_mailbox_relay_association(&actor, &locator).await?,
+        };
         conversation.require_home(&locator.home)?;
         let mut page: MailboxReadResponse = self
             .call_native_mailbox_home(

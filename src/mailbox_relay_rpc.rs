@@ -203,7 +203,15 @@ impl AppState {
                 )?;
                 let receipt = self
                     .mailbox_store
-                    .append_mailbox_relay(&append, &lease.with_current(self, |_, peer|Ok(peer.clone()))?, || authority.lock())
+                    .append_mailbox_relay(&append, &lease.with_current(self, |_, peer|Ok(peer.clone()))?,
+                        || authority.lock(), |guard| {
+                        let peer = federation_snapshot_locked(&guard._inner, &lease.channel.snapshot.peer.host_id)
+                            .map_err(|error| relay_store_error(&error.message))?;
+                        federation_participation_qualified(&guard._inner.federation,
+                            &guard._inner.preferences.federation, &peer, &lease.incarnation)
+                            .map_err(|error| relay_store_error(&error.message))?;
+                        Ok(())
+                    })
                     .map_err(mailbox_api_error)?;
                 self.federation_executor_wake_signal.kick();
                 serde_json::to_value(receipt)

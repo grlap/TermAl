@@ -198,6 +198,14 @@ struct FederationSessionIdentity {
     creation_id: String,
 }
 
+// The existing native-id syntax check is shared with explicit mailbox parsing;
+// syntax does not establish a session's creation identity or current authority.
+fn federation_native_session_id_valid(session_id: &str) -> bool {
+    !session_id.is_empty()
+        && session_id.len() <= 160
+        && !session_id.chars().any(|ch| ch.is_control() || ch.is_whitespace() || ch == '/')
+}
+
 impl FederationSessionIdentity {
     fn validate(&self) -> Result<(), ApiError> {
         FederationHostIdentity {
@@ -209,12 +217,7 @@ impl FederationSessionIdentity {
             .ok()
             .filter(|id| !id.is_nil());
         if creation.map(|id| id.to_string()).as_deref() != Some(self.creation_id.as_str())
-            || self.session_id.is_empty()
-            || self.session_id.len() > 160
-            || self
-                .session_id
-                .chars()
-                .any(|ch| ch.is_control() || ch.is_whitespace() || ch == '/')
+            || !federation_native_session_id_valid(&self.session_id)
         {
             return Err(ApiError::bad_request("invalid federation session identity"));
         }

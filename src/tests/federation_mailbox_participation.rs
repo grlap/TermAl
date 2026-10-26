@@ -14,7 +14,10 @@ mod local;
 #[path = "federation_mailbox_participation_review_r8.rs"]
 mod review_r8;
 
-async fn directory(state: &AppState, native: &str) -> Vec<FederationMailboxParticipant> {
+#[path = "federation_mailbox_native_addressing.rs"]
+mod native_addressing;
+
+pub(super) async fn directory(state: &AppState, native: &str) -> Vec<FederationMailboxParticipant> {
     list_federation_mailbox_participants(AxumPath(native.to_owned()), State(state.clone()))
         .await
         .expect("qualified native roots participate without an explicit join")
@@ -118,7 +121,7 @@ async fn unverified_satellite_cannot_automatically_join_the_domain() {
     pair.finish().await;
 }
 
-async fn qualified_pair() -> federation_onboarding_fixture::Pair {
+pub(super) async fn qualified_pair() -> federation_onboarding_fixture::Pair {
     let pair = federation_onboarding_fixture::Pair::with_enrolled_profile(
         federation_mailboxes::central_store(), federation_onboarding_fixture::io(),
         federation_onboarding_fixture::io(), federation_onboarding_fixture::profile(),
@@ -127,7 +130,7 @@ async fn qualified_pair() -> federation_onboarding_fixture::Pair {
     pair
 }
 
-fn native(state: &AppState, name: &str) -> String {
+pub(super) fn native(state: &AppState, name: &str) -> String {
     let native = test_session_id(state, Agent::Codex);
     let mut inner = state.inner.lock().unwrap();
     let index = inner.find_session_index(&native).unwrap();

@@ -36,9 +36,10 @@ without another list call. They are snapshots, not protection against a
 concurrent send or acknowledgement.
 
 1. TermAl validates a native root caller and a root peer. Local conversations
-   retain their existing storage. A known remote-root proxy can locate the
-   [authenticated native relay](native-mailbox-relay.md); it never becomes a
-   local participant or executor through that operation.
+   retain their existing storage. An explicit `host:<host UUID>::<session id>`
+   selects the exact remote root through the
+   [authenticated native relay](native-mailbox-relay.md). Bare session ids
+   remain local; UI proxies cannot initiate remote sends.
 2. The body is committed to SQLite with the next dense mailbox sequence.
 3. Only after commit, TermAl best-effort wakes the receiver with mailbox
    metadata (mailbox id, latest sequence, unread count, latest inbound sender,
@@ -475,10 +476,12 @@ Legacy numeric acknowledgement remains a forward-only compare-and-swap:
 
 The native routine relay is described in
 [Native cross-host routine mailbox relay](native-mailbox-relay.md). It accepts
-a known remote-root proxy through the existing send tool and routes subsequent
+an explicit `host:<host UUID>::<native session id>` through the existing send tool and routes subsequent
 reads, replies and receipt acknowledgements to one immutable central home.
 Both hosts must implement that protocol and have an enrolled, authenticated
-pair. No implicit migration of standalone history or domain enrollment occurs.
+pair with current qualification. No implicit migration of standalone history
+or domain enrollment occurs. The ordinary native mailbox wake uses the
+recipient's existing queue; it grants no executor placement.
 
 The separately bound central-domain protocol is designed in
 [Central control plane, satellite hosts and cross-host mailboxes](central-control-plane.md),

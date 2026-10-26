@@ -30,7 +30,29 @@ async fn list_federation_mailbox_participants(
 async fn list_federation_mailbox_directory(
     AxumPath(session): AxumPath<String>, State(state): State<AppState>,
 ) -> Result<Json<FederationMailboxDirectorySnapshot>, ApiError> {
-    state.mailbox_directory_snapshot(&session).await.map(Json)
+    let mut snapshot = state.mailbox_directory_snapshot(&session).await?;
+    snapshot.alias_basis = None;
+    Ok(Json(snapshot))
+}
+
+async fn list_federation_mailbox_participants_with_basis(
+    AxumPath(session): AxumPath<String>, State(state): State<AppState>,
+    Query(query): Query<FederationMailboxDirectoryQuery>,
+) -> Result<Response, ApiError> {
+    if query.alias_basis {
+        let directory = state.federation_mailbox_alias_directory(&session).await?;
+        Ok(Json(directory).into_response())
+    } else {
+        list_federation_mailbox_participants(AxumPath(session), State(state)).await
+            .map(IntoResponse::into_response)
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FederationMailboxDirectoryQuery {
+    #[serde(default)]
+    alias_basis: bool,
 }
 
 #[derive(Deserialize)]
@@ -185,7 +207,7 @@ impl AppState {
         }
         if !matches!(&operation, FederationMailboxOperation::Protocol | FederationMailboxOperation::Register) {
             self.ensure_automatic_mailbox_participation(session,
-                matches!(&operation, FederationMailboxOperation::Directory)).await?;
+                matches!(&operation, FederationMailboxOperation::Directory { .. })).await?;
         }
         if let FederationMailboxOperation::GetOrCreate { target } = &mut operation {
             let role = self.inner.lock().expect("state mutex poisoned").preferences.federation.role;
@@ -245,6 +267,16 @@ impl AppState {
         operation: FederationMailboxOperation,
         capability: Option<&FederationDeliveryCapability>,
     ) -> Result<(T, Option<FederationLinkLease>), ApiError> {
+        self.dispatch_federation_mailbox_operation_with_alias_basis(session, operation, capability)
+            .await.map(|(value, lease, _)| (value, lease))
+    }
+
+    async fn dispatch_federation_mailbox_operation_with_alias_basis<T: DeserializeOwned>(
+        &self,
+        session: &str,
+        operation: FederationMailboxOperation,
+        capability: Option<&FederationDeliveryCapability>,
+    ) -> Result<(T, Option<FederationLinkLease>, Option<FederationMailboxAliasBasis>), ApiError> {
         let (settings, actor) = {
             let actor = self.federation_mailbox_actor(session)?;
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -328,7 +360,7 @@ impl AppState {
             run_blocking_api(move || app.retain_federation_executor_mailbox_ack(&binding, &summary, &lease)).await?;
         }
         serde_json::from_value(response.value)
-            .map(|value| (value, lease))
+            .map(|value| (value, lease, response.alias_basis))
             .map_err(|_| ApiError::bad_gateway("invalid central mailbox response schema"))
     }
 }
@@ -343,8 +375,14 @@ fn federation_mailbox_routes() -> Router<FederationListenerState> {
 
 async fn serve_federation_mailbox(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
-    Json(request): Json<FederationMailboxRequest>,
+    Query(query): Query<FederationMailboxDirectoryQuery>,
+    Json(mut request): Json<FederationMailboxRequest>,
 ) -> Result<Response, ApiError> {
+    if let FederationMailboxOperation::Directory { alias_basis } = &mut request.operation {
+        // The existing MAC binds the full URI including this query. Old
+        // centrals ignore it and return the legacy response with no basis.
+        *alias_basis = query.alias_basis;
+    }
     let lease = peer.lease.ok_or_else(federation_stale_link)?;
     let permit = peer
         .mailbox_permit

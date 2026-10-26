@@ -27,7 +27,7 @@ impl FederationMailboxOperation {
         match self {
             Self::Protocol => "protocol",
             Self::Register => "register",
-            Self::Directory => "directory",
+            Self::Directory { .. } => "directory",
             Self::GetOrCreate { .. } => "getOrCreate",
             Self::Send { .. } => "send",
             Self::SendExact { .. } => "sendExact",

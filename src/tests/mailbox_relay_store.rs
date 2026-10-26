@@ -78,7 +78,7 @@ fn mailbox_relay_review_home_wake_keeps_original_enrollment_through_reopen_and_r
     let (_root, path, store) = store();
     let (relay, peer) = envelope(&store);
     let receipt = store
-        .append_mailbox_relay(&relay, &peer, || Ok(()))
+        .append_mailbox_relay(&relay, &peer, || Ok(()), |_| Ok(()))
         .unwrap();
     drop(store);
     let store = MailboxStore::open(&path).unwrap();
@@ -87,7 +87,7 @@ fn mailbox_relay_review_home_wake_keeps_original_enrollment_through_reopen_and_r
     reconnect.transport_generation += 1;
     assert!(
         store
-            .append_mailbox_relay(&relay, &reconnect, || Ok(()))
+            .append_mailbox_relay(&relay, &reconnect, || Ok(()), |_| Ok(()))
             .unwrap()
             .duplicate
     );
@@ -108,7 +108,7 @@ fn mailbox_relay_review_home_wake_keeps_original_enrollment_through_reopen_and_r
     reconnect.enrollment_generation += 1;
     assert!(
         store
-            .append_mailbox_relay(&relay, &reconnect, || Ok(()))
+            .append_mailbox_relay(&relay, &reconnect, || Ok(()), |_| Ok(()))
             .is_err()
     );
     assert_eq!(count(&store, "mailbox_messages"), 1);
@@ -270,7 +270,7 @@ fn mailbox_relay_store_two_way_same_home_preserves_raw_history_and_receipt_isola
     let raw = store.append(&old).unwrap().receipt.clone();
     let (relay, peer) = envelope(&store);
     let sent = store
-        .append_mailbox_relay(&relay, &peer, || Ok(()))
+        .append_mailbox_relay(&relay, &peer, || Ok(()), |_| Ok(()))
         .unwrap();
     let mut reply = relay.clone();
     std::mem::swap(&mut reply.sender, &mut reply.target);
@@ -278,7 +278,7 @@ fn mailbox_relay_store_two_way_same_home_preserves_raw_history_and_receipt_isola
     reply.message = "current build reply".into();
     reply.idempotency_key = "reply".into();
     let replied = store
-        .append_mailbox_relay(&reply, &peer, || Ok(()))
+        .append_mailbox_relay(&reply, &peer, || Ok(()), |_| Ok(()))
         .unwrap();
     assert_eq!(sent.mailbox_id, replied.mailbox_id);
     assert_eq!((sent.sequence, replied.sequence), (1, 2));
@@ -332,7 +332,7 @@ fn mailbox_relay_store_lost_reply_and_reload_reuse_original_append_and_wake() {
             .is_none()
     );
     let committed = store
-        .append_mailbox_relay(&relay, &peer, || Ok(()))
+        .append_mailbox_relay(&relay, &peer, || Ok(()), |_| Ok(()))
         .unwrap();
     drop(store); // Lost response: the metadata pin has no settled receipt yet.
     let reopened = MailboxStore::open(&path).unwrap();
@@ -343,7 +343,7 @@ fn mailbox_relay_store_lost_reply_and_reload_reuse_original_append_and_wake() {
             .is_none()
     );
     let duplicate = reopened
-        .append_mailbox_relay(&relay, &peer, || Ok(()))
+        .append_mailbox_relay(&relay, &peer, || Ok(()), |_| Ok(()))
         .unwrap();
     assert!(duplicate.duplicate);
     assert_eq!(duplicate.message_id, committed.message_id);
@@ -370,7 +370,7 @@ fn mailbox_relay_store_lost_reply_and_reload_reuse_original_append_and_wake() {
     );
     assert!(
         reopened
-            .append_mailbox_relay(&changed, &peer, || Ok(()))
+            .append_mailbox_relay(&changed, &peer, || Ok(()), |_| Ok(()))
             .is_err()
     );
     assert_eq!(count(&reopened, "mailbox_messages"), 1);
@@ -385,7 +385,7 @@ fn mailbox_relay_store_authority_failure_rolls_back_message_membership_wake_and_
         store
             .append_mailbox_relay(&relay, &peer, || Err::<(), _>(relay_store_error(
                 "owner changed"
-            )))
+            )), |_| Ok(()))
             .is_err()
     );
     for table in [
@@ -456,7 +456,7 @@ fn mailbox_relay_store_replacement_home_refuses_before_append() {
     let (_other, _other_path, replacement) = self::store();
     assert!(
         replacement
-            .append_mailbox_relay(&relay, &peer, || Ok(()))
+            .append_mailbox_relay(&relay, &peer, || Ok(()), |_| Ok(()))
             .is_err()
     );
     assert_eq!(count(&replacement, "mailbox_messages"), 0);

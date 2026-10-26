@@ -58,7 +58,7 @@ impl AppState {
             FederationMailboxOperation::Register => {
                 federation_mailbox_response(central, &participant)
             }
-            FederationMailboxOperation::Directory => {
+            FederationMailboxOperation::Directory { alias_basis } => {
                 let guard = authority.lock().map_err(mailbox_api_error)?;
                 let entries: Vec<_> = guard
                     ._inner
@@ -69,7 +69,11 @@ impl AppState {
                         current_federation_mailbox_participant_locked(&guard._inner, row)
                     })
                     .collect();
-                federation_mailbox_response(central, &entries)
+                let mut response = federation_mailbox_response(central, &entries)?;
+                if alias_basis {
+                    response.alias_basis = Some(federation_mailbox_alias_basis_locked(&guard._inner));
+                }
+                Ok(response)
             }
             FederationMailboxOperation::GetOrCreate { target } => {
                 let target = resolve_federation_mailbox_participant_locked(
@@ -273,5 +277,6 @@ fn federation_mailbox_response(
         schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
         value: serde_json::to_value(value)
             .map_err(|_| ApiError::internal("central mailbox response encoding failed"))?,
+        alias_basis: None,
     })
 }

@@ -4,7 +4,7 @@ use super::*;
 
 #[tokio::test]
 async fn aliases_include_new_eligible_roots_before_send_or_get_or_create() {
-    for target in ["Inbox", "Central::Inbox"] {
+    for target in ["Inbox", "host:Central::Inbox"] {
         let state = federation_mailboxes::central_store();
         let from = native(&state, "Sender");
         native(&state, "Inbox");
@@ -160,29 +160,72 @@ async fn unavailable_unrelated_peer_does_not_hide_the_central_directory() {
     pair.central.federation_peer_handles.lock().unwrap().clear();
     let unavailable_host = pair.id.clone();
     let result = list_federation_mailbox_directory(AxumPath(c.clone()), State(pair.central.clone())).await;
-    pair.finish().await;
     assert!(result.is_ok(), "unrelated peer must be unavailable, not erase healthy roots: {result:?}");
     let result = result.unwrap().0;
+    let default_wire = serde_json::to_value(&result).unwrap();
+    assert!(default_wire["unavailableHosts"].is_array());
+    assert!(default_wire.get("aliasBasis").is_none(), "the existing directory envelope stays unchanged");
     assert!(result.participants.iter().any(|row| row.binding.identity.session_id == local
         && row.binding.identity.host_id != unavailable_host));
     assert!(!result.participants.iter().any(|row| row.binding.identity.session_id == remote
         && row.binding.identity.host_id == unavailable_host));
     assert!(result.unavailable_hosts.iter().any(|host| host.host_id == unavailable_host && !host.reason.is_empty()));
-    assert!(!federation_directory_alias_available("Remote", &result.unavailable_hosts));
-    assert!(federation_directory_alias_available("Central::Local", &result.unavailable_hosts));
+    assert!(!federation_directory_alias_available("Remote", &result.unavailable_hosts, result.alias_basis.as_ref()));
+    assert!(federation_directory_alias_available("host:Central::Local", &result.unavailable_hosts, result.alias_basis.as_ref()));
+    let opted_in = list_federation_mailbox_participants_with_basis(AxumPath(c.clone()), State(pair.central.clone()),
+        Query(FederationMailboxDirectoryQuery { alias_basis: true })).await.unwrap();
+    let bytes = axum::body::to_bytes(opted_in.into_body(), usize::MAX).await.unwrap();
+    let opted_in: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(opted_in["aliasBasis"]["complete"], false);
+    assert!(opted_in["unavailableHosts"].as_array().unwrap().iter()
+        .any(|host| host["hostId"] == unavailable_host));
+    let local_binding = pair.central.federation_mailbox_actor(&local).unwrap().unwrap().binding;
+    let exact = format!("host:{}::{}", local_binding.identity.host_id, local);
+    for denied in ["name:Local".to_owned(), "Central::Local".to_owned(),
+        format!("host:{unavailable_host}::{remote}")] {
+        assert!(public_send(&pair.central, &c, &denied, &format!("denied-{denied}"), "must not append")
+            .await.is_err(), "unavailable inventory cannot reinterpret {denied}");
+    }
+    let sent = public_send(&pair.central, &c, &exact, "healthy-exact-pair", "exact local target").await.unwrap();
+    let stored_target: String = pair.central.mailbox_store.connection().unwrap().query_row(
+        "SELECT target_session_id FROM mailbox_messages WHERE id=?1", [&sent.message_id], |row| row.get(0)).unwrap();
+    assert_eq!(stored_target, local_binding.participant_key());
+    let message_count: u64 = pair.central.mailbox_store.connection().unwrap().query_row(
+        "SELECT COUNT(*) FROM mailbox_messages", [], |row| row.get(0)).unwrap();
+    assert_eq!(message_count, 1, "only the exact healthy target may append");
+    pair.finish().await;
 }
 
 #[test]
 fn incomplete_directories_never_choose_a_global_or_unavailable_host_alias() {
     let unavailable = vec![FederationMailboxUnavailableHost { host_id: "peer".into(),
         host_name: "Laptop".into(), reason: "unsupported endpoint".into(), status: 409 }];
-    for alias in ["Inbox", "Laptop::Inbox", "peer::Inbox"] {
-        assert!(!federation_directory_alias_available(alias, &unavailable));
+    for alias in ["Inbox", "name:Inbox", "Laptop::Inbox", "peer::Inbox", "host:Laptop::Inbox", "host:peer::Inbox"] {
+        assert!(!federation_directory_alias_available(alias, &unavailable, None));
     }
-    for exact in ["domain-session-current", "session-local", "Central::Inbox"] {
-        assert!(federation_directory_alias_available(exact, &unavailable));
+    for exact in ["domain-session-current", "session-local", "host:Central::Inbox"] {
+        assert!(federation_directory_alias_available(exact, &unavailable, None));
     }
-    assert!(!federation_directory_alias_available("Central::Inbox", &[federation_directory_incomplete()]));
+    assert!(!federation_directory_alias_available("host:Central::Inbox", &[federation_directory_incomplete()], None));
+}
+
+#[test]
+fn automatic_directory_availability_uses_the_shared_typed_grammar() {
+    let healthy = Uuid::new_v4();
+    let offline = Uuid::new_v4();
+    let basis = FederationMailboxAliasBasis { complete: false, hosts: vec![
+        FederationMailboxAliasHost { id: healthy.to_string(), name: "Lab::Mac".into() },
+        FederationMailboxAliasHost { id: offline.to_string(), name: "Offline".into() },
+    ] };
+    let unavailable = vec![FederationMailboxUnavailableHost { host_id: offline.to_string(),
+        host_name: "Offline".into(), reason: "disconnected".into(), status: 503 }];
+    let exact = format!("host:{healthy}::session-build");
+    assert!(federation_directory_alias_available(&exact, &unavailable, Some(&basis)));
+    for reference in ["name:Lab::Mac::Build".to_owned(), "Lab::Mac::Build".to_owned(),
+        "host:Lab::session-build".to_owned(), format!("host:{offline}::session-build")] {
+        assert!(!federation_directory_alias_available(&reference, &unavailable, Some(&basis)), "{reference}");
+    }
+    assert!(!federation_directory_alias_available(&exact, &[federation_directory_incomplete()], Some(&basis)));
 }
 
 #[tokio::test]

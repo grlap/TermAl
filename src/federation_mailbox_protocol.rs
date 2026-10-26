@@ -96,7 +96,12 @@ struct FederationMailboxRequest {
 enum FederationMailboxOperation {
     Protocol,
     Register,
-    Directory,
+    Directory {
+        // Local transport preference only: the signed URI opts in. The JSON
+        // body remains exactly the old {"operation":"directory"} shape.
+        #[serde(skip)]
+        alias_basis: bool,
+    },
     GetOrCreate {
         target: String,
     },
@@ -144,6 +149,8 @@ struct FederationMailboxResponse {
     schema_version: String,
     central: FederationHostIdentity,
     value: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    alias_basis: Option<FederationMailboxAliasBasis>,
 }
 
 #[derive(Deserialize, Serialize)]

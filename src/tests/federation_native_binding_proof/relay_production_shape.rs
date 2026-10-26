@@ -6,7 +6,7 @@ use super::*;
 
 struct ProxySend {
     caller: String,
-    proxy: String,
+    _proxy: String,
     central_api: DomainServer,
     central_domain: DomainServer,
     _handles: RelayHandleGuard,
@@ -65,14 +65,14 @@ impl ProxySend {
             Arc::new(FederationPeerHandle { channel: fixture.satellite_channel.clone(), rpc: reverse }),
         );
         let central_api = DomainServer::start(app_router(fixture.central.clone())).await;
-        Self { caller, proxy, central_api, central_domain, _handles: handles }
+        Self { caller, _proxy: proxy, central_api, central_domain, _handles: handles }
     }
 
     async fn send(&self, fixture: &Fixture, key: &str) -> MailboxAppendReceipt {
         let response = fixture
             .client
             .post(format!("http://127.0.0.1:{}/api/sessions/{}/mailboxes/send", self.central_api.port, self.caller))
-            .json(&json!({"targetSessionId": self.proxy, "message": "routine body stays at the central home",
+            .json(&json!({"targetSessionId": format!("host:{}::{}", fixture.channel.snapshot.peer.host_id, fixture.native), "message": "routine body stays at the central home",
                 "idempotencyKey": key}))
             .send()
             .await
@@ -265,4 +265,69 @@ fn mailbox_relay_refusal_reason_is_bounded_and_has_no_control_characters() {
     assert_eq!(reason, "held next line  [31mred ");
     let long = mailbox_relay_bounded_reason(&"é".repeat(400));
     assert!(long.len() <= MAILBOX_RELAY_HOME_WAKE_REASON_BYTES && long.chars().all(|c| c == 'é'));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn active_home_recovery_and_wake_keep_one_association_and_ack_owner() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for order in ["list-first", "wake-first", "concurrent"] {
+        let fixture = Fixture::production_shape().await;
+        let proxy = ProxySend::new(&fixture).await;
+        let sent = proxy.send(&fixture, order).await;
+        let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+        let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+        assert!(fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none());
+        let wake: MailboxRelayWake = {
+            let connection = fixture.central.mailbox_store.connection().unwrap();
+            let json: String = connection.query_row(
+                "SELECT wake_json FROM mailbox_relay_wakes WHERE mailbox_id=?1", [&locator.id],
+                |row| row.get(0)).unwrap();
+            serde_json::from_str(&json).unwrap()
+        };
+        let recover = || fixture.satellite.recover_native_mailbox_relay_association(&actor, &locator);
+        if order == "list-first" {
+            recover().await.unwrap();
+            fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+        } else if order == "wake-first" {
+            fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+            recover().await.unwrap();
+        } else {
+            let (recovered, _) = tokio::join!(recover(), fixture.central.run_mailbox_relay_wake_batch(0, 0));
+            recovered.unwrap();
+        }
+        assert_eq!(ProxySend::pending_home_wakes(&fixture), 0, "{order}");
+        let conversation = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id)
+            .unwrap().unwrap();
+        assert_eq!(conversation, wake.conversation);
+        let page = read_mailbox(AxumPath((fixture.native.clone(), sent.mailbox_id.clone())),
+            State(fixture.satellite.clone()), Json(ReadMailboxRequest {
+                after_sequence: None, limit: 20, issue_receipt: true, read_key: None,
+            })).await.unwrap().0;
+        assert!(page.messages.iter().any(|message| message.id == sent.message_id));
+        let _ = acknowledge_mailbox(AxumPath((fixture.native.clone(), sent.mailbox_id.clone())),
+            State(fixture.satellite.clone()), Json(AcknowledgeMailboxRequest {
+                receipt: page.receipt, expected_processed_through: None,
+                processed_through: None, no_continuation: false,
+            })).await.unwrap();
+        let notification = || {
+            let connection = fixture.satellite.mailbox_store.connection().unwrap();
+            connection.query_row(
+                "SELECT acknowledged,handed_off,queued FROM mailbox_relay_notifications WHERE mailbox_id=?1",
+                [&locator.id], |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?))).unwrap()
+        };
+        let before = notification();
+        assert!(before.0, "the original receipt ACK belongs to the same native principal");
+        recover().await.unwrap();
+        request(&fixture.rpc, &fixture.channel, MailboxRelayOperation::Wake { wake }).await.unwrap();
+        assert_eq!(notification(), before, "recovery and a duplicate wake retain notification ownership: {order}");
+        let connection = fixture.satellite.mailbox_store.connection().unwrap();
+        let row: (u64, u64) = connection.query_row(
+            "SELECT COUNT(*),MAX(acknowledged_through) FROM mailbox_relay_associations WHERE mailbox_id=?1",
+            [&locator.id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(row, (1, sent.sequence), "{order}");
+        drop(connection);
+        assert_eq!(fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap(), Some(conversation));
+        proxy.finish().await;
+        fixture.finish().await;
+    }
 }

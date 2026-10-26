@@ -32,7 +32,7 @@ queue, cached response or fabricated append receipt.
 Participation is explicit. A central native session joins through
 `POST /api/sessions/{id}/mailboxes/domain`; a satellite's host installs the
 central placement binding against its exact native creation identity. Names
-and `Host::Name` aliases are discovery only. The central directory returns
+and mailbox aliases are discovery only. The central directory returns
 qualified ids and refuses ambiguous aliases; creation identity, placement
 generation and central authority epoch fence mailbox membership and receipts.
 An old binding cannot attach to a recreated native session.
@@ -49,10 +49,86 @@ satellite binding install refuses a session with any standalone mailbox history
 session keeps its existing local reads and acknowledgements. Writer admission
 serializes binding against standalone sends, and standalone sends refuse bound
 participants. Rejoining an already-bound central-native session changes nothing.
-Domain routes require a directory-returned qualified `sessionId` or a unique
-`Host::Name` alias for native ids; bare `session-N` references remain local-only.
+Domain routes accept a directory-returned qualified `sessionId`, a unique
+literal name, or an explicit `host:Host::Name` alias; bare `session-N` references remain local-only.
 An exact canonical id takes precedence over display aliases, and a missing or
 stale canonical id never falls back to a display name.
+
+Domain alias grammar is shared by central, satellite and MCP resolution:
+`name:<exact literal>` selects only a literal display name; for example,
+`name:Termal::O1-A`. `host:<host label or UUID>::<exact local name>` selects
+that host and name; for example, `host:Central::Termal::O1-A`. The first `::`
+after `host:` is the separator, and the remaining local name may contain `::`.
+Use a host UUID when its label contains `::` or labels are ambiguous. Aliases
+compare without ASCII case sensitivity; they never create or rename a session.
+Names beginning `name:` or `host:` can themselves be selected with `name:` or
+a host-qualified form. `host:<host UUID>::<native session-id>` instead parses
+as a typed exact host/native pair, never a name. On domain-only create and
+delivery-intent routes it selects an already-current directory participant;
+no match returns a refusal, with no name fallback or implicit binding.
+Ordinary `/mailboxes/send` and `termal_send_to_session` instead prove that exact
+remote native root over the qualified pair and use the existing
+[native relay and mailbox wake](native-mailbox-relay.md), without a manual
+session join. A UI proxy cannot initiate a new remote send. Native ids require
+the host UUID, not a host label. Other principal/reference namespaces remain
+reserved inside aliases. Bare native ids remain local-only.
+
+A legacy bare name containing `::` remains a literal alias only when the
+central directory is complete, exactly one current literal name matches, and
+no known domain host label or UUID followed by `::` prefixes the reference.
+The check includes labels retained on directory rows and whole host labels
+containing `::`. Revoked peers retain their host selectors. Historical labels
+are not durably retained across re-enrollment: after old rows retire, use an
+exact host UUID or explicit literal rather than relying on a former host label.
+A legacy bare spelling is never
+reinterpreted as host-qualified. A collision, unavailable peer, missing basis or
+host-prefix match refuses with explicit `name:` and `host:` alternatives and an
+exact-id option. Non-domain local session names keep their existing grammar.
+
+The domain MCP session list returns a usable `name`, alongside `sessionId`,
+`localSessionId`, `localName`, `hostName` and `hostId`. `sessionId` is the canonical
+domain principal; `localSessionId` is its host's native id. Central-host listings
+use `host:<host UUID>::<native session-id>`. On a satellite, a local row uses its
+bare native id and the configured central uses the explicit host/native form.
+Rows on other satellites use the canonical domain id: there is no direct native
+relay pair between those hosts. A native id outside the copyable syntax also
+uses the canonical id. Friendly names remain in `hostName`/`localName`.
+If a satellite cannot reach or verify its central directory, its fallback lists
+only local native roots, with bare ids in `name` and friendly labels in
+`localName`; unavailable inventory still refuses global aliases.
+For a remote native address, `nativeWakeRequiresActivation: true` declares
+that waking requires the satellite to be Active at the central; it does not
+claim its current activation state. A Verified-only peer can append durably,
+but the existing relay wake stays held until the central operator activates
+the host. The public `durableButNotWoken` receipt names that prerequisite and
+operator remedy. No per-session join or implicit host activation occurs.
+Canonical ids retain domain delivery and its separate wake-authority contract;
+mailbox-only targets can be delivered without an executor wake. A manually
+supplied host/native address still requires its enrolled direct pair and is
+refused when that pair is absent; it does not fall back to domain delivery.
+Automatic directory discovery can admit eligible unbound roots for
+routing; explicit native sends do not require that per-session admission.
+Previously accepted bare `Host::Name` and `UUID::Name` qualified inputs must
+now use `host:`; they receive actionable refusal instead of implicit routing.
+For automated CLI or launcher `--notify` targets, use a bare native id for a
+local root, or `host:<host UUID>::<native session id>` for a remote root.
+Domain operations may use an exact domain principal or an explicit `name:`/`host:` alias. A bare literal containing
+`::` may be refused whenever a peer is unavailable, and an automated sender
+cannot choose an alternative on the operator's behalf.
+
+The existing directory RPC opts into an optional `aliasBasis` response through
+the MAC-bound URI query `?aliasBasis=true`; its JSON operation body stays
+`{"operation":"directory"}`. Without the query, the response has exactly the
+old shape. With the same query, the local participants API exposes
+`{participants, unavailableHosts, aliasBasis}` from one automatic-discovery
+snapshot; its default response remains an array. A new client talking
+to an old host treats the absent basis as incomplete for legacy bare names
+containing `::`, with no guess or cached fallback. Explicit `name:` literals
+can still select a current row when no hosts are reported unavailable.
+Exact-id resolution performs no additional discovery hop. This is a
+discovery projection of the existing registry, not authority or a retained
+lease; append still checks current participant and placement identity. The
+federation profile contract stays `2`, with no storage migration.
 
 `GET /api/sessions/{id}/mailboxes/participants` reads the current central
 participant directory. `POST /api/sessions/{id}/mailboxes/create`, with
@@ -541,9 +617,18 @@ inside one request. A fenced root is omitted without hiding other roots.
 The directory endpoint (`/api/sessions/{id}/mailboxes/directory`) and MCP session
 listing return `unavailableHosts` beside healthy participants. An unsupported or
 unavailable peer is omitted and identified by host, reason and status. The older
-`participants` endpoint retains its array shape. An incomplete directory cannot
-resolve a global display-name alias; use an exact qualified id or an unambiguous
-name qualified by an available host. Alias resolution refreshes candidates before
+`participants` endpoint retains its array shape. When hosts are reported
+unavailable, global display-name aliases, including explicit `name:` literals,
+are refused; use an exact qualified id or an explicit `host:` target on an
+available host. With an empty `unavailableHosts` list, an explicit `name:`
+literal can select a current row even if `aliasBasis` is absent or incomplete.
+Legacy bare names containing `::` additionally require a complete basis and
+must not begin with a known host selector.
+Availability checks use the shared alias parser and the same snapshot's host
+basis, rather than interpreting `::` separately. An exact
+`host:<host UUID>::<native session-id>` still requires a current directory row;
+it does not admit an absent root. Verified peers may participate in mailbox
+discovery without gaining executor authority. Alias resolution refreshes candidates before
 deciding uniqueness, including roots created since the previous directory read.
 If a satellite cannot reach its domain directory, MCP session listing still
 returns the host's local native roots and identifies the unavailable central.

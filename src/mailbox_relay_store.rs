@@ -172,12 +172,15 @@ impl MailboxStore {
         relay: &MailboxRelayAppend,
         peer: &FederationPeerSnapshot,
         authorize: impl FnOnce() -> Result<G>,
+        authorize_new: impl FnOnce(&G) -> Result<()>,
     ) -> Result<MailboxAppendReceipt> {
         let input = relay
             .input()
             .map_err(|error| relay_store_error(&error.message))?;
-        let appended =
-            self.append_with_delivery_and_relay(&input, None, Some((relay, peer)), authorize)?;
+        // Current ownership fences apply to both branches. Readiness for a new
+        // admission must not reinterpret an already committed exact retry.
+        let appended = self.append_with_delivery_policy(
+            &input, None, Some((relay, peer)), authorize, |_, authority| authorize_new(authority))?;
         let MailboxAppendResult {
             receipt,
             finalization,
@@ -277,6 +280,10 @@ impl MailboxStore {
             return Err(relay_store_error(
                 "idempotency key belongs to an existing standalone mailbox send; no relay fallback",
             ));
+        }
+        if native_sender_has_domain_intent(&transaction, &relay.sender.native_session_id,
+            &relay.sender.native_creation_id, &relay.idempotency_key)? {
+            return Err(federation_delivery_conflict());
         }
         let sender = relay.sender.participant_key();
         let existing: Option<(String,String,String,Option<String>,String)> = transaction.query_row(

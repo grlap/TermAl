@@ -432,7 +432,7 @@ async fn placement_installs_registers_and_recovers_original_key_without_a_second
         .central
         .federation_mailbox_operation(
             &local.binding.identity.session_id,
-            FederationMailboxOperation::Directory,
+            FederationMailboxOperation::Directory { alias_basis: false },
         )
         .await
         .unwrap();

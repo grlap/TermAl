@@ -18,12 +18,17 @@ struct ObservationPublicationFixture {
     stop: Arc<AtomicBool>,
     broadcaster: Option<std::thread::JoinHandle<()>>,
     watermark: u64,
+    /// The clock this state's observation fences measure their deadlines on.
+    /// These tests drive every step by hand, so only an explicit advance, not
+    /// elapsed host time, can expire a fence.
+    clock: EngramBudgetClock,
 }
 
 impl ObservationPublicationFixture {
     fn new() -> Self {
         let mut writer = FenceFixture::new();
         let mut state = writer.app_state();
+        let clock = state.select_test_scripted_engram_budget_clock();
         let root = writer.root.path().join("project");
         fs::create_dir(&root).unwrap();
         run_git_test_command(&root, &["init", "--quiet"]);
@@ -73,6 +78,7 @@ impl ObservationPublicationFixture {
             stop,
             broadcaster: Some(broadcaster),
             watermark: baseline.watermark,
+            clock,
         }
     }
 
@@ -138,10 +144,9 @@ impl ObservationPublicationFixture {
         let delta = collect_persist_delta_from_shared_state(&self.state.inner, self.watermark);
         assert_eq!(self.writer.batch.pending.len(), 1);
         assert!(self.writer.batch.pending[0].target.is_in_delta(&delta));
-        assert!(self.writer.batch.pending[0]
-            .completion
-            .poll_at(std::time::Instant::now())
-            .is_none());
+        // Still live at its own clock's now, the clock its deadline runs on.
+        let completion = &self.writer.batch.pending[0].completion;
+        assert!(completion.poll_at(completion.clock.now()).is_none());
         delta
     }
 
@@ -328,6 +333,29 @@ fn observation_publication_failed_sqlite_write_remains_visible_without_durable_a
         !loaded.test_run_observations.contains_key(&id),
         "failed transaction cannot fabricate the stored observation"
     );
+    assert_no_observation_snapshots(&all);
+}
+
+#[test]
+fn observation_publication_fence_expires_on_its_clock_and_records_failed_tracking() {
+    let mut fixture = ObservationPublicationFixture::new();
+    let id = fixture.start("expired-fence");
+    let mut all = fixture.flush();
+    observation_delta(&all, &id, TestRunState::Running, "pending");
+    let delta = fixture.collect_pending();
+    // A genuinely expired fence still fails. Its 5 s deadline runs on the
+    // fixture's clock, so this advance, not host time, is what expires it.
+    fixture.clock.advance(Duration::from_secs(5));
+    fixture.writer.write(&delta).unwrap();
+    fixture.watermark = delta.watermark;
+    fixture.state.step_test_command_observation_persistence();
+    let events = fixture.flush();
+    observation_delta(&events, &id, TestRunState::Running, "failed");
+    all.extend(events);
+    let inner = fixture.state.inner.lock().unwrap();
+    assert!(inner.test_runs.observations_failed.contains(&id));
+    assert!(!inner.test_runs.observations_durable.contains(&id));
+    drop(inner);
     assert_no_observation_snapshots(&all);
 }
 

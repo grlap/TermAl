@@ -8,17 +8,18 @@ use super::*;
 mod fixture_clock;
 mod references;
 mod relay;
+mod alias_grammar;
 
 const PROOF_PATH: &str = "/federation/v1/mailbox/native-binding";
 
-struct DomainServer {
+pub(super) struct DomainServer {
     stop: tokio::sync::watch::Sender<bool>,
     task: Option<tokio::task::JoinHandle<()>>,
-    port: u16,
+    pub(super) port: u16,
 }
 
 impl DomainServer {
-    async fn start(router: Router) -> Self {
+    pub(super) async fn start(router: Router) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let (stop, mut stopped) = tokio::sync::watch::channel(false);
@@ -31,7 +32,7 @@ impl DomainServer {
         Self { stop, task: Some(task), port }
     }
 
-    async fn finish(&mut self) {
+    pub(super) async fn finish(&mut self) {
         self.stop.send_replace(true);
         if let Some(task) = self.task.take() {
             tokio::time::timeout(phase_sync::DEADLOCK_GUARD, task)

@@ -273,6 +273,16 @@ struct MailboxRelaySummary {
     summary: MailboxSummary,
 }
 
+impl MailboxRelaySummary {
+    fn participant_names(&self) -> [String; 2] {
+        self.conversation.participants.clone().map(|principal| {
+            self.summary.participants.iter()
+                .find(|participant| participant.session_id == principal.participant_key())
+                .map(|participant| participant.display_name.clone())
+                .unwrap_or_else(|| principal.native_session_id.clone())
+        })
+    }
+}
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MailboxRelayRequest {

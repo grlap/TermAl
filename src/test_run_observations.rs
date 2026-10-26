@@ -665,9 +665,14 @@ impl AppState {
                 inner.test_runs.observations_durable.insert(id);
             }
             Ok((_, PersistDispatch::BackgroundQueued)) => {
-                let (fence, waiter) = PersistFence::new(
+                // The deadline runs on the state's budget clock, which is real
+                // time in production; a fixture driving these steps by hand
+                // chooses a scripted one.
+                let clock = inner.engram_budget_clock_snapshot();
+                let (fence, waiter) = PersistFence::new_with_clock(
                     PersistFenceTarget::TestRunObservation(Box::new(observation.clone())),
-                    std::time::Instant::now() + Duration::from_secs(5),
+                    clock.now() + Duration::from_secs(5),
+                    clock,
                 );
                 if self
                     .persist_tx
@@ -763,9 +768,12 @@ impl AppState {
                     inner.test_runs.observations_durable.insert(id);
                 }
                 Some(PersistDispatch::BackgroundQueued) => {
-                    let (fence, waiter) = PersistFence::new(
+                    // The same budget clock as a single observation's fence.
+                    let clock = inner.engram_budget_clock_snapshot();
+                    let (fence, waiter) = PersistFence::new_with_clock(
                         PersistFenceTarget::TestRunObservation(Box::new(row.clone())),
-                        std::time::Instant::now() + Duration::from_secs(5),
+                        clock.now() + Duration::from_secs(5),
+                        clock,
                     );
                     if self
                         .persist_tx
@@ -922,8 +930,9 @@ impl AppState {
         let completed: Vec<_> = pending
             .iter()
             .filter_map(|(id, (expected, waiter))| {
+                // Poll on the clock the fence's deadline is measured on.
                 waiter
-                    .wait_until(std::time::Instant::now())
+                    .wait_until(waiter.now())
                     .map(|result| (id.clone(), expected.clone(), result))
             })
             .collect();

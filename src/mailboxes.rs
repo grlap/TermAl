@@ -1890,9 +1890,8 @@ impl MailboxStore {
         } else { self.lock_writer("waiting to begin mailbox append")? };
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "beginning mailbox append")?;
-        if relay.is_none() && transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM mailbox_relay_intents WHERE owner_session_id=?1 AND idempotency_key=?2)",
-            rusqlite::params![input.sender_session_id,input.idempotency_key],|row|row.get::<_,bool>(0))? {
+        if relay.is_none() && native_sender_has_relay_intent(
+            &transaction, &input.sender_session_id, &input.idempotency_key)? {
             return Err(relay_store_error("idempotency key belongs to a native relay send; no standalone fallback"));
         }
         if let Some((relay, _)) = relay { check_mailbox_relay_home(&transaction, relay)?; }

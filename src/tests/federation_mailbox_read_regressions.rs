@@ -192,7 +192,7 @@ async fn newer_client_refuses_an_older_central_across_read_and_mutation_entry_po
     let client = case.client(port);
     let lease = client.channel.current_lease().unwrap();
     let mut operations = vec![FederationMailboxOperation::Protocol, FederationMailboxOperation::Register,
-        FederationMailboxOperation::List, FederationMailboxOperation::Directory,
+        FederationMailboxOperation::List, FederationMailboxOperation::Directory { alias_basis: false },
         FederationMailboxOperation::Read { mailbox_id: "mailbox".into(), after_sequence: None,
             limit: 200, issue_receipt: true },
         FederationMailboxOperation::ReadKeyed { mailbox_id: "mailbox".into(), after_sequence: None,

@@ -16,11 +16,17 @@ fn require_domain_mailbox_target(target: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn native_mailbox_local_target_error(mut error: ApiError) -> ApiError {
+    if error.status == StatusCode::NOT_FOUND {
+        error.message = "bare session ids select a local root; for a remote native session use host:<host UUID>::<native session id>".into();
+    }
+    error
+}
 impl AppState {
     fn is_local_native_mailbox_target(&self, target: &str) -> Result<bool, ApiError> {
         if !target.starts_with("session-") { return Ok(false); }
         let inner = self.inner.lock().expect("state mutex poisoned");
-        federation_mailbox_root_locked(&inner, target)?;
+        federation_mailbox_root_locked(&inner, target).map_err(native_mailbox_local_target_error)?;
         Ok(true)
     }
 
@@ -115,6 +121,13 @@ fn native_sender_has_domain_intent(connection: &rusqlite::Connection,
         rusqlite::params![session, creation, key], |row| row.get(0))?)
 }
 
+fn native_sender_has_relay_intent(connection: &rusqlite::Connection,
+    session: &str, key: &str) -> Result<bool>
+{
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM mailbox_relay_intents WHERE owner_session_id=?1 AND idempotency_key=?2)",
+        rusqlite::params![session, key], |row| row.get(0))?)
+}
 fn refuse_standalone_mailbox_history(history: &[String]) -> Result<(), ApiError> {
     if history.is_empty() {
         return Ok(());

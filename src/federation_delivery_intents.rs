@@ -190,7 +190,8 @@ impl MailboxStore {
         let mut connection = self.connection()?;
         let transaction =
             begin_mailbox_write(&mut connection, "persisting sender delivery intent")?;
-        if mailbox_message_for_idempotency_key(&transaction, owner, &delivery.key)?.is_some() {
+        if mailbox_message_for_idempotency_key(&transaction, owner, &delivery.key)?.is_some()
+            || native_sender_has_relay_intent(&transaction, owner, &delivery.key)? {
             return Err(federation_delivery_conflict());
         }
         let sender = delivery.sender.participant_key();

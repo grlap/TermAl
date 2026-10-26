@@ -104,30 +104,13 @@ fn resolve_federation_mailbox_participant_locked(
         return current_federation_mailbox_participant_locked(inner, exact)
             .ok_or_else(|| ApiError::not_found("qualified mailbox participant not found"));
     }
-    // Canonical ids never fall back to display aliases, including stale ids.
-    if reference.starts_with("domain-session-") || reference.starts_with("session-") {
-        return Err(ApiError::not_found(
-            "qualified id required; use the directory sessionId or exact Host::Name",
-        ));
-    }
-    let mut matches = inner
+    let basis = federation_mailbox_alias_basis_locked(inner);
+    let rows: Vec<_> = inner
         .federation
         .mailbox_directory
         .values()
         .filter_map(|row| current_federation_mailbox_participant_locked(inner, row))
-        .filter(|row| {
-            row.name.eq_ignore_ascii_case(reference)
-                || format!("{}::{}", row.host_name, row.name).eq_ignore_ascii_case(reference)
-                || format!("{}::{}", row.binding.identity.host_id, row.name)
-                    .eq_ignore_ascii_case(reference)
-        });
-    let first = matches
-        .next()
-        .ok_or_else(|| ApiError::not_found("qualified mailbox participant not found"))?;
-    if matches.next().is_some() {
-        return Err(ApiError::bad_request(
-            "mailbox participant alias is ambiguous; use its exact qualified sessionId",
-        ));
-    }
-    Ok(first)
+        .collect();
+    select_federation_mailbox_alias(&rows, reference, Some(&basis), federation_mailbox_alias_row)
+        .cloned()
 }

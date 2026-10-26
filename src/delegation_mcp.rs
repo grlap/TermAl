@@ -1593,8 +1593,8 @@ impl TermalDelegationMcpBridge {
     /// fail-safe caller-eligibility lookup and caches that immutable classification for the
     /// bridge lifetime, so sustained exact-id traffic does not serialize full state per
     /// message. The sender id remains path-validated by bridge construction, the target id is
-    /// sent only as JSON. The backend validates native peers, or resolves a remote
-    /// proxy through authenticated relay proof; hidden/child/missing targets are refused.
+    /// sent only as JSON. The backend validates native peers, or proves an explicit remote
+    /// host/native locator through authenticated relay; hidden/child/missing targets are refused.
     /// Names still require
     /// the live root-session inventory for case-insensitive and ambiguity-aware resolution.
     fn resolve_session_reference(&self, reference: &str) -> Result<String> {
@@ -1625,15 +1625,22 @@ impl TermalDelegationMcpBridge {
             return Ok(reference.to_owned());
         }
 
+        // Keep the explicit native locator for backend relay admission. Turning
+        // it into a domain principal would change delivery and wake ownership.
+        if matches!(FederationMailboxAlias::parse(reference, None),
+            Ok(FederationMailboxAlias::HostNative { .. })) {
+            return Ok(reference.to_owned());
+        }
         let state = self.get_json("/api/state")?;
-        if let Some((participants, unavailable)) = self.domain_mailbox_participants(&state)? {
-            if !federation_directory_alias_available(reference, &unavailable) {
-                bail!("mailbox alias inventory is unavailable; use a known exact participant id or an available Host::Name");
+        if let Some((participants, unavailable, basis)) = self.domain_mailbox_participants_with_basis(&state, true)? {
+            if !federation_directory_alias_available(reference, &unavailable, basis.as_ref()) {
+                bail!("mailbox alias inventory is unavailable; use a known exact participant id or an explicit host: target on an available host");
             }
-            return resolve_domain_mailbox_reference(
+            return resolve_domain_mailbox_reference_with_basis(
                 &participants,
                 reference,
                 &self.serving_session_id,
+                basis.as_ref(),
             );
         }
         let delegation_child_ids = delegation_child_session_ids(&state);
@@ -2682,12 +2689,12 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_send_to_session",
-                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name; prefer an exact id for sustained traffic because names require peer discovery. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original message and dispatch outcome with duplicate=true; reusing it for different content conflicts. If transport fails before a receipt arrives, the append outcome is unknown: retry the exact same intent and key. Receipt `notificationDisposition` is the immutable point-in-time dispatch outcome; mailbox reads expose the evolving row lifecycle as `notificationState`. `senderProcessedThrough` is the sender's resulting durable cursor snapshot; `senderCursorAdvanced` says whether this append advanced it. A fresh send advances only over its own message when the cursor already sat immediately before it, never skipping unread inbound messages. A duplicate returns the current cursor snapshot and senderCursorAdvanced=false. Legacy numeric clients may use that snapshot for CAS; receipt acknowledgements keep the read receipt unchanged. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
+                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts an exact principal id or a listed session name. Domain aliases use name:<literal> or host:<host label or UUID>::<local name>; the list returns a usable native spelling or canonical domain id. On a satellite, local rows use bare ids, its configured central uses host:UUID::native-session-id, and other hosts use canonical domain ids. For ordinary remote native delivery, use host:<host UUID>::<native session-id> from the listed name: the backend proves that exact native root over the qualified pair and uses its existing native mailbox relay. Native wake requires the satellite to be Active at the central; a never-activated Verified host can append durably but its wake stays held until the central operator activates it. Bare session ids are local-only; a UI proxy cannot initiate a remote send. Canonical domain principal ids keep domain routing and its separate wake-authority contract. Bare known-host-qualified forms are refused. Prefer an exact id for sustained traffic because names require peer discovery. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original message and dispatch outcome with duplicate=true; reusing it for different content conflicts. If transport fails before a receipt arrives, the append outcome is unknown: retry the exact same intent and key. Receipt `notificationDisposition` is the immutable point-in-time dispatch outcome; mailbox reads expose the evolving row lifecycle as `notificationState`. `senderProcessedThrough` is the sender's resulting durable cursor snapshot; `senderCursorAdvanced` says whether this append advanced it. A fresh send advances only over its own message when the cursor already sat immediately before it, never skipping unread inbound messages. A duplicate returns the current cursor snapshot and senderCursorAdvanced=false. Legacy numeric clients may use that snapshot for CAS; receipt acknowledgements keep the read receipt unchanged. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["sessionId", "message", "idempotencyKey"],
                     "properties": {
-                        "sessionId": { "type": "string", "description": "TermAl id, case-insensitive session name, or typed federation mailbox-reference handle. The mailbox-reference- prefix is reserved for handles, which require fresh resolution and never grant executor access." },
+                        "sessionId": { "type": "string", "description": "Exact TermAl/domain principal id, listed session name, or typed federation mailbox-reference handle. Domain aliases use name:<literal> or host:<host label or UUID>::<local name>; host:<host UUID>::<native session-id> selects the exact remote native root through the authenticated native relay, with no display-name fallback or per-session manual join. Native wake separately requires central activation of the satellite; durableButNotWoken retains that prerequisite and names the operator remedy. Use the listed form for its documented native or domain delivery; bare session ids always select local roots. Canonical domain ids retain domain delivery. Bare known-host-qualified names are refused. Prefer the exact sessionId for automation. The mailbox-reference- prefix is reserved for handles, which require fresh resolution and never grant executor access." },
                         "message": { "type": "string" },
                         "idempotencyKey": { "type": "string", "maxLength": 256 },
                         "topic": { "type": "string" },
@@ -2702,7 +2709,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_list_sessions",
-                "description": "List the root-level TermAl sessions (sessionId, name, agent, status, workdir, preview) so you can resolve a session by name to its id for termal_send_to_session. Excludes delegation-child sessions. Takes no arguments.",
+                "description": "List root-level sessions for termal_send_to_session. For ordinary remote native delivery, use the returned host:<host UUID>::<native session-id> name; sessionId retains the canonical domain principal for domain operations. In domain mode, name is a bare local native id, a usable host:<host UUID>::<native session-id> target, or an exact canonical domain id. If a satellite cannot reach or verify its central directory, only local native roots are listed: name is the bare id and localName preserves the friendly label; global aliases remain unavailable. hostId and localSessionId are the exact host/native components; localName and hostName preserve friendly names. The send backend proves exact native pairs over the qualified host link; they never fall back to names or require a manual session binding. nativeWakeRequiresActivation marks a native address whose wake requires the satellite to be Active at the central; it states a prerequisite, not current activation status. A Verified-only peer can deliver durably while its wake is held; ask the central operator to activate it. Explicit name:<literal> selects a literal domain name; bare known-host-qualified spellings are refused. Outside domain mode, name remains the local session display name (with agent, status, workdir, preview). Excludes delegation-child sessions. Takes no arguments.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {}

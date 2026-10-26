@@ -1,16 +1,33 @@
 # Native cross-host routine mailbox relay
 
-The existing `termal_send_to_session` / CLI `mailbox send` can address a known
-remote-root proxy. This sends routine durable mail, not a complete executor
-prompt. It does not start an agent, convert a proxy to a native session, enroll
-a session in a mailbox domain, or move existing local mailbox history.
+Native relay wake requires the satellite to be Active at the central.
+Verification alone permits durable mail without activating the host; its wake
+remains held. Remote native names carry `nativeWakeRequiresActivation` in the
+MCP listing, and `durableButNotWoken` receipts explain the central operator's
+activation remedy. This prerequisite label does not assert current membership.
+The relay's existing admission predicate remains the only wake authority.
+
+The existing `termal_send_to_session` / CLI `mailbox send` addresses a remote
+native root as `host:<host UUID>::<native session id>`. A bare `session-*` id
+always selects a local root. A missing local id is refused with guidance for
+the explicit remote form. A UI proxy cannot initiate a new remote send; its
+refusal gives the native address when the enrolled peer is known.
+This sends routine durable mail through the existing native mailbox relay.
+The native relay requires the enrolled central/satellite pair. A satellite's
+MCP listing uses bare ids for its local roots, the explicit host/native form
+for its central, and canonical domain ids for sibling satellites. Those
+canonical ids use domain mail and its separate wake-authority contract; they
+do not promise a native relay wake. An explicit native address without a direct
+pair is refused without a routing fallback.
+Its normal mailbox wake can start the recipient's turn; it grants no executor
+placement, enrolls no session in a mailbox domain and moves no local history.
 
 ## Identity and prerequisites
 
 Both hosts must support version 1 of `/federation/v1/mailbox/relay`, with an
-already enrolled, enabled and authenticated host pair. A proxy's configured
-SSH endpoint locates exactly one enrolled peer; an authenticated RPC proves
-the native target. Display names and SSH host names alone grant no authority.
+already enrolled, enabled, qualified and authenticated host pair. The explicit
+host UUID selects the enrolled peer; an authenticated RPC proves the exact
+native target. Display names and SSH host names alone grant no authority.
 A missing pair, disconnected transport, unsupported peer, changed identity or
 ambiguous locator is an explicit refusal, with no local mailbox or executor
 fallback. Installing this code on only one host does not enable the relay.
@@ -56,6 +73,15 @@ the original send reply was lost. An unavailable known relay home is reported
 as unavailable/unverified in the partial-list projection or legacy response
 headers (see below), never as an empty inbox; explicit standalone
 mailbox reads remain local.
+
+A first recipient can read an exact `relay-mailbox-*` handle before receiving
+its wake. If it has no local association yet, the read lists that exact
+original home over the authenticated pair, proves the caller's native
+membership and remembers the immutable association before reading. Recovery
+and a concurrent wake share the existing association writer and preserve its
+ACK cursor. An unrelated root cannot recover membership from a copied handle.
+An ordinary list with no known home or locator cannot discover an unknown
+home store; the exact handle or the normal metadata wake supplies that location.
 
 Reads do not acknowledge. MCP/CLI request issuance; acknowledgements accept
 only the unchanged issued receipt, never a numeric boundary or `readKey`.

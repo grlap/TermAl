@@ -460,10 +460,10 @@ async fn mailbox_relay_public_remote_proxy_send_reply_read_ack_keeps_local_histo
         "http://127.0.0.1:{}/api/sessions/{}",
         satellite_api.port, fixture.native
     );
-    let body = json!({"targetSessionId":proxy,"message":"complete routine body stays only at the central home",
+    let body = json!({"targetSessionId":format!("host:{}::{}", peer.peer.host_id, fixture.native),"message":"complete routine body stays only at the central home",
         "idempotencyKey":"public-original","topic":"Status"});
     let response=fixture.client.post(format!("{satellite_url}/mailboxes/send")).json(&json!({
-        "targetSessionId":opposite_proxy,"message":"opposite host sends first","idempotencyKey":"opposite-first" })).send().await.unwrap();
+        "targetSessionId":format!("host:{}::{}", peer.local.host_id, caller),"message":"opposite host sends first","idempotencyKey":"opposite-first" })).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let opposite_first: MailboxAppendReceipt = response.json().await.unwrap();
     let response = fixture

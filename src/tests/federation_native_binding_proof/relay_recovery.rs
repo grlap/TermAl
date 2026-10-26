@@ -195,6 +195,11 @@ async fn mailbox_relay_lost_home_reply_reopens_source_pin_and_replays_exactly_on
         .unwrap()
         .unwrap();
     assert_eq!(receipt_again.message_id, receipt.message_id);
+    let mut fresh = request.clone();
+    fresh.idempotency_key = "fresh-after-reconnect".into();
+    let refused = recovered.send_native_mailbox_relay(&fixture.native, &fresh).await.unwrap_err();
+    assert_eq!(refused.status, StatusCode::CONFLICT,
+        "a retained committed retry is not new-send qualification after reconnect");
     assert_eq!(
         fixture
             .central

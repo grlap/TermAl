@@ -25,6 +25,12 @@ fn mailbox_reference_handle(reference: &str) -> Result<Option<String>> {
 
 impl TermalDelegationMcpBridge {
     fn domain_mailbox_participants(&self, state: &Value) -> Result<Option<(Vec<Value>, Vec<FederationMailboxUnavailableHost>)>> {
+        self.domain_mailbox_participants_with_basis(state, false)
+            .map(|rows| rows.map(|(rows, unavailable, _)| (rows, unavailable)))
+    }
+
+    fn domain_mailbox_participants_with_basis(&self, state: &Value, include_basis: bool)
+        -> Result<Option<(Vec<Value>, Vec<FederationMailboxUnavailableHost>, Option<FederationMailboxAliasBasis>)>> {
         let caller = state["sessions"].as_array().and_then(|sessions| {
             sessions
                 .iter()
@@ -36,7 +42,9 @@ impl TermalDelegationMcpBridge {
             return Ok(None);
         }
         let response = self.get_json_with_safe_replay(&format!(
-            "/api/sessions/{}/mailboxes/directory", self.serving_session_id));
+            "/api/sessions/{}/mailboxes/{}", self.serving_session_id,
+            if include_basis { "participants?aliasBasis=true" } else { "directory" },
+        ));
         let response = match response {
             Ok(value) => value,
             Err(error) if automatic && state["preferences"]["federation"]["role"] == "satellite" => {
@@ -50,18 +58,65 @@ impl TermalDelegationMcpBridge {
                 return Ok(Some((mailbox_peer_session_listing(state, true), vec![FederationMailboxUnavailableHost {
                     host_id: central.host_id, host_name: "Central".into(), status,
                     reason: format!("central mailbox directory unavailable: {error}"),
-                }])));
+                }], None)));
             }
             Err(error) => return Err(error),
         };
-        let snapshot: FederationMailboxDirectorySnapshot = serde_json::from_value(response)
-            .context("central mailbox directory response shape was invalid")?;
-        let rows = snapshot.participants.into_iter().map(|row|json!({
-            "sessionId":row.session_id,"name":format!("{}::{}",row.host_name,row.name),
-            "localName":row.name,"hostName":row.host_name,"hostId":row.binding.identity.host_id,
-            "localSessionId":row.binding.identity.session_id,"creationId":row.binding.identity.creation_id
-        })).collect();
-        Ok(Some((rows, snapshot.unavailable_hosts)))
+        let value = response;
+        let directory = if value.is_array() {
+            FederationMailboxDirectorySnapshot {
+                participants: serde_json::from_value(value)
+                    .context("central mailbox directory response shape was invalid")?,
+                unavailable_hosts: Vec::new(),
+                alias_basis: None, // An old host did not certify completeness.
+            }
+        } else {
+            serde_json::from_value::<FederationMailboxDirectorySnapshot>(value)
+                .context("central mailbox alias directory response shape was invalid")?
+        };
+        let satellite = state["preferences"]["federation"]["role"] == "satellite";
+        let caller_host = |snapshot: &Value| {
+            let principal = snapshot["sessions"].as_array()?.iter()
+                .find(|session| session["id"] == self.serving_session_id)?
+                .get("mailboxParticipantId")?.as_str()?;
+            directory.participants.iter().find(|row| row.session_id == principal)
+                .map(|row| row.binding.identity.host_id.clone())
+        };
+        let mut local_host = caller_host(state);
+        if satellite && local_host.is_none() {
+            // The first metadata read may precede the directory's automatic
+            // admission. Re-read that existing projection once; never infer
+            // the host from a native id that can recur on several hosts.
+            if let Ok(refreshed) = self.get_json_with_safe_replay("/api/state") {
+                local_host = caller_host(&refreshed);
+            }
+        }
+        let central_host = state["preferences"]["federation"]["central"]["hostId"].as_str();
+        Ok(Some((directory.participants.into_iter().map(|row| {
+            let alias = format!("host:{}::{}", row.binding.identity.host_id, row.binding.identity.session_id);
+            let native_locator = matches!(FederationMailboxAlias::parse(&alias, None), Ok(FederationMailboxAlias::HostNative { .. }))
+                && required_path_identifier(Some(&Value::String(alias.clone())), "sessionId").is_ok();
+            // A satellite has a native relay pair with its central only.
+            // Local roots use native mail; other hosts keep domain delivery
+            // and its separate wake-authority contract.
+            let name = if satellite && native_locator
+                && local_host.as_deref() == Some(row.binding.identity.host_id.as_str()) {
+                row.binding.identity.session_id.clone()
+            } else if native_locator && (!satellite
+                || central_host == Some(row.binding.identity.host_id.as_str())) {
+                alias
+            } else {
+                row.session_id.clone()
+            };
+            let native_wake_requires_activation = native_locator && name.starts_with("host:")
+                && (satellite || row.binding.identity.host_id != row.binding.central.host_id);
+            json!({
+                "sessionId":row.session_id,"name":name,
+                "nativeWakeRequiresActivation":native_wake_requires_activation,
+                "localName":row.name,"hostName":row.host_name,"hostId":row.binding.identity.host_id,
+                "localSessionId":row.binding.identity.session_id,"creationId":row.binding.identity.creation_id
+            })
+        }).collect(), directory.unavailable_hosts, directory.alias_basis)))
     }
 }
 
@@ -70,14 +125,21 @@ fn mailbox_peer_session_listing(state: &Value, native_only: bool) -> Vec<Value> 
     state["sessions"].as_array().into_iter().flatten()
         .filter(|session| is_root_peer_session(session, &delegation_child_ids))
         .filter(|session| !native_only || session.get("remoteId").is_none_or(Value::is_null))
-        .map(|session| json!({
-            "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
-            "name": session.get("name").cloned().unwrap_or(Value::Null),
-            "agent": session.get("agent").cloned().unwrap_or(Value::Null),
-            "status": session.get("status").cloned().unwrap_or(Value::Null),
-            "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
-            "preview": session.get("preview").cloned().unwrap_or(Value::Null),
-        })).collect()
+        .map(|session| {
+            let mut row = json!({
+                "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
+                "name": session.get("name").cloned().unwrap_or(Value::Null),
+                "agent": session.get("agent").cloned().unwrap_or(Value::Null),
+                "status": session.get("status").cloned().unwrap_or(Value::Null),
+                "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
+                "preview": session.get("preview").cloned().unwrap_or(Value::Null),
+            });
+            if native_only {
+                row["localName"] = row["name"].clone();
+                row["name"] = row["sessionId"].clone();
+            }
+            row
+        }).collect()
 }
 
 fn automatic_domain_mailbox_discovery(state: &Value, native: &str) -> bool {
@@ -88,44 +150,26 @@ fn automatic_domain_mailbox_discovery(state: &Value, native: &str) -> bool {
                 && session.get("remoteId").is_none_or(Value::is_null))
 }
 
+#[cfg(test)]
 fn resolve_domain_mailbox_reference(
     rows: &[Value],
     reference: &str,
     local_session: &str,
 ) -> Result<String> {
-    if !matches!(mailbox_reference_handle(reference), Ok(None)) {
-        bail!("mailbox reference requires explicit typed resolution");
-    }
-    if let Some(exact) = rows
-        .iter()
-        .find(|row| row["sessionId"].as_str() == Some(reference))
-    {
-        return Ok(exact["sessionId"]
-            .as_str()
-            .expect("exact id checked")
-            .to_owned());
-    }
-    if reference.starts_with("domain-session-") || reference.starts_with("session-") {
-        bail!("qualified id required; use a current directory sessionId or exact Host::Name");
-    }
-    let mut matches = rows.iter().filter(|row| {
-        ["name", "localName"].iter().any(|key| {
-            row[*key]
-                .as_str()
-                .is_some_and(|value| value.eq_ignore_ascii_case(reference))
-        }) || format!(
-            "{}::{}",
-            row["hostId"].as_str().unwrap_or(""),
-            row["localName"].as_str().unwrap_or("")
-        )
-        .eq_ignore_ascii_case(reference)
-    });
-    let first = matches.next().ok_or_else(|| {
-        anyhow!("no qualified mailbox participant matches `{reference}`; call termal_list_sessions")
-    })?;
-    if matches.next().is_some() {
-        bail!("mailbox participant name `{reference}` is ambiguous; use its exact sessionId");
-    }
+    resolve_domain_mailbox_reference_with_basis(rows, reference, local_session, None)
+}
+
+fn resolve_domain_mailbox_reference_with_basis(
+    rows: &[Value], reference: &str, local_session: &str,
+    basis: Option<&FederationMailboxAliasBasis>,
+) -> Result<String> {
+    let first = select_federation_mailbox_alias(rows, reference, basis, |row| FederationMailboxAliasRow {
+        id: row["sessionId"].as_str().unwrap_or(""),
+        host_name: row["hostName"].as_str().unwrap_or(""),
+        host_id: row["hostId"].as_str().unwrap_or(""),
+        name: row["localName"].as_str().unwrap_or(""),
+        native_session_id: row["localSessionId"].as_str().unwrap_or(""),
+    }).map_err(|error| anyhow!(error.message))?;
     let id = first["sessionId"]
         .as_str()
         .ok_or_else(|| anyhow!("invalid central mailbox participant id"))?;

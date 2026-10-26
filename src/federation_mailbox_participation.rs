@@ -77,14 +77,26 @@ struct FederationMailboxUnavailableHost {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationMailboxDirectorySnapshot {
     participants: Vec<FederationMailboxParticipant>,
+    #[serde(default)]
     unavailable_hosts: Vec<FederationMailboxUnavailableHost>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    alias_basis: Option<FederationMailboxAliasBasis>,
 }
 
-fn federation_directory_alias_available(reference: &str, unavailable: &[FederationMailboxUnavailableHost]) -> bool {
+fn federation_directory_alias_available(
+    reference: &str, unavailable: &[FederationMailboxUnavailableHost],
+    basis: Option<&FederationMailboxAliasBasis>,
+) -> bool {
     if reference.starts_with("domain-session-") || reference.starts_with("session-") { return true; }
-    let host = reference.split_once("::").map(|(host, _)| host);
-    unavailable.iter().all(|row| !row.host_id.is_empty() && host.is_some_and(|host|
-        !host.eq_ignore_ascii_case(&row.host_id) && !host.eq_ignore_ascii_case(&row.host_name)))
+    match FederationMailboxAlias::parse(reference, basis) {
+        Ok(FederationMailboxAlias::Name(_) | FederationMailboxAlias::Legacy(_)) => unavailable.is_empty(),
+        Ok(FederationMailboxAlias::Host(host, _)) => unavailable.iter().all(|row|
+            !row.host_id.is_empty() && !host.eq_ignore_ascii_case(&row.host_id)
+                && !host.eq_ignore_ascii_case(&row.host_name)),
+        Ok(FederationMailboxAlias::HostNative { host, .. }) => unavailable.iter().all(|row|
+            !row.host_id.is_empty() && Uuid::parse_str(&row.host_id).is_ok_and(|id| id != host)),
+        Err(_) => false,
+    }
 }
 
 fn federation_directory_incomplete() -> FederationMailboxUnavailableHost {
@@ -202,10 +214,15 @@ impl AppState {
 
     async fn mailbox_directory_snapshot(&self, session: &str) -> Result<FederationMailboxDirectorySnapshot, ApiError> {
         let unavailable_hosts = self.ensure_automatic_mailbox_participation(session, true).await?;
-        let mut participants: Vec<FederationMailboxParticipant> = self.dispatch_federation_mailbox_operation(
-            session, FederationMailboxOperation::Directory).await?;
+        let (mut participants, _, mut alias_basis): (Vec<FederationMailboxParticipant>, _, _) = self
+            .dispatch_federation_mailbox_operation_with_alias_basis(
+                session, FederationMailboxOperation::Directory { alias_basis: true }, None,
+            ).await?;
         participants.retain(|row| !unavailable_hosts.iter().any(|host| host.host_id == row.binding.identity.host_id));
-        Ok(FederationMailboxDirectorySnapshot { participants, unavailable_hosts })
+        if let Some(basis) = &mut alias_basis {
+            basis.complete &= unavailable_hosts.is_empty();
+        }
+        Ok(FederationMailboxDirectorySnapshot { participants, unavailable_hosts, alias_basis })
     }
 
     async fn admit_automatic_mailbox_root(
