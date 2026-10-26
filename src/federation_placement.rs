@@ -49,9 +49,12 @@ fn federation_placement_authority(
     placement: &FederationPlacement,
 ) -> bool {
     !placement.mailbox_only && federation_mailbox_placement_authority(domain, settings, placement)
-        && domain.peers.get(&placement.identity.host_id).is_some_and(|peer| matches!(
-            peer.membership, FederationMembershipState::Active | FederationMembershipState::Draining
-        ))
+        && domain.peers.get(&placement.identity.host_id).is_some_and(|peer|
+            matches!(peer.membership, FederationMembershipState::Active | FederationMembershipState::Draining)
+                && peer.transport_generation == placement.peer.transport_generation
+                && peer.verification_basis() == placement.execution_basis
+                && peer.verified_on(domain.links.get(&peer.identity.host_id))
+                && domain.links.get(&peer.identity.host_id) == Some(&placement.link_incarnation))
 }
 
 fn federation_mailbox_placement_authority(
@@ -69,16 +72,10 @@ fn federation_mailbox_placement_authority(
         && settings.central.as_ref() == Some(&placement.peer.central)
         && peer.identity == placement.peer.peer
         && peer.enrollment_generation == placement.peer.enrollment_generation
-        && peer.transport_generation == placement.peer.transport_generation
         && peer.endpoint == placement.peer.endpoint
         && peer.pair_capability_ref == placement.peer.pair_capability_ref
-        && peer.verification_basis() == placement.execution_basis
-        && matches!(
-            peer.membership,
-            FederationMembershipState::Verified | FederationMembershipState::Active | FederationMembershipState::Draining
-        )
-        && peer.verified_on(domain.links.get(&peer.identity.host_id))
-        && domain.links.get(&peer.identity.host_id) == Some(&placement.link_incarnation)
+        && peer.membership != FederationMembershipState::Revoked
+        && domain.links.contains_key(&peer.identity.host_id)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -165,13 +162,18 @@ impl AppState {
                     .peers
                     .get(&expected.peer.host_id)
                     .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-                if peer.record_generation != expected.record_generation
-                    || !(peer.membership == FederationMembershipState::Active
-                        || mailbox_only && peer.membership == FederationMembershipState::Verified)
-                    || !peer.verified_on(domain.links.get(&peer.identity.host_id))
-                {
+                let admitted = if mailbox_only {
+                    peer.membership != FederationMembershipState::Draining
+                        && domain.links.get(&peer.identity.host_id).is_some_and(|incarnation|
+                            federation_participation_qualified(domain, settings, expected, incarnation).is_ok())
+                } else {
+                    peer.membership == FederationMembershipState::Active
+                        && peer.verified_on(domain.links.get(&peer.identity.host_id))
+                };
+                if peer.record_generation != expected.record_generation || !admitted {
                     return Err(ApiError::conflict(
-                        "satellite is not active with current verification",
+                        if mailbox_only { "satellite authenticated mailbox link is not current" }
+                        else { "satellite is not active with current verification" },
                     ));
                 }
                 let mut sessions = 0_u64;
@@ -245,7 +247,7 @@ impl AppState {
                     link_incarnation: domain
                         .links
                         .get(&peer.identity.host_id)
-                        .expect("verified link")
+                        .expect("authenticated link")
                         .clone(),
                     execution_basis: peer.verification_basis(),
                     mailbox_only,

@@ -146,6 +146,7 @@ fn a_worktree_root_over_engrams_basis_bound_leaves_the_report_without_a_basis() 
 #[derive(Clone, Copy)]
 enum ChildWorkspace {
     ReadOnly,
+    ReadOnlyRepository,
     IsolatedWorktree,
 }
 
@@ -257,8 +258,11 @@ fn start_mediated_turn_with_script(
         .to_path_buf();
     let root = temp_root.join(format!("engram-turn-observation-{label}-project"));
     fs::create_dir_all(&root).expect("project root should exist");
+    if matches!(workspace, ChildWorkspace::ReadOnlyRepository) {
+        init_git_repository(&root);
+    }
     let write_policy = match workspace {
-        ChildWorkspace::ReadOnly => DelegationWritePolicy::ReadOnly,
+        ChildWorkspace::ReadOnly | ChildWorkspace::ReadOnlyRepository => DelegationWritePolicy::ReadOnly,
         ChildWorkspace::IsolatedWorktree => {
             // A worktree needs a repository with a commit to branch from.
             init_git_repository(&root);
@@ -277,7 +281,7 @@ fn start_mediated_turn_with_script(
     let project_id = create_test_project(&state, &root, "Engram turn observation");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
     enable_test_project_engram(&state, &project_id, &root);
-    if matches!(workspace, ChildWorkspace::IsolatedWorktree) {
+    if matches!(workspace, ChildWorkspace::IsolatedWorktree | ChildWorkspace::ReadOnlyRepository) {
         // The Engram project marker written above must be tracked before a
         // worktree can be materialized from this repository.
         run_git_test_command(&root, &["add", "-A"]);
@@ -1421,7 +1425,7 @@ fn a_turn_that_changed_source_under_a_read_only_grant_reports_nothing() {
     // misreport the turn as observe-only, the checkpoint reports nothing.
     let turn = start_mediated_turn(
         "read-only-mutation",
-        ChildWorkspace::ReadOnly,
+        ChildWorkspace::ReadOnlyRepository,
         ControlBinding::Claimed,
     );
     turn.change_source("src/lib.rs");

@@ -12,8 +12,10 @@ fn federation_participation_qualified(
         && domain.peers.get(&current.peer.host_id).is_some_and(|peer|
             peer.record_generation == current.record_generation && peer.identity == current.peer
                 && peer.enrollment_generation == current.enrollment_generation
-                && matches!(peer.membership, FederationMembershipState::Verified | FederationMembershipState::Active | FederationMembershipState::Draining)
-                && peer.verified_on(domain.links.get(&current.peer.host_id)));
+                && peer.transport_generation == current.transport_generation
+                && peer.endpoint == current.endpoint
+                && peer.pair_capability_ref == current.pair_capability_ref
+                && peer.membership != FederationMembershipState::Revoked);
     if qualified { Ok(()) } else { Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY)) }
 }
 
@@ -230,8 +232,7 @@ impl AppState {
     ) -> Result<FederationMailboxParticipant, ApiError> {
         let current = lease.with_current(self, |inner, current| {
             federation_participation_qualified(&inner.federation, &inner.preferences.federation, current, &lease.incarnation)?;
-            if !(matches!(current.membership, FederationMembershipState::Verified | FederationMembershipState::Active)
-                || current.membership == FederationMembershipState::Draining && root.binding.is_some()) {
+            if current.membership == FederationMembershipState::Draining && root.binding.is_none() {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }
             Ok(current.clone())

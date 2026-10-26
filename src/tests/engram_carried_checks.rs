@@ -179,7 +179,8 @@ fn a_fence_names_the_holders_command_without_its_line() {
     assert!(cause.contains("`curl` command"), "{cause}");
     assert!(!cause.contains("sk-secret-123"), "{cause}");
     assert!(!cause.contains("Authorization"), "{cause}");
-    let one_call = engram_own_command_cause("pushd \"C:/repo\" && cargo build --token=abc");
+    let directory = if cfg!(windows) { "C:/repo" } else { "/repo" };
+    let one_call = engram_own_command_cause(&format!("pushd \"{directory}\" && cargo build --token=abc"));
     assert!(one_call.contains("`cargo` command"), "{one_call}");
     assert!(!one_call.contains("abc"), "{one_call}");
     // A leading assignment is skipped, whatever its value.

@@ -392,6 +392,9 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let codex_home = test_temp_dir().join(format!("termal-codex-home-limited-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let scope = codex_home.join("workspace");
+    let thread_cwd = scope.join("subdir");
+    fs::create_dir_all(&thread_cwd).expect("discovery scope should exist");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
     connection
@@ -420,7 +423,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     format!("thread-in-scope-{index}"),
-                    "/tmp/termal/subdir",
+                    thread_cwd.to_string_lossy(),
                     format!("In-scope thread {index}"),
                     r#"{"type":"workspace-write"}"#,
                     "on-request",
@@ -433,7 +436,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
             .expect("thread row should insert");
     }
 
-    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/termal")])
+    let threads = discover_codex_threads_from_home(&codex_home, &[scope])
         .expect("threads should load");
     let last_expected_id = format!(
         "thread-in-scope-{}",
@@ -795,6 +798,54 @@ fn discover_codex_threads_from_home_rejects_delegation_marker_outside_normalized
     assert!(discovery.threads.is_empty());
 
     drop(connection);
+}
+
+#[test]
+fn codex_discovery_scope_query_patterns_match_descendants_and_escape_literals() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    // Exercise SQLite's actual ESCAPE semantics on every host, including paths
+    // whose spelling is native to Windows, rather than only checking strings.
+    for scope in [
+        r"C:\repo\workspace",
+        r"C:\repo\workspace\",
+        r"\\?\C:\repo\workspace",
+        r"\\server\share\workspace",
+        r"C:\repo\work%_space",
+        r"C:\",
+        "/repo/workspace",
+        "/repo/workspace/",
+        "/repo/work%_space",
+        "/",
+    ] {
+        for (candidate, pattern) in codex_discovery_scope_query_patterns(scope) {
+            let separator = if candidate.contains('\\') { '\\' } else { '/' };
+            let directory = candidate.trim_end_matches(separator);
+            let child = format!("{directory}{separator}child");
+            let mut cases = vec![
+                (candidate.clone(), true),
+                (child.clone(), true),
+                (format!("{child}{separator}grandchild"), true),
+                (format!("{directory}-sibling{separator}child"), false),
+            ];
+            if candidate.contains('%') {
+                cases.push((child.replace('%', "anything"), false));
+                cases.push((child.replace('_', "x"), false));
+            }
+            for (cwd, expected) in cases {
+                let matches: bool = connection
+                    .query_row(
+                        "select ?1 = ?2 or ?1 like ?3 escape '\\'",
+                        rusqlite::params![cwd, candidate, pattern],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    matches, expected,
+                    "scope={scope:?}, cwd={cwd:?}, pattern={pattern:?}"
+                );
+            }
+        }
+    }
 }
 
 #[test]

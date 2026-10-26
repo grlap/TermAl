@@ -31,13 +31,10 @@ async fn verify_federation_satellite_mode(
         let inner = app.inner.lock().expect("state mutex poisoned");
         let expected = federation_snapshot_locked(&inner, &id)?;
         if expected.local_role != FederationRole::Central
-            || !matches!(
-                expected.membership,
-                FederationMembershipState::Enrolled | FederationMembershipState::Draining
-            )
+            || expected.membership == FederationMembershipState::Revoked
         {
             return Err(ApiError::conflict(
-                "onboarding requires an unverified satellite on the central host",
+                "onboarding requires an enrolled satellite on the central host",
             ));
         }
         let record = inner

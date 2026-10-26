@@ -66,8 +66,9 @@ impl FederationRpcClient {
         self.channel.current_lease()
     }
     async fn health(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
-        self.authenticated_health(lease).await?;
-        self.requalify(lease).await
+        // Onboarding reports are diagnostic; their probes do not own the
+        // lifetime of this already authenticated connection.
+        self.authenticated_health(lease).await
     }
 
     async fn authenticated_health(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
@@ -77,12 +78,31 @@ impl FederationRpcClient {
         self.validate_health(lease, response)
     }
 
+    fn retain_health_refusal(&self, lease: &FederationLinkLease, error: &ApiError) -> bool {
+        if lease.with_incarnation(|| Ok(())).is_err() {
+            // MAC, transport and replay failures already retire their context
+            // in the authenticated RPC owner; never revive that connection.
+            return false;
+        }
+        if let Err(authority) = self.channel.current_authority() {
+            if !matches!(authority.status, StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) {
+                self.channel.invalidate_if_current(lease);
+                return false;
+            }
+        }
+        // A signed application refusal (including 409) is diagnostic while
+        // the actual pair authority is current. Its status is not a new fence.
+        let _ = error;
+        self.channel.observe_attestation_failure(None, "health", "diagnosticUnavailable", false);
+        true
+    }
+
     fn validate_health(
         &self,
         lease: &FederationLinkLease,
         health: FederationHealth,
     ) -> Result<(), ApiError> {
-        lease.with_incarnation(|| {
+        let outcome = lease.with_incarnation(|| {
             if health.protocol_version != FEDERATION_PROTOCOL_VERSION
                 || health.host_id != self.channel.snapshot.peer.host_id
                 || health.host_generation != self.channel.snapshot.peer.host_generation
@@ -92,7 +112,11 @@ impl FederationRpcClient {
                 return Err(federation_stale_link());
             }
             Ok(())
-        })
+        });
+        if outcome.is_err() {
+            self.channel.invalidate_if_current(lease);
+        }
+        outcome
     }
 }
 

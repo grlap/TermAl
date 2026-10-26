@@ -452,15 +452,47 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
             mtime_ms: None,
             size_bytes: None,
         }]);
+    // A long checkout path can make the bounded prompt summary cut the
+    // refusal's identity. Observe the existing notice owner before that merge.
+    let fingerprint = turn.record_mut(|record| {
+        record.engram.test_source_root_lines = Some(Vec::new());
+        let check = record
+            .engram
+            .active_turn_checks
+            .iter()
+            .find(|check| check.key == ITEM)
+            .expect("the running check owns the refusal");
+        engram_check_fingerprint(&check.command)
+    });
     let first = turn.finish();
     assert!(first.get("verification_evidence").is_none(), "{first:#}");
     assert!(
         turn.record(|record| record.engram.carried_checks.is_empty()),
         "the fenced carry is refused at the close"
     );
-    let refused = holder_line(&turn);
+    let notices = turn.record_mut(|record| {
+        record
+            .engram
+            .test_source_root_lines
+            .take()
+            .expect("this close owns its notice witness")
+    });
     assert!(
-        refused.contains("a Codex test still running when its turn closed")
+        notices.iter().any(|line| {
+            line.contains("a Codex test still running when its turn closed")
+                && line.contains(&fingerprint)
+        }),
+        "the initial carry is announced: {notices:#?}"
+    );
+    let refusals = notices
+        .iter()
+        .filter(|line| line.contains("earned no credit"))
+        .collect::<Vec<_>>();
+    assert_eq!(refusals.len(), 1, "one refusal for this check: {notices:#?}");
+    let refused = refusals[0];
+    assert!(
+        refused.contains("the Codex test launched at")
+            && refused.contains(&fingerprint)
             && refused.contains("earned no credit")
             && refused.contains("a file in its worktree changed")
             && refused.contains("(while it was running)"),

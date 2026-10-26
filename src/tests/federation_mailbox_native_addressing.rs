@@ -2,7 +2,7 @@
 // Disposable authenticated hosts; no live hosts or provider turns are claimed.
 use super::*;
 
-fn address(state: &AppState, session: &str) -> String {
+pub(super) fn address(state: &AppState, session: &str) -> String {
     let inner = state.inner.lock().unwrap();
     let host = &inner.federation.local.as_ref().unwrap().host_id;
     let target = format!("host:{host}::{session}");
@@ -11,7 +11,7 @@ fn address(state: &AppState, session: &str) -> String {
     target
 }
 
-async fn ordinary(state: &AppState, sender: &str, target: &str, key: &str)
+pub(super) async fn ordinary(state: &AppState, sender: &str, target: &str, key: &str)
     -> Result<MailboxAppendReceipt, ApiError>
 {
     send_mailbox_message(AxumPath(sender.to_owned()), State(state.clone()),
@@ -22,7 +22,7 @@ async fn ordinary(state: &AppState, sender: &str, target: &str, key: &str)
         }, _target_binding: () })).await.map(|(_, receipt)| receipt.0)
 }
 
-async fn receive_and_ack(state: &AppState, recipient: &str, sent: &MailboxAppendReceipt)
+pub(super) async fn receive_and_ack(state: &AppState, recipient: &str, sent: &MailboxAppendReceipt)
     -> Result<(), ApiError>
 {
     let page = read_mailbox(AxumPath((recipient.to_owned(), sent.mailbox_id.clone())),
@@ -232,6 +232,15 @@ async fn refused_peer_case(condition: &str) {
         pair.lease.channel.invalidate();
     }
     let sent = ordinary(&pair.central, &sender, &address(&pair.satellite, &target), condition).await;
+    if condition == "unverified" {
+        let sent = sent.expect("the enrolled authenticated pair needs no diagnostic verification");
+        receive_and_ack(&pair.satellite, &target, &sent).await.unwrap();
+        assert!(pair.satellite.federation_mailbox_actor(&target).unwrap().is_none(),
+            "native delivery grants no domain or execution binding");
+        assert_eq!(messages(&pair.central) + messages(&pair.satellite), 1);
+        pair.finish().await;
+        return;
+    }
     let stored = messages(&pair.central) + messages(&pair.satellite);
     pair.finish().await;
     let error = sent.expect_err("explicit addressing cannot grant host qualification");
@@ -240,7 +249,7 @@ async fn refused_peer_case(condition: &str) {
 }
 
 #[tokio::test]
-async fn explicit_native_target_refuses_unverified_peer() { refused_peer_case("unverified").await; }
+async fn explicit_native_target_accepts_enrolled_unverified_peer() { refused_peer_case("unverified").await; }
 
 #[tokio::test]
 async fn explicit_native_target_refuses_revoked_peer() { refused_peer_case("revoked").await; }

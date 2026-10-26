@@ -138,6 +138,7 @@ mod phase_sync;
 mod read_only_orientation;
 mod review_freeze;
 mod review_identity;
+mod runtime_fixture_processes;
 mod test_temp_paths;
 mod work_memories;
 pub use orchestrator::{
@@ -1590,11 +1591,22 @@ fn init_git_document_test_repo(repo_root: &FsPath) {
 }
 
 fn test_exit_success_child() -> Child {
-    if cfg!(windows) {
+    let mut child = if cfg!(windows) {
         Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap()
     } else {
         Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap()
-    }
+    };
+    // Runtime-handle fixtures need a cached successful exit, not a live OS
+    // process. Neither Child nor SharedChild reaps on Drop; waiting here also
+    // covers fixtures discarded or unwound without exercising runtime cleanup.
+    // Tests that require a live child retain phase_sync::ParkedProcess instead.
+    assert!(
+        child
+            .wait()
+            .expect("successful fixture child should exit")
+            .success()
+    );
+    child
 }
 
 static TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =

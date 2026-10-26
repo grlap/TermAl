@@ -60,7 +60,7 @@ async fn federation_build_compatibility_recovery_rejects_changed_authority() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn federation_build_compatibility_failed_reconnect_never_restores_membership() {
+async fn federation_build_compatibility_explicit_diagnostic_refusal_does_not_activate_a_new_link() {
     for protocol in [true, false] {
         let profile = Arc::new(Mutex::new(profile()));
         let mut pair = Pair::new(federation_registry::central(), measured(profile.clone())).await;
@@ -79,12 +79,13 @@ async fn federation_build_compatibility_failed_reconnect_never_restores_membersh
             }
         }
         pair.reconnect().await;
-        let refused = pair.rpc.health(&pair.lease).await.unwrap_err();
+        pair.rpc.health(&pair.lease).await.unwrap();
+        let refused = pair.rpc.requalify(&pair.lease).await.unwrap_err();
         assert_eq!(refused.status, StatusCode::CONFLICT);
         assert!(refused.message.contains("re-attestation checks refused"));
         let inner = pair.central.inner.lock().unwrap();
         let peer = &inner.federation.peers[&pair.id];
-        assert_eq!(peer.membership, FederationMembershipState::Enrolled);
+        assert_eq!(peer.membership, FederationMembershipState::Active);
         assert!(!peer.verified_on(inner.federation.links.get(&pair.id)));
         assert!(peer.requalification.is_some());
         assert!(!inner.federation.onboarding.reports[&pair.id].termal_complete());

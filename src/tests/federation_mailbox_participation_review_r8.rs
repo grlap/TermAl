@@ -27,12 +27,12 @@ async fn superseded_sender_retry(unknown: bool) {
     assert_eq!(original.state, if unknown { "appendOutcomeUnknown" } else { "homeCommitted" });
     let original_message: String = pair.central.mailbox_store.connection().unwrap().query_row(
         "SELECT id FROM mailbox_messages", [], |row| row.get(0)).unwrap();
+    let peer_id = pair.id.clone();
     let (central_state, satellite_state, listeners) = pair.suspend().await;
-    let settings = central_state.inner.lock().unwrap().preferences.federation.clone();
-    let mut disabled = settings.clone();
-    disabled.enabled = false;
-    central_state.configure_federation(disabled).unwrap();
-    central_state.configure_federation(settings).unwrap();
+    let peer = central_state.inner.lock().unwrap().federation.peers[&peer_id].clone();
+    central_state.enroll_federation_peer(peer).unwrap();
+    let peer = satellite_state.inner.lock().unwrap().federation.peers.values().next().unwrap().clone();
+    satellite_state.enroll_federation_peer(peer).unwrap();
     let pair = federation_onboarding_fixture::Pair::resume(central_state, satellite_state, listeners,
         federation_onboarding_fixture::io(), federation_onboarding_fixture::io()).await;
     assert!(pair.verify().await.unwrap().termal_complete());
@@ -326,7 +326,7 @@ fn native_address_review_sibling_listing_preserves_canonical_domain_target() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn native_address_review_verified_satellite_listed_central_name_reports_activation_hold() {
+async fn native_address_review_verified_satellite_listed_central_name_wakes_without_activation() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let pair = qualified_pair().await;
     let sender = native(&pair.satellite, "Verified satellite caller");
@@ -372,16 +372,14 @@ async fn native_address_review_verified_satellite_listed_central_name_reports_ac
     let (name, requires_activation, value) = result.expect("durable native delivery remains available");
     assert_eq!(name, expected_name);
     assert_eq!(membership, FederationMembershipState::Verified, "ordinary mail must not activate the peer");
-    assert!(command.is_err(), "a never-activated satellite cannot admit a central runtime wake");
-    assert_eq!(pending, 1);
-    assert_eq!(refusals.len(), 1);
-    assert!(refusals[0].reason.contains("obligation held"));
+    assert!(matches!(command, Ok(ClaudeRuntimeCommand::Prompt(_))),
+        "ordinary native mail from the authenticated satellite wakes the central recipient");
+    assert_eq!(pending, 0);
+    assert!(refusals.is_empty());
     let receipt: MailboxAppendReceipt = serde_json::from_value(value).unwrap();
     assert_eq!(receipt.notification_disposition, "durableButNotWoken");
-    assert_eq!(receipt.notification_cause.as_deref(), Some(
-        "native mail is durable; wake requires central activation of the satellite; if it is only Verified, ask the central operator to activate the host"),
-        "a retained append must explain its activation prerequisite, not silently imply a wake");
-    assert!(requires_activation, "the copied central name must declare its wake prerequisite");
+    assert!(receipt.notification_cause.is_none(), "no activation remedy is required");
+    assert!(!requires_activation, "ordinary native wakes have no activation prerequisite");
     let page = read_mailbox(AxumPath((target.clone(), receipt.mailbox_id.clone())), State(central.clone()),
         Json(ReadMailboxRequest { after_sequence: None, limit: 20, issue_receipt: true, read_key: None })).await.unwrap().0;
     assert!(page.messages.iter().any(|message| message.id == receipt.message_id));

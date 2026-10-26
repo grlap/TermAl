@@ -1180,6 +1180,10 @@ fn is_missing_git_object_error(stderr: &str) -> bool {
 fn git_command() -> Command {
     let mut command = Command::new("git");
     command.env("LC_ALL", "C").env("LANG", "C");
+    // Disposable fixtures can live inside this checkout's ignored .tmp tree.
+    // A fixture with no repository must not discover the enclosing checkout.
+    #[cfg(test)]
+    command.env("GIT_CEILING_DIRECTORIES", test_temp_dir());
     command
 }
 

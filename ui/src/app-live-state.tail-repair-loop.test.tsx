@@ -15,6 +15,7 @@ import { SESSION_HYDRATION_RETRY_DELAYS_MS } from "./app-live-state-hydration";
 import * as hydration from "./app-live-state-hydration";
 import { requestSessionHistoryPage, requestSessionHistoryOlderPage, requestSessionHistoryStartPage } from "./session-history-demand";
 import * as transport from "./app-live-state-transport";
+import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
 import type { UseAppLiveStateParams } from "./app-live-state-types";
 import * as deltas from "./live-updates";
 import * as adoption from "./session-hydration-adoption";
@@ -287,6 +288,74 @@ afterEach(() => {
 });
 
 const COMPOSITE_WINDOW_MS = 2559;
+
+it.each(["ordinary", "stale state", "malformed state", "fallback state", "stream error", "disposal"] as const)(
+  "repairs a hidden completion after a session-only HTTP leap and %s clear path", async (clearPath) => {
+  const params = makeParams();
+  const complete = summary(102);
+  complete.sessions[0] = { ...complete.sessions[0], status: "idle" };
+  const full = vi.spyOn(api, "fetchState").mockResolvedValue(complete);
+  const currentTail = tail(102, "Finished");
+  currentTail.session.status = "idle";
+  vi.spyOn(api, "fetchSessionTail").mockResolvedValue(currentTail);
+  let h = renderHook(() => useAppLiveState(params));
+  act(() => {
+    Stream.latest.onopen?.(new Event("open"));
+    Stream.latest.emit("state", summary(100));
+  });
+  expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(100);
+  const created = { ...tail(102, "Forked").session, id: "forked-session", status: "idle" as const };
+  complete.sessions.push({ ...complete.sessions[0], id: created.id, status: "idle" });
+  act(() => {
+    expect(h.result.current.adoptCreatedSessionResponse({
+      revision: 102, serverInstanceId: INSTANCE, sessionId: created.id, session: created,
+    })).toBe("adopted");
+  });
+  expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(102);
+  // The turn ended at101, but its delayed metadata is now behind HTTP102.
+  act(() => Stream.latest.emit("delta", {
+    type: "messageUpdated", revision: 101, sessionId: SESSION_ID,
+    messageId: MESSAGE_ID, messageIndex: TOTAL - 1, messageCount: TOTAL,
+    sessionMutationStamp: 101, message: message("Finished"), preview: "Finished", status: "idle",
+  }));
+  expect(params.adoptionRefs.sessionsRef.current.find(entry => entry.id === SESSION_ID)?.status).toBe("active");
+  expect(full).not.toHaveBeenCalled();
+  if (clearPath === "stale state") {
+    act(() => Stream.latest.emit("state", summary(101)));
+  } else if (clearPath === "malformed state" || clearPath === "fallback state") {
+    // The immediate full repair fails: clearing its one-shot flags must not
+    // turn the partial HTTP ledger into a complete snapshot certificate.
+    full.mockRejectedValueOnce(new Error("Full repair unavailable"));
+    act(() => {
+      if (clearPath === "malformed state") {
+        Stream.latest.dispatchEvent(new MessageEvent("state", { data: "{" }));
+      } else {
+        Stream.latest.emit("state", { ...summary(102), _sseFallback: true });
+      }
+    });
+    await flush(clearPath === "malformed state" ? RECONNECT_STATE_RESYNC_DELAY_MS : 0);
+    expect(full).toHaveBeenCalledOnce();
+    // An equal-revision ignored frame can confirm transport recovery; it
+    // does not supply the missing earlier session metadata.
+    act(() => Stream.latest.emit("delta", {
+      type: "sessionCreated", revision: 102, sessionId: created.id, session: created,
+    }));
+    full.mockClear();
+  } else if (clearPath === "stream error") {
+    act(() => Stream.latest.onerror?.(new Event("error")));
+  } else if (clearPath === "disposal") {
+    h.unmount();
+    h = renderHook(() => useAppLiveState(params));
+    act(() => Stream.latest.onopen?.(new Event("open")));
+    await flush(1000); // Seed the fresh transport's drift baseline.
+  }
+  expect(params.adoptionRefs.sessionsRef.current.find(entry => entry.id === SESSION_ID)?.status).toBe("active");
+  // No pane is visible: forced visible-tail repair cannot repair this record.
+  vi.setSystemTime(Date.now() + 15_000);
+  await flush(1000);
+  expect(full).toHaveBeenCalledOnce();
+  expect(params.adoptionRefs.sessionsRef.current.find(entry => entry.id === SESSION_ID)?.status).toBe("idle");
+});
 
 // Seed proof through the real hook's first tail answer, not raw Session fields.
 async function pairedRetryFixture(fullyLoaded = true) {

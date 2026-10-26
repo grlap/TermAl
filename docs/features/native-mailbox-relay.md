@@ -1,11 +1,11 @@
 # Native cross-host routine mailbox relay
 
-Native relay wake requires the satellite to be Active at the central.
-Verification alone permits durable mail without activating the host; its wake
-remains held. Remote native names carry `nativeWakeRequiresActivation` in the
-MCP listing, and `durableButNotWoken` receipts explain the central operator's
-activation remedy. This prerequisite label does not assert current membership.
-The relay's existing admission predicate remains the only wake authority.
+Ordinary native mail and its wake require the enrolled, non-revoked,
+non-quarantined host pair and its existing authenticated transport proof.
+Verification reports, build hashes and Active membership are not prerequisites.
+The existing native mailbox admission and dispatch owners enforce enrollment,
+credentials, current link and native creation identity; no executor placement
+or additional per-session authorization is granted.
 
 The existing `termal_send_to_session` / CLI `mailbox send` addresses a remote
 native root as `host:<host UUID>::<native session id>`. A bare `session-*` id
@@ -25,7 +25,7 @@ placement, enrolls no session in a mailbox domain and moves no local history.
 ## Identity and prerequisites
 
 Both hosts must support version 1 of `/federation/v1/mailbox/relay`, with an
-already enrolled, enabled, qualified and authenticated host pair. The explicit
+already enrolled, enabled and authenticated host pair. The explicit
 host UUID selects the enrolled peer; an authenticated RPC proves the exact
 native target. Display names and SSH host names alone grant no authority.
 A missing pair, disconnected transport, unsupported peer, changed identity or

@@ -20,7 +20,7 @@ async fn aliases_include_new_eligible_roots_before_send_or_get_or_create() {
     }
 }
 
-async fn routing_after_new_verification(reenroll: bool) {
+async fn routing_after_authority_change(reenroll: bool) {
     let pair = qualified_pair().await;
     let c = native(&pair.central, "C");
     let s = native(&pair.satellite, "S");
@@ -49,7 +49,6 @@ async fn routing_after_new_verification(reenroll: bool) {
     }
     let pair = federation_onboarding_fixture::Pair::resume(central, satellite, listeners,
         federation_onboarding_fixture::io(), federation_onboarding_fixture::io()).await;
-    assert!(pair.verify().await.unwrap().termal_complete());
     // No participant-directory operation is allowed to repair this first send.
     let sent = public_send(&pair.satellite, &s, &central_target, "new-authority-first-send", "current route").await;
     if let Err(error) = sent {
@@ -63,8 +62,12 @@ async fn routing_after_new_verification(reenroll: bool) {
         rows.iter().any(|row| row["participantId"] == prior.participant_key()
             && row["reason"].as_str().is_some_and(|reason| !reason.is_empty())));
     let current = pair.satellite.federation_mailbox_actor(&s).unwrap().unwrap().binding;
-    assert_ne!(current, prior, "new admission cannot borrow the retired authority");
-    assert!(current.placement_generation > prior.placement_generation);
+    if reenroll {
+        assert_ne!(current, prior, "new enrollment cannot borrow the retired authority");
+        assert!(current.placement_generation > prior.placement_generation);
+    } else {
+        assert_eq!(current, prior, "a settings toggle cannot replace the enrolled mailbox identity");
+    }
     assert!(pair.satellite.inner.lock().unwrap().sessions.iter().find(|row|
         row.session.id == s).unwrap().federation_mailbox_binding.is_none());
     let restored = {
@@ -76,14 +79,15 @@ async fn routing_after_new_verification(reenroll: bool) {
     };
     assert_eq!(restored.mailbox_binding(), Some(&current));
     assert!(restored.federation_mailbox_binding.is_none());
-    assert!(restored.federation_retired_automatic_mailbox_bindings.contains(&prior));
+    assert_eq!(restored.federation_retired_automatic_mailbox_bindings.contains(&prior), reenroll);
     let original_page: (String, String) = pair.central.mailbox_store.connection().unwrap().query_row(
         "SELECT mailbox_id,session_id FROM mailbox_read_pages WHERE receipt=?1", [&retained_receipt],
         |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
     assert_eq!(original_page, (historical.mailbox_id.clone(), prior.participant_key()),
         "the original receipt is neither deleted nor reassigned to the replacement");
     pair.finish().await;
-    assert!(prior_visible, "superseded unread domain history and its issued receipt ({retained_receipt}) cannot disappear silently");
+    assert_eq!(prior_visible, reenroll,
+        "only a replaced enrollment retires unread domain history and its receipt ({retained_receipt})");
 }
 
 #[tokio::test]
@@ -109,12 +113,12 @@ async fn disconnected_qualified_peer_remains_in_alias_uniqueness() {
 
 #[tokio::test]
 async fn reenrollment_first_ordinary_send_readmits_automatic_routing() {
-    routing_after_new_verification(true).await;
+    routing_after_authority_change(true).await;
 }
 
 #[tokio::test]
-async fn settings_toggle_reverification_first_send_supersedes_old_automatic_admission() {
-    routing_after_new_verification(false).await;
+async fn settings_toggle_first_send_preserves_automatic_admission_without_verification() {
+    routing_after_authority_change(false).await;
 }
 
 #[tokio::test]

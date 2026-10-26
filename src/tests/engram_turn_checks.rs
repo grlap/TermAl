@@ -1068,7 +1068,7 @@ impl CheckedTurn {
         read(&inner.sessions[index])
     }
 
-    fn record_mut(&self, change: impl FnOnce(&mut SessionRecord)) {
+    fn record_mut<T>(&self, change: impl FnOnce(&mut SessionRecord) -> T) -> T {
         let mut inner = self.state.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(&self.session_id)
@@ -1077,7 +1077,7 @@ impl CheckedTurn {
             inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid"),
-        );
+        )
     }
 
     /// Completes the turn and returns the checkpoint request that closed it.

@@ -71,9 +71,8 @@ fn federation_transport_and_placement_reject_reused_uuid_after_reverification() 
     assert!(reused.transport_generation > next.transport_generation);
     state.verify_federation_peer(&reused, checks()).unwrap();
     let verified = state.federation_peer_snapshot(&old.peer.host_id).unwrap();
-    state
-        .transition_federation_peer(&verified, FederationMembershipState::Active)
-        .unwrap();
+    assert_eq!(verified.membership, FederationMembershipState::Active,
+        "explicit verification preserves membership retained across reconnect");
     let current = state.federation_peer_snapshot(&old.peer.host_id).unwrap();
     assert!(!old.same_transport_as(&current));
     assert!(

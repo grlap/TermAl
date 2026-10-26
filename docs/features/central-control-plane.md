@@ -93,15 +93,13 @@ bare native id and the configured central uses the explicit host/native form.
 Rows on other satellites use the canonical domain id: there is no direct native
 relay pair between those hosts. A native id outside the copyable syntax also
 uses the canonical id. Friendly names remain in `hostName`/`localName`.
-If a satellite cannot reach or verify its central directory, its fallback lists
+If a satellite cannot reach its authenticated central directory, its fallback lists
 only local native roots, with bare ids in `name` and friendly labels in
 `localName`; unavailable inventory still refuses global aliases.
-For a remote native address, `nativeWakeRequiresActivation: true` declares
-that waking requires the satellite to be Active at the central; it does not
-claim its current activation state. A Verified-only peer can append durably,
-but the existing relay wake stays held until the central operator activates
-the host. The public `durableButNotWoken` receipt names that prerequisite and
-operator remedy. No per-session join or implicit host activation occurs.
+Ordinary native mail and its wake use the enrolled, non-revoked,
+non-quarantined pair's current authenticated link. They require no verification
+report, Active membership or per-session join. They do not activate the host or
+grant executor placement.
 Canonical ids retain domain delivery and its separate wake-authority contract;
 mailbox-only targets can be delivered without an executor wake. A manually
 supplied host/native address still requires its enrolled direct pair and is
@@ -586,16 +584,16 @@ no mailbox state.
 
 ### Automatic native participation
 
-Enrollment and verification on the current authenticated link qualify a host
-for mailbox participation. Central native root sessions and qualified satellite
+Enrollment and the existing current authenticated pair proof qualify a host
+for mailbox participation. Central native root sessions and enrolled satellite
 native root sessions appear in the domain directory automatically, including
 sessions created before enrollment or before their first send. No explicit join,
 fresh session, per-session authorization, or executor activation is required.
 The MCP bridge discovers the domain through the caller's own host.
 
 Automatic bindings are mailbox-only. They reserve no executor session, build or
-gate capacity and do not promote Verified membership to Active. Execution still
-requires explicit Active admission; an operator placement upgrades a mailbox-only
+gate capacity and do not promote membership to Active. Execution still
+requires explicit Active admission and current verification; an operator placement upgrades a mailbox-only
 binding while preserving its creation identity and placement generation. Hidden
 sessions, delegation children and executor proxies are not enrolled as native
 domain principals by discovery.
@@ -627,7 +625,7 @@ must not begin with a known host selector.
 Availability checks use the shared alias parser and the same snapshot's host
 basis, rather than interpreting `::` separately. An exact
 `host:<host UUID>::<native session-id>` still requires a current directory row;
-it does not admit an absent root. Verified peers may participate in mailbox
+it does not admit an absent root. Enrolled peers may participate in mailbox
 discovery without gaining executor authority. Alias resolution refreshes candidates before
 deciding uniqueness, including roots created since the previous directory read.
 If a satellite cannot reach its domain directory, MCP session listing still
@@ -636,7 +634,7 @@ Their bare ids remain usable locally; incomplete global names remain refused.
 Local authority loss still refuses the operation. A failed domain operation is
 never retried against a local mailbox store. Draining peers retain existing
 mailbox authority but gain no new automatic bindings. Ordinary sends and lists
-revalidate automatic satellite admission after re-enrollment or re-verification;
+revalidate automatic satellite admission against the current enrolled pair;
 only obsolete automatic routing may be superseded, never an explicit grant.
 
 Mail delivered before an explicit executor grant remains mailbox data. Its wake
@@ -672,8 +670,9 @@ and outcome without granting access to the old domain principal.
 Automatic participation currently also retains the existing role and central
 replacement guards. Once roots have joined, replacing the role or central can
 be refused even though those roots hold no execution grant. Disabling and
-re-enabling the same domain preserves stored history and receipts. If fresh
-verification supersedes an automatic satellite route, that native root retains
+re-enabling the same domain preserves stored history and receipts. Ordinary
+reconnects retain participant identities, conversations and native creation ids;
+old leases remain fenced. If re-enrollment supersedes an automatic satellite route, that native root retains
 the old route descriptor. Mailbox listings expose `unavailablePriorDomains`
 (also returned by the MCP mailbox list) with the prior participant id, central
 and reason. The replacement identity cannot read or ACK as the retired identity;
@@ -888,8 +887,12 @@ Reachability alone, or an SSH shell exiting with zero, proves nothing. A passed
 checklist is bound to the full configuration and identity of the entry and
 moves it to Verified; an incomplete or failed one leaves it Enrolled, and it
 cannot initially become Active without operator activation. A material change to
-that authority requires the checklist again; an ordinary reconnect automatically
-restores only the membership already authorized, after fresh link proof.
+that execution authority requires the checklist again. An ordinary reconnect
+retains membership and uses fresh SSH/pair proof for mailbox routing, without
+running requalification or fabricating a current verification report. The old
+report remains diagnostic and `verificationCurrent` stays false on a new link
+until an explicit verification succeeds. Execution placement keeps its separate
+current-verification and incarnation fences.
 
 Engram's own onboarding check (an Engram binary and automated Git exchange on
 that platform) is a separately recorded step, run only for a host with Engram

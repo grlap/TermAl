@@ -197,9 +197,10 @@ async fn mailbox_relay_lost_home_reply_reopens_source_pin_and_replays_exactly_on
     assert_eq!(receipt_again.message_id, receipt.message_id);
     let mut fresh = request.clone();
     fresh.idempotency_key = "fresh-after-reconnect".into();
-    let refused = recovered.send_native_mailbox_relay(&fixture.native, &fresh).await.unwrap_err();
-    assert_eq!(refused.status, StatusCode::CONFLICT,
-        "a retained committed retry is not new-send qualification after reconnect");
+    let fresh_receipt = recovered.send_native_mailbox_relay(&fixture.native, &fresh).await.unwrap().unwrap();
+    assert!(!fresh_receipt.duplicate, "a fresh pair proof also admits new ordinary mail");
+    assert_ne!(fresh_receipt.message_id, receipt.message_id);
+    assert_eq!(fresh_receipt.mailbox_id, receipt.mailbox_id);
     assert_eq!(
         fixture
             .central
@@ -209,7 +210,7 @@ async fn mailbox_relay_lost_home_reply_reopens_source_pin_and_replays_exactly_on
             .query_row("SELECT count(*) FROM mailbox_messages", [], |row| row
                 .get::<_, u64>(0))
             .unwrap(),
-        1
+        2
     );
     let enrolled =
         { fixture.satellite.inner.lock().unwrap().federation.peers[&peer.peer.host_id].clone() };

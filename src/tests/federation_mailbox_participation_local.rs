@@ -68,8 +68,10 @@ async fn local_native_send_does_not_need_host_verification() {
     let target = native(&pair.satellite, "Local recipient");
     let sent = public_send(&pair.satellite, &sender, &target, "unverified-local", "local").await.unwrap();
     acknowledge_native(&pair.satellite, &target, &sent).await;
-    assert!(public_send(&pair.satellite, &sender, "Remote", "unverified-domain", "refuse").await.is_err());
     assert!(pair.satellite.federation_mailbox_actor(&sender).unwrap().is_none());
+    assert!(public_send(&pair.satellite, &sender, "Remote", "unverified-domain", "refuse").await.is_err());
+    assert!(federation_mailbox_root_locked(&pair.satellite.inner.lock().unwrap(), &sender)
+        .unwrap().federation_mailbox_binding.is_none());
     pair.finish().await;
 }
 

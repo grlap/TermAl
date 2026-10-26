@@ -228,12 +228,7 @@ fn federation_mailbox_alias_basis_locked(inner: &StateInner) -> FederationMailbo
         .peers
         .values()
         .filter(|peer| peer.membership != FederationMembershipState::Revoked)
-        .all(|peer| {
-            matches!(
-                peer.membership,
-                FederationMembershipState::Verified | FederationMembershipState::Active | FederationMembershipState::Draining
-            ) && peer.verified_on(inner.federation.links.get(&peer.identity.host_id))
-        });
+        .all(|peer| inner.federation.links.contains_key(&peer.identity.host_id));
     FederationMailboxAliasBasis { complete, hosts }
 }
 

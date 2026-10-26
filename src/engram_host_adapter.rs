@@ -2810,6 +2810,10 @@ struct EngramSessionState {
     /// built waits for the next one. Set only through
     /// `set_pending_source_root_line`. In memory only.
     pending_source_root_line: Option<String>,
+    /// Opt-in witness of complete notices before the prompt summary merges them.
+    /// Armed only by a fixture for its own session and taken after the close.
+    #[cfg(test)]
+    test_source_root_lines: Option<Vec<String>>,
     /// The lines the prompt of the given turn generation carried, set as the
     /// prompt is built (`turn_dispatch.rs`), less any given again since
     /// (`set_pending_source_root_line`); when the runtime accepts it,
@@ -2994,6 +2998,8 @@ impl Default for EngramSessionState {
             active_turn_other_source_roots: Vec::new(),
             named_root: None,
             pending_source_root_line: None,
+            #[cfg(test)]
+            test_source_root_lines: None,
             source_root_line_delivery: None,
             declaration_disabled_told: None,
             opening_diagnostic: None,

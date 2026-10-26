@@ -16,16 +16,13 @@ impl AppState {
             };
             let peer = position.host.as_ref().and_then(|host| inner.federation.peers.get(host));
             let eligible = position.host.is_none() || peer.is_some_and(|peer|
-                matches!(peer.membership, FederationMembershipState::Verified | FederationMembershipState::Active | FederationMembershipState::Draining)
-                    && peer.verified_on(inner.federation.links.get(&peer.identity.host_id)));
-            // A previously qualified host cannot silently disappear from alias
-            // uniqueness merely because its current transport has disconnected.
-            let unavailable = peer.filter(|peer| !eligible && peer.membership != FederationMembershipState::Revoked && (
-                matches!(peer.membership, FederationMembershipState::Verified | FederationMembershipState::Active | FederationMembershipState::Draining)
-                    || inner.federation.placements.values().any(|row| row.identity.host_id == peer.identity.host_id
-                        && row.state != FederationPlacementState::Completed)))
+                peer.membership != FederationMembershipState::Revoked
+                    && inner.federation.links.contains_key(&peer.identity.host_id));
+            // An enrolled host cannot disappear from alias uniqueness merely
+            // because its current authenticated transport is unavailable.
+            let unavailable = peer.filter(|peer| !eligible && peer.membership != FederationMembershipState::Revoked)
                 .map(|peer| FederationMailboxUnavailableHost { host_id: peer.identity.host_id.clone(),
-                    host_name: peer.display_name.clone(), reason: "peer mailbox qualification or link is unavailable".into(), status: 503 });
+                    host_name: peer.display_name.clone(), reason: "peer authenticated mailbox link is unavailable".into(), status: 503 });
             (central, next, eligible, unavailable)
         };
         let next_host = following.map(|host| FederationDiscoveryCursor { host: Some(host), after: None });

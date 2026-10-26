@@ -1,6 +1,7 @@
 // Phase-controlled reconnect races and retained report evidence. Uses the
 // authenticated loopback pair, never a live host or provider.
 use super::federation_onboarding_fixture::{Pair, io};
+use super::federation_build_compatibility::federation_requalification_refusal_status;
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -46,7 +47,7 @@ async fn federation_build_compatibility_reverse_route_preserves_authority_refusa
         selected.store(mode, Ordering::SeqCst);
         // This traverses satellite Reverse -> central Identity and the actual
         // reverse-route profile checks, including signed error responses.
-        let error = pair.rpc.health(&pair.lease).await.unwrap_err();
+        let error = pair.rpc.requalify(&pair.lease).await.unwrap_err();
         assert_eq!(error.status, status, "central mode {mode}");
         {
             let inner = pair.central.inner.lock().unwrap();
@@ -62,13 +63,13 @@ async fn federation_build_compatibility_reverse_route_preserves_authority_refusa
                         }
             }));
             let peer = &inner.federation.peers[&pair.id];
-            assert_eq!(peer.membership, FederationMembershipState::Enrolled);
+            assert_eq!(peer.membership, FederationMembershipState::Active);
             assert!(peer.requalification.is_some());
             assert!(!peer.verified_on(Some(&pair.lease.incarnation)));
         }
         if status == StatusCode::LOCKED {
             selected.store(0, Ordering::SeqCst);
-            pair.rpc.health(&pair.lease).await.unwrap();
+            pair.rpc.requalify(&pair.lease).await.unwrap();
             assert_eq!(
                 pair.central
                     .federation_peer_snapshot(&pair.id)
@@ -124,7 +125,7 @@ async fn federation_build_compatibility_mid_verify_settling_preserves_same_lease
             }),
         );
         fail_identity.store(phase == "incompleteVerificationChecked", Ordering::SeqCst);
-        let error = pair.rpc.health(&pair.lease).await.unwrap_err();
+        let error = pair.rpc.requalify(&pair.lease).await.unwrap_err();
         assert!(fired.load(Ordering::SeqCst), "phase not reached: {phase}");
         assert_eq!(error.status, StatusCode::LOCKED, "{phase}");
         assert!(pair.lease.with_incarnation(|| Ok(())).is_ok());
@@ -142,7 +143,7 @@ async fn federation_build_compatibility_mid_verify_settling_preserves_same_lease
         // proof; no reconnect, epoch change or operator verification occurs.
         pair.central.inner.lock().unwrap().federation_durable = true;
         fail_identity.store(false, Ordering::SeqCst);
-        pair.rpc.health(&pair.lease).await.unwrap();
+        pair.rpc.requalify(&pair.lease).await.unwrap();
         assert_eq!(
             pair.central
                 .federation_peer_snapshot(&pair.id)

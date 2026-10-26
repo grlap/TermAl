@@ -108,11 +108,8 @@ impl TermalDelegationMcpBridge {
             } else {
                 row.session_id.clone()
             };
-            let native_wake_requires_activation = native_locator && name.starts_with("host:")
-                && (satellite || row.binding.identity.host_id != row.binding.central.host_id);
             json!({
                 "sessionId":row.session_id,"name":name,
-                "nativeWakeRequiresActivation":native_wake_requires_activation,
                 "localName":row.name,"hostName":row.host_name,"hostId":row.binding.identity.host_id,
                 "localSessionId":row.binding.identity.session_id,"creationId":row.binding.identity.creation_id
             })

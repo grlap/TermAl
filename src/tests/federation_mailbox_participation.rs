@@ -17,6 +17,9 @@ mod review_r8;
 #[path = "federation_mailbox_native_addressing.rs"]
 mod native_addressing;
 
+#[path = "federation_mailbox_routing_reconnect.rs"]
+mod routing_reconnect;
+
 pub(super) async fn directory(state: &AppState, native: &str) -> Vec<FederationMailboxParticipant> {
     list_federation_mailbox_participants(AxumPath(native.to_owned()), State(state.clone()))
         .await
@@ -107,7 +110,7 @@ async fn verified_peer_roots_are_discovered_without_activation_or_placement() {
 }
 
 #[tokio::test]
-async fn unverified_satellite_cannot_automatically_join_the_domain() {
+async fn enrolled_authenticated_satellite_joins_mail_without_execution_authority() {
     let pair = federation_onboarding_fixture::Pair::with_enrolled_profile(
         federation_mailboxes::central_store(), federation_onboarding_fixture::io(),
         federation_onboarding_fixture::io(), federation_onboarding_fixture::profile(),
@@ -115,9 +118,14 @@ async fn unverified_satellite_cannot_automatically_join_the_domain() {
     let satellite_native = test_session_id(&pair.satellite, Agent::Codex);
     let result = list_federation_mailbox_participants(AxumPath(satellite_native.clone()),
         State(pair.satellite.clone())).await;
-    assert!(result.is_err(), "an authenticated link alone is not qualification");
-    assert!(pair.satellite.federation_mailbox_actor(&satellite_native).unwrap().is_none());
-    assert!(pair.central.inner.lock().unwrap().federation.placements.is_empty());
+    assert!(result.is_ok(), "the enrolled authenticated pair suffices for ordinary mail");
+    assert!(pair.satellite.federation_mailbox_actor(&satellite_native).unwrap().is_some());
+    let inner = pair.central.inner.lock().unwrap();
+    assert_eq!(inner.federation.peers[&pair.id].membership, FederationMembershipState::Enrolled);
+    assert!(inner.federation.peers[&pair.id].verification.is_none());
+    assert!(inner.federation.placements.values().all(|placement| placement.mailbox_only
+        && !federation_placement_authority(&inner.federation, &inner.preferences.federation, placement)));
+    drop(inner);
     pair.finish().await;
 }
 

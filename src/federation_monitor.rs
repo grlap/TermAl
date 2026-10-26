@@ -93,6 +93,7 @@ async fn federation_central_monitor(
                 match outcome {
                     Ok(()) => retry.reset(),
                     Err(error) if matches!(error.status, StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) => {},
+                    Err(error) if client.retain_health_refusal(&lease, &error) => {},
                     Err(error) => return Err(error),
                 }
             }
@@ -147,7 +148,10 @@ async fn federation_satellite_monitor(
                         error.status,
                         StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS
                     ) => {}
-                Err(_) => {
+                Err(error) => {
+                    if client.retain_health_refusal(&lease, &error) {
+                        continue;
+                    }
                     if client.channel.current_authority().is_err() {
                         continue;
                     }

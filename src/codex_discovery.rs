@@ -444,13 +444,14 @@ fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
 
 /// Handles Codex discovery like pattern.
 fn codex_discovery_like_pattern(scope: &str) -> String {
-    let escaped_scope = codex_discovery_escape_like_literal(scope);
     let separator = if scope.contains('\\') { '\\' } else { '/' };
-    if escaped_scope.ends_with(separator) {
-        format!("{escaped_scope}%")
+    let prefix = if scope.ends_with(separator) {
+        scope.to_owned()
     } else {
-        format!("{escaped_scope}{separator}%")
-    }
+        format!("{scope}{separator}")
+    };
+    // The separator is literal too: an unescaped backslash would escape '%'.
+    codex_discovery_like_prefix_pattern(&prefix)
 }
 
 fn codex_discovery_like_prefix_pattern(prefix: &str) -> String {

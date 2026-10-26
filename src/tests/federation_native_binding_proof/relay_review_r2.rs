@@ -182,36 +182,12 @@ async fn mailbox_relay_review_r2_authority_return_redrives_retained_head_and_fol
             .is_ok()
     );
     set_federation_enabled(&fixture.central, true);
-    // Re-enabling policy deliberately clears old verification and returns the
-    // peer to Enrolled. It does not itself restore dispatch authority.
-    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
-    assert!(matches!(input.try_recv(),Err(mpsc::TryRecvError::Empty)));
-    // A settings transition invalidates the old transport basis as well as its
-    // proof. Rebuild both ends from current snapshots before mutual attestation.
-    // The remote endpoint still owns the original proof until its guard drops;
-    // a fresh channel must not replace that live incarnation implicitly.
-    drop(fixture.attested.lock().unwrap().take());
-    let central_channel = FederationChannel::for_app(
-        fixture.central.federation_peer_snapshot(&fixture.channel.snapshot.peer.host_id).unwrap(),
-        FederationPairCapability::new("a".repeat(64)).unwrap(),
-        fixture.central.clone(),
-    );
-    let satellite_channel = FederationChannel::for_app(
-        fixture.satellite.federation_peer_snapshot(&fixture.satellite_channel.snapshot.peer.host_id).unwrap(),
-        FederationPairCapability::new("a".repeat(64)).unwrap(),
-        fixture.satellite.clone(),
-    );
-    central_channel.current_authority().expect("central reconnect basis must be current and disconnected");
-    satellite_channel.current_authority().expect("satellite reconnect basis must be current and disconnected");
-    let _fresh_proof = federation_control_fixture::attest(&central_channel, &satellite_channel).await;
-    let peer=fixture.central.federation_peer_snapshot(&central_channel.snapshot.peer.host_id).unwrap();
-    fixture.central.verify_federation_peer(&peer,federation_registry::checks()).unwrap();
-    let peer=fixture.central.federation_peer_snapshot(&peer.peer.host_id).unwrap();
-    fixture.central.transition_federation_peer(&peer,FederationMembershipState::Active).unwrap();
+    // This message is already durable at its home. The unchanged enrollment
+    // permits its local retained wake once policy is enabled again.
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
     assert!(
         matches!(input.try_recv(), Ok(ClaudeRuntimeCommand::Prompt(_))),
-        "restoring authority must re-drive the retained head without a new send"
+        "restoring local policy must re-drive the retained head without verification or a new send"
     );
     fixture
         .central
@@ -261,6 +237,8 @@ async fn mailbox_relay_review_r2_remote_home_reconnect_redrives_without_new_mail
     assert!(matches!(fixture.satellite.dispatch_turn(
         &fixture.native, user_prompt("satellite user behind relay")
     ).unwrap(), DispatchTurnResult::Queued));
+    let prior_membership = fixture.satellite.federation_peer_snapshot(
+        &fixture.satellite_channel.snapshot.peer.host_id).unwrap().membership;
     // Drop the actual proof owners, not enrollment or a mocked availability bit.
     // The runtime's completion occurs while the remote home has no current lease.
     drop(fixture.attested.lock().unwrap().take());
@@ -270,11 +248,10 @@ async fn mailbox_relay_review_r2_remote_home_reconnect_redrives_without_new_mail
     fixture.satellite.run_mailbox_relay_wake_batch(0, 0).await;
     assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
     fixture.reconnect().await;
-    // A fresh proof leaves the satellite's record of its central Enrolled, and
-    // a satellite never requalifies or activates its central. The current
-    // lease at the same enrollment is its authority, as for the executor.
+    // A fresh proof retains membership; the actual current lease at the same
+    // enrollment restores this remote-home wake without another ceremony.
     let central = fixture.satellite.federation_peer_snapshot(&fixture.satellite_channel.snapshot.peer.host_id).unwrap();
-    assert_eq!(central.membership, FederationMembershipState::Enrolled);
+    assert_eq!(central.membership, prior_membership);
     let notification = fixture.satellite.mailbox_store.mailbox_relay_notification(
         &append.target, &receipt.mailbox_id, receipt.sequence
     ).unwrap().unwrap();

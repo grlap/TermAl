@@ -142,12 +142,10 @@ async fn federation_mailbox_alias_grammar_real_directory_rpc_and_mcp_retain_inve
         assert!(error.contains("mailbox alias inventory is unavailable"), "{error}");
         assert!(error.contains("known exact participant id"), "{error}");
         assert!(error.contains("explicit host:"), "{error}");
-        assert_eq!(
-            bridge_resolve(api.port, central_caller, &format!("name:{}", target.name))
-                .await.unwrap(),
-            target.session_id,
-            "an explicit literal selects its current row without interpreting a host prefix"
-        );
+        let error = bridge_resolve(api.port, central_caller, &format!("name:{}", target.name))
+            .await.unwrap_err().to_string();
+        assert!(error.contains("mailbox alias inventory is unavailable"),
+            "an enrolled unavailable host also fences global literal aliases: {error}");
         assert_eq!(
             resolve_federation_delivery_target_with_basis(
                 &directory.participants,

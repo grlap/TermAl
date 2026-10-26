@@ -186,16 +186,16 @@ async fn rebuilt_delivery_case(
                 .federation_peer_snapshot(&pair.id)
                 .unwrap()
                 .membership,
-            FederationMembershipState::Enrolled
+            FederationMembershipState::Active
         );
-        // This is the production monitor's health operation, not the operator
-        // verify route. Fresh qualification restores only previous authority.
+        // Health checks the authenticated pair, without refreshing a diagnostic
+        // report or transferring execution authority to the new incarnation.
         pair.rpc.health(&pair.lease).await.unwrap();
         let inner = pair.central.inner.lock().unwrap();
         let peer = &inner.federation.peers[&pair.id];
         assert_eq!(peer.membership, FederationMembershipState::Active);
-        assert!(peer.verified_on(inner.federation.links.get(&pair.id)));
-        assert!(peer.requalification.is_none());
+        assert!(!peer.verified_on(inner.federation.links.get(&pair.id)));
+        assert!(peer.requalification.is_some());
         let intent = &inner.federation.binding_install_intents["rebuilt-delivery"];
         assert_eq!(intent.operation_key, original_intent.operation_key);
         assert_eq!(
@@ -203,8 +203,9 @@ async fn rebuilt_delivery_case(
             original_intent.native_creation_id
         );
         assert_eq!(intent.binding, original_intent.binding);
-        assert_eq!(intent.execution_basis, peer.verification_basis());
-        assert_eq!(intent.peer_verification_basis, peer.verification_basis());
+        let expected_basis = if legacy { peer.legacy_verification_basis() } else { peer.verification_basis() };
+        assert_eq!(intent.execution_basis, expected_basis);
+        assert_eq!(intent.peer_verification_basis, expected_basis);
         assert_eq!(
             inner.federation.placements["rebuilt-delivery"].identity,
             actor.binding.identity
@@ -219,10 +220,10 @@ async fn rebuilt_delivery_case(
             let FederationImageObservation::Known(image) = observation else {
                 panic!("reconnected image must remain diagnostic evidence")
             };
-            assert_eq!(image.sha256, "b".repeat(64));
+            assert_eq!(image.sha256, "a".repeat(64), "ordinary health does not fabricate a new report");
         }
         drop(inner);
-        let (status, Json(recovered)) = reserve_federation_mailbox_placement_route(
+        let recovered = reserve_federation_mailbox_placement_route(
             AxumPath(pair.id.clone()),
             State(pair.central.clone()),
             Json(FederationPlacementRequest {
@@ -230,14 +231,8 @@ async fn rebuilt_delivery_case(
                 admission_key: "rebuilt-delivery".to_owned(),
             }),
         )
-        .await
-        .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(recovered["operationKey"], original_intent.operation_key);
-        assert_eq!(
-            recovered["nativeCreationId"],
-            original_intent.native_creation_id
-        );
+        .await;
+        assert!(recovered.is_err(), "ordinary reconnect cannot refresh explicit execution placement");
     }
     let channel = pair.satellite_channel.clone();
     let check = channel.clone();
@@ -490,5 +485,65 @@ async fn federation_build_compatibility_unknown_stored_schema_is_not_aliased_aft
             assert!(peer.verification.is_none());
         }
         pair.finish().await;
+    }
+}
+
+// Explicit diagnostic recovery helper for the retained verification tests.
+// Production health never invokes requalification.
+impl FederationRpcClient {
+    pub(super) async fn requalify(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
+        if self.channel.snapshot.local_role != FederationRole::Central {
+            return Ok(());
+        }
+        let Some(app) = &self.channel.app else {
+            return Ok(());
+        };
+        let pending = lease.with_current(app, |inner, current| {
+            Ok(current.local_role == FederationRole::Central
+                && inner
+                    .federation
+                    .peers
+                    .get(&current.peer.host_id)
+                    .is_some_and(|peer| peer.requalification.is_some()))
+        })?;
+        if !pending {
+            return Ok(());
+        }
+        self.channel.control.observe("requalificationPrechecked", 0);
+        // Explicit diagnostic recovery may refresh execution verification.
+        // Ordinary health and mailbox routing never call this operation.
+        let report = verify_federation_satellite_mode(
+            app.clone(),
+            self.channel.snapshot.peer.host_id.clone(),
+            true,
+        )
+        .await?;
+        if !report.termal_complete() {
+            return Err(ApiError::from_status(
+                federation_requalification_refusal_status(&report),
+                "federation protocol/schema or re-attestation checks refused",
+            ));
+        }
+        lease.with_current(app, |_, _| Ok(()))
+    }
+}
+
+pub(super) fn federation_requalification_refusal_status(report: &FederationOnboardingReport) -> StatusCode {
+    if report.outcomes.iter().any(|outcome| {
+        !outcome.passed
+            && matches!(
+                outcome.reason.as_str(),
+                "protocolSchemaMismatch"
+                    | "identityMismatch"
+                    | "reverseIdentityMismatch"
+                    | "platformIdentityMismatch"
+                    | "healthAuthorityRefused"
+                    | "forwardAuthorityRefused"
+                    | "reverseAuthorityRefused"
+            )
+    }) {
+        StatusCode::CONFLICT
+    } else {
+        StatusCode::LOCKED
     }
 }

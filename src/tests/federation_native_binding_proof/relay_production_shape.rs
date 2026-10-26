@@ -214,14 +214,15 @@ async fn mailbox_relay_production_shape_holds_on_link_loss_and_delivers_on_a_fre
     assert!(queued_relay_wake(&fixture, &sent.mailbox_id).is_none(), "link loss holds the wake");
     assert_eq!(ProxySend::pending_home_wakes(&fixture), 1);
     fixture.reconnect().await;
-    // A fresh proof resets both records to Enrolled. Central requalifies its
-    // satellite, as a deployed central does; the satellite's record of its
-    // central stays Enrolled, as it always does.
+    // A fresh pair proof restores ordinary mail immediately. It retains the
+    // operator's membership but does not fabricate current verification.
     let satellite = fixture.channel.snapshot.peer.host_id.clone();
     let peer = fixture.central.federation_peer_snapshot(&satellite).unwrap();
-    fixture.central.verify_federation_peer(&peer, federation_registry::checks()).unwrap();
-    let peer = fixture.central.federation_peer_snapshot(&satellite).unwrap();
-    fixture.central.transition_federation_peer(&peer, FederationMembershipState::Active).unwrap();
+    assert_eq!(peer.membership, FederationMembershipState::Active);
+    let lease = fixture.channel.current_lease().unwrap();
+    let verification_current = fixture.central.inner.lock().unwrap().federation.peers[&satellite]
+        .verified_on(Some(&lease.incarnation));
+    assert!(!verification_current);
     let central = fixture.satellite_channel.snapshot.peer.host_id.clone();
     assert_eq!(fixture.satellite.federation_peer_snapshot(&central).unwrap().membership,
         FederationMembershipState::Enrolled);

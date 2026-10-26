@@ -528,6 +528,10 @@ impl EngramSessionState {
     /// feedback, so a run of refused checks never evicts a bind or name line.
     fn set_pending_source_root_line(&mut self, line: String) {
         let line = line.replace(['\r', '\n'], " ");
+        #[cfg(test)]
+        if let Some(lines) = self.test_source_root_lines.as_mut() {
+            lines.push(line.clone());
+        }
         let mut lines = self
             .pending_source_root_line
             .as_deref()

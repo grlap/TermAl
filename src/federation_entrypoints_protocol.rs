@@ -108,7 +108,7 @@ impl FederationBindingInstallIntent {
             || self.binding.identity.host_id != current.peer.host_id
             || self.execution_basis != placement.execution_basis
             || self.peer_enrollment_generation != current.enrollment_generation
-            || self.peer_verification_basis != peer.verification_basis()
+            || (!placement.mailbox_only && self.peer_verification_basis != peer.verification_basis())
             || self.configuration_basis != current.configuration_basis()
             || placement.state == FederationPlacementState::Completed
         {

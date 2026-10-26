@@ -112,10 +112,9 @@ impl AppState {
                     peer.record_generation = federation_next_generation(peer.record_generation)?;
                     peer.transport_generation =
                         federation_next_generation(peer.transport_generation)?;
-                    peer.verification = None;
-                    if peer.membership != FederationMembershipState::Draining {
-                        peer.membership = FederationMembershipState::Enrolled;
-                    }
+                    // Enrollment/operator authorization survives a process or
+                    // build change. The retained report remains diagnostic:
+                    // its old incarnation is never current on this new link.
                     peer.last_observed = Some(FederationLiveness {
                         link_incarnation: incarnation.clone(),
                         last_successful_rpc: None,
@@ -172,10 +171,7 @@ impl AppState {
                 .get_mut(&expected.peer.host_id)
                 .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
             if peer.record_generation != expected.record_generation
-                || !matches!(
-                    peer.membership,
-                    FederationMembershipState::Enrolled | FederationMembershipState::Draining
-                )
+                || peer.membership == FederationMembershipState::Revoked
                 || !checks.complete()
             {
                 return Err(ApiError::conflict(
@@ -191,7 +187,7 @@ impl AppState {
                 link_incarnation: link.clone(),
                 checks,
             });
-            if peer.membership != FederationMembershipState::Draining {
+            if peer.membership == FederationMembershipState::Enrolled {
                 peer.membership = FederationMembershipState::Verified;
             }
             peer.record_generation = federation_next_generation(peer.record_generation)?;

@@ -180,8 +180,15 @@ fn engram_declared_command_forbidden(words: &[String]) -> bool {
 /// an existing directory.
 fn engram_declared_path_inside(root: &FsPath, relative: &str, directory: bool) -> bool {
     let path = FsPath::new(relative);
+    // Declaration paths name neither a drive nor a network root, even when
+    // the current host would interpret Windows spelling as a relative path.
+    let drive = relative.as_bytes().get(..2).is_some_and(|prefix| {
+        prefix[0].is_ascii_alphabetic() && prefix[1] == b':'
+    });
     if relative.is_empty()
         || relative.contains(['\0', '\n', '\r'])
+        || relative.starts_with('\\')
+        || drive
         || path.is_absolute()
         || path.components().any(|component| {
             matches!(

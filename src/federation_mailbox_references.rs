@@ -126,7 +126,6 @@ impl FederationMailboxReference {
             || self.participant_id != self.binding.participant_key()
             || self.placement.identity != self.binding.identity
             || self.placement.placement_generation != self.binding.placement_generation
-            || self.placement.link_incarnation != self.link_incarnation
             || self.peer.peer.host_id != self.binding.identity.host_id
             || self.peer.local_role != FederationRole::Central
         {
@@ -190,7 +189,6 @@ impl FederationReferenceContext {
             || inner.federation.placements.get(&self.placement.admission_key) != Some(&self.placement)
             || self.placement.state == FederationPlacementState::Completed
             || !federation_mailbox_placement_authority(&inner.federation, &inner.preferences.federation, &self.placement)
-            || self.placement.link_incarnation != self.lease.incarnation
         {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
@@ -241,7 +239,7 @@ impl AppState {
             let central = federation_mailbox_central_locked(&inner)?;
             let record = federation_mailbox_root_locked(&inner, owner)?;
             let owner_binding = record.mailbox_binding().cloned()
-                .ok_or_else(|| ApiError::conflict("caller has no explicit mailbox binding"))?;
+                .ok_or_else(|| ApiError::conflict("caller has no mailbox binding"))?;
             if owner_binding.central != central {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }

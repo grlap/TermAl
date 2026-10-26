@@ -61,11 +61,6 @@ fn public_mailbox_relay_receipt(
 ) -> Result<MailboxAppendReceipt, ApiError> {
     receipt.mailbox_id = MailboxRelayLocator::encode(home, &receipt.mailbox_id, false)?;
     receipt.message_id = MailboxRelayLocator::encode(home, &receipt.message_id, true)?;
-    if receipt.notification_disposition == "durableButNotWoken" && receipt.notification_cause.is_none() {
-        receipt.notification_cause = Some(
-            "native mail is durable; wake requires central activation of the satellite; if it is only Verified, ask the central operator to activate the host".into(),
-        );
-    }
     Ok(receipt)
 }
 

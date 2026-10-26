@@ -56,7 +56,7 @@ fn federation_disconnect_fences_admission_even_during_a_pending_commit() {
         .federation_peer_connected(&reconnect, Uuid::new_v4().to_string())
         .unwrap();
     assert!(next.transport_generation > installed.transport_generation);
-    assert_eq!(next.membership, FederationMembershipState::Enrolled);
+    assert_eq!(next.membership, FederationMembershipState::Active);
     assert!(
         state
             .reconcile_federation_placement(&retained, true)

@@ -106,9 +106,8 @@ fn validate_mailbox_relay_wake_peer(
 }
 
 /// Whether `current`, this host's record of a relay conversation peer, still
-/// authorizes wake admission. Central requires its satellite to be active. A
-/// satellite never activates or requalifies its own central, so it accepts it
-/// as the executor authority does: same enrollment, short of revocation.
+/// authorizes ordinary native wake admission under the unchanged enrollment.
+/// Executor placement has its own verification and activation fences.
 fn mailbox_relay_peer_current_locked(
     inner: &StateInner,
     current: &FederationPeerSnapshot,
@@ -117,7 +116,8 @@ fn mailbox_relay_peer_current_locked(
     if current.local_role == FederationRole::Satellite && current.peer == current.central {
         federation_satellite_central_current_locked(inner, &current.peer, enrollment_generation)
     } else {
-        current.membership == FederationMembershipState::Active
+        inner.federation.admission_quarantine.is_none()
+            && current.membership != FederationMembershipState::Revoked
     }
 }
 
@@ -338,7 +338,8 @@ impl AppState {
             .map_err(|_| ApiError::conflict("native relay home wake evidence malformed"))?;
         validate_mailbox_relay_wake_peer(wake, &peer, true).map_err(mailbox_api_error)?;
         let current = self.federation_peer_snapshot(&peer.peer.host_id)?;
-        if current.membership != FederationMembershipState::Active
+        if !mailbox_relay_peer_current_locked(
+            &self.inner.lock().expect("state mutex poisoned"), &current, peer.enrollment_generation)
             || !same_mailbox_relay_enrollment(&peer, &current)
         {
             return Err(ApiError::conflict(
