@@ -278,6 +278,11 @@ impl FederationRpcClient {
         match self.channel.control.clock.timeout(Duration::from_secs(10), request).await {
             Ok(Ok(result)) => result,
             _failure => {
+                self.channel.observe_terminal(&context, "rpc", if _failure.is_err() {
+                    "rpcDeadlineExpired"
+                } else {
+                    "rpcError"
+                });
                 #[cfg(test)]
                 {
                     let reason = if let Ok(Err(error)) = &_failure {
@@ -324,7 +329,11 @@ async fn federation_sender_watchdog(
                 _ = channel.control.clock.deadline(deadline) => {
                     let expired = context.sender.lock().expect("sender window poisoned").outstanding
                         .values().any(|deadline| *deadline <= channel.control.clock.now());
-                    if expired { channel.fence_security(context.owner, &context.incarnation); return; }
+                    if expired {
+                        channel.observe_terminal(&context, "rpc", "senderDeadlineExpired");
+                        channel.fence_security(context.owner, &context.incarnation);
+                        return;
+                    }
                 },
             }
         } else {

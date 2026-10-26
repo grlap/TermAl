@@ -12,20 +12,28 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
         Err(_) => return,
     };
     let settings = &channel.control;
+    let mut terminal = FederationControlEnd {
+        channel: &channel,
+        context: &context,
+        reason: "controlError",
+        sequence: 0,
+    };
     let mut deadline = settings.clock.now() + settings.timeout;
     let mut last_sequence = 0;
     let mut retired = context.retired.subscribe();
     loop {
         if *retired.borrow() {
+            terminal.reason = "controlContextChanged";
             break;
         }
         let frame = tokio::select! {
             biased;
-            _ = retired.changed() => break,
-            _ = settings.clock.deadline(deadline) => break,
+            _ = retired.changed() => { terminal.reason = "controlContextChanged"; break; },
+            _ = settings.clock.deadline(deadline) => { terminal.reason = "controlExpired"; break; },
             result = federation_read_frame(&mut io) => match result { Ok(frame) => frame, Err(_) => break },
         };
         if channel.security_current(&context).is_err() {
+            terminal.reason = "controlContextChanged";
             break;
         }
         let fields = match federation_decode(&frame, b"termal-hb-req-v1", 3) {
@@ -48,9 +56,11 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
             continue;
         }
         if settings.clock.now() >= deadline {
+            terminal.reason = "controlExpired";
             break;
         }
         last_sequence = sequence;
+        terminal.sequence = sequence;
         deadline = settings.clock.now() + settings.timeout;
         let tag = match federation_mac(
             &context.keys[5],
@@ -62,7 +72,7 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
         let response = federation_encode(b"termal-hb-resp-v1", &[fields[0], &tag]);
         let result = tokio::select! {
             biased;
-            _ = settings.clock.deadline(deadline) => break,
+            _ = settings.clock.deadline(deadline) => { terminal.reason = "controlExpired"; break; },
             result = federation_write_frame(&mut io, &response) => result,
         };
         if result.is_err() {
@@ -85,7 +95,8 @@ async fn federation_control_central(
     let (mut reader, mut writer) = tokio::io::split(io);
     let settings = &channel.control;
     let mut terminal = FederationControlEnd {
-        settings,
+        channel: &channel,
+        context: &context,
         reason: "controlError",
         sequence: 0,
     };

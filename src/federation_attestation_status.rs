@@ -24,6 +24,40 @@ impl FederationAttestationObservation {
 }
 
 impl FederationChannel {
+    fn observe_terminal(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+    ) {
+        let mut recorded = false;
+        self.update_attestation(|observation, _| {
+            // Record before the owning teardown. A delayed old control task
+            // cannot replace its successor, nor can cleanup hide the first cause.
+            if observation.attempt_owner != context.owner
+                || observation.attempt_channel.as_deref()
+                    != Some(self.server_instance_id.as_str())
+                || matches!(observation.last_stage, Some("control" | "monitor" | "rpc"))
+            {
+                return;
+            }
+            observation.last_stage = Some(stage);
+            observation.last_reason = Some(reason);
+            recorded = true;
+        });
+        if recorded {
+            let role = match self.snapshot.local_role {
+                FederationRole::Central => "central",
+                FederationRole::Satellite => "satellite",
+                FederationRole::Standalone => "standalone",
+            };
+            eprintln!(
+                "federation link ended peer={} role={role} stage={stage} reason={reason} incarnation={}",
+                self.snapshot.peer.host_id, context.incarnation
+            );
+        }
+    }
+
     fn observe_attestation(&self, success: Option<u64>) {
         self.update_attestation(|observation, basis| match success {
             Some(owner)
