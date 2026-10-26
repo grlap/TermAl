@@ -97,6 +97,7 @@ type UseAppLiveStateTransportParams = {
   hydrationRestartResyncPendingRef: MutableRefObject<boolean>;
   laggedRecoveryBaselineRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
+  lastFullStateServerInstanceIdRef?: MutableRefObject<string | null>;
   latestStateRevisionRef: MutableRefObject<number | null>;
   orchestratorsRef: MutableRefObject<OrchestratorInstance[]>;
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>;
@@ -1065,8 +1066,8 @@ export function useAppLiveStateTransport(
       );
     }
 
-    function hasPotentiallyStaleTransportSession(now: number) {
-      return sessionsRef.current.some((session) =>
+    function potentiallyStaleTransportSessions(now: number) {
+      return sessionsRef.current.filter((session) =>
         sessionHasPotentiallyStaleTransport(
           session,
           lastLiveTransportActivityAtBySessionId.get(session.id),
@@ -1142,8 +1143,8 @@ export function useAppLiveStateTransport(
       // Wake-gap recovery stays broader than the stale-transport path so a first
       // assistant reply that finished while the machine was asleep can still recover,
       // even when queued follow-ups exist behind the active turn.
-      const transportLooksStale = hasPotentiallyStaleTransportSession(now);
-      if (!detectedResumeGap && !transportLooksStale) {
+      const staleSessions = potentiallyStaleTransportSessions(now);
+      if (!detectedResumeGap && staleSessions.length === 0) {
         return;
       }
 
@@ -1157,6 +1158,26 @@ export function useAppLiveStateTransport(
 
       // A focused window can wake without blur/focus or visibility transitions.
       lastWatchdogResyncAttemptAt = now;
+      if (
+        !detectedResumeGap &&
+        lastSeenServerInstanceIdRef.current &&
+        params.lastFullStateServerInstanceIdRef?.current ===
+          lastSeenServerInstanceIdRef.current &&
+        reconnectState.recoveryConfirmedSinceLastError &&
+        staleSessions.every(session =>
+          !session.remoteId && session.hasNewerHistory !== true,
+        )
+      ) {
+        // Silence belongs to these sessions. Reuse the tail owner's admission,
+        // coalescing and recovery instead of refreshing every global slice.
+        for (const session of staleSessions) {
+          startSessionHydration(session.id, {
+            forceTailRepair: true,
+            queueAfterCurrent: true,
+          });
+        }
+        return;
+      }
       requestStateResync({
         allowAuthoritativeRollback: true,
         allowUnknownServerInstance: true,

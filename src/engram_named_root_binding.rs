@@ -569,6 +569,7 @@ impl EngramWorkNamingBound {
     }
 }
 
+#[cfg(test)]
 fn engram_work_naming_token(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
@@ -2064,6 +2065,7 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
     fn reconcile_engram_named_root_with_fence_until(
         &self,
         session_id: &str,

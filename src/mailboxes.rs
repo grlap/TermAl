@@ -2817,6 +2817,7 @@ impl MailboxStore {
         .map(|r| r.0)
     }
 
+    #[cfg(test)]
     fn acknowledge_page(
         &self,
         session_id: &str,

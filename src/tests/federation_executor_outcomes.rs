@@ -201,7 +201,7 @@ fn view(stage: &str, receipt: Option<PromptDeliveryDisposition>, queued: bool, r
         // Every stage past received has been associated with the root's queue.
         stage: stage.into(), effect_state: "not_started".into(),
         queue_entry_id: (stage != "received").then(|| "entry".into()),
-        runtime_acknowledged: runtime, receipt, queue_position: queued.then_some(0), pending_prompt: None,
+        runtime_acknowledged: runtime, receipt, queue_position: queued.then_some(0),
         pending_prompts: Vec::new(), pending_prompt_count: usize::from(queued), pending_prompts_truncated: false,
         root_present: true, executor_local: true, root_status: Some(SessionStatus::Idle),
         root_paused: false, root_stopping: false, binding_current: true,

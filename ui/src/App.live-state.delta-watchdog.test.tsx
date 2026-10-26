@@ -35,6 +35,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
+import { installWatchdogTailProducer } from "./app-live-state-watchdog-test-fixtures";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
 import { ThemedCombobox } from "./preferences/themed-combobox";
@@ -1290,59 +1291,65 @@ describe("App live state - delta-gap core", () => {
     const originalVisibilityState = document.visibilityState;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
-    let stateRequestCount = 0;
+    let recoveryReadCount = 0;
+    const readRecoveryState = async () => {
+      recoveryReadCount += 1;
+      return jsonResponse({
+        revision: 40,
+        serverInstanceId: "test-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Quiet Session",
+            status: "idle",
+            preview: "Recovered quiet session.",
+            messages: [
+              {
+                id: "message-user-quiet-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "quiet prompt",
+              },
+              {
+                id: "message-assistant-quiet-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Recovered quiet session.",
+              },
+            ],
+          }),
+          makeSession("session-2", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Noisy Session",
+            status: "idle",
+            preview: "Busy output settled.",
+            messages: [
+              {
+                id: "message-user-noisy-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "noisy prompt",
+              },
+              {
+                id: "message-assistant-noisy-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Busy output settled.",
+              },
+            ],
+          }),
+        ],
+      });
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
-        stateRequestCount += 1;
-        return jsonResponse({
-          revision: 40,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Quiet Session",
-              status: "idle",
-              preview: "Recovered quiet session.",
-              messages: [
-                {
-                  id: "message-user-quiet-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "quiet prompt",
-                },
-                {
-                  id: "message-assistant-quiet-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Recovered quiet session.",
-                },
-              ],
-            }),
-            makeSession("session-2", {
-              name: "Noisy Session",
-              status: "idle",
-              preview: "Busy output settled.",
-              messages: [
-                {
-                  id: "message-user-noisy-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "noisy prompt",
-                },
-                {
-                  id: "message-assistant-noisy-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Busy output settled.",
-                },
-              ],
-            }),
-          ],
-        });
+        return readRecoveryState();
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -1357,16 +1364,18 @@ describe("App live state - delta-gap core", () => {
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
     const scrollIntoViewSpy = stubScrollIntoView();
-    const stateFetchCallCount = () => stateRequestCount;
+    const recoveryReadCallCount = () => recoveryReadCount;
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
       const eventSource = latestEventSource();
       await dispatchOpenedStateEvent(eventSource, {
         revision: 1,
+        serverInstanceId: "test-instance",
         projects: [],
         sessions: [
           makeSession("session-1", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
             name: "Quiet Session",
             status: "active",
             preview: "Quiet partial.",
@@ -1374,6 +1383,7 @@ describe("App live state - delta-gap core", () => {
             messages: [],
           }),
           makeSession("session-2", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
             name: "Noisy Session",
             status: "active",
             preview: "Busy output 1",
@@ -1433,6 +1443,8 @@ describe("App live state - delta-gap core", () => {
           eventSource.dispatchNamedEvent("delta", {
             type: "messageCreated",
             revision,
+            sessionSeq: messageIndex + 1,
+            bodySeqEpoch: "test-instance",
             sessionId,
             messageId: message.id,
             messageIndex,
@@ -1472,7 +1484,8 @@ describe("App live state - delta-gap core", () => {
         ]),
       });
       fetchMock.mockClear();
-      stateRequestCount = 0;
+      const tailProducer = installWatchdogTailProducer(readRecoveryState);
+      recoveryReadCount = 0;
 
       let noisyRevision = 5;
       let watchdogTriggered = false;
@@ -1486,6 +1499,8 @@ describe("App live state - delta-gap core", () => {
           eventSource.dispatchNamedEvent("delta", {
             type: "textReplace",
             revision: noisyRevision,
+            sessionSeq: noisyRevision - 3,
+            bodySeqEpoch: "test-instance",
             sessionId: "session-2",
             messageId: "message-assistant-noisy-1",
             messageIndex: 1,
@@ -1495,7 +1510,7 @@ describe("App live state - delta-gap core", () => {
           });
         });
         await advanceTimers(1000);
-        if (stateFetchCallCount() > 0) {
+        if (recoveryReadCallCount() > 0) {
           watchdogTriggered = true;
           break;
         }
@@ -1504,12 +1519,16 @@ describe("App live state - delta-gap core", () => {
       await settleAsyncUi();
 
       expect(watchdogTriggered).toBe(true);
-      expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
+      expect(screen.getAllByText("Recovered quiet session.").length).toBeGreaterThan(0);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages.filter(message =>
+        message.type === "text" && message.text === "Recovered quiet session.")).toHaveLength(1);
       expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
         status: "idle",
       });
-      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
+      expect(getSessionRecordSnapshotForTesting("session-2")).toMatchObject({ status: "active" });
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1527,59 +1546,65 @@ describe("App live state - delta-gap core", () => {
     const originalVisibilityState = document.visibilityState;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
-    let stateRequestCount = 0;
+    let recoveryReadCount = 0;
+    const readRecoveryState = async () => {
+      recoveryReadCount += 1;
+      return jsonResponse({
+        revision: 30,
+        serverInstanceId: "test-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Quiet Session",
+            status: "idle",
+            preview: "Recovered quiet session.",
+            messages: [
+              {
+                id: "message-user-quiet-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "quiet prompt",
+              },
+              {
+                id: "message-assistant-quiet-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Recovered quiet session.",
+              },
+            ],
+          }),
+          makeSession("session-2", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Noisy Session",
+            status: "idle",
+            preview: "Busy output settled.",
+            messages: [
+              {
+                id: "message-user-noisy-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "noisy prompt",
+              },
+              {
+                id: "message-assistant-noisy-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Busy output settled.",
+              },
+            ],
+          }),
+        ],
+      });
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
-        stateRequestCount += 1;
-        return jsonResponse({
-          revision: 30,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Quiet Session",
-              status: "idle",
-              preview: "Recovered quiet session.",
-              messages: [
-                {
-                  id: "message-user-quiet-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "quiet prompt",
-                },
-                {
-                  id: "message-assistant-quiet-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Recovered quiet session.",
-                },
-              ],
-            }),
-            makeSession("session-2", {
-              name: "Noisy Session",
-              status: "idle",
-              preview: "Busy output settled.",
-              messages: [
-                {
-                  id: "message-user-noisy-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "noisy prompt",
-                },
-                {
-                  id: "message-assistant-noisy-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Busy output settled.",
-                },
-              ],
-            }),
-          ],
-        });
+        return readRecoveryState();
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -1594,7 +1619,7 @@ describe("App live state - delta-gap core", () => {
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
     const scrollIntoViewSpy = stubScrollIntoView();
-    const stateFetchCallCount = () => stateRequestCount;
+    const recoveryReadCallCount = () => recoveryReadCount;
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -1603,9 +1628,11 @@ describe("App live state - delta-gap core", () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
+          serverInstanceId: "test-instance",
           projects: [],
           sessions: [
             makeSession("session-1", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Quiet Session",
               status: "active",
               preview: "Quiet partial.",
@@ -1627,6 +1654,7 @@ describe("App live state - delta-gap core", () => {
               ],
             }),
             makeSession("session-2", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Noisy Session",
               status: "active",
               preview: "Busy output 1",
@@ -1668,12 +1696,14 @@ describe("App live state - delta-gap core", () => {
       await clickAndSettle(quietSessionRowButton);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
-      stateRequestCount = 0;
+      const tailProducer = installWatchdogTailProducer(readRecoveryState);
+      recoveryReadCount = 0;
 
       act(() => {
         eventSource.dispatchNamedEvent("delta", {
           type: "messageCreated",
           revision: 2,
+          serverInstanceId: "test-instance",
           sessionId: "session-1",
           messageId: "message-assistant-quiet-1",
           messageIndex: 1,
@@ -1691,6 +1721,7 @@ describe("App live state - delta-gap core", () => {
         eventSource.dispatchNamedEvent("delta", {
           type: "messageCreated",
           revision: 3,
+          serverInstanceId: "test-instance",
           sessionId: "session-2",
           messageId: "message-assistant-noisy-1",
           messageIndex: 1,
@@ -1707,13 +1738,14 @@ describe("App live state - delta-gap core", () => {
         });
       });
       await settleAsyncUi();
-      expect(stateFetchCallCount()).toBe(0);
+      expect(recoveryReadCallCount()).toBe(0);
 
       await advanceTimers(1000);
       act(() => {
         eventSource.dispatchNamedEvent("delta", {
           type: "textReplace",
           revision: 4,
+          serverInstanceId: "test-instance",
           sessionId: "session-1",
           messageId: "message-assistant-quiet-1",
           messageIndex: 1,
@@ -1723,7 +1755,7 @@ describe("App live state - delta-gap core", () => {
         });
       });
       await settleAsyncUi();
-      expect(stateFetchCallCount()).toBe(0);
+      expect(recoveryReadCallCount()).toBe(0);
       expect(getSessionRecordSnapshotForTesting("session-1")?.messages).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1756,7 +1788,7 @@ describe("App live state - delta-gap core", () => {
       }
 
       await settleAsyncUi();
-      expect(stateFetchCallCount()).toBe(0);
+      expect(recoveryReadCallCount()).toBe(0);
 
       let watchdogTriggered = false;
       for (let elapsed = 0; elapsed < 2000; elapsed += 1000) {
@@ -1774,7 +1806,7 @@ describe("App live state - delta-gap core", () => {
           });
         });
         await advanceTimers(1000);
-        if (stateFetchCallCount() > 0) {
+        if (recoveryReadCallCount() > 0) {
           watchdogTriggered = true;
           break;
         }
@@ -1783,9 +1815,14 @@ describe("App live state - delta-gap core", () => {
       await settleAsyncUi();
 
       expect(watchdogTriggered).toBe(true);
-      expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(1);
-      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
+      expect(screen.getAllByText("Recovered quiet session.").length).toBeGreaterThan(0);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages.filter(message =>
+        message.type === "text" && message.text === "Recovered quiet session.")).toHaveLength(1);
+      expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({ status: "idle" });
+      expect(getSessionRecordSnapshotForTesting("session-2")).toMatchObject({ status: "active" });
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1808,36 +1845,43 @@ describe("App live state - delta-gap core", () => {
     const originalVisibilityState = document.visibilityState;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
+    let recoveryReadCount = 0;
+    const readRecoveryState = async () => {
+      recoveryReadCount += 1;
+      return jsonResponse({
+        revision: 2,
+        serverInstanceId: "test-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Codex Session",
+            status: "idle",
+            preview: "Quiet turn finished.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "test",
+              },
+              {
+                id: "message-assistant-1",
+                type: "text",
+                timestamp: "10:30",
+                author: "assistant",
+                text: "Quiet turn finished.",
+              },
+            ],
+          }),
+        ],
+      });
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
-        return jsonResponse({
-          revision: 2,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "idle",
-              preview: "Quiet turn finished.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:30",
-                  author: "assistant",
-                  text: "Quiet turn finished.",
-                },
-              ],
-            }),
-          ],
-        });
+        return readRecoveryState();
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -1852,9 +1896,7 @@ describe("App live state - delta-gap core", () => {
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
     const scrollIntoViewSpy = stubScrollIntoView();
-    const stateFetchCallCount = () =>
-      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
-        .length;
+    const recoveryReadCallCount = () => recoveryReadCount;
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -1863,9 +1905,11 @@ describe("App live state - delta-gap core", () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
+          serverInstanceId: "test-instance",
           projects: [],
           sessions: [
             makeSession("session-1", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Codex Session",
               status: "active",
               preview: "test",
@@ -1899,6 +1943,7 @@ describe("App live state - delta-gap core", () => {
       await clickAndSettle(sessionRowButton);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
+      const tailProducer = installWatchdogTailProducer(readRecoveryState);
 
       // After one stale window the watchdog should fire even though no
       // assistant chunks have arrived yet — the user prompt at the turn
@@ -1908,7 +1953,9 @@ describe("App live state - delta-gap core", () => {
       );
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBeGreaterThanOrEqual(1);
+      expect(recoveryReadCallCount()).toBeGreaterThanOrEqual(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
       // The recovery snapshot the watchdog fetched shows the assistant reply
       // that the lost SSE chunk would have streamed in, so the recovered
       // text becomes visible (the "waiting" affordance only disappears once

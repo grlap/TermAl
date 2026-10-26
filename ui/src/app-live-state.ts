@@ -1741,6 +1741,7 @@ export function useAppLiveState(
     hydrationRestartResyncPendingRef,
     laggedRecoveryBaselineRevisionRef,
     lastSeenServerInstanceIdRef,
+    lastFullStateServerInstanceIdRef,
     latestStateRevisionRef,
     orchestratorsRef,
     seenServerInstanceIdsRef,

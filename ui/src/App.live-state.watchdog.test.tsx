@@ -33,6 +33,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
+import { getSessionRecordSnapshotForTesting } from "./session-store";
+import { installWatchdogTailProducer } from "./app-live-state-watchdog-test-fixtures";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
 import {
@@ -1810,42 +1812,49 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     const originalVisibilityState = document.visibilityState;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
-    let shouldFailFirstStateFetch = true;
+    let shouldFailFirstRecoveryRead = true;
+    let recoveryReadCount = 0;
+    const readRecoveryState = async () => {
+      recoveryReadCount += 1;
+      if (shouldFailFirstRecoveryRead) {
+        shouldFailFirstRecoveryRead = false;
+        throw new Error("backend unavailable");
+      }
+
+      return jsonResponse({
+        revision: 2,
+        serverInstanceId: "test-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Codex Session",
+            status: "idle",
+            preview: "Here after retry.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "test",
+              },
+              {
+                id: "message-assistant-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Here after retry.",
+              },
+            ],
+          }),
+        ],
+      });
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
-        if (shouldFailFirstStateFetch) {
-          shouldFailFirstStateFetch = false;
-          throw new Error("backend unavailable");
-        }
-
-        return jsonResponse({
-          revision: 2,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "idle",
-              preview: "Here after retry.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Here after retry.",
-                },
-              ],
-            }),
-          ],
-        });
+        return readRecoveryState();
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -1860,9 +1869,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
     const scrollIntoViewSpy = stubScrollIntoView();
-    const stateFetchCallCount = () =>
-      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
-        .length;
+    const recoveryReadCallCount = () => recoveryReadCount;
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -1871,9 +1878,11 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
+          serverInstanceId: "test-instance",
           projects: [],
           sessions: [
             makeSession("session-1", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Codex Session",
               status: "active",
               preview: "Partial output.",
@@ -1914,17 +1923,22 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await clickAndSettle(sessionRowButton);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
+      const tailProducer = installWatchdogTailProducer(readRecoveryState);
 
       await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       await advanceTimers(1000);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       await advanceTimers(
@@ -1932,8 +1946,12 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       );
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(2);
-      expect(screen.getAllByText("Here after retry.")).toHaveLength(1);
+      expect(recoveryReadCallCount()).toBe(2);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
+      expect(screen.getAllByText("Here after retry.").length).toBeGreaterThan(0);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages.filter(message =>
+        message.type === "text" && message.text === "Here after retry.")).toHaveLength(1);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
     } finally {
       vi.useRealTimers();
@@ -1953,49 +1971,20 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     const baseline = new Date("2026-04-02T09:00:00.000Z");
     vi.useFakeTimers();
     vi.setSystemTime(baseline);
-    let stateRequestCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        stateRequestCount += 1;
-        if (stateRequestCount === 1) {
-          return jsonResponse({
-            revision: 2,
-            projects: [],
-            sessions: [
-              makeSession("session-1", {
-                name: "Codex Session",
-                status: "active",
-                preview: "Partial output.",
-                messages: [
-                  {
-                    id: "message-user-1",
-                    type: "text",
-                    timestamp: "10:00",
-                    author: "you",
-                    text: "test",
-                  },
-                  {
-                    id: "message-assistant-partial-1",
-                    type: "text",
-                    timestamp: "10:01",
-                    author: "assistant",
-                    text: "Partial output.",
-                  },
-                ],
-              }),
-            ],
-          });
-        }
-
+    let recoveryReadCount = 0;
+    const readRecoveryState = async () => {
+      recoveryReadCount += 1;
+      if (recoveryReadCount === 1) {
         return jsonResponse({
-          revision: 3,
+          revision: 2,
+          serverInstanceId: "test-instance",
           projects: [],
           sessions: [
             makeSession("session-1", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Codex Session",
-              status: "idle",
-              preview: "Here after enforced cooldown.",
+              status: "active",
+              preview: "Partial output.",
               messages: [
                 {
                   id: "message-user-1",
@@ -2005,16 +1994,52 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
                   text: "test",
                 },
                 {
-                  id: "message-assistant-final-1",
+                  id: "message-assistant-partial-1",
                   type: "text",
-                  timestamp: "10:02",
+                  timestamp: "10:01",
                   author: "assistant",
-                  text: "Here after enforced cooldown.",
+                  text: "Partial output.",
                 },
               ],
             }),
           ],
         });
+      }
+
+      return jsonResponse({
+        revision: 3,
+        serverInstanceId: "test-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Codex Session",
+            status: "idle",
+            preview: "Here after enforced cooldown.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "test",
+              },
+              {
+                id: "message-assistant-final-1",
+                type: "text",
+                timestamp: "10:02",
+                author: "assistant",
+                text: "Here after enforced cooldown.",
+              },
+            ],
+          }),
+        ],
+      });
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return readRecoveryState();
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -2029,9 +2054,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
     const scrollIntoViewSpy = stubScrollIntoView();
-    const stateFetchCallCount = () =>
-      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
-        .length;
+    const recoveryReadCallCount = () => recoveryReadCount;
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -2040,9 +2063,11 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
+          serverInstanceId: "test-instance",
           projects: [],
           sessions: [
             makeSession("session-1", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Codex Session",
               status: "active",
               preview: "Partial output.",
@@ -2083,31 +2108,37 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await clickAndSettle(sessionRowButton);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
+      const tailProducer = installWatchdogTailProducer(readRecoveryState);
 
       // 15s stale threshold + 1s watchdog tick margin -> first watchdog resync.
       await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       // One tick short of the cooldown boundary: watchdog must stay quiet.
       await advanceTimers(
-        LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS - 1000,
+        tailProducer.requestedAt[0] + LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS - Date.now() - 1,
       );
-      await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
-      // Crossing the next 1s tick moves the watchdog past the cooldown boundary.
-      await advanceTimers(1000);
+      // Reach the next watchdog tick at the original attempt deadline.
+      await advanceTimers(1);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(2);
-      expect(screen.getAllByText("Here after enforced cooldown.")).toHaveLength(
-        1,
-      );
+      expect(recoveryReadCallCount()).toBe(2);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
+      expect(screen.getAllByText("Here after enforced cooldown.").length).toBeGreaterThan(0);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages.filter(message =>
+        message.type === "text" && message.text === "Here after enforced cooldown.")).toHaveLength(1);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
     } finally {
       vi.useRealTimers();
@@ -2118,7 +2149,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
-  it("clears the watchdog cooldown when live SSE state resumes after a watchdog snapshot", async () => {
+  it("clears the watchdog cooldown when live SSE data resumes after a targeted repair", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -2126,49 +2157,20 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     const baseline = new Date("2026-04-02T09:00:00.000Z");
     vi.useFakeTimers();
     vi.setSystemTime(baseline);
-    let stateRequestCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        stateRequestCount += 1;
-        if (stateRequestCount === 1) {
-          return jsonResponse({
-            revision: 2,
-            projects: [],
-            sessions: [
-              makeSession("session-1", {
-                name: "Codex Session",
-                status: "active",
-                preview: "Partial output.",
-                messages: [
-                  {
-                    id: "message-user-1",
-                    type: "text",
-                    timestamp: "10:00",
-                    author: "you",
-                    text: "test",
-                  },
-                  {
-                    id: "message-assistant-partial-1",
-                    type: "text",
-                    timestamp: "10:01",
-                    author: "assistant",
-                    text: "Partial output.",
-                  },
-                ],
-              }),
-            ],
-          });
-        }
-
+    let recoveryReadCount = 0;
+    const readRecoveryState = async () => {
+      recoveryReadCount += 1;
+      if (recoveryReadCount === 1) {
         return jsonResponse({
-          revision: 4,
+          revision: 2,
+          serverInstanceId: "test-instance",
           projects: [],
           sessions: [
             makeSession("session-1", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Codex Session",
-              status: "idle",
-              preview: "Here after cleared cooldown.",
+              status: "active",
+              preview: "Partial output.",
               messages: [
                 {
                   id: "message-user-1",
@@ -2178,16 +2180,52 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
                   text: "test",
                 },
                 {
-                  id: "message-assistant-final-1",
+                  id: "message-assistant-partial-1",
                   type: "text",
-                  timestamp: "10:02",
+                  timestamp: "10:01",
                   author: "assistant",
-                  text: "Here after cleared cooldown.",
+                  text: "Partial output.",
                 },
               ],
             }),
           ],
         });
+      }
+
+      return jsonResponse({
+        revision: 4,
+        serverInstanceId: "test-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            bodySeq: 0, bodySeqEpoch: "test-instance",
+            name: "Codex Session",
+            status: "idle",
+            preview: "Here after cleared cooldown.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "test",
+              },
+              {
+                id: "message-assistant-final-1",
+                type: "text",
+                timestamp: "10:02",
+                author: "assistant",
+                text: "Here after cleared cooldown.",
+              },
+            ],
+          }),
+        ],
+      });
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return readRecoveryState();
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -2202,7 +2240,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
     const scrollIntoViewSpy = stubScrollIntoView();
-    const stateFetchCallCount = () => stateRequestCount;
+    const recoveryReadCallCount = () => recoveryReadCount;
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -2211,9 +2249,11 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
+          serverInstanceId: "test-instance",
           projects: [],
           sessions: [
             makeSession("session-1", {
+              bodySeq: 0, bodySeqEpoch: "test-instance",
               name: "Codex Session",
               status: "active",
               preview: "Partial output.",
@@ -2254,65 +2294,59 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await clickAndSettle(sessionRowButton);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
-      stateRequestCount = 0;
+      const tailProducer = installWatchdogTailProducer(readRecoveryState);
+      recoveryReadCount = 0;
 
       // First watchdog snapshot stays active, so the cooldown remains armed.
       await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
-      // A fresh SSE state payload should clear the residual watchdog cooldown and
-      // reset the stale-transport timer from this newer live activity.
+      // The paired tail did not advance the global ordering ledger. Deliver
+      // the intervening global frame before the next contiguous session delta.
+      act(() => eventSource.dispatchNamedEvent("delta", {
+        type: "orchestratorsUpdated", revision: 2, serverInstanceId: "test-instance",
+        orchestrators: [],
+      }));
+      // Actual session data clears the attempt cooldown and silence baseline.
       await act(async () => {
-        eventSource.dispatchNamedEvent("state", {
-          revision: 3,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "active",
-              preview: "Fresh live output.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-partial-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Fresh live output.",
-                },
-              ],
-            }),
-          ],
+        eventSource.dispatchNamedEvent("delta", {
+          type: "textReplace", revision: 3, sessionId: "session-1",
+          messageId: "message-assistant-partial-1", messageIndex: 1,
+          messageCount: 2, sessionMutationStamp: 3, sessionSeq: 3,
+          bodySeqEpoch: "test-instance", text: "Fresh live output.",
+          preview: "Fresh live output.",
         });
       });
       await settleAsyncUi();
 
       expect(screen.getAllByText("Fresh live output.")).toHaveLength(1);
-      expect(stateFetchCallCount()).toBe(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
 
-      await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS);
+      await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS - 1);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(1);
+      expect(recoveryReadCallCount()).toBe(1);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       // The next 1s watchdog tick should fire immediately once transport is stale again.
       await advanceTimers(1000);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(2);
-      expect(screen.getAllByText("Here after cleared cooldown.")).toHaveLength(
-        1,
-      );
+      expect(recoveryReadCallCount()).toBe(2);
+      expect(tailProducer).toHaveBeenCalled();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")).toHaveLength(0);
+      expect(screen.getAllByText("Here after cleared cooldown.").length).toBeGreaterThan(0);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages.filter(message =>
+        message.type === "text" && message.text === "Here after cleared cooldown.")).toHaveLength(1);
       expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
     } finally {
       vi.useRealTimers();
@@ -2359,6 +2393,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
             projects: [],
             sessions: [
               makeSession("session-1", {
+                bodySeq: 0, bodySeqEpoch: "test-instance",
                 name: "Codex Session",
                 status,
                 preview: sessionPreview,

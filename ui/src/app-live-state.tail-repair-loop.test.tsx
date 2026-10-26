@@ -1561,3 +1561,143 @@ describe("streaming tail-repair hypothesis schedules", () => {
     expect(h.current().messageCount).toBe(TOTAL);
   });
 });
+
+
+// These sessions were never opened or hydrated. Recovery must establish their
+// first tail through the existing owner without visible-pane hydration.
+function silentWatchdogFixture(ids = [SESSION_ID], knownInstance = true) {
+  const params = makeParams();
+  const full = vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const requests: Array<ReturnType<typeof deferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>> & {
+    id: string; limit: number | undefined;
+  }> = [];
+  const fetchTail = vi.spyOn(api, "fetchSessionTail").mockImplementation((id, limit) => {
+    const request = { ...deferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>(), id, limit };
+    requests.push(request);
+    return request.promise;
+  });
+  const h = renderHook(() => useAppLiveState(params));
+  act(() => {
+    Stream.latest.onopen?.(new Event("open"));
+    Stream.latest.emit("state", { ...summary(100, 0),
+      serverInstanceId: knownInstance ? INSTANCE : undefined,
+      sessions: ids.map(id => ({
+      ...summary(100, 0).sessions[0], id, bodySeq: 0, bodySeqEpoch: INSTANCE,
+    })) });
+    ids.forEach((id, index) => Stream.latest.emit("delta", {
+      type: "messageCreated", revision: 101 + index, sessionId: id,
+      messageId: `user-${id}`, messageIndex: 0, messageCount: 1,
+      sessionMutationStamp: 101 + index, sessionSeq: 1, bodySeqEpoch: INSTANCE,
+      message: { ...message("First prompt", `user-${id}`), author: "you" },
+      status: "active", preview: "Awaiting first reply",
+    }));
+  });
+  const current = (id = SESSION_ID) => params.adoptionRefs.sessionsRef.current.find(entry => entry.id === id)!;
+  expect(fetchTail).not.toHaveBeenCalled();
+  const resolve = async (index: number, finished = true) => {
+    const id = requests[index].id;
+    const session = current(id);
+    const response = { revision: 200, serverInstanceId: INSTANCE, session: {
+      ...session, bodySeq: finished ? 2 : 1, bodySeqEpoch: INSTANCE,
+      sessionMutationStamp: finished ? 200 : session.sessionMutationStamp,
+      status: finished ? "idle" as const : "active" as const,
+      preview: finished ? "First reply finished" : session.preview,
+      messages: finished ? [...session.messages, message("First reply finished", `reply-${id}`)] : session.messages,
+      messageCount: finished ? 2 : 1, messageStartIndex: 0, messagesLoaded: true,
+      hasOlderHistory: false, hasNewerHistory: false,
+    } };
+    await act(async () => requests[index].resolve(response));
+    await flush();
+  };
+  return { ...h, params, current, requests, fetchTail, full, resolve };
+}
+
+describe("stale-session watchdog targeted recovery", () => {
+  it("recovers a never-opened hidden session's first reply without a full read", async () => {
+    const h = silentWatchdogFixture();
+    expect(h.params.sessionAuthority.bodyCertificate(SESSION_ID)).toBeNull();
+    await flush(15_000);
+    expect(h.fetchTail.mock.calls).toEqual([[SESSION_ID, 20]]);
+    expect(h.full).not.toHaveBeenCalled();
+    await h.resolve(0);
+    expect(h.current()).toMatchObject({ status: "idle", preview: "First reply finished" });
+    expect(h.current().messages.map(entry => entry.id)).toEqual([`user-${SESSION_ID}`, `reply-${SESSION_ID}`]);
+    expect(getSessionRecordSnapshotForTesting(SESSION_ID)).toMatchObject({ status: "idle" });
+    expect(h.params.adoptionRefs.latestStateRevisionRef.current).toBe(101);
+  });
+
+  it("repairs a silent hidden session while a sibling continues streaming", async () => {
+    const noisy = "noisy-session";
+    const h = silentWatchdogFixture([SESSION_ID, noisy]);
+    for (let tick = 1; tick <= 15; tick++) {
+      act(() => Stream.latest.emit("delta", {
+        type: "textReplace", revision: 102 + tick, sessionId: noisy,
+        messageId: `user-${noisy}`, messageIndex: 0, messageCount: 1,
+        sessionMutationStamp: 102 + tick, sessionSeq: 1 + tick, bodySeqEpoch: INSTANCE,
+        text: `Still streaming ${tick}`, preview: "Busy sibling",
+      }));
+      await flush(1000);
+    }
+    expect(h.fetchTail.mock.calls).toEqual([[SESSION_ID, 20]]);
+    expect(h.full).not.toHaveBeenCalled();
+    await h.resolve(0);
+    expect(h.current().status).toBe("idle");
+    expect(h.current(noisy)).toMatchObject({ status: "active", preview: "Busy sibling" });
+    expect(h.current(noisy).messages[0]).toMatchObject({ text: "Still streaming 15" });
+    expect(h.params.adoptionRefs.latestStateRevisionRef.current).toBe(117);
+  });
+
+  it("repairs every stale session without requiring an open pane", async () => {
+    const ids = [SESSION_ID, "second-silent-session"];
+    const h = silentWatchdogFixture(ids);
+    await flush(15_000);
+    expect(h.fetchTail.mock.calls).toEqual(ids.map(id => [id, 20]));
+    expect(h.full).not.toHaveBeenCalled();
+    await h.resolve(0);
+    await h.resolve(1);
+    expect(ids.map(id => h.current(id).status)).toEqual(["idle", "idle"]);
+  });
+
+  it("retains the cooldown after an unchanged targeted answer", async () => {
+    const h = silentWatchdogFixture();
+    await flush(15_000);
+    await h.resolve(0, false);
+    expect(h.current().status).toBe("active");
+    await flush(14_999);
+    expect(h.fetchTail).toHaveBeenCalledTimes(1);
+    await flush(1);
+    expect(h.fetchTail).toHaveBeenCalledTimes(2);
+    expect(h.full).not.toHaveBeenCalled();
+    await h.resolve(1);
+    await flush(15_000);
+    expect(h.fetchTail).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives full recovery priority when a tick drift and stale session coincide", async () => {
+    const h = silentWatchdogFixture();
+    vi.setSystemTime(Date.now() + 15_000);
+    await flush(1000);
+    expect(h.full).toHaveBeenCalledOnce();
+    expect(h.fetchTail).not.toHaveBeenCalled();
+  });
+
+  it("keeps full recovery when the adopted baseline has no server instance", async () => {
+    const h = silentWatchdogFixture([SESSION_ID], false);
+    await flush(15_000);
+    expect(h.full).toHaveBeenCalledOnce();
+    expect(h.fetchTail).not.toHaveBeenCalled();
+  });
+
+  it("keeps full recovery through repeated reconnect opens without live data", async () => {
+    const h = silentWatchdogFixture();
+    for (let tick = 0; tick < 75; tick++) {
+      act(() => {
+        Stream.latest.onerror?.(new Event("error"));
+        Stream.latest.onopen?.(new Event("open"));
+      });
+      await flush(200);
+    }
+    expect(h.full).toHaveBeenCalledOnce();
+    expect(h.fetchTail).not.toHaveBeenCalled();
+  });
+});

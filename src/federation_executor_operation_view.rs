@@ -43,8 +43,6 @@ struct FederationExecutorOperationView {
     receipt: Option<PromptDeliveryDisposition>,
     /// Whether the queue entry is still queued, and its position if so.
     queue_position: Option<usize>,
-    #[cfg_attr(not(test), allow(dead_code))]
-    pending_prompt: Option<FederationExecutorPendingPromptMetadata>,
     /// The root's whole queue, as metadata only: its first
     /// FEDERATION_EXECUTOR_VIEW_QUEUE_LIMIT entries, its full count, and
     /// whether the list was cut.
@@ -103,7 +101,6 @@ impl AppState {
                 sequence: mailbox.map(|mailbox| mailbox.sequence),
             }
         };
-        let pending_prompt = queued.map(|(_, entry)| metadata(entry));
         let pending_prompt_count = root.map_or(0, |root| root.queued_prompts.len());
         let pending_prompts = root.map(|root| root.queued_prompts.iter()
             .take(FEDERATION_EXECUTOR_VIEW_QUEUE_LIMIT).map(metadata).collect()).unwrap_or_default();
@@ -116,7 +113,6 @@ impl AppState {
             runtime_acknowledged: record.runtime_ack.is_some(),
             receipt,
             queue_position: queued.map(|(position, _)| position),
-            pending_prompt,
             pending_prompts,
             pending_prompt_count,
             pending_prompts_truncated: pending_prompt_count > FEDERATION_EXECUTOR_VIEW_QUEUE_LIMIT,

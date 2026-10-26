@@ -996,6 +996,7 @@ impl AppState {
     }
 
     /// Indexed runs, optionally for one project, in list order.
+    #[cfg(test)]
     fn test_run_summaries(&self, project_id: Option<&str>) -> Vec<TestRunSummary> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         test_run_summaries_locked(&inner)

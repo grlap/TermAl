@@ -107,6 +107,7 @@ impl AppState {
 
     /// Routing-only installation by an authenticated central command, not an
     /// agent payload. The caller supplies the exact current enrolled channel.
+    #[cfg(test)]
     fn install_federation_mailbox_binding(
         &self,
         peer: &FederationPeerSnapshot,
