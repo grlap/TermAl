@@ -1576,6 +1576,19 @@ fn persist_delta_via_cache_timed(
     result
 }
 
+/// A different connection committed after transcript preparation. The write
+/// must be retried from a fresh baseline without resolving its content fences.
+#[derive(Debug)]
+struct PersistTranscriptPredecessorChanged;
+
+impl std::fmt::Display for PersistTranscriptPredecessorChanged {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("transcript predecessor changed while preparing persistence")
+    }
+}
+
+impl std::error::Error for PersistTranscriptPredecessorChanged {}
+
 fn persist_delta_via_cache_inner(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
@@ -1682,7 +1695,7 @@ fn persist_delta_via_cache_inner(
                 && Some(tx.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?)
                     != predecessor_version
             {
-                bail!("transcript predecessor changed while preparing persistence");
+                return Err(PersistTranscriptPredecessorChanged.into());
             }
             write_federation_host_generation(&tx, &delta.metadata)?;
             let committed_metadata = write_metadata_units(
