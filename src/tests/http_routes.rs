@@ -379,7 +379,7 @@ async fn create_session_route_returns_created_response() {
     let app = app_router(state.clone());
     let body = serde_json::to_vec(&json!({
         "name": "Route Created Session",
-        "workdir": "/tmp"
+        "workdir": state.default_workdir
     }))
     .expect("create session route body should serialize");
     let (status, response_body): (StatusCode, Value) = request_json(
@@ -401,7 +401,8 @@ async fn create_session_route_returns_created_response() {
     assert!(response.revision > 0);
     assert_eq!(state.snapshot().sessions.len(), initial_session_count + 1);
     assert_eq!(created_session.name, "Route Created Session");
-    let expected_workdir = resolve_session_workdir("/tmp").expect("route workdir should normalize");
+    let expected_workdir =
+        resolve_session_workdir(&state.default_workdir).expect("route workdir should normalize");
     assert_eq!(created_session.workdir, expected_workdir);
     assert_eq!(created_session.agent, Agent::Codex);
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -423,7 +424,7 @@ async fn get_session_route_returns_bounded_session_detail() {
             kimi_mode: None,
             name: Some("Route Session Detail".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -476,7 +477,7 @@ async fn get_session_route_can_return_tail_only() {
             kimi_mode: None,
             name: Some("Route Session Tail".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -558,7 +559,7 @@ async fn get_session_history_route_pages_large_transcript_by_message_id() {
             kimi_mode: None,
             name: Some("Route Session History".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -1227,7 +1228,7 @@ async fn get_session_route_tail_limit_covering_transcript_preserves_loaded_flag(
             kimi_mode: None,
             name: Some("Route Session Full Tail".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -1291,7 +1292,7 @@ async fn get_session_route_tail_returns_not_found_for_missing_or_hidden_sessions
             kimi_mode: None,
             name: Some("Route Session Hidden Tail".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -1347,7 +1348,7 @@ async fn get_session_route_rejects_zero_tail_limit() {
             kimi_mode: None,
             name: Some("Route Session Zero Tail".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -1391,7 +1392,7 @@ async fn get_session_route_rejects_tail_limit_above_cap() {
             kimi_mode: None,
             name: Some("Route Session Oversized Tail".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -1442,7 +1443,7 @@ async fn get_session_route_query_rejection_uses_api_error_envelope() {
             kimi_mode: None,
             name: Some("Route Session Bad Tail".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -1488,7 +1489,7 @@ async fn snapshot_bearing_routes_include_message_count() {
             kimi_mode: None,
             name: Some("Counted Session".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -1578,7 +1579,7 @@ async fn targeted_session_tail_includes_pending_prompts_redacted_from_global_sta
             kimi_mode: None,
             name: Some("Queued Prompt Projection".to_owned()),
             agent: None,
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -4169,7 +4170,7 @@ async fn codex_thread_fork_route_returns_created_response() {
             kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Route Review".to_owned()),
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: Some("gpt-5.4".to_owned()),
             approval_policy: Some(CodexApprovalPolicy::Never),

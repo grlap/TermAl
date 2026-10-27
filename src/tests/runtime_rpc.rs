@@ -33,7 +33,7 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
             opening_prompt: None,
             active_turn_generation: 1,
             command: AcpPromptCommand {
-                cwd: "/tmp".to_owned(),
+                cwd: state.default_workdir.clone(),
                 cursor_mode: None,
                 model: OPENCODE_CONFIG_AUTO.to_owned(),
                 opencode_effort: None,
@@ -322,7 +322,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
             kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Prompt Loop".to_owned()),
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: Some("auto".to_owned()),
             approval_policy: None,
@@ -397,7 +397,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
 
     input_tx
         .send(AcpRuntimeCommand::Prompt(AcpPromptCommand {
-            cwd: "/tmp".to_owned(),
+            cwd: state.default_workdir.clone(),
             cursor_mode: Some(CursorMode::Ask),
             model: "auto".to_owned(),
             opencode_effort: None,

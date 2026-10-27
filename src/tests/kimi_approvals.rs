@@ -11,7 +11,7 @@ use super::*;
 const RUNTIME: &str = "kimi-approvals-runtime";
 
 fn create_kimi(state: &AppState, extra: Value) -> String {
-    let mut request = json!({"agent": "Kimi", "workdir": "/tmp"});
+    let mut request = json!({"agent": "Kimi", "workdir": state.default_workdir});
     request
         .as_object_mut()
         .unwrap()
@@ -477,7 +477,7 @@ fn a_remote_kimi_session_keeps_its_policy_and_modes() {
 fn kimi_fields_belong_to_kimi_sessions_only() {
     let state = test_app_state();
     for field in ["kimiApprovalMode", "kimiMode"] {
-        let mut request = json!({ "agent": "Claude", "workdir": "/tmp" });
+        let mut request = json!({ "agent": "Claude", "workdir": state.default_workdir });
         request[field] = json!(if field == "kimiMode" { "yolo" } else { "auto-approve" });
         let error = state
             .create_session_with_agent_setup_validator(

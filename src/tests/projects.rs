@@ -157,12 +157,12 @@ fn creates_sessions_for_remote_projects_over_ssh() {
 #[test]
 fn creates_projects_and_assigns_sessions_to_them() {
     let state = test_app_state();
-    let expected_root = resolve_project_root_path("/tmp").unwrap();
+    let expected_root = resolve_project_root_path(&state.default_workdir).unwrap();
 
     let project = state
         .create_project(CreateProjectRequest {
             name: None,
-            root_path: "/tmp".to_owned(),
+            root_path: state.default_workdir.clone(),
             remote_id: default_local_remote_id(),
         })
         .unwrap();
@@ -305,10 +305,11 @@ fn deleting_a_remote_project_does_not_enqueue_local_board_cleanup() {
 #[test]
 fn rejects_session_workdirs_outside_the_selected_project() {
     let state = test_app_state();
+    let outside = TestTempRoot::create("termal-project-outside");
     let project = state
         .create_project(CreateProjectRequest {
             name: Some("Project".to_owned()),
-            root_path: "/tmp".to_owned(),
+            root_path: state.default_workdir.clone(),
             remote_id: default_local_remote_id(),
         })
         .unwrap();
@@ -319,7 +320,7 @@ fn rejects_session_workdirs_outside_the_selected_project() {
         kimi_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Out of Bounds".to_owned()),
-        workdir: Some("/Users".to_owned()),
+        workdir: Some(outside.path().to_string_lossy().into_owned()),
         project_id: Some(project.project_id),
         model: None,
         approval_policy: None,

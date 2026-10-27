@@ -1341,7 +1341,8 @@ fn acceptance_same_session_brief_carries_the_bases_and_every_criterion() {
 fn acceptance_submit_refuses_callers_without_authority_before_running() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (delegation, child) = install_evaluator_delegation(&state, &parent, None, "/tmp", 2);
+    let (delegation, child) = 
+        install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     let refused = |caller: &str, expected: &str| {
         let error = state
             .submit_acceptance_evaluation_with_runner(caller, two_verdicts(), runner_must_not_run)
@@ -1425,7 +1426,8 @@ fn acceptance_submit_refuses_callers_without_authority_before_running() {
 fn acceptance_submit_refuses_each_malformed_submission_before_running() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (delegation, child) = install_evaluator_delegation(&state, &parent, None, "/tmp", 2);
+    let (delegation, child) = 
+        install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     let pass = |criterion| verdict(criterion, "pass", "Checked it.", &["aaaaaaaa1111"]);
     let with = |change: &dyn Fn(&mut SubmitAcceptanceEvaluationVerdict)| {
         let mut second = pass(2);
@@ -1889,7 +1891,8 @@ fn acceptance_submit_capability_is_classified_for_claude_and_codex() {
 
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Codex);
-    let (delegation, child) = install_evaluator_delegation(&state, &parent, None, "/tmp", 1);
+    let (delegation, child) = 
+        install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 1);
     let request = json!({"id":"acceptance-approval","params":{
         "threadId":"thread-evaluator","turnId":"turn-evaluator","serverName":TERMAL_DELEGATION_MCP_SERVER_NAME,
         "mode":"form","message":"Approval copy","requestedSchema":{"type":"object","properties":{}},
@@ -1955,7 +1958,8 @@ fn acceptance_submit_capability_is_classified_for_claude_and_codex() {
 fn acceptance_and_review_capabilities_are_never_shared() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (_, evaluator) = install_evaluator_delegation(&state, &parent, None, "/tmp", 1);
+    let (_, evaluator) = 
+        install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 1);
     let (_, reviewer) =
         super::delegation_support::install_required_review_delegation(&state, &parent);
     for (child, tool, expected) in [
@@ -2051,7 +2055,8 @@ fn acceptance_and_review_capabilities_are_never_shared() {
 fn acceptance_target_persists_with_the_record_and_is_absent_elsewhere() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (evaluation, _) = install_evaluator_delegation(&state, &parent, None, "/tmp", 2);
+    let (evaluation, _) = 
+        install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     let (review, _) =
         super::delegation_support::install_required_review_delegation(&state, &parent);
     let inner = state.inner.lock().unwrap();
@@ -2446,7 +2451,8 @@ fn acceptance_project_defaults_are_used_only_when_admitted_and_never_override_ta
 fn acceptance_parent_card_uses_receipt_not_agent_prose_and_waits_for_acknowledgement() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (id, child) = install_evaluator_delegation(&state, &parent, None, "/tmp", 2);
+    let (id, child) = 
+        install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_delegation_index(&id).unwrap();

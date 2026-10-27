@@ -3,7 +3,7 @@
 use super::*;
 
 fn create(state: &AppState, extra: Value) -> String {
-    let mut request = json!({"agent": "OpenCode", "workdir": "/tmp"});
+    let mut request = json!({"agent": "OpenCode", "workdir": state.default_workdir});
     request
         .as_object_mut()
         .unwrap()
@@ -288,7 +288,10 @@ fn opencode_approval_updates_reject_other_agents_and_busy_turns() {
         Some(OpenCodeApprovalMode::AutoApprove)
     );
     let codex = state
-        .create_session(serde_json::from_value(json!({"agent":"Codex","workdir":"/tmp"})).unwrap())
+        .create_session(
+            serde_json::from_value(json!({"agent":"Codex","workdir":state.default_workdir}))
+                .unwrap(),
+        )
         .unwrap();
     assert_eq!(
         state
@@ -302,7 +305,7 @@ fn opencode_approval_updates_reject_other_agents_and_busy_turns() {
         state
             .create_session(
                 serde_json::from_value(
-                    json!({"agent":"Claude","workdir":"/tmp","opencodeApprovalMode":"auto-approve"})
+                    json!({"agent":"Claude","workdir":state.default_workdir,"opencodeApprovalMode":"auto-approve"})
                 )
                 .unwrap()
             )

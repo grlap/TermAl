@@ -2008,6 +2008,7 @@ fn persisted_state_maps_unknown_conversation_marker_kind_to_custom() {
 fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<PersistRequest>) {
     let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
     let test_temp_root = Arc::new(TestTempRoot::create("termal-test-state"));
+    let default_workdir = test_temp_root.path().to_string_lossy().into_owned();
     let persistence_path = test_temp_root.path().join("termal.sqlite");
     let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
     // Same fd-cascade rule as the mailbox store: retained test AppStates must
@@ -2018,7 +2019,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         federation_peer_handles: FederationPeerHandles::default(),
         federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
         test_run_phase_traces: TestRunPhaseTraces::default(),
-        default_workdir: "/tmp".to_owned(),
+        default_workdir: default_workdir.clone(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
         mailbox_store,
@@ -2055,7 +2056,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
         test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),
-        agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
+        agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),

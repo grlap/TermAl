@@ -14,7 +14,7 @@ fn guidance_session(agent: Agent) -> (AppState, String) {
             kimi_mode: None,
             agent: Some(agent),
             name: Some("Host guidance wire test".to_owned()),
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: Some("auto".to_owned()),
             approval_policy: None,
@@ -147,7 +147,7 @@ impl AcpGuidanceFixture {
             None,
             self.agent,
             AcpPromptCommand {
-                cwd: "/tmp".to_owned(),
+                cwd: self.state.default_workdir.clone(),
                 cursor_mode: None,
                 model: "auto".to_owned(),
                 opencode_effort: None,

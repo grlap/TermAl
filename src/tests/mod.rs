@@ -908,6 +908,7 @@ fn try_write_test_http_response(
 
 fn test_app_state() -> AppState {
     let test_temp_root = Arc::new(TestTempRoot::create("termal-test-state"));
+    let default_workdir = test_temp_root.path().to_string_lossy().into_owned();
     let persistence_path = test_temp_root.path().join("termal.sqlite");
     // Most tests do not exercise mailboxes. Keeping the production-shaped
     // persistent SQLite connection open in every retained test AppState
@@ -928,7 +929,7 @@ fn test_app_state() -> AppState {
 
     AppState {
         server_instance_id: Uuid::new_v4().to_string(),
-        default_workdir: "/tmp".to_owned(),
+        default_workdir: default_workdir.clone(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
         mailbox_store,
@@ -971,7 +972,7 @@ fn test_app_state() -> AppState {
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
         test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),
-        agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
+        agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         federation_peer_handles: FederationPeerHandles::default(),
@@ -1145,7 +1146,7 @@ fn test_session_id(state: &AppState, agent: Agent) -> String {
     let record = inner.create_session(
         agent,
         Some("Test".to_owned()),
-        "/tmp".to_owned(),
+        state.default_workdir.clone(),
         None,
         None,
     );
@@ -2651,7 +2652,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
             kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Canonical".to_owned()),
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: Some("gpt-5.4".to_owned()),
             approval_policy: None,
@@ -2716,7 +2717,7 @@ fn revisions_increase_for_visible_state_changes() {
             kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Revision Test".to_owned()),
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -2793,7 +2794,7 @@ fn renames_sessions_via_settings_updates() {
             kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Old Name".to_owned()),
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(state.default_workdir.clone()),
             project_id: None,
             model: None,
             approval_policy: None,
