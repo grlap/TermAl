@@ -1355,6 +1355,8 @@ struct AgentReadinessCache {
     snapshot: Vec<AgentReadiness>,
     expires_at: std::time::Instant,
     invalidated: bool,
+    #[cfg(test)]
+    phase_sink: Option<mpsc::Sender<TestApiPhaseObservation>>,
 }
 
 impl AgentReadinessCache {
@@ -1363,11 +1365,43 @@ impl AgentReadinessCache {
             snapshot,
             expires_at: std::time::Instant::now() + AGENT_READINESS_CACHE_TTL,
             invalidated: false,
+            #[cfg(test)]
+            phase_sink: None,
         }
     }
 
     fn needs_refresh(&self, now: std::time::Instant) -> bool {
         self.invalidated || now >= self.expires_at
+    }
+}
+
+/// Disposable attribution extends the readiness cache's existing owner.
+#[cfg(test)]
+struct TestApiPhaseObservation {
+    phase: &'static str,
+    session_id: Option<String>,
+    thread_id: std::thread::ThreadId,
+    started: std::time::Instant,
+    elapsed: Duration,
+}
+
+#[cfg(test)]
+struct TestApiPhaseTimer {
+    sink: mpsc::Sender<TestApiPhaseObservation>,
+    observation: TestApiPhaseObservation,
+}
+
+#[cfg(test)]
+impl Drop for TestApiPhaseTimer {
+    fn drop(&mut self) {
+        self.observation.elapsed = self.observation.started.elapsed();
+        let _ = self.sink.send(TestApiPhaseObservation {
+            phase: self.observation.phase,
+            session_id: self.observation.session_id.take(),
+            thread_id: self.observation.thread_id,
+            started: self.observation.started,
+            elapsed: self.observation.elapsed,
+        });
     }
 }
 

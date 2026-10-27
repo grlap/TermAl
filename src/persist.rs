@@ -1757,13 +1757,36 @@ fn persist_delta_via_cache_inner(
     // hardening, under the same writer lock) and the redirection check.
     persist_observe_phase("open");
     let open_started = std::time::Instant::now();
-    let opened = cache.connection_for(path).and_then(|connection| {
+    #[cfg(test)]
+    let reused_connection = cache.path.as_deref() == Some(path) && cache.connection.is_some();
+    let connected = cache.connection_for(path);
+    #[cfg(test)]
+    let connection_elapsed = open_started.elapsed();
+    #[cfg(test)]
+    persist_observe(|observer| {
+        observer.update(|tick| {
+            tick.phases.test_open_connection_us = Some(persist_observed_us(connection_elapsed));
+            tick.phases.test_open_reused_connection = Some(reused_connection);
+        })
+    });
+    let opened = connected.and_then(|connection| {
         // Keep state-path redirection failures fatal on cached writes too.
         // Directory chmod hardening runs when the cached connection is opened;
         // the hot path intentionally repeats only symlink/reparse checks
         // before each transaction so path swaps are caught without chmoding
         // the state directory every tick.
-        reject_existing_sqlite_state_path_redirection(path).map(|()| connection)
+        #[cfg(test)]
+        let checks_started = std::time::Instant::now();
+        let checked = reject_existing_sqlite_state_path_redirection(path);
+        #[cfg(test)]
+        let checks_elapsed = checks_started.elapsed();
+        #[cfg(test)]
+        persist_observe(|observer| {
+            observer.update(|tick| {
+                tick.phases.test_open_path_checks_us = Some(persist_observed_us(checks_elapsed));
+            })
+        });
+        checked.map(|()| connection)
     });
     timings.open = open_started.elapsed();
     let _ = opened?;

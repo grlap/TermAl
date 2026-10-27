@@ -168,6 +168,12 @@ struct PersistObservedPhases {
     collect_lock_count: usize,
     serialize_us: u64,
     open_us: u64,
+    #[cfg(test)]
+    test_open_connection_us: Option<u64>,
+    #[cfg(test)]
+    test_open_path_checks_us: Option<u64>,
+    #[cfg(test)]
+    test_open_reused_connection: Option<bool>,
     ticket_wait_us: u64,
     statements_us: u64,
     commit_us: u64,
@@ -223,6 +229,10 @@ struct PersistHeartbeatCounters {
 #[derive(Default)]
 struct PersistObserver {
     state: Mutex<PersistObserverState>,
+    // Only an explicitly armed disposable fixture retains every completed
+    // sample. Production keeps its existing bounded recent/slowest windows.
+    #[cfg(test)]
+    test_tick_sink: Mutex<Option<mpsc::Sender<(std::time::Instant, PersistObservedTick)>>>,
 }
 
 #[derive(Serialize)]
@@ -345,6 +355,10 @@ impl PersistObserver {
                     .then(b.tick.cmp(&a.tick))
             });
             state.slowest.truncate(PERSIST_OBSERVER_SLOWEST_LIMIT);
+            #[cfg(test)]
+            if let Some(sink) = self.test_tick_sink.lock().unwrap().as_ref() {
+                let _ = sink.send((now, active.tick.clone()));
+            }
             state.recent.push_back(active.tick);
         });
     }

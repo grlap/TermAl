@@ -6,6 +6,12 @@
 
 use super::*;
 
+#[path = "postcommit_bookkeeping.rs"]
+mod postcommit_bookkeeping;
+
+#[path = "state_lock_parallel.rs"]
+mod state_lock_parallel;
+
 fn make_persist_delta_test_delegation(
     id: &str,
     parent_session_id: &str,

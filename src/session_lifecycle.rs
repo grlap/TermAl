@@ -458,13 +458,21 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
+        #[cfg(test)]
+        let _handler = self.test_api_phase_timer("resume_handler", Some(session_id));
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_resume_session_queue(session_id);
         }
-        let delivery = self.resume_local_session_queue(session_id, None)?;
+        let delivery = {
+            #[cfg(test)]
+            let _local = self.test_api_phase_timer("resume_local_mutation", Some(session_id));
+            self.resume_local_session_queue(session_id, None)?
+        };
         if let Some(delivery) = delivery {
             delivery.into_public_result()?;
         }
+        #[cfg(test)]
+        let _snapshot = self.test_api_phase_timer("resume_snapshot", Some(session_id));
         Ok(self.snapshot())
     }
 

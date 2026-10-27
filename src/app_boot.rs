@@ -45,6 +45,17 @@ const PERSIST_FENCE_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 const COORDINATION_CLEANUP_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
 const COORDINATION_CLEANUP_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
+#[cfg(test)]
+thread_local! {
+    // Disposable production-worker fixtures can observe the original mutex
+    // and isolate unrelated Codex discovery from the developer's real homes.
+    static TEST_BOOT_STATE_MUTEX: std::cell::RefCell<Option<Box<dyn FnOnce(StateInner) -> StateMutex<StateInner>>>> =
+        const { std::cell::RefCell::new(None) };
+    static TEST_BOOT_SKIP_CODEX_DISCOVERY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TEST_BOOT_PERSIST_TICK_SINK: std::cell::RefCell<Option<mpsc::Sender<(std::time::Instant, PersistObservedTick)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PersistWorkerRetryState {
     retry_after_failure: bool,
@@ -469,7 +480,19 @@ impl AppState {
             }
         });
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
-        match discover_codex_threads(&default_workdir, &discovery_scopes) {
+        #[cfg(test)]
+        let skip_discovery = TEST_BOOT_SKIP_CODEX_DISCOVERY.with(|skip| skip.get());
+        #[cfg(not(test))]
+        let skip_discovery = false;
+        match if skip_discovery {
+            Ok(DiscoveredCodexThreads {
+                threads: Vec::new(),
+                subagent_thread_ids: Default::default(),
+                delegation_thread_ids: Default::default(),
+            })
+        } else {
+            discover_codex_threads(&default_workdir, &discovery_scopes)
+        } {
             Ok(discovery) => {
                 let DiscoveredCodexThreads { threads, .. } = discovery;
                 inner.import_discovered_codex_threads(&default_workdir, threads);
@@ -483,6 +506,10 @@ impl AppState {
             Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir)));
         let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
         let persist_observer = Arc::new(PersistObserver::default());
+        #[cfg(test)]
+        TEST_BOOT_PERSIST_TICK_SINK.with(|sink| {
+            *persist_observer.test_tick_sink.lock().unwrap() = sink.borrow_mut().take();
+        });
         let observer_for_persist = Arc::clone(&persist_observer);
 
         let persist_path_for_persist = Arc::new(persistence_path.clone());
@@ -509,7 +536,14 @@ impl AppState {
         // background persist thread. The thread briefly re-locks it on
         // each tick to collect the diff; see
         // `collect_persist_delta_from_shared_state`.
-        let inner_arc = Arc::new(StateMutex::new(inner));
+        #[cfg(test)]
+        let inner_mutex = TEST_BOOT_STATE_MUTEX.with(|hook| match hook.borrow_mut().take() {
+            Some(make) => make(inner),
+            None => StateMutex::new(inner),
+        });
+        #[cfg(not(test))]
+        let inner_mutex = StateMutex::new(inner);
+        let inner_arc = Arc::new(inner_mutex);
         let inner_for_persist = Arc::clone(&inner_arc);
         let inner_for_coordination_cleanup = Arc::clone(&inner_arc);
         let coordination_board_store_for_persist = Arc::clone(&coordination_board_store);

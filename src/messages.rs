@@ -64,15 +64,28 @@ fn sync_retained_transcript_metadata(record: &mut SessionRecord) {
     record.session.messages_loaded = record.message_start_index == 0;
 }
 
+#[cfg(test)]
 fn trim_retained_session_messages(record: &mut SessionRecord, limit: usize) {
+    drop(detach_retained_session_messages(record, limit));
+}
+
+/// Replaces the resident window without destroying its previous storage.
+/// A shared-state caller drops that storage after releasing StateInner.
+fn detach_retained_session_messages(
+    record: &mut SessionRecord,
+    limit: usize,
+) -> Option<(MessageSequence, HashMap<String, usize>)> {
     if record.session.messages.len() <= limit {
-        return;
+        return None;
     }
     let remove_count = record.session.messages.len() - limit;
-    record.session.messages.discard(..remove_count);
+    let retained = record.session.messages.window(remove_count..);
+    let retired = std::mem::replace(&mut record.session.messages, retained);
     record.message_start_index = record.message_start_index.saturating_add(remove_count);
-    record.message_positions = build_message_positions(&record.session.messages);
+    let positions = build_message_positions(&record.session.messages);
+    let retired_positions = std::mem::replace(&mut record.message_positions, positions);
     record.session.messages_loaded = false;
+    Some((retired, retired_positions))
 }
 
 fn normalize_prompt_history(prompts: impl IntoIterator<Item = String>) -> Vec<String> {

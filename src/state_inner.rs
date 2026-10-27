@@ -795,22 +795,29 @@ impl StateInner {
         self.materialize_persist_delta(plan)
     }
 
+    #[cfg(test)]
     fn trim_persisted_session_tails(&mut self, watermark: u64, persisted_session_ids: &[String]) {
         for session_id in persisted_session_ids {
-            let Some(index) = self.find_session_index(session_id) else {
-                continue;
-            };
-            let record = &mut self.sessions[index];
-            if record.mutation_stamp > watermark
-                || matches!(
-                    record.session.status,
-                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-                )
-            {
-                continue;
-            }
-            trim_retained_session_messages(record, SESSION_IN_MEMORY_MESSAGE_LIMIT);
+            drop(self.trim_persisted_session_tail(watermark, session_id));
         }
+    }
+
+    fn trim_persisted_session_tail(
+        &mut self,
+        watermark: u64,
+        session_id: &str,
+    ) -> Option<(MessageSequence, HashMap<String, usize>)> {
+        let index = self.find_session_index(session_id)?;
+        let record = &mut self.sessions[index];
+        if record.mutation_stamp > watermark
+            || matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            )
+        {
+            return None;
+        }
+        detach_retained_session_messages(record, SESSION_IN_MEMORY_MESSAGE_LIMIT)
     }
 
     /// Returns the index of any session, including internal records, by
@@ -1045,8 +1052,9 @@ fn merge_persist_delta_passes(mut earlier: PersistDelta, later: PersistDelta) ->
     earlier
 }
 
-/// Trims committed session tails under the shared state lock. The writer owns
-/// watermark advancement and fence acknowledgement separately from this work.
+/// Rechecks and trims one committed tail per state acquisition. The retired
+/// pointer storage and any last message bodies are destroyed after release.
+/// The writer owns watermark advancement and fence acknowledgement separately.
 #[track_caller]
 fn trim_persisted_session_tails_from_shared_state(
     inner: &StateMutex<StateInner>,
@@ -1056,8 +1064,32 @@ fn trim_persisted_session_tails_from_shared_state(
     if persisted_session_ids.is_empty() {
         return;
     }
-    let mut inner = inner.lock().expect("state mutex poisoned");
-    inner.trim_persisted_session_tails(watermark, persisted_session_ids);
+    for session_id in persisted_session_ids {
+        let retired = {
+            let mut state = inner.lock().expect("state mutex poisoned");
+            state.trim_persisted_session_tail(watermark, session_id)
+        };
+        #[cfg(test)]
+        observe_persist_tail_trim_boundary(session_id, "before_disposal");
+        drop(retired);
+        #[cfg(test)]
+        observe_persist_tail_trim_boundary(session_id, "unit_complete");
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PERSIST_TAIL_TRIM_BOUNDARY: std::cell::RefCell<Option<Box<dyn FnMut(&str, &'static str)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn observe_persist_tail_trim_boundary(session_id: &str, phase: &'static str) {
+    PERSIST_TAIL_TRIM_BOUNDARY.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook(session_id, phase);
+        }
+    });
 }
 
 /// Builds a persistence delta without holding the global mutex across the

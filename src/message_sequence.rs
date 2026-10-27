@@ -124,6 +124,7 @@ mod message_sequence {
         }
         // Dropping Vec::Drain removes the range without visiting/cloning its
         // shared message bodies. Eviction intentionally produces no messages.
+        #[cfg(test)]
         pub(super) fn discard(&mut self, range: impl std::ops::RangeBounds<usize>) {
             drop(self.bodies.drain(range));
         }

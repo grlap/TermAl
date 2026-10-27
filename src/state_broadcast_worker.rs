@@ -35,6 +35,8 @@ struct StateProjectionCache {
     sessions: HashMap<String, (StateProjectionKey, Arc<StateSessionSummary>)>,
     #[cfg(test)]
     before_materialize: Option<Box<dyn FnOnce() + Send>>,
+    #[cfg(test)]
+    capture_sink: Option<mpsc::Sender<(std::time::Instant, Duration, std::thread::ThreadId)>>,
 }
 
 struct ImmutableStateSnapshot {
@@ -219,6 +221,8 @@ impl AppState {
 
     fn immutable_state_snapshot_locked(&self, inner: &StateInner) -> ImmutableStateSnapshot {
         #[cfg(test)]
+        let capture_started = std::time::Instant::now();
+        #[cfg(test)]
         assert!(!self.inner.is_not_held_by_current_thread_for_test());
         let mut cache = inner
             .state_projection_cache
@@ -263,8 +267,10 @@ impl AppState {
         cache.sessions.retain(|id, _| live.contains(id.as_str()));
         #[cfg(test)]
         let before_materialize = cache.before_materialize.take();
+        #[cfg(test)]
+        let capture_sink = cache.capture_sink.clone();
         drop(cache);
-        ImmutableStateSnapshot {
+        let snapshot = ImmutableStateSnapshot {
             header: self.snapshot_header_from_inner(
                 inner,
                 self.cached_agent_readiness(),
@@ -279,7 +285,16 @@ impl AppState {
                 .load(Ordering::SeqCst),
             #[cfg(test)]
             before_materialize,
+        };
+        #[cfg(test)]
+        if let Some(sink) = capture_sink {
+            let _ = sink.send((
+                capture_started,
+                capture_started.elapsed(),
+                std::thread::current().id(),
+            ));
         }
+        snapshot
     }
 
     fn warm_state_projection_cache(&self) {

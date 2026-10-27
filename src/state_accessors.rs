@@ -964,25 +964,68 @@ impl AppState {
     }
 
     fn agent_readiness_snapshot(&self) -> Vec<AgentReadiness> {
+        #[cfg(test)]
+        let _readiness = self.test_api_phase_timer("readiness_total", None);
         if let Some(snapshot) = self.cached_agent_readiness_if_fresh() {
             return snapshot;
         }
 
+        #[cfg(test)]
+        let refresh_wait = self.test_api_phase_timer("readiness_refresh_mutex_wait", None);
         let _refresh_lock = self
             .agent_readiness_refresh_lock
             .lock()
             .expect("agent readiness refresh mutex poisoned");
+        #[cfg(test)]
+        drop(refresh_wait);
         if let Some(snapshot) = self.cached_agent_readiness_if_fresh() {
             return snapshot;
         }
 
-        let snapshot = collect_agent_readiness(&self.default_workdir);
+        let snapshot = {
+            #[cfg(test)]
+            // Includes the existing probes' filesystem reads, environment
+            // checks and parsing; this is not physical-I/O telemetry.
+            let _probe = self.test_api_phase_timer("readiness_probe", None);
+            collect_agent_readiness(&self.default_workdir)
+        };
         let mut cache = self
             .agent_readiness_cache
             .write()
             .expect("agent readiness cache poisoned");
+        #[cfg(test)]
+        let phase_sink = cache.phase_sink.take();
         *cache = AgentReadinessCache::fresh(snapshot);
+        #[cfg(test)]
+        {
+            cache.phase_sink = phase_sink;
+        }
         cache.snapshot.clone()
+    }
+
+    #[cfg(test)]
+    fn test_api_phase_timer(
+        &self,
+        phase: &'static str,
+        session_id: Option<&str>,
+    ) -> Option<TestApiPhaseTimer> {
+        let started = std::time::Instant::now();
+        let sink = self
+            .agent_readiness_cache
+            .read()
+            .expect("agent readiness cache poisoned")
+            .phase_sink
+            .clone()?;
+        Some(TestApiPhaseTimer {
+            sink,
+            observation: TestApiPhaseObservation {
+                phase,
+                session_id: session_id.map(str::to_owned),
+                thread_id: std::thread::current().id(),
+                started,
+                elapsed: Duration::ZERO,
+            },
+        })
     }
 
     fn cached_agent_readiness_if_fresh(&self) -> Option<Vec<AgentReadiness>> {
