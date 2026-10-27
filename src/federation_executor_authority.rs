@@ -24,6 +24,7 @@ fn federation_executor_target_locked(
     inner: &StateInner,
     operation: &FederationExecutorOperation,
 ) -> Result<(), ApiError> {
+    inner.require_delegation_inventory()?;
     let binding = operation.mailbox_binding();
     let local = inner.federation.local.as_ref();
     if operation.central_host_id != binding.central.host_id
@@ -48,6 +49,7 @@ struct FederationExecutorAuthority<'a> {
 // Permanent captured-identity retirement only. Link loss, disabled settings,
 // quarantine and unsettled durability remain visible retry/refusal conditions.
 fn federation_executor_operation_retired(inner: &StateInner, operation: &FederationExecutorOperation) -> bool {
+    if !inner.delegation_inventory_complete() { return false; }
     let binding = operation.mailbox_binding();
     inner.federation.local.as_ref().is_none_or(|host| host.host_id != operation.target_host_id)
         || inner.preferences.federation.central.as_ref() != Some(&binding.central)

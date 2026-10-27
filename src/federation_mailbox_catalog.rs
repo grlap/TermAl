@@ -81,6 +81,7 @@ fn federation_native_catalog_locked(
     inner: &StateInner, after: Option<&str>, host: FederationHostIdentity,
     central: FederationHostIdentity, incarnation: String,
 ) -> Result<FederationParticipationCatalog, ApiError> {
+    inner.require_delegation_inventory()?;
     let mut position: FederationCatalogPosition = after.map(serde_json::from_str).transpose()
         .map_err(|_| ApiError::bad_request("invalid native catalog cursor"))?.unwrap_or_default();
     if position.session > inner.sessions.len() || position.session > 0 && inner.sessions.get(position.session - 1)

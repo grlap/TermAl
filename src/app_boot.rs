@@ -417,7 +417,23 @@ impl AppState {
     /// also bubble up here. It takes no instance lock: the server
     /// enters through `AppState::new_server` (`server_instance_lock.rs`),
     /// which locks the data directory before calling it.
+    #[cfg(test)]
     fn new_with_paths(
+        default_workdir: String,
+        persistence_path: PathBuf,
+        orchestrator_templates_path: PathBuf,
+    ) -> Result<Self> {
+        let state = Self::new_before_listen_with_paths(
+            default_workdir, persistence_path, orchestrator_templates_path,
+        )?;
+        // Direct test constructors preserve their ready-state convenience.
+        // The server entry point always chooses the explicit pre-listen seam,
+        // including when compiled in a test binary.
+        state.run_post_listen_boot()?;
+        Ok(state)
+    }
+
+    fn new_before_listen_with_paths(
         default_workdir: String,
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,
@@ -859,14 +875,9 @@ impl AppState {
         state.spawn_test_run_index();
         #[cfg(not(test))]
         state.spawn_engram_retry_tick();
-        // Runtime-resuming boot work is deferred to `run_post_listen_boot`, invoked by
-        // `run_server` only AFTER the HTTP listener is bound and the base URL is published.
-        // Resuming a Codex session launches the shared app-server, which bakes a TermAl MCP
-        // bridge config from that URL and connects back to this backend. Running it
-        // pre-listen points the bridge at an unlistening backend. Tests have no HTTP server
-        // or real runtimes, so they run it inline here to preserve behavior.
-        #[cfg(test)]
-        state.run_post_listen_boot()?;
+        // Full delegation inventory and runtime recovery start only after the
+        // listener binds and publishes the base URL. The returned state carries
+        // the completeness fence even in tests of the production entry point.
         Ok(state)
     }
 
@@ -877,19 +888,40 @@ impl AppState {
     /// deferring this work past the boot persist above is safe.
     #[cfg(test)]
     fn run_post_listen_boot(&self) -> Result<()> {
-        let engram_plan = self.prepare_engram_sessions_for_boot_recovery()?;
+        let engram_plan = match self.load_delegation_inventory_observed(|_| {})? {
+            Some(plan) => plan,
+            None => self.prepare_engram_sessions_for_boot_recovery()?,
+        };
         self.run_post_listen_boot_after_readiness(engram_plan);
         Ok(())
     }
 
-    /// Marks every affected session as recovering synchronously, then runs the
-    /// expensive recovery sequence on a detached worker while Axum serves.
+    /// Inventory-dependent routes remain fenced while an owned worker restores
+    /// the full inventory and only then prepares and runs boot recovery.
     fn start_post_listen_boot(&self) -> Result<std::thread::JoinHandle<()>> {
-        let engram_plan = self.prepare_engram_sessions_for_boot_recovery()?;
+        self.start_post_listen_boot_observed(|_| {})
+    }
+
+    fn start_post_listen_boot_observed(
+        &self,
+        observe: impl FnMut(&str) + Send + 'static,
+    ) -> Result<std::thread::JoinHandle<()>> {
         let state = self.clone();
         std::thread::Builder::new()
             .name("termal-post-listen-boot".to_owned())
-            .spawn(move || state.run_post_listen_boot_after_readiness(engram_plan))
+            .spawn(move || {
+                let result = (|| -> Result<()> {
+                    let engram_plan = match state.load_delegation_inventory_observed(observe)? {
+                        Some(plan) => plan,
+                        None => state.prepare_engram_sessions_for_boot_recovery()?,
+                    };
+                    state.run_post_listen_boot_after_readiness(engram_plan);
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    eprintln!("startup> post-listen recovery unavailable: {error:#}");
+                }
+            })
             .context("failed spawning post-listen boot recovery worker")
     }
 

@@ -64,6 +64,7 @@ mod delegation_read_only;
 mod delegation_result_parser;
 mod delegation_review_results;
 mod delegation_support;
+mod delegation_startup_budget;
 mod delegation_validation;
 mod delegation_wait;
 mod delegation_worker;

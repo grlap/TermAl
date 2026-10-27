@@ -3809,6 +3809,7 @@ fn engram_project_for_session_locked<'a>(
     inner: &'a StateInner,
     session_id: &str,
 ) -> Option<&'a Project> {
+    if !inner.delegation_inventory_complete() { return None; }
     let mut current_session_id = session_id.to_owned();
     let mut visited = HashSet::new();
     loop {
@@ -4109,14 +4110,23 @@ impl AppState {
         // session's recovery instead of admitting.
         let _release_boot_hold = self.engram_retry_slots.release_boot_hold_on_drop();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        self.prepare_engram_sessions_for_boot_recovery_locked(&mut inner)
+    }
+
+    // Also used at the full-inventory publication boundary: per-session
+    // readiness must be prepared before the complete inventory becomes visible.
+    fn prepare_engram_sessions_for_boot_recovery_locked(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<EngramBootRecoveryPlan> {
         // A saved begin-unknown head is read as begin unknown and its exact
         // recovery scheduled (`engram_begin_boot.rs`) before any target is
         // picked, so no cold or restart-checkpoint recovery takes it first.
-        let mut changed = self.reconstruct_engram_begin_recovery_on_boot_locked(&mut inner);
+        let mut changed = self.reconstruct_engram_begin_recovery_on_boot_locked(inner);
         // A head an earlier host held after its prepared begin failed, with
         // nothing sent, is admitted afresh (`engram_begin_preparation_retry.rs`).
-        changed |= self.readmit_engram_begin_preparation_holds_on_boot_locked(&mut inner);
-        let targets = Self::engram_boot_recovery_targets_locked(&inner);
+        changed |= self.readmit_engram_begin_preparation_holds_on_boot_locked(inner);
+        let targets = Self::engram_boot_recovery_targets_locked(inner);
         let budget = Duration::from_millis(inner.preferences.engram.boot_recovery_budget_ms);
         let target_ids = targets
             .iter()
@@ -4139,7 +4149,7 @@ impl AppState {
             changed = true;
         }
         if changed {
-            self.commit_locked(&mut inner)?;
+            self.commit_locked(inner)?;
         }
         Ok(EngramBootRecoveryPlan { targets, budget })
     }

@@ -282,7 +282,17 @@ impl StateInner {
             }
         }
 
+        self.recover_interrupted_delegations();
+    }
+
+    fn recover_interrupted_delegations(&mut self) {
         for delegation_index in 0..self.delegations.len() {
+            // Terminal refresh is a no-op. Skip before its record clone so
+            // restoring large completed prompts does not copy history again
+            // under the inventory publication guard.
+            if delegation_is_terminal(self.delegations[delegation_index].status) {
+                continue;
+            }
             let defer_required_review =
                 self.delegations
                     .get(delegation_index)

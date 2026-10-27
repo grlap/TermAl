@@ -386,6 +386,7 @@ fn find_parent_delegation_index_locked(
     parent_session_id: &str,
     delegation_id: &str,
 ) -> Result<usize, ApiError> {
+    inner.require_delegation_inventory()?;
     let Some(parent_session_id) = normalize_optional_identifier(Some(parent_session_id)) else {
         return Err(ApiError::not_found("delegation not found"));
     };
@@ -422,6 +423,7 @@ impl AppState {
         request: CreateDelegationRequest,
         evaluation: Option<AcceptanceEvaluationTargetSeed>,
     ) -> Result<DelegationResponse, ApiError> {
+        self.inner.lock().expect("state mutex poisoned").require_delegation_inventory()?;
         let parent_session_id = normalize_optional_identifier(Some(parent_session_id))
             .ok_or_else(|| ApiError::bad_request("parent session id is required"))?
             .to_owned();
@@ -958,6 +960,7 @@ impl AppState {
         &self,
         parent_session_id: &str,
     ) -> Result<DelegationListResponse, ApiError> {
+        self.inner.lock().expect("state mutex poisoned").require_delegation_inventory()?;
         let parent_session_id = normalize_optional_identifier(Some(parent_session_id))
             .ok_or_else(|| ApiError::not_found("session not found"))?
             .to_owned();
@@ -1175,6 +1178,7 @@ impl AppState {
         parent_session_id: &str,
         request: CreateDelegationWaitRequest,
     ) -> Result<DelegationWaitResponse, ApiError> {
+        self.inner.lock().expect("state mutex poisoned").require_delegation_inventory()?;
         let parent_session_id = normalize_optional_identifier(Some(parent_session_id))
             .ok_or_else(|| ApiError::bad_request("parent session id is required"))?
             .to_owned();
@@ -1873,6 +1877,7 @@ impl AppState {
         workdir: Option<&str>,
         action: &str,
     ) -> Result<(), ApiError> {
+        self.inner.lock().expect("state mutex poisoned").require_delegation_inventory()?;
         let session_id = normalize_optional_identifier(session_id);
         let project_id = normalize_optional_identifier(project_id);
         let workdir = workdir.map(str::trim).filter(|value| !value.is_empty());
@@ -2012,6 +2017,7 @@ impl AppState {
         action: &str,
     ) -> Result<(), ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
+        inner.require_delegation_inventory()?;
         if let Some(block) = read_only_session_delegation_block_locked(&inner, session_id) {
             let detail = block
                 .title
@@ -2444,6 +2450,8 @@ impl AppState {
     }
 
     fn reconcile_delegation_waits_after_boot(&self) -> Result<()> {
+        self.inner.lock().expect("state mutex poisoned").require_delegation_inventory()
+            .map_err(|error| anyhow!(error.message))?;
         let (revision, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             // Holds are read from the loaded children before any wait is
@@ -2739,6 +2747,7 @@ fn validate_delegation_wait_parent_locked(
     inner: &StateInner,
     parent_session_id: &str,
 ) -> Result<(), ApiError> {
+    inner.require_delegation_inventory()?;
     match delegation_wait_parent_eligibility_locked(inner, parent_session_id) {
         DelegationWaitParentEligibility::Eligible => Ok(()),
         DelegationWaitParentEligibility::Missing => Err(ApiError::local_session_missing()),
@@ -2822,6 +2831,9 @@ fn refresh_delegation_waits_matching_locked(
     inner: &mut StateInner,
     should_refresh: impl Fn(&DelegationWaitRecord) -> bool,
 ) -> DelegationWaitRefresh {
+    if !inner.delegation_inventory_complete() {
+        return DelegationWaitRefresh::default();
+    }
     if inner.delegation_waits.is_empty() {
         return DelegationWaitRefresh::default();
     }

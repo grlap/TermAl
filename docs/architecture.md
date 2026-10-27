@@ -22,6 +22,12 @@ provenance. Bounded coding subwork still uses parent-integrated delegations.
 
 ## Delegation follow-up admission
 
+Startup restores the full delegation inventory on the existing post-listen boot
+worker. A runtime completeness witness fences inventory-dependent operations
+until atomic publication; independent routes can already serve. See
+[delegation startup](features/delegation-startup.md) for HTTP and persistence
+behavior during that interval.
+
 Follow-ups reserve a terminal result before restoring a Codex thread and re-arm
 at the prompt's start/queue commit. `delegation_followup_admission.rs` owns this
 transaction, wait-consumption rollback and typed startup-failure settlement;

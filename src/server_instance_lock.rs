@@ -199,7 +199,7 @@ impl AppState {
             .map(FsPath::to_path_buf)
             .context("the TermAl state database path has no parent directory")?;
         ServerInstanceLock::acquire(&data_dir)?.keep_in(lock_holder)?;
-        Self::new_with_paths(
+        Self::new_before_listen_with_paths(
             default_workdir,
             persistence_path,
             orchestrator_templates_path,

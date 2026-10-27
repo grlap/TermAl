@@ -37,6 +37,7 @@ fn engram_child_session_authority_locked<'a>(
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
+    inner.require_delegation_inventory().map_err(|error| error.message)?;
     let Some(delegation) = inner
         .delegations
         .iter()
@@ -74,6 +75,7 @@ fn engram_parent_session_authority_locked<'a>(
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
+    inner.require_delegation_inventory().map_err(|error| error.message)?;
     let record = inner
         .find_session_index(session_id)
         .and_then(|index| inner.sessions.get(index))
@@ -150,6 +152,7 @@ fn engram_session_authority_locked<'a>(
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
+    inner.require_delegation_inventory().map_err(|error| error.message)?;
     if AppState::engram_session_has_child_binding_shape_locked(inner, session_id) {
         engram_child_session_authority_locked(
             inner,

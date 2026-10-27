@@ -752,22 +752,162 @@ fn held_fence_keeps_the_state_lock_free_and_completes_only_after_sql_write() {
 }
 
 #[test]
-fn write_failure_is_reported_to_the_fence_not_only_the_worker() {
+fn predecessor_change_keeps_the_same_fences_pending_until_retry_commits() {
     let mut fixture = FenceFixture::new();
-    let expected = fixture.wait_record("failed-write");
-    let waiter = fixture.enqueue(PersistFenceTarget::WaitRegistration(expected));
+    let id = {
+        let mut inner = fixture.inner.lock().unwrap();
+        let id = inner
+            .create_session(
+                Agent::Codex,
+                None,
+                fixture.root.path().to_string_lossy().into_owned(),
+                None,
+                None,
+            )
+            .session
+            .id;
+        let index = inner.find_session_index(&id).unwrap();
+        push_message_on_record(
+            inner.session_mut_by_index(index).unwrap(),
+            Message::Text {
+                id: "retained-body".to_owned(),
+                timestamp: "2026-10-01T01:02:03Z".to_owned(),
+                author: Author::Assistant,
+                text: "original body".to_owned(),
+                expanded_text: None,
+                source: None,
+                attachments: Vec::new(),
+            },
+        );
+        id
+    };
+    let baseline = fixture.collect();
+    fixture.write(&baseline).unwrap();
+    assert!(!fixture.cache.transcripts.is_empty());
+
+    let targets = ["first-predecessor-retry", "second-predecessor-retry"]
+        .map(|id| PersistFenceTarget::WaitRegistration(fixture.wait_record(id)));
+    let waiters = targets.clone().map(|target| fixture.enqueue(target));
     fixture.receive(false);
+    fixture.batch.drain(&fixture.rx, false);
+    let completions = fixture
+        .batch
+        .pending
+        .iter()
+        .map(|fence| Arc::clone(&fence.completion))
+        .collect::<Vec<_>>();
+    let deadlines = completions
+        .iter()
+        .map(|completion| completion.deadline)
+        .collect::<Vec<_>>();
     let delta = fixture.collect();
-    let result = persist_delta_with_fences_using(&delta, &mut fixture.batch, || {
-        Err(anyhow!("injected transaction failure"))
+    let path = fixture.root.path().join("termal.sqlite");
+    let external_path = path.clone();
+    let external_id = id.clone();
+    // Commit through another real connection after the cached predecessor
+    // is sampled, before the writer acquires its transaction. No timing race.
+    PERSIST_MESSAGE_SERIALIZE_HOOK.with(|slot| {
+        assert!(slot.borrow().is_none());
+        *slot.borrow_mut() = Some(Box::new(move |_| {
+            let other = rusqlite::Connection::open(external_path).unwrap();
+            assert_eq!(
+                other
+                    .execute(
+                        "UPDATE messages SET value_json = json_set(value_json, '$.text', 'external body') WHERE session_id = ?1 AND message_id = 'retained-body'",
+                        [external_id],
+                    )
+                    .unwrap(),
+                1
+            );
+        }));
     });
-    assert!(result.is_err());
-    assert_eq!(
-        poll(&waiter),
-        Some(Err(PersistFenceError::WriteFailed(
-            "injected transaction failure".to_owned()
-        )))
+    let result = fixture.write(&delta);
+    assert!(
+        result.as_ref().is_err_and(|error| format!("{error:#}")
+            .contains("transcript predecessor changed")),
+        "the safety refusal must still reject the stale sparse write"
     );
+    assert!(fixture.cache.connection.is_none());
+    assert!(fixture.cache.transcripts.is_empty());
+    let stored = rusqlite::Connection::open(&path).unwrap();
+    for target in &targets {
+        assert!(!target.is_already_durable(&stored).unwrap());
+    }
+    let body = |connection: &rusqlite::Connection| -> String {
+        let json: String = connection
+            .query_row(
+                "SELECT value_json FROM messages WHERE session_id = ?1 AND message_id = 'retained-body'",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str::<Value>(&json).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(body(&stored), "external body");
+    for waiter in &waiters {
+        assert_eq!(
+            poll(waiter),
+            None,
+            "a retryable refusal must leave the waiter pending"
+        );
+    }
+    let mut retry = PersistWorkerRetryState::default();
+    assert!(!retry.finish_fenced_tick(&result.map(|_| ()), false, &mut fixture.batch));
+    assert!(retry.retry_after_failure);
+    assert_eq!(fixture.batch.pending.len(), 2);
+    for ((fence, completion), deadline) in fixture
+        .batch
+        .pending
+        .iter()
+        .zip(&completions)
+        .zip(&deadlines)
+    {
+        assert!(Arc::ptr_eq(&fence.completion, completion));
+        assert_eq!(fence.completion.deadline, *deadline);
+        assert!(matches!(
+            fence.completion.progress().phase,
+            PersistFencePhase::Accepted
+        ));
+    }
+
+    let retry_delta = fixture.collect();
+    fixture.write(&retry_delta).unwrap();
+    assert!(fixture.batch.pending.is_empty());
+    for waiter in &waiters {
+        assert_eq!(poll(waiter), Some(Ok(())));
+    }
+    for target in &targets {
+        assert!(target
+            .is_already_durable(fixture.cache.connection.as_ref().unwrap())
+            .unwrap());
+    }
+    assert_eq!(body(&stored), "original body");
+}
+
+#[test]
+fn write_failure_is_reported_to_the_fence_not_only_the_worker() {
+    for message in [
+        "injected transaction failure",
+        // Matching diagnostic text alone must never authorize a retry.
+        "transcript predecessor changed while preparing persistence",
+    ] {
+        let mut fixture = FenceFixture::new();
+        let expected = fixture.wait_record("failed-write");
+        let waiter = fixture.enqueue(PersistFenceTarget::WaitRegistration(expected));
+        fixture.receive(false);
+        let delta = fixture.collect();
+        let result = persist_delta_with_fences_using(&delta, &mut fixture.batch, || {
+            Err(anyhow!("{message}"))
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            poll(&waiter),
+            Some(Err(PersistFenceError::WriteFailed(message.to_owned())))
+        );
+    }
 }
 
 #[test]

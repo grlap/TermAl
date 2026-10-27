@@ -108,6 +108,7 @@ fn retain_source_observation_removal_locked(inner: &mut StateInner, sessions: &[
 impl StateInner {
     /// Internal removals defer the whole subtree and preserve visible recovery.
     fn defer_source_observation_removal(&mut self, session_id: &str) -> bool {
+        if !self.delegation_inventory_complete() { return true; }
         let sessions = source_observation_removal_set(self, session_id);
         if source_observation_removal_blocker(self, &sessions).is_none() {
             return false;
@@ -120,6 +121,7 @@ impl StateInner {
     }
 
     fn retain_hidden_source_observation_sessions(&mut self) {
+        if !self.delegation_inventory_complete() { return; }
         let hidden: Vec<_> = self
             .sessions
             .iter()

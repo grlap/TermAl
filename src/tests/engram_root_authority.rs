@@ -2996,10 +2996,11 @@ fn source_root_authority_review_stopped_production_writer_refuses_staging_and_cl
 #[test]
 fn source_root_authority_review_one_total_deadline_covers_prepare_read_and_publish() {
     for expired in [false, true] {
+        // Leave room for Git object paths below the private fixture root on Windows.
         let label = if expired {
-            "authority-total-multiple-phases-expired"
+            "total-phases-expired"
         } else {
-            "authority-total-multiple-phases-unadvanced"
+            "total-phases-unadvanced"
         };
         let claimed = ClaimedRoot::new_scripted(label, Vec::new());
         let clock = claimed.state.engram_budget_clock();

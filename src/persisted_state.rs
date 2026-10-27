@@ -72,6 +72,8 @@ struct PersistedState {
     /// Delegations are never read from or written into `app_state` metadata.
     #[serde(skip)]
     delegations: Vec<DelegationRecord>,
+    #[serde(skip)]
+    delegation_inventory: DelegationInventoryState,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: PersistTracked<Vec<DelegationWaitRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -250,6 +252,7 @@ impl PersistedState {
                 &inner.orchestrator_instances,
             ),
             delegations: Vec::new(),
+            delegation_inventory: inner.delegation_inventory.clone(),
             delegation_waits: collection!("delegationWaits", &inner.delegation_waits,),
             test_run_cards_epoch: clone_persist_metadata_field(
                 "testRunCardsEpoch",
@@ -342,6 +345,7 @@ impl PersistedState {
                 .snapshot_clone(),
             orchestrator_instances: self.orchestrator_instances.snapshot_clone(),
             delegations: Vec::new(),
+            delegation_inventory: self.delegation_inventory.clone(),
             delegation_waits: self.delegation_waits.snapshot_clone(),
             test_run_cards_epoch: self.test_run_cards_epoch.clone(),
             test_run_cards: self.test_run_cards.snapshot_clone(),
@@ -359,12 +363,18 @@ impl PersistedState {
     /// Builds the value from inner.
     fn from_inner(inner: &StateInner) -> Self {
         let mut persisted = Self::metadata_from_inner(inner);
-        persisted.delegations = inner.delegations.clone();
+        // A pending/failed inventory cannot supply an authoritative row value
+        // or absence. Even a conflicting in-memory writer must not replace
+        // durable history through this full-snapshot fallback.
+        if inner.delegation_inventory_complete() {
+            persisted.delegations = inner.delegations.clone();
+        }
         persisted.sessions = inner
             .sessions
             .iter()
             .filter(|record| {
-                !record.hidden
+                !inner.delegation_inventory_complete()
+                    || !record.hidden
                     || source_observation_removal_blocker(
                         inner,
                         &source_observation_removal_set(inner, &record.session.id),
@@ -488,6 +498,7 @@ impl PersistedState {
             remote_session_transcript_applied_revisions: HashMap::new(),
             orchestrator_instances: self.orchestrator_instances.into(),
             delegations: self.delegations,
+            delegation_inventory: self.delegation_inventory,
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
             acceptance_source_captures_live: Arc::default(),
@@ -589,7 +600,9 @@ impl PersistedState {
         inner.normalize_local_paths();
         inner.validate_projects_consistent()?;
         inner.recover_interrupted_sessions();
-        inner.repair_delegation_child_session_links();
+        if inner.delegation_inventory_complete() {
+            inner.repair_delegation_child_session_links();
+        }
         inner.rebuild_running_read_only_delegations();
         inner.normalize_orchestrator_instances_with_persisted_non_running(
             &persisted_non_running_session_ids,

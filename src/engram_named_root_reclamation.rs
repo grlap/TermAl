@@ -408,6 +408,9 @@ impl AppState {
         let now = self.engram_budget_clock().now();
         let (id, snapshot) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if !inner.delegation_inventory_complete() {
+                return "delegation inventory is unavailable; reclamation is deferred";
+            }
             if inner.engram_root_reclamation.flight.is_some() {
                 return "a bounded reclamation pass is already running";
             }

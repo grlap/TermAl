@@ -134,6 +134,7 @@ async fn run() -> Result<()> {
 
 /// Runs the backend server.
 async fn run_server() -> Result<()> {
+    let boot_started = std::time::Instant::now();
     let cwd_path = std::env::current_dir().context("failed to resolve current directory")?;
     let ui_dist_dir = cwd_path.join("ui").join("dist");
     let ui_index_file = ui_dist_dir.join("index.html");
@@ -164,12 +165,13 @@ async fn run_server() -> Result<()> {
         .local_addr()
         .context("failed to read local backend address")?;
     state.set_local_http_base_url(format!("http://{bound}"));
+    eprintln!("startup> listener bound elapsed_ms={}", boot_started.elapsed().as_millis());
 
-    // Publish per-session readiness fences synchronously, then recover runtimes
-    // in the background. The shared Codex app-server still receives the bound
-    // base URL, while health and state routes begin serving without waiting for
-    // Engram CLI work-binding calls.
-    let _post_listen_boot_worker = state.start_post_listen_boot()?;
+    // Restore the full inventory on the owned boot worker. Its publication
+    // prepares per-session readiness before dependent requests can observe it.
+    // Independent HTTP routes can serve throughout, and resumed runtimes see
+    // the already-bound base URL.
+    let post_listen_boot_worker = state.start_post_listen_boot()?;
     // Bound, with recovery started: the journal's own thread records this boot
     // and, from then on, how this instance ends.
     let host_lifecycle = HostLifecycle::start(&state);
@@ -214,6 +216,10 @@ async fn run_server() -> Result<()> {
         .await
         .context("backend server failed");
     federation_runtime.shutdown().await;
+    match tokio::task::spawn_blocking(move || post_listen_boot_worker.join()).await {
+        Ok(Ok(())) => {}
+        _ => eprintln!("startup> post-listen boot worker join failed during shutdown"),
+    }
     #[cfg(not(test))]
     shutdown_state.stop_telegram_relay_runtime();
 
@@ -670,6 +676,7 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/codex/requests/{message_id}",
             post(submit_codex_app_request),
         )
+        .layer(axum::middleware::from_fn_with_state(state.clone(), delegation_inventory_http_guard))
         .with_state(state)
         .layer(axum::Extension(policy_limiter))
         .layer(axum::Extension(EngramAuditLimiter(Arc::new(
@@ -1155,6 +1162,7 @@ include!("session_body_sequence.rs");
 include!("state_boot.rs");
 include!("state_inner.rs");
 include!("delegations.rs");
+include!("delegation_inventory.rs");
 include!("delegation_worker.rs");
 include!("delegation_worker_handoff.rs");
 include!("delegation_attempt_state.rs");

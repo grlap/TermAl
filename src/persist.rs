@@ -970,7 +970,10 @@ mod state_permission_hardening_tests {
 /// Loads state from SQLite.
 #[cfg(test)]
 fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
-    let (state, _connection) = load_state_for_boot(path)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let (state, _connection) = load_state_from_sqlite_with_connection(path, false)?;
     Ok(state)
 }
 
@@ -985,7 +988,7 @@ fn load_state_for_boot(
     if !path.exists() {
         return Ok((None, None));
     }
-    let (state, connection) = load_state_from_sqlite_with_connection(path)?;
+    let (state, connection) = load_state_from_sqlite_with_connection(path, true)?;
     Ok((state, Some(connection)))
 }
 
@@ -1037,13 +1040,17 @@ include!("persist_sqlite_reader_floor_tests.rs");
 
 fn load_state_from_sqlite_with_connection(
     path: &FsPath,
+    defer_delegations: bool,
 ) -> Result<(Option<StateInner>, rusqlite::Connection)> {
     let connection = open_sqlite_state_connection_unconfigured(path)?;
     let persisted = ensure_sqlite_state_schema_for_load_path(&connection, path)?;
     let (mut session_records, mut quarantined_session_ids, mut skipped_session_records) =
         load_session_records_from_sqlite_with_skipped(&connection, path)?;
-    let (delegation_records, quarantined_delegation_ids) =
-        load_delegation_records_from_sqlite(&connection, path)?;
+    let (delegation_records, quarantined_delegation_ids) = if defer_delegations {
+        (Vec::new(), BTreeSet::new())
+    } else {
+        load_delegation_records_from_sqlite(&connection, path)?
+    };
     let Some(mut persisted) = persisted else {
         return Ok((None, connection));
     };
@@ -1080,6 +1087,13 @@ fn load_state_from_sqlite_with_connection(
     persisted.quarantined_persisted_session_ids = quarantined_session_ids;
     persisted.quarantined_persisted_delegation_ids = quarantined_delegation_ids;
     persisted.delegations = delegation_records;
+    if defer_delegations {
+        persisted.delegation_inventory = DelegationInventoryState::Loading {
+            token: Uuid::new_v4().to_string(),
+            source: delegation_inventory_file_identity(path)?,
+            worker_started: false,
+        };
+    }
     let mut inner = persisted
         .into_inner()
         .with_context(|| format!("failed to validate state from `{}`", path.display()))?;
@@ -1089,10 +1103,91 @@ fn load_state_from_sqlite_with_connection(
 
 include!("persist_sqlite_transcript_read.rs");
 
+#[cfg(test)]
+thread_local! {
+    static DELEGATION_STARTUP_PAYLOAD_WORK: std::cell::Cell<(usize, usize)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
+
+#[cfg(test)]
+fn take_delegation_startup_payload_work() -> (usize, usize) {
+    DELEGATION_STARTUP_PAYLOAD_WORK.with(|work| work.replace((0, 0)))
+}
+
 fn load_delegation_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<(Vec<DelegationRecord>, BTreeSet<String>)> {
+    let (records, quarantined, _) = load_delegation_records_with_fingerprint(connection, path, || false)?;
+    Ok((records, quarantined))
+}
+
+impl AppState {
+    /// Fences the final inventory validation and install with existing writer
+    /// admission plus SQLite's cross-connection reservation. SQL stays off
+    /// StateInner. Never wait for StateInner while holding either writer lock:
+    /// synchronous persistence already acquires them in the other order.
+    fn lock_delegation_inventory_publication<'state, 'sql, 'writer>(
+        &'state self,
+        connection: &'sql rusqlite::Connection,
+        writer: &'writer SqliteStateWriterAdmission,
+        version: i64,
+        fingerprint: &str,
+        source: &FederationImageFileIdentity,
+        observe: &mut impl FnMut(&str),
+    ) -> Result<(
+        StateMutexGuard<'state, StateInner>,
+        rusqlite::Transaction<'sql>,
+        SqliteStateWriterGuard<'writer>,
+    )> {
+        let mut observed = false;
+        loop {
+            // A StateInner wait is ordinary lock admission, not SQLite busy
+            // time. Start a fresh SQL budget after each released state wait.
+            let deadline = std::time::Instant::now() + SQLITE_BUSY_TIMEOUT;
+            let remaining = deadline.checked_duration_since(std::time::Instant::now())
+                .context("delegation inventory publication admission timed out")?;
+            let admission = lock_sqlite_state_writer_for(writer, remaining)
+                .context("delegation inventory writer admission timed out")?;
+            let remaining = deadline.checked_duration_since(std::time::Instant::now())
+                .context("delegation inventory publication admission timed out")?;
+            connection.busy_timeout(remaining)?;
+            let transaction = rusqlite::Transaction::new_unchecked(
+                connection, rusqlite::TransactionBehavior::Immediate,
+            )?;
+            let current_version: i64 =
+                transaction.query_row("PRAGMA data_version", [], |row| row.get(0))?;
+            if version != current_version {
+                anyhow::ensure!(
+                    delegation_inventory_fingerprint(&transaction)? == fingerprint,
+                    "delegation inventory changed while loading; refusing stale publication"
+                );
+            }
+            if !observed {
+                observed = true;
+                observe("publication_reserved");
+            }
+            if let Some(inner) = self.inner.try_lock_now() {
+                // Revalidate the pathname at the publication boundary as well
+                // as the open connection's SQL generation. No SQL runs here.
+                verify_delegation_inventory_source(connection, &self.persistence_path, source)?;
+                observe("publication_state_acquired");
+                return Ok((inner, transaction, admission));
+            }
+            drop(transaction);
+            drop(admission);
+            // Wait on the existing state mutex without reserving SQLite. This
+            // is lock admission, not a retry of loading or recovery effects.
+            drop(self.inner.lock().expect("state mutex poisoned"));
+        }
+    }
+}
+
+fn load_delegation_records_with_fingerprint(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+    cancelled: impl Fn() -> bool,
+) -> Result<(Vec<DelegationRecord>, BTreeSet<String>, String)> {
     let mut statement = connection
         .prepare("SELECT id, value_json FROM delegations ORDER BY rowid")
         .with_context(|| {
@@ -1114,18 +1209,20 @@ fn load_delegation_records_from_sqlite(
     let mut records = Vec::new();
     let mut quarantined_ids = BTreeSet::new();
     let mut skipped = 0_usize;
+    let mut fingerprint = sha2::Sha256::new();
     for row in rows {
-        let (delegation_id, encoded) = match row {
-            Ok(row) => row,
-            Err(err) => {
-                skipped += 1;
-                eprintln!(
-                    "persist> skipping unreadable delegation row from `{}`: {err:#}",
-                    path.display()
-                );
-                continue;
-            }
-        };
+        anyhow::ensure!(!cancelled(), "delegation inventory load interrupted by shutdown");
+        // A row conversion/iteration failure cannot identify a complete set of
+        // records or quarantine IDs. Refuse rather than certify an omission.
+        let (delegation_id, encoded) = row.with_context(|| {
+            format!("failed to read complete delegation inventory from `{}`", path.display())
+        })?;
+        delegation_inventory_hash_row(&mut fingerprint, &delegation_id, &encoded);
+        #[cfg(test)]
+        DELEGATION_STARTUP_PAYLOAD_WORK.with(|work| {
+            let (rows, bytes) = work.get();
+            work.set((rows + 1, bytes + encoded.len()));
+        });
         match serde_json::from_str::<DelegationRecord>(&encoded) {
             Ok(record) if record.id == delegation_id => records.push(record),
             Ok(record) => {
@@ -1152,7 +1249,7 @@ fn load_delegation_records_from_sqlite(
             path.display()
         );
     }
-    Ok((records, quarantined_ids))
+    Ok((records, quarantined_ids, format!("{:x}", fingerprint.finalize())))
 }
 
 include!("persist_sqlite_transcript_write.rs");
@@ -1194,10 +1291,10 @@ fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) 
         path,
         &metadata,
         &persisted.sessions,
-        true,
+        matches!(persisted.delegation_inventory, DelegationInventoryState::Ready),
         &persisted.quarantined_persisted_session_ids,
         &persisted.delegations,
-        true,
+        matches!(persisted.delegation_inventory, DelegationInventoryState::Ready),
         &persisted.quarantined_persisted_delegation_ids,
     )
 }
@@ -1229,10 +1326,10 @@ fn persist_locked_state_to_sqlite(path: &FsPath, inner: &StateInner) -> Result<u
         path,
         &metadata,
         &persisted.sessions,
-        true,
+        inner.delegation_inventory_complete(),
         &persisted.quarantined_persisted_session_ids,
         &persisted.delegations,
-        true,
+        inner.delegation_inventory_complete(),
         &persisted.quarantined_persisted_delegation_ids,
         guard,
         true,
@@ -1576,6 +1673,19 @@ fn persist_delta_via_cache_timed(
     result
 }
 
+/// A different connection committed after transcript preparation. The write
+/// must be retried from a fresh baseline without resolving its content fences.
+#[derive(Debug)]
+struct PersistTranscriptPredecessorChanged;
+
+impl std::fmt::Display for PersistTranscriptPredecessorChanged {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("transcript predecessor changed while preparing persistence")
+    }
+}
+
+impl std::error::Error for PersistTranscriptPredecessorChanged {}
+
 fn persist_delta_via_cache_inner(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
@@ -1682,7 +1792,7 @@ fn persist_delta_via_cache_inner(
                 && Some(tx.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?)
                     != predecessor_version
             {
-                bail!("transcript predecessor changed while preparing persistence");
+                return Err(PersistTranscriptPredecessorChanged.into());
             }
             write_federation_host_generation(&tx, &delta.metadata)?;
             let committed_metadata = write_metadata_units(

@@ -1024,6 +1024,15 @@ impl PersistFenceBatch {
         connection: Option<&rusqlite::Connection>,
     ) {
         if let Err(error) = result {
+            if error.is::<PersistTranscriptPredecessorChanged>() {
+                // The worker retries this delta with an invalidated baseline.
+                // Retain the original completions and deadlines for that tick;
+                // no failed transaction can acknowledge their content.
+                for fence in &self.pending {
+                    fence.completion.progress().phase = PersistFencePhase::Accepted;
+                }
+                return;
+            }
             self.fail(PersistFenceError::WriteFailed(format!("{error:#}")));
             return;
         }

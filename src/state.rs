@@ -1679,6 +1679,8 @@ struct StateInner {
     orchestrator_instances: PersistTracked<Vec<OrchestratorInstance>>,
     /// Durable parent-child delegation links for ordinary sessions.
     delegations: Vec<DelegationRecord>,
+    /// Runtime-only completeness of the full durable delegation inventory.
+    delegation_inventory: DelegationInventoryState,
     /// In-process admission owners. Terminal records remain durable and readable
     /// until a reserved follow-up reaches prompt admission under the state lock.
     /// Values retain the last Author::You id before admission (None for an
@@ -1821,6 +1823,7 @@ impl StateInner {
             test_run_cards: PersistTracked::default(),
             test_run_waits: PersistTracked::default(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
+            delegation_inventory: DelegationInventoryState::Ready,
             delegation_waits: PersistTracked::default(),
             delegation_mutation_stamps: BTreeMap::new(),
             delegation_catalog_children: Mutex::new(FederationCatalogChildren::default()),

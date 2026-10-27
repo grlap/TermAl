@@ -234,6 +234,7 @@ fn federation_mailbox_root_locked<'a>(
     inner: &'a StateInner,
     session_id: &str,
 ) -> Result<&'a SessionRecord, ApiError> {
+    inner.require_delegation_inventory()?;
     let index = inner
         .find_session_index(session_id)
         .ok_or_else(|| ApiError::not_found("session not found"))?;

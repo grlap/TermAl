@@ -297,11 +297,16 @@ impl StateInner {
     /// `session_mut_by_index` eagerly bumps the mutation stamp, so this repair
     /// only calls it after deciding the row must change.
     fn repair_delegation_child_session_links(&mut self) {
-        let mut links = self
+        let links = self
             .delegations
             .iter()
             .map(|delegation| (delegation.child_session_id.clone(), delegation.id.clone()))
             .collect::<BTreeMap<_, _>>();
+
+        self.repair_delegation_child_session_links_with(links);
+    }
+
+    fn repair_delegation_child_session_links_with(&mut self, mut links: BTreeMap<String, String>) {
 
         for record in &mut self.sessions {
             if links.contains_key(&record.session.id) {
@@ -679,14 +684,15 @@ impl StateInner {
     fn collect_persist_delta_plan(&mut self, watermark: u64) -> PersistDeltaPlan {
         self.retain_hidden_source_observation_sessions();
         let mut changed_sessions = Vec::new();
-        let retry_removed_ids = std::mem::take(&mut self.removed_session_ids);
-        let retry_removed_delegation_ids = std::mem::take(&mut self.removed_delegation_ids);
+        let complete = self.delegation_inventory_complete();
+        let retry_removed_ids = if complete { std::mem::take(&mut self.removed_session_ids) } else { Vec::new() };
+        let retry_removed_delegation_ids = if complete { std::mem::take(&mut self.removed_delegation_ids) } else { BTreeMap::new() };
         let mut removed_ids = retry_removed_ids.clone();
         for record in &self.sessions {
             if record.mutation_stamp <= watermark {
                 continue;
             }
-            if record.hidden {
+            if record.hidden && complete {
                 // A session that changed and is now hidden must not
                 // stay in SQLite, so ensure any prior visible row is
                 // removed.
@@ -702,6 +708,7 @@ impl StateInner {
         let changed_delegations = self
             .delegations
             .iter()
+            .filter(|_| complete)
             .filter_map(|delegation| {
                 let mutation_stamp = self
                     .delegation_mutation_stamps
