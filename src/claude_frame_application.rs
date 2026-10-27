@@ -272,9 +272,33 @@ fn apply_claude_frame_plan(
     // Who produced what this frame records, fixed before any of its effects:
     // this runtime and the turn the router found for it. The sink checks it
     // again where each observation is applied (`claude_outstanding_work.rs`).
+    let observed_runtime_generation = match &plan.terminal {
+        Some(ClaudeResultOwner::Runtime(owner)) => owner.adopted_generation,
+        Some(_) => None,
+        None => lock_claude_turn_ownership(&context.ownership).open_adopted_runtime_generation(),
+    };
     let provenance = ClaudeObservationProvenance {
         token: context.token.clone(),
-        origin: plan.origin.clone(),
+        origin: if plan.scope != ClaudeFrameScope::Nested
+            && plan.origin == ClaudeWorkOrigin::Unattributed
+        {
+            let inner = context.state.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_session_index(&context.session_id)
+                .map(|index| &inner.sessions[index])
+                .filter(|record| record.runtime.matches_runtime_token(&context.token))
+                .and_then(|record| {
+                    record.adopted_claude_turn_generation.filter(|generation| {
+                        *generation == record.active_turn_generation
+                            && Some(*generation) == observed_runtime_generation
+                    })
+                })
+                .map_or(ClaudeWorkOrigin::Unattributed, |turn_generation| {
+                    ClaudeWorkOrigin::Adopted { turn_generation }
+                })
+        } else {
+            plan.origin.clone()
+        },
     };
     recorder.set_observation_provenance(EngramObservationProvenance::Claude(provenance.clone()));
     // The work the frame starts is registered, and a frame that proves tool

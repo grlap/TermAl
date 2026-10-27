@@ -423,6 +423,14 @@ impl AppState {
         place: &EngramBasisPlace,
         budget: Duration,
     ) -> Option<EngramExecutionSourceBasis> {
+        #[cfg(test)]
+        {
+            let capture = self.inner.lock().expect("state mutex poisoned")
+                .test_engram_source_capture.clone();
+            if let Some(capture) = capture {
+                return capture(place, budget);
+            }
+        }
         let live = self
             .inner
             .lock()

@@ -32,7 +32,8 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
 
 // The layout and its semantic reader floor evolve independently.
 const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
-const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1";
+const SQLITE_OBSERVATION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1";
+const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";

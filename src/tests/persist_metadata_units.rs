@@ -723,9 +723,38 @@ fn metadata_units_old_reader(connection: &rusqlite::Connection) -> Result<Value>
 // This offline rollback contract is only for the pre-handoff units layout.
 fn metadata_units_rollback_connection(fixture: &FenceFixture) -> &rusqlite::Connection {
     let connection = metadata_units_connection(fixture);
+    // Extend the existing historical fixture owner; never downgrade custody.
+    assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION,
+        "only construct the historical fixture from the known current layout");
+    let custody_rows: u64 = connection.query_row(
+        "SELECT count(*) FROM sessions WHERE
+         json_type(value_json,'$.engramRuntimeCheckpoint') IS NOT NULL OR
+         json_type(value_json,'$.engramUnadmittedActiveTurn') IS NOT NULL OR
+         json_type(value_json,'$.engramUnadmittedClosingJobs') IS NOT NULL OR
+         json_type(value_json,'$.engramUnadmittedReports') IS NOT NULL",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(custody_rows, 0, "historical rollback fixture must contain no observation custody");
     connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",
         [SQLITE_METADATA_UNITS_VERSION]).unwrap();
     connection
+}
+
+#[test]
+fn metadata_units_rollback_refuses_observation_reader_floor_without_data_loss() {
+    let mut fixture = FenceFixture::new();
+    fixture.wait_record("retained-after-rollback-refusal");
+    fixture.write(&fixture.collect()).unwrap();
+    let connection = metadata_units_connection(&fixture);
+    let metadata = read_metadata_units_unchecked(connection).unwrap();
+    let generation = metadata_unit_generation(connection).unwrap();
+    assert!(connection.execute_batch(&metadata_units_rollback_sql()).is_err());
+    if !connection.is_autocommit() {
+        connection.execute_batch("ROLLBACK").unwrap();
+    }
+    assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION);
+    assert_eq!(read_metadata_units_unchecked(connection).unwrap(), metadata);
+    assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
 }
 
 #[test]

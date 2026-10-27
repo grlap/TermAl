@@ -13,6 +13,9 @@
 // module uses). New module.
 use super::*;
 
+#[path = "engram_unadmitted_runtime_reporting.rs"]
+mod unadmitted_runtime_reporting;
+
 fn task_notification() -> Value {
     json!({"type": "system", "subtype": "task_notification", "task_id": "b1",
         "tool_use_id": "toolu-b1", "status": "completed"})
@@ -316,7 +319,7 @@ fn an_edit_by_a_turn_beside_a_granted_turn_leaves_the_grants_source_report_withh
 }
 
 #[test]
-fn an_adopted_runtime_started_turn_reports_nothing_and_never_closes_a_leftover_grant() {
+fn an_adopted_runtime_started_turn_never_reports_under_or_closes_a_leftover_grant() {
     let turn = CheckedTurn::start("runtime-adopted", true);
     turn.finish();
     // A grant left open on the session (a degraded earlier checkpoint) must

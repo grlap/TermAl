@@ -40,6 +40,9 @@ const CLAUDE_OUTSTANDING_WORK_LIMIT: usize = 256;
 enum ClaudeWorkOrigin {
     /// The prompt attempt dispatched under this session turn generation.
     Attempt { turn_generation: u64 },
+    /// A root frame proven to belong to this adopted runtime turn. Nested
+    /// frames need their own parent proof and never inherit this identity.
+    Adopted { turn_generation: u64 },
     /// No prompt attempt: a turn no prompt owned, an unresolved turn, no turn,
     /// or a subagent whose task the open attempt did not launch.
     Unattributed,
@@ -105,6 +108,7 @@ fn claude_observation_disposition(
     }
     match provenance.origin {
         ClaudeWorkOrigin::Attempt { turn_generation }
+        | ClaudeWorkOrigin::Adopted { turn_generation }
             if turn_generation != record.active_turn_generation =>
         {
             ClaudeObservationDisposition::Foreign
@@ -113,7 +117,9 @@ fn claude_observation_disposition(
             ClaudeObservationDisposition::Unowned
         }
         ClaudeWorkOrigin::Attempt { .. } => ClaudeObservationDisposition::Current,
-        ClaudeWorkOrigin::Unattributed => ClaudeObservationDisposition::Foreign,
+        ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => {
+            ClaudeObservationDisposition::Foreign
+        }
     }
 }
 
@@ -286,11 +292,13 @@ fn claude_begin_grant_beside_outstanding_work(record: &mut SessionRecord, grant_
 fn claude_exclude_observation(
     record: &mut SessionRecord,
     disposition: ClaudeObservationDisposition,
+    provenance: &EngramObservationProvenance,
     observation: &EngramRecorderObservation<'_>,
 ) {
     match disposition {
         ClaudeObservationDisposition::Current => {}
         ClaudeObservationDisposition::Unowned => {
+            observe_runtime_unadmitted_command(record, provenance, observation);
             push_unassigned_claude_observation(
                 record,
                 unassigned_claude_observation_text(observation),

@@ -1339,7 +1339,12 @@ impl AppState {
             );
             head.engram_interrupted = false;
             head.engram_waiting = true;
-            record.engram.rebind_required = false;
+            // Releasing a preparation hold is not a binding recovery read.
+            // Preserve an unread restore's fence; a definitive no-claim bind
+            // already cleared it, and an installed binding can be reused.
+            if record.engram.work_binding.is_some() {
+                record.engram.rebind_required = false;
+            }
             if reconcile {
                 record.engram.recovered_admission = true;
                 if let Some(evaluate) = &head.engram_evaluate
@@ -1372,7 +1377,10 @@ impl AppState {
                      not be saved locally; it stays held. Nothing was sent. {error:#}"
                 )));
             }
-            return Ok(EngramQueuedAdmissionOwner::capture(&inner.sessions[index]));
+            let owner = EngramQueuedAdmissionOwner::capture(&inner.sessions[index]);
+            drop(inner);
+            self.start_runtime_observation_worker(session_id);
+            return Ok(owner);
         }
         let head = record.queued_prompts.front_mut().expect("a held head");
         let saved = (

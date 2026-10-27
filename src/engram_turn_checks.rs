@@ -2010,9 +2010,22 @@ impl AppState {
                     });
                 }
             }
+            if disposition == ClaudeObservationDisposition::Unowned {
+                // Recognition (including a declared-only test) has already
+                // happened off-lock at this command's actual start. Pass its
+                // facts to the adopted trace; do not introduce another parser.
+                let command = recognised.as_ref()
+                    .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command));
+                observe_runtime_unadmitted_recognized_command(
+                    &mut inner.sessions[index], provenance,
+                    &EngramRecorderObservation::CommandStarted { key, ran, cwd }, command,
+                    visibility_declared.as_ref().map(|(_, _, binding)| binding),
+                );
+            }
             claude_exclude_observation(
                 &mut inner.sessions[index],
                 disposition,
+                provenance,
                 &EngramRecorderObservation::CommandStarted { key, ran, cwd },
             );
             return;
@@ -2449,6 +2462,7 @@ impl AppState {
             claude_exclude_observation(
                 record,
                 disposition,
+                provenance,
                 &EngramRecorderObservation::CommandDescribed { key, ran, cwd },
             );
         }
@@ -2591,7 +2605,7 @@ impl AppState {
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
-        let (starting_check, workdir, unresolved_writers, launch_held_target) = {
+        let (starting_check, workdir, unresolved_writers, launch_held_target, observed_declared) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -2625,8 +2639,26 @@ impl AppState {
                     Vec::new()
                 },
                 launch_held_target,
+                runtime_unadmitted_trace(record, provenance).and_then(|trace| {
+                    trace.commands.iter().find(|entry| entry.tool_key == key)
+                        .and_then(|entry| entry.declared.clone())
+                        .map(|binding| (trace.host_turn_ref.clone(), binding))
+                }),
             )
         };
+        // Reuse the declared owner's start binding and artifact verdict,
+        // off the state lock. Shell success alone cannot prove a declared
+        // test passed; a stale/mismatched completion remains indeterminate.
+        let observed_declared = observed_declared.map(|(turn, binding)| {
+            let matches = reported_command.and_then(engram_declared_candidate)
+                .is_some_and(|(_, words)| engram_declared_words(&binding.entry.command)
+                    .is_ok_and(|expected| expected == words));
+            let outcome = if matches {
+                let exit = exit.unwrap_or(EngramCommandExit::Unknown);
+                engram_declared_outcome(exit, &engram_declared_result(&binding, exit))
+            } else { Some(EngramExecutionOutcome::Unknown) };
+            (turn, binding, outcome)
+        });
         // On the recorder's path, so bounded as the turn path's own held read.
         let launch_held = launch_held_target.map(|target| {
             target.adapter.read_held_claims(
@@ -2682,7 +2714,7 @@ impl AppState {
                 && check.end.is_none()
                 && grant_id.as_deref() == Some(check.grant_id.as_str())
         };
-        let provenance = engram_turn_root_capture_locked(&inner, session_id);
+        let root_provenance = engram_turn_root_capture_locked(&inner, session_id);
         // A session in a turn now was in one while the check ran. Its turn
         // start or its own reports marked the check already; this catches a
         // turn that began where no mark was made.
@@ -2737,9 +2769,18 @@ impl AppState {
         // is excluded from it (`claude_outstanding_work.rs`). One a turn no
         // prompt owns hides is kept as unassigned, and still ends a check its
         // own key started.
+        if let Some((turn, binding, outcome)) = &observed_declared {
+            observe_runtime_unadmitted_declared_end(
+                record, provenance,
+                &EngramRecorderObservation::CommandFinished {
+                    key, command, reported_command, output, exit, runtime_output_cut,
+                }, turn, binding, *outcome,
+            );
+        }
         claude_exclude_observation(
             record,
             disposition,
+            provenance,
             &EngramRecorderObservation::CommandFinished {
                 key,
                 command,
@@ -2852,7 +2893,7 @@ impl AppState {
             exit,
             runtime_output_cut,
             &workers,
-            provenance,
+            root_provenance,
         );
     }
 
@@ -2875,6 +2916,7 @@ impl AppState {
             claude_exclude_observation(
                 &mut inner.sessions[index],
                 disposition,
+                provenance,
                 &EngramRecorderObservation::CommandAbandoned { key },
             );
             let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
@@ -2999,6 +3041,7 @@ impl AppState {
         claude_exclude_observation(
             &mut inner.sessions[index],
             disposition,
+            provenance,
             &EngramRecorderObservation::WorkspaceEdit { target },
         );
         engram_note_session_worktree(

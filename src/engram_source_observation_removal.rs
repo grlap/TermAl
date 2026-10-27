@@ -6,6 +6,7 @@ does not authorize orphan recovery, provider replay or evidence abandonment.
 */
 
 const SOURCE_OBSERVATION_DELETE_RETAINED: &str = "Session kept: source tracking has not finished. Resume recovers tracking only; then retry Delete.";
+const SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED: &str = "Session kept: a runtime-started turn bound to claimed work is still active. Stop the turn, let source tracking finish, then retry Delete. Queued work remains paused.";
 
 // Covers synchronous delivery as well as the queue worker's admission guard.
 // It spans every off-lock prepare/capture boundary until its outbox is installed.
@@ -27,7 +28,65 @@ impl Drop for SourceObservationPreparationGuard<'_> {
 fn source_observation_removal_content(record: &PersistedSessionRecord) -> Value {
     json!({ "deleteRequested": record.engram_source_observation_delete_requested,
         "admission": engram_admission_persisted_content(record),
+        "unadmittedActive": record.engram_unadmitted_active_turn,
+        "unadmittedClosing": record.engram_unadmitted_closing_jobs,
+        "unadmittedReports": record.engram_unadmitted_reports,
         "blocked": record.orchestrator_auto_dispatch_blocked })
+}
+
+fn runtime_observation_active_removal_duty(record: &SessionRecord) -> bool {
+    // Closing captures the then-current binding, not a borrowed old grant.
+    // An unbound trace can never become a report at this removal cut. Keep
+    // a known claimed trace even if its connection is temporarily unavailable.
+    record.engram.unadmitted_active_turn.is_some()
+        && record.engram.work_binding.is_some()
+}
+
+fn runtime_observation_has_removal_duty(record: &SessionRecord) -> bool {
+    runtime_observation_active_removal_duty(record)
+        || record.engram.unadmitted_closing_jobs.iter().any(|job| job.terminal_failure.is_none())
+        || record.engram.unadmitted_reports.iter().any(|report| {
+            report.envelopes.iter().any(|envelope| !matches!(envelope.delivery,
+                EngramRuntimeObservationDelivery::Recorded { .. }
+                    | EngramRuntimeObservationDelivery::Refused { .. }))
+        })
+}
+
+fn runtime_observation_terminal_removal_notice(record: &SessionRecord) -> Option<String> {
+    for report in &record.engram.unadmitted_reports {
+        for envelope in &report.envelopes {
+            let EngramRuntimeObservationDelivery::LocalFailure { code, .. } = &envelope.delivery else {
+                continue;
+            };
+            // These codes and identifiers are local diagnostic facts, not a
+            // reason to copy a retained transport message or request/token.
+            let (code, condition) = match code.as_str() {
+                "runtime_observation_retry_exhausted" => ("runtime_observation_retry_exhausted",
+                    "Delivery outcome is unknown"),
+                "runtime_observation_invalid_retained_image" => ("runtime_observation_invalid_retained_image",
+                    "The retained observation could not be validated; any earlier delivery remains unconfirmed"),
+                "runtime_observation_policy_unavailable" => ("runtime_observation_policy_unavailable",
+                    "Observation policy is unavailable; any earlier delivery remains unconfirmed"),
+                _ => ("runtime_observation_local_failure", "The retained observation has a local reporting failure"),
+            };
+            let turn = if report.host_turn_ref.len() <= 128
+                && !report.host_turn_ref.is_empty()
+                && report.host_turn_ref.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')) {
+                report.host_turn_ref.as_str()
+            } else { "unavailable" };
+            return Some(format!("Session kept: observation report for turn {turn} still needs resolution ({code}). {condition}; automatic reporting has stopped. Resume cannot resolve this report. The report is retained for support investigation before this session can be deleted."));
+        }
+    }
+    runtime_observation_active_removal_duty(record)
+        .then(|| SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED.to_owned())
+}
+
+fn source_observation_terminal_removal_notice(inner: &StateInner, sessions: &[String]) -> Option<String> {
+    sessions.iter().find_map(|session| {
+        let record = &inner.sessions[inner.find_session_index(session)?];
+        runtime_observation_terminal_removal_notice(record)
+            .map(|notice| format!("{notice} Affected session: {session}."))
+    })
 }
 
 fn source_observation_unresolved(intent: &EngramSourceObservationIntent) -> bool {
@@ -85,6 +144,7 @@ fn source_observation_removal_blocker(inner: &StateInner, sessions: &[String]) -
             }) || inner.find_session_index(session_id).is_some_and(|index| {
                 inner.sessions[index].engram.admission_in_progress.is_some()
                     || inner.sessions[index].engram.source_observation_preparations != 0
+                    || runtime_observation_has_removal_duty(&inner.sessions[index])
             })
         })
         .cloned()
@@ -96,11 +156,12 @@ fn retain_source_observation_removal_locked(inner: &mut StateInner, sessions: &[
             continue;
         };
         retire_source_observation_locked(inner, index);
+        let terminal_notice = runtime_observation_terminal_removal_notice(&inner.sessions[index]);
         let record = &mut inner.sessions[index];
         record.hidden = false;
         record.engram.source_observation_delete_requested = true;
         record.set_auto_dispatch_blocked(true);
-        record.session.preview = SOURCE_OBSERVATION_DELETE_RETAINED.to_owned();
+        record.session.preview = terminal_notice.unwrap_or_else(|| SOURCE_OBSERVATION_DELETE_RETAINED.to_owned());
         inner.stamp_session_at_index(index);
     }
 }
@@ -190,10 +251,29 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             source_observation_removal_blocker(&inner, &sessions)
         };
-        if let Some(blocker) = blocker {
-            for retained in &sessions {
+        for retained in &sessions {
+            let has_runtime_custody = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.find_session_index(retained).is_some_and(|index| {
+                    let state = &inner.sessions[index].engram;
+                    state.unadmitted_active_turn.is_some()
+                        || !state.unadmitted_closing_jobs.is_empty()
+                        || !state.unadmitted_reports.is_empty()
+                })
+            };
+            // Worker terminality is not a durable discharge. In particular a
+            // newly Recorded/Refused image must survive this coupled fence
+            // before its session may be tombstoned.
+            if blocker.is_some() || has_runtime_custody {
                 self.confirm_source_observation_removal_durable(retained).map_err(|error|
                     ApiError::conflict(format!("Session retained; source tracking recovery persistence is uncertain: {error}")))?;
+            }
+        }
+        if let Some(blocker) = blocker {
+            if let Some(notice) = source_observation_terminal_removal_notice(
+                &self.inner.lock().expect("state mutex poisoned"), &sessions,
+            ) {
+                return Err(ApiError::conflict(notice));
             }
             return Err(ApiError::conflict(format!(
                 "{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}."
@@ -203,7 +283,7 @@ impl AppState {
     }
 
     fn resume_source_observation_delete(&self, session_id: &str) -> Result<bool, ApiError> {
-        {
+        let recover_binding = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -221,13 +301,32 @@ impl AppState {
                     "Session retained: its source capture is still finishing. Retry tracking recovery after it finishes.",
                 ));
             }
-        }
+            if runtime_observation_active_removal_duty(&inner.sessions[index]) {
+                return Err(ApiError::conflict(SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED));
+            }
+            let record = &inner.sessions[index];
+            record.engram.rebind_required
+                && !record.engram_boot_recovery_pending
+                && !record.engram.bind_in_progress
+                && record.engram.unadmitted_closing_jobs.iter()
+                    .any(|job| job.terminal_failure.is_none())
+        };
         self.confirm_source_observation_removal_durable(session_id)
             .map_err(|error| {
                 ApiError::conflict(format!(
                     "Session retained; tracking recovery persistence is uncertain: {error}"
                 ))
             })?;
+        // Explicit tracking Resume can recover a lazy binding through the
+        // existing first-use owner. It does not open an admission window,
+        // evaluate/Begin a turn, or release Delete's provider-queue pause.
+        if recover_binding {
+            self.ensure_engram_session_bound_with_budget_off_lock(session_id, None, None)
+                .map_err(|_| ApiError::conflict(
+                    "Session retained: tracking binding recovery is not ready. Keep the original store and connection and retry tracking Resume; queued work remains paused.",
+                ))?;
+        }
+        self.start_runtime_observation_worker(session_id);
         self.reconcile_retired_source_observations(session_id).map_err(|error| ApiError::conflict(format!(
             "Session retained: tracking recovery still needs its original store and connection. Queued work stays paused. {error}")))?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -235,6 +334,11 @@ impl AppState {
             &inner,
             &source_observation_removal_set(&inner, session_id),
         ) {
+            if let Some(notice) = source_observation_terminal_removal_notice(
+                &inner, &source_observation_removal_set(&inner, session_id),
+            ) {
+                return Err(ApiError::conflict(notice));
+            }
             return Err(ApiError::conflict(format!(
                 "Session retained: source tracking still has unresolved duties in session {blocker}. Recover that session with its original store and connection; queued work remains paused."
             )));

@@ -1988,6 +1988,8 @@ impl AppState {
                 state.bind_in_progress = false;
             }
         }
+        drop(inner);
+        self.start_runtime_observation_worker(session_id);
         result
     }
 

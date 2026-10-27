@@ -3075,6 +3075,13 @@ impl AppState {
                         // The waiting reason the fence still holds keeps the
                         // preview it replaced (`engram_project_reset_wait.rs`).
                         project_reset_wait_preview: record.engram.project_reset_wait_preview.take(),
+                        runtime_checkpoint: record.engram.runtime_checkpoint.take(),
+                        unadmitted_active_turn: record.engram.unadmitted_active_turn.take(),
+                        unadmitted_closing_jobs: std::mem::take(
+                            &mut record.engram.unadmitted_closing_jobs,
+                        ),
+                        unadmitted_reports: std::mem::take(&mut record.engram.unadmitted_reports),
+                        unadmitted_worker_running: record.engram.unadmitted_worker_running,
                         ..EngramSessionState::default()
                     };
                     for line in carried_lines {
@@ -4880,6 +4887,13 @@ impl AppState {
                         // So the waiting reason can still restore the preview
                         // it replaced (`engram_project_reset_wait.rs`).
                         project_reset_wait_preview: record.engram.project_reset_wait_preview.take(),
+                        runtime_checkpoint: record.engram.runtime_checkpoint.take(),
+                        unadmitted_active_turn: record.engram.unadmitted_active_turn.take(),
+                        unadmitted_closing_jobs: std::mem::take(
+                            &mut record.engram.unadmitted_closing_jobs,
+                        ),
+                        unadmitted_reports: std::mem::take(&mut record.engram.unadmitted_reports),
+                        unadmitted_worker_running: record.engram.unadmitted_worker_running,
                         ..EngramSessionState::default()
                     };
                 }

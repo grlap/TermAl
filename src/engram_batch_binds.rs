@@ -822,16 +822,7 @@ impl AppState {
             (target, permit)
         };
         let result = self.bind_engram_target_uncoordinated_off_lock(target, false, None);
-        {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            if let Some(index) = inner.find_session_index(session_id) {
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid")
-                    .engram
-                    .bind_in_progress = false;
-            }
-        }
+        self.clear_engram_bind_in_progress(session_id);
         if let Err(error) = result {
             self.record_engram_transport_failure(session_id, &error);
             eprintln!("engram> session={session_id} owed-bind rebind degraded: {error}");
@@ -1081,14 +1072,7 @@ impl AppState {
 
     /// Releases the binding `claim_engram_owed_bind_send` claimed.
     fn release_engram_owed_bind_send(&self, session_id: &str) {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if let Some(index) = inner.find_session_index(session_id) {
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid")
-                .engram
-                .bind_in_progress = false;
-        }
+        self.clear_engram_bind_in_progress(session_id);
     }
 
     /// Applies one session's worked `entries` to its own list under the lock:

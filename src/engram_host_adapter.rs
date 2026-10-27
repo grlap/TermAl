@@ -2782,8 +2782,18 @@ struct EngramSessionState {
     active_turn_source_binding: Option<EngramControlWorkBinding>,
     /// Where the last checkpoint Engram acknowledged left the workspace
     /// (`engram_turn_continuity.rs`). Advanced only by an acknowledged
-    /// checkpoint, so retries never advance it twice. In memory only.
+    /// checkpoint, so retries never advance it twice. In memory only; the
+    /// separate runtime checkpoint below persists its historical endpoint.
     continuity_anchor: Option<EngramContinuityAnchor>,
+    /// Historical checkpoint endpoint for unadmitted reporting only. Does
+    /// not change the ordinary mediated comparison after a host restart.
+    runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
+    /// Observation-only history is independent of grants and admission.
+    unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
+    unadmitted_closing_jobs: Vec<EngramRuntimeClosingJob>,
+    unadmitted_reports: Vec<EngramRuntimeObservationReport>,
+    /// Process-local coalescing flag, never restored as a live worker.
+    unadmitted_worker_running: bool,
     /// For the named grant, how its turn's measured begin compares with
     /// `continuity_anchor`: a change between the two turns is kept here,
     /// apart from the turn's own begin basis. In memory only.
@@ -2992,6 +3002,11 @@ impl Default for EngramSessionState {
             active_turn_naming_identity: None,
             active_turn_source_binding: None,
             continuity_anchor: None,
+            runtime_checkpoint: None,
+            unadmitted_active_turn: None,
+            unadmitted_closing_jobs: Vec::new(),
+            unadmitted_reports: Vec::new(),
+            unadmitted_worker_running: false,
             active_turn_continuity: None,
             active_turn_mixed_attribution: None,
             active_turn_source_root: None,
@@ -4556,6 +4571,10 @@ impl AppState {
         if let Some(index) = inner.find_session_index(session_id) {
             inner.sessions[index].engram.bind_in_progress = false;
         }
+        drop(inner);
+        // A bind can install its binding before later reconciliation fails.
+        // Releasing its guard, not its aggregate result, makes capture eligible.
+        self.start_runtime_observation_worker(session_id);
     }
 
     fn finish_engram_restart_recovery(
@@ -4621,6 +4640,9 @@ impl AppState {
             should_dispatch
         };
 
+        // An immutable closing observation may have waited for this session's
+        // recovered binding, independently of whether a prompt hit the fence.
+        self.start_runtime_observation_worker(session_id);
         if !should_dispatch {
             return;
         }
@@ -7747,14 +7769,7 @@ impl AppState {
 
         let result =
             self.bind_engram_target_uncoordinated_off_lock(target, trace_boot_recovery, owner);
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if let Some(index) = inner.find_session_index(&session_id) {
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid")
-                .engram
-                .bind_in_progress = false;
-        }
+        self.clear_engram_bind_in_progress(&session_id);
         if trace_boot_recovery {
             log_engram_boot_recovery_phase(
                 &session_id,

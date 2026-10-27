@@ -266,6 +266,9 @@ impl AppState {
     /// so callers that need strict durability for those variants should
     /// quiesce their producers before invoking this method.
     fn shutdown_persist_blocking(&self) {
+        // This only retires the writer (tests also swap it while the host
+        // keeps running). Real host retirement is owned by
+        // trigger_shutdown_signal, which joins observation installs first.
         #[cfg(test)]
         self.federation_executor_wake_signal
             .observe("persistShutdown");
@@ -455,6 +458,7 @@ impl AppState {
     /// shutdown notification can be missed before waiter registration".
     fn trigger_shutdown_signal(&self) {
         self.federation_executor_wake_signal.stop();
+        self.runtime_observation_lifetime.stop_and_join();
         self.shutdown_signal_tx.send_replace(true);
     }
 

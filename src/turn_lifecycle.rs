@@ -496,6 +496,11 @@ impl AppState {
             persist_error,
             effective_shutdown_error,
         ) = {
+            let Some(_observation_install) =
+                self.runtime_observation_lifetime.enter("terminal")
+            else {
+                return EngramMcpRuntimeRevocationFinalization::default();
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return EngramMcpRuntimeRevocationFinalization::default();
@@ -576,6 +581,7 @@ impl AppState {
                 shutdown_error
             };
 
+            self.queue_runtime_observation_close_locked(&mut inner, index);
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
@@ -897,6 +903,11 @@ impl AppState {
         );
         let cleaned = error_message.trim();
         let (should_dispatch_next, failed_mailbox_notification) = {
+            let Some(_observation_install) =
+                self.runtime_observation_lifetime.enter("terminal")
+            else {
+                return Ok(false);
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -925,6 +936,9 @@ impl AppState {
                     });
                 return Ok(false);
             }
+            let _ = record;
+            self.queue_runtime_observation_close_locked(&mut inner, index);
+            let record = &mut inner.sessions[index];
             // A turn that failed before its runtime acknowledged a receipted
             // prompt leaves that delivery unknown. Settled here, under the
             // lock and past a Stop's deferral, so a hand-off a Stop still
@@ -1393,6 +1407,11 @@ impl AppState {
             failed_mailbox_notification,
             deferred_stop_callbacks,
         ) = {
+            let Some(_observation_install) =
+                self.runtime_observation_lifetime.enter("terminal")
+            else {
+                return Ok(false);
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -1494,6 +1513,7 @@ impl AppState {
                 }
                 return Ok(false);
             }
+            self.queue_runtime_observation_close_locked(&mut inner, index);
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
             let file_change_message_id = (preserve_accepted_turn_state
                 && !inner.sessions[index].active_turn_file_changes.is_empty())
@@ -1904,6 +1924,11 @@ impl AppState {
         );
         let cleaned = error_message.trim();
         let (commit_result, should_dispatch_next, failed_mailbox_notification) = {
+            let Some(_observation_install) =
+                self.runtime_observation_lifetime.enter("terminal")
+            else {
+                return Ok(());
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -1931,6 +1956,9 @@ impl AppState {
                     });
                 return Ok(());
             }
+            let _ = record;
+            self.queue_runtime_observation_close_locked(&mut inner, index);
+            let record = &mut inner.sessions[index];
             take_and_abandon_engram_pending_dispatch(record);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
@@ -2052,6 +2080,11 @@ impl AppState {
         );
         let stopping_orchestrator_session_ids = self.stopping_orchestrator_session_ids_snapshot();
         let (should_dispatch_next, _orchestrator_delta) = {
+            let Some(_observation_install) =
+                self.runtime_observation_lifetime.enter("terminal")
+            else {
+                return Ok(());
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -2109,6 +2142,9 @@ impl AppState {
             if !record.runtime_projection_allowed() {
                 return Ok(());
             }
+            let _ = record;
+            self.queue_runtime_observation_close_locked(&mut inner, index);
+            let record = &mut inner.sessions[index];
             take_and_abandon_engram_pending_dispatch(record);
 
             if record.session.status == SessionStatus::Active {
@@ -2292,6 +2328,11 @@ impl AppState {
             exited_mailbox_notification,
             commit_result,
         ) = {
+            let Some(_observation_install) =
+                self.runtime_observation_lifetime.enter("terminal")
+            else {
+                return Ok(());
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -2335,6 +2376,7 @@ impl AppState {
                 && inner.sessions[index].session.preview == make_preview(cleaned) {
                 return Ok(());
             }
+            self.queue_runtime_observation_close_locked(&mut inner, index);
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval

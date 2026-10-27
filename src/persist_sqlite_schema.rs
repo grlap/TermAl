@@ -432,56 +432,70 @@ fn validate_sqlite_state_schema_for_version(
     Ok(())
 }
 
-/// Normalize supported legacy metadata first, then install the handoff reader
-/// floor before exposing any recovered session. Each stage is atomic; a failure
-/// after normalization leaves a valid units predecessor with no handoff effects.
+/// Normalize supported legacy metadata, then advance the application reader
+/// floor before any typed session load or observation delivery can occur.
+/// Metadata layout and application obligations deliberately have separate versions.
 fn prepare_existing_sqlite_state_reader_floor(
     connection: &rusqlite::Connection,
     for_load: bool,
 ) -> Result<Option<PersistedState>> {
     migrate_metadata_units(connection)?;
     let (_, version) = sqlite_state_schema_header(connection)?;
-    if version == SQLITE_METADATA_UNITS_VERSION {
+    if matches!(version.as_str(), SQLITE_METADATA_UNITS_VERSION | SQLITE_OBSERVATION_PREDECESSOR) {
         return advance_sqlite_state_reader_floor(connection, for_load);
     }
     validate_current_sqlite_state_schema(connection)?;
-    if for_load {
-        validate_no_legacy_embedded_state(connection)
-    } else {
-        // Keep already-current write-only setup bounded. Deep validation belongs
-        // to startup and to the one-time predecessor migration below.
-        Ok(None)
-    }
+    if for_load { validate_no_legacy_embedded_state(connection) } else { Ok(None) }
 }
 
 fn advance_sqlite_state_reader_floor(
     connection: &rusqlite::Connection,
     for_load: bool,
 ) -> Result<Option<PersistedState>> {
-    let transaction =
-        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
-            .context("failed to begin state reader-floor migration")?;
-    // Another opener may have completed the migration while this one waited.
-    // All predecessor authority checks use this transaction's committed cut.
-    let (_, version) = sqlite_state_schema_header(&transaction)?;
-    let persisted = if version == SQLITE_METADATA_UNITS_VERSION {
-        validate_sqlite_state_schema_for_version(&transaction, SQLITE_METADATA_UNITS_VERSION)?;
-        let persisted = validate_no_legacy_embedded_state(&transaction)?;
-        let updated = transaction.execute(
-            "UPDATE meta SET value = ?1 WHERE key = 'schema_version' AND value = ?2",
-            rusqlite::params![SQLITE_SCHEMA_VERSION, SQLITE_METADATA_UNITS_VERSION],
-        ).context("failed to advance state reader floor")?;
-        if updated != 1 {
-            bail!("state reader-floor migration did not update its exact predecessor");
+    let transaction = rusqlite::Transaction::new_unchecked(
+        connection, rusqlite::TransactionBehavior::Immediate,
+    ).context("failed to begin state reader-floor migration")?;
+    let (tables, version) = sqlite_state_schema_header(&transaction)?;
+    let persisted = if matches!(version.as_str(), SQLITE_METADATA_UNITS_VERSION | SQLITE_OBSERVATION_PREDECESSOR) {
+        validate_sqlite_state_schema_for_version(&transaction, &version)?;
+        let known = CURRENT_SQLITE_STATE_TABLE_COLUMNS.iter()
+            .map(|(name, _)| (*name).to_owned()).collect::<BTreeSet<_>>();
+        // These obsolete embedded coordination tables are deliberately left
+        // untouched by the current primary-store boot contract. They carry
+        // no primary reader obligations. Other unknown tables still refuse.
+        let unknown = tables.difference(&known).any(|table| !matches!(table.as_str(),
+            "mailboxes" | "mailbox_participants" | "mailbox_messages"));
+        if unknown {
+            return Err(reject_unsupported_state_schema(
+                "reader-floor predecessor has unknown state tables",
+            ));
         }
+        let persisted = validate_no_legacy_embedded_state(&transaction)?;
+        // A pre-floor draft containing these keys is not a supported old
+        // image. Preserve it for diagnosis rather than adopting hidden custody.
+        let unversioned: Option<String> = transaction.query_row(
+            "SELECT id FROM sessions WHERE json_valid(value_json) AND (
+                json_type(value_json,'$.engramRuntimeCheckpoint') IS NOT NULL OR
+                json_type(value_json,'$.engramUnadmittedActiveTurn') IS NOT NULL OR
+                json_type(value_json,'$.engramUnadmittedClosingJobs') IS NOT NULL OR
+                json_type(value_json,'$.engramUnadmittedReports') IS NOT NULL) LIMIT 1",
+            [], |row| row.get(0),
+        ).optional()?;
+        if unversioned.is_some() {
+            return Err(reject_unsupported_state_schema(
+                "observation custody is present under an unsupported predecessor floor",
+            ));
+        }
+        let updated = transaction.execute(
+            "UPDATE meta SET value=?1 WHERE key='schema_version' AND value=?2",
+            rusqlite::params![SQLITE_SCHEMA_VERSION, &version],
+        ).context("failed to advance state reader floor")?;
+        if updated != 1 { bail!("state reader-floor migration lost its exact predecessor"); }
         persisted
     } else {
+        // A concurrent opener may have completed exactly this transition.
         validate_current_sqlite_state_schema(&transaction)?;
-        if for_load {
-            validate_no_legacy_embedded_state(&transaction)?
-        } else {
-            None
-        }
+        if for_load { validate_no_legacy_embedded_state(&transaction)? } else { None }
     };
     transaction.commit().context("failed to commit state reader-floor migration")?;
     Ok(persisted)

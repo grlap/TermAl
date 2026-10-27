@@ -161,9 +161,9 @@ mod ordinary_handoff_reader_floor_tests {
                 let connection = legacy_store(source);
                 connection
                     .execute_batch(
-                        "CREATE TRIGGER refuse_handoff_floor BEFORE UPDATE OF value ON meta
-                    WHEN new.key='schema_version' AND new.value='2-metadata-units-2-handoff-1'
-                    BEGIN SELECT RAISE(ABORT,'injected handoff floor failure'); END;",
+                        &format!("CREATE TRIGGER refuse_handoff_floor BEFORE UPDATE OF value ON meta
+                    WHEN new.key='schema_version' AND new.value='{SQLITE_SCHEMA_VERSION}'
+                    BEGIN SELECT RAISE(ABORT,'injected handoff floor failure'); END;"),
                     )
                     .unwrap();
                 let error = prepare(&connection, load).unwrap_err();
@@ -328,9 +328,9 @@ mod ordinary_handoff_reader_floor_tests {
                 .unwrap();
             connection
                 .execute_batch(
-                    "CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
-                WHEN new.value='2-metadata-units-2-handoff-1'
-                BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;",
+                    &format!("CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
+                WHEN new.value='{SQLITE_SCHEMA_VERSION}'
+                BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;"),
                 )
                 .unwrap();
             assert!(prepare(&connection, true).is_err());
@@ -397,9 +397,9 @@ mod ordinary_handoff_reader_floor_tests {
         seed_units_store(&connection);
         connection
             .execute_batch(
-                "CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
-            WHEN new.value='2-metadata-units-2-handoff-1'
-            BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;",
+                &format!("CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
+            WHEN new.value='{SQLITE_SCHEMA_VERSION}'
+            BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;"),
             )
             .unwrap();
         let before = image(&connection);
@@ -446,7 +446,10 @@ mod ordinary_handoff_reader_floor_tests {
             "the production snapshot must contain the marked head"
         );
         let error = persist_persisted_state_to_sqlite(&path, &persisted).unwrap_err();
-        assert!(format!("{error:#}").contains("feature floor unavailable"));
+        assert!(
+            format!("{error:#}").contains("feature floor unavailable"),
+            "the floor failpoint must reject the write: {error:#}"
+        );
         assert_eq!(version(&connection), SQLITE_METADATA_UNITS_VERSION);
         assert_eq!(image(&connection), before);
         let present: bool = connection

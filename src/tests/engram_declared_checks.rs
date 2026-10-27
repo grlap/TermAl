@@ -24,15 +24,15 @@ pub(super) const DECLARED_TEST: &str =
 pub(super) const DECLARED_ARTIFACT: &str = ".termal-results/results.trx";
 
 /// Real TRX files `dotnet test --logger trx` wrote (fixtures/declared-trx).
-const PASSING_TRX: &[u8] = include_bytes!(concat!(
+pub(super) const PASSING_TRX: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/tests/fixtures/declared-trx/pass.trx"
 ));
-const FAILING_TRX: &[u8] = include_bytes!(concat!(
+pub(super) const FAILING_TRX: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/tests/fixtures/declared-trx/fail.trx"
 ));
-const ZERO_TRX: &[u8] = include_bytes!(concat!(
+pub(super) const ZERO_TRX: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/tests/fixtures/declared-trx/zero.trx"
 ));
@@ -63,7 +63,7 @@ fn toml_string(value: &str) -> String {
 
 /// Writes the result file the declared command produces, as the command
 /// would while it runs.
-fn write_artifact(turn: &CheckedTurn, content: &[u8]) {
+pub(super) fn write_artifact(turn: &CheckedTurn, content: &[u8]) {
     let path = turn.root.join(DECLARED_ARTIFACT);
     fs::create_dir_all(path.parent().expect("artifact has a directory"))
         .expect("result directory creates");

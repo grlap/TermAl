@@ -17,7 +17,7 @@
 // frame helpers this module repeats). New module.
 use super::*;
 
-const LEFTOVER: &str = "leftover-grant";
+pub(super) const LEFTOVER: &str = "leftover-grant";
 
 fn task_notification() -> Value {
     json!({"type": "system", "subtype": "task_notification", "task_id": "b1",
@@ -37,7 +37,7 @@ fn result(is_error: bool) -> Value {
         "is_error": is_error, "result": "done"})
 }
 
-fn checkpoint_requests(turn: &CheckedTurn) -> Vec<Value> {
+pub(super) fn checkpoint_requests(turn: &CheckedTurn) -> Vec<Value> {
     turn.transport
         .requests()
         .into_iter()
@@ -94,7 +94,7 @@ fn feed(turn: &CheckedTurn, token: &RuntimeToken, ownership: &ClaudeTurnOwnershi
     }
 }
 
-fn assert_leftover_untouched(turn: &CheckedTurn, checkpoints_before: usize, path: &str) {
+pub(super) fn assert_leftover_untouched(turn: &CheckedTurn, checkpoints_before: usize, path: &str) {
     assert_eq!(
         checkpoint_requests(turn).len(),
         checkpoints_before,
@@ -256,7 +256,7 @@ fn a_settlement_repeats_an_earlier_attempts_report_instead_of_an_empty_one() {
 
 /// The settlement checkpoint a teardown sent for the leftover grant, asserted
 /// to carry no execution of the adopted turn.
-fn assert_settled_without_adopted_report(turn: &CheckedTurn, before: usize, path: &str) {
+pub(super) fn assert_settled_without_adopted_report(turn: &CheckedTurn, before: usize, path: &str) {
     let checkpoints = checkpoint_requests(turn);
     assert_eq!(checkpoints.len(), before + 1, "{path}: one settlement");
     let settlement = &checkpoints[before];
@@ -307,16 +307,7 @@ fn revoke(turn: &CheckedTurn, context: &str) {
 }
 
 #[test]
-fn deletion_and_revocation_teardown_settle_a_leftover_grant_without_the_adopted_report() {
-    // Session deletion, through the host's own entry point.
-    let (turn, _token, _generation, _ownership) =
-        adopted_with_leftover_grant("adopted-deletion", vec![checkpoint_reply(LEFTOVER)]);
-    let before = checkpoint_requests(&turn).len();
-    turn.state
-        .kill_session(&turn.session_id)
-        .expect("the session should be deleted");
-    assert_settled_without_adopted_report(&turn, before, "session deletion");
-
+fn revocation_teardown_settles_a_leftover_grant_without_the_adopted_report() {
     // Revocation teardown, after a failed Stop handed it the fence.
     let (turn, _token, generation, _ownership) =
         adopted_with_leftover_grant("adopted-revocation", vec![checkpoint_reply(LEFTOVER)]);

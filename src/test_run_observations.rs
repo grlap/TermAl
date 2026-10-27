@@ -272,6 +272,7 @@ impl TestRunCommandOrigin {
             turn_generation: match provenance {
                 EngramObservationProvenance::Claude(origin) => match &origin.origin {
                     ClaudeWorkOrigin::Attempt { turn_generation } => *turn_generation,
+                    ClaudeWorkOrigin::Adopted { turn_generation } => *turn_generation,
                     ClaudeWorkOrigin::Unattributed => record.active_turn_generation,
                 },
                 EngramObservationProvenance::Ambient => record.active_turn_generation,
@@ -387,7 +388,7 @@ impl AppState {
                                 ClaudeWorkOrigin::Attempt { turn_generation } => {
                                     pending.origin.turn_generation == *turn_generation
                                 }
-                                ClaudeWorkOrigin::Unattributed => false,
+                                ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => false,
                             },
                             EngramObservationProvenance::Ambient => true,
                         }
@@ -406,7 +407,7 @@ impl AppState {
                                 ClaudeWorkOrigin::Attempt { turn_generation } => {
                                     row.turn_generation == *turn_generation
                                 }
-                                ClaudeWorkOrigin::Unattributed => false,
+                                ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => false,
                             },
                             EngramObservationProvenance::Ambient => true,
                         }
@@ -585,7 +586,7 @@ impl AppState {
         let turn = match provenance {
             EngramObservationProvenance::Claude(origin) => match &origin.origin {
                 ClaudeWorkOrigin::Attempt { turn_generation } => Some(*turn_generation),
-                ClaudeWorkOrigin::Unattributed => None,
+                ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => None,
             },
             EngramObservationProvenance::Ambient => None,
         };

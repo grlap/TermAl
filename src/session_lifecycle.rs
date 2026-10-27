@@ -201,6 +201,9 @@ impl AppState {
                         "Session retained; source tracking persistence is uncertain: {error:#}"
                     ))
                 })?;
+                if let Some(notice) = source_observation_terminal_removal_notice(&inner, &sessions) {
+                    return Err(ApiError::conflict(notice));
+                }
                 return Err(ApiError::conflict(format!(
                     "{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}."
                 )));
@@ -1310,6 +1313,11 @@ impl AppState {
         // hand-off has not begun: woken only after the Stop's commit.
         let mut receipted_successor = None;
         let transition = {
+            let Some(_observation_install) =
+                self.runtime_observation_lifetime.enter("terminal")
+            else {
+                return Ok(self.snapshot());
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -1349,6 +1357,7 @@ impl AppState {
                 drop(inner);
                 return Ok(self.snapshot());
             }
+            self.queue_runtime_observation_close_locked(&mut inner, index);
             let message_id = inner.next_message_id();
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())

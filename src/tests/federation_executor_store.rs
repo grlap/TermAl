@@ -417,6 +417,55 @@ fn federation_m4_store_recovery_does_not_adopt_locally_woken_central_obligations
         [&receipt.message_id], |row| row.get::<_, String>(0)).unwrap(), "queuedBehindActiveTurn");
 }
 
+#[cfg(windows)]
+pub(super) fn verify_pinned_rollback_binary(
+    binary: &FsPath, expected_hash: &str, expected_len: u64,
+) -> PathBuf {
+    use std::io::Read;
+    let binary = fs::canonicalize(binary).unwrap();
+    let mut file = fs::File::open(&binary).unwrap();
+    assert_eq!(file.metadata().unwrap().len(), expected_len);
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).unwrap();
+        if count == 0 { break; }
+        digest.update(&buffer[..count]);
+    }
+    assert_eq!(format!("{:x}", digest.finalize()), expected_hash);
+    binary
+}
+
+// One existing rollback process owner for all reader-floor probes. Callers
+// provision only disposable repository-local data before entering this owner.
+#[cfg(windows)]
+pub(super) fn run_pinned_schema_opener(
+    binary: &FsPath, root: &FsPath, isolated_home: &FsPath,
+) -> std::process::Output {
+    let empty_path = isolated_home.join("empty-bin");
+    let scratch = isolated_home.join("scratch");
+    fs::create_dir_all(&empty_path).unwrap();
+    fs::create_dir_all(&scratch).unwrap();
+    let mut rollback_child = Command::new(binary);
+    for (name, _) in std::env::vars_os() {
+        rollback_child.env_remove(name);
+    }
+    let child = rollback_child
+        .current_dir(root)
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW; this helper is Windows-only.
+        .env("SystemRoot", std::env::var_os("SystemRoot").expect("Windows system directory"))
+        .env("HOME", isolated_home).env("USERPROFILE", isolated_home)
+        .env("APPDATA", isolated_home.join("AppData/Roaming"))
+        .env("LOCALAPPDATA", isolated_home.join("AppData/Local"))
+        .env("TEMP", &scratch).env("TMP", &scratch).env("TMPDIR", &scratch)
+        .env("PATH", &empty_path)
+        .env("CODEX_HOME", isolated_home.join(".codex"))
+        .env("TERMAL_PORT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    wait_for_executor_child(child, "pinned previous schema opener")
+}
+
 // Deliberately separate from the ordinary gate: this needs the installed
 // pre-increment production binary and its immutable source/hash pin. Run
 // explicitly with --ignored after provisioning; an ignored test is no evidence.
@@ -424,7 +473,6 @@ fn federation_m4_store_recovery_does_not_adopt_locally_woken_central_obligations
 #[test]
 #[ignore = "requires the pinned pre-increment binary; a separate rollback check is mandatory"]
 fn federation_m4_store_pinned_previous_binary_refuses_without_mailbox_data_loss() {
-    use std::io::Read;
     let pin_path = FsPath::new(env!("CARGO_MANIFEST_DIR"))
         .join(".tmp/federation-executor-rollback-pin.json");
     let pin: Value = serde_json::from_slice(&fs::read(&pin_path)
@@ -440,16 +488,7 @@ fn federation_m4_store_pinned_previous_binary_refuses_without_mailbox_data_loss(
     let expected_hash = "deff537d093c7e264bd3edb4ea1bdecaa0522a46f85fe4f6f511e2509e7bf7a8";
     assert_eq!(pin["sha256"], expected_hash);
     assert_eq!(pin["sourceCommit"], "8ebf2f8e6798f82021bc91daa01ed72f176a30fd");
-    let mut file = fs::File::open(&binary).unwrap();
-    assert_eq!(file.metadata().unwrap().len(), 41382912);
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0; 1024*1024];
-    loop {
-        let count = file.read(&mut buffer).unwrap();
-        if count == 0 { break; }
-        digest.update(&buffer[..count]);
-    }
-    assert_eq!(format!("{:x}", digest.finalize()), expected_hash);
+    let binary = verify_pinned_rollback_binary(&binary, expected_hash, 41382912);
     let _directory = TestTempRootDirectoryScope::repository_local();
     let root = TestTempRoot::create("executor-store-pinned-rollback");
     assert!(fs::canonicalize(root.path()).unwrap()
@@ -457,10 +496,6 @@ fn federation_m4_store_pinned_previous_binary_refuses_without_mailbox_data_loss(
     let isolated_home = root.path().join("isolated-home");
     let data_dir = isolated_home.join(".termal");
     fs::create_dir_all(&data_dir).unwrap();
-    let empty_path = isolated_home.join("empty-bin");
-    let scratch = isolated_home.join("scratch");
-    fs::create_dir(&empty_path).unwrap();
-    fs::create_dir(&scratch).unwrap();
     let path = data_dir.join("coordination.sqlite");
     let store = MailboxStore::open(&path).unwrap();
     let append = store.append(&MailboxAppendInput {
@@ -477,26 +512,7 @@ fn federation_m4_store_pinned_previous_binary_refuses_without_mailbox_data_loss(
     // Boot fails at the existing coordination-schema barrier, before any
     // HTTP listener, runtime recovery or persist worker starts. Every path
     // belongs to this disposable fixture; no installed host is contacted.
-    let mut rollback_child = Command::new(binary);
-    // The guarded Windows command exposes explicit per-name removal, not
-    // mutable access to the underlying command. Keep guarded process creation.
-    for (name, _) in std::env::vars_os() {
-        rollback_child.env_remove(name);
-    }
-    let child = rollback_child
-        .current_dir(root.path())
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW; this test is Windows-only.
-        .env("SystemRoot", std::env::var_os("SystemRoot").expect("Windows system directory"))
-        .env("HOME", &isolated_home).env("USERPROFILE", &isolated_home)
-        .env("APPDATA", isolated_home.join("AppData/Roaming"))
-        .env("LOCALAPPDATA", isolated_home.join("AppData/Local"))
-        .env("TEMP", &scratch).env("TMP", &scratch).env("TMPDIR", &scratch)
-        .env("PATH", &empty_path)
-        .env("CODEX_HOME", isolated_home.join(".codex"))
-        .env("TERMAL_PORT", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    let output = wait_for_executor_child(child, "pinned previous schema opener");
+    let output = run_pinned_schema_opener(&binary, root.path(), &isolated_home);
     assert!(!output.status.success(), "old binary must refuse the current database");
     let diagnostic = format!("{}{}", String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr));

@@ -14,8 +14,9 @@
 // Does not own: deciding which turn a frame belongs to
 // (`claude_turn_ownership.rs`), the stdout reader loop (`claude_spawn.rs`),
 // the ordinary finish/error paths it calls (`turn_lifecycle.rs`), or Engram
-// mediation of such a turn, which waits on Engram's producer contract for
-// observed turns: no retroactive turn evaluation or begin is made here.
+// observation reporting (`engram_unadmitted_*.rs`), which retains adopted
+// traces independently of this diagnostic ring. No retroactive turn
+// evaluation or begin is made here.
 //
 // New file; nothing was split out of another.
 
@@ -36,7 +37,8 @@ struct UnmediatedClaudeTurn {
 }
 
 /// Something the recorder saw in a turn no prompt owns, kept on the session
-/// as unassigned: never reported to Engram and never credited.
+/// as unassigned. This bounded local diagnostic ring is never sent itself;
+/// the independent adopted trace may be reported as uncredited history.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct UnassignedClaudeObservation {
     notice_message_id: String,
@@ -68,9 +70,14 @@ fn unmediated_claude_turn_is_current(record: &SessionRecord) -> bool {
     record.adopted_claude_turn_generation == Some(record.active_turn_generation)
 }
 
-fn unmediated_claude_turn_notice(cause: ClaudeUnownedCause, adopted: bool) -> String {
-    let unrecorded = "TermAl did not mediate it: Engram has no record of it, and its edits \
-                      and test runs are kept unassigned, not reported or credited.";
+fn unmediated_claude_turn_notice(cause: ClaudeUnownedCause, adopted: bool, bound: bool) -> String {
+    let unrecorded = if adopted && bound {
+        "TermAl did not mediate it. When it ends, the host attempts to report its observations to Engram \
+         as unadmitted history with unknown causality. Its test runs remain uncredited."
+    } else {
+        "TermAl did not mediate it: Engram has no record of it, and its edits \
+         and test runs are kept unassigned, not reported or credited."
+    };
     match cause {
         ClaudeUnownedCause::Unassigned => format!(
             "TermAl could not tie this Claude turn to the prompt it is waiting on. {unrecorded} \
@@ -298,8 +305,9 @@ impl AppState {
                 record.session.preview = "Turn started by Claude Code.".to_owned();
                 record.active_turn_generation
             });
-            if adopted_generation.is_some() {
-                record.adopted_claude_turn_generation = adopted_generation;
+            if let Some(generation) = adopted_generation {
+                record.adopted_claude_turn_generation = Some(generation);
+                adopt_runtime_observation(record, &message_id, generation);
             }
             record.unmediated_claude_turn = Some(UnmediatedClaudeTurn {
                 adopted_generation,
@@ -310,7 +318,7 @@ impl AppState {
                 id: message_id,
                 timestamp: stamp_now(),
                 author: Author::System,
-                text: unmediated_claude_turn_notice(cause, adopted_generation.is_some()),
+                text: unmediated_claude_turn_notice(cause, adopted_generation.is_some(), record.engram.work_binding.is_some()),
                 expanded_text: None,
                 source: None,
             };
@@ -487,6 +495,7 @@ impl AppState {
                 ),
             },
             ClaudeResultOwner::Runtime(owner) => {
+                self.close_runtime_observation_logged(session_id, token, owner.adopted_generation);
                 let turn = self.open_unmediated_claude_turn_of(session_id, token);
                 // The adopted turn is finished first, while it is still
                 // marked, so the finish path's Engram checkpoint sees it and
@@ -580,6 +589,7 @@ impl AppState {
                         self.claude_adopted_generation_is_current(session_id, token, *generation)
                     })
                 {
+                    self.close_runtime_observation_logged(session_id, token, Some(generation));
                     let turn = self.open_unmediated_claude_turn_of(session_id, token);
                     let result = match error_detail {
                         Some(detail) => self.mark_turn_error_if_runtime_and_generation_match(

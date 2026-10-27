@@ -23,7 +23,7 @@ const ENGRAM_DECLARATION_MAX_BYTES: usize = 64 * 1024;
 const ENGRAM_DECLARATION_MAX_ENTRIES: usize = 64;
 
 /// One `[[test]]` entry of the declaration, as written.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct EngramDeclaredEntry {
     command: String,
     cwd: String,
@@ -472,7 +472,7 @@ fn engram_declared_wrapper_script(line: &str) -> Option<&str> {
 }
 
 /// The artifact as a declared check's start found it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 enum EngramArtifactStart {
     Absent,
     Present { sha256: String },
@@ -481,7 +481,7 @@ enum EngramArtifactStart {
 }
 
 /// What a declared check keeps from its start, verified again at its end.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct EngramDeclaredBinding {
     /// The worktree root the declaration was read in.
     root: PathBuf,

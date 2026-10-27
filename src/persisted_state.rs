@@ -503,6 +503,8 @@ impl PersistedState {
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
+            #[cfg(test)]
+            test_engram_source_capture: None,
             engram_source_root_validations_live: Arc::default(),
             // An epoch loaded from disk is already durable.
             test_runs: TestRunIndex {
@@ -798,6 +800,15 @@ struct PersistedSessionRecord {
     engram_source_observation_gate: Option<EngramSourceObservationGate>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     engram_source_observation_delete_requested: bool,
+    /// Immutable observation history survives a host restart; no grant is restored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_unadmitted_closing_jobs: Vec<EngramRuntimeClosingJob>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_unadmitted_reports: Vec<EngramRuntimeObservationReport>,
     /// The queue head a user Stop held (`EngramSessionState::stopped_prompt_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_stopped_prompt_id: Option<String>,
@@ -933,6 +944,10 @@ impl PersistedSessionRecord {
             engram_source_observation_delete_requested: self
                 .engram_source_observation_delete_requested
                 .clone(),
+            engram_runtime_checkpoint: self.engram_runtime_checkpoint.clone(),
+            engram_unadmitted_active_turn: self.engram_unadmitted_active_turn.clone(),
+            engram_unadmitted_closing_jobs: self.engram_unadmitted_closing_jobs.clone(),
+            engram_unadmitted_reports: self.engram_unadmitted_reports.clone(),
             engram_stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
             message_start_index: self.message_start_index.clone(),
             persist_prompt_history: self.persist_prompt_history.clone(),
@@ -989,6 +1004,10 @@ impl PersistedSessionRecord {
             engram_source_observation_delete_requested: record
                 .engram
                 .source_observation_delete_requested,
+            engram_runtime_checkpoint: record.engram.runtime_checkpoint.clone(),
+            engram_unadmitted_active_turn: record.engram.unadmitted_active_turn.clone(),
+            engram_unadmitted_closing_jobs: record.engram.unadmitted_closing_jobs.clone(),
+            engram_unadmitted_reports: record.engram.unadmitted_reports.clone(),
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
             engram_admission_retry: record.engram.admission_retry.clone(),
             engram_begin_preparation_lineage: record.engram.begin_preparation_lineage.clone(),
@@ -1145,6 +1164,10 @@ impl PersistedSessionRecord {
                 source_observation_gate: self.engram_source_observation_gate.clone(),
                 source_observation_delete_requested: self
                     .engram_source_observation_delete_requested,
+                runtime_checkpoint: self.engram_runtime_checkpoint,
+                unadmitted_active_turn: self.engram_unadmitted_active_turn,
+                unadmitted_closing_jobs: self.engram_unadmitted_closing_jobs,
+                unadmitted_reports: self.engram_unadmitted_reports,
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
                 admission_retry: self.engram_admission_retry.clone(),
                 // A saved pending marker proves nothing after a restart: the

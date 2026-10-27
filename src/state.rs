@@ -1256,6 +1256,7 @@ struct AppState {
     /// waiter registration" / "Graceful shutdown blocks forever waiting
     /// for SSE streams to drain".
     shutdown_signal_tx: Arc<tokio::sync::watch::Sender<bool>>,
+    runtime_observation_lifetime: Arc<EngramRuntimeObservationLifetime>,
     /// Background SSE state/delta broadcast mailbox. `publish_snapshot`
     /// stores a pre-built `StateResponse` here; a dedicated thread serializes
     /// snapshots to JSON and forwards each queued item to the matching SSE
@@ -1801,6 +1802,10 @@ struct StateInner {
     /// Threads taking a turn's begin or closing source basis that are still
     /// alive, abandoned ones included. Memory only, one count for the host.
     engram_turn_basis_captures_live: Arc<std::sync::atomic::AtomicUsize>,
+    /// Per-state test dependency for logical capture completion/absence.
+    /// Never persisted; production always uses the bounded filesystem owner.
+    #[cfg(test)]
+    test_engram_source_capture: Option<Arc<dyn Fn(&EngramBasisPlace, Duration) -> Option<EngramExecutionSourceBasis> + Send + Sync>>,
     /// Threads checking a path named as a work's source root that are still
     /// alive, abandoned ones included (`engram_run_source_root_validation_within`).
     /// Memory only, one count for the host.
@@ -1915,6 +1920,8 @@ impl StateInner {
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
+            #[cfg(test)]
+            test_engram_source_capture: None,
             engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
             test_run_registrations: PersistTracked::default(),

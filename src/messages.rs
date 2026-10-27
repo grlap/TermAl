@@ -154,12 +154,19 @@ fn append_prompt_history(record: &mut SessionRecord, prompt: &str) {
     set_prompt_history_on_record(record, normalize_prompt_history(prompts));
 }
 
-/// Recovers interrupted session record.
-fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<String> {
-    if !matches!(
+struct InterruptedSessionRecovery {
+    text: String,
+    expanded_text: Option<String>,
+}
+
+/// Recovers interrupted session record, including observation custody whose
+/// process-local adoption marker deliberately does not survive a restart.
+fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<InterruptedSessionRecovery> {
+    let interrupted = matches!(
         record.session.status,
         SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-    ) {
+    );
+    if !interrupted && record.engram.unadmitted_active_turn.is_none() {
         return None;
     }
 
@@ -186,7 +193,18 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Stri
         notice.push_str(&format!(" {queued_count} queued {noun} saved."));
     }
 
-    Some(notice)
+    // No closing capture occurred before the crash. Preserve the original
+    // observation facts in the existing recovery transcript, with an explicit
+    // non-report disposition, rather than fabricating a closing scope or
+    // allowing the next adoption to replace the only copy silently.
+    let expanded_text = record.engram.unadmitted_active_turn.take().map(|trace| {
+        notice.push_str(&format!(
+            " Runtime-started turn {} was not reported to Engram because the host restarted before its closing capture. Its retained observations remain uncredited; details are in this recovery notice.",
+            trace.host_turn_ref
+        ));
+        serde_json::to_string_pretty(&trace).unwrap_or_else(|_| format!("{trace:#?}"))
+    });
+    Some(InterruptedSessionRecovery { text: notice, expanded_text })
 }
 
 // Select through shared references before obtaining a mutable body. A

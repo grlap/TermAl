@@ -269,8 +269,8 @@ impl StateInner {
                     id: message_id,
                     timestamp: stamp_now(),
                     author: Author::Assistant,
-                    text: recovery,
-                    expanded_text: None,
+                    text: recovery.text,
+                    expanded_text: recovery.expanded_text,
                     source: None,
                 },
             );

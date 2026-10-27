@@ -13,22 +13,15 @@
 // turn is reported or how its facts are measured, persisted and recovered
 // (the runtime-started turn path), or splitting more than 16 checks into
 // standalone requests (the caller's). New module beside the protocol file,
-// created instead of growing it. Until the runtime-started turn path sends
-// these requests, only this module's tests build them, so its items allow
-// dead code outside tests.
+// created instead of growing it. The runtime observation worker builds and
+// delivers these requests independently of admission and grants.
 
-#[cfg_attr(not(test), allow(dead_code))]
 const ENGRAM_OBSERVATION_MAX_CHECKS: usize = 16;
-#[cfg_attr(not(test), allow(dead_code))]
 const ENGRAM_OBSERVATION_MAX_LABEL_BYTES: usize = 128;
-#[cfg_attr(not(test), allow(dead_code))]
 const ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES: usize = 2_048;
-#[cfg_attr(not(test), allow(dead_code))]
 const ENGRAM_OBSERVATION_MAX_SOURCE_BYTES: usize = 512;
-#[cfg_attr(not(test), allow(dead_code))]
 const ENGRAM_OBSERVATION_MAX_REQUEST_BYTES: usize = 64 * 1_024;
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EngramObservedCheckResult {
@@ -37,7 +30,6 @@ enum EngramObservedCheckResult {
     Indeterminate,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// One check the host saw run inside an unadmitted turn: a bounded fact,
 /// never verification evidence. A passed or failed result has finished.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -57,7 +49,6 @@ struct EngramObservedCheck {
     host_evidence_ref: Option<String>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// The facts every unadmitted occurrence carries besides the occurrence
 /// itself: the exact binding and canonical root basis at the capture cut,
 /// the window actually observed and the accounting policy.
@@ -70,7 +61,6 @@ struct EngramUnadmittedObservationBasis {
     policy_basis: EngramObservationPolicyBasis,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// The execution_observe request for an unadmitted turn, validated as built
 /// at `built_at`.
 fn engram_unadmitted_turn_request(
@@ -89,7 +79,6 @@ fn engram_unadmitted_turn_request(
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// The execution_observe request for one check of an unadmitted turn,
 /// reported on its own, validated as built at `built_at`.
 fn engram_observed_check_request(
@@ -107,7 +96,6 @@ fn engram_observed_check_request(
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn engram_unadmitted_request(
     routing_token: &str,
     basis: EngramUnadmittedObservationBasis,
@@ -141,14 +129,12 @@ fn engram_unadmitted_request(
     Ok(request)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn engram_observation_instant(value: &str, label: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|at| at.with_timezone(&chrono::Utc))
         .map_err(|_| format!("{label} is not an RFC 3339 time"))
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn engram_observation_text(value: &str, max_bytes: usize, label: &str) -> Result<(), String> {
     if value.trim().is_empty() || value.trim() != value || value.len() > max_bytes {
         return Err(format!("{label} must be trimmed, nonblank and at most {max_bytes} bytes"));
@@ -156,7 +142,6 @@ fn engram_observation_text(value: &str, max_bytes: usize, label: &str) -> Result
     Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn engram_observation_within(
     at: &str,
     from: chrono::DateTime<chrono::Utc>,
@@ -170,7 +155,6 @@ fn engram_observation_within(
     Ok(at)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn engram_observation_source_basis(basis: &EngramExecutionSourceBasis, label: &str) -> Result<(), String> {
     engram_observation_text(&basis.workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, &format!("{label}.workspace_id"))?;
     engram_observation_text(&basis.source_revision, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, &format!("{label}.source_revision"))?;
@@ -183,7 +167,6 @@ fn engram_observation_source_basis(basis: &EngramExecutionSourceBasis, label: &s
     Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// The producer's shape rules for a grant-free occurrence, checked before
 /// sending: each bound, the relations between the facts, and every time
 /// inside the observed window, which ends no later than `built_at`.
@@ -231,7 +214,6 @@ fn engram_validate_unadmitted_observation(
     engram_validate_observed_checks(checks, from, through)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn engram_validate_observed_source_change(
     change: &EngramObservedSourceChange,
     from: chrono::DateTime<chrono::Utc>,
@@ -267,7 +249,6 @@ fn engram_validate_observed_source_change(
     Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn engram_validate_observed_checks(
     checks: &[EngramObservedCheck],
     from: chrono::DateTime<chrono::Utc>,
@@ -313,7 +294,6 @@ fn engram_validate_observed_checks(
     Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// One check's summary on a receipt: its id and the producer-set credit.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -323,7 +303,6 @@ struct EngramObservedCheckSummary {
 }
 
 impl EngramSourceObservationReceipt {
-    #[cfg_attr(not(test), allow(dead_code))]
     /// Decodes the receipt of an unadmitted occurrence built here: it must
     /// record exactly the request under its scope, name exactly the request's
     /// checks, each uncredited, and account for a reported change as a change
@@ -344,7 +323,6 @@ impl EngramSourceObservationReceipt {
         Ok(receipt)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     fn validate_unadmitted(
         &self,
         request: &EngramInterTurnObservation,

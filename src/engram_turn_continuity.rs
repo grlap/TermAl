@@ -144,6 +144,18 @@ fn advance_engram_continuity_anchor(record: &mut SessionRecord, session_id: &str
         }
         _ => None,
     };
+    // Runtime history retains an independent endpoint across restart. The
+    // ordinary mediated comparison remains local to this process.
+    record.engram.runtime_checkpoint = anchor.as_ref().and_then(|anchor| {
+        Some(EngramRuntimeCheckpointBasis {
+            binding: record.engram.work_binding.clone()?,
+            endpoint: EngramMeasuredBaseline {
+                workspace_id: anchor.workspace_id.clone(),
+                source_revision: anchor.source_revision.clone(),
+                observed_at: anchor.observed_at.clone()?,
+            },
+        })
+    });
     record.engram.continuity_anchor = anchor;
 }
 

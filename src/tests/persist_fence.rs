@@ -5,7 +5,7 @@
 use super::*;
 
 #[path = "persist_metadata_units.rs"]
-mod metadata_units;
+pub(super) mod metadata_units;
 
 #[path = "test_run_registration_fence.rs"]
 mod test_run_registration;

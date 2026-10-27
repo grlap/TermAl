@@ -747,6 +747,15 @@ impl ClaudeTurnOwnershipState {
         }
     }
 
+    /// A proven open root runtime turn, excluding contradictory/unresolved
+    /// identities and host prompts that joined an unowned interval.
+    fn open_adopted_runtime_generation(&self) -> Option<u64> {
+        match &self.open {
+            Some(ClaudeOpenTurn::Runtime(owner)) => owner.adopted_generation,
+            _ => None,
+        }
+    }
+
     /// A top-level `result` arrived: it ends the open turn and only that one,
     /// and it settles a prompt only when its identities name that prompt
     /// alone. A subagent's result (`claude_frame_is_top_level`) is not passed

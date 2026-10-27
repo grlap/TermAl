@@ -963,6 +963,7 @@ fn test_app_state() -> AppState {
         // shutdown path explicitly flip this to `false`.
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
+        runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
         state_broadcast_mailbox: None,
         state_broadcast_worker: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),

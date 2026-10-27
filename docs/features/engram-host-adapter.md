@@ -614,7 +614,10 @@ The host keeps that change apart instead:
   where that turn's closing observation left the workspace, with the work,
   run and claim it reported to. Only an acknowledged checkpoint moves it, so
   a retry never advances it twice. A report without a closing basis clears it
-  rather than leaving an older one standing.
+  rather than leaving an older one standing. This mediated continuity anchor
+  is process-local. A separate persisted copy of the measured checkpoint
+  endpoint supports adopted-turn history without extending the ordinary
+  mediated comparison across a restart.
 - **The comparison.** When the next turn's begin basis is taken, it is
   compared with the anchor, and the result is kept for that grant:
   - unchanged;
@@ -626,8 +629,11 @@ The host keeps that change apart instead:
 - **Surfacing.** A drift is logged as a host diagnostic. A turn that then
   edits nothing still reports `source_changed=false` for itself, and the
   drift stays recorded beside that report.
-- **Not yet reported to Engram.** Reporting the drift to the store waits on
-  the producer representation agreed with Engram.
+- **Reporting separately.** The accounted-source path below reports a
+  compatible measured opening as an inter-turn observation before provider
+  handoff. An adopted runtime-started turn has its own unadmitted history,
+  described below. Neither replaces a mediated turn's measured begin or
+  attributes the intervening writes to that turn.
 
 ### Accounted source baseline
 
@@ -924,16 +930,20 @@ What the host does with a runtime-started turn:
 - **Adoption.** On an idle session (or one idle after an error) the turn is
   adopted: Active under a new turn generation, so prompts sent meanwhile
   queue behind it. A System notice in the transcript says at once that
-  TermAl did not mediate it and that its edits and tests are neither
-  reported nor credited. On a session busy with another turn, the turn is
-  marked but not adopted, and the notice says it is not part of that turn.
+  TermAl did not mediate it. With a claimed work binding, the notice explains
+  that the host attempts to report its observations as unadmitted history,
+  with unknown causality and uncredited checks. With no claimed binding it
+  says the turn is not reported to Engram. On a session busy with another
+  turn, the turn is marked but not adopted, and the notice says it is not
+  part of that turn.
   An unassigned turn is never adopted. Its notice says TermAl could not tie
   it to the waiting prompt, and that the session should be stopped if it
   stays busy.
 - **No attribution, full fencing.** While it is open, nothing the recorder
   sees is attributed to a grant: no check starts and no credit is given. It
-  is kept on the session as unassigned observations instead (bounded,
-  newest last, each naming the notice that announced its turn). Where its
+  is kept on the session as unassigned observations instead (bounded to 64,
+  newest last, each naming the notice that announced its turn). The separate
+  adopted-turn trace used for reporting does not share that cap. Where its
   commands run and what they may write still fences carried gates and marks
   open checks, of its own session and of others, as any command does. An
   adopted turn's start makes the same overlap marks a dispatched turn's
@@ -1061,8 +1071,115 @@ What the host does with a runtime-started turn:
   session's live turn, and the same runtime. A new prompt, a stop, a new
   turn or a new runtime drops it.
 
-Recording such a turn in the store, as detected and unmediated, waits on
-Engram's producer contract for observed turns.
+### Reporting adopted turns as unadmitted history
+
+An adopted turn has no pre-effect admission. Its reporting path never calls
+`turn_evaluate`, `turn_begin` or a turn checkpoint, and never borrows a grant
+left open on the session. It publishes evidence through `execution_observe`
+with `account_if_eligible` and unknown causality
+(`engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
+`engram_unadmitted_closing.rs`, `engram_unadmitted_delivery.rs` and
+`engram_unadmitted_worker.rs`).
+
+- **Identity and checks.** Adoption assigns a stable `host_turn_ref` and
+  retains the actual adoption timestamp. Collection requires a root frame
+  whose runtime and adopted generation match both the ownership ledger and
+  the current session. Nested or unresolved work with no proven adopted
+  parent is excluded from that trace. Each collected test has a stable
+  `host_check_id` and remains uncredited, whether it passed, failed or has
+  an indeterminate outcome. Up to 16 checks travel inside `unadmitted_turn`;
+  further checks travel as standalone `observed_check` occurrences with the
+  same turn reference. The 64-entry local diagnostic ring does not truncate
+  this collection. The existing command observer supplies declared-only test
+  recognition too. A successful detached full-launcher invocation is only a
+  launch fact: it remains indeterminate with no terminal time, not PASS.
+  Declared checks retain their original declaration/artifact start facts and
+  reuse the existing declared-artifact judge at completion, off the state
+  lock. Shell success without a valid passing artifact is not PASS. Proved
+  denied calls are local attempts, not observed runs; a missing end alone
+  does not establish denial.
+- **Close and scope.** Guarded result, error, reader failure, runtime exit,
+  missing-runtime and successful Stop/revocation paths retain a closing job
+  before clearing adoption or runtime ownership. The terminal transition
+  does no producer RPC or source measurement. The job pins the exact closing
+  work binding, including revision and claim fence, authority store,
+  connection and routing identity, named-root generation and `named_at`,
+  and local workdir. Capture requires current local scope and canonical
+  binding/root proof to agree with those facts. A mismatch ends the job with
+  a visible `not reported: scope changed` diagnostic naming the pinned and
+  current identities; it never re-scopes the old trace to another work.
+  This strict comparison also treats a revision/fence-only advance or a
+  routing-token rotation before capture as a scope change.
+- **Measurement and policy.** The worker pins the observation policy once,
+  off-thread, in a separately persisted phase before measuring source.
+  Measurement and request construction use that same pinned policy. The
+  previous acknowledged checkpoint supplies a baseline only for the exact
+  same binding and workspace: differing revisions use `content_comparison`
+  with the baseline's original timestamp, equal revisions report a null
+  change, and no compatible baseline uses `assumed_missing_baseline`. The
+  reported interval is an observation envelope, not the turn's execution
+  duration. It starts at adoption, or at the earlier original baseline time
+  when a comparison is included, and ends at the actual closing observation
+  cut before request construction. It asserts neither continuous observation
+  nor that the adopted turn caused the drift.
+- **Durability and replay.** The prepared request and delivery state live in
+  the session's SQLite row. Exact row read-back precedes every send, and the
+  turn/check identities determine immutable idempotency keys. An uncertain
+  reply or a restart replays the identical retained request and original
+  routing token; the host does not refresh a credential inside that request.
+  Retained reports may replay automatically after boot as evidence, without
+  activating a session. A restored closing job still needs its original
+  pinned scope; a rebind that changes it produces the visible scope failure.
+  Until the existing session binding/readiness owner finishes recovery,
+  Capture defers without changing the job or spending an attempt. Lazy idle
+  roots remain lazy: closing custody does not initiate a bind or a provider
+  prompt. Binding-guard release and boot-readiness completion wake retained
+  capture even when a bind installed its claim before later reconciliation
+  failed; the worker rechecks readiness and the original pinned scope.
+  Releasing a prepared-Begin hold does not establish an unread binding:
+  its recovery fence stays raised until the existing binding owner reads it.
+  A definitive no-claim bind still clears that fence and settles the original
+  closing scope as changed, rather than leaving it waiting forever.
+  Immutable delivery does not wait for the current session binding.
+  Historical receipts do not upgrade a successor grant or its current
+  source-sighting baseline. An active trace restored without a pre-crash
+  closing capture is not replayed or re-scoped. Boot archives its original
+  turn/check facts in the recovery notice's expanded details and explicitly
+  says it was not reported because the host restarted. The next adoption
+  therefore cannot silently replace that custody or invent an end measurement.
+  Invisible policy, outbox and delivery bookkeeping is persisted without
+  advancing the public state revision; visible diagnostics use the existing
+  state/delta publication path.
+  Delete uses the existing source-tracking removal barrier for active traces,
+  unfinished closing jobs and unresolved delivery custody too. It keeps the
+  session and exact request visible and durable, with queued work paused;
+  tracking-only Resume can explicitly recover a lazy binding through the existing
+  first-use binding owner, but never evaluates or begins a turn, unpauses queued
+  work, or sends a provider prompt. Recorded or definitively
+  refused envelopes release their removal duty only after the exact settlement
+  passes the existing coupled durability fence. A terminal local failure keeps
+  its custody: the Delete/Resume diagnostic names the turn and safe cause,
+  states that automatic reporting stopped and that Resume cannot resolve that
+  report. An uncertain send remains unknown; no retry reset, replacement key,
+  implemented repair command or permission to discard the report is implied.
+- **Delivery outcomes.** Before sending, the worker reads current reporting
+  eligibility. It keeps the pinned capture policy in the wire when other
+  policy details changed; the producer judges `account_if_eligible`.
+  Unavailable or disabled policy has a visible local-failure diagnostic.
+  Busy, expired-request and other recognized transient replies retain the
+  immutable request with the existing backoff. After eight failed attempts,
+  delivery or capture ends visibly rather than retrying forever. A definitive
+  producer refusal names its code and settles that envelope. Malformed
+  retained wire becomes a visible local failure and does not starve later
+  reports. Settled request/receipt bodies and failed closing jobs are currently
+  retained; diagnostics and eligibility reads are per envelope.
+- **Retirement boundary.** Worker installs register before checking the
+  process-local stopping flag and hold their guard through CAS and persistence,
+  including synchronous fallback. Retirement refuses new installs, joins
+  those guards, then drains the persistence writer before a restore opens the
+  same store. The same fence currently declines late terminal callbacks during
+  graceful shutdown, so the final snapshot can retain their pre-callback state
+  for restart recovery to handle as interrupted.
 
 ### Content revision
 
@@ -1647,10 +1764,12 @@ happens elsewhere. The agent therefore names the item's worktree once with
   none, having no evaluator child: a rename or a clear after it does not
   refuse its submission, and the tracker's own freshness check is what
   stands. A
-  change made between two mediated turns (the naming turn's edits, a
-  runtime-started turn) is not reported by either. The host keeps it as
-  continuity drift (Continuity between turns, above); reporting it to
-  Engram waits on the producer representation agreed with Engram. The main checkout of a
+  change made between two mediated turns is not attributed to either turn's
+  own source flag. A compatible accounted-source opening can report it as an
+  inter-turn observation; an adopted runtime-started turn can report its
+  own unadmitted history, both with unknown causality as described above.
+  Missing scope or measurement can still leave history unreported, with the
+  runtime reporting path's visible diagnostic. The main checkout of a
   `--separate-git-dir` repository cannot be named, since its `.git` file
   names no linked worktree; a linked worktree of it can.
 

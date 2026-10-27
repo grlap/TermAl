@@ -839,6 +839,7 @@ impl AppState {
             persist_thread_handle: Arc::new(Mutex::new(Some(persist_thread_handle))),
             persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
+            runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
             state_broadcast_mailbox: Some(state_broadcast_mailbox),
             state_broadcast_worker: None,
             telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
@@ -976,6 +977,7 @@ impl AppState {
         // the per-session readiness fence blocks only affected sessions until
         // their own recovery result is committed.
         self.recover_prepared_engram_sessions_after_boot(engram_plan);
+        self.resume_runtime_observation_reports();
         self.recover_federation_executor_after_boot();
         // Materialize unread mailbox wakes before either workflow reconciler can
         // queue and dispatch a durable resume. That preserves FIFO ordering:
