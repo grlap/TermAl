@@ -3055,6 +3055,7 @@ async fn state_events_route_aligns_an_opted_in_connection_once_then_chains_diffs
                 "newInstance": 0,
             },
             "legacyPairedFullStates": 0,
+            "cutRequests": 0,
         })
     );
 }
@@ -3103,6 +3104,110 @@ async fn full_state_request_on_an_idle_host_publishes_a_marked_full_state_withou
     assert_no_ready_sse_chunk(&mut body, "one answer");
 }
 
+// An in-chain client asks for the current cut (`mode: "cut"`), not a marked
+// full state: no new request generation, so the cut takes the normal path. A
+// cut newer than the shared base goes out as a diff from it, carrying the row
+// a delta-only commit touched; a cut at the base's revision sends nothing.
+#[tokio::test]
+async fn full_state_cut_request_publishes_a_diff_without_a_new_generation() {
+    let mut state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    state.state_broadcast_senders.stream_events = broadcast::channel(64).0;
+    let mailbox = Arc::new(StateBroadcastMailbox::default());
+    state.state_broadcast_mailbox = Some(mailbox.clone());
+    let senders = state.state_broadcast_senders.clone();
+    let mut producer = StateDiffProducer::default();
+    let flush = |producer: &mut StateDiffProducer| {
+        for work in mailbox.take_pending_for_test() {
+            producer.forward(work, &senders);
+        }
+    };
+    let _other_listener = senders.stream_events.subscribe();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        state.commit_locked(&mut inner).unwrap();
+    }
+    flush(&mut producer);
+    let base_revision = state.inner.lock().unwrap().revision;
+
+    let app = app_router(state.clone());
+    let mut body = open_state_events(&app, "/api/events?stateDiff=1").await;
+    assert_eq!(post_full_state_request(&app).await, StatusCode::NO_CONTENT);
+    flush(&mut producer);
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    let payload: Value = serde_json::from_str(&data).unwrap();
+    assert_eq!(name, "state");
+    assert_eq!(payload["stateDiffBase"], true);
+    assert_eq!(payload["revision"].as_u64(), Some(base_revision));
+    assert_eq!(full_state_request_generation(&senders), 2);
+
+    // A delta-only commit moves the revision and publishes no cut.
+    push_test_text_message(&state, &session_id, "Delta-only commit");
+    flush(&mut producer);
+    assert_eq!(parse_sse_event(&next_sse_event(&mut body).await).0, "delta");
+    let delta_revision = state.inner.lock().unwrap().revision;
+    assert!(delta_revision > base_revision);
+    assert_no_ready_sse_chunk(&mut body, "no cut without a request");
+
+    assert_eq!(
+        post_full_state_request_as(&app, Some("application/json"), r#"{"mode":"cut"}"#).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(full_state_request_generation(&senders), 2, "a cut request opens no generation");
+    flush(&mut producer);
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    let payload: Value = serde_json::from_str(&data).unwrap();
+    assert_eq!(name, "stateDiff");
+    assert_eq!(payload["baseRevision"].as_u64(), Some(base_revision));
+    assert_eq!(payload["revision"].as_u64(), Some(delta_revision));
+    let changed: Vec<&str> = payload["sessions"]["changed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(changed, [session_id.as_str()], "the touched row rides the diff");
+    assert_eq!(state.inner.lock().unwrap().revision, delta_revision, "no commit");
+    assert_no_ready_sse_chunk(&mut body, "one diff");
+
+    // At the base's revision the cut has nothing to send.
+    assert_eq!(
+        post_full_state_request_as(&app, Some("application/json"), r#"{"mode":"cut"}"#).await,
+        StatusCode::NO_CONTENT
+    );
+    flush(&mut producer);
+    assert_no_ready_sse_chunk(&mut body, "a cut at the base revision sends nothing");
+    assert_eq!(full_state_request_generation(&senders), 2);
+    assert_eq!(producer.satisfied_generation, 2);
+
+    let (status, diagnostics): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .uri("/api/diagnostics/persistence")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        diagnostics["stateBroadcast"],
+        json!({
+            "diffsEmitted": 1,
+            "markedFullStates": {
+                "noBase": 1,
+                "lag": 0,
+                "failure": 0,
+                "noReceivers": 0,
+                "alignmentRequest": 1,
+                "newInstance": 0,
+            },
+            "legacyPairedFullStates": 0,
+            "cutRequests": 2,
+        })
+    );
+}
+
 // The alignment request rides the same router and layers as `/api/events`.
 // That route has no authentication of its own (only the shared CORS layer),
 // so the request is accepted or refused exactly as `/api/events` is: both
@@ -3144,6 +3249,7 @@ async fn full_state_request_shares_the_event_stream_access_policy() {
         (None, ""),
         (None, "{}"),
         (Some("text/plain"), "{}"),
+        (Some("text/plain"), r#"{"mode":"cut"}"#),
         (Some("application/x-www-form-urlencoded"), "a=b"),
     ] {
         assert_eq!(
@@ -3153,11 +3259,19 @@ async fn full_state_request_shares_the_event_stream_access_policy() {
         );
         assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 0);
     }
-    assert_eq!(
-        post_full_state_request_as(&app, Some("application/json"), "not json").await,
-        StatusCode::UNPROCESSABLE_ENTITY
-    );
+    for body in ["not json", r#"{"mode":"unknown"}"#] {
+        assert_eq!(
+            post_full_state_request_as(&app, Some("application/json"), body).await,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{body}"
+        );
+    }
     assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 0);
+    assert_eq!(
+        state.state_broadcast_senders.diff_counters.snapshot().cut_requests,
+        0,
+        "a refused cut request is not counted"
+    );
     assert_eq!(post_full_state_request(&app).await, StatusCode::NO_CONTENT);
     assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 1);
     let response = request_response(

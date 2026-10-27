@@ -179,20 +179,22 @@ function sameFilesystemEntry(before, after) {
     before.mode === after.mode &&
     before.size === after.size &&
     before.mtimeNs === after.mtimeNs &&
-    before.ctimeNs === after.ctimeNs
+    // Windows ChangeTime can advance on AV/indexer metadata writes without a
+    // content change; retain every other identity, size and mtime check.
+    (process.platform === "win32" || before.ctimeNs === after.ctimeNs)
   );
 }
 
-function lstatStablePath(path, gitPath) {
+function lstatStablePath(path, gitPath, hooks) {
   try {
-    return lstatSync(path, { bigint: true });
+    return (hooks.lstat ?? lstatSync)(path, { bigint: true });
   } catch (error) {
     throw worktreeChangedError(gitPath, error);
   }
 }
 
-function assertFilesystemEntryStable(path, gitPath, before) {
-  const after = lstatStablePath(path, gitPath);
+function assertFilesystemEntryStable(path, gitPath, before, hooks) {
+  const after = lstatStablePath(path, gitPath, hooks);
   if (!sameFilesystemEntry(before, after)) {
     throw worktreeChangedError(gitPath);
   }
@@ -230,7 +232,7 @@ function hashRegularFile(hash, path, gitPath, metadata, hooks) {
   if (totalBytes !== metadata.size) {
     throw worktreeChangedError(gitPath);
   }
-  assertFilesystemEntryStable(path, gitPath, metadata);
+  assertFilesystemEntryStable(path, gitPath, metadata, hooks);
 }
 
 export async function hashUntrackedFiles(root, hooks = {}, env = isolatedGitEnvironment()) {
@@ -248,7 +250,7 @@ export async function hashUntrackedFiles(root, hooks = {}, env = isolatedGitEnvi
   for (const gitPath of paths) {
     const path = filesystemPath(root, gitPath);
     hooks.beforeEntry?.(gitPath);
-    const metadata = lstatStablePath(path, gitPath);
+    const metadata = lstatStablePath(path, gitPath, hooks);
     const kind = metadata.isSymbolicLink() ? "symlink" : "file";
     if (kind === "file" && !metadata.isFile()) {
       throw new Error(
@@ -271,7 +273,7 @@ export async function hashUntrackedFiles(root, hooks = {}, env = isolatedGitEnvi
       }
       writeLength(hash, content.length);
       hash.update(content);
-      assertFilesystemEntryStable(path, gitPath, metadata);
+      assertFilesystemEntryStable(path, gitPath, metadata, hooks);
     }
   }
   return hash.digest("hex");

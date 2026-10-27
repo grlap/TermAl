@@ -1,16 +1,19 @@
 // Pins `stateDiff` admission, the pure merges, the transport handler's
-// apply/ignore/resync effects, and the partial writer in
-// transcript-http-adoption.ts that voids the diff baseline.
+// apply/ignore/resync effects, the partial writer in
+// transcript-http-adoption.ts that voids the diff baseline, and the repair of
+// delegation and wait deltas from a requested cut.
 import { describe, expect, it, vi } from "vitest";
 import {
   createStateDiffEventHandler,
+  createStateDiffRepairCutRequester,
   decideStateDiffAdmission,
   mergeStateDiffRows,
   mergeStateDiffSessions,
   type StateDiffEvent,
   type StateDiffEventHandlerContext,
+  type StateDiffRepairCutContext,
 } from "./app-live-state-diff";
-import { requestFullStateAlignment } from "./api";
+import { requestFullStateAlignment, requestStateCut } from "./api";
 import { createAppLiveStateTransportEventHandlers } from "./app-live-state-transport-events";
 import { applyHttpSessionEffects, type HttpSessionDecision } from "./transcript-http-adoption";
 import { TranscriptRepairAuthority } from "./transcript-repair-authority";
@@ -40,11 +43,17 @@ describe("stateDiff admission", () => {
     expect(admission({ baseRevision: 3, revision: 4 })).toBe("ignore");
   });
 
+  it("applies a diff from the baseline equal to the current revision", () => {
+    // In-stream deltas moved the current revision past the baseline; the
+    // requested cut lands at the last one's revision and covers it.
+    expect(admission({ revision: 7 })).toBe("apply");
+    expect(admission({ currentRevision: 9, revision: 9 })).toBe("apply");
+  });
+
   it.each([
     ["no baseline", { baselineRevision: null }],
     ["a base other than the baseline", { baseRevision: 4 }],
-    ["a revision not newer than the current one", { revision: 7 }],
-    ["a revision equal to the current one", { currentRevision: 9, revision: 9 }],
+    ["a revision behind the current one", { currentRevision: 9, revision: 8 }],
   ] as const)("asks for alignment, not an HTTP resync, for %s", (_, overrides) => {
     expect(admission(overrides)).toBe("align");
   });
@@ -358,5 +367,228 @@ describe("alignment request", () => {
         body: "{}",
       }),
     );
+  });
+
+  it("asks for a cut with a JSON mode on the same route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await requestStateCut();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      "/api/events/full-state",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"mode":"cut"}',
+      }),
+    );
+  });
+});
+
+/** A cut request the test settles by hand. */
+function deferredCut() {
+  const settles: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+  const requestStateCut = vi.fn(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        settles.push({ resolve: () => resolve(), reject });
+      }),
+  );
+  return { requestStateCut, settles };
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function makeRepairContext(
+  overrides: Partial<StateDiffRepairCutContext> = {},
+): StateDiffRepairCutContext {
+  return {
+    isCancelled: () => false,
+    isInChain: () => true,
+    requestStateCut: vi.fn(() => Promise.resolve()),
+    requestHttpRepair: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe("repair-cut requester", () => {
+  it("asks an in-chain repair for a cut, not an HTTP repair", async () => {
+    const context = makeRepairContext();
+    createStateDiffRepairCutRequester(context)(8);
+    await flushMicrotasks();
+
+    expect(context.requestStateCut).toHaveBeenCalledOnce();
+    expect(context.requestHttpRepair).not.toHaveBeenCalled();
+  });
+
+  it("repairs over HTTP when the client is not in chain", () => {
+    const context = makeRepairContext({ isInChain: () => false });
+    createStateDiffRepairCutRequester(context)(8);
+
+    expect(context.requestStateCut).not.toHaveBeenCalled();
+    expect(context.requestHttpRepair).toHaveBeenCalledExactlyOnceWith(8);
+  });
+
+  it("falls back to the HTTP repair when the cut request fails", async () => {
+    const rejected = makeRepairContext({
+      requestStateCut: vi.fn(() => Promise.reject(new Error("503"))),
+    });
+    createStateDiffRepairCutRequester(rejected)(8);
+    await flushMicrotasks();
+    expect(rejected.requestHttpRepair).toHaveBeenCalledExactlyOnceWith(8);
+
+    const thrown = makeRepairContext({
+      requestStateCut: vi.fn(() => {
+        throw new Error("no fetch");
+      }),
+    });
+    createStateDiffRepairCutRequester(thrown)(8);
+    expect(thrown.requestHttpRepair).toHaveBeenCalledExactlyOnceWith(8);
+  });
+
+  // The server may take the outstanding request's cut before a later
+  // repair's commit; that repair is kept and asks once more, never dropped.
+  it("keeps repairs asked for while a cut is outstanding and asks once more", async () => {
+    const { requestStateCut, settles } = deferredCut();
+    const context = makeRepairContext({ requestStateCut });
+    const request = createStateDiffRepairCutRequester(context);
+    request(8);
+    request(9);
+    request(10);
+    expect(requestStateCut).toHaveBeenCalledOnce();
+
+    settles[0].resolve();
+    await flushMicrotasks();
+    expect(requestStateCut).toHaveBeenCalledTimes(2);
+
+    settles[1].resolve();
+    await flushMicrotasks();
+    expect(requestStateCut).toHaveBeenCalledTimes(2);
+    expect(context.requestHttpRepair).not.toHaveBeenCalled();
+  });
+
+  it("covers a kept repair over HTTP when the outstanding cut fails", async () => {
+    const { requestStateCut, settles } = deferredCut();
+    const context = makeRepairContext({ requestStateCut });
+    const request = createStateDiffRepairCutRequester(context);
+    request(8);
+    request(10);
+    settles[0].reject(new Error("offline"));
+    await flushMicrotasks();
+
+    expect(context.requestHttpRepair).toHaveBeenCalledExactlyOnceWith(10);
+    expect(requestStateCut).toHaveBeenCalledOnce();
+  });
+
+  it("repairs a kept request over HTTP once the client has left the chain", async () => {
+    const { requestStateCut, settles } = deferredCut();
+    let inChain = true;
+    const context = makeRepairContext({ requestStateCut, isInChain: () => inChain });
+    const request = createStateDiffRepairCutRequester(context);
+    request(8);
+    request(9);
+    inChain = false;
+    settles[0].resolve();
+    await flushMicrotasks();
+
+    expect(requestStateCut).toHaveBeenCalledOnce();
+    expect(context.requestHttpRepair).toHaveBeenCalledExactlyOnceWith(9);
+  });
+
+  it("does nothing once cancelled", async () => {
+    let cancelled = false;
+    const rejected = makeRepairContext({
+      isCancelled: () => cancelled,
+      requestStateCut: vi.fn(() => Promise.reject(new Error("closed"))),
+    });
+    const request = createStateDiffRepairCutRequester(rejected);
+    request(8);
+    cancelled = true;
+    request(9);
+    await flushMicrotasks();
+
+    expect(rejected.requestStateCut).toHaveBeenCalledOnce();
+    expect(rejected.requestHttpRepair).not.toHaveBeenCalled();
+  });
+});
+
+describe("authoritative-repair delta transport", () => {
+  function delegationDeltaEvent(revision: number) {
+    return new MessageEvent<string>("delta", {
+      data: JSON.stringify({ type: "delegationCompleted", revision, delegationId: "d1" }),
+    });
+  }
+
+  function makeHandlers(overrides: Partial<StateDiffEventHandlerContext> = {}) {
+    const base = makeContext(overrides);
+    const extra = {
+      applyDelegationWaitDeltaLocally: vi.fn(),
+      confirmReconnectRecoveryFromDeltaEvent: vi.fn(() => true),
+      requestStateCut: vi.fn(() => Promise.resolve()),
+      setLastDelegationRepairRequestedRevision: vi.fn(),
+    };
+    const handlers = createAppLiveStateTransportEventHandlers({
+      ...base,
+      ...extra,
+    } as unknown as Parameters<typeof createAppLiveStateTransportEventHandlers>[0]);
+    return { base, extra, handlers };
+  }
+
+  it("repairs an in-chain delegation delta from a requested cut", async () => {
+    const { base, extra, handlers } = makeHandlers();
+    handlers.handleDeltaEvent(delegationDeltaEvent(8));
+    await flushMicrotasks();
+
+    expect(extra.applyDelegationWaitDeltaLocally).toHaveBeenCalledOnce();
+    expect(extra.requestStateCut).toHaveBeenCalledOnce();
+    expect(base.requestStateResync).not.toHaveBeenCalled();
+    expect(extra.setLastDelegationRepairRequestedRevision).not.toHaveBeenCalled();
+    expect(base.latestStateRevisionRef.current).toBe(7);
+    expect(base.stateDiffBaselineRevisionRef.current).toBe(5);
+  });
+
+  it.each([
+    ["no baseline", { stateDiffBaselineRevisionRef: { current: null } }],
+    ["an alignment pending", { stateDiffAlignmentPendingRef: { current: true } }],
+    [
+      "a bad live event awaiting repair",
+      {
+        transportState: {
+          delegationRepairAdoptedSinceLastReconnectError: false,
+          pendingBadLiveEventRecovery: true,
+          sawReconnectOpenSinceLastError: false,
+        },
+      },
+    ],
+  ] as const)("keeps the HTTP repair with %s", (_, overrides) => {
+    const { base, extra, handlers } = makeHandlers(
+      overrides as Partial<StateDiffEventHandlerContext>,
+    );
+    handlers.handleDeltaEvent(delegationDeltaEvent(8));
+
+    expect(extra.requestStateCut).not.toHaveBeenCalled();
+    expect(extra.setLastDelegationRepairRequestedRevision).toHaveBeenCalledExactlyOnceWith(8);
+    expect(base.requestStateResync).toHaveBeenCalledExactlyOnceWith({
+      allowAuthoritativeRollback: true,
+      forceAdoptEqualOrNewerRevision: 8,
+      rearmOnFailure: true,
+    });
+  });
+
+  it("applies the requested cut's diff at the current revision and keeps the chain", () => {
+    // A session delta moved the current revision to 8 after the baseline at
+    // 5; the cut requested for the delegation delta lands at 8 too.
+    const context = makeContext({ latestStateRevisionRef: { current: 8 } });
+    createStateDiffEventHandler(context)(diffEvent({ baseRevision: 5, revision: 8 }));
+
+    expect(context.adoptStateDiff).toHaveBeenCalledOnce();
+    expect(context.requestStateDiffAlignment).not.toHaveBeenCalled();
+    expect(context.requestStateResync).not.toHaveBeenCalled();
   });
 });

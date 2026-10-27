@@ -363,6 +363,8 @@ struct StateDiffCounters {
     marked_alignment_request: AtomicU64,
     marked_new_instance: AtomicU64,
     legacy_paired_full_states: AtomicU64,
+    /// `POST /api/events/full-state` calls with `mode: "cut"`.
+    cut_requests: AtomicU64,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -371,6 +373,7 @@ struct StateDiffCountersSnapshot {
     diffs_emitted: u64,
     marked_full_states: StateDiffMarkedCounts,
     legacy_paired_full_states: u64,
+    cut_requests: u64,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -410,6 +413,7 @@ impl StateDiffCounters {
                 new_instance: read(&self.marked_new_instance),
             },
             legacy_paired_full_states: read(&self.legacy_paired_full_states),
+            cut_requests: read(&self.cut_requests),
         }
     }
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   appendFileSync,
   chmodSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -372,6 +373,68 @@ test("fingerprint rejects an untracked file mutated during hashing", async () =>
         }),
       /worktree changed while fingerprinting .*; rerun/,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fingerprint tolerates ctime-only drift during hashing only on Windows", async () => {
+  const root = createRepository();
+  try {
+    writeFileSync(join(root, "metadata only.txt"), "unchanged\n");
+    const expected = await hashUntrackedFiles(root);
+    let opened = false;
+    const observedCtimes = [];
+    const capture = () => hashUntrackedFiles(root, {
+      afterOpen() { opened = true; },
+      lstat(path, options) {
+        const metadata = lstatSync(path, options);
+        metadata.ctimeNs = opened ? 2n : 1n;
+        observedCtimes.push(metadata.ctimeNs);
+        return metadata;
+      },
+    });
+    if (process.platform === "win32") {
+      assert.equal(await capture(), expected);
+    } else {
+      await assert.rejects(capture, /worktree changed while fingerprinting .*; rerun/);
+    }
+    assert.deepEqual(observedCtimes, [1n, 2n]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const field of ["dev", "ino", "mode", "size", "mtimeNs"]) {
+  test(`fingerprint rejects ${field} drift even with a ctime-only exception`, async () => {
+    const root = createRepository();
+    try {
+      writeFileSync(join(root, "metadata-drift.txt"), "unchanged\n");
+      let opened = false;
+      await assert.rejects(() => hashUntrackedFiles(root, {
+        afterOpen() { opened = true; },
+        lstat(path, options) {
+          const metadata = lstatSync(path, options);
+          metadata.ctimeNs = opened ? 2n : 1n;
+          if (opened) metadata[field] += 1n;
+          return metadata;
+        },
+      }), /worktree changed while fingerprinting .*; rerun/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("fingerprint rejects an mtime change without a content or size change", async () => {
+  const root = createRepository();
+  try {
+    const path = join(root, "mtime-drift.txt");
+    writeFileSync(path, "unchanged\n");
+    const earlier = new Date(Date.now() - 60_000);
+    await assert.rejects(() => hashUntrackedFiles(root, {
+      afterOpen() { utimesSync(path, earlier, earlier); },
+    }), /worktree changed while fingerprinting .*; rerun/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

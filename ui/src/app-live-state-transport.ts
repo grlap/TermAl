@@ -20,6 +20,7 @@ import {
 import {
   fetchState,
   requestFullStateAlignment,
+  requestStateCut,
   type StateResponse,
 } from "./api";
 import { isBackendUnavailableError } from "./api-request";
@@ -1275,6 +1276,7 @@ export function useAppLiveStateTransport(
       stateDiffBaselineRevisionRef: params.stateDiffBaselineRevisionRef,
       stateDiffAlignmentPendingRef,
       requestStateDiffAlignment: () => requestFullStateAlignment(),
+      requestStateCut: () => requestStateCut(),
       transportState: reconnectState,
       clearInitialStateResyncRetryTimeout,
       shouldForceAdoptNextStateEvent,

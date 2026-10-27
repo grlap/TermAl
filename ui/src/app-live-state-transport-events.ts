@@ -60,7 +60,11 @@ import type { RequestStateResyncOptions } from "./app-live-state-resync-options"
 import type { ReconnectRecoveryStateSnapshot } from "./app-live-state-reconnect-state";
 import type { SessionHydrationOptions } from "./app-live-state-hydration";
 import type { HydrationDeltaObservation } from "./session-hydration-adoption";
-import { createStateDiffEventHandler, type StateDiffEvent } from "./app-live-state-diff";
+import {
+  createStateDiffEventHandler,
+  createStateDiffRepairCutRequester,
+  type StateDiffEvent,
+} from "./app-live-state-diff";
 
 type AppLiveStateTransportEventHandlersContext = {
   sessionAuthority: TranscriptRepairAuthority;
@@ -124,6 +128,8 @@ type AppLiveStateTransportEventHandlersContext = {
   stateDiffBaselineRevisionRef: MutableRefObject<number | null>;
   stateDiffAlignmentPendingRef: MutableRefObject<boolean>;
   requestStateDiffAlignment: () => Promise<unknown>;
+  /** `POST /api/events/full-state` with `mode: "cut"`. */
+  requestStateCut: () => Promise<unknown>;
   syncLiveSessionResumeWatchdogBaselines: (
     sessions: readonly Session[],
     now?: number,
@@ -231,6 +237,28 @@ export function createAppLiveStateTransportEventHandlers(
     syncLiveTransportActivityFromState,
     triggerRecoveryForDelta,
   } = context;
+
+  const requestAuthoritativeRepair = createStateDiffRepairCutRequester({
+    isCancelled,
+    isInChain: () =>
+      context.stateDiffBaselineRevisionRef.current !== null &&
+      !context.stateDiffAlignmentPendingRef.current &&
+      !transportState.pendingBadLiveEventRecovery,
+    requestStateCut: context.requestStateCut,
+    requestHttpRepair: (revision) => {
+      setLastDelegationRepairRequestedRevision(revision);
+      requestStateResync({
+        allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
+        // A delegation or wait delta can require an authoritative
+        // `/api/state` repair for state its commit changed, but adopting
+        // that snapshot is not proof the reopened SSE stream is healthy.
+        // Keep reconnect polling armed until a later data-bearing SSE
+        // event confirms live delivery after the repair.
+        forceAdoptEqualOrNewerRevision: revision,
+        rearmOnFailure: true,
+      });
+    },
+  });
 
   function applyTranscriptDelta(delta: Parameters<typeof applyDeltaToSessions>[1], revisionAction: HydrationDeltaObservation["revisionAction"]) {
     const result = applyDeltaToSessions(sessionsRef.current, delta);
@@ -590,7 +618,8 @@ export function createAppLiveStateTransportEventHandlers(
       // Delegation and test-run wait deltas carry only part of their commit
       // (a consumed wait also queued a resume prompt; sibling waits share the
       // revision). Apply the wait locally by id, never move the global
-      // revision from it, and repair from the authoritative snapshot.
+      // revision from it, and repair: from a requested cut on the stream
+      // while the diff baseline holds, else from the authoritative snapshot.
       if (isAuthoritativeRepairDeltaEvent(delta)) {
         if (currentRevision === null || delta.revision > currentRevision) {
           observeDelta(delta, "resync");
@@ -604,17 +633,7 @@ export function createAppLiveStateTransportEventHandlers(
           if (transportState.delegationRepairAdoptedSinceLastReconnectError) {
             void confirmReconnectRecoveryFromDeltaEvent();
           }
-          setLastDelegationRepairRequestedRevision(delta.revision);
-          requestStateResync({
-            allowAuthoritativeRollback: currentRevision !== null,
-            // A delegation or wait delta can require an authoritative
-            // `/api/state` repair for state its commit changed, but adopting
-            // that snapshot is not proof the reopened SSE stream is healthy.
-            // Keep reconnect polling armed until a later data-bearing SSE
-            // event confirms live delivery after the repair.
-            forceAdoptEqualOrNewerRevision: delta.revision,
-            rearmOnFailure: true,
-          });
+          requestAuthoritativeRepair(delta.revision);
         } else if (!transportState.pendingBadLiveEventRecovery) {
           void confirmReconnectRecoveryFromDeltaEvent();
         }

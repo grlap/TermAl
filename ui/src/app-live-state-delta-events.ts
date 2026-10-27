@@ -102,9 +102,10 @@ export type TestRunWaitRecordDeltaEvent = Extract<
 >;
 
 // Deltas that carry only part of their commit. A delegation or test-run wait
-// delta updates its own list by id and asks for an authoritative /api/state
-// repair; it never moves the global revision, because the snapshot of the
-// same commit (queued prompts, sibling waits) may not have arrived yet.
+// delta updates its own list by id and asks for a repair (a requested cut
+// while the stateDiff baseline holds, else an authoritative /api/state); it
+// never moves the global revision, because the snapshot of the same commit
+// (queued prompts, sibling waits) may not have arrived yet.
 export function isAuthoritativeRepairDeltaEvent(
   delta: DeltaEvent,
 ): delta is DelegationDeltaEvent | TestRunWaitRecordDeltaEvent {

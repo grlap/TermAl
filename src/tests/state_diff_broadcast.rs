@@ -655,6 +655,7 @@ fn state_diff_counters_record_each_emission_by_reason() {
                 "newInstance": 1,
             },
             "legacyPairedFullStates": 1,
+            "cutRequests": 0,
         })
     );
 }

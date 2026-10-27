@@ -5,7 +5,9 @@
 // server-marked full state, or of the last applied diff), the pure merges
 // that fold a diff into the current sessions and keyed rows, and the
 // transport handler that admits and applies one diff, or ignores it and asks
-// the server once for a marked full state to align on.
+// the server once for a marked full state to align on; and the repair-cut
+// requester, which repairs a partial-commit delta from the stream (a requested
+// cut) while the baseline holds, and over HTTP otherwise.
 //
 // Does not own: writing adopted slices into React state and refs
 // (`adoptStateDiff` in app-live-state.ts, beside `adoptState`), the baseline
@@ -82,16 +84,90 @@ export function decideStateDiffAdmission(input: {
   }
   const baseline = input.baselineRevision;
   if (baseline !== null && input.revision <= baseline) return "ignore";
+  // A diff equal to the current revision applies too. While the baseline is
+  // valid, every writer that moves the current revision other than an
+  // in-stream delta clears it, and the stream is ordered: a delta this
+  // client applied before the diff was published before its cut, so the
+  // cut covers it. A requested cut usually lands at the last delta's
+  // revision exactly.
   if (
     baseline !== null &&
     baseline === input.baseRevision &&
-    (input.currentRevision === null || input.revision > input.currentRevision)
+    (input.currentRevision === null || input.revision >= input.currentRevision)
   ) {
     return "apply";
   }
   // No baseline, another base, or a diff behind state this client already
   // took from elsewhere: only a marked full state realigns it.
   return "align";
+}
+
+export type StateDiffRepairCutContext = {
+  isCancelled: () => boolean;
+  /**
+   * The baseline is valid and nothing is realigning it: no alignment is
+   * pending and no bad live event awaits repair. Read on every request.
+   */
+  isInChain: () => boolean;
+  /** `POST /api/events/full-state` with `mode: "cut"`. */
+  requestStateCut: () => Promise<unknown>;
+  /** The authoritative HTTP repair covering `revision`. */
+  requestHttpRepair: (revision: number) => void;
+};
+
+/**
+ * Repairs the state behind a delegation or wait delta, which carries only
+ * part of its commit. An in-chain client asks for the current cut, which
+ * reaches it as a `stateDiff` and keeps its baseline; at the baseline's
+ * revision the server sends nothing, because that cut already covered the
+ * commit. Any other client, and any failed request, takes the HTTP repair.
+ *
+ * At most one cut request is outstanding. A repair asked for meanwhile is
+ * kept, not dropped: the server may have taken the outstanding request's cut
+ * before that repair's commit, so one more request follows when it settles.
+ */
+export function createStateDiffRepairCutRequester(context: StateDiffRepairCutContext) {
+  let outstanding = false;
+  let followUpRevision: number | null = null;
+
+  function newest(a: number, b: number | null) {
+    return b === null ? a : Math.max(a, b);
+  }
+
+  function request(revision: number) {
+    if (context.isCancelled()) return;
+    if (outstanding) {
+      followUpRevision = newest(revision, followUpRevision);
+      return;
+    }
+    if (!context.isInChain()) {
+      context.requestHttpRepair(revision);
+      return;
+    }
+    outstanding = true;
+    const settled = () => {
+      outstanding = false;
+      const next = followUpRevision;
+      followUpRevision = null;
+      if (next !== null) request(next);
+    };
+    const failed = () => {
+      outstanding = false;
+      const covering = newest(revision, followUpRevision);
+      followUpRevision = null;
+      if (!context.isCancelled()) context.requestHttpRepair(covering);
+    };
+    let pending: Promise<unknown>;
+    try {
+      pending = context.requestStateCut();
+    } catch {
+      failed();
+      return;
+    }
+    void pending.then(settled, failed);
+  }
+
+  return request;
 }
 
 /**

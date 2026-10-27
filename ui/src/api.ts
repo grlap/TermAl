@@ -603,6 +603,21 @@ export function requestFullStateAlignment() {
   });
 }
 
+/**
+ * Asks the server to publish its current state cut on `/api/events` the
+ * normal way: a `stateDiff` from the shared base when the cut is newer,
+ * nothing when it is not. For a client whose diff baseline is valid and that
+ * needs the commit behind a delta that carries only part of it. Idempotent;
+ * 204 with no body. JSON for the same CORS reason as the alignment request.
+ */
+export function requestStateCut() {
+  return request<void>("/api/events/full-state", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "cut" }),
+  });
+}
+
 export function fetchSessionTail(sessionId: string, messageLimit = 20) {
   const query = new URLSearchParams({
     tail: String(Math.max(1, Math.floor(messageLimit))),

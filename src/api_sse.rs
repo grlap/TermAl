@@ -17,7 +17,9 @@
 //    receiving every cut as a full `state` (the remote hub is one). An
 //    opted-in connection, and `POST /api/events/full-state`, ask the
 //    broadcaster for its next cut as a full `state` marked
-//    `stateDiffBase: true`, the only kind a client builds diffs on.
+//    `stateDiffBase: true`, the only kind a client builds diffs on. The
+//    same route with `mode: "cut"` publishes the current cut unmarked, so a
+//    client keeps its diff baseline and receives the cut as a `stateDiff`.
 // 4. Configures keep-alive pings so the connection stays live
 //    through idle periods and aggressive HTTP proxies.
 //
@@ -254,29 +256,60 @@ fn request_state_diff_base(senders: &StateBroadcastSenders) {
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// What `POST /api/events/full-state` asks the broadcaster for.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+enum FullStateRequestMode {
+    /// The next cut as a full `state` marked `stateDiffBase: true`.
+    #[default]
+    Base,
+    /// The current cut on the normal path: a `stateDiff` from the shared
+    /// base when it is newer, nothing when it is not. For a client whose diff
+    /// baseline is valid and that needs the commit behind a delta that
+    /// carries only part of it, without giving up its baseline.
+    Cut,
+}
+
 /// `POST /api/events/full-state` body. Requiring JSON keeps the request off
 /// the CORS simple-request path, so a cross-origin call needs the preflight
-/// the shared CORS layer governs. No fields are defined; `{}` is the body.
+/// the shared CORS layer governs. `{}` asks for a base; `{"mode":"cut"}` for
+/// a cut.
 #[derive(Deserialize)]
-struct FullStateRequest {}
+struct FullStateRequest {
+    #[serde(default)]
+    mode: FullStateRequestMode,
+}
 
 /// `POST /api/events/full-state`: an opted-in client that cannot apply a
-/// `stateDiff` asks for a marked full state. Idempotent. It publishes the
-/// current cut at once, with no revision bump and nothing to persist, so an
-/// idle host answers without waiting for an unrelated commit.
+/// `stateDiff` asks for a marked full state, or an in-chain client asks for
+/// the current cut (`mode: "cut"`). Idempotent. It publishes the current cut
+/// at once, with no revision bump and nothing to persist, so an idle host
+/// answers without waiting for an unrelated commit.
 async fn request_full_state(
     State(state): State<AppState>,
     request: Result<Json<FullStateRequest>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
-    let Json(FullStateRequest {}) =
+    let Json(FullStateRequest { mode }) =
         request.map_err(|rejection| api_json_rejection("full-state request", rejection))?;
     run_blocking_api(move || {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        // Under the commit lock and before the capture: this cut carries the
-        // new generation, and a cut captured earlier (even one the
-        // broadcaster already dequeued) carries an older one and cannot
-        // answer the request.
-        request_state_diff_base(&state.state_broadcast_senders);
+        match mode {
+            // Under the commit lock and before the capture: this cut carries
+            // the new generation, and a cut captured earlier (even one the
+            // broadcaster already dequeued) carries an older one and cannot
+            // answer the request.
+            FullStateRequestMode::Base => {
+                request_state_diff_base(&state.state_broadcast_senders);
+            }
+            // No new generation: the cut takes the normal path.
+            FullStateRequestMode::Cut => {
+                state
+                    .state_broadcast_senders
+                    .diff_counters
+                    .cut_requests
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         state.publish_state_locked(&inner);
         Ok(())
     })
