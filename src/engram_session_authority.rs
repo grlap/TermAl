@@ -207,9 +207,6 @@ impl AppState {
 /// The narrow view of the Base-service naming target, or None when it would
 /// build none or fail. Nothing is cloned and no turn grant is created.
 struct EngramSessionReaderView<'a> {
-    /// The session id the target's connection would carry, as the core
-    /// computes it (a reader's identity for the namer preference).
-    connection_session_id: &'a str,
     routing_token: Option<&'a str>,
     store: Option<&'a EngramAuthorityStoreKey>,
 }
@@ -225,7 +222,6 @@ fn engram_session_reader_view_locked<'a>(
         .ok()
         .flatten()?;
     Some(EngramSessionReaderView {
-        connection_session_id: authority.connection_session_id,
         routing_token: authority.record.engram.routing_token.as_deref(),
         store: authority.settings.authority_store_key.as_ref(),
     })

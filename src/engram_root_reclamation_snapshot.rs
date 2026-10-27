@@ -1,4 +1,4 @@
-// Scheduler-only input. Capture each table once, copying identifiers and
+// Scheduler and recovery candidates. Capture each table once, copying identifiers and
 // predicate facts rather than session messages, runtimes, event proofs or
 // complete histories. Cross-table lookups and planning happen after unlock.
 // This is a candidate plan, not authority: the worker still revalidates each
@@ -7,9 +7,7 @@ struct EngramRootReclamationSnapshot {
     roots: Vec<EngramWorkSourceRoot>,
     unpublished: Vec<EngramWorkSourceRoot>,
     journals: Vec<EngramReclamationJournal>,
-    sessions: Vec<EngramReclamationSession>,
-    projects: Vec<EngramReclamationProject>,
-    parents: Vec<(String, String)>,
+    reader_snapshot: EngramRootReaderSnapshot,
     evaluations: Vec<(EngramAuthorityStoreKey, String)>,
     pending_releases: Vec<EngramWorkSourceRoot>,
     quarantined: BTreeSet<String>,
@@ -43,28 +41,20 @@ struct EngramReclamationProject {
     store: Option<EngramAuthorityStoreKey>,
 }
 
-impl EngramRootReclamationSnapshot {
+// Shared candidate facts for reclamation scheduling and authority recovery.
+// Indexing and reader selection use these owned facts after releasing state;
+// only the existing current-state target builder grants reader authority.
+struct EngramRootReaderSnapshot {
+    sessions: Vec<EngramReclamationSession>,
+    projects: Vec<EngramReclamationProject>,
+    parents: Vec<(String, String)>,
+    inventory_available: bool,
+}
+
+impl EngramRootReaderSnapshot {
     fn capture(inner: &StateInner) -> Self {
-        let schedule = &inner.engram_root_reclamation;
         Self {
-            roots: inner.engram_work_source_roots.clone(),
-            unpublished: inner
-                .engram_work_naming_history
-                .iter()
-                .flat_map(|history| &history.retirements)
-                .filter(|notice| !notice.published)
-                .map(|notice| notice.selection.clone())
-                .collect(),
-            journals: inner
-                .engram_named_root_journal
-                .iter()
-                .map(|journal| EngramReclamationJournal {
-                    store: journal.store.clone(),
-                    claim_id: journal.claim_id.clone(),
-                    binding: journal.read_binding.clone(),
-                    pending: journal.pending.is_some(),
-                })
-                .collect(),
+            inventory_available: inner.require_delegation_inventory().is_ok(),
             sessions: inner
                 .sessions
                 .iter()
@@ -114,6 +104,99 @@ impl EngramRootReclamationSnapshot {
                     )
                 })
                 .collect(),
+        }
+    }
+
+    // Mirrors the reader-view predicates in engram_session_authority.rs.
+    // Resolve ancestry on the owned metadata, never by re-entering StateInner.
+    // First-match order, orphan child refusal and cycle refusal are preserved.
+    fn reader_project<'a>(
+        &'a self,
+        session: &EngramReclamationSession,
+        sessions: &HashMap<&str, &EngramReclamationSession>,
+        parents: &HashMap<&str, &str>,
+        projects: &HashMap<&str, &'a EngramReclamationProject>,
+    ) -> Option<&'a EngramReclamationProject> {
+        if !session.local || !session.enabled {
+            return None;
+        }
+        let child = parents.contains_key(session.id.as_str());
+        if session.child_shape && !child {
+            return None;
+        }
+        let project_id = if child {
+            let mut current = session;
+            let mut visited = HashSet::new();
+            loop {
+                if !visited.insert(current.id.as_str()) {
+                    return None;
+                }
+                if let Some(project) = current.project_id.as_deref() {
+                    break project;
+                }
+                current = sessions.get(parents.get(current.id.as_str())?)?;
+            }
+        } else {
+            session.project_id.as_deref()?
+        };
+        projects
+            .get(project_id)
+            .copied()
+            .filter(|project| project.eligible)
+    }
+
+    fn readers(&self) -> Vec<(&EngramReclamationSession, &EngramAuthorityStoreKey)> {
+        if !self.inventory_available {
+            return Vec::new();
+        }
+        let mut sessions = HashMap::new();
+        for session in &self.sessions {
+            sessions.entry(session.id.as_str()).or_insert(session);
+        }
+        let mut parents = HashMap::new();
+        for (child, parent) in &self.parents {
+            parents.entry(child.as_str()).or_insert(parent.as_str());
+        }
+        let mut projects = HashMap::new();
+        for project in &self.projects {
+            projects.entry(project.id.as_str()).or_insert(project);
+        }
+        self.sessions
+            .iter()
+            .filter_map(|session| sessions.get(session.id.as_str()).copied())
+            .filter(|session| session.token)
+            .filter_map(|session| {
+                self.reader_project(session, &sessions, &parents, &projects)
+                    .and_then(|project| project.store.as_ref())
+                    .map(|store| (session, store))
+            })
+            .collect()
+    }
+}
+
+impl EngramRootReclamationSnapshot {
+    fn capture(inner: &StateInner) -> Self {
+        let schedule = &inner.engram_root_reclamation;
+        Self {
+            roots: inner.engram_work_source_roots.clone(),
+            unpublished: inner
+                .engram_work_naming_history
+                .iter()
+                .flat_map(|history| &history.retirements)
+                .filter(|notice| !notice.published)
+                .map(|notice| notice.selection.clone())
+                .collect(),
+            journals: inner
+                .engram_named_root_journal
+                .iter()
+                .map(|journal| EngramReclamationJournal {
+                    store: journal.store.clone(),
+                    claim_id: journal.claim_id.clone(),
+                    binding: journal.read_binding.clone(),
+                    pending: journal.pending.is_some(),
+                })
+                .collect(),
+            reader_snapshot: EngramRootReaderSnapshot::capture(inner),
             evaluations: inner
                 .delegations
                 .iter()
@@ -160,66 +243,8 @@ impl EngramRootReclamationSnapshot {
             .find(|journal| journal.store == root.store && journal.claim_id == root.claim_id)
     }
 
-    // Mirrors the reader-view predicates in engram_session_authority.rs.
-    // Resolve ancestry on the owned metadata, never by re-entering StateInner.
-    // First-match order, orphan child refusal and cycle refusal are preserved.
-    fn reader_project<'a>(
-        &'a self,
-        session: &EngramReclamationSession,
-        sessions: &HashMap<&str, &EngramReclamationSession>,
-        parents: &HashMap<&str, &str>,
-        projects: &HashMap<&str, &'a EngramReclamationProject>,
-    ) -> Option<&'a EngramReclamationProject> {
-        if !session.local || !session.enabled {
-            return None;
-        }
-        let child = parents.contains_key(session.id.as_str());
-        if session.child_shape && !child {
-            return None;
-        }
-        let project_id = if child {
-            let mut current = session;
-            let mut visited = HashSet::new();
-            loop {
-                if !visited.insert(current.id.as_str()) {
-                    return None;
-                }
-                if let Some(project) = current.project_id.as_deref() {
-                    break project;
-                }
-                current = sessions.get(parents.get(current.id.as_str())?)?;
-            }
-        } else {
-            session.project_id.as_deref()?
-        };
-        projects
-            .get(project_id)
-            .copied()
-            .filter(|project| project.eligible)
-    }
-
     fn readers(&self) -> Vec<(&EngramReclamationSession, &EngramAuthorityStoreKey)> {
-        let mut sessions = HashMap::new();
-        for session in &self.sessions {
-            sessions.entry(session.id.as_str()).or_insert(session);
-        }
-        let mut parents = HashMap::new();
-        for (child, parent) in &self.parents {
-            parents.entry(child.as_str()).or_insert(parent.as_str());
-        }
-        let mut projects = HashMap::new();
-        for project in &self.projects {
-            projects.entry(project.id.as_str()).or_insert(project);
-        }
-        self.sessions
-            .iter()
-            .filter(|session| session.token)
-            .filter_map(|session| {
-                self.reader_project(session, &sessions, &parents, &projects)
-                    .and_then(|project| project.store.as_ref())
-                    .map(|store| (session, store))
-            })
-            .collect()
+        self.reader_snapshot.readers()
     }
 
     fn plan(&self, now: std::time::Instant) -> Vec<EngramRootReclamationTask> {
@@ -331,7 +356,7 @@ impl EngramRootReclamationSnapshot {
                     .refused_claims
                     .iter()
                     .any(|(store, claim)| *store == root.store && *claim == root.claim_id);
-                let held = self.sessions.iter().any(|session| {
+                let held = self.reader_snapshot.sessions.iter().any(|session| {
                     session.binding.as_ref().is_some_and(|binding| {
                         binding.work_id == root.work_id && binding.claim_id == root.claim_id
                     })

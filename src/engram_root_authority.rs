@@ -52,26 +52,29 @@ fn engram_retain_recovery_run(
     runs.push(binding.clone());
 }
 
-/// The recovery reader for `store`: among sessions whose target would carry
-/// that store and a routing token, the one whose connection is the namer's,
-/// else the first in session order (a stable sort keeps ties in order). It is
-/// chosen from the narrow reader view and only the winner's full target is
-/// built, under the caller's guard: every other session would otherwise build
-/// a target and clone every root, journal and project store.
+/// Choose a candidate from the shared off-lock reader projection. Preserve
+/// the namer's preference and original session order without building targets.
+fn engram_root_recovery_reader<'a>(
+    readers: &[(&'a EngramReclamationSession, &EngramAuthorityStoreKey)],
+    store: &EngramAuthorityStoreKey,
+    namer: Option<&str>,
+) -> Option<&'a str> {
+    let mut eligible = readers.iter().filter(|(_, current)| *current == store);
+    eligible.clone().find(|(session, _)| Some(session.id.as_str()) == namer)
+        .or_else(|| eligible.next())
+        .map(|(session, _)| session.id.as_str())
+}
+
+// Parity control for the selection and the single current target build.
+#[cfg(test)]
 fn engram_root_recovery_reader_target_locked(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     namer: Option<&str>,
 ) -> Option<EngramBindingTarget> {
-    let mut readers = inner
-        .sessions
-        .iter()
-        .filter_map(|record| engram_session_reader_view_locked(inner, &record.session.id))
-        .filter(|view| view.store == Some(store) && view.routing_token.is_some())
-        .map(|view| view.connection_session_id)
-        .collect::<Vec<_>>();
-    readers.sort_by_key(|session_id| Some(*session_id) != namer);
-    let winner = readers.first()?;
+    let snapshot = EngramRootReaderSnapshot::capture(inner);
+    let readers = snapshot.readers();
+    let winner = engram_root_recovery_reader(&readers, store, namer)?;
     AppState::engram_source_root_target_locked(inner, winner)
         .ok()
         .flatten()
@@ -963,7 +966,7 @@ impl AppState {
         let required_selection = reclamation.map(|(root, _)| root);
         let clock = self.engram_budget_clock();
         let budget = deadline.saturating_duration_since(clock.now());
-        let (target, runs, abandoned) = {
+        let (reader_snapshot, namer, runs, pending) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let history = inner
                 .engram_work_naming_history
@@ -979,6 +982,24 @@ impl AppState {
                     "recovery batch belongs to an earlier owner",
                 ));
             }
+            let runs = history
+                .unresolved_runs
+                .iter()
+                .filter(|binding| {
+                    required_selection.is_none_or(|root| {
+                        binding.work_id == root.work_id
+                            && binding.claim_id == root.claim_id
+                            && engram_same_recovery_run(binding, &owner.binding)
+                    })
+                })
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>();
+            // An empty batch has no canonical fact with which to settle a
+            // pending intent. Do not scan the reader inventory for no work.
+            if runs.is_empty() {
+                return Ok(());
+            }
             let namer = inner
                 .engram_work_source_roots
                 .iter()
@@ -987,36 +1008,60 @@ impl AppState {
                         && root.work_id == owner.binding.work_id
                         && root.claim_id == owner.binding.claim_id
                 })
-                .map(|root| root.named_by_session.as_str());
-            let target = engram_root_recovery_reader_target_locked(&inner, store, namer);
-            let abandoned = inner
-                .engram_named_root_journal
-                .iter()
-                .filter_map(|journal| journal.pending.as_ref())
-                .filter(|intent| !Self::engram_root_reporter_available(&inner, intent))
-                .cloned()
-                .collect::<Vec<_>>();
+                .map(|root| root.named_by_session.clone());
+            let pending = if settle_abandoned_writes {
+                inner.engram_named_root_journal.iter()
+                    .filter(|journal| &journal.store == store
+                        && journal.read_binding.as_ref().is_some_and(|binding| {
+                            runs.iter().any(|run| engram_same_recovery_run(run, binding))
+                        }))
+                    .filter_map(|journal| journal.pending.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             (
-                target,
-                history
-                    .unresolved_runs
-                    .iter()
-                    .filter(|binding| {
-                        required_selection.is_none_or(|root| {
-                            binding.work_id == root.work_id
-                                && binding.claim_id == root.claim_id
-                                && engram_same_recovery_run(binding, &owner.binding)
-                        })
-                    })
-                    .take(8)
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                abandoned,
+                EngramRootReaderSnapshot::capture(&inner), namer, runs, pending,
             )
         };
-        if runs.is_empty() {
-            return Ok(());
-        }
+        // Cross-table indexing and all candidate decisions happen without
+        // StateInner. This projection carries no executable authority.
+        let readers = reader_snapshot.readers();
+        let winner = engram_root_recovery_reader(&readers, store, namer.as_deref());
+        let available = readers.iter()
+            .map(|(session, store)| (session.id.as_str(), *store))
+            .collect::<HashMap<_, _>>();
+        let abandoned = pending.into_iter().filter(|intent| {
+            available.get(intent.reporter.as_str()).copied() != Some(&intent.root.store)
+        }).collect::<Vec<_>>();
+        #[cfg(test)]
+        engram_root_reclamation_planning_boundary("recovery_selected", &[]);
+        let (target, abandoned) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if !inner.engram_work_naming_history.iter().any(|history| {
+                &history.store == store && history.work_id == owner.binding.work_id
+                    && history.transition.as_ref().is_some_and(|current| {
+                        current.id == owner.id && current.version == owner.version
+                    })
+            }) {
+                return Err(ApiError::conflict("recovery batch was superseded during reader selection"));
+            }
+            // Rebuild from CURRENT state: a copied id or eligibility fact
+            // cannot supply a connection, token or authority after unlock.
+            let target = winner.and_then(|session| {
+                Self::engram_source_root_target_locked(&inner, session).ok().flatten()
+            }).filter(|target| {
+                target.routing_token.is_some()
+                    && target.settings.authority_store_key.as_ref() == Some(store)
+            });
+            // Only intents associated with this bounded batch were copied.
+            // A reporter which became executable during planning must keep
+            // its intent, even when the copied facts said it was abandoned.
+            let abandoned = abandoned.into_iter()
+                .filter(|intent| !Self::engram_root_reporter_available(&inner, intent))
+                .collect::<Vec<_>>();
+            (target, abandoned)
+        };
         let reserve = budget / 4;
         for binding in runs {
             let left = deadline.saturating_duration_since(clock.now());

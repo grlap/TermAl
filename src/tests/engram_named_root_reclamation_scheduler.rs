@@ -2,10 +2,10 @@
 // scheduler, without sleeps, external processes, or a performance timing guess.
 use super::*;
 
-struct PlanningProbe;
+pub(super) struct PlanningProbe;
 
 impl PlanningProbe {
-    fn install(hook: impl Fn(&str, &[EngramRootReclamationTask]) + 'static) -> Self {
+    pub(super) fn install(hook: impl Fn(&str, &[EngramRootReclamationTask]) + 'static) -> Self {
         TEST_ENGRAM_ROOT_RECLAMATION_PLANNING.with(|slot| {
             assert!(slot.borrow().is_none());
             *slot.borrow_mut() = Some(Box::new(hook));

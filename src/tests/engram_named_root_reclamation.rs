@@ -18,6 +18,10 @@ mod eligibility {
     include!("engram_named_root_reclamation_eligibility.rs");
 }
 
+mod recovery_lock {
+    include!("engram_root_recovery_lock.rs");
+}
+
 mod scheduler {
     include!("engram_named_root_reclamation_scheduler.rs");
 }
