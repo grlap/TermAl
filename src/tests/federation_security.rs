@@ -14,6 +14,8 @@ mod attestation_budget;
 mod fixture;
 #[path = "federation_security_liveness.rs"]
 mod liveness;
+#[path = "federation_security_rpc_ready.rs"]
+mod rpc_ready;
 #[path = "federation_security_mailbox_fixture.rs"]
 mod mailbox_fixture;
 #[path = "federation_security_mailbox_outcomes.rs"]

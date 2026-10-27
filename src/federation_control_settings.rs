@@ -47,16 +47,28 @@ impl FederationControlSettings {
     }
 }
 
-// Observation only: every central-control return has a terminal phase. A
-// fixture must distinguish the specified deadline from an earlier IO failure.
+// Observation only: publish the terminal phase before the owned security guard
+// withdraws this context. Keep the fixture's sequence notification as well.
 struct FederationControlEnd<'a> {
-    settings: &'a FederationControlSettings,
+    channel: &'a FederationChannel,
+    context: &'a FederationSecurityContext,
     reason: &'static str,
+    io_kind: Option<&'static str>,
     sequence: u64,
 }
 
 impl Drop for FederationControlEnd<'_> {
     fn drop(&mut self) {
-        self.settings.observe(self.reason, self.sequence);
+        self.channel
+            .observe_terminal_detail(self.context, "control", self.reason, self.io_kind);
+        self.channel.control.observe(self.reason, self.sequence);
+    }
+}
+
+impl FederationControlEnd<'_> {
+    fn frame_failure(&mut self, failure: FederationControlFrameFailure) -> ApiError {
+        self.reason = failure.reason;
+        self.io_kind = failure.io_kind;
+        failure.error
     }
 }

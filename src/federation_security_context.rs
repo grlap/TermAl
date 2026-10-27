@@ -54,6 +54,13 @@ struct FederationSecurityContext {
     sender: Mutex<FederationSenderWindow>,
     changed: tokio::sync::Notify,
     watchdog_started: AtomicBool,
+    // A satellite installs before central receives its final proof. Only a
+    // valid central heartbeat proves the peer has installed this context too.
+    outgoing_rpc_ready: AtomicBool,
+    // Diagnostic facts stay with this exact context, including after replacement.
+    installed_at: std::sync::OnceLock<std::time::Instant>,
+    terminal_logged: AtomicBool,
+    last_control_sequence: std::sync::atomic::AtomicU64,
     retired: tokio::sync::watch::Sender<bool>,
 }
 
@@ -93,6 +100,10 @@ impl FederationSecurityContext {
             sender: Mutex::default(),
             changed: Default::default(),
             watchdog_started: AtomicBool::new(false),
+            outgoing_rpc_ready: AtomicBool::new(false),
+            installed_at: std::sync::OnceLock::new(),
+            terminal_logged: AtomicBool::new(false),
+            last_control_sequence: std::sync::atomic::AtomicU64::new(0),
             retired: tokio::sync::watch::channel(false).0,
         })
     }

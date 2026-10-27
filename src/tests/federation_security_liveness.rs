@@ -14,7 +14,7 @@ async fn wait_for_fence(lease: &FederationLinkLease) {
 }
 
 #[tokio::test]
-async fn federation_security_owned_stream_eof_withdraws_runtime_link() {
+async fn federation_security_owned_stream_eof_records_reason_before_withdrawing_runtime_link() {
     let (satellite, control) = established().await;
     let lease = satellite.handle.channel.current_lease().unwrap();
     drop(control);
@@ -25,12 +25,21 @@ async fn federation_security_owned_stream_eof_withdraws_runtime_link() {
     })
     .await
     .is_ok();
-    let available = satellite.app.inner.lock().unwrap().federation.links.len();
+    let (available, observed) = {
+        let inner = satellite.app.inner.lock().unwrap();
+        (
+            inner.federation.links.len(),
+            inner.federation_attestation[&satellite.handle.channel.snapshot.peer.host_id].project(),
+        )
+    };
     satellite.finish().await;
     assert!(
         fenced && available == 0,
         "EOF cannot leave verified availability behind"
     );
+    assert_eq!(observed["lastStage"], "control");
+    assert_eq!(observed["lastReason"], "controlEof");
+    assert_eq!(observed["consecutiveFailures"], 0);
 }
 
 #[tokio::test]

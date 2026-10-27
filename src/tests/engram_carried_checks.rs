@@ -1068,9 +1068,13 @@ fn an_edit_refusal_names_the_file_the_tool_reported() {
         .record(|record| record.engram.pending_source_root_line.clone())
         .expect("the holder should be told");
     assert!(
-        line.contains(&reported),
+        line.contains(&format!(
+            "(tool-reported target: \"{}\")",
+            engram_display_reported_target(&reported)
+        )),
         "the refusal names the reported file: {line}"
     );
+    assert!(line.contains("probe.py\")"), "the filename is kept: {line}");
     assert!(
         line.contains("tool-reported"),
         "the target is labelled as reported: {line}"

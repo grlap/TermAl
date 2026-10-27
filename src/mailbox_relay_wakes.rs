@@ -663,8 +663,8 @@ impl MailboxRelayWakeWorker {
                     Ok(()) => !boot.scan_complete,
                     Err(error) => {
                         eprintln!(
-                            "native relay boot reconciliation deferred ({})",
-                            error.status
+                            "native relay boot reconciliation deferred ({}): {:?}",
+                            error.status, error.message
                         );
                         false
                     }
@@ -741,17 +741,24 @@ impl AppState {
                 recovery.after = *id;
             }
             processed += 1;
+            let mut context = String::new();
             let result = match json {
                 Some(json) => match serde_json::from_str::<MailboxRelayWake>(json) {
-                    Ok(wake) => self.reconcile_mailbox_relay_boot_boundary(wake).await,
+                    Ok(wake) => {
+                        context = format!(
+                            " session={:?} mailbox={:?} sequence={}",
+                            wake.target.native_session_id, wake.mailbox_id, wake.sequence
+                        );
+                        self.reconcile_mailbox_relay_boot_boundary(wake).await
+                    }
                     Err(_) => Err(ApiError::conflict("invalid native relay boot metadata")),
                 },
                 None => Ok(()),
             };
             if let Err(error) = result {
                 eprintln!(
-                    "native relay boot boundary {id} deferred ({})",
-                    error.status
+                    "native relay boot boundary {id} deferred ({}){context}: {:?}",
+                    error.status, error.message
                 );
                 recovery.retry.push_back(*id);
             }

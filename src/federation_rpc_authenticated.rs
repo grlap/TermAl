@@ -90,6 +90,16 @@ impl FederationRpcClient {
         if context.incarnation != lease.incarnation {
             return Err(federation_auth_refused());
         }
+        // Local install precedes central install on a satellite. Refuse before
+        // allocating a counter or sending HTTP; this is not a link failure.
+        if self.channel.snapshot.local_role == FederationRole::Satellite
+            && !context.outgoing_rpc_ready.load(Ordering::SeqCst)
+        {
+            return Err(ApiError::from_status(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "federation peer handshake is completing; retry the original operation",
+            ));
+        }
         // Serialize before allocating a transport counter. Local size/encoding
         // refusals have not started an application operation on the peer.
         let url = format!("http://{}{path}", self.address);
@@ -121,6 +131,8 @@ impl FederationRpcClient {
                 "federation request exceeds negotiated size",
             ));
         }
+        let mut rpc_stage = "counter";
+        let mut rpc_status = None;
         let request = async {
             let counter = self.allocate_authenticated_counter(&context).await?;
             // A cancelled caller is not settlement. The independent watchdog
@@ -131,6 +143,7 @@ impl FederationRpcClient {
                     context.clone(),
                 ));
             }
+            rpc_stage = "requestEncode";
             let direction = if self.channel.snapshot.local_role == FederationRole::Central {
                 "c2s"
             } else {
@@ -167,12 +180,15 @@ impl FederationRpcClient {
                 federation_mac_header(&context, direction, counter, &tag)?,
             );
             *prepared.headers_mut() = headers;
+            rpc_stage = "execute";
             let mut response = self
                 .client
                 .execute(prepared)
                 .await
                 .map_err(|_| federation_transport_unavailable())?;
             let status = response.status();
+            rpc_status = Some(status.as_u16());
+            rpc_stage = "responseBody";
             let response_headers = response.headers().clone();
             let mut bytes = Vec::new();
             while let Some(chunk) = response
@@ -195,10 +211,13 @@ impl FederationRpcClient {
                 }
                 bytes.extend_from_slice(&chunk);
             }
+            rpc_stage = "macParse";
             let (returned, tag) = federation_parse_mac(&response_headers, &context, direction)?;
+            rpc_stage = "counter";
             if returned != counter {
                 return Err(federation_auth_refused());
             }
+            rpc_stage = "responseEncode";
             let authenticated = federation_response_representation(
                 &context,
                 counter,
@@ -208,7 +227,9 @@ impl FederationRpcClient {
                 &response_headers,
                 &bytes,
             )?;
+            rpc_stage = "verify";
             federation_verify_mac(&context.keys[key + 1], &[&authenticated], &tag)?;
+            rpc_stage = "securityCurrent";
             if let Err(error) = self.channel.security_current(&context) {
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     // A verified read-only proof cannot survive local lease
@@ -218,6 +239,7 @@ impl FederationRpcClient {
                 }
                 return Err(error);
             }
+            rpc_stage = "authority";
             if let Err(error) = (self.ensure_current)() {
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     context.settle(counter);
@@ -268,6 +290,7 @@ impl FederationRpcClient {
                     _ => federation_transport_unavailable(),
                 }));
             }
+            rpc_stage = "decode";
             let decoded =
                 serde_json::from_slice(&bytes).map_err(|_| federation_transport_unavailable())?;
             context.settle(counter);
@@ -278,6 +301,11 @@ impl FederationRpcClient {
         match self.channel.control.clock.timeout(Duration::from_secs(10), request).await {
             Ok(Ok(result)) => result,
             _failure => {
+                self.channel.observe_rpc_terminal(&context, if _failure.is_err() {
+                    "rpcDeadlineExpired"
+                } else {
+                    "rpcError"
+                }, path, rpc_stage, rpc_status);
                 #[cfg(test)]
                 {
                     let reason = if let Ok(Err(error)) = &_failure {
@@ -324,7 +352,11 @@ async fn federation_sender_watchdog(
                 _ = channel.control.clock.deadline(deadline) => {
                     let expired = context.sender.lock().expect("sender window poisoned").outstanding
                         .values().any(|deadline| *deadline <= channel.control.clock.now());
-                    if expired { channel.fence_security(context.owner, &context.incarnation); return; }
+                    if expired {
+                        channel.observe_terminal(&context, "rpc", "senderDeadlineExpired");
+                        channel.fence_security(context.owner, &context.incarnation);
+                        return;
+                    }
                 },
             }
         } else {

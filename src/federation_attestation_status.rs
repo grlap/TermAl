@@ -24,6 +24,85 @@ impl FederationAttestationObservation {
 }
 
 impl FederationChannel {
+    fn observe_terminal(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+    ) {
+        self.observe_terminal_detail(context, stage, reason, None);
+    }
+
+    fn observe_terminal_detail(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+        io_kind: Option<&'static str>,
+    ) {
+        self.observe_terminal_event(context, stage, reason, io_kind, None);
+    }
+
+    fn observe_rpc_terminal(
+        &self,
+        context: &FederationSecurityContext,
+        reason: &'static str,
+        path: &str,
+        rpc_stage: &'static str,
+        status: Option<u16>,
+    ) {
+        self.observe_terminal_event(context, "rpc", reason, None, Some((path, rpc_stage, status)));
+    }
+
+    fn observe_terminal_event(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+        io_kind: Option<&'static str>,
+        rpc: Option<(&str, &'static str, Option<u16>)>,
+    ) {
+        // This context owns its one console line even if a newer context owns
+        // the current status. Neither diagnostic fact changes link authority.
+        if context.terminal_logged.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.update_attestation(|observation, _| {
+            // Record before the owning teardown. A delayed old control task
+            // cannot replace its successor, nor can cleanup hide the first cause.
+            if observation.attempt_owner != context.owner
+                || observation.attempt_channel.as_deref()
+                    != Some(self.server_instance_id.as_str())
+                || matches!(observation.last_stage, Some("control" | "monitor" | "rpc"))
+            {
+                return;
+            }
+            observation.last_stage = Some(stage);
+            observation.last_reason = Some(reason);
+        });
+        let role = match self.snapshot.local_role {
+            FederationRole::Central => "central",
+            FederationRole::Satellite => "satellite",
+            FederationRole::Standalone => "standalone",
+        };
+        let elapsed_ms = context
+            .installed_at
+            .get()
+            .map(|installed| {
+                self.control.clock.now().saturating_duration_since(*installed).as_millis()
+            })
+            .unwrap_or(0);
+        let sequence = context.last_control_sequence.load(Ordering::SeqCst);
+        // Paths and stages originate from fixed local route/branch constants.
+        // Zero means no HTTP response was received; never log peer body text.
+        let (rpc_path, rpc_stage, status) = rpc.unwrap_or(("none", "none", None));
+        let status = status.unwrap_or(0);
+        eprintln!(
+            "federation link ended peer={} role={role} stage={stage} reason={reason} ioKind={} incarnation={} elapsedMs={elapsed_ms} lastSequence={sequence} rpcPath={rpc_path} rpcStage={rpc_stage} httpStatus={status}",
+            self.snapshot.peer.host_id, io_kind.unwrap_or("none"), context.incarnation
+        );
+    }
+
     fn observe_attestation(&self, success: Option<u64>) {
         self.update_attestation(|observation, basis| match success {
             Some(owner)

@@ -13,6 +13,22 @@ fn source_change(path: &FsPath) -> WorkspaceFileChangeEvent {
     }
 }
 
+// An ancestor named .tmp can add the existing scratch-routing explanation
+// even though this source file is outside its own worktree's scratch directory.
+fn source_refusal_path_forms(path: &FsPath) -> [String; 2] {
+    let plain = path.to_string_lossy().into_owned();
+    let directory = engram_canonical_path(path.parent().unwrap());
+    let root = engram_worktree_root_path(&directory);
+    let detailed = engram_scratch_fence_detail(
+        &plain,
+        &engram_path_key(&root),
+        &engram_exact_path_key(&root),
+        &engram_exact_path_key(&directory),
+        true,
+    );
+    [plain, detailed]
+}
+
 #[test]
 fn watcher_provenance_source_refusal_retains_available_and_unknown_facts() {
     take_workspace_watch_diagnostics();
@@ -30,12 +46,11 @@ fn watcher_provenance_source_refusal_retains_available_and_unknown_facts() {
         .record(|record| record.engram.carried_checks[0].fence.clone())
         .expect("the uncertain source event must still fence the run");
     // No arrival and no modification time: the cause says both are unknown.
-    assert_eq!(
-        fence,
-        format!(
-            "a file in its worktree changed: {}; modification time unknown",
-            path.display()
-        )
+    assert!(
+        source_refusal_path_forms(&path).iter().any(|shown| {
+            fence == format!("a file in its worktree changed: {shown}; modification time unknown")
+        }),
+        "{fence}"
     );
     let diagnostic = turn
         .record(|record| {
@@ -123,10 +138,10 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
     // The converted event carries the file's modification time and the
     // notification's arrival, both named in the cause.
     assert!(
-        legacy_fence.starts_with(&format!(
-            "a file in its worktree changed: {}; modified at ",
-            delivered_path.display()
-        )) && legacy_fence.contains(", seen at "),
+        source_refusal_path_forms(&delivered_path).iter().any(|shown| {
+            legacy_fence
+                .starts_with(&format!("a file in its worktree changed: {shown}; modified at "))
+        }) && legacy_fence.contains(", seen at "),
         "{legacy_fence}"
     );
     let fence = turn

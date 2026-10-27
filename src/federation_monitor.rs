@@ -59,13 +59,20 @@ async fn federation_central_monitor(
         };
         let (control_stop, control_stop_rx) = tokio::sync::watch::channel(false);
         let (ready, ready_rx) = tokio::sync::oneshot::channel();
+        let terminal_context = context.clone();
         let mut task = tokio::spawn(federation_control_central(client.channel.clone(), control, context, guard, control_stop_rx, ready));
         let mut joined = false;
         let outcome = async {
             tokio::select! {
                 _ = federation_wait_stop(stop) => return Ok(()),
                 result = tokio::time::timeout(Duration::from_secs(5), ready_rx) => {
-                    result.map_err(|_| federation_transport_unavailable())?.map_err(|_| federation_transport_unavailable())?;
+                    result.map_err(|_| {
+                        client.channel.observe_terminal(&terminal_context, "monitor", "controlReadyExpired");
+                        federation_transport_unavailable()
+                    })?.map_err(|_| {
+                        client.channel.observe_terminal(&terminal_context, "monitor", "controlReadyClosed");
+                        federation_transport_unavailable()
+                    })?;
                 },
             }
             let mut first_probe = true;
@@ -80,7 +87,17 @@ async fn federation_central_monitor(
                 }}
                 first_probe = false;
                 if *stop.borrow() || stop.has_changed().is_err() { return Ok(()); }
-                if server.is_finished() || process.child_exited()? { return Err(federation_transport_unavailable()); }
+                if server.is_finished() {
+                    client.channel.observe_terminal(&terminal_context, "monitor", "listenerEnded");
+                    return Err(federation_transport_unavailable());
+                }
+                if process.child_exited().map_err(|error| {
+                    client.channel.observe_terminal(&terminal_context, "monitor", "sshChildStatusError");
+                    error
+                })? {
+                    client.channel.observe_terminal(&terminal_context, "monitor", "sshChildExited");
+                    return Err(federation_transport_unavailable());
+                }
                 if let Err(error) = client.channel.current_authority() {
                     if error.status == StatusCode::LOCKED { continue; }
                     return Err(error);

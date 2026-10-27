@@ -2,6 +2,7 @@
 // Does not launch real SSH, use live enrollment or open a live store. New tests.
 
 use super::federation_link::{allowed, peer_snapshot};
+use super::federation_control_fixture::heartbeat_round_trip;
 use super::*;
 
 const CHILD_ROLE: &str = "TERMAL_TEST_FEDERATION_SATELLITE";
@@ -183,9 +184,12 @@ async fn federation_two_process_loopback_bidirectional_and_reconnect() {
             .await
             .unwrap(),
     );
-    let (_, _old_guard) = federation_attest_central(&central, &mut control)
+    let (context, _old_guard) = federation_attest_central(&central, &mut control)
         .await
         .unwrap();
+    // The child runs the production control receiver. Complete the first
+    // authenticated heartbeat before asking it for an outgoing RPC.
+    heartbeat_round_trip(&mut control, &context, 1).await;
     let old = rpc.open_link().await.unwrap();
     rpc.health(&old).await.unwrap();
     let command = format!("reverse {central_port}");
@@ -212,9 +216,10 @@ async fn federation_two_process_loopback_bidirectional_and_reconnect() {
             .await
             .unwrap(),
     );
-    let (_, _new_guard) = federation_attest_central(&central, &mut control)
+    let (context, _new_guard) = federation_attest_central(&central, &mut control)
         .await
         .unwrap();
+    heartbeat_round_trip(&mut control, &context, 1).await;
     let current = rpc.open_link().await.unwrap();
     assert_ne!(old.incarnation, current.incarnation);
     assert!(rpc.health(&old).await.is_err());
