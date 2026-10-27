@@ -76,9 +76,14 @@ impl TestTempRoot {
             TEST_TEMP_ROOT_DIRECTORY.with(|slot| slot.borrow().clone()).unwrap_or_else(test_temp_dir);
         let path = directory.join(format!("{prefix}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("test temp root should be created");
-        // The guard exists before the marker is written, so a failed write
-        // still removes the root.
-        let root = Self::own(path);
+        // The guard exists before canonicalization and the marker write, so
+        // either failure still removes the root.
+        let mut root = Self::own(path);
+        root.path = fs::canonicalize(&root.path).expect("test temp root should canonicalize");
+        #[cfg(windows)]
+        {
+            root.path = normalize_user_facing_path(&root.path);
+        }
         // Name the creating test in a sibling file, never inside the root,
         // whose contents fixtures own. A root that outlives its test can then
         // be traced to it from the wrapper's leftover report.

@@ -99,7 +99,9 @@ fn terminal_pass_remains_at_risk_while_its_exact_carried_check_is_unsettled() {
             producer["source_basis"]
         );
         assert_eq!(
-            test_run_path_key(&association.source_basis.workspace_id),
+            test_run_path_key(&test_run_display_path(FsPath::new(
+                &association.source_basis.workspace_id,
+            ))),
             test_run_path_key(&row.summary.worktree),
             "the source association cannot switch away from the validated root"
         );

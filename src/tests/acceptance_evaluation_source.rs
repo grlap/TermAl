@@ -942,7 +942,8 @@ fn acceptance_request_on_a_named_source_root_runs_and_measures_the_evaluator_the
     );
     let record = delegation.delegation;
     assert_eq!(
-        record.cwd, display_root,
+        record.cwd,
+        resolve_session_workdir(&display_root).unwrap(),
         "the evaluator runs in the named root"
     );
     assert!(

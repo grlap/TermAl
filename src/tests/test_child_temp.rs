@@ -139,7 +139,10 @@ fn terminal_child_temp_sits_in_the_test_root_not_in_a_nested_workdir() {
     let names: Vec<_> = environment.iter().map(|(name, _)| *name).collect();
     assert_eq!(names, ["TEMP", "TMP"]);
     for (_, value) in &environment {
-        assert_eq!(PathBuf::from(value), root.path().join("child-temp"));
+        assert_eq!(
+            fs::canonicalize(value).unwrap(),
+            fs::canonicalize(root.path().join("child-temp")).unwrap()
+        );
     }
     assert!(
         !root.path().join("project").join("child-temp").exists()

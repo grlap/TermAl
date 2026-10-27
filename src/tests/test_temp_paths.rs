@@ -429,7 +429,10 @@ fn unexpected_release_panic_during_unwind_still_drops_the_fixture_state() {
 fn guarded_temp_roots_are_contained_and_removed_before_the_cleanup_receipt() {
     let root = TestTempRoot::create("termal-temp-contract");
     let path = root.path().to_owned();
-    assert_eq!(path.parent(), Some(test_temp_dir().as_path()));
+    assert_eq!(
+        fs::canonicalize(path.parent().unwrap()).unwrap(),
+        fs::canonicalize(test_temp_dir()).unwrap()
+    );
     fs::write(path.join("evidence"), b"fixture").unwrap();
     let cleaned = root.observe_cleanup();
     drop(root);
