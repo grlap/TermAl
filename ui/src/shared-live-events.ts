@@ -4,10 +4,15 @@
 // Keep this allowlist in parity with src/api_sse.rs (covered by a wire test).
 export const LIVE_EVENT_TYPES = [
   "state",
+  "stateDiff",
   "delta",
   "lagged",
   "workspaceFilesChanged",
 ] as const;
+
+// Every browser connection opts into `stateDiff`; other `/api/events`
+// clients (the remote hub) keep the full-`state` stream.
+export const LIVE_EVENTS_URL = "/api/events?stateDiff=1";
 
 export type SharedLiveEvent =
   | { type: "open" | "error" | "status"; readyState: number }
@@ -31,7 +36,7 @@ export const SHARED_LIVE_LEASE_MS = 90_000;
 export const SHARED_LIVE_CONNECTING_STALE_MS = 10_000;
 
 export function createSharedLiveEventHub(
-  createSource: () => EventSource = () => new EventSource("/api/events"),
+  createSource: () => EventSource = () => new EventSource(LIVE_EVENTS_URL),
 ) {
   const ports = new Map<MessagePort, { active: boolean; lastSeen: number }>();
   let source: EventSource | null = null;

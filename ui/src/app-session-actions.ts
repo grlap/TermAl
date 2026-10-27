@@ -194,6 +194,7 @@ export function useAppSessionActions(
     refs: {
       isMountedRef,
       latestStateRevisionRef,
+      stateDiffBaselineRevisionRef,
       lastSeenServerInstanceIdRef,
       sessionsRef,
       actionStateClassifierContextRef,
@@ -1444,6 +1445,11 @@ export function useAppSessionActions(
             optimisticSession,
           ),
         );
+        // The rollback writes values captured before the request, which a
+        // `stateDiff` applied meanwhile may have superseded; a diff carries
+        // only changed rows, so realign on a full state instead of trusting
+        // the local copy.
+        stateDiffBaselineRevisionRef.current = null;
       }
       reportRequestError(error);
     } finally {
@@ -1649,6 +1655,7 @@ export function useAppSessionActions(
     isMountedRef,
     lastSeenServerInstanceIdRef,
     latestStateRevisionRef,
+    stateDiffBaselineRevisionRef,
     reportRequestError,
     requestActionRecoveryResync,
     sessionLookup,

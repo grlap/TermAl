@@ -16,6 +16,10 @@
 //   after coalescing general commits by the owned broadcaster thread. Used by
 //   new SSE clients and remote proxies that need a ground-truth
 //   snapshot after reconnect.
+//   Once it has emitted a cut, the broadcaster sends later cuts as a
+//   cumulative `stateDiff` from that cut (`state_broadcast_diff.rs`) for
+//   connections that opted in, plus the full snapshot only while legacy
+//   connections are counted.
 // - **Delta events** (`DeltaEvent` in `wire.rs`) — narrow per-field
 //   updates queued behind any earlier state snapshot and then pushed by
 //   that same broadcaster thread. Clients that stay connected apply them to
@@ -607,7 +611,9 @@ impl AppState {
         }
 
         match serde_json::to_string(&snapshot) {
-            Ok(payload) => self.state_broadcast_senders.send_state(payload),
+            Ok(payload) => {
+                self.state_broadcast_senders.send_state(payload);
+            }
             Err(err) => {
                 eprintln!(
                     "warning: failed to serialize SSE state snapshot at revision {}: {err}",

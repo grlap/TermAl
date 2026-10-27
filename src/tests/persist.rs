@@ -2030,8 +2030,12 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         engram_retry_slots: EngramRetrySlots::default(),
         state_broadcast_senders: StateBroadcastSenders {
             stream_events: broadcast::channel(16).0,
+            legacy_state_subscribers: Arc::default(),
+            full_state_request_generation: Arc::default(),
+            diff_counters: Arc::default(),
             state_events: broadcast::channel(16).0,
             delta_events: broadcast::channel(16).0,
+            state_diff_events: broadcast::channel(16).0,
         },
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),

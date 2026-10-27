@@ -64,6 +64,7 @@ void compilerBoundary;
 
 const WRITERS = [
   ["transcript-repair-authority.ts", "adoptSummaries", "metadata"],
+  ["transcript-repair-authority.ts", "adoptSummaryDiff", "metadata"],
   ["transcript-repair-authority.ts", "receiveBodyDelta", "delta"],
   ["transcript-repair-authority.ts", "adoptTail", "delta"],
   ["transcript-repair-authority.ts", "adoptTail", "delta"],

@@ -589,6 +589,20 @@ export function fetchState() {
   return requestJsonFirst<StateResponse>("/api/state");
 }
 
+/**
+ * Asks the server to send its next state cut on `/api/events` as a full
+ * `state` marked `stateDiffBase: true`, the only base a `stateDiff` builds on.
+ * Idempotent; the server answers 204 with no body. The JSON body keeps the
+ * call off the CORS simple-request path, which the server refuses.
+ */
+export function requestFullStateAlignment() {
+  return request<void>("/api/events/full-state", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+}
+
 export function fetchSessionTail(sessionId: string, messageLimit = 20) {
   const query = new URLSearchParams({
     tail: String(Math.max(1, Math.floor(messageLimit))),

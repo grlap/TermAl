@@ -26,6 +26,7 @@ import {
 import {
   classifyDeltaServerIdentity,
   decideDeltaRevisionAction,
+  isServerInstanceMismatch,
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
 import {
@@ -59,6 +60,7 @@ import type { RequestStateResyncOptions } from "./app-live-state-resync-options"
 import type { ReconnectRecoveryStateSnapshot } from "./app-live-state-reconnect-state";
 import type { SessionHydrationOptions } from "./app-live-state-hydration";
 import type { HydrationDeltaObservation } from "./session-hydration-adoption";
+import { createStateDiffEventHandler, type StateDiffEvent } from "./app-live-state-diff";
 
 type AppLiveStateTransportEventHandlersContext = {
   sessionAuthority: TranscriptRepairAuthority;
@@ -67,6 +69,7 @@ type AppLiveStateTransportEventHandlersContext = {
   hasPartialTailAppendProof?: (sessionId?: string) => boolean;
   markTranscriptsDirty?: () => void;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
+  adoptStateDiff: (diff: StateDiffEvent) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
   applyTestRunDeltaLocally?: (delta: DeltaEvent) => void;
   beginBadLiveEventRecovery: () => void;
@@ -118,6 +121,9 @@ type AppLiveStateTransportEventHandlersContext = {
     sessionId: string,
     options?: SessionHydrationOptions,
   ) => void;
+  stateDiffBaselineRevisionRef: MutableRefObject<number | null>;
+  stateDiffAlignmentPendingRef: MutableRefObject<boolean>;
+  requestStateDiffAlignment: () => Promise<unknown>;
   syncLiveSessionResumeWatchdogBaselines: (
     sessions: readonly Session[],
     now?: number,
@@ -256,6 +262,32 @@ export function createAppLiveStateTransportEventHandlers(
         payload,
         "_sseFallback",
       );
+      const rawIsDiffBase = payloadHasTopLevelTrueBoolean(payload, "stateDiffBase");
+      // A marked full state is the server's new diff base, whoever asked for
+      // it. It may sit at exactly the current revision: an idle host answers
+      // with its current cut, and a cut published without a revision bump can
+      // carry changes this client never saw. A complete state at R is
+      // consistent with any partial data at or below R, so it is adopted.
+      // Instance and lag rules still apply through the revision gate.
+      const diffBaseAdmitsEqualRevision =
+        rawIsDiffBase &&
+        rawRevision !== null &&
+        rawRevision === latestStateRevisionRef.current;
+      if (rawIsDiffBase) {
+        // The server answered an alignment request (ours or another tab's).
+        // Even if this state is rejected, a later diff may ask again.
+        context.stateDiffAlignmentPendingRef.current = false;
+        if (
+          rawRevision !== null &&
+          latestStateRevisionRef.current !== null &&
+          rawRevision < latestStateRevisionRef.current &&
+          !isServerInstanceMismatch(lastSeenServerInstanceIdRef.current, rawServerInstanceId)
+        ) {
+          // Too old to adopt, yet the server's base moved to it: this
+          // client's baseline no longer matches what diffs build on.
+          context.stateDiffBaselineRevisionRef.current = null;
+        }
+      }
       const forceStateEvent = shouldForceAdoptNextStateEvent() ||
         // A delta after the loss marker cancels rollback permission, not
         // transcript repair from a snapshot covering that newer delta.
@@ -271,7 +303,7 @@ export function createAppLiveStateTransportEventHandlers(
           latestStateRevisionRef.current,
           rawRevision,
           {
-            force: forceStateEvent,
+            force: forceStateEvent || diffBaseAdmitsEqualRevision,
             allowRevisionDowngrade: forceStateEvent,
             lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
             nextServerInstanceId: rawServerInstanceId,
@@ -324,15 +356,24 @@ export function createAppLiveStateTransportEventHandlers(
       // and being overwritten. Allow revision downgrade so a restarted
       // server (whose persisted revision may be lower) is adopted.
       const adopted = adoptState(state, {
-        force,
+        // Equal-revision admission only; downgrade and unknown-instance
+        // permission stay with the lag-recovery force.
+        force: force || diffBaseAdmitsEqualRevision,
         allowRevisionDowngrade: force,
         allowUnknownServerInstance: force,
         // Loss marks local attached tails dirty without evicting their bodies.
         // The ordinary hydration flight covers that demand separately.
         forceMessagesUnloaded: false,
+        stateDiffBase: state.stateDiffBase === true,
       });
       profiler?.mark("adoptState");
       profiledAdopted = adopted;
+      if (adopted && !rawIsDiffBase) {
+        // An unmarked full state leaves no baseline (adoptState); a pending
+        // alignment answer may have been lost with it, so a later diff asks
+        // again rather than waiting forever.
+        context.stateDiffAlignmentPendingRef.current = false;
+      }
       clearForceAdoptNextStateEvent(adopted);
       // Confirm recovery after an adopted state. A parseable but rejected
       // state is still useful stream proof in ordinary reconnects, but it
@@ -932,6 +973,11 @@ export function createAppLiveStateTransportEventHandlers(
     // silently ignored".
     laggedRecoveryBaselineRevisionRef.current = latestStateRevisionRef.current;
     forceAdoptNextStateEventRef.current = true;
+    // The loss may have dropped a marked answer to this client's alignment
+    // request, and the recovery state that follows is unmarked: no baseline,
+    // and the next diff asks again.
+    context.stateDiffBaselineRevisionRef.current = null;
+    context.stateDiffAlignmentPendingRef.current = false;
   }
 
 
@@ -939,6 +985,7 @@ export function createAppLiveStateTransportEventHandlers(
   return {
     handleDeltaEvent,
     handleLaggedEvent,
+    handleStateDiffEvent: createStateDiffEventHandler(context),
     handleStateEvent,
     handleWorkspaceFilesChangedEvent,
   };

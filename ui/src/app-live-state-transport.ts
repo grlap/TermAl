@@ -19,6 +19,7 @@ import {
 } from "react";
 import {
   fetchState,
+  requestFullStateAlignment,
   type StateResponse,
 } from "./api";
 import { isBackendUnavailableError } from "./api-request";
@@ -70,6 +71,7 @@ import {
 } from "./app-shell-internals";
 import type { AdoptStateOptions } from "./app-live-state-types";
 import { createAppLiveStateTransportEventHandlers } from "./app-live-state-transport-events";
+import type { StateDiffEvent } from "./app-live-state-diff";
 import { ReconnectStateMachine } from "./app-live-state-reconnect-state";
 import { createWaitSnapshotRepairRetry } from "./app-live-state-wait-repair";
 import type { SessionHydrationOptions } from "./app-live-state-hydration";
@@ -83,6 +85,7 @@ type UseAppLiveStateTransportParams = {
   observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
   hasPartialTailAppendProof?: (sessionId?: string) => boolean;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
+  adoptStateDiff: (diff: StateDiffEvent) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
   applyTestRunDeltaLocally?: (delta: DeltaEvent) => void;
   cancelStaleSendResponseRecoveryPollForSessions: (
@@ -135,6 +138,7 @@ type UseAppLiveStateTransportParams = {
     sessionId: string,
     options?: SessionHydrationOptions,
   ) => void;
+  stateDiffBaselineRevisionRef: MutableRefObject<number | null>;
   stateResyncInFlightRef: MutableRefObject<boolean>;
   stateResyncPendingRef: MutableRefObject<boolean>;
   syncAdoptedLiveSessionResumeWatchdogBaselinesRef: MutableRefObject<
@@ -241,6 +245,9 @@ export function useAppLiveStateTransport(
     >();
     let lastWatchdogResyncAttemptAt: number | null = null;
     const eventSource = createLiveEventSource(sseEpoch > 0);
+    // One outstanding `stateDiff` alignment request per connection. A new
+    // connection registers itself for a marked full state server-side.
+    const stateDiffAlignmentPendingRef = { current: false };
     const waitRepairRetry = createWaitSnapshotRepairRetry(requestStateResync, readNavigatorOnline);
 
     function clearInitialStateResyncRetryTimeout() {
@@ -729,6 +736,11 @@ export function useAppLiveStateTransport(
                 openSessionId,
                 paneId,
               });
+              if (adopted) {
+                // An HTTP state is unmarked: no baseline, and a pending
+                // alignment request may ask again on the next diff.
+                stateDiffAlignmentPendingRef.current = false;
+              }
               if (waitRepair) {
                 if (adopted) waitRepairRetry.complete();
                 else waitRepairRetry.schedule(resyncOptions);
@@ -1211,6 +1223,7 @@ export function useAppLiveStateTransport(
 
     const {
       handleStateEvent,
+      handleStateDiffEvent,
       handleDeltaEvent,
       handleWorkspaceFilesChangedEvent,
       handleLaggedEvent,
@@ -1220,6 +1233,7 @@ export function useAppLiveStateTransport(
       observeHydrationDelta,
       hasPartialTailAppendProof,
       adoptState,
+      adoptStateDiff: params.adoptStateDiff,
       applyDelegationWaitDeltaLocally,
       applyTestRunDeltaLocally,
       beginBadLiveEventRecovery,
@@ -1258,6 +1272,9 @@ export function useAppLiveStateTransport(
         reconnectState.setLastDelegationRepairRequestedRevision(revision);
       },
       startSessionHydration,
+      stateDiffBaselineRevisionRef: params.stateDiffBaselineRevisionRef,
+      stateDiffAlignmentPendingRef,
+      requestStateDiffAlignment: () => requestFullStateAlignment(),
       transportState: reconnectState,
       clearInitialStateResyncRetryTimeout,
       shouldForceAdoptNextStateEvent,
@@ -1266,7 +1283,18 @@ export function useAppLiveStateTransport(
       triggerRecoveryForDelta,
     });
 
+    // Any break in the live stream's continuity (error, (re)open, a shared
+    // stream joined mid-flight) may have hidden a marked full state, including
+    // the answer to a pending alignment request or a same-revision rebase.
+    // Neither the baseline nor the pending request survives it: the next
+    // `stateDiff` asks for alignment again.
+    function resetStateDiffContinuity() {
+      stateDiffAlignmentPendingRef.current = false;
+      params.stateDiffBaselineRevisionRef.current = null;
+    }
+
     function handleSharedSnapshotRequired() {
+      resetStateDiffContinuity();
       // A tab joining an already-open shared stream missed its initial state.
       // Fetch an authoritative snapshot using the existing revision and
       // hydration recovery rules instead of replaying an outdated summary.
@@ -1282,6 +1310,7 @@ export function useAppLiveStateTransport(
 
     eventSource.addEventListener("snapshotRequired", handleSharedSnapshotRequired);
     eventSource.addEventListener("state", handleStateEvent as EventListener);
+    eventSource.addEventListener("stateDiff", handleStateDiffEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
     eventSource.addEventListener("lagged", handleLaggedEvent as EventListener);
     eventSource.addEventListener(
@@ -1290,6 +1319,7 @@ export function useAppLiveStateTransport(
     );
     eventSource.onopen = () => {
       if (!cancelled) {
+        resetStateDiffContinuity();
         markEventSourceOpen();
       }
     };
@@ -1297,6 +1327,7 @@ export function useAppLiveStateTransport(
       if (cancelled) {
         return;
       }
+      resetStateDiffContinuity();
 
       const { hadReconnectOpenSinceLastError } = reconnectState.onSseError();
       observedEventSourceOpen = false;
@@ -1484,6 +1515,10 @@ export function useAppLiveStateTransport(
       eventSource.removeEventListener(
         "state",
         handleStateEvent as EventListener,
+      );
+      eventSource.removeEventListener(
+        "stateDiff",
+        handleStateDiffEvent as EventListener,
       );
       eventSource.removeEventListener(
         "delta",

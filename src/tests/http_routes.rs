@@ -2779,6 +2779,399 @@ async fn state_events_route_emits_non_empty_lagged_marker_before_recovery_state(
     assert_eq!(recovery_state.revision, state.summary_snapshot().revision);
 }
 
+/// Opens `/api/events` at `uri` and reads its initial full `state` frame.
+async fn open_state_events(app: &Router, uri: &str) -> std::pin::Pin<Box<axum::body::BodyDataStream>> {
+    open_state_events_with_initial(app, uri).await.0
+}
+
+async fn open_state_events_with_initial(
+    app: &Router,
+    uri: &str,
+) -> (std::pin::Pin<Box<axum::body::BodyDataStream>>, Value) {
+    let response = request_response(
+        app,
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(name, "state");
+    (body, serde_json::from_str(&data).unwrap())
+}
+
+async fn post_full_state_request(app: &Router) -> StatusCode {
+    post_full_state_request_as(app, Some("application/json"), "{}").await
+}
+
+async fn post_full_state_request_as(
+    app: &Router,
+    content_type: Option<&str>,
+    body: &'static str,
+) -> StatusCode {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri("/api/events/full-state");
+    if let Some(content_type) = content_type {
+        request = request.header("content-type", content_type);
+    }
+    request_response(app, request.body(Body::from(body)).unwrap())
+        .await
+        .status()
+}
+
+fn full_state_request_generation(senders: &StateBroadcastSenders) -> u64 {
+    senders.full_state_request_generation.load(Ordering::SeqCst)
+}
+
+fn legacy_state_subscriber_count(state: &AppState) -> usize {
+    state
+        .state_broadcast_senders
+        .legacy_state_subscribers
+        .load(Ordering::SeqCst)
+}
+
+// Pins the per-connection forwarding of the three state kinds: an opted-in
+// connection takes `stateDiff` and drops the full state paired with it; a
+// legacy connection does the reverse; a full state sent without a diff
+// reaches both.
+#[tokio::test]
+async fn state_events_route_forwards_state_diffs_only_to_opted_in_connections() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let mut opted_in = open_state_events(&app, "/api/events?stateDiff=1").await;
+    let mut legacy = open_state_events(&app, "/api/events").await;
+    let mut unknown = open_state_events(&app, "/api/events?stateDiff=yes&other=1").await;
+
+    let senders = &state.state_broadcast_senders;
+    for event in [
+        SseStreamEvent::StateDiff(Arc::from(r#"{"revision":2,"baseRevision":1}"#)),
+        SseStreamEvent::LegacyState(Arc::from(r#"{"revision":2,"paired":true}"#)),
+        SseStreamEvent::State(Arc::from(r#"{"revision":3,"paired":false}"#)),
+    ] {
+        senders.stream_events.send(event).unwrap();
+    }
+
+    let read = |raw: String| parse_sse_event(&raw);
+    assert_eq!(
+        read(next_sse_event(&mut opted_in).await),
+        ("stateDiff".to_owned(), r#"{"revision":2,"baseRevision":1}"#.to_owned())
+    );
+    assert_eq!(
+        read(next_sse_event(&mut opted_in).await),
+        ("state".to_owned(), r#"{"revision":3,"paired":false}"#.to_owned())
+    );
+    assert_no_ready_sse_chunk(&mut opted_in, "opted-in connection after the unpaired state");
+    for body in [&mut legacy, &mut unknown] {
+        assert_eq!(
+            read(next_sse_event(&mut *body).await),
+            ("state".to_owned(), r#"{"revision":2,"paired":true}"#.to_owned())
+        );
+        assert_eq!(
+            read(next_sse_event(&mut *body).await),
+            ("state".to_owned(), r#"{"revision":3,"paired":false}"#.to_owned())
+        );
+        assert_no_ready_sse_chunk(&mut *body, "legacy connection after the unpaired state");
+    }
+}
+
+// Lag recovery stays a `lagged` marker plus a full `state` for an opted-in
+// connection, exactly as for a legacy one.
+#[tokio::test]
+async fn state_events_route_recovers_an_opted_in_connection_with_a_full_state() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let mut body = open_state_events(&app, "/api/events?stateDiff=1").await;
+    state
+        .state_broadcast_senders
+        .stream_events
+        .send(SseStreamEvent::Lagged)
+        .unwrap();
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!((name.as_str(), data.as_str()), ("lagged", "1"));
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    assert_eq!(name, "state");
+    let recovered: StateResponse = serde_json::from_str(&data).unwrap();
+    assert_eq!(recovered.revision, state.summary_snapshot().revision);
+}
+
+// A legacy connection is counted before its initial capture and uncounted
+// when its stream drops or ends; an opted-in connection is never counted.
+#[tokio::test]
+async fn state_events_route_counts_legacy_connections_for_the_stream_lifetime() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    assert_eq!(legacy_state_subscriber_count(&state), 0);
+
+    let (observed, observations) = mpsc::channel();
+    let counter = state.state_broadcast_senders.legacy_state_subscribers.clone();
+    let receivers = state.state_broadcast_senders.stream_events.clone();
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .state_projection_cache
+        .lock()
+        .unwrap()
+        .before_materialize = Some(Box::new(move || {
+        observed
+            .send((counter.load(Ordering::SeqCst), receivers.receiver_count()))
+            .unwrap();
+    }));
+    let legacy = open_state_events(&app, "/api/events").await;
+    assert_eq!(
+        observations.try_recv().unwrap(),
+        (1, 1),
+        "the initial capture runs after the connection is counted and subscribed"
+    );
+    assert_eq!(legacy_state_subscriber_count(&state), 1);
+
+    let opted_in = open_state_events(&app, "/api/events?stateDiff=1").await;
+    assert_eq!(legacy_state_subscriber_count(&state), 1);
+    drop(legacy);
+    assert_eq!(legacy_state_subscriber_count(&state), 0);
+    drop(opted_in);
+    assert_eq!(legacy_state_subscriber_count(&state), 0);
+
+    // A stream that ends at once still releases its count.
+    state.trigger_shutdown_signal();
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    expect_sse_stream_end(&mut body, "legacy connection after shutdown").await;
+    assert_eq!(legacy_state_subscriber_count(&state), 0);
+}
+
+// Convergence under steady load: an opted-in connection's registration asks
+// for one marked full state, after which every cut is a diff chained on the
+// previous emitted cut, through the real route and producer. Nothing else is
+// sent in full until a client asks again through `POST /api/events/full-state`.
+#[tokio::test]
+async fn state_events_route_aligns_an_opted_in_connection_once_then_chains_diffs() {
+    let mut state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    state.state_broadcast_senders.stream_events = broadcast::channel(1024).0;
+    let mailbox = Arc::new(StateBroadcastMailbox::default());
+    state.state_broadcast_mailbox = Some(mailbox.clone());
+    let senders = state.state_broadcast_senders.clone();
+    let mut producer = StateDiffProducer::default();
+    let flush = |producer: &mut StateDiffProducer| {
+        for work in mailbox.take_pending_for_test() {
+            producer.forward(work, &senders);
+        }
+    };
+    let commit = |name: String| {
+        let mut inner = state.inner.lock().unwrap();
+        inner.session_mut(&session_id).unwrap().session.name = name;
+        state.commit_locked(&mut inner).unwrap()
+    };
+    // Another listener already gave the broadcaster a base.
+    let _other_listener = senders.stream_events.subscribe();
+    commit("base".to_owned());
+    flush(&mut producer);
+
+    let app = app_router(state.clone());
+    let (mut body, initial) = open_state_events_with_initial(&app, "/api/events?stateDiff=1").await;
+    assert!(initial.get("stateDiffBase").is_none(), "the initial capture is no diff base");
+    assert_eq!(full_state_request_generation(&senders), 1, "registration requests a base");
+
+    const CUTS: usize = 4;
+    let mut revisions = Vec::new();
+    for index in 0..CUTS {
+        push_test_text_message(&state, &session_id, format!("Steady delta {index}"));
+        revisions.push(commit(format!("Steady cut {index}")));
+        flush(&mut producer);
+    }
+    let mut previous = None;
+    for (index, revision) in revisions.iter().enumerate() {
+        assert_eq!(parse_sse_event(&next_sse_event(&mut body).await).0, "delta");
+        let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+        let payload: Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(payload["revision"].as_u64(), Some(*revision));
+        if index == 0 {
+            assert_eq!(name, "state", "the alignment is the only full state");
+            assert_eq!(payload["stateDiffBase"], true);
+        } else {
+            assert_eq!(name, "stateDiff");
+            assert_eq!(payload["baseRevision"].as_u64(), previous);
+        }
+        previous = Some(*revision);
+    }
+    assert_no_ready_sse_chunk(&mut body, "no full state without a new request");
+    assert_eq!(producer.satisfied_generation, 1);
+
+    // A client that cannot apply a diff asks; repeats are idempotent. On an
+    // idle host the request itself publishes the current cut: no commit, no
+    // revision bump, and the answer is a marked full state at that revision.
+    let idle_revision = state.inner.lock().unwrap().revision;
+    assert_eq!(post_full_state_request(&app).await, StatusCode::NO_CONTENT);
+    assert_eq!(post_full_state_request(&app).await, StatusCode::NO_CONTENT);
+    assert_eq!(full_state_request_generation(&senders), 3);
+    flush(&mut producer);
+    assert_eq!(state.inner.lock().unwrap().revision, idle_revision);
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    let payload: Value = serde_json::from_str(&data).unwrap();
+    assert_eq!(name, "state");
+    assert_eq!(payload["stateDiffBase"], true);
+    assert_eq!(payload["revision"].as_u64(), Some(idle_revision));
+    assert_eq!(previous, Some(idle_revision));
+    assert_no_ready_sse_chunk(&mut body, "after the requested full state");
+    assert_eq!(producer.satisfied_generation, 3);
+
+    let (status, diagnostics): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .uri("/api/diagnostics/persistence")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        diagnostics["stateBroadcast"],
+        json!({
+            "diffsEmitted": CUTS - 1,
+            "markedFullStates": {
+                "noBase": 1,
+                "lag": 0,
+                "failure": 0,
+                "noReceivers": 0,
+                "alignmentRequest": 2,
+                "newInstance": 0,
+            },
+            "legacyPairedFullStates": 0,
+        })
+    );
+}
+
+// On an idle host no commit will come along to carry an alignment. The
+// request publishes the current cut itself, without a revision bump, and the
+// broadcaster sends it as the marked full state at the unchanged revision.
+#[tokio::test]
+async fn full_state_request_on_an_idle_host_publishes_a_marked_full_state_without_a_commit() {
+    let mut state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    test_session_id(&state, Agent::Codex);
+    state.state_broadcast_senders.stream_events = broadcast::channel(64).0;
+    let mailbox = Arc::new(StateBroadcastMailbox::default());
+    state.state_broadcast_mailbox = Some(mailbox.clone());
+    let senders = state.state_broadcast_senders.clone();
+    let mut producer = StateDiffProducer::default();
+    let flush = |producer: &mut StateDiffProducer| {
+        for work in mailbox.take_pending_for_test() {
+            producer.forward(work, &senders);
+        }
+    };
+    let _other_listener = senders.stream_events.subscribe();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        state.commit_locked(&mut inner).unwrap();
+    }
+    flush(&mut producer);
+    let idle_revision = state.inner.lock().unwrap().revision;
+
+    let app = app_router(state.clone());
+    let mut body = open_state_events(&app, "/api/events?stateDiff=1").await;
+    flush(&mut producer);
+    assert_no_ready_sse_chunk(&mut body, "registration alone publishes nothing");
+
+    assert_eq!(post_full_state_request(&app).await, StatusCode::NO_CONTENT);
+    flush(&mut producer);
+    let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
+    let payload: Value = serde_json::from_str(&data).unwrap();
+    assert_eq!(name, "state");
+    assert_eq!(payload["stateDiffBase"], true);
+    assert_eq!(payload["revision"].as_u64(), Some(idle_revision));
+    assert_eq!(state.inner.lock().unwrap().revision, idle_revision, "no commit");
+    assert_eq!(full_state_request_generation(&senders), 2);
+    assert_eq!(producer.satisfied_generation, 2);
+    assert_no_ready_sse_chunk(&mut body, "one answer");
+}
+
+// The alignment request rides the same router and layers as `/api/events`.
+// That route has no authentication of its own (only the shared CORS layer),
+// so the request is accepted or refused exactly as `/api/events` is: both
+// answer a foreign origin's preflight without an allow-origin header, and the
+// allowed origin's with one. The request must be JSON, never a CORS simple
+// request, so a cross-origin caller cannot skip that preflight.
+#[tokio::test]
+async fn full_state_request_shares_the_event_stream_access_policy() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    for origin in ["http://evil.example", "http://127.0.0.1:8787"] {
+        let mut allowed = Vec::new();
+        for (uri, method) in [("/api/events", "GET"), ("/api/events/full-state", "POST")] {
+            let response = request_response(
+                &app,
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri(uri)
+                    .header("origin", origin)
+                    .header("access-control-request-method", method)
+                    .header("access-control-request-headers", "content-type")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+            allowed.push(
+                response
+                    .headers()
+                    .get("access-control-allow-origin")
+                    .map(|value| value.to_str().unwrap().to_owned()),
+            );
+        }
+        assert_eq!(allowed[0], allowed[1], "{origin}");
+        assert_eq!(allowed[0].is_some(), origin == "http://127.0.0.1:8787", "{origin}");
+    }
+    // Simple-request shapes are refused before anything is requested.
+    for (content_type, body) in [
+        (None, ""),
+        (None, "{}"),
+        (Some("text/plain"), "{}"),
+        (Some("application/x-www-form-urlencoded"), "a=b"),
+    ] {
+        assert_eq!(
+            post_full_state_request_as(&app, content_type, body).await,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "{content_type:?}"
+        );
+        assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 0);
+    }
+    assert_eq!(
+        post_full_state_request_as(&app, Some("application/json"), "not json").await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 0);
+    assert_eq!(post_full_state_request(&app).await, StatusCode::NO_CONTENT);
+    assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 1);
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events/full-state")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
 // Pins `GET /api/events` + `PUT/DELETE /api/workspaces/{id}` — asserts
 // every workspace-layout mutation (create, update, delete) republishes
 // a fresh `state` SSE frame whose `workspaces` summaries reflect the

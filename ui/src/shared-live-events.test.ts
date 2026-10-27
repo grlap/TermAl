@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLiveEventSource, SharedLiveEventSource } from "./live-event-source";
 import { TestPort, TestSource } from "./shared-live-events.test-support";
 import {
-  createSharedLiveEventHub, LIVE_EVENT_TYPES, SHARED_LIVE_LEASE_MS,
+  createSharedLiveEventHub, LIVE_EVENT_TYPES, LIVE_EVENTS_URL, SHARED_LIVE_LEASE_MS,
   SHARED_LIVE_CONNECTING_STALE_MS,
 } from "./shared-live-events";
 
@@ -220,7 +220,7 @@ describe("shared live updates", () => {
     const factory = vi.fn(function () { return native; });
     vi.stubGlobal("EventSource", factory);
     expect(createLiveEventSource()).toBe(native);
-    expect(factory).toHaveBeenCalledWith("/api/events");
+    expect(factory).toHaveBeenCalledWith(LIVE_EVENTS_URL);
   });
 
   it("uses native EventSource when the browser denies SharedWorker construction", () => {
@@ -245,7 +245,7 @@ describe("shared stream recovery requirements", () => {
     (worker as unknown as SharedWorker).onerror?.(new ErrorEvent("error"));
     await flushMessages();
 
-    expect(factory).toHaveBeenCalledExactlyOnceWith("/api/events");
+    expect(factory).toHaveBeenCalledExactlyOnceWith(LIVE_EVENTS_URL);
     native.open();
     native.emit("delta", "recovered");
     expect(client.readyState).toBe(1);
@@ -282,7 +282,7 @@ describe("shared stream recovery requirements", () => {
     worker.port.onmessageerror?.();
     await flushMessages();
 
-    expect(factory).toHaveBeenCalledExactlyOnceWith("/api/events");
+    expect(factory).toHaveBeenCalledExactlyOnceWith(LIVE_EVENTS_URL);
     expect(client.readyState).not.toBe(1);
   });
 
@@ -463,6 +463,12 @@ describe("shared stream lifecycle", () => {
     );
     const names = [...serverSseSource.matchAll(/\.event\("([^"]+)"\)/g)].map((match) => match[1]);
     expect([...new Set(names)].sort()).toEqual([...LIVE_EVENT_TYPES].sort());
+    expect(LIVE_EVENT_TYPES).toContain("stateDiff");
+  });
+
+  it("opts every browser connection into state diffs", () => {
+    // Without the query the server keeps the legacy full-state stream.
+    expect(LIVE_EVENTS_URL).toBe("/api/events?stateDiff=1");
   });
 
   it("acknowledges a joining tab during CONNECTING without replacing the fresh stream", async () => {
@@ -584,7 +590,7 @@ describe("shared stream lifecycle", () => {
     const state = vi.fn();
     client.addEventListener("state", state);
     await flushMessages();
-    expect(createSource).toHaveBeenCalledExactlyOnceWith("/api/events");
+    expect(createSource).toHaveBeenCalledExactlyOnceWith(LIVE_EVENTS_URL);
     upstream.open();
     upstream.emit("state", "worker entry snapshot");
     await flushMessages();

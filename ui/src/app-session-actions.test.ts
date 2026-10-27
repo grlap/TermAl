@@ -115,6 +115,7 @@ function makeSessionActionsParams(
   refs = {
     isMountedRef: { current: true },
     latestStateRevisionRef: { current: 5 },
+    stateDiffBaselineRevisionRef: { current: null },
     lastSeenServerInstanceIdRef: { current: "server-a" },
     sessionsRef: { current: [session] },
     actionStateClassifierContextRef: {
@@ -1095,6 +1096,40 @@ describe("useAppSessionActions", () => {
     expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
   });
 
+  it("voids the state-diff baseline when a marker response advances the revision", async () => {
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [],
+    });
+    vi.spyOn(api, "createConversationMarker").mockResolvedValue({
+      marker: makeConversationMarker(),
+      revision: 6,
+      serverInstanceId: "server-a",
+      sessionMutationStamp: 6,
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    params.refs.stateDiffBaselineRevisionRef.current = 5;
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleCreateConversationMarker("session-1", "message-1"),
+    ).resolves.toBe(true);
+
+    // One marker's data cannot be a base a full-state diff builds on.
+    expect(params.refs.latestStateRevisionRef.current).toBe(6);
+    expect(params.refs.stateDiffBaselineRevisionRef.current).toBeNull();
+  });
+
   it("uses the provided checkpoint marker label when creating markers", async () => {
     const marker = makeConversationMarker({
       name: "Review later",
@@ -1892,6 +1927,25 @@ describe("useAppSessionActions", () => {
       "session-1":
         "GPT Small only supports low reasoning, so TermAl reset effort from high to low.",
     });
+  });
+
+  it("voids the state-diff baseline when a failed settings change rolls back", async () => {
+    const session: TestSession = {
+      ...makeSession("session-1"),
+      reasoningEffort: "medium",
+    };
+    vi.spyOn(api, "updateSessionSettings").mockRejectedValue(new Error("rejected"));
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    params.refs.stateDiffBaselineRevisionRef.current = 5;
+    const actions = useAppSessionActions(params);
+
+    await actions.handleSessionSettingsChange("session-1", "reasoningEffort", "high");
+
+    expect(params.refs.sessionsRef.current[0]?.reasoningEffort).toBe("medium");
+    expect(params.refs.stateDiffBaselineRevisionRef.current).toBeNull();
+    expect(params.reportRequestError).toHaveBeenCalled();
   });
 
   it("reads response sessions after adopted settings success", async () => {

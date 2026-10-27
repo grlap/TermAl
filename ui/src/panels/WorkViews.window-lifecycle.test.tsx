@@ -24,6 +24,8 @@ let commits: number;
 let measure: () => void;
 let dynamicLayout: boolean;
 let inheritedTableLayout: boolean;
+let layoutMutations: MutationObserver;
+let assignmentWidths: WeakMap<HTMLElement, number>;
 const SCROLLBAR = 17;
 const horizontalBars = new Set<boolean>();
 const quantum = (value: number) => Math.round(value * 64) / 64;
@@ -44,8 +46,16 @@ const crowdedHeights = new Map([
 // values depend on the mounted rows, never on a render counter or a forced
 // alternating rectangle. This tests a layout hypothesis, not browser pixels.
 function tableWidths(table: HTMLElement, available: number) {
-  const assignment = Math.max(100, ...[...table.querySelectorAll("tbody[data-work-window-key] td:nth-child(8)")]
-    .map(cell => (cell.textContent ?? "").split(/\s+/).reduce((longest, word) => Math.max(longest, word.length * 7), 0) + 14));
+  // Like the transcript fixture, reuse DOM-derived layout until a mutation.
+  // takeRecords also catches changes made within the current layout effect;
+  // viewport-dependent title widths below are still calculated on every read.
+  if (layoutMutations.takeRecords().length) assignmentWidths = new WeakMap();
+  let assignment = assignmentWidths.get(table);
+  if (assignment === undefined) {
+    assignment = Math.max(100, ...[...table.querySelectorAll("tbody[data-work-window-key] td:nth-child(8)")]
+      .map(cell => (cell.textContent ?? "").split(/\s+/).reduce((longest, word) => Math.max(longest, word.length * 7), 0) + 14));
+    assignmentWidths.set(table, assignment);
+  }
   const otherColumns = 582;
   return { minimum: otherColumns + assignment + 224, title: Math.max(224, available - otherColumns - assignment) };
 }
@@ -133,6 +143,9 @@ describe("real Work views at the clamped end of a measured window", () => {
     commits = 0;
     dynamicLayout = false;
     inheritedTableLayout = false;
+    assignmentWidths = new WeakMap();
+    layoutMutations = new MutationObserver(() => { assignmentWidths = new WeakMap(); });
+    layoutMutations.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
     horizontalBars.clear();
     measure = () => { throw new Error("ResizeObserver was not attached"); };
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
@@ -164,8 +177,29 @@ describe("real Work views at the clamped end of a measured window", () => {
 
   afterEach(() => {
     cleanup();
+    layoutMutations.disconnect();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("refreshes cached assignment layout before synchronous DOM and viewport reads", () => {
+    const table = document.createElement("table");
+    table.innerHTML = '<tbody data-work-window-key="fixture"><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>reviewer</td></tr></tbody>';
+    document.body.append(table);
+    try {
+      const cell = table.querySelector("td:last-child")!;
+      expect(tableWidths(table, 1137)).toEqual({ minimum: 906, title: 455 });
+      expect(tableWidths(table, 1017)).toEqual({ minimum: 906, title: 335 });
+      const text = cell.firstChild!;
+      text.textContent = "x".repeat(50);
+      expect(tableWidths(table, 1137)).toEqual({ minimum: 1170, title: 224 });
+      cell.textContent = "reviewer";
+      expect(tableWidths(table, 1137)).toEqual({ minimum: 906, title: 455 });
+      cell.textContent = "x".repeat(50);
+      expect(tableWidths(table, 1137)).toEqual({ minimum: 1170, title: 224 });
+      table.querySelector("tbody")!.remove();
+      expect(tableWidths(table, 1137)).toEqual({ minimum: 906, title: 455 });
+    } finally { table.remove(); }
   });
 
   it.each<View>(["table", "tree", "labels"])("settles %s measurements, end clamping and resize without a render loop", view => {

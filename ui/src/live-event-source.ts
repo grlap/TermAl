@@ -1,7 +1,8 @@
-// EventTarget facade for the app's four named SSE events, readyState and
+// EventTarget facade for the app's named SSE events, readyState and
 // onopen/onerror. A failed worker/channel falls back on this same object so
 // listeners survive. bfcache releases its port and resubscribes on pageshow.
 import {
+  LIVE_EVENTS_URL,
   LIVE_EVENT_TYPES,
   SHARED_LIVE_HEARTBEAT_MS,
   SHARED_LIVE_LEASE_MS,
@@ -118,7 +119,7 @@ export class SharedLiveEventSource extends EventTarget {
     if (this.closed || this.suspended || this.native) return;
     this.detach();
     try {
-      const native = new EventSource("/api/events");
+      const native = new EventSource(LIVE_EVENTS_URL);
       this.native = native;
       native.onopen = () => { if (this.native === native) this.emitStatus("open", native.readyState); };
       native.onerror = () => { if (this.native === native) this.emitStatus("error", native.readyState); };
@@ -195,11 +196,11 @@ export class SharedLiveEventSource extends EventTarget {
 }
 
 export function createLiveEventSource(reconnect = false) {
-  if (typeof SharedWorker === "undefined") return new EventSource("/api/events");
+  if (typeof SharedWorker === "undefined") return new EventSource(LIVE_EVENTS_URL);
   try {
     return new SharedLiveEventSource(createWorker(), reconnect);
   } catch {
     // Embedded browsers can expose SharedWorker while denying its constructor.
-    return new EventSource("/api/events");
+    return new EventSource(LIVE_EVENTS_URL);
   }
 }

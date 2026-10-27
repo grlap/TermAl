@@ -72,6 +72,8 @@ export type ActionStateClassifierContext = {
 export type UseAppSessionActionsRefs = {
   isMountedRef: MutableRefObject<boolean>;
   latestStateRevisionRef: MutableRefObject<number | null>;
+  /** See `UseAppLiveStateAdoptionRefs.stateDiffBaselineRevisionRef`. */
+  stateDiffBaselineRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
   sessionsRef: SessionReadRef;
   actionStateClassifierContextRef: MutableRefObject<ActionStateClassifierContext>;

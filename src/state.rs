@@ -584,11 +584,20 @@ impl StateBroadcastMailbox {
     }
 }
 
-/// One `/api/events` event, a state snapshot or a delta, as the broadcaster
-/// published it (`StateBroadcastSenders::stream_events`).
+/// One `/api/events` event, a state snapshot, a state diff or a delta, as the
+/// broadcaster published it (`StateBroadcastSenders::stream_events`).
 #[derive(Clone, Debug)]
 enum SseStreamEvent {
+    /// A full snapshot every connection forwards. The broadcaster marks one it
+    /// sends as a diff base with `stateDiffBase: true`; snapshots from paths
+    /// that never diff carry no mark.
     State(Arc<str>),
+    /// A full snapshot of the same cut as an accompanying `StateDiff`, sent
+    /// only while legacy connections exist; opted-in connections drop it.
+    LegacyState(Arc<str>),
+    /// A cumulative diff from the broadcaster's last emitted cut, forwarded
+    /// only by connections that opted in (`/api/events?stateDiff=1`).
+    StateDiff(Arc<str>),
     Delta(Arc<str>),
     Lagged,
 }
@@ -602,27 +611,83 @@ enum SseStreamEvent {
 /// its message. Test builds also send each payload to a per-kind channel, so a
 /// test can observe snapshots or deltas alone; production builds have no such
 /// channel and make no second copy of a payload.
+///
+/// `legacy_state_subscribers` counts live `/api/events` connections that did
+/// not opt into `stateDiff`. The broadcaster serializes a full snapshot beside
+/// each diff only while that count is positive.
+/// `full_state_request_generation` counts requests for a marked full state (a
+/// new diff base): an opted-in connection and `POST /api/events/full-state`
+/// each increment it. Every cut records the generation it was captured at, so
+/// only a cut captured after a request can answer it.
 #[derive(Clone)]
 struct StateBroadcastSenders {
     stream_events: broadcast::Sender<SseStreamEvent>,
+    legacy_state_subscribers: Arc<std::sync::atomic::AtomicUsize>,
+    full_state_request_generation: Arc<AtomicU64>,
+    diff_counters: Arc<StateDiffCounters>,
     #[cfg(test)]
     state_events: broadcast::Sender<String>,
     #[cfg(test)]
     delta_events: broadcast::Sender<String>,
+    #[cfg(test)]
+    state_diff_events: broadcast::Sender<String>,
 }
 
 impl StateBroadcastSenders {
-    /// Sends one serialized state snapshot. The ordered stream gets it first,
-    /// so a test that has seen a payload on a per-kind channel knows the
-    /// ordered stream already holds it.
-    fn send_state(&self, payload: String) {
+    /// Sends one serialized state snapshot that every connection forwards.
+    /// The ordered stream gets it first, so a test that has seen a payload on
+    /// a per-kind channel knows the ordered stream already holds it. Returns
+    /// whether the ordered stream had a receiver.
+    fn send_state(&self, payload: String) -> bool {
         #[cfg(test)]
         let observed = payload.clone();
-        let _ = self
+        let sent = self
             .stream_events
-            .send(SseStreamEvent::State(Arc::from(payload)));
+            .send(SseStreamEvent::State(Arc::from(payload)))
+            .is_ok();
         #[cfg(test)]
         let _ = self.state_events.send(observed);
+        sent
+    }
+
+    /// Sends the full snapshot that accompanies a diff of the same cut, for
+    /// legacy connections only. Test builds observe it with other snapshots.
+    fn send_legacy_state(&self, payload: String) -> bool {
+        #[cfg(test)]
+        let observed = payload.clone();
+        let sent = self
+            .stream_events
+            .send(SseStreamEvent::LegacyState(Arc::from(payload)))
+            .is_ok();
+        #[cfg(test)]
+        let _ = self.state_events.send(observed);
+        sent
+    }
+
+    /// Sends one serialized state diff, in the same order as the others.
+    fn send_state_diff(&self, payload: String) -> bool {
+        #[cfg(test)]
+        let observed = payload.clone();
+        let sent = self
+            .stream_events
+            .send(SseStreamEvent::StateDiff(Arc::from(payload)))
+            .is_ok();
+        #[cfg(test)]
+        let _ = self.state_diff_events.send(observed);
+        sent
+    }
+
+    /// Whether a full snapshot must accompany a diff. Test builds also count
+    /// observers of the per-kind snapshot channel, which expect every cut as
+    /// a full snapshot exactly as a legacy connection does.
+    fn legacy_state_demand(&self) -> bool {
+        let legacy = self
+            .legacy_state_subscribers
+            .load(std::sync::atomic::Ordering::SeqCst)
+            > 0;
+        #[cfg(test)]
+        let legacy = legacy || self.state_events.receiver_count() > 0;
+        legacy
     }
 
     /// Sends one serialized delta, in the same order as [`Self::send_state`].
@@ -646,7 +711,9 @@ fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadca
     });
     match work {
         StateBroadcastWork::Snapshot(snapshot) => match serde_json::to_string(&snapshot) {
-            Ok(payload) => senders.send_state(payload),
+            Ok(payload) => {
+                senders.send_state(payload);
+            }
             Err(err) => {
                 eprintln!(
                     "warning: failed to serialize SSE state snapshot at revision {}: {err}",

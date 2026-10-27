@@ -72,9 +72,11 @@ import {
   fetchSessionHistory,
   fetchSessionTail,
   type CreateSessionResponse,
+  type DelegationStateSummary,
   type DelegationWaitRecord,
   type StateResponse,
 } from "./api";
+import { mergeStateDiffRows, type StateDiffEvent } from "./app-live-state-diff";
 import {
   areRemoteConfigsEqual,
   areTelegramUiConfigsEqual,
@@ -212,6 +214,7 @@ export function useAppLiveState(
   const {
     isMountedRef,
     latestStateRevisionRef,
+    stateDiffBaselineRevisionRef,
     lastSeenServerInstanceIdRef,
     seenServerInstanceIdsRef,
     sessionsRef,
@@ -284,6 +287,9 @@ export function useAppLiveState(
   const seenTestRunWaitFailuresRef = useRef(new Map<string, import("./test-run-waits").TestRunWaitFailure>());
   const testRunWaitWatermarkRef = useRef(new WaitDeltaWatermark());
   const delegationWaitWatermarkRef = useRef(new WaitDeltaWatermark());
+  // The delegation rows of the last adoption: a `stateDiff` carries only the
+  // changed ones, and session parent ids derive from the full set.
+  const delegationStateRowsRef = useRef<DelegationStateSummary[]>([]);
   const dismissTestRunWaitFailure = useCallback((sessionId: string) => {
     setTestRunWaitFailures(current => {
       const next = { ...current };
@@ -617,15 +623,22 @@ export function useAppLiveState(
   function adoptSessions(
     nextSessions: StateSessionSummary[],
     options?: AdoptSessionsOptions,
+    // A `stateDiff` lists only changed summaries; the rest are retained.
+    diff?: { removed: readonly string[]; order?: readonly string[] },
   ) {
     const previousSessions = sessionsRef.current;
-    const mergedSessions = params.sessionAuthority.adoptSummaries(
-      nextSessions,
-      {
-        disableMutationStampFastPath: options?.disableMutationStampFastPath,
-        forceMessagesUnloaded: options?.forceMessagesUnloaded,
-      },
-    );
+    const reconcileOptions = {
+      disableMutationStampFastPath: options?.disableMutationStampFastPath,
+      forceMessagesUnloaded: options?.forceMessagesUnloaded,
+    };
+    const mergedSessions = diff
+      ? params.sessionAuthority.adoptSummaryDiff(
+          nextSessions,
+          diff.removed,
+          diff.order,
+          reconcileOptions,
+        )
+      : params.sessionAuthority.adoptSummaries(nextSessions, reconcileOptions);
     queueMicrotask(startVisibleTranscriptRepairs);
     // Summary metadata cannot prove what happened to transcript content.
     // Only observed reducer applications may advance an append proof.
@@ -963,6 +976,8 @@ export function useAppLiveState(
       return "stale";
     }
 
+    // One session at a newer revision is partial data: no diff builds on it.
+    stateDiffBaselineRevisionRef.current = null;
     params.sessionAuthority.setServerInstance(created.serverInstanceId);
     const nextSessions = params.sessionAuthority.adoptCreatedSession(created.session);
     if (!nextSessions) return "stale";
@@ -1038,7 +1053,8 @@ export function useAppLiveState(
     });
     if (!next) return "stale";
     applyHttpSessionEffects(decision, { latestRevision: latestStateRevisionRef,
-      instance: lastSeenServerInstanceIdRef, seenInstances: seenServerInstanceIdsRef });
+      instance: lastSeenServerInstanceIdRef, seenInstances: seenServerInstanceIdsRef,
+      stateDiffBaseline: stateDiffBaselineRevisionRef });
     const adopted = next.find(entry => entry.id === session.id)!;
     if (activeTranscriptSessionIdRef.current === session.id) noteSessionTailAdopted(adopted);
     upsertSessionSlice(adopted);
@@ -1497,6 +1513,8 @@ export function useAppLiveState(
       return false;
     }
 
+    // Admitted: no diff may build on this state until the adoption completes.
+    stateDiffBaselineRevisionRef.current = null;
     params.sessionAuthority.setServerInstance(nextState.serverInstanceId);
     latestStateRevisionRef.current = nextState.revision;
     if (fullStateServerInstanceChanged) {
@@ -1513,11 +1531,7 @@ export function useAppLiveState(
       });
     }
     setTestRuns(current => reconcileTestRunSnapshot(current, nextState.testRuns ?? []));
-    // A partial wait delta can be ahead of this otherwise adoptable snapshot.
-    // Keep its projection until a snapshot covering that delta arrives.
-    if (testRunWaitWatermarkRef.current.snapshotCovers(nextState.revision, nextState.serverInstanceId)) {
-      setTestRunWaits(current => JSON.stringify(current) === JSON.stringify(nextState.testRunWaits ?? []) ? current : nextState.testRunWaits ?? []);
-    }
+    adoptTestRunWaitsFromState(nextState);
     setHasAdoptedStateSnapshot(true);
     if (nextState.serverInstanceId) {
       rememberServerInstanceId(
@@ -1568,6 +1582,72 @@ export function useAppLiveState(
       pendingSseRecreateOnInstanceChangeRef.current = null;
     }
     hydrationMismatchSessionIdsRef.current.clear();
+    delegationStateRowsRef.current = nextState.delegations ?? [];
+    adoptStateHeaderSlices(nextState);
+    const requestedOpenSessionId =
+      options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
+    adoptSessions(
+      applyDelegationParentIdsFromSummaries(
+        nextState.sessions,
+        nextState.delegations ?? [],
+      ),
+      resolveAdoptStateSessionOptions(options, fullStateServerInstanceChanged),
+    );
+    if (options?.forceMessagesUnloaded === true) {
+      // A same-metadata recovery may preserve session identity, so no React
+      // effect runs. Repair visible transcripts explicitly, without fetching
+      // every inactive session affected by the global transport loss.
+      startVisibleTranscriptRepairs();
+    }
+    // Local state adoptions can resume or create active sessions before any SSE arrives.
+    syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
+      sessionsRef.current,
+    );
+    for (const sessionId of hydrationAfterStateResyncSessionIdsRef.current) {
+      hydrationAfterStateResyncSessionIdsRef.current.delete(sessionId);
+      if (sessionStillNeedsHydration(sessionId)) {
+        startSessionHydration(sessionId, { queueAfterCurrent: true });
+      }
+    }
+    finishStateAdoption(requestedOpenSessionId, nextState.sessions);
+    // Only the complete adoption of a server-marked full state is a base a
+    // `stateDiff` may build on: its revision is the broadcaster's own cut.
+    // Initial, HTTP, lag-recovery and other full states leave none.
+    if (options?.stateDiffBase === true) {
+      stateDiffBaselineRevisionRef.current = nextState.revision;
+    }
+    return true;
+  }
+
+  // The shared tail of full and diff adoption: select the project of the
+  // session a pending recovery asked to open, if the adopted sessions hold
+  // it, then resume history demands that waited for a state adoption.
+  function finishStateAdoption(
+    requestedOpenSessionId: string | undefined,
+    adoptedSessions: readonly Pick<Session, "id" | "projectId">[],
+  ) {
+    if (requestedOpenSessionId) {
+      const openedSession = adoptedSessions.find(
+        (session) => session.id === requestedOpenSessionId,
+      );
+      if (openedSession) {
+        setSelectedProjectId(openedSession.projectId ?? ALL_PROJECTS_FILTER_ID);
+      }
+    }
+    resumeSessionHistoryDemandsAfterStateAdoption();
+  }
+
+  // Shared by full and diff adoption. A partial wait delta can be ahead of an
+  // otherwise adoptable snapshot; keep its projection until a snapshot
+  // covering that delta arrives.
+  function adoptTestRunWaitsFromState(nextState: StateResponse) {
+    if (testRunWaitWatermarkRef.current.snapshotCovers(nextState.revision, nextState.serverInstanceId)) {
+      setTestRunWaits(current => JSON.stringify(current) === JSON.stringify(nextState.testRunWaits ?? []) ? current : nextState.testRunWaits ?? []);
+    }
+  }
+
+  // Header slices, shared by full and diff adoption; both pass absolute slices.
+  function adoptStateHeaderSlices(nextState: StateResponse) {
     const currentCodexState = codexStateRef.current;
     const currentAgentReadiness = agentReadinessRef.current;
     const currentProjects = projectsRef.current;
@@ -1641,40 +1721,51 @@ export function useAppLiveState(
       workspaceSummariesRef.current = adoptedStateSlices.workspaces;
       setWorkspaceSummaries(adoptedStateSlices.workspaces);
     }
-    const requestedOpenSessionId =
-      options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
-    adoptSessions(
-      applyDelegationParentIdsFromSummaries(
-        nextState.sessions,
-        nextState.delegations ?? [],
-      ),
-      resolveAdoptStateSessionOptions(options, fullStateServerInstanceChanged),
-    );
-    if (options?.forceMessagesUnloaded === true) {
-      // A same-metadata recovery may preserve session identity, so no React
-      // effect runs. Repair visible transcripts explicitly, without fetching
-      // every inactive session affected by the global transport loss.
-      startVisibleTranscriptRepairs();
+  }
+
+  // Applies an admitted `stateDiff` (app-live-state-diff.ts). Same instance
+  // and a baseline equal to the diff's base are the caller's admission; this
+  // folds the diff into current state the way `adoptState` adopts a full one.
+  function adoptStateDiff(diff: StateDiffEvent) {
+    if (!isMountedRef.current) {
+      return false;
     }
-    // Local state adoptions can resume or create active sessions before any SSE arrives.
+    // Invalidated before any slice changes: a throw below leaves no baseline.
+    stateDiffBaselineRevisionRef.current = null;
+    latestStateRevisionRef.current = diff.revision;
+    const delegations = mergeStateDiffRows(
+      delegationStateRowsRef.current,
+      diff.delegations,
+      (delegation) => delegation.id,
+    );
+    delegationStateRowsRef.current = delegations;
+    const nextState: StateResponse = {
+      ...diff.header,
+      revision: diff.revision,
+      serverInstanceId: diff.serverInstanceId,
+      sessions: [],
+      delegations,
+    };
+    setTestRuns(current => reconcileTestRunSnapshot(
+      current,
+      mergeStateDiffRows(current, diff.testRuns, (run) => run.runId),
+    ));
+    adoptTestRunWaitsFromState(nextState);
+    hydrationMismatchSessionIdsRef.current.clear();
+    adoptStateHeaderSlices(nextState);
+    // Read before adoptSessions, which may consume the pending open.
+    const requestedOpenSessionId = pendingRecoveryOpenSessionIdRef.current;
+    adoptSessions(
+      applyDelegationParentIdsFromSummaries(diff.sessions.changed, delegations),
+      resolveAdoptStateSessionOptions(undefined, false),
+      { removed: diff.sessions.removed, order: diff.sessions.order },
+    );
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
       sessionsRef.current,
     );
-    for (const sessionId of hydrationAfterStateResyncSessionIdsRef.current) {
-      hydrationAfterStateResyncSessionIdsRef.current.delete(sessionId);
-      if (sessionStillNeedsHydration(sessionId)) {
-        startSessionHydration(sessionId, { queueAfterCurrent: true });
-      }
-    }
-    if (requestedOpenSessionId) {
-      const openedSession = nextState.sessions.find(
-        (session) => session.id === requestedOpenSessionId,
-      );
-      if (openedSession) {
-        setSelectedProjectId(openedSession.projectId ?? ALL_PROJECTS_FILTER_ID);
-      }
-    }
-    resumeSessionHistoryDemandsAfterStateAdoption();
+    // A diff lists only changed sessions; the opened one may be unchanged.
+    finishStateAdoption(requestedOpenSessionId, sessionsRef.current);
+    stateDiffBaselineRevisionRef.current = diff.revision;
     return true;
   }
 
@@ -1732,6 +1823,7 @@ export function useAppLiveState(
     observeHydrationDelta,
     hasPartialTailAppendProof,
     adoptState,
+    adoptStateDiff,
     applyDelegationWaitDeltaLocally,
     cancelStaleSendResponseRecoveryPollForSessions,
     clearRecoveredBackendRequestError,
@@ -1767,6 +1859,7 @@ export function useAppLiveState(
     sseRecoveryAttemptRef,
     sseRecoveryTimerRef,
     startSessionHydration,
+    stateDiffBaselineRevisionRef,
     stateResyncInFlightRef,
     stateResyncPendingRef,
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef,

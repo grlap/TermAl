@@ -398,6 +398,7 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
+        .route("/api/events/full-state", post(request_full_state))
         .route(
             "/api/reviews/{change_set_id}",
             get(get_review).put(put_review),
@@ -1151,6 +1152,7 @@ include!("session_crud.rs");
 include!("engram_project_reset_wait.rs");
 include!("sse_broadcast.rs");
 include!("state_broadcast_worker.rs");
+include!("state_broadcast_diff.rs");
 include!("shared_codex_mgr.rs");
 include!("shared_codex_profile.rs");
 include!("workspace_queries.rs");

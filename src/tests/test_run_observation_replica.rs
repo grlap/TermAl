@@ -155,6 +155,9 @@ fn observation_replica_measurement() {
                 }
                 SseStreamEvent::Delta(_) => delta_count += 1,
                 SseStreamEvent::Lagged => panic!("replica observation lost ordered events"),
+                SseStreamEvent::LegacyState(_) | SseStreamEvent::StateDiff(_) => {
+                    panic!("a state without a broadcaster worker never diffs")
+                }
             }
         }
     }

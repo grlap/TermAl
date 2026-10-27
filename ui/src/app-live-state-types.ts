@@ -77,6 +77,11 @@ export type AdoptStateOptions = {
   sseReconnectRequestId?: number | null;
   openSessionId?: string;
   paneId?: string | null;
+  /**
+   * The state is a full state the server marked `stateDiffBase: true`. Only
+   * a complete adoption of such a state mints the `stateDiff` baseline.
+   */
+  stateDiffBase?: boolean;
 };
 
 export type AdoptSessionsOptions = {
@@ -95,6 +100,14 @@ export type SessionHydrationTarget = {
 export type UseAppLiveStateAdoptionRefs = {
   isMountedRef: MutableRefObject<boolean>;
   latestStateRevisionRef: MutableRefObject<number | null>;
+  /**
+   * The `stateDiff` baseline: the revision of the last complete adoption of a
+   * server-marked full state or of an applied diff, or null while none may be
+   * built on. Set to null before any adoption mutates state, left null by
+   * unmarked full adoptions, and set to null by every writer that advances
+   * `latestStateRevisionRef` from partial data.
+   */
+  stateDiffBaselineRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>;
   sessionsRef: SessionReadRef;

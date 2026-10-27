@@ -74,6 +74,8 @@ export const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
 export type SessionErrorMap = Record<string, string | undefined>;
 export type StateEventPayload = StateResponse & {
   _sseFallback?: boolean;
+  /** Set only on full states the server's broadcaster sends as diff bases. */
+  stateDiffBase?: boolean;
 };
 export type SessionNoticeMap = Record<string, string | undefined>;
 export type WorkspaceLayoutPersistencePayload = {

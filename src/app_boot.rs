@@ -769,10 +769,15 @@ impl AppState {
         // past the capacity gets `lagged` and a recovery snapshot.
         let state_broadcast_senders = StateBroadcastSenders {
             stream_events: broadcast::channel(512).0,
+            legacy_state_subscribers: Arc::default(),
+            full_state_request_generation: Arc::default(),
+            diff_counters: Arc::default(),
             #[cfg(test)]
             state_events: broadcast::channel(128).0,
             #[cfg(test)]
             delta_events: broadcast::channel(256).0,
+            #[cfg(test)]
+            state_diff_events: broadcast::channel(128).0,
         };
         let mut state = Self {
             // Per-process UUID generated at boot. Every `StateResponse`

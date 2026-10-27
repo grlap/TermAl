@@ -493,7 +493,10 @@ fn persist_observe_payload(
 }
 
 async fn get_persistence_diagnostics(State(state): State<AppState>) -> Json<Value> {
-    // Only the bounded observer mutex; no StateInner, SQLite or file reads.
+    // Only the bounded observer mutex and atomics; no StateInner, SQLite or
+    // file reads. `stateBroadcast` counts the SSE broadcaster's diffs and full
+    // states (state_broadcast_diff.rs).
     Json(json!({ "serverInstanceId": state.server_instance_id,
-        "writer": state.persist_observer.snapshot_at(std::time::Instant::now()) }))
+        "writer": state.persist_observer.snapshot_at(std::time::Instant::now()),
+        "stateBroadcast": state.state_broadcast_senders.diff_counters.snapshot() }))
 }

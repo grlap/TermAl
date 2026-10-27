@@ -132,6 +132,7 @@ export const UNIT_TEST_FILES: readonly string[] = [
   "src/app-live-state-activity.test.ts",
   "src/app-live-state-delegation-waits.test.ts",
   "src/app-live-state-delta-events.test.ts",
+  "src/app-live-state-diff.test.ts",
   "src/app-live-state-model-confirmations.test.ts",
   "src/app-live-state-reconnect-state.test.ts",
   "src/app-live-state-resync-options.test.ts",

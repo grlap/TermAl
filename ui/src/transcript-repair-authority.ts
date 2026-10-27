@@ -9,6 +9,7 @@ import { applyBodyDeltaToRange } from "./transcript-body-placement";
 import { decodeTargetedSessionProjection } from "./targeted-session-projection";
 import { reconcileSingleSession, reconcileStateSessionSummaries } from "./session-reconcile";
 import { mergeAppendOnlyPartialTailCoverage, type SessionHydrationRequestContext } from "./session-hydration-adoption";
+import { mergeStateDiffSessions } from "./app-live-state-diff";
 
 export type SessionReadRef = { readonly current: readonly Session[] };
 export type SessionCommitProvenance = "metadata" | "delta" | "history";
@@ -147,14 +148,27 @@ export class TranscriptRepairAuthority {
     return this.sessions;
   }
 
-  adoptSummaries(summaries: StateSessionSummary[],
-    options?: Parameters<typeof reconcileStateSessionSummaries>[2]) {
-    const metadata = summaries.map(summary => {
+  private summaryMetadata(summaries: StateSessionSummary[]) {
+    return summaries.map(summary => {
       this.observe(summary);
       const { bodySeq: _seq, bodySeqEpoch: _epoch, ...rest } = summary;
       return rest;
     });
+  }
+
+  adoptSummaries(summaries: StateSessionSummary[],
+    options?: Parameters<typeof reconcileStateSessionSummaries>[2]) {
+    const metadata = this.summaryMetadata(summaries);
     return this.commit(reconcileStateSessionSummaries(this.sessions, metadata, options), "metadata");
+  }
+
+  // A `stateDiff` carries only changed summaries. Reconciled rows align with
+  // `changed` by index; the rest of the resident list keeps its identity.
+  adoptSummaryDiff(changed: StateSessionSummary[], removedIds: readonly string[],
+    order: readonly string[] | undefined,
+    options?: Parameters<typeof reconcileStateSessionSummaries>[2]) {
+    const reconciled = reconcileStateSessionSummaries(this.sessions, this.summaryMetadata(changed), options);
+    return this.commit(mergeStateDiffSessions(this.sessions, reconciled, removedIds, order), "metadata");
   }
 
   receiveBodyDelta(delta: BodyDelta & { serverInstanceId?: string }): "legacy" | "late" | "applied" | "repair" {

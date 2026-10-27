@@ -758,8 +758,12 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         engram_retry_slots: state.engram_retry_slots.clone(),
         state_broadcast_senders: StateBroadcastSenders {
             stream_events: broadcast::channel(16).0,
+            legacy_state_subscribers: Arc::default(),
+            full_state_request_generation: Arc::default(),
+            diff_counters: Arc::default(),
             state_events: broadcast::channel(16).0,
             delta_events: broadcast::channel(16).0,
+            state_diff_events: broadcast::channel(16).0,
         },
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),

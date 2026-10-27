@@ -116,6 +116,9 @@ fn concurrent_text_publication(before_fix: bool) -> (u64, Vec<Value>) {
                 serde_json::from_str(&body).unwrap()
             }
             SseStreamEvent::Lagged => panic!("no work was dropped"),
+            SseStreamEvent::LegacyState(_) | SseStreamEvent::StateDiff(_) => {
+                panic!("the stateless forwarder never diffs")
+            }
         })
         .collect();
     (initial_revision, received)

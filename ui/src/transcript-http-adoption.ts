@@ -41,9 +41,18 @@ export function applyHttpSessionEffects(decision: HttpSessionDecision, refs: {
   latestRevision: { current: number | null };
   instance: { current: string | null };
   seenInstances: { current: Set<string> };
+  /** The `stateDiff` baseline; a revision moved by one session's data voids it. */
+  stateDiffBaseline?: { current: number | null };
 }) {
-  if (decision.revision.kind === "set") refs.latestRevision.current = decision.revision.value;
+  if (decision.revision.kind === "set") {
+    if (refs.stateDiffBaseline) refs.stateDiffBaseline.current = null;
+    refs.latestRevision.current = decision.revision.value;
+  }
   if (decision.instance.kind === "remember") {
+    // A baseline never carries across server instances.
+    if (refs.stateDiffBaseline && refs.instance.current !== decision.instance.value) {
+      refs.stateDiffBaseline.current = null;
+    }
     refs.seenInstances.current.add(decision.instance.value);
     refs.instance.current = decision.instance.value;
   }

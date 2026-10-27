@@ -27,6 +27,7 @@ function params(): TestLiveStateParams {
   return withLiveSessionAuthority({
     adoptionRefs: {
       isMountedRef: { current: true }, latestStateRevisionRef: { current: null },
+      stateDiffBaselineRevisionRef: { current: null },
       lastSeenServerInstanceIdRef: { current: null }, seenServerInstanceIdsRef: { current: new Set() },
       sessionsRef: { current: [] }, draftsBySessionIdRef: { current: {} }, draftAttachmentsBySessionIdRef: { current: {} },
       codexStateRef: { current: {} }, agentReadinessRef: { current: [] }, projectsRef: { current: [] },

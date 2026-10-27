@@ -534,6 +534,10 @@ export default function App() {
   const orchestratorsRef = useRef(orchestrators);
   const delegationWaitsRef = useRef(delegationWaits);
   const latestStateRevisionRef = useRef<number | null>(null);
+  // The revision a `stateDiff` may build on: minted only by a complete
+  // adoption of a server-marked full state or an applied diff, voided by
+  // partial writers (app-live-state-diff.ts).
+  const stateDiffBaselineRevisionRef = useRef<number | null>(null);
   // The `serverInstanceId` the client last adopted, plus every
   // non-empty instance id this tab has already accepted. Different ids are
   // only accepted on explicit restart-recovery paths; a different
@@ -913,6 +917,7 @@ export default function App() {
     adoptionRefs: {
       isMountedRef,
       latestStateRevisionRef,
+      stateDiffBaselineRevisionRef,
       lastSeenServerInstanceIdRef,
       seenServerInstanceIdsRef,
       sessionsRef,
@@ -1048,6 +1053,7 @@ export default function App() {
     refs: {
       isMountedRef,
       latestStateRevisionRef,
+      stateDiffBaselineRevisionRef,
       lastSeenServerInstanceIdRef,
       sessionsRef,
       actionStateClassifierContextRef,

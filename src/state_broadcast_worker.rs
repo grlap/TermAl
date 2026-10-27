@@ -40,6 +40,9 @@ struct StateProjectionCache {
 struct ImmutableStateSnapshot {
     header: StateResponse,
     sessions: Vec<Arc<StateSessionSummary>>,
+    /// The full-state request generation read under StateInner when this cut
+    /// was captured (`state_broadcast_diff.rs`).
+    request_generation: u64,
     #[cfg(test)]
     before_materialize: Option<Box<dyn FnOnce() + Send>>,
 }
@@ -268,6 +271,12 @@ impl AppState {
                 Vec::new(),
             ),
             sessions,
+            // Read under StateInner, which every request increment that must
+            // bind to a cut (the full-state route) also holds.
+            request_generation: self
+                .state_broadcast_senders
+                .full_state_request_generation
+                .load(Ordering::SeqCst),
             #[cfg(test)]
             before_materialize,
         }
@@ -323,6 +332,8 @@ impl StateBroadcastWorker {
         let handle = std::thread::Builder::new()
             .name("termal-state-broadcast".to_owned())
             .spawn(move || {
+                // Worker-local: closing keeps the base for late work.
+                let mut diffs = StateDiffProducer::default();
                 loop {
                     match worker_mailbox.recv_next() {
                         StateBroadcastWork::Drain => {
@@ -338,10 +349,13 @@ impl StateBroadcastWorker {
                                     hook();
                                 }
                             }
-                            forward_state_broadcast_work(work, &state.state_broadcast_senders);
+                            diffs.forward(work, &state.state_broadcast_senders);
                         }
                     }
                 }
+                // Stopped: later commits publish full snapshots synchronously,
+                // so the base no longer describes what clients will see.
+                drop(diffs);
             })
             .expect("failed to spawn state broadcast thread");
         Self {

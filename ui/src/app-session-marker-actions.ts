@@ -47,6 +47,7 @@ type MarkerActionsDeps = {
   isMountedRef: UseAppSessionActionsRefs["isMountedRef"];
   lastSeenServerInstanceIdRef: UseAppSessionActionsRefs["lastSeenServerInstanceIdRef"];
   latestStateRevisionRef: UseAppSessionActionsRefs["latestStateRevisionRef"];
+  stateDiffBaselineRevisionRef: UseAppSessionActionsRefs["stateDiffBaselineRevisionRef"];
   reportRequestError: UseAppSessionActionsParams["reportRequestError"];
   requestActionRecoveryResync: UseAppSessionActionsParams["requestActionRecoveryResync"];
   sessionLookup: Map<string, Session>;
@@ -65,6 +66,7 @@ export function createSessionMarkerActions({
   isMountedRef,
   lastSeenServerInstanceIdRef,
   latestStateRevisionRef,
+  stateDiffBaselineRevisionRef,
   reportRequestError,
   requestActionRecoveryResync,
   sessionLookup,
@@ -132,6 +134,8 @@ export function createSessionMarkerActions({
       return "deferred";
     }
 
+    // One marker at a newer revision is partial data: no diff builds on it.
+    stateDiffBaselineRevisionRef.current = null;
     latestStateRevisionRef.current = response.revision;
     return "apply";
   }

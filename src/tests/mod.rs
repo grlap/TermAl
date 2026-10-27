@@ -70,7 +70,8 @@ mod delegation_wait;
 mod delegation_worker;
 mod delegation_worker_handoff;
 mod delegations;
-// Also mounts initial_state_snapshot.rs, sharing the snapshot-cache fixtures.
+// Also mounts initial_state_snapshot.rs and state_diff_broadcast.rs, sharing
+// the snapshot-cache fixtures.
 mod deferred_state_snapshot;
 mod engram_authority_fence_phases;
 mod engram_authority_fixture;
@@ -939,8 +940,12 @@ fn test_app_state() -> AppState {
         engram_retry_slots: EngramRetrySlots::default(),
         state_broadcast_senders: StateBroadcastSenders {
             stream_events: broadcast::channel(16).0,
+            legacy_state_subscribers: Arc::default(),
+            full_state_request_generation: Arc::default(),
+            diff_counters: Arc::default(),
             state_events: broadcast::channel(16).0,
             delta_events: broadcast::channel(16).0,
+            state_diff_events: broadcast::channel(16).0,
         },
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),

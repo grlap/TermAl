@@ -1,6 +1,6 @@
 import { ApiRequestError } from "./api-request";
 import { act, render, waitFor } from "@testing-library/react";
-import { createElement, useState } from "react";
+import { createElement, useState, type SetStateAction } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
@@ -40,6 +40,8 @@ import {
 } from "./session-history-demand";
 import { CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES } from "./panels/conversation-composer-focus";
 import type { StateResponse } from "./api";
+import type { StateDiffEvent } from "./app-live-state-diff";
+import type { TestRunSummary } from "./test-runs";
 import type {
   DelegationSummary,
   Message,
@@ -311,6 +313,7 @@ function makeLiveStateParams(
     adoptionRefs: {
       isMountedRef: { current: true },
       latestStateRevisionRef: { current: 1 },
+      stateDiffBaselineRevisionRef: { current: null },
       lastSeenServerInstanceIdRef: { current: "server-a" },
       seenServerInstanceIdsRef: { current: new Set(["server-a"]) },
       sessionsRef: { current: [session] },
@@ -4115,5 +4118,474 @@ describe("hydration adoption side effects", () => {
       resolveAdoptStateSessionOptions(undefined, false)
         .pruneDelegatedChildWorkspaceTabs,
     ).toBe(false);
+  });
+});
+
+describe("stateDiff adoption", () => {
+  function stubTransport() {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchSessionTail").mockImplementation(
+      () =>
+        new Promise<Awaited<ReturnType<typeof api.fetchSessionTail>>>(() => {}),
+    );
+    const align = vi
+      .spyOn(api, "requestFullStateAlignment")
+      .mockImplementation(() => Promise.resolve());
+    const fetchState = vi
+      .spyOn(api, "fetchState")
+      .mockImplementation(() => new Promise<StateResponse>(() => {}));
+    return { align, fetchState };
+  }
+
+  /** A full state as the server's broadcaster sends a diff base. */
+  function marked(state: StateResponse) {
+    return { ...state, stateDiffBase: true };
+  }
+
+  function stateWith(sessions: Session[], revision: number): StateResponse {
+    return {
+      ...makeStateResponse(sessions[0]!, revision),
+      sessions: sessions.map(makeStateSessionSummary),
+    };
+  }
+
+  function makeStateDiff(
+    baseRevision: number,
+    revision: number,
+    sessions: { changed?: StateSessionSummary[]; removed?: string[]; order?: string[] } = {},
+    header: Partial<StateDiffEvent["header"]> = {},
+  ): StateDiffEvent {
+    const full = makeStateResponse(makeSession(), revision);
+    return {
+      baseRevision,
+      revision,
+      serverInstanceId: "server-a",
+      header: {
+        codex: full.codex,
+        agentReadiness: full.agentReadiness,
+        preferences: full.preferences,
+        projects: full.projects,
+        orchestrators: full.orchestrators,
+        workspaces: full.workspaces,
+        delegationWaits: [],
+        testRunWaits: [],
+        pendingEngramMcpRevocationSessionIds: [],
+        ...header,
+      },
+      sessions: {
+        changed: sessions.changed ?? [],
+        removed: sessions.removed ?? [],
+        ...(sessions.order ? { order: sessions.order } : {}),
+      },
+      delegations: { changed: [], removed: [] },
+      testRuns: { changed: [], removed: [] },
+    };
+  }
+
+  function renderDiffHarness(session: Session, params = makeLiveStateParams(session)) {
+    let hook: UseAppLiveStateReturn | null = null;
+    renderLiveStateHarness(params, (next) => {
+      hook = next;
+    });
+    const eventSource = EventSourceMock.instances[EventSourceMock.instances.length - 1]!;
+    return { params, refs: params.adoptionRefs, eventSource, hook: () => hook! };
+  }
+
+  it("mints the baseline only from a complete marked adoption and applies an admitted diff", () => {
+    const { align, fetchState } = stubTransport();
+    const session = makeSession();
+    const { refs, eventSource } = renderDiffHarness(session);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+
+    // An unmarked full state (initial, HTTP, lag recovery) is no base.
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 2)));
+    expect(refs.latestStateRevisionRef.current).toBe(2);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 3))));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+
+    const renamed = makeStateSessionSummary(
+      makeSession({ name: "Renamed", sessionMutationStamp: 4 }),
+    );
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4, { changed: [renamed] })));
+    expect(refs.latestStateRevisionRef.current).toBe(4);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(4);
+    expect(refs.sessionsRef.current.map((entry) => entry.name)).toEqual(["Renamed"]);
+
+    // No newer than the baseline: nothing at all.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    expect(fetchState).not.toHaveBeenCalled();
+    expect(align).not.toHaveBeenCalled();
+  });
+
+  it("leaves no baseline when a marked adoption throws after admission", () => {
+    stubTransport();
+    const session = makeSession();
+    const params = makeLiveStateParams(session);
+    let failProjects = false;
+    params.stateSetters.setProjects = vi.fn(() => {
+      if (failProjects) throw new Error("projects failed");
+    });
+    const { refs, eventSource } = renderDiffHarness(session, params);
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 2))));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(2);
+
+    failProjects = true;
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 3))));
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+  });
+
+  it("converges through one alignment request and keeps chained diffs off HTTP", () => {
+    const { align, fetchState } = stubTransport();
+    const session = makeSession();
+    const { refs, eventSource, hook } = renderDiffHarness(session);
+    const codexDelta = (revision: number) =>
+      act(() => eventSource.dispatchNamedEvent("delta", { type: "codexUpdated", revision, codex: {} }));
+
+    // The connection's initial full state is unmarked.
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 2)));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+
+    // A diff with no baseline is ignored and asks once for alignment.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(1, 3)));
+    expect(align).toHaveBeenCalledTimes(1);
+    expect(refs.latestStateRevisionRef.current).toBe(2);
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    expect(align).toHaveBeenCalledTimes(1);
+    expect(refs.latestStateRevisionRef.current).toBe(2);
+
+    // The answer: a marked full state mints the baseline.
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 5))));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(5);
+
+    // Three diffs chained on the previous cut, with deltas between them.
+    let base = 5;
+    for (const step of [1, 2, 3]) {
+      codexDelta(base + 1);
+      const renamed = makeStateSessionSummary(
+        makeSession({ name: `Chained ${step}`, sessionMutationStamp: 10 + step }),
+      );
+      act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(base, base + 2, { changed: [renamed] })));
+      base += 2;
+      expect(refs.latestStateRevisionRef.current).toBe(base);
+      expect(refs.stateDiffBaselineRevisionRef.current).toBe(base);
+      expect(refs.sessionsRef.current[0]?.name).toBe(`Chained ${step}`);
+    }
+    expect(fetchState).not.toHaveBeenCalled();
+    expect(align).toHaveBeenCalledTimes(1);
+
+    // A partial HTTP writer voids the baseline; the next diff realigns once.
+    const created = makeSession({ id: "created", messagesLoaded: true });
+    act(() => {
+      expect(hook().adoptCreatedSessionResponse({
+        sessionId: created.id, session: created, revision: base + 1, serverInstanceId: "server-a",
+      })).toBe("adopted");
+    });
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(base, base + 2)));
+    expect(align).toHaveBeenCalledTimes(2);
+    expect(refs.latestStateRevisionRef.current).toBe(base + 1);
+    expect(fetchState).not.toHaveBeenCalled();
+  });
+
+  it("applies removals and order, and adopts waits only through their delta watermark", () => {
+    stubTransport();
+    const [a, b, c] = ["a", "b", "c"].map((id) => makeSession({ id, name: id }));
+    const { refs, eventSource } = renderDiffHarness(a!);
+    act(() => eventSource.dispatchNamedEvent("state", marked(stateWith([a!, b!, c!], 2))));
+    expect(refs.sessionsRef.current.map((entry) => entry.id)).toEqual(["a", "b", "c"]);
+
+    const wait = {
+      id: "wait-1",
+      parentSessionId: "a",
+      delegationIds: ["delegation-1"],
+      mode: "all",
+      createdAt: "12:00:00",
+      title: "Review",
+    };
+    // A wait delta at revision 4 is ahead of the diff that follows.
+    act(() => eventSource.dispatchNamedEvent("delta", {
+      type: "delegationWaitCreated", serverInstanceId: "server-a", revision: 4, wait,
+    }));
+    expect(refs.delegationWaitsRef.current).toEqual([wait]);
+
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(2, 3, {
+      removed: ["b"], order: ["c", "a"],
+    })));
+    expect(refs.sessionsRef.current.map((entry) => entry.id)).toEqual(["c", "a"]);
+    expect(refs.delegationWaitsRef.current).toEqual([wait]);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+
+    // A diff covering the delta's revision replaces the wait list absolutely.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    expect(refs.delegationWaitsRef.current).toEqual([]);
+    expect(refs.sessionsRef.current.map((entry) => entry.id)).toEqual(["c", "a"]);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(4);
+  });
+
+  it("converges when the dropped diff was the final cut: the answer may sit at the current revision", () => {
+    const { align, fetchState } = stubTransport();
+    const session = makeSession();
+    const { refs, eventSource } = renderDiffHarness(session);
+
+    // The connection's unmarked initial state already includes the last cut.
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 3)));
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(2, 3)));
+    expect(align).toHaveBeenCalledTimes(1);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+
+    // An idle host answers with its current cut: same revision, marked.
+    const aligned = makeSession({ name: "Aligned", sessionMutationStamp: 7 });
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(aligned, 3))));
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+    expect(refs.sessionsRef.current[0]?.name).toBe("Aligned");
+
+    // Converged: the next cut applies, and nothing went to HTTP.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(4);
+    expect(align).toHaveBeenCalledTimes(1);
+    expect(fetchState).not.toHaveBeenCalled();
+  });
+
+  it("adopts a marked state at the current revision on connect, with no alignment request", () => {
+    const { align, fetchState } = stubTransport();
+    const session = makeSession();
+    const { refs, eventSource } = renderDiffHarness(session);
+    // Initial-connect race: the unmarked capture and the broadcaster's
+    // marked base land at the same revision.
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 3)));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 3))));
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(4);
+    expect(align).not.toHaveBeenCalled();
+    expect(fetchState).not.toHaveBeenCalled();
+  });
+
+  it("follows a same-revision rebase another client asked for", () => {
+    const { align, fetchState } = stubTransport();
+    const session = makeSession({ name: "B", sessionMutationStamp: 5 });
+    const { refs, eventSource } = renderDiffHarness(session);
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 3))));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+
+    // A cut published without a revision bump changed B to B2; another
+    // tab's alignment made it the server's base. Nothing is pending here.
+    const rebased = makeSession({ name: "B2", sessionMutationStamp: 6 });
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(rebased, 3))));
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+    expect(refs.sessionsRef.current[0]?.name).toBe("B2");
+
+    // The next diff builds on that base and applies.
+    const next = makeStateSessionSummary(makeSession({ name: "B3", sessionMutationStamp: 7 }));
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4, { changed: [next] })));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(4);
+    expect(refs.sessionsRef.current[0]?.name).toBe("B3");
+    expect(align).not.toHaveBeenCalled();
+    expect(fetchState).not.toHaveBeenCalled();
+  });
+
+  it("drops the baseline for a marked state below the current revision, then realigns once", () => {
+    const { align, fetchState } = stubTransport();
+    const session = makeSession();
+    const { refs, eventSource } = renderDiffHarness(session);
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 3))));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+
+    // Too old to adopt, but the server's base moved to it.
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 2))));
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(2, 4)));
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(4, 5)));
+    expect(align).toHaveBeenCalledTimes(1);
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(fetchState).not.toHaveBeenCalled();
+  });
+
+  it("asks for alignment again after a lag drops the marked answer", () => {
+    const { align } = stubTransport();
+    const session = makeSession();
+    const { refs, eventSource } = renderDiffHarness(session);
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 2)));
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(1, 3)));
+    expect(align).toHaveBeenCalledTimes(1);
+
+    // The marked answer is lost in the lag; recovery is an unmarked state.
+    act(() => eventSource.dispatchNamedEvent("lagged", "1"));
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 3)));
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(4, 5)));
+    expect(align).toHaveBeenCalledTimes(2);
+  });
+
+  it("forgets a pending alignment and the baseline when a shared stream must be rejoined", async () => {
+    const { align, fetchState } = stubTransport();
+    const session = makeSession();
+    const { refs, eventSource } = renderDiffHarness(session);
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 2))));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(2);
+
+    // A foreign base: ignored, one POST, whose marked answer this tab misses
+    // while detached.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(1, 3)));
+    expect(align).toHaveBeenCalledTimes(1);
+
+    // Rejoining an open shared stream: the hub asks for an HTTP snapshot.
+    let resolveFetch!: (state: StateResponse) => void;
+    fetchState.mockImplementation(() => new Promise<StateResponse>((resolve) => {
+      resolveFetch = resolve;
+    }));
+    act(() => eventSource.dispatchNamedEvent("snapshotRequired", ""));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+    expect(fetchState).toHaveBeenCalledTimes(1);
+
+    // A delta moves past the snapshot in flight, so the snapshot is rejected.
+    act(() => eventSource.dispatchNamedEvent("delta", { type: "codexUpdated", revision: 3, codex: {} }));
+    await act(async () => {
+      resolveFetch(makeStateResponse(session, 2));
+      await flushHydrationMicrotasks();
+      await flushHydrationMicrotasks();
+    });
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+
+    // Nothing is left pending: the next unadmittable diff asks again.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    expect(align).toHaveBeenCalledTimes(2);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+  });
+
+  it("voids the baseline when a created or forked session response is adopted", () => {
+    stubTransport();
+    const session = makeSession();
+    const { refs, eventSource, hook } = renderDiffHarness(session);
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 2))));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(2);
+
+    const created = makeSession({ id: "forked", messagesLoaded: true });
+    act(() => {
+      expect(hook().adoptCreatedSessionResponse({
+        sessionId: created.id, session: created, revision: 3, serverInstanceId: "server-a",
+      })).toBe("adopted");
+    });
+    expect(refs.latestStateRevisionRef.current).toBe(3);
+    expect(refs.stateDiffBaselineRevisionRef.current).toBeNull();
+  });
+
+  it("lets any adopted unmarked full state end a pending alignment", () => {
+    const { align } = stubTransport();
+    const session = makeSession();
+    const { eventSource } = renderDiffHarness(session);
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 2)));
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(1, 3)));
+    expect(align).toHaveBeenCalledTimes(1);
+
+    act(() => eventSource.dispatchNamedEvent("state", makeStateResponse(session, 3)));
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(3, 4)));
+    expect(align).toHaveBeenCalledTimes(2);
+  });
+
+  it("finishes a diff adoption like a full one: history demands resume", () => {
+    stubTransport();
+    const resume = vi.spyOn(sessionHistoryDemand, "resumeSessionHistoryDemandsAfterStateAdoption");
+    const session = makeSession();
+    const { eventSource } = renderDiffHarness(session);
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 2))));
+    const afterFullAdoption = resume.mock.calls.length;
+    expect(afterFullAdoption).toBeGreaterThan(0);
+
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(2, 3)));
+    expect(resume).toHaveBeenCalledTimes(afterFullAdoption + 1);
+    // An ignored diff adopts nothing.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(2, 3)));
+    expect(resume).toHaveBeenCalledTimes(afterFullAdoption + 1);
+  });
+
+  it("selects the project of a pending recovery-open session a diff brings in", () => {
+    stubTransport();
+    const session = makeSession();
+    const params = makeLiveStateParams(session);
+    const setSelectedProjectId = vi.fn() as typeof params.stateSetters.setSelectedProjectId;
+    params.stateSetters.setSelectedProjectId = setSelectedProjectId;
+    const { eventSource } = renderDiffHarness(session, params);
+    act(() => eventSource.dispatchNamedEvent("state", marked(makeStateResponse(session, 2))));
+    act(() => {
+      params.requestActionRecoveryResyncRef.current({
+        openSessionId: "pending-session",
+        paneId: "pane-1",
+      });
+    });
+    expect(setSelectedProjectId).not.toHaveBeenCalled();
+
+    const pending = makeStateSessionSummary(
+      makeSession({ id: "pending-session", projectId: "pending-project" }),
+    );
+    act(() => eventSource.dispatchNamedEvent("stateDiff", makeStateDiff(2, 3, { changed: [pending] })));
+    expect(setSelectedProjectId).toHaveBeenCalledWith("pending-project");
+  });
+
+  it("merges delegation and test-run rows with the bookkeeping a full adoption does", () => {
+    stubTransport();
+    const [owner, child1, child2, child3] = ["session-1", "child-1", "child-2", "child-3"]
+      .map((id) => makeSession({ id, name: id }));
+    const params = makeLiveStateParams(owner!);
+    const childIdUpdates: SetStateAction<Set<string>>[] = [];
+    params.stateSetters.setDelegationChildSessionIds = vi.fn((update: SetStateAction<Set<string>>) => {
+      childIdUpdates.push(update);
+    });
+    const latestChildIds = () => {
+      const update = childIdUpdates[childIdUpdates.length - 1]!;
+      return [...(typeof update === "function" ? update(new Set()) : update)].sort();
+    };
+    const delegation = (id: string, childSessionId: string) => ({
+      id, childSessionId, mode: "reviewer" as const, reviewResultRequired: true,
+    });
+    const run = (runId: string, state: string) =>
+      ({ runId, state, startedAt: null }) as unknown as TestRunSummary;
+    const { refs, eventSource, hook } = renderDiffHarness(owner!, params);
+    act(() => eventSource.dispatchNamedEvent("state", {
+      ...marked(stateWith([owner!, child1!, child2!], 2)),
+      delegations: [delegation("d1", "child-1"), delegation("d2", "child-2")],
+      testRuns: [run("r1", "running"), run("r2", "running")],
+    }));
+    expect(latestChildIds()).toEqual(["child-1", "child-2"]);
+
+    act(() => eventSource.dispatchNamedEvent("stateDiff", {
+      ...makeStateDiff(2, 3, {
+        changed: [makeStateSessionSummary(child3!)],
+        order: ["session-1", "child-1", "child-2", "child-3"],
+      }),
+      delegations: { changed: [delegation("d3", "child-3")], removed: ["d2"] },
+      testRuns: { changed: [run("r1", "passed"), run("r3", "running")], removed: ["r2"] },
+    }));
+    expect(refs.stateDiffBaselineRevisionRef.current).toBe(3);
+    expect(latestChildIds()).toEqual(["child-1", "child-3"]);
+    expect(refs.sessionsRef.current.find((entry) => entry.id === "child-3")?.parentDelegationId)
+      .toBe("d3");
+    expect(hook().testRuns.map((entry) => [entry.runId, entry.state])).toEqual([
+      ["r1", "passed"],
+      ["r3", "running"],
+    ]);
+
+    // The retained rows carry across diffs: removing d1 leaves only d3.
+    act(() => eventSource.dispatchNamedEvent("stateDiff", {
+      ...makeStateDiff(3, 4),
+      delegations: { changed: [], removed: ["d1"] },
+      testRuns: { changed: [], removed: ["r1"] },
+    }));
+    expect(latestChildIds()).toEqual(["child-3"]);
+    expect(hook().testRuns.map((entry) => entry.runId)).toEqual(["r3"]);
   });
 });

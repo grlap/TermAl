@@ -1146,6 +1146,9 @@ fn live_durability_delta_has_a_revision_after_the_preceding_persistence_snapshot
                 }
             }
             SseStreamEvent::Lagged => panic!("the bounded fixture must not lose events"),
+            SseStreamEvent::LegacyState(_) | SseStreamEvent::StateDiff(_) => {
+                panic!("a state without a broadcaster worker never diffs")
+            }
         }
     }
     assert!(saw_durable);

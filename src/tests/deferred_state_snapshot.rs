@@ -6,6 +6,9 @@ use std::sync::atomic::AtomicUsize;
 #[path = "initial_state_snapshot.rs"]
 mod initial_state_snapshot;
 
+#[path = "state_diff_broadcast.rs"]
+mod state_diff_broadcast;
+
 struct ProjectionObserver;
 
 impl ProjectionObserver {
@@ -518,15 +521,30 @@ fn closing_accepts_late_work_and_stopped_fallback_cannot_overtake_it() {
     let fallback = metadata_commit(&state);
     let revisions = (0..4)
         .map(|_| match stream.try_recv().unwrap() {
-            SseStreamEvent::State(payload) | SseStreamEvent::Delta(payload) => {
-                serde_json::from_str::<Value>(&payload).unwrap()["revision"]
-                    .as_u64()
-                    .unwrap()
-            }
+            SseStreamEvent::State(payload) => ("state", payload),
+            SseStreamEvent::StateDiff(payload) => ("stateDiff", payload),
+            SseStreamEvent::Delta(payload) => ("delta", payload),
+            SseStreamEvent::LegacyState(_) => panic!("no legacy connection is counted"),
             SseStreamEvent::Lagged => panic!("no loss in this schedule"),
         })
+        .map(|(kind, payload)| {
+            let revision = serde_json::from_str::<Value>(&payload).unwrap()["revision"]
+                .as_u64()
+                .unwrap();
+            (kind, revision)
+        })
         .collect::<Vec<_>>();
-    assert_eq!(revisions, vec![first, first + 1, last, fallback]);
+    // Closing keeps the base: the late cut still diffs from the first one.
+    // After Stopped, the synchronous fallback is a full state again.
+    assert_eq!(
+        revisions,
+        vec![
+            ("state", first),
+            ("delta", first + 1),
+            ("stateDiff", last),
+            ("state", fallback)
+        ]
+    );
 }
 
 #[tokio::test]

@@ -11,7 +11,13 @@
 // 2. Pushes an initial state snapshot over the wire so the client
 //    has ground truth before any deltas arrive.
 // 3. Multiplexes the two channels into one SSE stream with
-//    `event:` tags identifying each payload kind.
+//    `event:` tags identifying each payload kind. A connection opened with
+//    `?stateDiff=1` forwards `stateDiff` events in place of the full `state`
+//    paired with them; any other connection is counted as legacy and keeps
+//    receiving every cut as a full `state` (the remote hub is one). An
+//    opted-in connection, and `POST /api/events/full-state`, ask the
+//    broadcaster for its next cut as a full `state` marked
+//    `stateDiffBase: true`, the only kind a client builds diffs on.
 // 4. Configures keep-alive pings so the connection stays live
 //    through idle periods and aggressive HTTP proxies.
 //
@@ -208,14 +214,100 @@ async fn lagged_recovery_events(state: AppState) -> (Event, Event) {
     )
 }
 
-/// Streams state and delta events over SSE.
+/// `GET /api/events` query. Only `stateDiff=1` opts in; an absent, unknown or
+/// malformed query keeps the legacy full-`state` stream.
+#[derive(Deserialize)]
+struct StateEventsQuery {
+    #[serde(default, rename = "stateDiff")]
+    state_diff: Option<String>,
+}
+
+fn state_events_query_opts_into_diffs(
+    query: &Result<Query<StateEventsQuery>, QueryRejection>,
+) -> bool {
+    matches!(query, Ok(Query(StateEventsQuery { state_diff: Some(value) })) if value == "1")
+}
+
+/// Counts one legacy `/api/events` connection for as long as it lives. The
+/// broadcaster pairs every diff with a full snapshot while any is counted.
+struct LegacyStateSubscriber(Arc<std::sync::atomic::AtomicUsize>);
+
+impl LegacyStateSubscriber {
+    fn register(senders: &StateBroadcastSenders) -> Self {
+        let count = senders.legacy_state_subscribers.clone();
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self(count)
+    }
+}
+
+impl Drop for LegacyStateSubscriber {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Opens a new full-state request generation. Only a cut captured after this
+/// (it reads the generation under StateInner) can answer it.
+fn request_state_diff_base(senders: &StateBroadcastSenders) {
+    senders
+        .full_state_request_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// `POST /api/events/full-state` body. Requiring JSON keeps the request off
+/// the CORS simple-request path, so a cross-origin call needs the preflight
+/// the shared CORS layer governs. No fields are defined; `{}` is the body.
+#[derive(Deserialize)]
+struct FullStateRequest {}
+
+/// `POST /api/events/full-state`: an opted-in client that cannot apply a
+/// `stateDiff` asks for a marked full state. Idempotent. It publishes the
+/// current cut at once, with no revision bump and nothing to persist, so an
+/// idle host answers without waiting for an unrelated commit.
+async fn request_full_state(
+    State(state): State<AppState>,
+    request: Result<Json<FullStateRequest>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    let Json(FullStateRequest {}) =
+        request.map_err(|rejection| api_json_rejection("full-state request", rejection))?;
+    run_blocking_api(move || {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        // Under the commit lock and before the capture: this cut carries the
+        // new generation, and a cut captured earlier (even one the
+        // broadcaster already dequeued) carries an older one and cannot
+        // answer the request.
+        request_state_diff_base(&state.state_broadcast_senders);
+        state.publish_state_locked(&inner);
+        Ok(())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Streams state and delta events over SSE. Opted-in connections receive
+/// `stateDiff` instead of the full `state` that accompanies a diff; a full
+/// `state` sent without a diff, the initial state and lag recovery reach both.
 async fn state_events(
     State(state): State<AppState>,
+    query: Result<Query<StateEventsQuery>, QueryRejection>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
+    let state_diffs = state_events_query_opts_into_diffs(&query);
+    // Counted before subscribing and before the initial capture: a diff this
+    // connection can receive is then always paired with a full snapshot. The
+    // guard moves into the stream, so every exit, including a dropped request
+    // before the stream exists, uncounts it.
+    let legacy_subscriber =
+        (!state_diffs).then(|| LegacyStateSubscriber::register(&state.state_broadcast_senders));
     // Snapshots and deltas arrive on one channel, in the order they were
     // published. Merging two channels here cannot keep that order: whichever
     // the select polls first overtakes the other when both are ready.
     let mut stream_receiver = state.subscribe_stream_events();
+    if state_diffs {
+        // Ask for a marked full state so this connection gets a diff base.
+        // Requested after subscribing: a cut the broadcaster sends for this
+        // request is then always delivered here.
+        request_state_diff_base(&state.state_broadcast_senders);
+    }
     let mut file_receiver = state.subscribe_file_events();
     let mut shutdown_rx = state.subscribe_shutdown_signal();
     // Sticky pre-check: if shutdown was already triggered before this
@@ -229,6 +321,7 @@ async fn state_events(
     let initial_payload = state_snapshot_payload_for_sse(state.clone()).await;
 
     let stream = async_stream::stream! {
+        let _legacy_subscriber = legacy_subscriber;
         if already_shutting_down {
             return;
         }
@@ -256,6 +349,16 @@ async fn state_events(
                     match result {
                         Ok(SseStreamEvent::State(payload)) => {
                             yield Ok(Event::default().event("state").data(&*payload));
+                        }
+                        Ok(SseStreamEvent::LegacyState(payload)) => {
+                            if !state_diffs {
+                                yield Ok(Event::default().event("state").data(&*payload));
+                            }
+                        }
+                        Ok(SseStreamEvent::StateDiff(payload)) => {
+                            if state_diffs {
+                                yield Ok(Event::default().event("stateDiff").data(&*payload));
+                            }
                         }
                         Ok(SseStreamEvent::Delta(payload)) => {
                             yield Ok(Event::default().event("delta").data(&*payload));
