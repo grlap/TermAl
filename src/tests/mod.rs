@@ -77,6 +77,7 @@ mod engram_authority_fence_phases;
 mod engram_authority_fixture;
 mod engram_batch_binds;
 mod engram_budget_clock_boundary;
+mod engram_budget_watchdog_unwind;
 mod engram_child_temp;
 mod engram_compaction;
 mod engram_host_adapter;
@@ -89,6 +90,7 @@ mod engram_retry_hold_projection;
 // under engram_host_adapter's turn_observations module, whose ClaimedRoot
 // fixture they share.
 mod engram_source_roots;
+mod engram_unadmitted_capture_diagnostic;
 mod engram_verification_bind;
 mod evaluator_tool_access;
 mod federation_onboarding;
@@ -222,6 +224,7 @@ mod shared_codex;
 mod shared_codex_events;
 mod shared_codex_thread_setup;
 mod state_mutex;
+mod state_lock_registration;
 mod telegram;
 mod telegram_forwarding;
 mod telegram_relay_lifecycle;
@@ -229,6 +232,7 @@ mod telegram_settings;
 mod telegram_support;
 mod terminal;
 mod test_child_temp;
+mod test_panic_journal;
 mod test_run_cards;
 mod test_run_waits;
 mod test_runs;
@@ -907,6 +911,7 @@ fn try_write_test_http_response(
 }
 
 fn test_app_state() -> AppState {
+    let server_instance_id = Uuid::new_v4().to_string();
     let test_temp_root = Arc::new(TestTempRoot::create("termal-test-state"));
     let default_workdir = test_temp_root.path().to_string_lossy().into_owned();
     let persistence_path = test_temp_root.path().join("termal.sqlite");
@@ -928,7 +933,7 @@ fn test_app_state() -> AppState {
     ));
 
     AppState {
-        server_instance_id: Uuid::new_v4().to_string(),
+        server_instance_id: server_instance_id.clone(),
         default_workdir: default_workdir.clone(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
@@ -991,7 +996,7 @@ fn test_app_state() -> AppState {
         )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
-        inner: Arc::new(StateMutex::new(inner)),
+        inner: Arc::new(StateMutex::new_for_instance(inner, &server_instance_id)),
         test_temp_root: Some(test_temp_root),
     }
 }

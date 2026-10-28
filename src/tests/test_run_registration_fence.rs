@@ -1,7 +1,11 @@
 // Test-only child beside src/tests/persist_fence.rs, mounted there.
 // Owns the connected-worker registration ACK boundary using real SQLite.
-// Does not fake a fence completion or start a production persistence thread.
+// Direct fixtures drive the real writer steps without faking a successful ACK;
+// the acknowledgement child also exercises the production background thread.
 use super::*;
+
+#[path = "test_run_registration_ack.rs"]
+mod acknowledgement;
 
 #[path = "test_run_observation_publication.rs"]
 mod observation_publication;

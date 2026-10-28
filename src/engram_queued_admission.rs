@@ -957,10 +957,8 @@ impl AppState {
         // (`engram_admission_retry.rs`), and so is an unknown begin, by its
         // exact replay; a Defer, a Reconcile disposition or anything else
         // holding the head keeps this explicit hold.
-        let scheduled = spent.is_none()
-            && !interrupted
-            && !defer
-            && schedule_engram_admission_retry_locked(
+        let retry_decision = if spent.is_none() && !interrupted && !defer {
+            decide_engram_admission_retry_locked(
                 record,
                 if begin_unknown {
                     Some(ENGRAM_BEGIN_REPLAY_CODE)
@@ -970,7 +968,11 @@ impl AppState {
                 authority.as_deref(),
                 wall_now,
                 budget_now,
-            );
+            )
+        } else {
+            EngramAdmissionRetryDecision::NotScheduled
+        };
+        let scheduled = matches!(&retry_decision, EngramAdmissionRetryDecision::Scheduled);
         if !scheduled {
             clear_engram_admission_retry(record);
         }
@@ -983,6 +985,10 @@ impl AppState {
                 "Automatic retry scheduled by the existing admission scheduler, attempt {}, next at {}, pending durable acknowledgement.",
                 retry.attempts, retry.due_at
             ));
+        let latency_hold = match &retry_decision {
+            EngramAdmissionRetryDecision::LatencyHold(explanation) => Some(explanation.as_str()),
+            _ => None,
+        };
         let latest_card = record.session.messages.iter().rposition(|message| matches!(message, Message::EngramControl { .. }));
         if let Some(cause) = latest_card.and_then(|index| match &mut record.session.messages[index] {
             Message::EngramControl { card, .. } => card.causal_failure.as_mut(),
@@ -1005,6 +1011,8 @@ impl AppState {
                 "Automatic continuation withheld: retained authorization requires reconciliation."
             } else if defer {
                 "Automatic continuation deferred by the producer."
+            } else if let Some(explanation) = latency_hold.as_deref() {
+                explanation
             } else {
                 "Automatic continuation withheld: existing scheduler did not admit a retry; prompt retained."
             };

@@ -604,6 +604,57 @@ so one scheduler spike does not reject a gate while sustained starvation still
 fails before frontend tests start. Windows reports process CPU availability
 without presenting its unsupported load-average value as real system load.
 
+### Rust panic journal
+
+libtest keeps a test's panic output in memory and prints it when the test
+finishes. When a second panic during unwinding aborts the test process (on
+Windows, exit code `0xc0000409`), that output is lost with the process, and so
+is the name of the test that started it. So the launcher gives every command in
+a run two variables:
+
+- `RUST_BACKTRACE=1`, unless the caller already set `RUST_BACKTRACE` (in any
+  case on Windows). With it, the launcher also sets `RUST_LIB_BACKTRACE=0`,
+  unless the caller set that one. That is std's "panic backtraces only"
+  pairing: without it, every `anyhow` error would also capture a stack, under
+  std's process-wide backtrace lock.
+- `TERMAL_TEST_PANIC_JOURNAL`, the run directory's `rust-panics.jsonl`, also
+  recorded as `panicJournal` in `results.json`.
+
+When that variable is set, the test binary installs a panic hook once, as it
+loads (`src/test_panic_journal.rs`). For each panic the hook appends two JSON
+lines, joined by process id and sequence number:
+1. The panic line: time, message, location and a backtrace.
+2. The thread line: the thread's name. libtest names a test's thread after the
+   test.
+
+Reading the thread's name is the one step that can still fail fatally, so the
+panic line is on disk before it. The hook writes straight to the file, outside
+libtest's capture, and then hands the panic to the hook before it, so libtest's
+own report is unchanged. Without the variable, nothing is installed or written.
+
+A Rust stage ends abnormally when its test process did not exit as a pass or an
+ordinary libtest failure.
+- Through cargo: cargo itself exits 101 either way, so the launcher reads
+  cargo's `process didn't exit successfully: …` line for a test binary (under
+  `deps/`) whose status is not 101, or a signal. A build script's failure does
+  not count.
+- A command that runs the test binary directly: it crashed (a signal, or a
+  Windows status code such as `0xc0000409`) and the run's journal exists.
+
+For such a stage, the run summary prints the journal's path and its last three
+panics, each with its thread and the first lines of its backtrace. The full
+records stay in the file. Panics that tests provoke on purpose are recorded
+too, but they are listed only after an abnormal end.
+
+The journal's own regression (`src/tests/test_panic_journal.rs`) crashes a child
+copy of the test binary on purpose, in the test's temporary directory, so a core
+file never lands in the repository. On Windows and macOS the operating system
+may still record a crash report for it outside the repository.
+
+Known gap: when `scripts/test-rust.sh` runs `cargo.exe` through WSL interop, it
+forwards only `RUST_TEST_THREADS`. So there is no journal and no backtrace
+setting, and after an abort the summary says no panic was recorded.
+
 ### Per-test durations
 
 The full gate names every test that took 2 seconds or longer, so slow tests

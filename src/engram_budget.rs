@@ -19,7 +19,15 @@ struct ScriptedEngramBudgetClock {
     /// then on the wall time this clock reads moves only with the scripted
     /// clock (`EngramBudgetClock::wall_now`).
     wall: Mutex<Option<(chrono::DateTime<chrono::Utc>, std::time::Instant)>>,
+    /// How long, in real time, a scripted driver waits before it treats its
+    /// fixture as broken and fails the test (`wait_scripted`,
+    /// `wait_for_scripted_waiter`).
+    watchdog: Duration,
 }
+
+/// The real-time bound on a scripted driver whose fixture never advances it.
+#[cfg(test)]
+const SCRIPTED_ENGRAM_DRIVER_WATCHDOG: Duration = Duration::from_secs(30);
 
 impl EngramBudgetClock {
     fn now(&self) -> std::time::Instant {
@@ -68,7 +76,15 @@ impl EngramBudgetClock {
     fn notify(&self) {
         #[cfg(test)]
         if let Self::Scripted(clock) = self {
-            let mut event = clock.event.lock().expect("budget event mutex poisoned");
+            // A driver's watchdog panics while it holds this lock, which
+            // poisons it. Unwinding then drops queued fences, and each fence
+            // notifies here. Panicking again would abort the test process and
+            // hide every later result, so a poisoned lock is still taken: the
+            // counter it guards stays valid.
+            let mut event = clock
+                .event
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *event = event.checked_add(1).expect("budget event exhausted");
             clock.changed.notify_all();
         }
@@ -76,12 +92,20 @@ impl EngramBudgetClock {
 
     #[cfg(test)]
     fn scripted() -> Self {
+        Self::scripted_with_watchdog(SCRIPTED_ENGRAM_DRIVER_WATCHDOG)
+    }
+
+    /// A scripted clock whose drivers give up after `watchdog` of real time,
+    /// for a test of the watchdog itself.
+    #[cfg(test)]
+    fn scripted_with_watchdog(watchdog: Duration) -> Self {
         Self::Scripted(Arc::new(ScriptedEngramBudgetClock {
             now: Mutex::new(std::time::Instant::now()),
             event: Mutex::new(0),
             changed: Condvar::new(),
             waiters: std::sync::atomic::AtomicUsize::new(0),
             wall: Mutex::new(None),
+            watchdog,
         }))
     }
 
@@ -113,7 +137,7 @@ impl EngramBudgetClock {
         };
         // This bounds a broken fixture driver, not its logical operation.
         // A watchdog is a test failure and can never acknowledge authority.
-        let watchdog = std::time::Instant::now() + Duration::from_secs(30);
+        let watchdog = std::time::Instant::now() + clock.watchdog;
         let mut event = clock.event.lock().expect("budget event mutex poisoned");
         loop {
             let now = self.now();
@@ -147,7 +171,7 @@ impl EngramBudgetClock {
         let Self::Scripted(clock) = self else {
             panic!("scripted clock required")
         };
-        let watchdog = std::time::Instant::now() + Duration::from_secs(30);
+        let watchdog = std::time::Instant::now() + clock.watchdog;
         let mut event = clock.event.lock().expect("budget event mutex poisoned");
         while clock.waiters.load(std::sync::atomic::Ordering::SeqCst) == 0 {
             let remaining = watchdog.saturating_duration_since(std::time::Instant::now());

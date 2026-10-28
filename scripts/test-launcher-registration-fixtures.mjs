@@ -10,7 +10,21 @@ import { basename, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createRun, executeRun, startDetachedRun } from "./test-launcher.mjs";
-import { registerTestRun, validateRunRegistration } from "./test-run-registration.mjs";
+import { registerTestRun, validateRunRegistration, boundedStateLockEvidence } from "./test-run-registration.mjs";
+
+function stateLockEvidenceFixture() {
+  return {
+    contract: "termal-state-lock-observation", version: 1,
+    instanceId: "11111111-1111-4111-8111-111111111111", mutexEpoch: "1",
+    lossCount: 0, evictionCount: 0, truncationCount: 0,
+    partial: false, unavailable: false,
+    note: "requested wait includes wall scheduling",
+    waits: [{ holdId: "2", site: { file: "src/test_run_registration.rs", line: 101, column: 5 },
+      requestedMicros: 20, acquiredMicros: 60 }],
+    holders: [{ holdId: "1", site: { file: "src/test_runs.rs", line: 202, column: 9 },
+      acquiredMicros: 10, releasedMicros: 50, state: "released" }],
+  };
+}
 
 function registrationRootSpelling(t, root, spelling) {
   if (spelling === "original") return root;
@@ -274,6 +288,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
           assert.equal(host.requests.length, 1, "malformed pending does not authorize replay");
           assert.equal(host.queries.length, 0);
           assert.equal(failure.durabilityPending, undefined, "unrelated identities are not this pending operation");
+          assert.equal(failure.stateLock, undefined, "advisory data cannot validate an unrelated pending operation");
           const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
           assert.notEqual(result.registration.state, "pending");
           assert.equal(result.registration.pending, undefined);
@@ -291,7 +306,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             case "retry": pending.retry.mode = "new_request"; break;
             case "error": pending.error = ""; break;
           }
-          return pending;
+          return { ...pending, stateLock: stateLockEvidenceFixture() };
         } });
       });
     });
@@ -339,6 +354,92 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
           identity: { ...pending.identity, extra: "private-field-sentinel" } };
       } });
     });
+  });
+
+  test("state lock registration evidence survives the run record without changing launcher decisions", async (t) => {
+    const block = stateLockEvidenceFixture();
+    const outcomes = [];
+    const records = [];
+    for (const withEvidence of [false, true]) {
+      await pendingRepository(t, async (root, env) => {
+        let service;
+        await registrationHost(async (host) => {
+          service = host;
+          let runDir;
+          let failure;
+          try {
+            await createRun({ root, full: false, scope: "focused", needsCargo: true,
+              onRunCreated: (directory) => { runDir = directory; },
+              stages: [stage("focused", "throw new Error('advisory block admitted execution')")],
+            }, { ...env, TERMAL_BASE_URL: host.url });
+          } catch (error) { failure = error; }
+          assert.ok(failure);
+          assertNoExecution(root, runDir);
+          const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+          const request = JSON.parse(readFileSync(join(runDir, "request.json"), "utf8"));
+          outcomes.push({ state: result.state, exitCode: result.exitCode,
+            registrationState: result.registration.state, stages: result.stages,
+            posts: host.requests.length, gets: host.queries.length,
+            retry: failure.durabilityPending?.retry, receipt: request.registration });
+          records.push({ failure, registration: result.registration });
+        }, { autoAcknowledge: true, status: 503, acknowledgement: (ack) => {
+          const pending = pendingRegistration(service.registrations.get(ack.runId).request);
+          return withEvidence ? { ...pending,
+            stateLock: { ...block, exitCode: 0, retry: true, deadline: 999999,
+              extra: "private-field-sentinel" }, extra: "private-field-sentinel" } : pending;
+        } });
+      });
+    }
+    assert.deepEqual(outcomes[1], outcomes[0],
+      "advisory evidence cannot affect exit code, replay, deadline, ACK or stage/credit eligibility");
+    assert.equal(outcomes[1].exitCode, 1);
+    assert.equal(outcomes[1].posts, 1);
+    assert.equal(outcomes[1].gets, 0, "no extra diagnostic fetch or automatic replay");
+    assert.equal(records[0].registration.stateLock, undefined);
+    assert.deepEqual(records[1].registration.stateLock, block,
+      "the original run must retain the bounded allowlisted holder block");
+    assert.deepEqual(records[1].failure.stateLock, block);
+    assert.ok(Buffer.byteLength(JSON.stringify(records[1].registration.stateLock)) <= 2048);
+    assert.doesNotMatch(JSON.stringify(records[1].registration), /private-field-sentinel/u);
+  });
+
+  for (const [name, mutate] of [
+    ["version", (v) => { v.version = 2; }],
+    ["unsafe timestamp", (v) => { v.waits[0].acquiredMicros = Number.MAX_SAFE_INTEGER + 1; }],
+    ["backwards wait", (v) => { v.waits[0].requestedMicros = 61; }],
+    ["backwards release", (v) => { v.holders[0].releasedMicros = 9; }],
+    ["unknown holder state", (v) => { v.holders[0].state = "runtime_owner"; }],
+    ["absolute path", (v) => { v.holders[0].site.file = "C:/private/secret.rs"; }],
+    ["traversal", (v) => { v.holders[0].site.file = "src/../private.rs"; }],
+    ["too many waits", (v) => { v.waits = Array(9).fill(v.waits[0]); }],
+    ["too many holders", (v) => { v.holders = Array(5).fill(v.holders[0]); }],
+    ["unmarked lost history", (v) => { v.lossCount = 1; }],
+    ["oversized block", (v) => {
+      v.waits[0].site.file = `src/${"a".repeat(85)}.rs`;
+      v.holders[0].site.file = v.waits[0].site.file;
+      v.waits = Array(8).fill(v.waits[0]); v.holders = Array(4).fill(v.holders[0]);
+    }],
+  ]) {
+    test(`state lock registration evidence discards unsupported advisory data: ${name}`, () => {
+      const value = stateLockEvidenceFixture();
+      mutate(value);
+      assert.equal(boundedStateLockEvidence(value), undefined);
+    });
+  }
+
+  test("state lock registration evidence preserves active ages and explicit partial indicators", () => {
+    const value = stateLockEvidenceFixture();
+    value.lossCount = 2; value.partial = true; value.unavailable = true;
+    value.holders = [{ holdId: "1", site: value.holders[0].site,
+      acquiredMicros: 10, ageMicros: 60, state: "active", secret: "private-field-sentinel" }];
+    const block = boundedStateLockEvidence(value);
+    assert.equal(block.partial, true);
+    assert.equal(block.unavailable, true);
+    assert.equal(block.lossCount, 2);
+    assert.equal(block.holders[0].state, "active");
+    assert.equal(block.holders[0].ageMicros, 60);
+    assert.equal(block.holders[0].releasedMicros, undefined);
+    assert.doesNotMatch(JSON.stringify(block), /private-field-sentinel/u);
   });
 
   async function registrationFailure(root, env) {

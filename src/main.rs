@@ -957,7 +957,10 @@ include!("remote_sync.rs");
 include!("test_temp_paths.rs");
 #[cfg(test)]
 include!("test_temp_root.rs");
+#[cfg(test)]
+include!("test_panic_journal.rs");
 include!("state.rs");
+include!("state_lock_observer.rs");
 include!("engram_budget.rs");
 include!("engram_host_adapter.rs");
 include!("engram_control_non_application.rs");

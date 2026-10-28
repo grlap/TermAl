@@ -17,7 +17,14 @@ struct SourceObservationPreparationGuard<'a> {
 
 impl Drop for SourceObservationPreparationGuard<'_> {
     fn drop(&mut self) {
-        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        // A panic inside the guarded span may have poisoned the state lock,
+        // and this runs while that panic unwinds: a second panic here would
+        // abort the process. Recover the lock and still release the count.
+        let mut inner = self
+            .state
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(index) = inner.find_session_index(&self.session_id) {
             let count = &mut inner.sessions[index].engram.source_observation_preparations;
             *count = count.saturating_sub(1);

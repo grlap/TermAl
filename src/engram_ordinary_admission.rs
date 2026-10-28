@@ -18,7 +18,14 @@ struct EngramOrdinaryPreparation<'a> {
 
 impl Drop for EngramOrdinaryPreparation<'_> {
     fn drop(&mut self) {
-        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        // This also runs while a panic in the preparation unwinds, when the
+        // state lock may be poisoned: a second panic here would abort the
+        // process. Recover the lock and still retire our own slot.
+        let mut inner = self
+            .state
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(index) = inner.find_session_index(self.session_id) {
             let record = &mut inner.sessions[index];
             // Cancellation may already have advanced the live queue owner.

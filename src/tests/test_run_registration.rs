@@ -28,6 +28,9 @@ mod observed_terminal;
 #[path = "test_run_lifecycle_batch.rs"]
 mod lifecycle_batch;
 
+#[path = "test_run_batch_failure_deltas.rs"]
+mod batch_failure_deltas;
+
 #[tokio::test]
 async fn http_registration_returns_the_versioned_durable_contract_and_one_global_row_on_retry() {
     let fixture = RunFixture::new("registration-http-contract");

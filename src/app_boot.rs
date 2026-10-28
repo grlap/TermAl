@@ -536,13 +536,18 @@ impl AppState {
         // background persist thread. The thread briefly re-locks it on
         // each tick to collect the diff; see
         // `collect_persist_delta_from_shared_state`.
+        let server_instance_id = Uuid::new_v4().to_string();
         #[cfg(test)]
         let inner_mutex = TEST_BOOT_STATE_MUTEX.with(|hook| match hook.borrow_mut().take() {
-            Some(make) => make(inner),
-            None => StateMutex::new(inner),
+            Some(make) => {
+                let mut mutex = make(inner);
+                mutex.lock_observer = Arc::new(StateLockObserver::new(&server_instance_id));
+                mutex
+            }
+            None => StateMutex::new_for_instance(inner, &server_instance_id),
         });
         #[cfg(not(test))]
-        let inner_mutex = StateMutex::new(inner);
+        let inner_mutex = StateMutex::new_for_instance(inner, &server_instance_id);
         let inner_arc = Arc::new(inner_mutex);
         let inner_for_persist = Arc::clone(&inner_arc);
         let inner_for_coordination_cleanup = Arc::clone(&inner_arc);
@@ -820,7 +825,7 @@ impl AppState {
             // out-of-order stale responses. A fresh UUID on every boot
             // guarantees the id changes exactly when the client should
             // accept a revision downgrade.
-            server_instance_id: Uuid::new_v4().to_string(),
+            server_instance_id,
             default_workdir,
             local_http_base_url: Arc::new(Mutex::new(None)),
             persistence_path: persist_path_for_state,

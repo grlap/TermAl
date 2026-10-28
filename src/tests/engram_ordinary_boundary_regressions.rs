@@ -385,3 +385,46 @@ async fn admission_review_stop_during_marker_fence_keeps_unsent_owner() {
         );
     }
 }
+
+/// A panic elsewhere while the state lock was held leaves it poisoned. The
+/// preparation guard's Drop runs during that unwinding, so it must recover
+/// the lock instead of panicking, and still retire its own unsent slot.
+#[test]
+fn admission_review_preparation_cleanup_survives_a_poisoned_state_lock() {
+    let (state, session, _receiver, _transport) = root_fixture([]);
+    let _dispatch = root_dispatch(&state, &session, false);
+    let owner = inspect(&state, &session, |record| {
+        EngramQueuedAdmissionOwner::capture(record).unwrap()
+    });
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.session_mut(&session).unwrap().engram.ordinary_handoff =
+            Some(EngramOrdinaryHandoff { owner: owner.clone(), durable: false });
+    }
+    let poisoner = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let _held = state.inner.lock().unwrap();
+                panic!("deliberate panic while holding the state lock");
+            })
+            .join()
+    });
+    assert!(poisoner.is_err());
+    assert!(state.inner.lock().is_err(), "the fixture must leave the state lock poisoned");
+    drop(EngramOrdinaryPreparation {
+        state: &state,
+        session_id: &session,
+        owner: &owner,
+    });
+    let inner = state
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let index = inner.find_session_index(&session).unwrap();
+    assert!(
+        inner.sessions[index].engram.ordinary_handoff.is_none(),
+        "the guard still retires its own unsent preparation"
+    );
+    drop(inner);
+    state.inner.inner.clear_poison();
+}

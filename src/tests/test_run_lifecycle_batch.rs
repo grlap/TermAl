@@ -197,6 +197,176 @@ fn lifecycle_batch_failed_persistence_exposes_failure_without_losing_response() 
 }
 
 #[test]
+fn lifecycle_batch_failed_mixed_save_keeps_compacted_proof_revalidating_and_never_safe() {
+    let (mut fixture, id, store, binding, report) = evidence_fixture("lifecycle-batch-mixed-failure");
+    fixture.state.settle_test_run_verification_receipt(&report, &exact_receipt(), &store, &binding);
+    let compact_id = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let proof = second_observation(&inner.test_run_observations[&id], "compacted");
+        let compact_id = proof.execution_id.clone();
+        inner.test_run_compacted.insert(compact_id.clone(), TestRunCompacted {
+            compacted: true, request_identity: None, summary: test_run_minimal_summary(proof.summary.clone()),
+            registration: None, observations: vec![test_run_minimal_observation(proof)],
+            request_stamp: None, results_stamp: None, reason: "resolved fixture".to_owned(),
+            artifact_conflict: false, artifact_unavailable: true,
+        });
+        // An earlier save made this compact identity durable.
+        inner.test_runs.compactions_durable.insert(compact_id.clone());
+        compact_id
+    };
+    let read: EngramNamedRootReadResponse =
+        serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
+    let durable_path = fixture.state.persistence_path.clone();
+    let invalid = fixture.root.join("state-is-a-directory");
+    fs::create_dir(&invalid).unwrap();
+    fixture.state.persistence_path = Arc::new(invalid);
+    fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        // The shared batch failed: the live row says so, and the new compacted
+        // proof stays revalidating instead of inheriting the earlier flag.
+        assert!(inner.test_runs.observations_failed.contains(&id));
+        assert!(!inner.test_runs.observations_durable.contains(&id));
+        assert!(inner.test_runs.compactions_revalidating.contains(&compact_id));
+        assert!(inner.test_runs.compactions_durable.contains(&compact_id), "the prior durable flag is kept");
+        let compacted = &inner.test_run_compacted[&compact_id];
+        assert_eq!(compacted.observations[0].evidence[0].lifecycle_read.as_deref(), Some(&read));
+        assert_ne!(
+            test_run_compacted_summary(&*inner, compacted).registration.restart_would_void_evidence,
+            Some(false),
+            "an unsaved proof is never reported as durably safe",
+        );
+    }
+    // Contrast: the same read saved durably clears the flag and the proof is
+    // then safe, so only the failed save withheld it above.
+    fixture.state.persistence_path = durable_path;
+    fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
+    let inner = fixture.state.inner.lock().unwrap();
+    assert!(!inner.test_runs.compactions_revalidating.contains(&compact_id));
+    assert!(inner.test_runs.compactions_durable.contains(&compact_id));
+    assert_eq!(
+        test_run_compacted_summary(&*inner, &inner.test_run_compacted[&compact_id])
+            .registration
+            .restart_would_void_evidence,
+        Some(false),
+    );
+}
+
+/// A finished test check at `sequence` that keys itself as `key`, the way a
+/// runtime that reuses one key for repeated runs reports it.
+fn reported_check(sequence: usize, key: &str) -> EngramResolvedCheck {
+    let basis = EngramExecutionSourceBasis {
+        source_root_generation: Some(1),
+        source_root_state: None,
+        workspace_id: "C:/w".to_owned(),
+        source_revision: "a".repeat(64),
+    };
+    let capture = Arc::new(EngramBasisCapture::default());
+    capture.finish(Some(basis.clone()));
+    let end = EngramTurnCheckEnd {
+        declared: None,
+        completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
+        exit: EngramCommandExit::Code(0),
+        build_diagnostic: None,
+        result_lines: Vec::new(),
+        showed_passing_tests: true,
+        focused_stage_line_missing: false,
+        launcher_ran_no_stage: false,
+        end_basis: Arc::clone(&capture),
+    };
+    let check = EngramTurnCheck {
+        declared: None,
+        grant_id: "duplicate-check-grant".to_owned(),
+        key: key.to_owned(),
+        sequence,
+        command: engram_check_command("cargo test").expect("a test"),
+        target: EngramCheckTarget {
+            root: PathBuf::from("C:/w"),
+            directory: PathBuf::from("C:/w"),
+            common_dir_key: None,
+        },
+        toolchain: EngramToolchainCapture::settled(None),
+        started_at: "2026-09-24T00:00:00.000Z".to_owned(),
+        started_order: None,
+        sandbox: None,
+        start_basis: capture,
+        overlapped: false,
+        overlap_cause: None,
+        fenced_by_outstanding: None,
+        watcher_fence: None,
+        watcher_provenance: None,
+        watcher_cargo_candidates: Vec::new(),
+        watcher_exempted: None,
+        runtime_output_cut: false,
+        ended_at: None,
+        keyed_by_line: false,
+        end: Some(end.clone()),
+    };
+    EngramResolvedCheck {
+        check,
+        end,
+        outcome: EngramExecutionOutcome::Succeeded,
+        basis,
+        toolchain: None,
+        ran_successfully: true,
+    }
+}
+
+#[test]
+fn duplicate_check_associations_on_one_live_row_queue_one_final_image_fence() {
+    let (mut fixture, id, store, binding, _) = evidence_fixture("lifecycle-batch-duplicate-association");
+    let checks = [reported_check(0, "repeated-key"), reported_check(1, "repeated-key")];
+    let index = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let session = inner.test_run_observations[&id].summary.owner_session_id.clone().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].engram.work_binding = Some(binding.clone());
+        let project_id = inner.sessions[index].session.project_id.clone().unwrap();
+        let project = inner.projects.iter_mut().find(|project| project.id == project_id).unwrap();
+        project.engram = Some(EngramProjectSettings {
+            enabled: true,
+            authority_store_key: Some(store.clone()),
+            ..EngramProjectSettings::default()
+        });
+        // Both checks resolve to this one execution: same grant, key, command,
+        // start and worktree, only their places in the turn differ.
+        let check = &checks[0].check;
+        let row = inner.test_run_observations.get_mut(&id).unwrap();
+        row.grant_identity = Some(sha256_hex(check.grant_id.as_bytes()));
+        row.tool_identity = sha256_hex(check.key.as_bytes());
+        row.command_fingerprint = EngramHost::check_fingerprint(&check.command);
+        row.summary.started_at = Some(check.started_at.clone());
+        row.summary.worktree = test_run_display_path(&check.target.root);
+        index
+    };
+    let receiver = queued_persistence(&mut fixture);
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        fixture.state.associate_reported_test_checks_locked(&mut inner, index, &checks);
+    }
+    let queued: Vec<_> = receiver.try_iter().collect();
+    let inner = fixture.state.inner.lock().unwrap();
+    let row = &inner.test_run_observations[&id];
+    let session = row.summary.owner_session_id.clone().unwrap();
+    for check in &checks {
+        let producer = sha256_hex(
+            format!("termal-turn-check:{session}:{}:{}:{}", check.check.grant_id, check.check.sequence, check.check.key)
+                .as_bytes(),
+        );
+        assert_eq!(
+            row.evidence.iter().filter(|association| association.producer_observation_id == producer).count(),
+            1,
+            "each check adds its own association to the shared row",
+        );
+    }
+    // One save and one exact fence, holding the row after both associations.
+    assert_one_save_and_exact_fences(&queued, &BTreeMap::from([(id.clone(), row.clone())]), None);
+    let pending = inner.test_runs.observation_persistence.0.lock().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(&pending[&id].0, row);
+}
+
+#[test]
 fn lifecycle_batch_wrong_authority_or_generation_has_no_dispatch_or_revision() {
     let (mut fixture, id, store, binding, _) = evidence_fixture("lifecycle-batch-noop");
     let mut wrong_store = store.clone();

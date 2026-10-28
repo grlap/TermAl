@@ -49,6 +49,42 @@ transport-unknown errors and safe-replay no-write refusals. Evaluator-start
 requests (the plural acceptance-evaluations endpoint) do not acquire the
 submission contract. No new CLI command or request argument is introduced.
 
+## Advisory registration lock evidence
+
+A pending test registration may also carry an optional `stateLock` object,
+with contract `termal-state-lock-observation` and version 1. The same bounded
+object is retained in the existing exact-run phase trace when that trace is
+available. It contains at most eight acquired-lock wait observations and four
+overlapping holders, and occupies at most 2,048 serialized UTF-8 bytes. It adds
+no endpoint, diagnostic fetch or automatic retry. Other pending operations do
+not acquire this extension.
+
+Each block identifies the server instance and mutex epoch. Its monotonic
+microsecond points share a process origin within lock evidence; phase-trace
+timestamps use a separate origin and cannot be compared directly. Only
+acquisitions through the typed state mutex, including successful try-locks,
+produce spans. A failed try-lock leaves no wait row, so an absent row does not
+prove an absence of contention. Requested wait includes thread scheduling.
+
+Holder rows overlap a wait in the same epoch. Selection prioritizes active
+holders, then the largest overlap with an observed wait, then hold duration
+and hold identity for deterministic ties. Active rows report an age, not a
+completed duration. Byte trimming removes the lowest-priority holder rows
+first. An overlapping holder from a different epoch is omitted with explicit
+truncation; epochs are never joined.
+
+`partial` flags missing or truncated evidence, while `unavailable` marks a
+snapshot that could not be read coherently, including an in-flight release,
+busy or poisoned diagnostic storage, or concurrent publication. Loss and
+eviction counts are cumulative for the observer lifetime: historical loss
+keeps `partial` conservative even when a recent window may be fully retained.
+These observations describe intervals, not exclusive cause attribution.
+
+The launcher validates the supported block and retains it as advisory data.
+It cannot change pending identity, same-request retry, deadlines, test-stage
+execution, exit status, durable acknowledgement or execution credit. A lost
+response remains unknown even when its trace retained evidence.
+
 ## Identity, replay and restart
 
 An unchanged in-process retry settles the existing durable operation and must

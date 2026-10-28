@@ -7,6 +7,9 @@
 thread_local! {
     // Deterministic connected-worker witness, after enqueue and before wait.
     static TEST_TEST_RUN_REGISTRATION_FENCE_SENT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    // Post-publication contention schedule; neither hook supplies durability.
+    static TEST_TEST_RUN_REGISTRATION_PUBLISHED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_TEST_RUN_REGISTRATION_NEXT_LOCK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn test_run_timestamp() -> String {
@@ -131,6 +134,7 @@ struct TestRunRegistrationDiagnostics {
     enabled: bool,
     request_digest: Option<String>,
     lock_timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
+    lock_observation_loss: Arc<std::sync::atomic::AtomicU64>,
     spans: Vec<(&'static str, Duration, Duration)>,
     fence_deadline: Option<std::time::Instant>,
     durability_confirmed: bool,
@@ -158,6 +162,7 @@ impl TestRunRegistrationDiagnostics {
             enabled: true,
             request_digest: None,
             lock_timings: Arc::new(Mutex::new(TestRunRegistrationLockTimings::default())),
+            lock_observation_loss: Arc::new(0.into()),
             spans: Vec::with_capacity(16),
             fence_deadline: None,
             durability_confirmed: false,
@@ -188,19 +193,30 @@ impl TestRunRegistrationDiagnostics {
             .unwrap_or("unavailable").to_owned();
     }
 
+    #[track_caller]
     fn lock<'a>(&self, state: &'a StateMutex<StateInner>) -> TestRunRegistrationGuard<'a> {
+        #[cfg(test)]
+        TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| {
+            if let Some(step) = slot.borrow_mut().take() {
+                step();
+            }
+        });
         TestRunRegistrationGuard {
             guard: state.lock().expect("state mutex poisoned"),
             timings: Arc::clone(&self.lock_timings),
+            loss: Arc::clone(&self.lock_observation_loss),
             phase: self.phase,
         }
     }
 
     fn fields(&self, run_id: &str, category: &str, status: u16) -> String {
-        let lock_timings = self.lock_timings.lock().expect("registration timing mutex poisoned");
+        let lock_timings = match self.lock_timings.try_lock() {
+            Ok(timings) => timings,
+            Err(_) => return "stateInnerTimings=UNKNOWN; diagnostic metadata unavailable".to_owned(),
+        };
         let waited = lock_timings.waited;
         let held = lock_timings.held;
-        let locks = lock_timings.observations.iter().map(|(phase, wait, hold)| {
+        let locks = lock_timings.observations.iter().flatten().map(|(phase, wait, hold)| {
             format!("{phase}:{}/{}", wait.as_millis(), hold.as_millis())
         }).collect::<Vec<_>>().join(",");
         let (phase, phase_elapsed) = self.failure_phase.unwrap_or((self.phase, self.phase_started.elapsed()));
@@ -225,6 +241,20 @@ impl TestRunRegistrationDiagnostics {
     }
 
     fn report(&self, run_id: &str, error: &mut ApiError) {
+        if self.method == "POST" && error.status == StatusCode::SERVICE_UNAVAILABLE
+            && let Some(deadline) = error.durability_deadline.as_mut()
+            && matches!(deadline.operation, Some(DurabilityPendingOperation::TestRunRegistration))
+        {
+            let mut block = self.state_lock_block();
+            if let Some(trace) = &self.trace
+                && !trace.retain_state_lock(&block)
+            {
+                block.partial = true;
+                block.loss_count = block.loss_count.saturating_add(1);
+                block.bound();
+            }
+            deadline.state_lock = Some(block);
+        }
         let category = self.category.unwrap_or(if error.status.is_client_error() {
             "request_refused"
         } else {
@@ -244,6 +274,22 @@ impl TestRunRegistrationDiagnostics {
                 .replace('\n', " "),
         );
     }
+
+    fn state_lock_block(&self) -> StateLockBlock {
+        let loss = self.lock_observation_loss.load(std::sync::atomic::Ordering::Relaxed);
+        let copied = self.lock_timings.try_lock().ok().and_then(|timings| {
+            timings.observer.as_ref().map(|observer| (Arc::clone(observer), timings.wait_spans))
+        });
+        if let Some((observer, waits)) = copied {
+            StateLockBlock::collect(&observer, &waits, loss)
+        } else {
+            let mut block = StateLockBlock::empty(&self.server_instance);
+            block.partial = true;
+            block.unavailable = true;
+            block.loss_count = loss.saturating_add(1);
+            block
+        }
+    }
 }
 
 // Reuse the existing StateMutex acquisition measurements. Only accumulate
@@ -252,12 +298,16 @@ impl TestRunRegistrationDiagnostics {
 struct TestRunRegistrationLockTimings {
     waited: Duration,
     held: Duration,
-    observations: Vec<(&'static str, Duration, Duration)>,
+    observations: [Option<(&'static str, Duration, Duration)>; 8],
+    observer: Option<Arc<StateLockObserver>>,
+    wait_spans: [Option<StateLockSpan>; 8],
+    span_count: usize,
 }
 
 struct TestRunRegistrationGuard<'a> {
     guard: StateMutexGuard<'a, StateInner>,
     timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
+    loss: Arc<std::sync::atomic::AtomicU64>,
     phase: &'static str,
 }
 
@@ -276,13 +326,22 @@ impl std::ops::DerefMut for TestRunRegistrationGuard<'_> {
 
 impl Drop for TestRunRegistrationGuard<'_> {
     fn drop(&mut self) {
-        let mut timings = self.timings.lock().expect("registration timing mutex poisoned");
+        let Ok(mut timings) = self.timings.try_lock() else {
+            self.loss.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return;
+        };
         let waited = self.guard.waited;
         let held = self.guard.acquired_at.elapsed();
         timings.waited += waited;
         timings.held += held;
-        if timings.observations.len() < 8 {
-            timings.observations.push((self.phase, waited, held));
+        timings.observer = Some(Arc::clone(&self.guard.lock_observer));
+        let count = timings.span_count;
+        if count < timings.wait_spans.len() {
+            timings.wait_spans[count] = Some(self.guard.lock_span);
+            timings.observations[count] = Some((self.phase, waited, held));
+            timings.span_count += 1;
+        } else {
+            self.loss.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -637,7 +696,7 @@ impl AppState {
             return Err(ApiError::conflict("test run request changed before acknowledgement"));
         }
         diagnostics.enter("publish_registration");
-        {
+        let acknowledgement = {
             let mut inner = diagnostics.lock(&self.inner);
             if inner.test_run_registrations.get(&request.run_id) != Some(&expected) {
                 return Err(ApiError::conflict(
@@ -650,25 +709,24 @@ impl AppState {
                 .registration_failures
                 .remove(&request.run_id);
             diagnostics.published = true;
-        }
-        // Durability, not an unrelated global rescan, is the ACK boundary.
+            // This exact durable identity is acknowledged at publication.
+            // A later unrelated holder must not delay it with another query.
+            RegisterTestRunResponse {
+                contract: "termal-durable-test-run-registration",
+                version: 1,
+                run_id: request.run_id,
+                registered: true,
+            }
+        };
+        #[cfg(test)]
+        TEST_TEST_RUN_REGISTRATION_PUBLISHED.with(|slot| {
+            if let Some(step) = slot.borrow_mut().take() {
+                step();
+            }
+        });
         // The background index remains its only writer; exact GET can use
         // the durable registration until that scanner catches up.
-        diagnostics.enter("query_confirmation");
-        let inner = diagnostics.lock(&self.inner);
-        if !inner.test_runs.registered.contains(&request.run_id)
-            || inner.test_run_registrations.get(&request.run_id) != Some(&expected) {
-            diagnostics.category = Some("query_unavailable");
-            return Err(ApiError::internal(
-                "durable test run registration is not available in the host query",
-            ));
-        }
-        Ok(RegisterTestRunResponse {
-            contract: "termal-durable-test-run-registration",
-            version: 1,
-            run_id: request.run_id,
-            registered: true,
-        })
+        Ok(acknowledgement)
     }
 }
 

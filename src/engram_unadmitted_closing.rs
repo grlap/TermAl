@@ -2,6 +2,29 @@
 // worker after retaining the trace and previous checkpoint endpoint under the
 // turn-result lock. No reconcile/admission/hold method is called here.
 
+/// The test build's diagnostic line for one closing-capture attempt: the
+/// attempt number, the capture budget, the time its source measurement took,
+/// and whether it measured anything. It says how far a slow or failing
+/// capture got, so it is printed only for an attempt that failed to measure or
+/// took longer than its budget, and not for every capture in every test.
+#[cfg(test)]
+fn unadmitted_capture_diagnostic(
+    session_id: &str,
+    attempt: u32,
+    budget: Duration,
+    elapsed: Duration,
+    measured: bool,
+) -> Option<String> {
+    if measured && elapsed <= budget {
+        return None;
+    }
+    Some(format!(
+        "UNADMITTED_CAPTURE_DIAGNOSTIC session={session_id} attempt={attempt} budget_us={} elapsed_us={} measured={measured}",
+        budget.as_micros(),
+        elapsed.as_micros(),
+    ))
+}
+
 impl AppState {
     fn capture_runtime_observation_report(
         &self,
@@ -171,8 +194,15 @@ impl AppState {
         let capture_started = std::time::Instant::now();
         let measured = self.engram_source_basis_within(&place, capture_budget);
         #[cfg(test)]
-        eprintln!("UNADMITTED_CAPTURE_DIAGNOSTIC session={session_id} attempt={} budget_us={} elapsed_us={} measured={}",
-            job.attempts, capture_budget.as_micros(), capture_started.elapsed().as_micros(), measured.is_some());
+        if let Some(line) = unadmitted_capture_diagnostic(
+            session_id,
+            job.attempts,
+            capture_budget,
+            capture_started.elapsed(),
+            measured.is_some(),
+        ) {
+            eprintln!("{line}");
+        }
         let source_basis = provenance
             .stamp(measured)
             .ok_or_else(|| {

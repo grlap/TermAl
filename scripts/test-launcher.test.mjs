@@ -86,6 +86,11 @@ const json = (path) => JSON.parse(readFileSync(path, "utf8"));
 const logPath = (runDir, entry) => isAbsolute(entry.log) ? entry.log : join(runDir, entry.log);
 const GiB = 1024n ** 3n;
 const capacity = (bytes) => ({ bavail: bytes, bsize: 1n });
+// The native capacity reader, captured before any fixture mocks it, so the
+// native smoke test can tell a leaked fixture mock from a real measurement.
+const nativeStatfsSync = fs.statfsSync;
+// Test contexts whose fixture capacity mock repository() already installed.
+const statfsMockedContexts = new WeakSet();
 
 // Only isolated fixture processes get this filesystem observation. The outer
 // maintained gate reads real capacity; there is no supported override flag.
@@ -161,7 +166,13 @@ async function repository(t, callback, sourceEnv = fixtureEnv, directory = testT
     cwd: root,
     env,
   });
-  t.mock.method(fs, "statfsSync", () => capacity(200n * GiB));
+  // Mock once per test context: MockTracker restores in creation order, so a
+  // second mock in the same context would restore to the first mock and leak
+  // it into every later test of this file.
+  if (!statfsMockedContexts.has(t)) {
+    statfsMockedContexts.add(t);
+    t.mock.method(fs, "statfsSync", () => capacity(200n * GiB));
+  }
   env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --import=${writeDiskCapacityFixture(root)}`.trim();
   await withHostedRegistrationFixture(root, env, (hostedEnv) => callback(root, hostedEnv));
 }
@@ -196,6 +207,7 @@ registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stag
 registerLauncherLifecycleTests({ repository, stage, json });
 
 test("disk space native filesystem smoke reports capacity without imposing a threshold", () => {
+  assert.equal(fs.statfsSync, nativeStatfsSync, "a fixture statfs mock leaked into the native smoke test");
   const root = realpathSync(projectRoot);
   const result = diskSpacePreflight({ root, full: false },
     join(root, ".tmp", "disk-capacity-smoke", "not-created"), {});

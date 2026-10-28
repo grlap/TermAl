@@ -798,3 +798,76 @@ fn assert_removed_observer_recovers(removal: u8, restore: bool) {
         "the removed provider payload must never replay"
     );
 }
+
+const PREPARATION_UNWIND_CASE: &str = "tests::engram_host_adapter::turn_observations::source_observations::removal::a_panic_during_delivery_preparation_fails_the_test_without_aborting";
+const PREPARATION_UNWIND_CHILD: &str = "TERMAL_TEST_SOURCE_PREPARATION_UNWIND_CHILD";
+const PREPARATION_UNWIND_PANIC: &str = "deliberate panic inside guarded delivery preparation";
+const PREPARATION_UNWIND_COUNT: &str = "source observation preparations after unwinding: ";
+
+/// A panic while the state lock is held poisons it. The preparation guard is
+/// dropped while that panic unwinds, so a second panic in its Drop would abort
+/// the whole process. The child runs in its own process so that an abort
+/// there cannot take this test run down with it.
+#[test]
+fn a_panic_during_delivery_preparation_fails_the_test_without_aborting() {
+    if std::env::var(PREPARATION_UNWIND_CHILD).as_deref() == Ok(PREPARATION_UNWIND_CASE) {
+        delivery_preparation_panics_under_the_state_lock();
+    }
+    let mut command = crate::host_command::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", PREPARATION_UNWIND_CASE, "--test-threads=1", "--nocapture"])
+        .env(PREPARATION_UNWIND_CHILD, PREPARATION_UNWIND_CASE);
+    let (status, stderr) = crate::tests::phase_sync::CapturedStderrProcess::spawn(&mut command)
+        .wait_with_stderr("source observation preparation unwind child");
+    assert!(
+        stderr.contains(PREPARATION_UNWIND_PANIC),
+        "the child must fail on its own panic: {stderr}"
+    );
+    assert!(
+        !stderr.contains("state mutex poisoned"),
+        "dropping the preparation guard must not panic a second time while unwinding: {stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("{PREPARATION_UNWIND_COUNT}0")),
+        "the guard must still release its preparation: {stderr}"
+    );
+    assert_eq!(
+        status.code(),
+        Some(101),
+        "the panic must be an ordinary test failure, not a process abort: {status:?}\n{stderr}"
+    );
+}
+
+/// The child's body. The real turn-start capture hook, inside the guarded
+/// preparation span, panics while holding the state lock.
+fn delivery_preparation_panics_under_the_state_lock() -> ! {
+    let claimed = opening_fixture("source-observation-preparation-unwind");
+    let state = claimed.state.clone();
+    TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let _held = state.inner.lock().unwrap();
+            panic!("{PREPARATION_UNWIND_PANIC}");
+        }));
+    });
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        deliver_turn_dispatch(&claimed.state, claimed.dispatch())
+    }));
+    let Err(payload) = unwound else {
+        panic!("the hook's panic must leave delivery preparation");
+    };
+    let preparations = {
+        let inner = claimed
+            .state
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let index = inner.find_session_index(&claimed.session_id).unwrap();
+        inner.sessions[index].engram.source_observation_preparations
+    };
+    eprintln!("{PREPARATION_UNWIND_COUNT}{preparations}");
+    // Let the fixture's own teardown lock the state normally, then report the
+    // original panic as this child's outcome.
+    claimed.state.inner.inner.clear_poison();
+    drop(claimed);
+    std::panic::resume_unwind(payload);
+}

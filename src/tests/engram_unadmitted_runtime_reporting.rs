@@ -241,6 +241,28 @@ fn install_reporting_source_capture(state: &AppState) {
         Some(Arc::new(|place, _budget| engram_place_source_basis(place)));
 }
 
+/// Restarts a reporting fixture's host from its persisted state, as a new
+/// process would: a fresh `AppState` booted over the old one's SQLite file and
+/// templates, answering Engram through `transport`. Like the fixture's first
+/// state (`CheckedTurn::start_with`), it runs on a scripted Engram budget
+/// clock, chosen before boot takes its first snapshot. On real time, the real
+/// Git and filesystem work the source capture hook does would spend the
+/// fixture's short RPC cap, and a loaded machine would fail the capture.
+fn restart_reporting_state(
+    root: &FsPath,
+    old: &AppState,
+    transport: Arc<dyn EngramControlTransport>,
+) -> AppState {
+    AppState::new_with_paths_engram_transport_and_clock_for_test(
+        root.to_string_lossy().into_owned(),
+        old.persistence_path.as_ref().clone(),
+        old.orchestrator_templates_path.as_ref().clone(),
+        transport,
+        EngramBudgetClock::scripted(),
+    )
+    .unwrap()
+}
+
 impl ReportingTurn {
     fn new(label: &str, claimed: bool, mode: ReplyMode, blocked: bool) -> Self {
         Self::start(label, claimed, mode, blocked, true)
@@ -622,13 +644,7 @@ fn restart_before_reply_replays_the_same_report_from_real_session_storage() {
         0
     );
     assert!(state.persist_thread_handle.lock().unwrap().is_none());
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        fixture.turn.root.to_string_lossy().into_owned(),
-        state.persistence_path.as_ref().clone(),
-        state.orchestrator_templates_path.as_ref().clone(),
-        producer.clone(),
-    )
-    .unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, &state, producer.clone());
     install_reporting_source_capture(&restarted);
     let restarting = restarted.clone();
     let boot = std::thread::spawn(move || restarting.run_post_listen_boot());

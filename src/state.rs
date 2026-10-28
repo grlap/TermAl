@@ -228,8 +228,17 @@ struct StateMutexLongHold {
     location: &'static std::panic::Location<'static>,
 }
 
+#[cfg(test)]
+thread_local! {
+    // One-shot schedule witness only; it neither supplies a guard nor records
+    // a diagnostic. The real mutex still decides acquisition and poisoning.
+    static TEST_STATE_MUTEX_REQUESTED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_STATE_MUTEX_UNLOCKED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
 struct StateMutex<T> {
     inner: Mutex<T>,
+    lock_observer: Arc<StateLockObserver>,
     diagnostic_reporter: StateMutexDiagnosticReporter,
     warn_after: Duration,
     // Set only on the existing over-threshold report path, never per lock.
@@ -241,7 +250,7 @@ struct StateMutex<T> {
     owner_thread: Mutex<Option<std::thread::ThreadId>>,
 }
 
-impl<T> StateMutex<T> {
+impl<T: 'static> StateMutex<T> {
     /// Call only after releasing the guard. The production reporter queues
     /// without waiting and formats on its own thread, including on slow scans
     /// which did not produce a late summary or commit.
@@ -251,9 +260,15 @@ impl<T> StateMutex<T> {
         }
     }
 
+    #[cfg(test)]
     fn new(value: T) -> Self {
+        Self::new_for_instance(value, &STATE_LOCK_PROCESS)
+    }
+
+    fn new_for_instance(value: T, instance: &str) -> Self {
         Self {
             inner: Mutex::new(value),
+            lock_observer: Arc::new(StateLockObserver::new(instance)),
             diagnostic_reporter: default_state_mutex_diagnostic_reporter(),
             warn_after: STATE_MUTEX_WARN_AFTER,
             longest_hold: Mutex::new(None),
@@ -278,6 +293,7 @@ impl<T> StateMutex<T> {
     ) -> Self {
         Self {
             inner: Mutex::new(value),
+            lock_observer: Arc::new(StateLockObserver::new(&STATE_LOCK_PROCESS)),
             diagnostic_reporter,
             warn_after,
             longest_hold: Mutex::new(None),
@@ -289,6 +305,11 @@ impl<T> StateMutex<T> {
     fn lock(&self) -> std::sync::LockResult<StateMutexGuard<'_, T>> {
         let requested_at = std::time::Instant::now();
         let caller = std::panic::Location::caller();
+        #[cfg(test)]
+        TEST_STATE_MUTEX_REQUESTED.with(|slot| {
+            let hook = slot.borrow_mut().take();
+            if let Some(hook) = hook { hook(); }
+        });
         match self.inner.lock() {
             Ok(guard) => Ok(StateMutexGuard::new(
                 guard,
@@ -297,6 +318,7 @@ impl<T> StateMutex<T> {
                 self.warn_after,
                 Arc::clone(&self.diagnostic_reporter),
                 &self.longest_hold,
+                Arc::clone(&self.lock_observer),
                 #[cfg(test)]
                 &self.owner_thread,
             )),
@@ -307,6 +329,7 @@ impl<T> StateMutex<T> {
                 self.warn_after,
                 Arc::clone(&self.diagnostic_reporter),
                 &self.longest_hold,
+                Arc::clone(&self.lock_observer),
                 #[cfg(test)]
                 &self.owner_thread,
             ))),
@@ -331,6 +354,7 @@ impl<T> StateMutex<T> {
             self.warn_after,
             Arc::clone(&self.diagnostic_reporter),
             &self.longest_hold,
+            Arc::clone(&self.lock_observer),
             #[cfg(test)]
             &self.owner_thread,
         ))
@@ -354,6 +378,8 @@ struct StateMutexGuard<'a, T> {
     acquired_at: std::time::Instant,
     caller: &'static std::panic::Location<'static>,
     diagnostic_reporter: StateMutexDiagnosticReporter,
+    lock_observer: Arc<StateLockObserver>,
+    lock_span: StateLockSpan,
     waited: Duration,
     warn_after: Duration,
     longest_hold: &'a Mutex<Option<StateMutexLongHold>>,
@@ -361,7 +387,7 @@ struct StateMutexGuard<'a, T> {
     owner_thread: &'a Mutex<Option<std::thread::ThreadId>>,
 }
 
-impl<'a, T> StateMutexGuard<'a, T> {
+impl<'a, T: 'static> StateMutexGuard<'a, T> {
     fn new(
         guard: std::sync::MutexGuard<'a, T>,
         requested_at: std::time::Instant,
@@ -369,9 +395,12 @@ impl<'a, T> StateMutexGuard<'a, T> {
         warn_after: Duration,
         diagnostic_reporter: StateMutexDiagnosticReporter,
         longest_hold: &'a Mutex<Option<StateMutexLongHold>>,
+        lock_observer: Arc<StateLockObserver>,
         #[cfg(test)] owner_thread: &'a Mutex<Option<std::thread::ThreadId>>,
     ) -> Self {
         let acquired_at = std::time::Instant::now();
+        let epoch = state_lock_value_epoch(&*guard, lock_observer.fallback_epoch);
+        let lock_span = lock_observer.acquired(epoch, caller, requested_at, acquired_at);
         let waited = acquired_at.saturating_duration_since(requested_at);
         if waited >= warn_after {
             diagnostic_reporter(StateMutexDiagnostic::Waited {
@@ -394,6 +423,8 @@ impl<'a, T> StateMutexGuard<'a, T> {
             acquired_at,
             caller,
             diagnostic_reporter,
+            lock_observer,
+            lock_span,
             waited,
             warn_after,
             longest_hold,
@@ -423,6 +454,8 @@ impl<T> std::ops::DerefMut for StateMutexGuard<'_, T> {
 
 impl<T> Drop for StateMutexGuard<'_, T> {
     fn drop(&mut self) {
+        let mut span = self.lock_span;
+        span.released = Some(state_lock_point(std::time::Instant::now()));
         let held = self.acquired_at.elapsed();
         let waited = self.waited;
         let file = self.caller.file();
@@ -437,7 +470,18 @@ impl<T> Drop for StateMutexGuard<'_, T> {
             debug_assert_eq!(owner.as_ref(), Some(&std::thread::current().id()));
             *owner = None;
         }
+        // Publish the release in flight before handing the primary mutex to
+        // a successor. History remains an off-lock, nonblocking append.
+        self.lock_observer.begin_release();
         drop(self.guard.take());
+        #[cfg(test)]
+        TEST_STATE_MUTEX_UNLOCKED.with(|slot| {
+            let hook = slot.borrow_mut().take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        });
+        self.lock_observer.finish_release(span);
         if held >= self.warn_after {
             // After release, on the rare over-threshold path only.
             let mut longest = self
@@ -1658,6 +1702,9 @@ struct StateInner {
     /// Process-local projections; a restored/replaced StateInner starts cold.
     /// Access only under StateInner, never from the broadcaster worker.
     state_projection_cache: Mutex<StateProjectionCache>,
+    // Runtime identity of this whole value, refreshed by construction/restore.
+    // Never persisted; replacing it cannot join observations across reloads.
+    state_lock_epoch: u64,
     federation: FederationState,
     federation_durable: bool,
     federation_continuity_lost: bool,
@@ -1868,6 +1915,7 @@ impl StateInner {
             metadata_predecessor: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             metadata_watermarks: Arc::default(),
             state_projection_cache: Mutex::new(StateProjectionCache::default()),
+            state_lock_epoch: next_state_lock_epoch(),
             federation: FederationState::default(),
             federation_durable: false,
             federation_continuity_lost: false,

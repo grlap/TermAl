@@ -453,6 +453,7 @@ impl PersistedState {
             metadata_predecessor: self.metadata_capture.known.clone(),
             metadata_watermarks: Arc::default(),
             state_projection_cache: Mutex::new(StateProjectionCache::default()),
+            state_lock_epoch: next_state_lock_epoch(),
             federation: self.federation,
             federation_durable: true,
             federation_continuity_lost: false,

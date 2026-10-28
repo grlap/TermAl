@@ -564,12 +564,7 @@ fn unadmitted_review_actual_boot_archives_custody_before_new_router_adoption() {
         old.trigger_shutdown_signal();
         old.shutdown_persist_blocking();
         fixture.turn.transport.responses.lock().unwrap().push_back(bind_reply("turn-check-token"));
-        let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-            fixture.turn.root.to_string_lossy().into_owned(),
-            old.persistence_path.as_ref().clone(),
-            old.orchestrator_templates_path.as_ref().clone(),
-            fixture.producer.clone(),
-        ).unwrap();
+        let restarted = restart_reporting_state(&fixture.turn.root, &old, fixture.producer.clone());
         fixture.turn.state = restarted.clone();
         let (active, archive, closing_count, report_count) = fixture.turn.record(|record| {
             let archive = record.session.messages.iter().find_map(|message| match message {
@@ -705,13 +700,7 @@ fn retirement_joins_post_check_capture_and_delivery_installs_before_restore() {
         );
         assert!(state.persist_thread_handle.lock().unwrap().is_none());
 
-        let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-            fixture.turn.root.to_string_lossy().into_owned(),
-            state.persistence_path.as_ref().clone(),
-            state.orchestrator_templates_path.as_ref().clone(),
-            fixture.producer.clone(),
-        )
-        .unwrap();
+        let restarted = restart_reporting_state(&fixture.turn.root, &state, fixture.producer.clone());
         {
             let mut inner = restarted.inner.lock().unwrap();
             let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
@@ -888,11 +877,7 @@ fn restored_closing_r6_preparation_resume_keeps_unread_binding_pending() {
         ))),
     );
     let old = &fixture.turn.state;
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        fixture.turn.root.to_string_lossy().into_owned(),
-        old.persistence_path.as_ref().clone(), old.orchestrator_templates_path.as_ref().clone(),
-        fixture.producer.clone(),
-    ).unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
     install_reporting_source_capture(&restarted);
     wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
     let prepared = EngramPreparedBegin {
@@ -961,11 +946,7 @@ fn restored_closing_r6_definitively_unbound_binding_does_not_wait_forever() {
     fixture.turn.transport.responses.lock().unwrap()
         .push_back(bind_reply(&expected.scope.routing_token));
     let old = &fixture.turn.state;
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        fixture.turn.root.to_string_lossy().into_owned(),
-        old.persistence_path.as_ref().clone(), old.orchestrator_templates_path.as_ref().clone(),
-        fixture.producer.clone(),
-    ).unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
     install_reporting_source_capture(&restarted);
     wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
     restarted.ensure_engram_session_bound_off_lock(&fixture.turn.session_id).unwrap().unwrap();
@@ -1000,12 +981,7 @@ fn restored_closing_r5_partial_bind_error_still_wakes_capture() {
     fixture.turn.transport.responses.lock().unwrap()
         .push_back(bind_reply(&expected.scope.routing_token));
     let old = &fixture.turn.state;
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        fixture.turn.root.to_string_lossy().into_owned(),
-        old.persistence_path.as_ref().clone(),
-        old.orchestrator_templates_path.as_ref().clone(),
-        fixture.producer.clone(),
-    ).unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
     install_reporting_source_capture(&restarted);
     wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
     let barrier = InstallBarrier::new(&restarted, "capture");
@@ -1055,12 +1031,7 @@ fn restored_closing_r5_tracking_resume_binds_without_provider_replay() {
     fixture.turn.transport.responses.lock().unwrap()
         .push_back(bind_reply(&expected.scope.routing_token));
     let old = &fixture.turn.state;
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        fixture.turn.root.to_string_lossy().into_owned(),
-        old.persistence_path.as_ref().clone(),
-        old.orchestrator_templates_path.as_ref().clone(),
-        fixture.producer.clone(),
-    ).unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
     install_reporting_source_capture(&restarted);
     wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
     {
@@ -1121,12 +1092,7 @@ fn restored_closing_capture_waits_for_lazy_binding_recovery() {
         .push_back(bind_reply(&expected.scope.routing_token));
     let operations_before = fixture.turn.transport.requests().len();
     let old = &fixture.turn.state;
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        fixture.turn.root.to_string_lossy().into_owned(),
-        old.persistence_path.as_ref().clone(),
-        old.orchestrator_templates_path.as_ref().clone(),
-        fixture.producer.clone(),
-    ).unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
     install_reporting_source_capture(&restarted);
     wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
     {
@@ -1158,6 +1124,52 @@ fn restored_closing_capture_waits_for_lazy_binding_recovery() {
     assert_eq!(occurrence(&sent)["host_turn_ref"], expected.trace.host_turn_ref);
     assert_eq!(sent.request["binding"], serde_json::to_value(&expected.scope.binding).unwrap());
     assert_eq!(sent.request["policy_basis"], serde_json::to_value(expected.policy.as_ref().unwrap()).unwrap());
+    assert_eq!(fixture.producer.requests().len(), 1);
+    fixture.assert_no_granted_reporting();
+    restarted.trigger_shutdown_signal();
+    restarted.shutdown_persist_blocking();
+}
+
+#[test]
+fn restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_cap() {
+    // The restarted host's closing capture measures real Git and filesystem
+    // contents, which a loaded machine can make slow. That time must not
+    // spend the capture's RPC cap: the restarted state runs on the same kind
+    // of clock as the state before the restart. The hook holds every
+    // measurement for twice the whole cap, so a restart on real time fails
+    // every attempt and backs off past the wait, while the fixture's clock
+    // does not see the hold at all. It stands in for slow I/O, not for an
+    // ordering barrier.
+    let mut fixture = ReportingTurn::new(
+        "unadmitted-slow-closing-measurement", true, ReplyMode::Recorded, false,
+    );
+    fixture.check("before-slow-measurement-restart", false);
+    let expected = retire_with_pinned_closing_job(&mut fixture);
+    fixture.turn.transport.responses.lock().unwrap()
+        .push_back(bind_reply(&expected.scope.routing_token));
+    let old = &fixture.turn.state;
+    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
+    let cap = {
+        let inner = restarted.inner.lock().unwrap();
+        engram_project_for_session_locked(&inner, &fixture.turn.session_id)
+            .and_then(|project| project.engram.as_ref())
+            .map(|settings| settings.call_timeout())
+            .expect("the fixture's project sets its Engram RPC cap")
+    };
+    assert!(cap < Duration::from_secs(1), "the fixture's RPC cap is a scripted short cap");
+    let hold = cap * 2;
+    restarted.inner.lock().unwrap().test_engram_source_capture =
+        Some(Arc::new(move |place, _budget| {
+            std::thread::sleep(hold);
+            engram_place_source_basis(place)
+        }));
+    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
+    restarted.ensure_engram_session_bound_off_lock(&fixture.turn.session_id)
+        .unwrap().unwrap();
+    let sent = fixture.observation();
+    assert!(sent.durable_before_send);
+    assert_eq!(occurrence(&sent)["host_turn_ref"], expected.trace.host_turn_ref);
+    assert_eq!(sent.request["binding"], serde_json::to_value(&expected.scope.binding).unwrap());
     assert_eq!(fixture.producer.requests().len(), 1);
     fixture.assert_no_granted_reporting();
     restarted.trigger_shutdown_signal();
@@ -1304,13 +1316,7 @@ async fn a_restored_closing_job_keeps_its_original_scope_and_policy() {
         .lock()
         .unwrap()
         .push_back(bind_reply(&expected.scope.routing_token));
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        fixture.turn.root.to_string_lossy().into_owned(),
-        old.persistence_path.as_ref().clone(),
-        old.orchestrator_templates_path.as_ref().clone(),
-        fixture.producer.clone(),
-    )
-    .unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, &old, fixture.producer.clone());
     let recovered_binding = {
         let inner = restarted.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.turn.session_id).unwrap();

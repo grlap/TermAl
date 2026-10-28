@@ -766,8 +766,12 @@ impl AppState {
         let dispatch = if observations.is_empty() {
             self.persist_internal_locked_with_dispatch(inner).ok()
         } else {
+            let before = inner.revision;
             let result = self.commit_persisted_delta_locked_with_dispatch(inner);
-            first_revision = Some(inner.revision);
+            // The commit allocates its revision before it persists, so a failed
+            // write still owns that revision; a failed allocation owns none and
+            // must never republish the revision already in use.
+            first_revision = (inner.revision != before).then_some(inner.revision);
             result.ok().map(|(_, dispatch)| dispatch)
         };
         let mut ids = Vec::with_capacity(observations.len());
@@ -841,7 +845,14 @@ impl AppState {
                 // including its post-shutdown synchronous durability fallback.
                 let revision = match first_revision.take() {
                     Some(revision) => Some(revision),
-                    None => self.commit_delta_locked(inner).ok(),
+                    None => {
+                        // A stopped worker's synchronous save can fail after
+                        // this row's revision was allocated: publish the
+                        // row's factual failed tracking there all the same.
+                        let before = inner.revision;
+                        let _ = self.commit_delta_locked(inner);
+                        (inner.revision != before).then_some(inner.revision)
+                    }
                 };
                 if let Some(revision) = revision {
                     self.publish_delta_locked(inner, DeltaEvent::TestRunChanged { revision, run });

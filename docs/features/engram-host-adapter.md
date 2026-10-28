@@ -2712,8 +2712,10 @@ evaluate that missed its deadline or lost its transport after the request was
 saved (`deadline_exceeded`, `control_unavailable`), an open circuit
 (`control_circuit_open`), a bind backoff (`control_backoff`) or an exhausted
 admission budget (`dispatch_budget_exhausted`). Such a park is re-admitted
-automatically, without Resume, a new message or a restart
-(`src/engram_admission_retry.rs`):
+automatically, without Resume, a new message or a restart, except when the
+current head's attributed attempt consumed its whole attempt budget: that
+measured admission latency hold requires Resume or Cancel (see the measured
+hold below). The automatic path (`src/engram_admission_retry.rs`) works as follows:
 
 1. The park writes a retry record with the head: its prompt and intent
    fingerprint, the card code, the attempt index, when the prompt was first
@@ -2984,6 +2986,28 @@ recovery has an overall budget of 240 seconds
 - **Boot reconciliation.** A restarted head's reconciliation (its status read,
   focus read and bind) is clipped to the same saved deadline, so no control
   call of it starts after the budget.
+
+An attempt can also stop automatic retry before the overall window ends.
+When the current retained head's typed `dispatch_budget_exhausted` dispatch
+was withheld after consuming its 20,000 ms attempt budget, the host holds
+instead of repeating the same full evaluation on the unchanged schedule.
+The preview and saved cause name the original prompt and dispatch generation,
+total, admission/evaluate span, its included admission fence, configured budget,
+and the condition for retry: explicitly Resume after the observed latency cause clears, or
+Cancel. The fence is not added to the admission/evaluate span a second time.
+The initial admission span and total use the same operation clock; the span
+starts before bind and may include work outside Evaluate itself. Begin-refusal
+healing retains its separate re-evaluation measurement. The diagnostic must
+name this exact head, turn and authority; a stale or unattributed card cannot create this hold.
+Automatic recovery ticks do not poll Engram to measure whether latency has
+improved, and the hold does not reset the head or its recovery window.
+
+The overall window-spent check precedes this per-attempt decision, retaining
+the separate exhaustion disposition above. Slow successful admission,
+explicit Refuse/Defer, ordinary proven-unsent fail-open, and exact replay of
+a possibly sent Begin keep their own rules. A measured latency hold is not
+a grant-retirement receipt or proof that an earlier operation did not apply;
+issued-grant settlement and ambiguous Begin recovery remain separate.
 
 While a retry is scheduled, its preview names the wait (for a pending begin,
 "the prepared begin awaits its durable acknowledgement; nothing sent"), the

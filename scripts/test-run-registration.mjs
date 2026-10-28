@@ -148,6 +148,8 @@ class RegistrationDiagnostics {
     const result = new Error(`${errorPrefix} ${human}; ${this.fields(category)}`.slice(0, 1280), { cause: error });
     result.registrationDiagnostic = true;
     if (error?.durabilityPending) result.durabilityPending = error.durabilityPending;
+    const stateLock = boundedStateLockEvidence(error?.stateLock);
+    if (stateLock) result.stateLock = stateLock;
     return result;
   }
 
@@ -179,11 +181,56 @@ function registrationPending(body, response, diagnostics, reason) {
   };
 }
 
+// Advisory only: reject unsupported/malformed evidence without changing the
+// pending-envelope validation or any refusal/retry/ACK/deadline decision.
+export function boundedStateLockEvidence(value) {
+  const uint = (n) => Number.isSafeInteger(n) && n >= 0;
+  const id = (n) => typeof n === "string" && /^(?:0|[1-9][0-9]{0,19})$/u.test(n);
+  if (!value || value.contract !== "termal-state-lock-observation" || value.version !== 1
+      || typeof value.instanceId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(value.instanceId)
+      || !id(value.mutexEpoch) || !uint(value.lossCount) || !uint(value.evictionCount)
+      || !uint(value.truncationCount) || typeof value.partial !== "boolean"
+      || typeof value.unavailable !== "boolean" || value.note !== "requested wait includes wall scheduling"
+      || !Array.isArray(value.waits) || value.waits.length > 8
+      || !Array.isArray(value.holders) || value.holders.length > 4) return;
+  if ((value.unavailable || value.lossCount || value.evictionCount || value.truncationCount) && !value.partial) return;
+  const site = (v) => v && typeof v.file === "string" && v.file.length <= 96
+    && /^src\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.rs$/u.test(v.file)
+    && !v.file.split("/").some((part) => part === "." || part === "..")
+    && uint(v.line) && v.line > 0 && uint(v.column) && v.column > 0
+    ? { file: v.file, line: v.line, column: v.column } : undefined;
+  const waits = [];
+  const holders = [];
+  for (const row of value.waits) {
+    const at = site(row?.site);
+    if (!at || !id(row.holdId) || row.holdId === "0" || !uint(row.requestedMicros)
+        || !uint(row.acquiredMicros) || row.requestedMicros > row.acquiredMicros) return;
+    waits.push({ holdId: row.holdId, site: at,
+      requestedMicros: row.requestedMicros, acquiredMicros: row.acquiredMicros });
+  }
+  for (const row of value.holders) {
+    const at = site(row?.site);
+    if (!at || !id(row.holdId) || row.holdId === "0" || !uint(row.acquiredMicros)) return;
+    const common = { holdId: row.holdId, site: at, acquiredMicros: row.acquiredMicros };
+    if (row.state === "released" && uint(row.releasedMicros) && row.releasedMicros >= row.acquiredMicros) {
+      holders.push({ ...common, releasedMicros: row.releasedMicros, state: "released" });
+    } else if (row.state === "active" && uint(row.ageMicros)) {
+      holders.push({ ...common, ageMicros: row.ageMicros, state: "active" });
+    } else return;
+  }
+  const block = { contract: "termal-state-lock-observation", version: 1,
+    instanceId: value.instanceId, mutexEpoch: value.mutexEpoch,
+    lossCount: value.lossCount, evictionCount: value.evictionCount, truncationCount: value.truncationCount,
+    partial: value.partial, unavailable: value.unavailable, note: value.note, waits, holders };
+  return Buffer.byteLength(JSON.stringify(block), "utf8") <= 2048 ? block : undefined;
+}
+
 async function httpFailure(response, diagnostics, signal) {
   let reason = "host reason unavailable";
   let bodyCategory = "missing_reason";
   let bodyCode = "unavailable";
   let pending;
+  let stateLock;
   try {
     const body = await readResponse(response);
     if (typeof body?.error === "string" && body.error.trim()) {
@@ -191,6 +238,7 @@ async function httpFailure(response, diagnostics, signal) {
       bodyCategory = "host_reason";
     }
     pending = registrationPending(body, response, diagnostics, reason);
+    if (pending) stateLock = boundedStateLockEvidence(body.stateLock);
   } catch (error) {
     // Non-2xx already forbids execution and automatic replay. A body failure
     // cannot turn that status into an ambiguous retryable POST transport loss.
@@ -202,6 +250,7 @@ async function httpFailure(response, diagnostics, signal) {
   const error = responseFailure(pending ? "durability_pending" : "http_error",
     `${diagnostics.method} HTTP ${response.status}: ${disposition}; ${reason}; errorBodyCategory=${bodyCategory}; errorBodyCode=${bodyCode}`);
   if (pending) error.durabilityPending = pending;
+  if (stateLock) error.stateLock = stateLock;
   return diagnostics.failure(error, signal);
 }
 

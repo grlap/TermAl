@@ -2,13 +2,14 @@
 //! the production dispatch path from a mailbox wake, as the stalls seen on
 //! live lanes were: a prepared begin whose acknowledgement missed its
 //! deadline (`begin_preparation_pending`), a failed preparation write settled
-//! for a fresh admission (the abort retry), and an admission whose budget a
-//! slow evaluate spent before its begin (`dispatch_budget_exhausted`). While
-//! the retry is due, the wake and the session say so; when it is due, the
+//! for a fresh admission (the abort retry), and an unknown evaluate whose
+//! reply was lost (`deadline_exceeded`). While the retry is due, the wake
+//! and the session say so; when it is due, the
 //! head is delivered once with no Resume. Next to them, the holds that are not
 //! a due automatic retry: a Stop, an operator's pause, a retained hold with
 //! nothing scheduled, a cancelled head, exhaustion and changed authority keep
-//! the paused-queue disposition and no retry hold.
+//! the paused-queue disposition and no retry hold. A measured admission that
+//! consumed its whole attempt budget also keeps that explicit hold.
 //!
 //! Owns: those producer and negative cases. Does not own the shared
 //! assertions (src/tests/engram_retry_hold_projection.rs), the named-root
@@ -36,21 +37,18 @@ fn with_mailbox(state: AppState) -> AppState {
 /// causal-failure fixture.
 const DISPATCH_BUDGET: Duration = Duration::from_secs(20);
 
-/// The stateful producer, answering every operation in order, except that
-/// the second turn_evaluate, a queued wake's admission once the turn before it
-/// ended, is answered only after the whole dispatch budget has passed on the
-/// scripted clock: the grant arrives with nothing left for its begin, as an
-/// Engram slowed by load left it. This is the fault the root causal-failure
-/// tests use, under the same budget. (Before the evaluate's reply the same
-/// deadline is checked by every step, which then fails first as
-/// `deadline_exceeded`.)
-struct SlowQueuedEvaluate {
+/// The second Evaluate belongs to a wake queued behind the first turn. Its
+/// reply is either lost before the budget is spent, or returned after the
+/// whole budget on the scripted clock. The producer still owns the actual
+/// grant, so the lost reply can be recovered by the exact Evaluate replay.
+struct QueuedEvaluate {
     producer: Arc<StatefulEngramControlTransport>,
     clock: EngramBudgetClock,
     evaluates: std::sync::atomic::AtomicUsize,
+    exhaust_budget: bool,
 }
 
-impl EngramControlTransport for SlowQueuedEvaluate {
+impl EngramControlTransport for QueuedEvaluate {
     fn request(
         &self,
         connection: &EngramConnectionConfig,
@@ -61,7 +59,11 @@ impl EngramControlTransport for SlowQueuedEvaluate {
         if matches!(request, EngramControlRequest::TurnEvaluate { .. })
             && self.evaluates.fetch_add(1, Ordering::SeqCst) == 1
         {
-            self.clock.advance(DISPATCH_BUDGET + Duration::from_secs(1));
+            if self.exhaust_budget {
+                self.clock.advance(DISPATCH_BUDGET + Duration::from_secs(1));
+            } else {
+                return Err(EngramTransportError::deadline("queued Evaluate reply lost"));
+            }
         }
         reply
     }
@@ -73,10 +75,10 @@ impl EngramControlTransport for SlowQueuedEvaluate {
 
 /// A root session with a mailbox whose first turn runs; a wake sent meanwhile
 /// queues behind it, and when the turn ends the wake's admission spends its
-/// budget, as on the live lanes: the head is parked for its automatic retry.
+/// budget or loses its reply. Only the latter schedules an automatic retry.
 /// Returns the state, the session, its runtime (the first turn's prompt
 /// already taken) and the sender.
-fn budget_exhausted_hold() -> (
+fn queued_evaluate_hold(exhaust_budget: bool) -> (
     AppState,
     String,
     mpsc::Receiver<CodexRuntimeCommand>,
@@ -84,10 +86,11 @@ fn budget_exhausted_hold() -> (
 ) {
     let (state, session, receiver, _) = root_fixture([]);
     let state = with_mailbox(state);
-    state.install_control_test_transport(Arc::new(SlowQueuedEvaluate {
+    state.install_control_test_transport(Arc::new(QueuedEvaluate {
         producer: StatefulEngramControlTransport::new(),
         clock: state.engram_budget_clock(),
         evaluates: std::sync::atomic::AtomicUsize::new(0),
+        exhaust_budget,
     }));
     // Installing a control transport sets the test dispatch budget to the
     // deadlock guard; the slow evaluate must outlast the real-sized budget the
@@ -119,23 +122,23 @@ fn budget_exhausted_hold() -> (
         admission_retry(&state, &session)
             .map(|retry| retry.code)
             .as_deref(),
-        Some("dispatch_budget_exhausted"),
-        "the spent budget parks the head for its automatic retry"
+        (!exhaust_budget).then_some("deadline_exceeded"),
+        "only an unknown reply within the budget schedules an automatic retry"
     );
     (state, session, receiver, sender)
 }
 
-/// Criterion 1, `dispatch_budget_exhausted`: while the retry is due, the
+/// Criterion 1, `deadline_exceeded`: while the retry is due, the
 /// session names its cause and next due time and a wake sent then is reported
 /// as waiting for it; when due, the retained wake is delivered once.
 #[test]
-fn a_spent_dispatch_budget_is_reported_as_an_automatic_retry_and_delivered_without_resume() {
-    let (state, session, receiver, sender) = budget_exhausted_hold();
+fn an_unknown_evaluate_is_reported_as_an_automatic_retry_and_delivered_without_resume() {
+    let (state, session, receiver, sender) = queued_evaluate_hold(false);
     assert_automatic_retry_hold(
         &state,
         &session,
-        Some("dispatch_budget_exhausted"),
-        "spent budget",
+        Some("deadline_exceeded"),
+        "unknown Evaluate",
     );
     let held = send(&state, &sender, &session, "budget-held");
     assert_eq!(
@@ -150,6 +153,43 @@ fn a_spent_dispatch_budget_is_reported_as_an_automatic_retry_and_delivered_witho
         "the retained wake reaches the provider once, without Resume"
     );
     assert_no_hold(&state, &session, "after the retry delivered");
+}
+
+#[test]
+fn a_spent_dispatch_budget_is_reported_as_an_explicit_hold_without_automatic_delivery() {
+    let (state, session, receiver, sender) = queued_evaluate_hold(true);
+    let before = with_record(&state, &session, Clone::clone);
+    assert_plain_pause(&state, &session, "measured admission latency hold");
+    assert!(before.session.preview.contains("admission latency hold"));
+    let held = send(&state, &sender, &session, "budget-held");
+    assert_eq!(held.notification_disposition, PAUSED_QUEUE_DISPOSITION);
+    let clock = state.engram_budget_clock();
+    for offset in [1, 5, 30] {
+        state.engram_abort_retry_tick(clock.wall_now() + chrono::Duration::seconds(offset));
+    }
+    assert!(
+        receiver.try_recv().is_err(),
+        "ticks cannot deliver the held wake"
+    );
+    let after = with_record(&state, &session, Clone::clone);
+    assert!(after.engram.admission_retry.is_none());
+    assert_eq!(
+        after.queued_prompts.front().unwrap().pending_prompt.id,
+        before.queued_prompts.front().unwrap().pending_prompt.id
+    );
+    assert_eq!(
+        after.engram.dispatch_generation,
+        before.engram.dispatch_generation
+    );
+    assert_eq!(
+        serde_json::to_value(&after.engram.begin_preparation_lineage).unwrap(),
+        serde_json::to_value(&before.engram.begin_preparation_lineage).unwrap()
+    );
+    assert_plain_pause(
+        &state,
+        &session,
+        "latency hold survives ticks and another wake",
+    );
 }
 
 /// Criterion 1, `begin_preparation_pending`: a prepared begin whose
@@ -240,7 +280,7 @@ fn a_failed_preparation_write_settled_for_a_fresh_admission_is_reported_as_an_au
 /// is held as a paused queue, exactly as before.
 #[test]
 fn a_stop_during_an_automatic_retry_keeps_the_paused_queue() {
-    let (state, session, _receiver, _sender) = budget_exhausted_hold();
+    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
     state
         .request_stop_session(&session)
         .expect("Stop is accepted");
@@ -252,7 +292,7 @@ fn a_stop_during_an_automatic_retry_keeps_the_paused_queue() {
 /// pause.
 #[test]
 fn an_operator_pause_over_a_scheduled_retry_keeps_the_paused_queue() {
-    let (state, session, _receiver, _sender) = budget_exhausted_hold();
+    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -267,7 +307,7 @@ fn an_operator_pause_over_a_scheduled_retry_keeps_the_paused_queue() {
 /// retained head as an interrupted hold: a paused queue, not a due retry.
 #[test]
 fn a_retry_under_changed_authority_keeps_the_paused_queue() {
-    let (state, session, _receiver, _sender) = budget_exhausted_hold();
+    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
     // A settings update validates its binary, which the fixture's sentinel
     // is not: the project first names the real control fixture, as the bind
     // backoff tests' settings reset does (engram_bind_backoff_retry.rs).
@@ -311,7 +351,7 @@ fn a_retry_under_changed_authority_keeps_the_paused_queue() {
 /// is reported exactly as the latch and status say, as before.
 #[test]
 fn a_cancelled_head_is_not_reported_as_an_automatic_retry() {
-    let (state, session, _receiver, _sender) = budget_exhausted_hold();
+    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
     let head = with_record(&state, &session, |record| {
         record
             .queued_prompts
@@ -425,7 +465,7 @@ fn a_receipted_head_parked_for_resume_keeps_the_paused_queue() {
 /// lifts.
 #[test]
 fn a_source_observation_hold_met_again_after_a_restart_counts_as_a_change() {
-    let (state, session, _receiver, _sender) = budget_exhausted_hold();
+    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
     let (first, restarted_hold, again, held) = {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();

@@ -6609,6 +6609,25 @@ impl AppState {
         if let (Some(cause), Some(code)) = (&mut causal_failure, healing_refusal) {
             cause.continuation_reason.push_str(&format!(" During healing of Begin refusal {}.", engram_causal_text(&code, &[])));
         }
+        if refusal_code.as_deref() == Some("dispatch_budget_exhausted")
+            && let (Some(cause), Some(owner), Some(target)) =
+                (&mut causal_failure, &admission_owner, &binding_target)
+        {
+            // Attribute this observation to the immutable attempt captured
+            // before I/O. The guarded finish still has to own that dispatch;
+            // the scheduler independently checks the current authority.
+            // Preserve any earlier operation's attribution rather than
+            // relabeling a stale cause as this head's evidence.
+            cause
+                .continuation_id
+                .get_or_insert_with(|| owner.prompt_id.clone());
+            cause
+                .turn_generation
+                .get_or_insert(owner.active_turn_generation);
+            cause
+                .authority_fingerprint
+                .get_or_insert_with(|| engram_abort_authority(target));
+        }
         let repair_armed = issued_unbegun_grant_id.is_some()
             || (decision == EngramControlCardDecision::Refuse
                 && refusal_code
@@ -6642,7 +6661,7 @@ impl AppState {
                 evaluate: Some(evaluate_latency_ms),
                 begin: begin_latency_ms,
                 checkpoint: None,
-                total: duration_millis(pending.started_at.elapsed()),
+                total: duration_millis(self.engram_budget_clock().elapsed_since(pending.started_at)),
             },
             fail_mode,
             repair_armed,

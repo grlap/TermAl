@@ -206,6 +206,55 @@ fn drop_engram_admission_retry(record: &mut SessionRecord) {
     }
 }
 
+/// An observed failure, not a slow successful call, can show that replaying
+/// the same admission with the same bound cannot make progress. The fence
+/// is already part of evaluate's span. Keep the original card and head;
+/// explicit Resume may try again, but unrelated wakes must not poll Engram
+/// with speculative full evaluations. Possibly-sent Begin recovery is not
+/// governed by this fresh-admission policy.
+fn engram_admission_latency_hold(
+    record: &SessionRecord,
+    code: Option<&str>,
+    authority: Option<&str>,
+) -> Option<String> {
+    if code != Some("dispatch_budget_exhausted") {
+        return None;
+    }
+    let head = record.queued_prompts.front()?;
+    if !head.engram_waiting || head.engram_interrupted {
+        return None;
+    }
+    let card = record.session.messages.iter().rev().find_map(|message| match message {
+        Message::EngramControl { card, .. } => Some(card),
+        _ => None,
+    })?;
+    let cause = card.causal_failure.as_ref()?;
+    if card.stage != EngramControlStage::Dispatch
+        || card.decision != EngramControlCardDecision::Degraded
+        || card.dispatch != EngramControlCardDispatch::Withheld
+        || card.refusal_code.as_deref() != code
+        || cause.failure_class != EngramCausalFailureClass::Deadline
+        || cause.continuation_id.as_deref() != Some(head.pending_prompt.id.as_str())
+        || cause.turn_generation != Some(record.active_turn_generation)
+        || authority.is_none()
+        || cause.authority_fingerprint.as_deref() != authority
+        || card.latency_ms.total < ENGRAM_DISPATCH_BUDGET_MS
+    {
+        return None;
+    }
+    let measured = |value: Option<u64>| {
+        value.map_or_else(|| "unavailable".to_owned(), |ms| format!("{ms} ms"))
+    };
+    Some(format!(
+        "Engram: admission latency hold for prompt {} at dispatch generation {}: total {} ms, \
+         admission/evaluate span {} (includes admission fence {}), budget {} ms. \
+         No automatic re-evaluation; resume explicitly after the observed latency cause clears, or cancel.",
+        head.pending_prompt.id, record.engram.dispatch_generation,
+        card.latency_ms.total, measured(card.latency_ms.evaluate),
+        measured(card.latency_ms.admission_fence), ENGRAM_DISPATCH_BUDGET_MS,
+    ))
+}
+
 /// Schedules, on the head just parked under the lock, the automatic retry of
 /// its unknown admission when `code` is one the schedule takes and nothing
 /// else holds the head; otherwise forgets any earlier retry so the explicit
@@ -220,6 +269,28 @@ fn schedule_engram_admission_retry_locked(
     now: chrono::DateTime<chrono::Utc>,
     budget_now: std::time::Instant,
 ) -> bool {
+    matches!(
+        decide_engram_admission_retry_locked(record, code, authority, now, budget_now),
+        EngramAdmissionRetryDecision::Scheduled
+    )
+}
+
+/// The scheduler's applied decision also supplies the park's causal text.
+/// In particular, replay/reconstruction bypasses must not be reclassified by
+/// a second, less constrained hold check in the caller.
+enum EngramAdmissionRetryDecision {
+    Scheduled,
+    LatencyHold(String),
+    NotScheduled,
+}
+
+fn decide_engram_admission_retry_locked(
+    record: &mut SessionRecord,
+    code: Option<&str>,
+    authority: Option<&str>,
+    now: chrono::DateTime<chrono::Utc>,
+    budget_now: std::time::Instant,
+) -> EngramAdmissionRetryDecision {
     let fingerprint = record.queued_prompts.front().map(|head| {
         engram_turn_intent_fingerprint(
             &head.pending_prompt.text,
@@ -240,6 +311,14 @@ fn schedule_engram_admission_retry_locked(
         && engram_begin_reconstruction_shape(record).is_some()
         && (code == Some(ENGRAM_BEGIN_RECONSTRUCT_CODE)
             || engram_begin_reconstruction_pending(record).is_some());
+    if !begin_replay && !begin_reconstruct && authority.is_some()
+        && let Some(explanation) = engram_admission_latency_hold(record, code, authority)
+    {
+        clear_engram_admission_retry(record);
+        clear_engram_bind_retry(record);
+        record.session.preview = explanation.clone();
+        return EngramAdmissionRetryDecision::LatencyHold(explanation);
+    }
     let (Some(code), Some(authority), Some(fingerprint), Some(prompt_id)) = (
         code.filter(|code| {
             engram_admission_code_retries(code)
@@ -263,7 +342,7 @@ fn schedule_engram_admission_retry_locked(
             .map(|head| head.pending_prompt.id.clone()),
     ) else {
         drop_engram_admission_retry(record);
-        return false;
+        return EngramAdmissionRetryDecision::NotScheduled;
     };
     let prior = record
         .engram
@@ -309,7 +388,7 @@ fn schedule_engram_admission_retry_locked(
     };
     if !engram_admission_retry_head_matches(record, &retry) || record.runtime_stop_in_progress {
         clear_engram_admission_retry(record);
-        return false;
+        return EngramAdmissionRetryDecision::NotScheduled;
     }
     if record
         .engram
@@ -325,7 +404,7 @@ fn schedule_engram_admission_retry_locked(
     record.engram.abort_retry_acknowledged = false;
     record.engram.abort_retry_saved = false;
     record.engram.abort_retry_fence = None;
-    true
+    EngramAdmissionRetryDecision::Scheduled
 }
 
 /// One tick's step for `record`'s parked-admission retry at `now`, given the

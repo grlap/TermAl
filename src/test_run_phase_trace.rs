@@ -32,6 +32,8 @@ struct TestRunPhaseSnapshot {
     phases: Vec<TestRunPhasePoint>,
     completed: bool,
     truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state_lock: Option<StateLockBlock>,
 }
 
 #[derive(Clone, Serialize)]
@@ -77,6 +79,7 @@ impl TestRunPhaseTraces {
             phases: vec![point],
             completed: false,
             truncated: false,
+            state_lock: None,
         });
         let trace = TestRunPhaseTrace {
             ring: self.clone(),
@@ -158,6 +161,13 @@ impl TestRunPhaseTraces {
 }
 
 impl TestRunPhaseTrace {
+    fn retain_state_lock(&self, block: &StateLockBlock) -> bool {
+        let Ok(mut ring) = self.ring.0.try_lock() else { return false; };
+        let Some(entry) = ring.entries.iter_mut().find(|entry| entry.trace_id == self.trace_id) else { return false; };
+        entry.state_lock = Some(block.clone());
+        true
+    }
+
     fn mark(&self, phase: &'static str) {
         let mut ring = self
             .ring

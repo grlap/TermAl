@@ -26,7 +26,7 @@ import {
   isolatedGitEnvironment,
 } from "./review-freeze-fingerprint.mjs";
 import { processMayBeAlive } from "./test-temp-root.mjs";
-import { registerTestRun, validateRunRegistration, validateRegistrationContext } from "./test-run-registration.mjs";
+import { registerTestRun, validateRunRegistration, validateRegistrationContext, boundedStateLockEvidence } from "./test-run-registration.mjs";
 import {
   durationReportKinds,
   durationReportPlan,
@@ -56,6 +56,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
+  "scripts/test-launcher-panic-journal.test.mjs",
   "scripts/test-ui-bootstrap.test.mjs",
   "scripts/test-launcher-git-path.test.mjs",
   "scripts/test-temp-root.test.mjs",
@@ -492,15 +493,17 @@ export async function createRun({
   } catch (error) {
     const result = readJson(join(runDir, "results.json"));
     const pending = error.durabilityPending;
+    const stateLock = boundedStateLockEvidence(error.stateLock);
     Object.assign(result, {
       state: "failed", exitCode: 1, ended: new Date().toISOString(),
       error: error.message,
       registration: { state: pending ? "pending" : "failed", reason: error.message,
-        ...(pending ? { pending } : {}) },
+        ...(pending ? { pending } : {}), ...(stateLock ? { stateLock } : {}) },
     });
     save(join(runDir, "results.json"), result);
     const failure = new Error(`${error.message}; run directory: ${runDir}`, { cause: error });
     if (pending) failure.durabilityPending = pending;
+    if (stateLock) failure.stateLock = stateLock;
     throw failure;
   }
   try {
@@ -568,6 +571,104 @@ function cargoOutputEnvironment(env, name, platform = process.platform) {
   if (platform !== "win32") return env[name];
   const key = Object.keys(env).sort().find((entry) => entry.toUpperCase() === name);
   return key === undefined ? undefined : env[key];
+}
+
+// A run's Rust panics are recorded by the test binary itself
+// (src/test_panic_journal.rs) to this file in the run directory, outside
+// libtest's output capture. The record survives a test process abort, which
+// loses everything libtest had captured.
+export const PANIC_JOURNAL_ENV = "TERMAL_TEST_PANIC_JOURNAL";
+export const PANIC_JOURNAL_FILE = "rust-panics.jsonl";
+const PANIC_JOURNAL_SUMMARY_RECORDS = 3;
+const PANIC_JOURNAL_BACKTRACE_LINES = 12;
+
+// The environment of a run's commands. Panics print backtraces unless the
+// caller chose otherwise, and the test binary journals its panics for this
+// run. RUST_BACKTRACE=1 on its own would also turn on library backtraces:
+// every anyhow error would capture a stack, under std's process-wide
+// backtrace lock. So when the launcher sets RUST_BACKTRACE and the caller did
+// not set RUST_LIB_BACKTRACE, it also sets RUST_LIB_BACKTRACE=0, std's
+// documented "panic backtraces only" pairing. A caller's own choice of either
+// variable is kept. On Windows an existing name in another case is replaced,
+// never duplicated.
+export function runEnvironment(env, runDir, platform = process.platform) {
+  const childEnv = { ...env };
+  const panicBacktrace = cargoOutputEnvironment(env, "RUST_BACKTRACE", platform);
+  const libraryBacktrace = cargoOutputEnvironment(env, "RUST_LIB_BACKTRACE", platform);
+  if (panicBacktrace === undefined) {
+    childEnv.RUST_BACKTRACE = "1";
+    if (libraryBacktrace === undefined) childEnv.RUST_LIB_BACKTRACE = "0";
+  }
+  if (platform === "win32") {
+    for (const key of Object.keys(childEnv)) {
+      if (key.toUpperCase() === PANIC_JOURNAL_ENV) delete childEnv[key];
+    }
+  }
+  childEnv[PANIC_JOURNAL_ENV] = join(runDir, PANIC_JOURNAL_FILE);
+  return childEnv;
+}
+
+// A crash, as opposed to an exit: a signal, or a Windows status code such as
+// 0xc0000409, which is no ordinary exit code.
+function crashed(stage) {
+  return Boolean(stage.signal) || (typeof stage.code === "number" && (stage.code < 0 || stage.code > 255));
+}
+
+// A Rust stage ended abnormally when its test process did not exit as a pass
+// or an ordinary libtest failure.
+// - Through cargo: cargo exits 101 for both an ordinary failure and an abort,
+//   so the abort is read from cargo's own report about a test binary (one
+//   under deps/) in the log: "process didn't exit successfully:
+//   `…/deps/termal-….exe` (exit code: 0xc0000409, …)" or "(signal: 6, …)".
+//   A build script's failure is not a test process ending.
+// - A command that runs the test binary directly: it crashed, and the run's
+//   journal shows the binary had the journal hook.
+function abnormalRustExit(stage, journalExists) {
+  if (stage.state !== "failed") return false;
+  const command = stage.command ?? [];
+  const throughCargo = stage.name === "rust-tests" ||
+    command.some((part) => /(^|[\\/])cargo(\.exe)?$/iu.test(String(part)));
+  if (crashed(stage) && (throughCargo || journalExists)) return true;
+  if (!throughCargo || !stage.log || !existsSync(stage.log)) return false;
+  return /process didn't exit successfully: `[^`]*[\\/]deps[\\/][^`]*` \((?:exit (?:code|status): (?!101\))[^)]*|signal: [^)]*)\)/u
+    .test(readFileSync(stage.log, "utf8"));
+}
+
+// The journal's panics, oldest first, each with its thread. The hook writes a
+// panic line (message, location, backtrace) and then a thread line; they are
+// joined by process id and sequence. A panic whose thread line never came, or
+// a line the abort cut short, is kept or skipped, never guessed at.
+function journalPanics(text) {
+  const lines = text.split("\n").flatMap((line) => {
+    try { return line.trim() ? [JSON.parse(line)] : []; } catch { return []; }
+  });
+  const threads = new Map(lines.filter((line) => "thread" in line && !("message" in line))
+    .map((line) => [`${line.pid}:${line.seq}`, line.thread]));
+  return lines.filter((line) => "message" in line)
+    .map((line) => ({ ...line, thread: line.thread ?? threads.get(`${line.pid}:${line.seq}`) }));
+}
+
+// The last recorded panics of an abnormally ended Rust stage, with the file
+// they came from.
+export function panicJournalSummaryLines(result, runDir) {
+  const path = result.panicJournal ?? join(runDir, PANIC_JOURNAL_FILE);
+  const journalExists = existsSync(path);
+  if (!(result.stages ?? []).some((stage) => abnormalRustExit(stage, journalExists))) return [];
+  if (!journalExists) {
+    return [`rust panic journal: ${path} (none recorded; the test binary wrote no panic before it ended)`];
+  }
+  const records = journalPanics(readFileSync(path, "utf8"));
+  const last = records.slice(-PANIC_JOURNAL_SUMMARY_RECORDS);
+  const lines = [`rust panic journal: ${path} (${records.length} recorded; the last ${last.length} follow)`];
+  for (const record of last) {
+    lines.push(`  panic in ${record.thread ?? "<unknown thread>"} at ${record.location ?? "<unknown location>"}: ${record.message ?? ""}`.slice(0, diagnosticLimit));
+    const backtrace = String(record.backtrace ?? "").split("\n").filter((frame) => frame.trim());
+    for (const frame of backtrace.slice(0, PANIC_JOURNAL_BACKTRACE_LINES)) {
+      lines.push(`    ${frame.trim()}`.slice(0, diagnosticLimit));
+    }
+    if (backtrace.length > PANIC_JOURNAL_BACKTRACE_LINES) lines.push("    [backtrace truncated; full record in the journal]");
+  }
+  return lines;
 }
 
 const diskErrorCodes = new Set(["EACCES", "EPERM", "ENOSYS", "ENOTSUP", "ENOENT", "ENOTDIR", "EINVAL", "EIO"]);
@@ -851,7 +952,9 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     }
     return result;
   }
-  const childEnv = { ...env };
+  const childEnv = runEnvironment(env, runDir);
+  result.panicJournal = childEnv[PANIC_JOURNAL_ENV];
+  save(resultPath, result);
   const probe = async (name, command, args) => {
     const log = join(runDir, `preflight-${name}.log`);
     const outcome = await runCommand(command, args, {
@@ -1170,6 +1273,7 @@ export async function summarize(runDir) {
     }
     if (stage.diagnostics?.truncated) lines.push("[diagnostics truncated; full output in log]");
   }
+  lines.push(...panicJournalSummaryLines(result, runDir));
   lines.push(...accountingSummaryLines(result.stages));
   lines.push(...focusedCountSummaryLines(result));
   lines.push(...durationSummaryLines(result.stages));

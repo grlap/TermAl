@@ -16,6 +16,9 @@ mod begin_preparation_retry;
 #[path = "engram_retry_hold_producers.rs"]
 mod retry_hold_producers;
 
+#[path = "engram_admission_latency.rs"]
+mod admission_latency;
+
 /// One durability or wire boundary, in the order the writer acknowledged a
 /// fence and the producer received a begin.
 #[derive(Clone, Debug)]

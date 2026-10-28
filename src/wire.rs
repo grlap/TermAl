@@ -163,6 +163,7 @@ enum DurabilityPendingOperation {
 struct EnqueuedDurabilityDeadline {
     identity: Value,
     operation: Option<DurabilityPendingOperation>,
+    state_lock: Option<StateLockBlock>,
 }
 
 #[derive(Debug)]
@@ -252,6 +253,7 @@ impl ApiError {
         error.durability_deadline = Some(EnqueuedDurabilityDeadline {
             identity,
             operation: None,
+            state_lock: None,
         });
         error
     }
@@ -279,20 +281,22 @@ impl IntoResponse for ApiError {
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation
         {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "error": truncate_chars(&self.message, 2048),
-                    "contract": "termal-durability-pending",
-                    "version": 1,
-                    "code": "durability_pending",
-                    "outcome": "pending",
-                    "operation": operation,
-                    "identity": deadline.identity,
-                    "retry": { "mode": "same_request" },
-                })),
-            )
-                .into_response();
+            let mut body = json!({
+                "error": truncate_chars(&self.message, 2048),
+                "contract": "termal-durability-pending",
+                "version": 1,
+                "code": "durability_pending",
+                "outcome": "pending",
+                "operation": operation,
+                "identity": deadline.identity,
+                "retry": { "mode": "same_request" },
+            });
+            if matches!(operation, DurabilityPendingOperation::TestRunRegistration)
+                && let Some(block) = deadline.state_lock
+            {
+                body["stateLock"] = serde_json::to_value(block).unwrap_or(Value::Null);
+            }
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response();
         }
         let body = Json(ErrorResponse {
             error: self.message,
