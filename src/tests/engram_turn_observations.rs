@@ -2225,16 +2225,24 @@ fn without_a_closing_basis_a_watcher_event_outside_the_named_root_is_no_change()
     let nested = worktree.join("nested");
     fs::create_dir_all(&nested).expect("nested directory");
     init_git_repository(&nested);
-    // The watcher saw only a write in the main checkout.
+    let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
+    let outside = [
+        normalize_user_facing_path(&claimed.root.join("README.md")),
+        normalize_user_facing_path(&canonical.with_file_name("wt-outside").join("README.md")),
+    ];
+    // The watcher saw writes in the main checkout and a sibling with a
+    // similar prefix, both in the watcher's platform display form.
     claimed.record(|record| {
-        record.active_turn_file_changes.insert(
-            claimed
-                .root
-                .join("README.md")
-                .to_string_lossy()
-                .into_owned(),
-            WorkspaceFileChangeKind::Modified,
+        assert_eq!(
+            record.engram.active_turn_source_root.as_ref().unwrap().root,
+            canonical.to_string_lossy()
         );
+        for path in &outside {
+            record.active_turn_file_changes.insert(
+                path.to_string_lossy().into_owned(),
+                WorkspaceFileChangeKind::Modified,
+            );
+        }
     });
 
     let observation = finish_claimed_turn(&claimed, &runtime_token);
@@ -2252,9 +2260,15 @@ fn without_a_closing_basis_a_watcher_event_inside_the_named_root_is_a_change() {
     let nested = worktree.join("nested");
     fs::create_dir_all(&nested).expect("nested directory");
     init_git_repository(&nested);
+    let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
+    let watched = normalize_user_facing_path(&canonical.join("README.md"));
     claimed.record(|record| {
+        assert_eq!(
+            record.engram.active_turn_source_root.as_ref().unwrap().root,
+            canonical.to_string_lossy()
+        );
         record.active_turn_file_changes.insert(
-            worktree.join("README.md").to_string_lossy().into_owned(),
+            watched.to_string_lossy().into_owned(),
             WorkspaceFileChangeKind::Modified,
         );
     });

@@ -405,9 +405,16 @@ fn acceptance_requested_claim_controls_the_root_even_when_another_claim_is_bound
         let target = record.acceptance_evaluation.unwrap();
         let expected_dir = if case == "unnamed" { &root } else { &requested };
         let expected = content_revision(expected_dir).unwrap().1;
+        // An unnamed source inherits the parent's cwd verbatim. A requested
+        // named root passes through the delegation cwd resolver.
+        let expected_cwd = if case == "unnamed" {
+            root.to_string_lossy().into_owned()
+        } else {
+            resolve_session_workdir(expected_dir.to_str().unwrap()).unwrap()
+        };
         assert_eq!(
             record.cwd,
-            normalize_user_facing_path(&fs::canonicalize(expected_dir).unwrap()),
+            expected_cwd,
             "{case}"
         );
         assert_eq!(target.source_fingerprint, Some(expected), "{case}");

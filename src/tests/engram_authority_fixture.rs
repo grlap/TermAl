@@ -59,7 +59,10 @@ fn authority_command() {
     assert_eq!(args[0], "--project-file");
     assert_eq!(args[2], "--home");
     let root = FsPath::new(&args[3]);
-    assert_eq!(FsPath::new(&args[1]), root.join(".engram-project"));
+    assert_eq!(
+        fs::canonicalize(&args[1]).expect("fixture project file should exist"),
+        fs::canonicalize(root.join(".engram-project")).expect("home's project file should exist")
+    );
     let mode = fs::read_to_string(&args[1]).expect("fixture project declaration");
     assert_eq!(mode.trim(), "fixture-ready");
     if args[4..] == ["readiness", "--json"] {

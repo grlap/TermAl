@@ -272,14 +272,14 @@ fn engram_turn_execution_observation(
     // A turn measured in its claim's named source root counts only the
     // watcher's changes inside that root: the watcher attributes every write
     // under the session's workdir, whoever made it and wherever it landed.
-    // Compared by key: watch roots are canonical, so event paths carry the
-    // root's canonical prefix even when the project is reached by an alias.
+    // Compare both paths in the watcher's display form: the named root keeps
+    // its canonical identity, which can use a different platform path alias.
     // The key folds case, which can count an edit in a sibling worktree
     // differing only in case but never misses one in the root: a missed
     // change is the unsafe answer here, unlike a check's credit.
     let tracked_change = match &record.engram.active_turn_source_root {
         Some(turn_root) => {
-            let root = engram_path_key(FsPath::new(&turn_root.root));
+            let root = engram_path_key(&normalize_user_facing_path(FsPath::new(&turn_root.root)));
             let workdir = FsPath::new(&record.session.workdir);
             record.active_turn_file_changes.keys().any(|path| {
                 // The watcher reports absolute paths; a relative one is read
@@ -290,7 +290,7 @@ fn engram_turn_execution_observation(
                 } else {
                     workdir.join(path)
                 };
-                engram_path_within(&engram_path_key(&path), &root)
+                engram_path_within(&engram_path_key(&normalize_user_facing_path(&path)), &root)
             })
         }
         None => !record.active_turn_file_changes.is_empty(),

@@ -3204,7 +3204,10 @@ async fn read_and_write_file_accept_project_id_without_session() {
     )
     .await
     .unwrap();
-    assert_eq!(write_response.path, new_file.to_string_lossy());
+    assert_eq!(
+        write_response.path,
+        normalize_user_facing_path(&new_file).to_string_lossy()
+    );
     assert_eq!(
         fs::read_to_string(&new_file).unwrap(),
         "pub fn generated() {}

@@ -192,8 +192,15 @@ fn linked_worktree_wait_keeps_its_identity_when_the_main_scan_project_is_removed
     runs.state.delete_project(&runs.project_id).unwrap();
     runs.refresh(&[std::process::id()]);
     assert_eq!(runs.summary(&run_id).run_dir, locator);
-    assert!(runs.state.inner.lock().unwrap().test_runs.parsed.contains_key(&directory),
-        "canonical discovery keeps the native run-directory cache key");
+    {
+        let inner = runs.state.inner.lock().unwrap();
+        let disk = inner.test_runs.parsed.get(&directory)
+            .expect("discovery keeps its run-directory parse cache key");
+        assert_eq!(disk.locator_identity, test_run_locator_identity(&directory),
+            "the cache entry retains the canonical native-byte locator identity");
+        assert_eq!(inner.test_run_registrations[&run_id].locator_identity,
+            disk.locator_identity);
+    }
     assert_eq!(runs.summary(&run_id).project_id.as_deref(), Some(project.as_str()));
     runs.state.refresh_test_run_waits();
     assert_eq!(runs.state.inner.lock().unwrap().test_run_waits.len(), 1);

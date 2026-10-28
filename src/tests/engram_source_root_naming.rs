@@ -5637,7 +5637,8 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
             sealed_revision: None,
         });
     });
-    let scope_root = PathBuf::from(engram_source_root_display(&project_root.to_string_lossy()));
+    let scope_root = canonical_workspace_file_watch_root(&project_root.to_string_lossy())
+        .expect("the real watcher scope exists");
     // The other session works in the same tree and has a turn running too.
     {
         let mut inner = claimed.state.inner.lock().expect("state mutex poisoned");
@@ -5658,11 +5659,31 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
             session_id: Some(other.clone()),
         },
     ];
-    let edited = PathBuf::from(engram_source_root_display(
-        &canonical.join("README.md").to_string_lossy(),
-    ));
-    let events =
-        workspace_file_changes_from_path(&edited, WorkspaceFileChangeKind::Modified, &scopes);
+    let canonical_edited = canonical.join("README.md");
+    let edited = normalize_user_facing_path(&canonical_edited);
+    let events = [&canonical_edited, &edited]
+        .into_iter()
+        .flat_map(|path| {
+            workspace_file_changes_from_path(path, WorkspaceFileChangeKind::Modified, &scopes)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 4, "both aliases reach both real watcher scopes");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.session_id.as_deref() == Some(other.as_str()))
+            .count(),
+        2,
+        "each alias has a copy attributed to the other session"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.session_id.is_none())
+            .count(),
+        2,
+        "each alias also has its unscoped duplicate"
+    );
     assert!(
         events
             .iter()
@@ -5704,6 +5725,19 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
             .collect::<Vec<_>>()
     };
     assert_eq!(other_paths, [edited.to_string_lossy().into_owned()]);
+    // A sibling sharing the root's text prefix is still outside the root.
+    let outside = canonical.with_file_name("wt-outside").join("README.md");
+    let outside_events =
+        workspace_file_changes_from_path(&outside, WorkspaceFileChangeKind::Modified, &scopes);
+    assert_eq!(outside_events.len(), 2);
+    claimed.state.record_active_turn_file_changes(&outside_events);
+    claimed.record(|record| {
+        assert_eq!(
+            record.engram.active_turn_source_root.as_ref().unwrap().root,
+            canonical.to_string_lossy(),
+            "watcher comparison never changes the canonical named-root identity"
+        );
+    });
     // The set is the turn's "files changed" summary, so the card lists it.
     let card = claimed.record(|record| {
         assert!(push_active_turn_file_changes_on_record(

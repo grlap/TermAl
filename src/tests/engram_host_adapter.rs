@@ -4209,7 +4209,10 @@ fn project_engram_connection_accepts_the_default_path_command() {
             .expect("a single command name should resolve through PATH at execution time");
 
     assert_eq!(binary_path, PathBuf::from("engram"));
-    assert_eq!(project_file, root.join(".engram-project"));
+    assert_eq!(
+        project_file,
+        normalize_user_facing_path(&root.join(".engram-project"))
+    );
     assert_eq!(home, root);
     assert_engram_budget_clock_unread(&state);
 }
@@ -8195,7 +8198,10 @@ fn engram_mcp_uses_persisted_project_identity_when_marker_disappears_and_retries
             .iter()
             .find(|entry| entry.grant_hash == "grant-pending-identity")
             .expect("unresolved retirement must be durable");
-        assert_eq!(tombstone.project_root, root.to_string_lossy());
+        assert_eq!(
+            tombstone.project_root,
+            normalize_user_facing_path(&root).to_string_lossy()
+        );
         assert_eq!(tombstone.project_id, "fixture-ready");
         assert!(!tombstone.revoke_confirmed);
         assert!(tombstone.reason.contains("work-authority grant removed"));
@@ -14447,7 +14453,9 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
     let claude_session = create_test_project_session(&state, Agent::Claude, &project_id, &root);
     let acp_session = create_test_project_session(&state, Agent::Cursor, &project_id, &root);
     let codex_session = create_test_project_session(&state, Agent::Codex, &project_id, &root);
-    let project_file = root.join(".engram-project").to_string_lossy().into_owned();
+    let project_file = normalize_user_facing_path(&root.join(".engram-project"))
+        .to_string_lossy()
+        .into_owned();
 
     let claude: Value = serde_json::from_str(
         &state
@@ -15690,7 +15698,10 @@ fn project_deletion_without_an_engram_binary_still_persists_the_unconfirmed_gran
         .iter()
         .find(|entry| entry.grant_hash == "grant-without-binary")
         .expect("project deletion must not lose the unresolved credential");
-    assert_eq!(tombstone.project_root, root.to_string_lossy());
+    assert_eq!(
+        tombstone.project_root,
+        normalize_user_facing_path(&root).to_string_lossy()
+    );
     assert!(!tombstone.revoke_confirmed);
     drop(inner);
     assert_engram_budget_clock_unread(&state);

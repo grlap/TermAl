@@ -152,16 +152,19 @@ fn prepare_file_change_capture(
         .source_root
         .as_ref()
         .filter(|_| owner.grant_id.is_some())
-        .map(|root| engram_path_key(FsPath::new(&root.root)));
+        .map(|root| engram_path_key(&normalize_user_facing_path(FsPath::new(&root.root))));
     let mut prepared = Vec::new();
     for change in changes {
         let path = change.path.trim();
         if path.is_empty() {
             continue;
         }
-        let in_root = root_key
-            .as_deref()
-            .is_some_and(|root| engram_path_within(&engram_path_key(FsPath::new(path)), root));
+        let in_root = root_key.as_deref().is_some_and(|root| {
+            engram_path_within(
+                &engram_path_key(&normalize_user_facing_path(FsPath::new(path))),
+                root,
+            )
+        });
         if !in_root
             && (change.session_id.is_none() && scoped_paths.contains(path)
                 || change

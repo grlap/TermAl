@@ -3,7 +3,7 @@
 //! to write anywhere but a TermAl test temp root (tm-47g6).
 //!
 //! Owns fixture self-protection tests. Does not own adapter conformance, the
-//! fixtures' behaviour under a valid home, or `real_engram_control_fixture_path`
+//! adapter behaviour under a valid home, or `real_engram_control_fixture_path`
 //! (the parent's readiness and compaction suites import it). New module beside
 //! `src/tests/engram_host_adapter.rs`, created instead of growing that file.
 
@@ -17,6 +17,81 @@ struct OutsideHome(PathBuf);
 impl Drop for OutsideHome {
     fn drop(&mut self) {
         remove_test_directory(&self.0);
+    }
+}
+
+#[test]
+fn engram_control_fixture_accepts_a_canonical_test_home() {
+    let root = TestTempRoot::create("engram-fixture-canonical-home");
+    let project_file = root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-ready\n").unwrap();
+    let output = engram_command(&real_engram_control_fixture_path())
+        .arg("--project-file")
+        .arg(&project_file)
+        .arg("--home")
+        .arg(root.path())
+        .args(["readiness", "--json"])
+        .output()
+        .expect("fixture should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&output.stdout).expect("readiness JSON");
+    assert_eq!(receipt["ready"], true);
+    assert_eq!(receipt["scope"], "readiness");
+}
+
+#[cfg(unix)]
+#[test]
+fn engram_control_fixture_accepts_both_spellings_of_a_linked_user_temp() {
+    // Model /var -> /private/var without changing the parent environment or
+    // writing outside this test's own root.
+    let root = TestTempRoot::create("engram-fixture-linked-user-temp");
+    let user_temp = root.path().join("physical");
+    let alias = root.path().join("alias");
+    fs::create_dir(&user_temp).unwrap();
+    std::os::unix::fs::symlink(&user_temp, &alias).unwrap();
+    for spelling in [&user_temp, &alias] {
+        let home = spelling.join("termal/tests/home");
+        fs::create_dir_all(&home).unwrap();
+        let project_file = home.join(".engram-project");
+        fs::write(&project_file, "fixture-ready\n").unwrap();
+        let output = engram_command(&real_engram_control_fixture_path())
+            .env("TERMAL_TEST_USER_TEMP", &alias)
+            .arg("--project-file")
+            .arg(&project_file)
+            .arg("--home")
+            .arg(&home)
+            .args(["readiness", "--json"])
+            .output()
+            .expect("fixture should run");
+        assert!(
+            output.status.success(),
+            "{}: {}",
+            home.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt: Value = serde_json::from_slice(&output.stdout).expect("readiness JSON");
+        assert_eq!(receipt["ready"], true);
+
+        let sibling = spelling.join("termal/tests-sibling");
+        for refused in [sibling.clone(), home.join("..").join("home")] {
+            let output = engram_command(&real_engram_control_fixture_path())
+                .env("TERMAL_TEST_USER_TEMP", &alias)
+                .arg("--project-file")
+                .arg(&project_file)
+                .arg("--home")
+                .arg(&refused)
+                .args(["readiness", "--json"])
+                .output()
+                .expect("fixture should run");
+            assert_eq!(output.status.code(), Some(4), "{}", refused.display());
+            assert!(String::from_utf8_lossy(&output.stderr)
+                .contains("refusing --home outside a TermAl test temp root"));
+            assert!(!sibling.exists(), "a refused sibling must not be created");
+        }
     }
 }
 

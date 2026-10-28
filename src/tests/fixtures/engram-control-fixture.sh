@@ -59,8 +59,9 @@ done
 # DARWIN_USER_TEMP_DIR directory on macOS, else /tmp. Any other home is a real
 # Engram home (a developer's ~/.engram received one once). Refuse before any
 # write; exit 4 is used by no other exit in either fixture script. The root is
-# normalised with a logical cd (dot and trailing-slash spelling, no symlink
-# resolution, matching the Rust side); the home is compared at a component
+# resolved with physical cd (including macOS's /var alias), matching the
+# canonical TestTempRoot. Keep the logical spelling too for public paths
+# passed by the connection resolver. Each spelling is compared at a component
 # boundary and any `..` segment is refused outright, since nothing normalises
 # the home here.
 refuse_engram_home() {
@@ -74,14 +75,16 @@ if [ -z "$user_temp" ]; then
   esac
   [ -n "$user_temp" ] || user_temp=/tmp
 fi
-test_root=$(cd "$user_temp" 2>/dev/null && pwd) || test_root=""
+test_root=$(cd "$user_temp" 2>/dev/null && pwd -P) || test_root=""
 [ -n "$test_root" ] || refuse_engram_home
 test_root="${test_root%/}/termal/tests"
+logical_test_root=$(cd "$user_temp" 2>/dev/null && pwd -L) || refuse_engram_home
+logical_test_root="${logical_test_root%/}/termal/tests"
 case "/$engram_home/" in
   */../*) refuse_engram_home ;;
 esac
 case "$engram_home" in
-  "$test_root"|"$test_root"/*) ;;
+  "$test_root"|"$test_root"/*|"$logical_test_root"|"$logical_test_root"/*) ;;
   *) refuse_engram_home ;;
 esac
 
