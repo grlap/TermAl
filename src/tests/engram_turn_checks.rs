@@ -908,6 +908,8 @@ impl CheckedTurn {
                 workdir
             },
         );
+        // The low-level fixture creator bypasses normal API path normalization.
+        let workdir = normalize_user_facing_path(&workdir);
         let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &workdir);
         enable_test_project_engram(&state, &project_id, &root);
         {

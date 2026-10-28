@@ -1,8 +1,9 @@
 param([Parameter(Mandatory=$true)][string]$RequestPath,
-  [Parameter(Mandatory=$true)][string]$CompilerScratch)
+  [Parameter(Mandatory=$true)][string]$CompilerScratch,
+  [Parameter(Mandatory=$true)][string]$BootstrapPath)
 $ErrorActionPreference = 'Stop'
 function Write-BootstrapPhase([string]$Phase) {
-  [IO.File]::AppendAllText(($RequestPath + '.bootstrap.jsonl'), ((@{phase=$Phase;pid=$PID;compilerScratch=$CompilerScratch} | ConvertTo-Json -Compress) + [Environment]::NewLine))
+  [IO.File]::AppendAllText($BootstrapPath, ((@{phase=$Phase;pid=$PID;compilerScratch=$CompilerScratch} | ConvertTo-Json -Compress) + [Environment]::NewLine))
 }
 Write-BootstrapPhase 'script-entered'
 $request = Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -24,7 +25,7 @@ try {
   }
   [TestCommandOwner]::Run([string]$request.command, [string[]]$request.args,
     [string]$request.cwd, [string]$request.log, [string]$request.ledger,
-    [string]$request.nonce, [int]$request.cleanupBudgetMs, ($RequestPath + '.bootstrap.jsonl'))
+    [string]$request.nonce, [int]$request.cleanupBudgetMs, $BootstrapPath)
   Write-BootstrapPhase 'native-returned'
 } catch {
   Write-BootstrapPhase 'script-failed'

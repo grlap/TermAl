@@ -2,8 +2,8 @@
 // initialize without DETACHED_PROCESS; Node's private job also owns that child.
 // PowerShell holds the only strict command-job handle. No target runs outside it.
 import { spawn } from "node:child_process";
-import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve, toNamespacedPath } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const requestPath = process.argv[2];
@@ -38,9 +38,18 @@ ensureOwnedDirectory(compilerTemp);
 ensureOwnedDirectory(compilerBase);
 const compilerScratch = mkdtempSync(join(compilerBase, "o-"));
 assertOwnedDirectory(compilerScratch);
+// Windows PowerShell's framework file APIs still impose MAX_PATH. Keep its
+// request and bootstrap trace beside the existing short compiler scratch;
+// Node archives the trace at the original, unshortened run path before exit.
+const compilerRequest = join(compilerScratch, "request.json");
+const bootstrapPath = join(compilerScratch, "bootstrap.jsonl");
+writeFileSync(compilerRequest, JSON.stringify({
+  ...request, log: toNamespacedPath(request.log), ledger: toNamespacedPath(request.ledger),
+}), { flag: "wx" });
 const args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
   join(dirname(fileURLToPath(import.meta.url)), "test-process-owner-windows.ps1"),
-  "-RequestPath", requestPath, "-CompilerScratch", compilerScratch];
+  "-RequestPath", compilerRequest, "-CompilerScratch", compilerScratch,
+  "-BootstrapPath", bootstrapPath];
 trace("node-guardian-entered");
 const child = spawn(powershell, args, {
   cwd: request.cwd, env: process.env, detached: false, windowsHide: true,
@@ -60,8 +69,19 @@ child.stdout.pipe(process.stdout, { end: false });
 child.stderr.pipe(process.stderr, { end: false });
 child.on("error", (error) => { process.stderr.write(`PowerShell bootstrap failed: ${error.message}\n`); });
 child.on("close", (code, signal) => {
+  let exitCode = code ?? 1;
+  let bootstrapArchived = false;
+  try {
+    appendFileSync(`${requestPath}.bootstrap.jsonl`, readFileSync(bootstrapPath));
+    bootstrapArchived = true;
+  } catch (error) {
+    trace("bootstrap-archive-failed", { bootstrapPath, error: error.message });
+    process.stderr.write(`PowerShell bootstrap archive failed: ${error.message}\n`);
+    exitCode = 1;
+  }
   trace("powershell-close", { bootstrapPid: child.pid, code, signal });
   try {
+    if (!bootstrapArchived) throw new Error("unarchived bootstrap evidence must be retained");
     assertOwnedDirectory(compilerTemp);
     assertOwnedDirectory(compilerBase);
     assertOwnedDirectory(compilerScratch);
@@ -77,5 +97,5 @@ child.on("close", (code, signal) => {
     trace("compiler-scratch-retained", { compilerScratch, error: error.message });
   }
   process.stdin.destroy();
-  process.exitCode = code ?? 1;
+  process.exitCode = exitCode;
 });

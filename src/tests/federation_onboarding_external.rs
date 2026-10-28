@@ -87,5 +87,52 @@ fn federation_onboarding_local_probe_resolves_paths_and_reaps_fixed_child() {
     assert!(probe.paths_resolved && probe.child_spawned_and_reaped);
     assert_eq!(probe.platform, std::env::consts::OS);
     assert_eq!(probe.arch, std::env::consts::ARCH);
-    assert!(probe.toolchain_identity.starts_with("rustc "));
+}
+
+#[test]
+fn federation_onboarding_platform_probe_keeps_optional_toolchain_observations() {
+    let directory = fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
+    // A compiler is optional on an installed host. Exercise both fallback
+    // causes without depending on PATH or a live rustup proxy's response time.
+    for observed in [Some("rustc fixture-version"), Some(""), None] {
+        let calls = std::cell::Cell::new(0);
+        let probe = federation_platform_probe_with(&directory, |program, args, cwd| {
+            assert_eq!(cwd, directory.as_path());
+            let call = calls.get();
+            calls.set(call + 1);
+            match call {
+                0 => {
+                    #[cfg(windows)]
+                    {
+                        assert_eq!(program, "cmd.exe");
+                        assert_eq!(args, &["/d", "/s", "/c", "echo TERMAL_PROBE_WAKE"]);
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        assert_eq!(program, "/bin/sh");
+                        assert_eq!(args, &["-c", "printf TERMAL_PROBE_WAKE"]);
+                    }
+                    Ok("TERMAL_PROBE_WAKE".to_owned())
+                }
+                1 => {
+                    assert_eq!(program, "rustc");
+                    assert_eq!(args, &["--version"]);
+                    observed.map(str::to_owned).ok_or_else(|| {
+                        ApiError::from_status(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "fixture probe unavailable",
+                        )
+                    })
+                }
+                _ => panic!("unexpected additional platform probe"),
+            }
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 2);
+        assert!(probe.paths_resolved && probe.child_spawned_and_reaped);
+        assert_eq!(
+            probe.toolchain_identity,
+            observed.filter(|text| !text.is_empty()).unwrap_or("unavailable")
+        );
+    }
 }

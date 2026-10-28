@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { AgentIcon } from "./agent-icon";
+import { SessionRowRemoteMarker, describeSessionRemote } from "./session-row-remote-marker";
 import {
   describeProjectScope,
   type ComboboxOption,
@@ -375,11 +376,16 @@ export function AppControlSurface({
       const preview = showErrorReason
         ? session.preview
         : (searchResult?.snippet ?? session.preview);
+      const remote = describeSessionRemote(
+        session,
+        session.projectId ? projectLookup.get(session.projectId) : null,
+        remoteLookup,
+      );
 
       return (
         <div
           key={`${surfaceId}-${session.id}`}
-          className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
+          className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}${remote ? " remote" : ""}`}
           onMouseLeave={() => {
             if (!isKilling && !isKillConfirmationOpen) {
               setKillRevealSessionId((current) =>
@@ -454,6 +460,7 @@ export function AppControlSurface({
                 {preview}
               </div>
             </div>
+            {remote ? <SessionRowRemoteMarker remote={remote} /> : null}
           </button>
           <button
             className="session-row-status-button"

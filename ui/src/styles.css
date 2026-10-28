@@ -3954,6 +3954,34 @@ textarea {
   transform: translateY(-2px);
 }
 
+/* A remote-hosted session's marker sits immediately left of the agent-icon
+   status button: same top and height, right edge 0.3rem left of the button
+   (0.8rem inset + 2.1rem button). The title line reserves its width too. */
+.session-row-remote-marker {
+  position: absolute;
+  top: 0.8rem;
+  right: calc(0.8rem + 2.1rem + 0.3rem);
+  height: 2.1rem;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  transition: opacity 140ms ease;
+}
+
+.session-row-remote-marker-symbol {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+.session-row-shell.remote .session-title-line {
+  padding-right: calc(2.9rem + var(--icon-size-sm) + 0.3rem);
+}
+
+/* The Kill button is wider than the status button it replaces. */
+.session-row-shell.kill-armed .session-row-remote-marker {
+  opacity: 0;
+}
+
 .session-row-shell.kill-armed .session-row-kill,
 .session-row-kill:disabled {
   opacity: 1;

@@ -18,7 +18,7 @@ import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 const launcherUrl = new URL("./test-launcher.mjs", import.meta.url).href;
 const sourceRoot = realpathSync.native(fileURLToPath(new URL("../", import.meta.url)));
 
-function fixture(t, linked) {
+function fixture(t, linked, longRun = false) {
   const directory = join(sourceRoot, ".tmp", "launcher-git-path-fixtures");
   mkdirSync(directory, { recursive: true });
   const canonicalDirectory = realpathSync.native(directory);
@@ -26,7 +26,17 @@ function fixture(t, linked) {
   assert.ok(fromSource && !isAbsolute(fromSource) && !fromSource.split(/[\\/]/u).includes(".."));
   const base = mkdtempSync(join(canonicalDirectory, "launcher git path "));
   removeFixtureOnPass(t, base);
-  const main = join(base, "main worktree");
+  let worktreeBase = base;
+  if (longRun) {
+    // Git refuses an explicit GIT_DIR above PATH_MAX - 40 even with
+    // core.longpaths. Leave its admin path at 210; review-runs and the run
+    // id then put the real run directory beyond 260 and its bootstrap past 300.
+    const padding = 210 - join(base, "main worktree", ".git", "worktrees", "linked-worktree").length - 1;
+    assert.ok(padding > 0, "fixture checkout must leave room below Git's own GIT_DIR limit");
+    worktreeBase = join(base, "x".repeat(padding));
+  }
+  mkdirSync(worktreeBase, { recursive: true });
+  const main = join(worktreeBase, "main worktree");
   mkdirSync(main);
   const env = isolatedGitEnvironment({
     ...process.env,
@@ -47,7 +57,7 @@ function fixture(t, linked) {
   writeFileSync(join(main, "tracked.txt"), "fixture\n");
   git(["add", "tracked.txt"]);
   git(["commit", "--quiet", "--no-gpg-sign", "-m", "fixture"]);
-  const root = linked ? join(base, "linked worktree") : main;
+  const root = linked ? join(worktreeBase, "linked worktree") : main;
   if (linked) git(["worktree", "add", "--quiet", "--detach", root, "HEAD"]);
   const admin = realpathSync.native(git(["rev-parse", "--absolute-git-dir"], root).replace(/\r?\n$/u, ""));
   if (linked) assert.notEqual(admin, realpathSync.native(join(main, ".git")));
@@ -144,11 +154,13 @@ async function launch(root, admin, env, preload, execute) {
   return JSON.parse(reports[0].slice("GIT_PATH_FIXTURE_RESULT ".length));
 }
 
-for (const linked of [false, true]) {
+const layouts = [{ linked: false, longRun: false }, { linked: true, longRun: false }];
+if (process.platform === "win32") layouts.push({ linked: true, longRun: true });
+for (const { linked, longRun } of layouts) {
   for (const mode of ["current", "legacy"]) {
-    test(`launcher Git path ${mode}: ${linked ? "linked" : "main"} worktree with spaces`,
+    test(`launcher Git path ${mode}: ${linked ? "linked" : "main"} worktree with spaces${longRun ? " beyond MAX_PATH" : ""}`,
       { timeout: HELPER_TEST_HANG_GUARD_MS }, async (t) => {
-        const { root, admin, env } = fixture(t, linked);
+        const { root, admin, env } = fixture(t, linked, longRun);
         const { preload, trace } = writeShim(admin, { mode });
         await registrationHost(async (host) => {
           const result = await launch(root, admin, { ...env, TERMAL_BASE_URL: host.url }, preload, true);
@@ -159,10 +171,23 @@ for (const linked of [false, true]) {
           assert.equal(result.state, "passed", JSON.stringify(result));
           assert.equal(result.executed, "x", "exactly one stage executes after registration");
           if (process.platform === "win32") {
+            if (longRun) {
+              assert.ok(result.runDir.length > 260, "keep the actual run directory beyond MAX_PATH");
+              assert.ok(join(result.runDir, "focused.log.owner-request.json.bootstrap.jsonl").length > 300,
+                "exercise the old framework bootstrap write well beyond 260 characters");
+            }
             // Linked Git metadata deliberately makes run-local compiler TEMP
             // too deep on the failing input. Keep that real run path intact.
             const phases = readFileSync(join(result.runDir, "focused.log.owner-request.json.bootstrap.jsonl"), "utf8")
               .trim().split(/\r?\n/u).map((line) => JSON.parse(line));
+            const expectedPhases = ["script-entered", "request-read", "before-add-type", "after-add-type",
+              "native-entered", "ledger-open", "ledger-committed", "native-returned", "powershell-close"];
+            let previousPhase = -1;
+            for (const phase of expectedPhases) {
+              const index = phases.findIndex((entry) => entry.phase === phase);
+              assert.ok(index > previousPhase, `preserve every bootstrap phase in order: ${phase}`);
+              previousPhase = index;
+            }
             const scratch = phases.find((entry) => entry.phase === "before-add-type").compilerScratch;
             assert.ok(isAbsolute(scratch));
             assert.ok(scratch.length <= 200, "leave room for native compiler temporary names");

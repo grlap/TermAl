@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
+using Microsoft.Win32.SafeHandles;
 #pragma warning disable 0649 // Native layout fields are populated by Win32.
 
 public static class TestCommandOwner {
@@ -40,6 +41,7 @@ public static class TestCommandOwner {
   [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr list);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateProcessW(string app, StringBuilder line, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr environment, string cwd, ref StartupEx startup, out ProcessInfo info);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateFileW(string name, uint access, uint share, ref Security security, uint disposition, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool MoveFileW(string source, string destination);
   [DllImport("kernel32.dll", SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
   [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle, uint timeout);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process, out uint code);
@@ -219,10 +221,17 @@ public static class TestCommandOwner {
     // One immutable final ledger survives even when the launcher was killed.
     string partial = ledger + ".partial";
     Trace(bootstrap, "ledger-open");
-    using (var file = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
-      byte[] bytes = new UTF8Encoding(false).GetBytes(json); file.Write(bytes, 0, bytes.Length); file.Flush(true);
+    // The guardian supplies extended-length run paths. Open through the existing
+    // Win32 owner boundary so legacy framework path validation cannot reject
+    // them; CREATE_NEW and the final move preserve immutable ledger publication.
+    var ledgerSecurity = new Security { Size = Marshal.SizeOf(typeof(Security)) };
+    using (var handle = new SafeFileHandle(CreateFileW(partial, 0x40000000, 1, ref ledgerSecurity, 1, 0x80, IntPtr.Zero), true)) {
+      Check(!handle.IsInvalid, "create owner ledger");
+      using (var file = new FileStream(handle, FileAccess.Write)) {
+        byte[] bytes = new UTF8Encoding(false).GetBytes(json); file.Write(bytes, 0, bytes.Length); file.Flush(true);
+      }
     }
-    File.Move(partial, ledger);
+    Check(MoveFileW(partial, ledger), "publish owner ledger");
     Trace(bootstrap, "ledger-committed");
     Emit(new { type = "finished", nonce = nonce, result = result });
   }
