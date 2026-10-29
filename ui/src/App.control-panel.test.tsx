@@ -484,7 +484,7 @@ describe("App control panel - helpers and compact coverage", () => {
         }
         expect(list.getByRole("button", { name: "Working sessions (2)" })).toHaveAttribute(
           "title",
-          "Active or stopping top-level sessions in the selected project scope. Background test runs are counted separately in Test Runs.",
+          "Top-level sessions in the selected project scope with a foreground turn (active or stopping) or owned running test-run work in the background. A session with both counts once.",
         );
         expect(rowNames()).not.toContain("Hidden child");
         expect(rowNames()).not.toContain("Hidden working child");

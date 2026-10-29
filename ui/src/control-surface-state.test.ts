@@ -6,6 +6,8 @@ import {
   createControlPanelSectionLauncherTab,
   resolveWorkspaceScopedSessionId,
 } from "./control-surface-state";
+import { runningRunsByOwner } from "./test-runs";
+import { makeTestRun } from "./test-runs-fixtures";
 import type { Project, Session } from "./types";
 
 function createSession(overrides: Partial<Session>): Session {
@@ -52,6 +54,27 @@ describe("buildControlSurfaceSessionListState", () => {
     const searched = buildControlSurfaceSessionListState(sessions, project, "error", "Provider");
     expect(searched.filteredSessions.map(({ id }) => id)).toEqual(["refused"]);
     expect(searched.sessionFilterCounts).toEqual(state.sessionFilterCounts);
+  });
+
+  it("counts owned background work as working within the project scope, as the docked list does", () => {
+    const project = { id: "project-1", name: "Project", rootPath: "/repo" };
+    const sessions = [
+      createSession({ id: "busy", projectId: project.id }),
+      createSession({ id: "idle", projectId: project.id }),
+      createSession({ id: "other-project", projectId: "project-2" }),
+      createSession({ id: "child", projectId: project.id, parentDelegationId: "delegation-1" }),
+    ];
+    const runsByOwner = runningRunsByOwner([
+      makeTestRun({ runId: "a", ownerSessionId: "busy", detached: true }),
+      makeTestRun({ runId: "b", ownerSessionId: "other-project", detached: true }),
+      makeTestRun({ runId: "c", ownerSessionId: "child", detached: true }),
+    ]);
+    const working = buildControlSurfaceSessionListState(sessions, project, "working", "", runsByOwner);
+    expect(working.filteredSessions.map(({ id }) => id)).toEqual(["busy"]);
+    expect(working.sessionFilterCounts).toEqual({ all: 2, working: 1, asking: 0, completed: 1, error: 0 });
+    expect(working.sessionWorkingBreakdown).toEqual({ foreground: 0, background: 1 });
+    const completed = buildControlSurfaceSessionListState(sessions, project, "completed", "", runsByOwner);
+    expect(completed.filteredSessions.map(({ id }) => id)).toEqual(["idle"]);
   });
 
   it("separates definite session-list matches from unloaded transcript state", () => {

@@ -8,6 +8,27 @@ mod authority;
 mod outage;
 mod publication;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_reference_hostname_update_retains_publication_without_promoting_old_proof() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = ReferenceFixture::new(true).await;
+    let reference = fixture.provision("before-hostname-update").await;
+    let id = reference["id"].as_str().unwrap();
+    let (version, original) = {
+        let inner = fixture.proof.central.inner.lock().unwrap();
+        (inner.federation.version, inner.federation.mailbox_references[id].clone())
+    };
+    fixture.proof.central.update_federation_ssh_host(&original.peer.peer.host_id,
+        version, "moved.local".into()).unwrap();
+    assert_eq!(fixture.resolve(id).await.status(), StatusCode::CONFLICT);
+    let retained = fixture.proof.central.inner.lock().unwrap().federation.mailbox_references[id].clone();
+    assert_eq!(retained, original, "an address update cannot rewrite an exact published receipt");
+    assert!(retained.is_published());
+    assert!(fixture.send(id, "stale-reference-after-hostname").await.is_err());
+    assert_eq!(fixture.mail_counts(), (0, 0, 0));
+    fixture.finish().await;
+}
+
 struct ReferenceFixture {
     api: DomainServer,
     proof: Fixture,

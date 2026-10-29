@@ -576,6 +576,30 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
   in the pane's existing toolbar strip, cut to 16rem with the full label as its
   title, and adds no row: the transcript, the activity strip and the composer
   keep their layout. It also shows on the board.
+- **Sessions list busy state.** The Sessions list (docked and standalone)
+  treats a session that owns a `running` run as busy even when its turn has
+  ended (`ui/src/session-work-activity.ts`, from one by-owner index built in
+  `ui/src/test-runs.ts`). Only the exact `ownerSessionId` counts: a
+  notification recipient, an unowned run and a terminal or `unknown` run never
+  make a session busy.
+  - **Working** is the union of sessions with a foreground turn (`active` or
+    `stopping`) and sessions with owned background work, each counted once;
+    **Completed** leaves out an idle session with background work. Asking and
+    Error keep their status buckets, so such a session can also be working.
+  - Beside the Working chip, "F foreground · B background" counts each kind;
+    a session with both counts in each.
+  - Each row says "Foreground turn", "Background work" or "Foreground turn +
+    background work". During a turn, a run the turn started in the foreground
+    (`detached: false`) is part of the turn; a host-observed run without a
+    detach mode (the same rule as the marker's "test running") says "running
+    work (mode unknown)", and the breakdown counts it as background. An idle
+    row with background work shows a busy badge, not the idle one. In a
+    narrow pane the label is cut with an ellipsis, and its full text is its
+    title.
+  - A run-only change (`testRunChanged`, `testRunRemoved` or a snapshot)
+    updates the counts, filters and labels without a session update.
+  - Only runs this index knows count: a detached build that was never
+    registered as a run is not seen.
 - The prototype linked on the tm-ncc6 epic is the visual reference.
 
 ## Slice 2: the test-run card

@@ -65,11 +65,13 @@ import {
 } from "./session-find";
 import {
   countSessionsByFilter,
+  countWorkingBreakdown,
   filterSessionListVisibleSessions,
   filterSessionsByListFilter,
   isSessionVisibleInSessionList,
   type SessionListFilter,
 } from "./session-list-filter";
+import type { RunningRunsByOwner } from "./test-runs";
 import type {
   OrchestratorInstance,
   Project,
@@ -172,6 +174,10 @@ export function buildControlSurfaceSessionListState(
   selectedProject: Project | null,
   sessionListFilter: SessionListFilter,
   sessionListSearchQuery: string,
+  // Each session's running owned launcher work, so the counts and the
+  // Working/Completed filters treat a session busy in the background as
+  // working, as the docked list does (app-control-panel-state.ts).
+  runsByOwner?: RunningRunsByOwner,
 ) {
   const sessionListVisibleSessions = filterSessionListVisibleSessions(sessions);
   const projectScopedSessions = selectedProject
@@ -182,10 +188,16 @@ export function buildControlSurfaceSessionListState(
   const mutableProjectScopedSessions = [...projectScopedSessions];
   const sessionFilterCounts = countSessionsByFilter(
     mutableProjectScopedSessions,
+    runsByOwner,
+  );
+  const sessionWorkingBreakdown = countWorkingBreakdown(
+    mutableProjectScopedSessions,
+    runsByOwner,
   );
   const statusFilteredSessions = filterSessionsByListFilter(
     mutableProjectScopedSessions,
     sessionListFilter,
+    runsByOwner,
   );
   const trimmedSearchQuery = sessionListSearchQuery.trim();
   const hasSessionListSearch = trimmedSearchQuery.length > 0;
@@ -194,6 +206,7 @@ export function buildControlSurfaceSessionListState(
     return {
       projectScopedSessions,
       sessionFilterCounts,
+      sessionWorkingBreakdown,
       hasSessionListSearch,
       sessionListSearchResults: new Map<string, SessionListSearchResult>(),
       filteredSessions: statusFilteredSessions,
@@ -213,6 +226,7 @@ export function buildControlSurfaceSessionListState(
   return {
     projectScopedSessions,
     sessionFilterCounts,
+    sessionWorkingBreakdown,
     hasSessionListSearch,
     sessionListSearchResults,
     filteredSessions: statusFilteredSessions.filter((session) =>

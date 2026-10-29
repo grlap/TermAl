@@ -99,6 +99,37 @@ struct FederationSshEndpoint {
     satellite_reverse_forward_port: u16,
 }
 
+// New locator updates use durable DNS names. Legacy numeric records remain
+// readable until an authorized address-only transition replaces them.
+fn validate_federation_ssh_hostname(host: &str) -> Result<(), ApiError> {
+    let dns = host.strip_suffix('.').unwrap_or(host);
+    // OpenSSH's system resolver also accepts inet_aton-style numeric forms,
+    // including mixed decimal/hex components that Rust's IpAddr rejects.
+    let numeric_ipv4 = dns.split('.').count() <= 4 && dns.split('.').all(|part| {
+        if let Some(hex) = part.strip_prefix("0x").or_else(|| part.strip_prefix("0X")) {
+            !hex.is_empty() && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+        } else {
+            !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
+        }
+    });
+    if dns.is_empty()
+        || dns.len() > 253
+        || host.parse::<std::net::IpAddr>().is_ok()
+        || numeric_ipv4
+        || !dns.bytes().any(|byte| byte.is_ascii_alphabetic())
+        || dns.split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || label.starts_with('-')
+                || label.ends_with('-')
+                || !label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
+        return Err(ApiError::bad_request("federation SSH locator requires a DNS hostname"));
+    }
+    Ok(())
+}
+
 impl FederationSshEndpoint {
     fn validate(&self) -> Result<(), ApiError> {
         // These become separate argv values. Reject option-like tokens and

@@ -4,6 +4,69 @@
 // Staged domain APIs are consumed by the separately landed transport/operator slices.
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
+    // A locator change is not enrollment. The existing mutation and supervisor
+    // own durability and reconnect; old credential/channel bases stay fenced.
+    fn update_federation_ssh_host(
+        &self,
+        id: &str,
+        expected_version: u64,
+        ssh_host: String,
+    ) -> Result<(), ApiError> {
+        validate_federation_ssh_hostname(&ssh_host)?;
+        self.mutate_federation(|domain, settings| {
+            if settings.role != FederationRole::Central || !settings.enabled {
+                return Err(ApiError::conflict("SSH hostname updates require an enabled central"));
+            }
+            if domain.version != expected_version {
+                return Err(ApiError::conflict("federation settings changed; read them again")
+                    .with_kind(ApiErrorKind::FederationVersionConflict));
+            }
+            let old = domain.peers.get(id)
+                .ok_or_else(|| ApiError::not_found("enrolled federation peer not found"))?;
+            if old.membership == FederationMembershipState::Revoked {
+                return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+            }
+            if old.endpoint.ssh_host == ssh_host {
+                return Ok(());
+            }
+            // A malformed retained pair cannot be repaired by changing its
+            // locator. Validate before deriving any successor configuration.
+            domain.validate().map_err(|_| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+            let old = old.clone();
+            for placement in domain.placements.values_mut().filter(|placement| {
+                placement.mailbox_only && placement.state != FederationPlacementState::Completed
+                    && placement.identity.host_id == id
+            }) {
+                let prior = &placement.peer;
+                if domain.local.as_ref() != Some(&prior.local)
+                    || settings.central.as_ref() != Some(&prior.central)
+                    || prior.local_role != FederationRole::Central
+                    || prior.peer != old.identity
+                    || prior.enrollment_generation != old.enrollment_generation
+                    || prior.pair_capability_ref != old.pair_capability_ref
+                    || prior.endpoint != old.endpoint
+                {
+                    // Historical authority stays fenced and byte-unchanged;
+                    // it cannot veto recovery of the current peer's locator.
+                    continue;
+                }
+                // Only mailbox locator bookkeeping moves. Old execution
+                // proof, link incarnation and immutable INSTALL intent remain.
+                placement.peer.endpoint.ssh_host = ssh_host.clone();
+                if let Some(intent) = domain.binding_install_intents.get_mut(&placement.admission_key) {
+                    intent.configuration_basis = placement.peer.configuration_basis();
+                }
+            }
+            let peer = domain.peers.get_mut(id)
+                .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+            peer.endpoint.ssh_host = ssh_host;
+            peer.record_generation = federation_next_generation(peer.record_generation)?;
+            peer.transport_generation = federation_next_generation(peer.transport_generation)?;
+            domain.links.remove(id);
+            Ok(())
+        })
+    }
+
     fn enroll_federation_peer(&self, peer: FederationPeerRecord) -> Result<(), ApiError> {
         self.enroll_federation_peer_with(peer, |_, _| Ok(()))
     }

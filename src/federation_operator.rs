@@ -15,6 +15,28 @@ struct UpdateFederationSettingsRequest {
     expected_version: Option<u64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateFederationSshHostRequest {
+    expected_version: u64,
+    ssh_host: String,
+}
+
+async fn update_federation_ssh_host_route(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    request: Result<Json<UpdateFederationSshHostRequest>, JsonRejection>,
+) -> Result<Json<Value>, Response> {
+    let Json(request) = request
+        .map_err(|rejection| api_json_rejection("federation SSH hostname", rejection).into_response())?;
+    run_blocking_api(move || {
+        state.update_federation_ssh_host(&id, request.expected_version, request.ssh_host)?;
+        state.federation_registry_view().map(Json)
+    })
+    .await
+    .map_err(federation_settings_refusal)
+}
+
 async fn get_federation(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let view = run_blocking_api(move || state.federation_registry_view()).await?;
     Ok(Json(view))

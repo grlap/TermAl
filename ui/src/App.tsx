@@ -12,6 +12,7 @@ import {
 } from "react";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { TestRunsProvider } from "./test-runs-context";
+import { runningRunsByOwner } from "./test-runs";
 import { EngramControlRecoveryContext } from "./engram-control-recovery";
 import { openTestRunsInWorkspaceState } from "./workspace";
 import { DialogCloseIcon } from "./message-card-icons";
@@ -993,6 +994,9 @@ export default function App() {
     activeTranscriptSessionId,
     visibleSessionHydrationTargets,
   });
+  // One index of each session's running owned launcher work, shared by the
+  // docked and standalone Sessions lists.
+  const testRunsByOwner = useMemo(() => runningRunsByOwner(testRuns), [testRuns]);
 
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
@@ -1178,6 +1182,7 @@ export default function App() {
     controlPanelContextSession,
     controlPanelSessionId,
     sessionFilterCounts,
+    sessionWorkingBreakdown,
     hasSessionListSearch,
     sessionListSearchResults,
     filteredSessions,
@@ -1201,6 +1206,7 @@ export default function App() {
     agentReadinessByAgent,
     sessionListFilter,
     sessionListSearchQuery,
+    testRunsByOwner,
     controlPanelFilesystemRoot,
     setControlPanelFilesystemRoot,
     controlPanelGitWorkdir,
@@ -2016,6 +2022,8 @@ export default function App() {
         sessionListSearchQuery={sessionListSearchQuery}
         setSessionListSearchQuery={setSessionListSearchQuery}
         sessionFilterCounts={sessionFilterCounts}
+        sessionWorkingBreakdown={sessionWorkingBreakdown}
+        testRunsByOwner={testRunsByOwner}
         hasSessionListSearch={hasSessionListSearch}
         sessionListSearchResults={sessionListSearchResults}
         filteredSessions={filteredSessions}

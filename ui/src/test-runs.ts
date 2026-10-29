@@ -117,6 +117,27 @@ export function applyTestRunDelta(runs: readonly TestRunSummary[], event: TestRu
   if (event.type === "testRunChanged") next.push(event.run);
   return sortTestRuns(next);
 }
+/** Running runs grouped by their exact owner session. */
+export type RunningRunsByOwner = ReadonlyMap<string, readonly TestRunSummary[]>;
+export const NO_RUNNING_RUNS_BY_OWNER: RunningRunsByOwner = new Map();
+// Only the owner is busy with a run: the session a run will notify is not, and
+// a run with no owner belongs to no session. Terminal and unknown runs are
+// never counted as running work.
+export function runningRunsByOwner(runs: readonly TestRunSummary[]): RunningRunsByOwner {
+  const byOwner = new Map<string, TestRunSummary[]>();
+  for (const run of runs) {
+    if (run.state !== "running" || !run.ownerSessionId) continue;
+    const owned = byOwner.get(run.ownerSessionId);
+    if (owned) owned.push(run);
+    else byOwner.set(run.ownerSessionId, [run]);
+  }
+  return byOwner.size ? byOwner : NO_RUNNING_RUNS_BY_OWNER;
+}
+/** The host observed the run's command but not whether it was detached. Any
+ * other run without a detach mode reads as background work. */
+export function testRunDetachModeUnobserved(run: TestRunSummary) {
+  return run.registrationState === "hostObserved" && run.detached == null;
+}
 export function testRunMatchesSession(run: TestRunSummary, sessionId: string) {
   return run.ownerSessionId === sessionId || run.notifySessionId === sessionId;
 }
@@ -126,7 +147,7 @@ export function testRunSessionMarker(runs: readonly TestRunSummary[], sessionId:
   const foreground = relevant.some(run => run.ownerSessionId === sessionId && run.detached === false);
   const owned = relevant.some(run => run.ownerSessionId === sessionId);
   const observedWithoutDetach = relevant.some(run => run.ownerSessionId === sessionId
-    && run.registrationState === "hostObserved" && run.detached == null);
+    && testRunDetachModeUnobserved(run));
   const label = foreground ? "running tests" : owned ? observedWithoutDetach ? "test running" : "test run in background" : "test run will notify this session";
   const roleRuns = relevant.filter(run => foreground
     ? run.ownerSessionId === sessionId && run.detached === false

@@ -63,7 +63,10 @@ import type {
 import {
   filterSessionListVisibleSessions,
   type SessionListFilter,
+  type SessionWorkingBreakdown,
 } from "./session-list-filter";
+import { sessionWorkActivity, sessionWorkLabel } from "./session-work-activity";
+import type { RunningRunsByOwner } from "./test-runs";
 import type { SessionListSearchResult } from "./session-find";
 import type {
   OrchestratorRuntimeAction,
@@ -90,6 +93,9 @@ type AppControlSurfaceProps = {
   sessionListSearchQuery: string;
   setSessionListSearchQuery: Dispatch<SetStateAction<string>>;
   sessionFilterCounts: Record<SessionListFilter, number>;
+  sessionWorkingBreakdown: SessionWorkingBreakdown;
+  /** Each session's running owned launcher work (test-runs.ts). */
+  testRunsByOwner: RunningRunsByOwner;
   hasSessionListSearch: boolean;
   sessionListSearchResults: Map<string, SessionListSearchResult>;
   filteredSessions: Session[];
@@ -188,6 +194,8 @@ export function AppControlSurface({
   sessionListSearchQuery,
   setSessionListSearchQuery,
   sessionFilterCounts,
+  sessionWorkingBreakdown,
+  testRunsByOwner,
   hasSessionListSearch,
   sessionListSearchResults,
   filteredSessions,
@@ -299,6 +307,7 @@ export function AppControlSurface({
           controlSurfaceSelectedProject,
           standaloneControlSurfaceViewState?.sessionListFilter ?? "all",
           standaloneControlSurfaceViewState?.sessionListSearchQuery ?? "",
+          testRunsByOwner,
         )
       : null;
     const controlSurfaceSessionListFilter = standaloneSessionListState
@@ -310,6 +319,9 @@ export function AppControlSurface({
     const controlSurfaceSessionFilterCounts = standaloneSessionListState
       ? standaloneSessionListState.sessionFilterCounts
       : sessionFilterCounts;
+    const controlSurfaceWorkingBreakdown = standaloneSessionListState
+      ? standaloneSessionListState.sessionWorkingBreakdown
+      : sessionWorkingBreakdown;
     const controlSurfaceHasSessionListSearch = standaloneSessionListState
       ? standaloneSessionListState.hasSessionListSearch
       : hasSessionListSearch;
@@ -381,6 +393,13 @@ export function AppControlSurface({
         session.projectId ? projectLookup.get(session.projectId) : null,
         remoteLookup,
       );
+      // A session busy only with background work is not idle, whatever its
+      // turn status; the label says which kind of work keeps it busy.
+      const workActivity = sessionWorkActivity(session, testRunsByOwner);
+      const workLabel = sessionWorkLabel(workActivity);
+      const workKind = workActivity.foreground && workActivity.background
+        ? "both"
+        : workActivity.background ? "background" : workActivity.foreground ? "foreground" : undefined;
 
       return (
         <div
@@ -442,6 +461,11 @@ export function AppControlSurface({
             <div className="session-copy">
               <div className="session-title-line">
                 <strong>{session.name}</strong>
+                {workLabel ? (
+                  <span className="session-work-label" data-work={workKind} title={workLabel}>
+                    {workLabel}
+                  </span>
+                ) : null}
                 {searchResult ? (
                   <span className="session-search-count">
                     {searchResult.transcriptIncomplete &&
@@ -475,6 +499,7 @@ export function AppControlSurface({
             <span
               className="status-agent-badge session-row-status-badge"
               data-status={session.status}
+              data-work={workActivity.background ? "background" : undefined}
             >
               <AgentIcon
                 agent={session.agent}
@@ -1297,10 +1322,25 @@ export function AppControlSurface({
                       }
                     }}
                     aria-pressed={controlSurfaceSessionListFilter === "working"}
-                    title="Active or stopping top-level sessions in the selected project scope. Background test runs are counted separately in Test Runs."
+                    aria-describedby={
+                      controlSurfaceSessionFilterCounts.working > 0
+                        ? `${surfaceId}-working-breakdown`
+                        : undefined
+                    }
+                    title="Top-level sessions in the selected project scope with a foreground turn (active or stopping) or owned running test-run work in the background. A session with both counts once."
                   >
                     Working sessions ({controlSurfaceSessionFilterCounts.working})
                   </button>
+                  {controlSurfaceSessionFilterCounts.working > 0 ? (
+                    <span
+                      id={`${surfaceId}-working-breakdown`}
+                      className="sidebar-status-breakdown"
+                      title="A session with a foreground turn and background work counts in both."
+                    >
+                      {controlSurfaceWorkingBreakdown.foreground} foreground ·{" "}
+                      {controlSurfaceWorkingBreakdown.background} background
+                    </span>
+                  ) : null}
                   <button
                     className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "asking" ? "selected" : ""}`}
                     type="button"

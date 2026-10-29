@@ -549,6 +549,9 @@ mod roles;
 #[path = "federation_operator.rs"]
 mod operator;
 
+#[path = "federation_endpoint.rs"]
+mod endpoint;
+
 #[path = "federation_satellite_operator.rs"]
 mod satellite_operator;
 

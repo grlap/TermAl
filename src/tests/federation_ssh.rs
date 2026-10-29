@@ -103,6 +103,23 @@ fn federation_ssh_uses_one_strict_batch_session_and_two_loopback_forwards() {
 }
 
 #[test]
+fn federation_hostname_dials_retain_the_exact_pinned_key_alias_instead_of_an_ip_cache() {
+    let mut remote = satellite_ssh_config();
+    remote.host = Some("satellite.local".into());
+    // Every replacement child receives the name again. DNS resolution belongs
+    // to OpenSSH, which still requires the same fixed known-hosts key alias.
+    for _ in 0..2 {
+        let args = federation_ssh_command_args(&remote, &federation_forwards(), FsPath::new("known-hosts")).unwrap();
+        assert_eq!(args.last().unwrap(), "operator@satellite.local");
+        for option in ["HostKeyAlias=pair-host-key", "StrictHostKeyChecking=yes",
+            "CheckHostIP=no", "VerifyHostKeyDNS=no", "UpdateHostKeys=no", "ControlMaster=no"] {
+            assert!(args.windows(2).any(|pair| pair == ["-o", option]), "{option}");
+        }
+        assert!(args.windows(2).any(|pair| pair == ["-o", "UserKnownHostsFile=known-hosts"]));
+    }
+}
+
+#[test]
 fn federation_ssh_rejects_disabled_or_local_configs_and_unusable_ports() {
     let mut remote = satellite_ssh_config();
     remote.enabled = false;

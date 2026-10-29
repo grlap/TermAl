@@ -127,6 +127,102 @@ async fn mailbox_relay_wake_reaches_a_satellite_whose_record_of_central_is_only_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_boot_boundary_retries_after_missing_link_without_replaying_mail() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "boot-waits-for-link").await;
+    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    assert!(queued_relay_wake(&fixture, &sent.mailbox_id).is_some());
+    // The restored process has lost its former runtime queue. Keep the exact
+    // durable boundary and message; only process-owned delivery is gone.
+    fixture.satellite.mailbox_store.connection().unwrap().execute(
+        "UPDATE mailbox_relay_notifications SET handed_off=1,queued=1", [],
+    ).unwrap();
+    {
+        let mut inner = fixture.satellite.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.native).unwrap();
+        inner.sessions[index].queued_prompts.clear();
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+    fixture.satellite_channel.invalidate();
+    let mut boot = MailboxRelayBootRecovery::default();
+    fixture.satellite.reconcile_mailbox_relay_notifications_after_boot(&mut boot).await.unwrap();
+    assert_eq!(boot.retry.len(), 1, "the unavailable home retains the original boundary");
+    assert!(!boot.complete());
+    assert!(queued_relay_wake(&fixture, &sent.mailbox_id).is_none());
+    fixture.reconnect().await;
+    fixture.satellite.reconcile_mailbox_relay_notifications_after_boot(&mut boot).await.unwrap();
+    assert!(boot.complete(), "fresh authentication releases the same retained boot boundary");
+    fixture.satellite.run_mailbox_relay_wake_batch(0, 0).await;
+    let wake = queued_relay_wake(&fixture, &sent.mailbox_id).expect("unread metadata is rearmed");
+    assert!(wake.contains("[TermAl mailbox notification]"));
+    assert!(!wake.contains("routine body"));
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let count: u64 = fixture.central.mailbox_store.connection().unwrap().query_row(
+        "SELECT count(*) FROM mailbox_messages WHERE mailbox_id=?1", [&locator.id], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(count, 1, "boot recovery never replays the committed message");
+    proxy.finish().await;
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_hostname_migration_recovers_send_read_ack_without_reference_republication() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = Fixture::production_shape().await;
+    let mut proxy = ProxySend::new(&fixture).await;
+    let old = fixture.channel.current_lease().unwrap();
+    let enrolled = fixture.channel.current_authority().unwrap();
+    let version = fixture.central.inner.lock().unwrap().federation.version;
+    fixture.central.update_federation_ssh_host(&enrolled.peer.host_id, version, "moved.local".into()).unwrap();
+    assert!(old.with_current(&fixture.central, |_, _| Ok(())).is_err());
+    let mut successor = FederationChannel::for_app(
+        fixture.central.federation_peer_snapshot(&enrolled.peer.host_id).unwrap(),
+        FederationPairCapability::new("a".repeat(64)).unwrap(), fixture.central.clone(),
+    );
+    successor.control.clock = FederationControlClock::scripted_io();
+    let checked = successor.clone();
+    fixture.rpc = FederationRpcClient::new(fixture.server.port, successor.clone(),
+        Arc::new(move || checked.current_authority().map(|_| ()))).unwrap();
+    fixture.channel = successor;
+    fixture.reconnect().await;
+    proxy.central_domain.finish().await;
+    let checked = fixture.channel.clone();
+    proxy.central_domain = DomainServer::start(federation_router(fixture.channel.clone(),
+        Arc::new(move || checked.current_authority().map(|_| ())))).await;
+    fixture.central.federation_peer_handles.lock().unwrap().insert(enrolled.peer.host_id.clone(),
+        Arc::new(FederationPeerHandle { channel: fixture.channel.clone(), rpc: fixture.rpc.clone() }));
+    let checked = fixture.satellite_channel.clone();
+    let reverse = FederationRpcClient::new(proxy.central_domain.port, fixture.satellite_channel.clone(),
+        Arc::new(move || checked.current_authority().map(|_| ()))).unwrap();
+    fixture.satellite.federation_peer_handles.lock().unwrap().insert(enrolled.local.host_id.clone(),
+        Arc::new(FederationPeerHandle { channel: fixture.satellite_channel.clone(), rpc: reverse }));
+    let sent = proxy.send(&fixture, "mail-after-address-change").await;
+    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    assert!(queued_relay_wake(&fixture, &sent.mailbox_id).is_some());
+    let page = read_mailbox(AxumPath((fixture.native.clone(), sent.mailbox_id.clone())),
+        State(fixture.satellite.clone()), Json(ReadMailboxRequest {
+            after_sequence: None, limit: 20, issue_receipt: true, read_key: None,
+        })).await.unwrap().0;
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].id, sent.message_id);
+    let summary = acknowledge_mailbox(AxumPath((fixture.native.clone(), sent.mailbox_id.clone())),
+        State(fixture.satellite.clone()), Json(AcknowledgeMailboxRequest {
+            receipt: page.receipt, expected_processed_through: None,
+            processed_through: None, no_continuation: false,
+        })).await.unwrap().0;
+    assert_eq!(summary.unread_count, 0);
+    let fresh = fixture.channel.current_authority().unwrap();
+    assert_eq!(fresh.enrollment_generation, enrolled.enrollment_generation);
+    assert_eq!(fresh.peer, enrolled.peer);
+    let references = fixture.central.inner.lock().unwrap().federation.mailbox_references.len();
+    assert_eq!(references, 0, "ordinary native mail never needs a published reference");
+    proxy.finish().await;
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn satellite_accepts_its_central_short_of_revocation_and_only_at_the_current_enrollment() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::production_shape().await;

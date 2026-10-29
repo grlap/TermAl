@@ -3003,6 +3003,16 @@ textarea {
   border-color: color-mix(in srgb, var(--signal-blue) 22%, transparent);
 }
 
+/* No turn running, but the session owns running background work: busy, not
+   idle, and distinct from an active foreground turn. */
+.status-agent-badge[data-status="idle"][data-work="background"]::before {
+  inset: -0.22rem;
+  border-width: 1.9px;
+  border-color: color-mix(in srgb, var(--signal-blue) 36%, transparent);
+  border-top-color: var(--signal-blue);
+  animation: spin 1600ms linear infinite;
+}
+
 .status-agent-badge[data-status="approval"]::before {
   border-color: color-mix(in srgb, var(--signal-gold) 52%, transparent);
 }
@@ -3866,6 +3876,12 @@ textarea {
   color: var(--ink);
 }
 
+.sidebar-status-breakdown {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.82em;
+}
+
 .session-filter-empty {
   padding: 0.15rem 0.1rem;
   color: var(--muted);
@@ -4102,6 +4118,23 @@ textarea {
   gap: 0.5rem;
   min-height: 2.1rem;
   padding-right: 2.9rem;
+}
+
+/* Shrinks before the session name does, and is cut with an ellipsis in a
+   narrow pane; the full label is its title. */
+.session-work-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+.session-work-label[data-work="background"],
+.session-work-label[data-work="both"] {
+  color: var(--signal-blue);
 }
 
 .session-search-count {

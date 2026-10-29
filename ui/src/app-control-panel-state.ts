@@ -11,10 +11,13 @@ import { fetchGitStatus } from "./api";
 import type { StandaloneControlSurfaceViewState } from "./app-shell-internals";
 import {
   countSessionsByFilter,
+  countWorkingBreakdown,
   filterSessionListVisibleSessions,
   filterSessionsByListFilter,
   type SessionListFilter,
+  type SessionWorkingBreakdown,
 } from "./session-list-filter";
+import type { RunningRunsByOwner } from "./test-runs";
 import {
   buildSessionListSearchResultFromIndex,
   buildSessionSearchIndex,
@@ -79,6 +82,8 @@ type UseAppControlPanelStateParams = {
   agentReadinessByAgent: Map<AgentType, AgentReadiness>;
   sessionListFilter: SessionListFilter;
   sessionListSearchQuery: string;
+  /** Each session's running owned launcher work (test-runs.ts). */
+  testRunsByOwner: RunningRunsByOwner;
   controlPanelFilesystemRoot: string | null;
   setControlPanelFilesystemRoot: Dispatch<SetStateAction<string | null>>;
   controlPanelGitWorkdir: string | null;
@@ -110,6 +115,7 @@ type UseAppControlPanelStateReturn = {
   controlPanelContextSession: Session | null;
   controlPanelSessionId: string | null;
   sessionFilterCounts: Record<SessionListFilter, number>;
+  sessionWorkingBreakdown: SessionWorkingBreakdown;
   hasSessionListSearch: boolean;
   sessionListSearchResults: Map<string, SessionListSearchResult>;
   filteredSessions: Session[];
@@ -203,6 +209,7 @@ export function useAppControlPanelState({
   agentReadinessByAgent,
   sessionListFilter,
   sessionListSearchQuery,
+  testRunsByOwner,
   controlPanelFilesystemRoot,
   setControlPanelFilesystemRoot,
   controlPanelGitWorkdir,
@@ -398,13 +405,19 @@ export function useAppControlPanelState({
   const derivedControlPanelFilesystemRoot = derivedControlPanelWorkspaceRoot;
   const derivedControlPanelGitWorkdir = derivedControlPanelWorkspaceRoot;
   const controlPanelSessionId = controlPanelContextSession?.id ?? null;
+  // A run-only change (a run starting, finishing or going away) changes
+  // testRunsByOwner without touching any session, and recomputes these.
   const sessionFilterCounts = useMemo(
-    () => countSessionsByFilter(projectScopedSessions),
-    [projectScopedSessions],
+    () => countSessionsByFilter(projectScopedSessions, testRunsByOwner),
+    [projectScopedSessions, testRunsByOwner],
+  );
+  const sessionWorkingBreakdown = useMemo(
+    () => countWorkingBreakdown(projectScopedSessions, testRunsByOwner),
+    [projectScopedSessions, testRunsByOwner],
   );
   const statusFilteredSessions = useMemo(() => {
-    return filterSessionsByListFilter(projectScopedSessions, sessionListFilter);
-  }, [projectScopedSessions, sessionListFilter]);
+    return filterSessionsByListFilter(projectScopedSessions, sessionListFilter, testRunsByOwner);
+  }, [projectScopedSessions, sessionListFilter, testRunsByOwner]);
   const trimmedSessionListSearchQuery = sessionListSearchQuery.trim();
   const deferredSessionListSearchQuery = useDeferredValue(
     trimmedSessionListSearchQuery,
@@ -582,6 +595,7 @@ export function useAppControlPanelState({
     controlPanelContextSession,
     controlPanelSessionId,
     sessionFilterCounts,
+    sessionWorkingBreakdown,
     hasSessionListSearch,
     sessionListSearchResults,
     filteredSessions,

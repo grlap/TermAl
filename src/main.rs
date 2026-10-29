@@ -318,6 +318,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(enroll_federation_satellite),
         )
         .route(
+            "/api/federation/peers/{id}/ssh-host",
+            post(update_federation_ssh_host_route),
+        )
+        .route(
             "/api/federation/peers/{id}/verify",
             post(verify_federation_satellite_route),
         )

@@ -14,7 +14,9 @@ TermAl host stores credential references rather than secret values.
 
 Configure one M1 registry entry with the satellite's stable host identity,
 endpoint, pinned host-key and capability references, expected protocol, schema,
-OS, architecture and capacity limits. Binary hash and toolchain are recorded
+OS, architecture and capacity limits. Use a stable DNS hostname (including
+`.local`) for `endpoint.sshHost`, so DHCP changes do not strand the pair.
+Binary hash and toolchain are recorded
 diagnostics, not compatibility or delivery gates. Configure the
 satellite with the matching central host identity. Enrollment creates an
 Enrolled entry. Existing executor-proxy sessions are not adopted.
@@ -23,7 +25,7 @@ The execution profile's `schemaVersion` is the federation data and behavior
 contract, currently `"2"`. It is versioned independently of the local SQLite
 layout (`2-metadata-units-2`) and the mailbox message schema. A local storage
 migration does not rewrite enrolled profiles. Once both hosts run this contract,
-an existing profile `"2"` reconnects through fresh authenticated qualification;
+an existing profile `"2"` reconnects through fresh pair authentication;
 it needs no profile refresh or re-enrollment. Unknown profile schemas are
 refused, including a local SQLite layout identifier used as a profile schema.
 Local storage migration and compatibility checks remain enforced separately.
@@ -90,19 +92,61 @@ Initial activation remains a separate operator action. Changes to protocol,
 schema, keys, host identity, enrollment or configuration remove prior authority
 and require explicit verification or enrollment as appropriate.
 
-Ordinary reconnects, including a restart after a hash-only rebuild, automatically
-re-attest the fresh link with authenticated health, forward identity and reverse
-RPC. They restore only the peer's prior Verified, Active or Draining state and
-the exact prior epoch's unfinished placement/binding intents. Old HTTP leases
-remain fenced. Re-enrollment, settings changes, revocation and continuity resets
-clear this recovery authority; admission quarantine still blocks restoration.
-The report explicitly retains the original isolated probe's snapshot, basis and
-IDs in `retainedProbe`, with `previouslyQualifiedProbe` and
-`previouslyQualifiedPlatform` outcomes. Reconnects create no isolated wake and
-cannot consume the unresolved-probe archive. Initial onboarding still runs the
-full checklist. No recurring operator refresh is required for a binary or
-toolchain observation change. The first rollout needs this behavior on both
-hosts; a host still running the old strict comparison can refuse a new image.
+Ordinary reconnects, including a restart after a hash-only rebuild, establish a
+fresh authenticated pair and link incarnation using the existing pinned SSH key
+and pair capability. Enrollment and membership survive. Ordinary mailbox routing
+does not require an onboarding report, activation or automatic requalification.
+The retained report remains diagnostic and its old proof cannot authorize a new
+executor placement. Explicit verification and execution keep their separate
+authority checks. Old HTTP leases remain fenced; revocation, key or enrollment
+changes and continuity quarantine remain real refusals.
+
+## Recovering a changed network address
+
+Read `GET /api/federation`, then call the central's local operator route
+`POST /api/federation/peers/{host_id}/ssh-host` with
+`{"expectedVersion": <the version read>, "sshHost": "satellite.local"}`.
+The request accepts only these fields and a DNS hostname, not a numeric DHCP
+address. A concurrent domain change returns 409; read the registry again before
+retrying. This is an address-only update, not `/enroll`: host identities,
+enrollment, key references, membership, mailbox identities and history survive.
+The record and transport generations advance, and the old link is withdrawn.
+The existing supervisor reconnects and authenticates the new link automatically.
+
+Each new SSH child resolves the hostname through OpenSSH. No resolved IP is
+persisted or used as a durable fallback. The fixed `HostKeyAlias`, pinned
+known-hosts file and `StrictHostKeyChecking=yes` still refuse a different key;
+the pair proof still requires the enrolled host UUID and capability. DNS is a
+locator, not proof of identity. A failed resolution stays on the existing bounded
+reconnect path. Legacy IP endpoints remain readable and can be migrated through
+this supported route without re-pairing or raw store edits. Free-text display
+names are never guessed into hostnames.
+
+UI session proxies have a separate locator in `preferences.remotes`. Keep that
+record's `host` as the same stable hostname as well. The existing
+`POST /api/settings` request accepts a `remotes` array; preserve every remote's
+`id`, user, port and other settings when updating its host. This path retires
+old proxy tunnels but neither changes federation enrollment nor replaces its
+SSH key pins. Proxy SSH retains its own existing OpenSSH trust configuration;
+updating the federation locator alone does not update the proxy locator.
+
+The same fenced mutation preserves matching unfinished mailbox-only placements
+and their INSTALL intents, rebasing only the locator and its derived local
+configuration basis. Well-formed historical pairs from another identity,
+enrollment, key or endpoint stay unchanged and fenced without blocking the
+current peer's address update; malformed retained pairs refuse the mutation.
+Executor placements, execution proof and old link incarnations are not promoted.
+Published reference descriptors retain their
+original exact snapshots and publication receipts; an old reference can refuse
+as stale after the transition. Existing native relay messages and boot recovery
+boundaries retain their original keys and sequence, and resume once the link
+returns. A boot-boundary `409 federation link changed` while no link is installed
+is a local deferred history read, not evidence of a failed peer identity proof.
+
+The persisted representation and predecessor validation invariants are unchanged:
+`sshHost` was already a String accepting DNS names. The paired mailbox placement
+and configuration-basis update preserves the existing stored-state invariant;
+this transition introduces no new reader floor or execution meaning.
 
 The fresh identity must still match the enrolled platform and architecture.
 Material identity or protocol/schema mismatches retire the link and use the
