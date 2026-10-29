@@ -45,6 +45,8 @@ struct PersistedState {
     projects: PersistTracked<Vec<Project>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_retired_work_authority_grants: PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
+    // Mandatory at the joint reader floor; absent is not an empty ledger.
+    engram_session_obligations: EngramSessionObligationLedger,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -234,6 +236,10 @@ impl PersistedState {
                 "engramSourceSightings",
                 &inner.engram_source_sightings,
             ),
+            // Safety custody stays eager in full and sparse captures.
+            engram_session_obligations: clone_persist_metadata_field(
+                "engramSessionObligations", &inner.engram_session_obligations,
+            ),
             engram_source_root_generation: inner.engram_source_root_generation,
             pending_coordination_scope_deletions: collection!(
                 "pendingCoordinationScopeDeletions",
@@ -333,6 +339,7 @@ impl PersistedState {
             engram_work_naming_history: self.engram_work_naming_history.snapshot_clone(),
             engram_named_root_release_audit: self.engram_named_root_release_audit.snapshot_clone(),
             engram_source_sightings: self.engram_source_sightings.snapshot_clone(),
+            engram_session_obligations: self.engram_session_obligations.clone(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self
                 .pending_coordination_scope_deletions
@@ -388,6 +395,23 @@ impl PersistedState {
 
     /// Converts the value into inner.
     fn into_inner(self) -> Result<StateInner> {
+        self.engram_session_obligations.validate()?;
+        // Stage persisted inputs until the canonical ledger, mirrors and
+        // project provenance can all be checked. Per-row boot conversion must
+        // not replace these inputs with irreversible lost-credit notices.
+        let mut pending_checkpoint_inputs = Vec::new();
+        let sessions = self.sessions.into_iter().map(|mut persisted| {
+            if let Some(mirror) = &persisted.engram_checkpoint_operation
+                && !self.engram_session_obligations.checkpoint_operations.iter().any(|operation|
+                    operation.protection.local_session_id == persisted.session.id
+                        && serde_json::to_value(operation).ok() == serde_json::to_value(mirror).ok()) {
+                bail!("Checkpoint mirror lacks its canonical original during restore")
+            }
+            let pending = std::mem::take(&mut persisted.engram_pending_batches);
+            let record = persisted.into_record()?;
+            pending_checkpoint_inputs.push((record.session.id.clone(), pending));
+            Ok(record)
+        }).collect::<Result<Vec<_>>>()?;
         let terminal_unbound_registrations: HashSet<_> = self
             .test_run_registrations
             .values()
@@ -485,6 +509,9 @@ impl PersistedState {
             engram_work_naming_history: self.engram_work_naming_history.into(),
             engram_named_root_release_audit: engram_named_root_release_audit.into(),
             engram_source_sightings: self.engram_source_sightings.into(),
+            engram_session_obligations: self.engram_session_obligations,
+            engram_confirmed_containment_ids: BTreeSet::new(),
+            engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts::default(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),
@@ -572,11 +599,7 @@ impl PersistedState {
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: self.workspace_layouts.into(),
-            sessions: self
-                .sessions
-                .into_iter()
-                .map(PersistedSessionRecord::into_record)
-                .collect::<Result<Vec<_>>>()?,
+            sessions,
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids,
             quarantined_persisted_delegation_ids: self.quarantined_persisted_delegation_ids,
             // Mutation stamps are in-memory only — start at `0` on each
@@ -602,6 +625,21 @@ impl PersistedState {
             .collect::<HashSet<_>>();
         inner.normalize_local_paths();
         inner.validate_projects_consistent()?;
+        for (session_id, batches) in pending_checkpoint_inputs {
+            let Some(index) = inner.find_session_index(&session_id) else { continue };
+            for batch in batches {
+                if pending_checkpoint_batch_owner(&inner, &session_id, &batch).is_some() {
+                    inner.sessions[index].engram.pending_batches.push(batch);
+                } else {
+                    for target in &batch.targets {
+                        let line = engram_batch_member_lost_line(&target.short_ref,
+                            "before Engram's answer named the batch gate's record");
+                        eprintln!("engram> session={session_id} {line}");
+                        inner.sessions[index].engram.set_pending_source_root_line(line);
+                    }
+                }
+            }
+        }
         inner.recover_interrupted_sessions();
         if inner.delegation_inventory_complete() {
             inner.repair_delegation_child_session_links();
@@ -681,6 +719,12 @@ impl PersistedState {
         engram_end_orphaned_work_source_roots(&mut inner.engram_work_source_roots, |named_by| {
             session_ids.contains(named_by)
         });
+        inner.engram_confirmed_containment_ids = inner
+            .engram_session_obligations
+            .all_protections()
+            .filter(|entry| engram_containment_confirmation_materialized(&inner, entry))
+            .map(|entry| entry.id.clone())
+            .collect();
         Ok(inner)
     }
 }
@@ -760,6 +804,8 @@ struct PersistedSessionRecord {
     engram_begins_recorded: bool,
     #[serde(default)]
     engram_dispatch_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_checkpoint_operation: Option<EngramCheckpointOperation>,
     /// One marker per background full gate carried when the record was
     /// written (`engram_carried_checks.rs`). A host restart loses the carried
     /// checks themselves; loading tells each holder its run lost its credit.
@@ -933,6 +979,7 @@ impl PersistedSessionRecord {
             engram_uncertain_grant_id: self.engram_uncertain_grant_id.clone(),
             engram_begins_recorded: self.engram_begins_recorded.clone(),
             engram_dispatch_generation: self.engram_dispatch_generation.clone(),
+            engram_checkpoint_operation: self.engram_checkpoint_operation.clone(),
             engram_carried_launches: self.engram_carried_launches.clone(),
             engram_owed_binds: self.engram_owed_binds.clone(),
             engram_pending_batches: self.engram_pending_batches.clone(),
@@ -991,6 +1038,7 @@ impl PersistedSessionRecord {
             engram_uncertain_grant_id: record.engram.uncertain_grant_id.clone(),
             engram_begins_recorded: record.engram.begins_recorded,
             engram_dispatch_generation: record.engram.dispatch_generation,
+            engram_checkpoint_operation: record.engram.checkpoint_operation.clone(),
             engram_carried_launches: record
                 .engram
                 .carried_checks
@@ -1150,6 +1198,11 @@ impl PersistedSessionRecord {
                 uncertain_grant_id: self.engram_uncertain_grant_id,
                 begins_recorded: self.engram_begins_recorded,
                 dispatch_generation: self.engram_dispatch_generation,
+                // Flight ownership is process-local. The mandatory ledger,
+                // not a reconstructed live caller, retains dispatch exclusion.
+                checkpoint_in_progress: false,
+                checkpoint_operation: self.engram_checkpoint_operation,
+                checkpoint_status_owner: None,
                 rebind_required: self.engram_routing_token.is_some(),
                 abort_retry: self.engram_abort_retry.clone(),
                 // Sent again after the restart, however long it took.

@@ -318,7 +318,7 @@ fn validate_no_legacy_embedded_state(
         reject_unsupported_state_schema(format!("persisted state metadata units are invalid: {error:#}"))
     })?;
     let persisted = if let Some(encoded) = metadata {
-        let value: Value = serde_json::from_str(&encoded).map_err(|error| {
+        let mut value: Value = serde_json::from_str(&encoded).map_err(|error| {
             reject_unsupported_state_schema(format!(
                 "persisted state metadata is not valid JSON: {error}"
             ))
@@ -330,9 +330,24 @@ fn validate_no_legacy_embedded_state(
                 )));
             }
         }
+        let version = required_state_meta_value(connection, "schema_version")?;
+        if is_sqlite_obligation_predecessor(&version) {
+            let object = value.as_object_mut().ok_or_else(|| {
+                reject_unsupported_state_schema("state metadata is not an object".to_owned())
+            })?;
+            // Only the supported predecessor migration may supply absence.
+            // Current readers require the serialized field unconditionally.
+            if object.contains_key("engramSessionObligations") {
+                return Err(reject_unsupported_state_schema(
+                    "experimental obligation metadata under a predecessor floor",
+                ));
+            }
+            object.insert("engramSessionObligations".to_owned(),
+                serde_json::to_value(EngramSessionObligationLedger::empty())?);
+        }
         #[cfg(test)]
         PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(|count| count.set(count.get() + 1));
-        let mut persisted = serde_json::from_str::<PersistedState>(&encoded)
+        let mut persisted = serde_json::from_value::<PersistedState>(value)
             .map_err(reject_invalid_persisted_state_metadata_shape)?;
         let generation = metadata_unit_generation(connection)?;
         persisted
@@ -340,12 +355,22 @@ fn validate_no_legacy_embedded_state(
             .known
             .store(generation, std::sync::atomic::Ordering::Release);
         persisted.metadata_capture.predecessor = generation;
+        validate_sqlite_checkpoint_mirrors(connection, &persisted.engram_session_obligations)?;
         Some(persisted)
     } else if let Some(table_name) = first_normalized_state_authority_table_with_rows(connection)? {
         return Err(reject_unsupported_state_schema(format!(
             "missing app_state `{SQLITE_METADATA_KEY}` metadata while normalized table \
              `{table_name}` contains rows"
         )));
+    } else if matches!(required_state_meta_value(connection, "schema_version")?.as_str(),
+        SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR) {
+        return Err(reject_unsupported_state_schema(
+            "missing mandatory Engram session obligation metadata".to_owned(),
+        ));
+    } else if metadata_unit_generation(connection)? != 0 {
+        return Err(reject_unsupported_state_schema(
+            "missing metadata authority with an initialized metadata generation",
+        ));
     } else {
         None
     };
@@ -432,73 +457,13 @@ fn validate_sqlite_state_schema_for_version(
     Ok(())
 }
 
-/// Normalize supported legacy metadata, then advance the application reader
-/// floor before any typed session load or observation delivery can occur.
-/// Metadata layout and application obligations deliberately have separate versions.
+/// Preserve the complete predecessor handoff contract and install the joint
+/// observation/obligation reader floor atomically, before maintenance or mutation.
 fn prepare_existing_sqlite_state_reader_floor(
     connection: &rusqlite::Connection,
     for_load: bool,
 ) -> Result<Option<PersistedState>> {
-    migrate_metadata_units(connection)?;
-    let (_, version) = sqlite_state_schema_header(connection)?;
-    if matches!(version.as_str(), SQLITE_METADATA_UNITS_VERSION | SQLITE_OBSERVATION_PREDECESSOR) {
-        return advance_sqlite_state_reader_floor(connection, for_load);
-    }
-    validate_current_sqlite_state_schema(connection)?;
-    if for_load { validate_no_legacy_embedded_state(connection) } else { Ok(None) }
-}
-
-fn advance_sqlite_state_reader_floor(
-    connection: &rusqlite::Connection,
-    for_load: bool,
-) -> Result<Option<PersistedState>> {
-    let transaction = rusqlite::Transaction::new_unchecked(
-        connection, rusqlite::TransactionBehavior::Immediate,
-    ).context("failed to begin state reader-floor migration")?;
-    let (tables, version) = sqlite_state_schema_header(&transaction)?;
-    let persisted = if matches!(version.as_str(), SQLITE_METADATA_UNITS_VERSION | SQLITE_OBSERVATION_PREDECESSOR) {
-        validate_sqlite_state_schema_for_version(&transaction, &version)?;
-        let known = CURRENT_SQLITE_STATE_TABLE_COLUMNS.iter()
-            .map(|(name, _)| (*name).to_owned()).collect::<BTreeSet<_>>();
-        // These obsolete embedded coordination tables are deliberately left
-        // untouched by the current primary-store boot contract. They carry
-        // no primary reader obligations. Other unknown tables still refuse.
-        let unknown = tables.difference(&known).any(|table| !matches!(table.as_str(),
-            "mailboxes" | "mailbox_participants" | "mailbox_messages"));
-        if unknown {
-            return Err(reject_unsupported_state_schema(
-                "reader-floor predecessor has unknown state tables",
-            ));
-        }
-        let persisted = validate_no_legacy_embedded_state(&transaction)?;
-        // A pre-floor draft containing these keys is not a supported old
-        // image. Preserve it for diagnosis rather than adopting hidden custody.
-        let unversioned: Option<String> = transaction.query_row(
-            "SELECT id FROM sessions WHERE json_valid(value_json) AND (
-                json_type(value_json,'$.engramRuntimeCheckpoint') IS NOT NULL OR
-                json_type(value_json,'$.engramUnadmittedActiveTurn') IS NOT NULL OR
-                json_type(value_json,'$.engramUnadmittedClosingJobs') IS NOT NULL OR
-                json_type(value_json,'$.engramUnadmittedReports') IS NOT NULL) LIMIT 1",
-            [], |row| row.get(0),
-        ).optional()?;
-        if unversioned.is_some() {
-            return Err(reject_unsupported_state_schema(
-                "observation custody is present under an unsupported predecessor floor",
-            ));
-        }
-        let updated = transaction.execute(
-            "UPDATE meta SET value=?1 WHERE key='schema_version' AND value=?2",
-            rusqlite::params![SQLITE_SCHEMA_VERSION, &version],
-        ).context("failed to advance state reader floor")?;
-        if updated != 1 { bail!("state reader-floor migration lost its exact predecessor"); }
-        persisted
-    } else {
-        // A concurrent opener may have completed exactly this transition.
-        validate_current_sqlite_state_schema(&transaction)?;
-        if for_load { validate_no_legacy_embedded_state(&transaction)? } else { None }
-    };
-    transaction.commit().context("failed to commit state reader-floor migration")?;
-    Ok(persisted)
+    prepare_sqlite_obligation_reader_floor(connection, for_load)
 }
 
 fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<bool> {
@@ -528,6 +493,10 @@ fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> 
             rusqlite::params![SQLITE_SCHEMA_VERSION],
         )
         .context("failed to record SQLite state schema version")?;
+    // Initialization changes metadata authority. Pre-seeding snapshots must
+    // remain stale; live sources capture again after confirmed initialization.
+    let metadata = PersistedState::metadata_from_inner(&StateInner::new());
+    write_metadata_units(&transaction, project_metadata_units(&metadata)?, None, &[], None, true)?;
     transaction
         .execute(
             "INSERT INTO meta(key, value) VALUES(?1, ?2)",
@@ -549,17 +518,22 @@ fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> 
 /// Deep metadata deserialization and the legacy session-JSON authority scan
 /// belong exclusively to [`ensure_sqlite_state_schema_for_load`].
 fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+    ensure_sqlite_state_schema_with_initialization(connection).map(|_| ())
+}
+
+fn ensure_sqlite_state_schema_with_initialization(connection: &rusqlite::Connection) -> Result<bool> {
     if sqlite_state_user_table_names(connection)?.is_empty()
         && initialize_current_sqlite_state_schema(connection)?
     {
         configure_sqlite_state_connection(connection)?;
-        return Ok(());
+        return Ok(true);
     }
 
     // Existing databases must pass every read-only compatibility check before
     // a persistent PRAGMA, CREATE/ALTER, backfill, or metadata write can run.
     prepare_existing_sqlite_state_reader_floor(connection, false)?;
-    finish_existing_sqlite_state_schema_setup(connection)
+    finish_existing_sqlite_state_schema_setup(connection)?;
+    Ok(false)
 }
 
 /// Applies maintenance after the caller's applicable read-only checks.

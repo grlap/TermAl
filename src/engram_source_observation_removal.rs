@@ -148,7 +148,8 @@ fn source_observation_removal_blocker(inner: &StateInner, sessions: &[String]) -
                     intent.session_id == **session_id
                         && source_observation_has_removal_duty(owner, intent)
                 })
-            }) || inner.find_session_index(session_id).is_some_and(|index| {
+            }) || engram_session_has_checkpoint_batch_custody(inner, session_id)
+            || inner.find_session_index(session_id).is_some_and(|index| {
                 inner.sessions[index].engram.admission_in_progress.is_some()
                     || inner.sessions[index].engram.source_observation_preparations != 0
                     || runtime_observation_has_removal_duty(&inner.sessions[index])
@@ -163,7 +164,9 @@ fn retain_source_observation_removal_locked(inner: &mut StateInner, sessions: &[
             continue;
         };
         retire_source_observation_locked(inner, index);
-        let terminal_notice = runtime_observation_terminal_removal_notice(&inner.sessions[index]);
+        let terminal_notice = runtime_observation_terminal_removal_notice(&inner.sessions[index])
+            .or_else(|| engram_session_has_checkpoint_batch_custody(inner, session_id).then(||
+                "Session kept: Engram checkpoint batch credit still needs accounting. Let recovery settle the pending credit, then retry Delete.".to_owned()));
         let record = &mut inner.sessions[index];
         record.hidden = false;
         record.engram.source_observation_delete_requested = true;

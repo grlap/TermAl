@@ -92,11 +92,34 @@ impl AppState {
             return Ok(false);
         };
         if let Some(owner) = owner {
-            self.require_queued_engram_owner(
+            // This scope settles only the selected original checkpoint. The
+            // ordinary admission owner check deliberately excludes that duty.
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let selected = certified_checkpoint_replay_target_locked(
+                &inner,
                 &target.connection.session_id,
-                owner,
-                "retained closing checkpoint",
-            )?;
+                Some(owner),
+            );
+            let request_matches = inner
+                .find_session_index(&target.connection.session_id)
+                .and_then(|index| inner.sessions[index].engram.checkpoint_operation.as_ref())
+                .is_some_and(|operation| {
+                    serde_json::to_value(&operation.original.request).ok()
+                        == serde_json::to_value(&retained.request).ok()
+                });
+            if !request_matches
+                || selected.as_ref().is_none_or(|current| {
+                    current.connection != target.connection
+                        || !current.settings.same_admission_settings(&target.settings)
+                        || current.work_binding != target.work_binding
+                        || current.routing_token != target.routing_token
+                        || current.active_grant_id != target.active_grant_id
+                })
+            {
+                return Err(EngramTransportError::local_state(
+                    "Retained closing checkpoint no longer owns its selected queued action",
+                ));
+            }
         }
         let timeout = match started_at {
             Some(started) => Some(target.rpc_timeout_until(target.dispatch_deadline(started))?),
@@ -105,7 +128,7 @@ impl AppState {
         let EngramControlRequest::TurnCheckpoint { next_intent, .. } = &retained.request else {
             return Ok(false);
         };
-        let outcome = self.checkpoint_engram_turn_with_budget_off_lock(
+        let outcome = self.checkpoint_engram_turn_with_retry_owner_off_lock(
             &target.connection.session_id,
             EngramCheckpointPurpose::Settlement,
             None,
@@ -114,13 +137,26 @@ impl AppState {
             None,
             None,
             timeout,
+            true,
+            owner,
+            started_at.map(|started| target.dispatch_deadline(started)),
+            None,
+            None,
         );
         if let Some(owner) = owner {
-            self.require_queued_engram_owner(
-                &target.connection.session_id,
-                owner,
-                "retained closing receipt",
-            )?;
+            if matches!(outcome, EngramCheckpointOutcome::Succeeded) {
+                // Settlement is not admission permission: another duty still
+                // excludes this owner even when the exact close succeeded.
+                self.require_queued_engram_owner(
+                    &target.connection.session_id,
+                    owner,
+                    "retained closing receipt",
+                )?;
+            } else if !self.queued_engram_owner_is_current(&target.connection.session_id, owner) {
+                return Err(EngramTransportError::local_state(
+                    "Retained closing receipt no longer owns the queued prompt",
+                ));
+            }
         }
         match outcome {
             EngramCheckpointOutcome::Succeeded => Ok(true),

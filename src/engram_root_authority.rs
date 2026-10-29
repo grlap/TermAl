@@ -52,20 +52,27 @@ fn engram_retain_recovery_run(
     runs.push(binding.clone());
 }
 
-/// Choose a candidate from the shared off-lock reader projection. Preserve
+/// Order candidates from the shared off-lock reader projection. Preserve
 /// the namer's preference and original session order without building targets.
-fn engram_root_recovery_reader<'a>(
+fn engram_root_recovery_readers<'a>(
     readers: &[(&'a EngramReclamationSession, &EngramAuthorityStoreKey)],
     store: &EngramAuthorityStoreKey,
     namer: Option<&str>,
-) -> Option<&'a str> {
-    let mut eligible = readers.iter().filter(|(_, current)| *current == store);
-    eligible.clone().find(|(session, _)| Some(session.id.as_str()) == namer)
-        .or_else(|| eligible.next())
+) -> Vec<&'a str> {
+    let mut seen = HashSet::new();
+    let mut candidates = readers.iter()
+        .filter(|(_, current)| *current == store)
         .map(|(session, _)| session.id.as_str())
+        .filter(|session| seen.insert(*session))
+        .collect::<Vec<_>>();
+    if let Some(index) = candidates.iter().position(|session| Some(*session) == namer) {
+        let preferred = candidates.remove(index);
+        candidates.insert(0, preferred);
+    }
+    candidates
 }
 
-// Parity control for the selection and the single current target build.
+// Parity control for ordered candidates and current target validation.
 #[cfg(test)]
 fn engram_root_recovery_reader_target_locked(
     inner: &StateInner,
@@ -74,10 +81,12 @@ fn engram_root_recovery_reader_target_locked(
 ) -> Option<EngramBindingTarget> {
     let snapshot = EngramRootReaderSnapshot::capture(inner);
     let readers = snapshot.readers();
-    let winner = engram_root_recovery_reader(&readers, store, namer)?;
-    AppState::engram_source_root_target_locked(inner, winner)
-        .ok()
-        .flatten()
+    engram_root_recovery_readers(&readers, store, namer).into_iter()
+        .find_map(|session| {
+            AppState::engram_source_root_target_locked(inner, session).ok().flatten()
+                .filter(|target| target.routing_token.is_some()
+                    && target.settings.authority_store_key.as_ref() == Some(store))
+        })
 }
 
 struct EngramRootEventReply {
@@ -1027,17 +1036,10 @@ impl AppState {
         // Cross-table indexing and all candidate decisions happen without
         // StateInner. This projection carries no executable authority.
         let readers = reader_snapshot.readers();
-        let winner = engram_root_recovery_reader(&readers, store, namer.as_deref());
-        let available = readers.iter()
-            .map(|(session, store)| (session.id.as_str(), *store))
-            .collect::<HashMap<_, _>>();
-        let abandoned = pending.into_iter().filter(|intent| {
-            available.get(intent.reporter.as_str()).copied() != Some(&intent.root.store)
-        }).collect::<Vec<_>>();
+        let candidates = engram_root_recovery_readers(&readers, store, namer.as_deref());
         #[cfg(test)]
         engram_root_reclamation_planning_boundary("recovery_selected", &[]);
-        let (target, abandoned) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+        let require_current_owner = |inner: &StateInner| {
             if !inner.engram_work_naming_history.iter().any(|history| {
                 &history.store == store && history.work_id == owner.binding.work_id
                     && history.transition.as_ref().is_some_and(|current| {
@@ -1046,22 +1048,34 @@ impl AppState {
             }) {
                 return Err(ApiError::conflict("recovery batch was superseded during reader selection"));
             }
-            // Rebuild from CURRENT state: a copied id or eligibility fact
-            // cannot supply a connection, token or authority after unlock.
-            let target = winner.and_then(|session| {
-                Self::engram_source_root_target_locked(&inner, session).ok().flatten()
-            }).filter(|target| {
-                target.routing_token.is_some()
-                    && target.settings.authority_store_key.as_ref() == Some(store)
-            });
-            // Only intents associated with this bounded batch were copied.
-            // A reporter which became executable during planning must keep
-            // its intent, even when the copied facts said it was abandoned.
-            let abandoned = abandoned.into_iter()
-                .filter(|intent| !Self::engram_root_reporter_available(&inner, intent))
-                .collect::<Vec<_>>();
-            (target, abandoned)
+            Ok(())
         };
+        let mut target = None;
+        if candidates.is_empty() {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            require_current_owner(&inner)?;
+        }
+        for session in candidates {
+            let current = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                require_current_owner(&inner)?;
+                // A candidate is not authority. Rebuild once per candidate,
+                // releasing state before trying a successor on refusal.
+                Self::engram_source_root_target_locked(&inner, session).ok().flatten()
+                    .filter(|target| target.routing_token.is_some()
+                        && target.settings.authority_store_key.as_ref() == Some(store))
+            };
+            if current.is_some() {
+                target = current;
+                break;
+            }
+        }
+        // Raw snapshot membership cannot establish reporter availability.
+        // Revalidate each bounded intent separately, including exclusions.
+        let abandoned = pending.into_iter().filter(|intent| {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            !Self::engram_root_reporter_available(&inner, intent)
+        }).collect::<Vec<_>>();
         let reserve = budget / 4;
         for binding in runs {
             let left = deadline.saturating_duration_since(clock.now());

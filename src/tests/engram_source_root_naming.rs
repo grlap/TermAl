@@ -5037,6 +5037,24 @@ fn source_root_stale_opening_capture_cannot_change_a_delivered_successor() {
         vec![claimed_root_held(label)],
     )
     .unwrap();
+    assert!(matches!(
+        deliver_turn_dispatch_now(&claimed.state, claimed.dispatch()),
+        TurnDispatchDeliveryOutcome::Delivered
+    ));
+    assert!(received_prompt(&claimed).contains("Change the root workspace."));
+    let old_generation = claimed.record(|record| record.active_turn_generation);
+    let opening_identity = |record: &SessionRecord| {
+        (
+            record.active_turn_generation,
+            record.engram.active_grant_id.clone(),
+            record.engram.active_turn_root_capture.clone(),
+            record.engram.active_turn_start_basis.clone(),
+            record.engram.active_turn_source_root.as_ref()
+                .map(|root| (root.root.clone(), root.generation)),
+            record.engram.active_turn_naming_identity.clone(),
+            record.engram.opening_diagnostic.is_none(),
+        )
+    };
     let saved = Arc::new(Mutex::new(None));
     let (state, session_id, transport, successor) = (
         claimed.state.clone(),
@@ -5069,67 +5087,59 @@ fn source_root_stale_opening_capture_cannot_change_a_delivered_successor() {
                 .lock()
                 .unwrap()
                 .push_back(Ok(Some(binding)));
-            // The original prompt has not reached the provider. Completion
-            // drains that queued prompt through a fresh grant and real handoff
-            // while the superseded opening's capture is still suspended.
+            // This turn was actually delivered. Finish it through its normal
+            // owner, then admit and deliver a distinct successor while the
+            // old turn's repeated capture is suspended before installation.
             state
                 .finish_turn_ok_if_runtime_matches(&session_id, &runtime)
                 .unwrap();
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-            let root = record.engram.active_turn_source_root.as_ref().unwrap();
-            assert!(record.engram.opening_diagnostic.is_none());
-            *successor.lock().unwrap() = Some((
-                record.active_turn_generation,
-                record.engram.active_grant_id.clone(),
-                record.engram.active_turn_root_capture.clone(),
-                record
-                    .engram
-                    .active_turn_start_basis
-                    .as_ref()
-                    .unwrap()
-                    .source_revision
-                    .clone(),
-                root.root.clone(),
-                root.generation,
-                record.engram.active_turn_naming_identity.clone(),
+            let dispatch = match state.dispatch_turn(
+                &session_id,
+                SendMessageRequest {
+                    text: "Fresh successor after the delivered turn.".to_owned(),
+                    expanded_text: None,
+                    attachments: Vec::new(),
+                    source_session_id: None,
+                    source_mailbox: None,
+                },
+            ).unwrap() {
+                DispatchTurnResult::Dispatched(dispatch)
+                | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+                DispatchTurnResult::Queued => panic!("the settled turn permits a fresh successor"),
+            };
+            assert!(matches!(
+                deliver_turn_dispatch_now(&state, dispatch),
+                TurnDispatchDeliveryOutcome::Delivered
             ));
+            let identity = {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+                opening_identity(record)
+            };
+            assert!(identity.0 > old_generation, "a new turn owns the delivered successor");
+            assert!(identity.3.is_some(), "the delivered successor has a start basis");
+            assert!(identity.4.is_some(), "the delivered successor has its named root");
+            assert!(identity.6, "the delivered successor has no opening diagnostic");
+            *successor.lock().unwrap() = Some(identity);
         }));
     });
-    assert!(matches!(
-        deliver_turn_dispatch_now(&claimed.state, claimed.dispatch()),
-        TurnDispatchDeliveryOutcome::Superseded
-    ));
+    // Exercise the existing guarded installation boundary directly; no
+    // fabricated pre-handoff completion or old provider delivery is needed.
+    claimed.state.record_engram_turn_start_basis_off_lock(
+        &claimed.session_id, &old_grant,
+    );
     assert!(TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| hook.borrow().is_none()));
     let prompt = received_prompt(&claimed);
-    assert!(prompt.contains("Change the root workspace."), "{prompt}");
+    assert!(prompt.contains("Fresh successor after the delivered turn."), "{prompt}");
     assert!(!prompt.contains("unconfirmed"), "{prompt}");
     assert!(
         matches!(
             claimed.runtime_rx.try_recv(),
             Err(std::sync::mpsc::TryRecvError::Empty)
         ),
-        "the superseded opening must not reach the provider"
+        "the stale capture must not send the old prompt again"
     );
-    let actual = claimed.record(|record| {
-        let root = record.engram.active_turn_source_root.as_ref().unwrap();
-        assert!(record.engram.opening_diagnostic.is_none());
-        (
-            record.active_turn_generation,
-            record.engram.active_grant_id.clone(),
-            record.engram.active_turn_root_capture.clone(),
-            record
-                .engram
-                .active_turn_start_basis
-                .as_ref()
-                .unwrap()
-                .source_revision
-                .clone(),
-            root.root.clone(),
-            root.generation,
-            record.engram.active_turn_naming_identity.clone(),
-        )
-    });
+    let actual = claimed.record(|record| opening_identity(record));
     assert_eq!(
         Some(actual),
         *saved.lock().unwrap(),

@@ -57,8 +57,15 @@ fn federation_separate_stores_never_share_a_minted_host_identity() {
 fn federation_legacy_schema_upgrade_preserves_local_metadata() {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
     seed_primary2_state_schema_for_test(&connection);
+    let mut metadata =
+        serde_json::to_value(PersistedState::metadata_from_inner(&StateInner::new())).unwrap();
+    assert_eq!(
+        metadata.as_object_mut().unwrap().remove("engramSessionObligations"),
+        Some(json!(EngramSessionObligationLedger::empty())),
+        "a primary-2 specimen cannot contain modern obligation custody"
+    );
     connection.execute("INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
-        rusqlite::params![SQLITE_METADATA_KEY, serde_json::to_string(&PersistedState::metadata_from_inner(&StateInner::new())).unwrap()]).unwrap();
+        rusqlite::params![SQLITE_METADATA_KEY, serde_json::to_string(&metadata).unwrap()]).unwrap();
     let before: String = connection
         .query_row(
             "SELECT value_json FROM app_state WHERE key = ?1",
@@ -78,8 +85,8 @@ fn federation_legacy_schema_upgrade_preserves_local_metadata() {
     assert_eq!(before, after);
     let current = read_persisted_metadata_json(&connection).unwrap().unwrap();
     let restored: PersistedState = serde_json::from_str(&current).unwrap();
-    let original: PersistedState = serde_json::from_str(&before).unwrap();
-    assert_eq!(restored.next_session_number, original.next_session_number);
-    assert_eq!(restored.next_message_number, original.next_message_number);
-    assert_eq!(serde_json::to_value(restored.projects).unwrap(), serde_json::to_value(original.projects).unwrap());
+    let original: Value = serde_json::from_str(&before).unwrap();
+    assert_eq!(json!(restored.next_session_number), original["nextSessionNumber"]);
+    assert_eq!(json!(restored.next_message_number), original["nextMessageNumber"]);
+    assert_eq!(serde_json::to_value(restored.projects).unwrap(), original["projects"]);
 }

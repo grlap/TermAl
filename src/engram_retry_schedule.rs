@@ -222,6 +222,7 @@ struct EngramRetrySlots {
     in_flight: Arc<std::sync::atomic::AtomicUsize>,
     deferred_due: Arc<std::sync::atomic::AtomicUsize>,
     boot_pending: Arc<std::sync::atomic::AtomicBool>,
+    checkpoint_due: Arc<Mutex<BTreeMap<String, EngramCheckpointRetryState>>>,
 }
 
 /// One attempt's place under the cap, released when the attempt completes,
@@ -524,6 +525,7 @@ impl AppState {
             self.run_engram_retry_attempts_concurrently(admitted, now);
         }
         self.provider_capacity_retry_tick(now);
+        self.engram_checkpoint_result_retry_tick(now);
     }
 
     /// Runs two or more admitted attempts side by side and returns when all

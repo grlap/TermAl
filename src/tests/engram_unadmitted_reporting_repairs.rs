@@ -1421,7 +1421,7 @@ fn metadata_only_projection_keeps_active_closing_and_retained_observation_state(
 
 #[test]
 fn unadmitted_runtime_reporting_reader_floor_marker_guard_preserves_active_closing_and_pending_custody() {
-    assert_runtime_custody_reader_refusal(None);
+    assert_runtime_custody_reader_refusal(None, true);
 }
 
 // This explicitly executed probe needs a hash-pinned repository-local binary.
@@ -1438,10 +1438,10 @@ fn unadmitted_runtime_reporting_pinned_reader_refuses_active_closing_and_pending
         "never invoke an installed executable or an external reader path");
     let binary = verify_pinned_rollback_binary(&copy,
         "cba9ef654032bd0753f55bcbf74e14228138b459c2fb3ece27d264acacad4d12", 49_166_848);
-    assert_runtime_custody_reader_refusal(Some(&binary));
+    assert_runtime_custody_reader_refusal(Some(&binary), false);
 }
 
-fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>) {
+fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>, migrate_outbox: bool) {
     let repository = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
     let _directory = TestTempRootDirectoryScope::repository_local();
     let root = TestTempRoot::create("unadmitted-reader-custody");
@@ -1452,13 +1452,76 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>) {
         let data = home.join(".termal");
         fs::create_dir_all(&data).unwrap();
         let path = data.join("termal.sqlite");
-        let mut persisted = PersistedState::from_inner(&fixture.turn.state.inner.lock().unwrap());
+        // Initialize this independent destination before exporting the runtime
+        // snapshot. The copy has its own confirmed predecessor, not the source
+        // store's writer guard or a pre-initialization generation-zero claim.
+        let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
+        assert!(ensure_sqlite_state_schema_for_path_with_initialization(&connection, &path).unwrap());
+        let generation = metadata_unit_generation(&connection).unwrap();
+        assert_eq!(generation, 1);
+        drop(connection);
+        let (mut persisted, baseline_has_no_other_owner) = {
+            let inner = fixture.turn.state.inner.lock().unwrap();
+            let settled = inner.engram_session_obligations.checkpoint_operations.iter().all(|operation| {
+                inner.engram_confirmed_containment_ids.contains(&operation.original.id)
+            }) && inner.engram_pending_checkpoint_receipts.entries.is_empty()
+                && inner.quarantined_persisted_session_ids.is_empty()
+                && inner.sessions.iter().all(|record| {
+                    !record.engram.checkpoint_in_progress
+                        && record.engram.checkpoint_status_owner.is_none()
+                        && record.engram.active_grant_id.is_none()
+                        && record.engram.uncertain_grant_id.is_none()
+                })
+                && engram_admission_obligation_locked(&inner, &fixture.turn.session_id).is_none();
+            (PersistedState::from_inner(&inner), settled)
+        };
         let source_image = serde_json::to_value(&persisted).unwrap();
-        // A separate empty physical store has no predecessor. Do not transplant
-        // the original store's runtime-only writer guard or mutate its owner.
-        persisted.metadata_capture = PersistMetadataCapture::default();
+        persisted.metadata_capture = PersistMetadataCapture::new(
+            Arc::new(std::sync::atomic::AtomicU64::new(generation)),
+        );
         assert_eq!(serde_json::to_value(&persisted).unwrap(), source_image,
             "copy setup must not alter serialized custody or authority");
+        if migrate_outbox {
+            // The landed producer had neither the new ledger nor its mirror.
+            // Project only this fixture's fully ACKed baseline on the disposable
+            // copy; keep its complete current image and every older-format field.
+            fs::write(data.join("current-format-snapshot.json"),
+                serde_json::to_vec(&persisted).unwrap()).unwrap();
+            assert!(baseline_has_no_other_owner,
+                "predecessor projection must not omit live or unresolved checkpoint custody");
+            let ledger = &persisted.engram_session_obligations;
+            ledger.validate().unwrap();
+            assert!(ledger.entries.is_empty(), "no linked independent obligation may be omitted");
+            assert_eq!(ledger.checkpoint_operations.len(), 1, "only the known baseline is projected");
+            let operation = &ledger.checkpoint_operations[0];
+            operation.validate().unwrap();
+            assert_eq!(operation.protection.local_session_id, fixture.turn.session_id);
+            assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+            assert!(operation.protection.authority_confirmed);
+            assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+            assert_eq!(operation.attempts.len(), 1);
+            assert!(matches!(operation.attempts[0].result, Some(EngramCheckpointAttemptResult::Accepted)));
+            let baseline_requests: Vec<_> = fixture.turn.transport.requests().into_iter()
+                .filter(|request| request.request["operation"] == "turn_checkpoint").collect();
+            assert_eq!(baseline_requests.len(), 1);
+            assert_eq!(baseline_requests[0].request["grant_id"], CHECK_GRANT);
+            assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), baseline_requests[0].request);
+            for record in &mut persisted.sessions {
+                if let Some(mirror) = &record.engram_checkpoint_operation {
+                    assert_eq!(record.session.id, fixture.turn.session_id);
+                    assert_eq!(serde_json::to_value(mirror).unwrap(), serde_json::to_value(operation).unwrap());
+                }
+                record.engram_checkpoint_operation = None;
+            }
+            persisted.engram_session_obligations = EngramSessionObligationLedger::empty();
+            let mut expected = source_image.clone();
+            expected["engramSessionObligations"] = serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
+            for record in expected["sessions"].as_array_mut().unwrap() {
+                record.as_object_mut().unwrap().remove("engramCheckpointOperation");
+            }
+            assert_eq!(serde_json::to_value(&persisted).unwrap(), expected,
+                "predecessor projection preserves all runtime checkpoint and observation custody");
+        }
         persist_state_from_persisted(&path, &persisted).unwrap();
         let connection = open_sqlite_state_read_connection(&path).unwrap();
         let raw: String = connection.query_row("SELECT value_json FROM sessions WHERE id=?1",
@@ -1485,6 +1548,30 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>) {
     fixture.turn.state.shutdown_persist_blocking();
 
     for (home, path, raw) in [active, closing, pending] {
+        if migrate_outbox {
+            // Construct the exact landed format from actual runtime custody,
+            // then exercise the production joint migration without a worker.
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            let ledger = read_persisted_metadata_field(&connection, "engramSessionObligations").unwrap().unwrap();
+            assert_eq!(ledger, serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap());
+            connection.execute("DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations'", []).unwrap();
+            connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SQLITE_OBSERVATION_SCHEMA_VERSION]).unwrap();
+            let original = read_metadata_units_unchecked(&connection).unwrap();
+            let generation = metadata_unit_generation(&connection).unwrap();
+            let capture = PersistMetadataCapture::new(Arc::new(std::sync::atomic::AtomicU64::new(generation)));
+            ensure_sqlite_state_schema_for_load(&connection).unwrap();
+            let mut expected = original.clone();
+            expected.extend(metadata_value_to_units(json!({"engramSessionObligations": ledger})).unwrap());
+            assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), expected);
+            assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
+            assert_eq!(connection.query_row("SELECT value_json FROM sessions WHERE id=?1",
+                [&fixture.turn.session_id], |row| row.get::<_, String>(0)).unwrap(), raw,
+                "active capture, closing job and pending request survive byte-for-byte");
+            assert!(write_metadata_units(&connection, original, None, &[], Some(&capture), false).is_err());
+            assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), expected);
+            ensure_sqlite_state_schema_for_load(&connection).unwrap();
+            assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
+        }
         let connection = open_sqlite_state_read_connection(&path).unwrap();
         let metadata = read_metadata_units_unchecked(&connection).unwrap();
         let generation = metadata_unit_generation(&connection).unwrap();
@@ -1493,9 +1580,10 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>) {
         // non-mutation through the parameterized validator in this build.
         // It is not predecessor-reader behavior evidence. Only the explicit
         // pinned-binary probe below exercises that application's startup.
-        let error = validate_sqlite_state_schema_for_version(&connection,
-            SQLITE_OBSERVATION_PREDECESSOR).unwrap_err();
-        assert!(format!("{error:#}").contains("unsupported state database schema"));
+        for old_floor in [SQLITE_OBSERVATION_PREDECESSOR, SQLITE_OBSERVATION_SCHEMA_VERSION] {
+            let error = validate_sqlite_state_schema_for_version(&connection, old_floor).unwrap_err();
+            assert!(format!("{error:#}").contains("unsupported state database schema"));
+        }
         assert_eq!(connection.total_changes(), changes);
         drop(connection);
         #[cfg(windows)]

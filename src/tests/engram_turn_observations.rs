@@ -166,11 +166,11 @@ enum CheckpointScript {
     /// The first checkpoint times out after Engram may have accepted it; the
     /// retry is accepted.
     DeadlineThenAccept,
-    /// Engram answers the first checkpoint by rejecting its payload; the
-    /// retry is accepted.
+    /// A remote error does not prove whether the original was applied; its
+    /// exact-result recovery is accepted.
     RejectThenAccept,
-    /// The first checkpoint's call is lost; the next prompt's rebind finds
-    /// the grant open, closes it and binds afresh for a new grant.
+    /// The first checkpoint's call is lost; exact-original recovery settles
+    /// it before a subsequent prompt can bind for a new grant.
     LostThenClosedByRebind,
     /// The first checkpoint's call is lost; Engram refuses a rebind's
     /// recovery checkpoint with an error; the next rebind's recovery
@@ -309,24 +309,15 @@ fn start_mediated_turn_with_script(
         CheckpointScript::LostThenClosedByRebind
         | CheckpointScript::LostThenRecoveryRefusedWithError
         | CheckpointScript::LostThenRecoveryRefusedWithAnswer => {
-            let open_grant = || {
-                ScriptedEngramControlResponse::Reply(Ok(json!({
-                    "phase": "turn_open",
-                    "open_grant_id": grant_id
-                })))
-            };
             responses.push(ScriptedEngramControlResponse::Reply(Err(
                 EngramTransportError::transport("checkpoint call lost"),
             )));
-            responses.push(open_grant());
             match script {
                 CheckpointScript::LostThenRecoveryRefusedWithError => {
                     responses.push(remote_error_reply("control_projection_invalid"));
-                    responses.push(open_grant());
                 }
                 CheckpointScript::LostThenRecoveryRefusedWithAnswer => {
                     responses.push(checkpoint_refusal_reply("observation_scope_mismatch"));
-                    responses.push(open_grant());
                 }
                 _ => {}
             }
@@ -486,6 +477,20 @@ impl RunningMediatedTurn {
     /// Lets the bind backoff a failed control call armed elapse, as time
     /// would.
     fn let_bind_retry_elapse(&self) {
+        let original = {
+            let inner = self.state.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&self.child_id).unwrap();
+            inner.sessions[index].engram.checkpoint_operation.as_ref().map(|operation| operation.original.id.clone())
+        };
+        let due = original.and_then(|id| self.state.engram_retry_slots.checkpoint_due.lock().unwrap()
+            .get(&id).map(|entry| entry.next_at));
+        if let Some(due) = due {
+            // Admission retries share the original-result schedule. Advance
+            // the existing scripted clock rather than clearing that history.
+            let clock = self.state.engram_budget_clock();
+            clock.pin_wall();
+            if due > clock.wall_now() { clock.advance((due - clock.wall_now()).to_std().unwrap()); }
+        }
         let mut inner = self.state.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(&self.child_id)
@@ -1073,9 +1078,8 @@ fn a_turn_without_a_begin_basis_withholds_comparison_without_inventing_a_change(
 
 #[test]
 fn a_report_engram_rejects_is_dropped_so_the_grant_can_close_bare() {
-    // Engram answered and refused the payload: repeating it could never
-    // close the grant. The next closing attempt goes without the report, as
-    // every checkpoint did before turns reported observations.
+    // A remote projection error does not prove the checkpoint was unapplied.
+    // Removal cannot replace its complete report with a bare Exit request.
     let turn = start_mediated_turn_with_script(
         "rejected",
         ChildWorkspace::IsolatedWorktree,
@@ -1087,35 +1091,45 @@ fn a_report_engram_rejects_is_dropped_so_the_grant_can_close_bare() {
     turn.state
         .finish_turn_ok_if_runtime_matches(&turn.child_id, &turn.runtime_token)
         .expect("turn completion should tolerate the rejected checkpoint");
+    let first = turn.checkpoints();
+    assert_eq!(first.len(), 1);
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.child_id, &first[0], None)
+    };
     turn.state
         .kill_session(&turn.child_id)
-        .expect("terminal cleanup closes the grant with exit intent");
-
+        .expect("administrative removal retains the original checkpoint");
+    assert_eq!(turn.checkpoints(), first);
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(loaded.find_session_index(&turn.child_id).is_none());
+    assert_unknown_checkpoint_custody(&loaded, &turn.child_id, &first[0], Some(&original));
+    let summary = engram_control_recovery_summaries(&loaded).into_iter()
+        .find(|summary| summary.session_id == turn.child_id).unwrap();
+    assert!(summary.excluded && !summary.settlement_confirmed);
+    assert!(summary.next_actions.is_empty());
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+    let authority = checkpoint_and_admission_requests(&turn.transport);
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
     let checkpoints = turn.checkpoints();
-    assert_eq!(checkpoints.len(), 2);
-    assert_eq!(
-        checkpoints[0]["observations"].as_array().map(Vec::len),
-        Some(1),
-        "the first attempt carried the report"
-    );
-    assert_eq!(checkpoints[1]["next_intent"], "exit");
-    assert!(
-        checkpoints[1].get("observations").is_none(),
-        "the rejected report is not repeated"
-    );
-    assert_eq!(
-        checkpoints[1]["idempotency_key"],
-        format!("termal-checkpoint:{}:{}:exit", turn.child_id, turn.grant_id),
-        "the bare retry has a bare key"
-    );
+    assert_eq!(checkpoints, [first[0].clone(), first[0].clone()]);
+    assert_eq!(checkpoints[0]["observations"].as_array().map(Vec::len), Some(1));
+    assert_eq!(checkpoints[1]["next_intent"], "wait");
+    assert_ne!(checkpoints[1]["idempotency_key"],
+        format!("termal-checkpoint:{}:{}:exit", turn.child_id, turn.grant_id));
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority.into_iter().chain([first[0].clone()]).collect::<Vec<_>>());
 }
 
 #[test]
 fn a_rebind_after_a_lost_closing_checkpoint_closes_the_grant_with_the_cached_report() {
     // A closing checkpoint whose call was lost leaves the grant open and the
-    // report on the record. The next prompt's rebind finds the grant open
-    // and closes it with that report rather than bare, so the turn's
-    // evidence survives the lost call.
+    // report on the record. A later prompt first settles that exact original;
+    // an open-grant status alone cannot authorize a changed recovery request.
     let turn = start_mediated_turn_with_script(
         "rebound",
         ChildWorkspace::IsolatedWorktree,
@@ -1126,6 +1140,16 @@ fn a_rebind_after_a_lost_closing_checkpoint_closes_the_grant_with_the_cached_rep
     turn.state
         .finish_turn_ok_if_runtime_matches(&turn.child_id, &turn.runtime_token)
         .expect("turn completion should tolerate the lost checkpoint");
+    let first = turn.checkpoints();
+    assert_eq!(first.len(), 1);
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.child_id, &first[0], None)
+    };
+    let authority_requests = checkpoint_and_admission_requests(&turn.transport);
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().extend(
+        (0..3).map(|_| Ok(operation.original.work_binding.clone())));
     turn.let_bind_retry_elapse();
 
     queue_test_engram_prompt(
@@ -1135,47 +1159,43 @@ fn a_rebind_after_a_lost_closing_checkpoint_closes_the_grant_with_the_cached_rep
         QueuedPromptSource::User,
         None,
     );
+    assert_unknown_checkpoint_custody_after_reload(&turn.state, &turn.child_id, &first[0], &original);
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority_requests.iter().cloned().chain([first[0].clone()]).collect::<Vec<_>>());
     let dispatch = turn
         .state
         .start_next_queued_turn_off_lock(&turn.child_id, false, false)
         .expect("queue inspection should succeed")
-        .expect("the queued prompt should rebind and dispatch")
+        .expect("the queued prompt can dispatch after exact-original settlement")
         .dispatch;
-    deliver_turn_dispatch(&turn.state, dispatch)
-        .expect("the rebound prompt should reach the runtime");
-    assert!(matches!(
-        receive(
-            &turn._runtime_rx,
-            "runtime should receive the second prompt"
-        ),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+    assert!(matches!(turn._runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 
     let checkpoints = turn.checkpoints();
-    assert_eq!(
-        checkpoints.len(),
-        2,
-        "the lost close and the recovery close"
-    );
+    assert_eq!(checkpoints, [first[0].clone(), first[0].clone()], "no restart key replaces the original request");
+    assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+    let requests = checkpoint_and_admission_requests(&turn.transport);
+    let expected = authority_requests.into_iter().chain([first[0].clone()]).collect::<Vec<_>>();
+    assert_eq!(&requests[..expected.len()], expected.as_slice(), "settlement precedes new admission");
+    assert_eq!(requests[expected.len()..].iter().map(|request| request["operation"].as_str().unwrap()).collect::<Vec<_>>(),
+        ["session_bind", "turn_evaluate"], "Begin belongs to dispatch delivery");
     assert_eq!(checkpoints[0]["next_intent"], "wait");
     assert_eq!(
         checkpoints[0]["observations"].as_array().map(Vec::len),
         Some(1)
     );
-    assert_eq!(
-        checkpoints[1]["observations"], checkpoints[0]["observations"],
-        "the recovery close carries the report the lost close built"
-    );
-    assert!(
-        checkpoints[1]["idempotency_key"]
-            .as_str()
-            .expect("idempotency key")
-            .starts_with(&format!(
-                "termal-restart-checkpoint:{}:{}:observations:",
-                turn.child_id, turn.grant_id
-            )),
-        "the recovery key folds the report"
-    );
+    deliver_turn_dispatch(&turn.state, dispatch).expect("the new prompt should reach its runtime");
+    assert!(matches!(receive(&turn._runtime_rx, "runtime should receive the new prompt"),
+        CodexRuntimeCommand::Prompt { .. }));
+    assert!(matches!(turn._runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+        "only one new prompt reaches the provider");
+    let delivered = checkpoint_and_admission_requests(&turn.transport);
+    assert_eq!(&delivered[..expected.len()], expected.as_slice());
+    assert_eq!(delivered[expected.len()..].iter().map(|request| request["operation"].as_str().unwrap()).collect::<Vec<_>>(),
+        ["session_bind", "turn_evaluate", "turn_begin"]);
     let inner = turn.state.inner.lock().expect("state mutex poisoned");
     let index = inner
         .find_session_index(&turn.child_id)
@@ -1183,7 +1203,7 @@ fn a_rebind_after_a_lost_closing_checkpoint_closes_the_grant_with_the_cached_rep
     assert_eq!(
         inner.sessions[index].engram.active_grant_id.as_deref(),
         Some(format!("{}-next", turn.grant_id).as_str()),
-        "the rebound session runs its next turn under a new grant"
+        "only the new prompt owns the new grant"
     );
 }
 
@@ -1201,18 +1221,16 @@ fn a_rebind_whose_recovery_checkpoint_is_refused_with_an_answer_closes_bare_next
     assert_a_refused_recovery_checkpoint_closes_bare_next_time(
         "recovery-refused-answer",
         CheckpointScript::LostThenRecoveryRefusedWithAnswer,
-        "restart_checkpoint_refused",
+        "observation_scope_mismatch",
     );
 }
 
-/// The recovery checkpoint of a rebind carries the report a lost close
-/// built. When Engram refuses it, in either form, the next rebind must not
-/// resend the same refused report, or the grant, and the session's prompts,
-/// would stay held until a restart.
+/// Preserve the lost original and both later failure forms. A remote error
+/// remains Unknown and may recover exactly; a Refuse result stays held.
 fn assert_a_refused_recovery_checkpoint_closes_bare_next_time(
     label: &str,
     script: CheckpointScript,
-    rebind_error_code: &str,
+    recovery_error_code: &str,
 ) {
     let turn = start_mediated_turn_with_script(
         label,
@@ -1224,54 +1242,62 @@ fn assert_a_refused_recovery_checkpoint_closes_bare_next_time(
     turn.state
         .finish_turn_ok_if_runtime_matches(&turn.child_id, &turn.runtime_token)
         .expect("turn completion should tolerate the lost checkpoint");
+    let first = turn.checkpoints();
+    assert_eq!(first.len(), 1);
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.child_id, &first[0], None)
+    };
+    let authority_requests = checkpoint_and_admission_requests(&turn.transport);
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().extend(
+        (0..3).map(|_| Ok(operation.original.work_binding.clone())));
 
     turn.let_bind_retry_elapse();
     let Err(refused) = turn
         .state
         .ensure_engram_session_bound_off_lock(&turn.child_id)
     else {
-        panic!("the refused recovery checkpoint fails the rebind");
+        panic!("an unresolved recovery result must withhold the rebind");
     };
-    assert_eq!(refused.code.as_deref(), Some(rebind_error_code));
+    let _ = refused;
+    let attempted = assert_original_checkpoint_held_after_reload(&turn.state, &original);
+    assert_eq!(turn.checkpoints(), [first[0].clone(), first[0].clone()]);
+    assert_eq!(attempted.attempts.len(), 2);
+    assert!(matches!(attempted.attempts[0].result, Some(EngramCheckpointAttemptResult::Unknown { .. })));
+    assert!(matches!(turn._runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    let after_attempt = checkpoint_and_admission_requests(&turn.transport);
+    assert_eq!(after_attempt, authority_requests.into_iter().chain([first[0].clone()]).collect::<Vec<_>>());
     turn.let_bind_retry_elapse();
-    turn.state
-        .ensure_engram_session_bound_off_lock(&turn.child_id)
-        .expect("the bare recovery checkpoint closes the grant and the session binds afresh");
-
-    let checkpoints = turn.checkpoints();
-    assert_eq!(
-        checkpoints.len(),
-        3,
-        "the lost close, the refused recovery and the bare recovery"
-    );
-    assert_eq!(
-        checkpoints[0]["observations"].as_array().map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(
-        checkpoints[1]["observations"], checkpoints[0]["observations"],
-        "the first recovery carried the lost close's report"
-    );
-    assert!(
-        checkpoints[2].get("observations").is_none(),
-        "the refused report is not resent"
-    );
-    assert_eq!(
-        checkpoints[2]["idempotency_key"],
-        format!(
-            "termal-restart-checkpoint:{}:{}",
-            turn.child_id, turn.grant_id
-        ),
-        "the bare recovery has a bare key"
-    );
-    let inner = turn.state.inner.lock().expect("state mutex poisoned");
-    let index = inner
-        .find_session_index(&turn.child_id)
-        .expect("child should exist");
-    assert_eq!(
-        inner.sessions[index].engram.active_grant_id, None,
-        "the recovered grant is closed"
-    );
+    if matches!(script, CheckpointScript::LostThenRecoveryRefusedWithAnswer) {
+        assert!(matches!(&attempted.attempts[1].result,
+            Some(EngramCheckpointAttemptResult::Refused { response }) if response["code"] == recovery_error_code));
+        assert!(turn.state.ensure_engram_session_bound_off_lock(&turn.child_id).is_err());
+        let now = chrono::Utc::now();
+        turn.state.engram_abort_retry_tick(now);
+        turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+        assert_eq!(turn.checkpoints(), [first[0].clone(), first[0].clone()]);
+        assert_eq!(checkpoint_and_admission_requests(&turn.transport), after_attempt);
+        let held = assert_original_checkpoint_held_after_reload(&turn.state, &original);
+        assert_eq!(held.attempts.len(), 2, "Refuse does not erase the older Unknown or permit a bare fallback");
+        let inner = turn.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&turn.child_id).unwrap()];
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(turn.grant_id.as_str()));
+    } else {
+        assert!(matches!(&attempted.attempts[1].result,
+            Some(EngramCheckpointAttemptResult::Unknown { code }) if code.as_deref() == Some(recovery_error_code)));
+        turn.state.ensure_engram_session_bound_off_lock(&turn.child_id)
+            .expect("a matching original receipt settles the old result before a fresh bind");
+        let recovered = assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+        assert_eq!(recovered.attempts.len(), 3);
+        assert_eq!(turn.checkpoints(), [first[0].clone(), first[0].clone(), first[0].clone()]);
+        let requests = checkpoint_and_admission_requests(&turn.transport);
+        let expected = after_attempt.into_iter().chain([first[0].clone()]).collect::<Vec<_>>();
+        assert_eq!(&requests[..expected.len()], expected.as_slice());
+        assert_eq!(requests[expected.len()..].iter().map(|request| request["operation"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["session_bind"]);
+    }
+    assert_eq!(first[0]["observations"].as_array().map(Vec::len), Some(1));
 }
 
 #[test]
@@ -1568,16 +1594,38 @@ fn a_retried_exit_checkpoint_repeats_the_report_the_wait_built() {
     turn.state
         .finish_turn_ok_if_runtime_matches(&turn.child_id, &turn.runtime_token)
         .expect("turn completion should tolerate the wait checkpoint deadline");
+    let first_request = turn.checkpoints();
+    assert_eq!(first_request.len(), 1);
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.child_id, &first_request[0], None)
+    };
     fs::write(turn.child_workdir.join("after.txt"), "after the turn\n")
         .expect("later edit should write");
     turn.state
         .kill_session(&turn.child_id)
-        .expect("terminal cleanup retries the grant with exit intent");
+        .expect("terminal cleanup retains the original Wait checkpoint");
+
+    assert_eq!(turn.checkpoints(), first_request);
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(loaded.find_session_index(&turn.child_id).is_none());
+    assert_unknown_checkpoint_custody(&loaded, &turn.child_id, &first_request[0], Some(&original));
+    let summary = engram_control_recovery_summaries(&loaded).into_iter()
+        .find(|summary| summary.session_id == turn.child_id).unwrap();
+    assert!(summary.excluded && !summary.settlement_confirmed);
+    assert!(summary.next_actions.is_empty());
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+    let authority = checkpoint_and_admission_requests(&turn.transport);
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
 
     let checkpoints = turn.checkpoints();
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(checkpoints[0]["next_intent"], "wait");
-    assert_eq!(checkpoints[1]["next_intent"], "exit");
+    assert_eq!(checkpoints[1], checkpoints[0], "the full original key and report are replayed");
     let first = checkpoints[0]["observations"]
         .as_array()
         .expect("the wait checkpoint carries the observation");
@@ -1587,8 +1635,10 @@ fn a_retried_exit_checkpoint_repeats_the_report_the_wait_built() {
     assert!(first[0].get("observed_at").is_some());
     assert_eq!(
         checkpoints[1]["observations"], checkpoints[0]["observations"],
-        "the exit retry repeats the report: same change, basis and time"
+        "original-result recovery repeats the report: same change, basis and time"
     );
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority.into_iter().chain([first_request[0].clone()]).collect::<Vec<_>>());
 }
 
 #[test]
@@ -1615,16 +1665,38 @@ fn a_closer_that_captured_before_another_claimed_repeats_the_cached_report() {
     turn.state
         .finish_turn_ok_if_runtime_matches(&turn.child_id, &turn.runtime_token)
         .expect("turn completion should tolerate the wait checkpoint deadline");
+    let first_request = turn.checkpoints();
+    assert_eq!(first_request.len(), 1);
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.child_id, &first_request[0], None)
+    };
     gate.release();
     teardown
         .join()
         .expect("teardown thread should not panic")
-        .expect("teardown retries the grant with exit intent");
+        .expect("teardown preserves the completion's original checkpoint");
+
+    assert_eq!(turn.checkpoints(), first_request);
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(loaded.find_session_index(&turn.child_id).is_none());
+    assert_unknown_checkpoint_custody(&loaded, &turn.child_id, &first_request[0], Some(&original));
+    let summary = engram_control_recovery_summaries(&loaded).into_iter()
+        .find(|summary| summary.session_id == turn.child_id).unwrap();
+    assert!(summary.excluded && !summary.settlement_confirmed);
+    assert!(summary.next_actions.is_empty());
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+    let authority = checkpoint_and_admission_requests(&turn.transport);
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
 
     let checkpoints = turn.checkpoints();
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(checkpoints[0]["next_intent"], "wait");
-    assert_eq!(checkpoints[1]["next_intent"], "exit");
+    assert_eq!(checkpoints[1], checkpoints[0], "the teardown cannot substitute an Exit key");
     let first = checkpoints[0]["observations"]
         .as_array()
         .expect("the completion carries the observation");
@@ -1632,8 +1704,10 @@ fn a_closer_that_captured_before_another_claimed_repeats_the_cached_report() {
     assert_eq!(first[0]["outcome"], "succeeded");
     assert_eq!(
         checkpoints[1]["observations"], checkpoints[0]["observations"],
-        "the teardown repeats the completion's report rather than its own unknown one"
+        "recovery repeats the completion's report rather than the teardown's unknown one"
     );
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority.into_iter().chain([first_request[0].clone()]).collect::<Vec<_>>());
 }
 
 #[test]
@@ -1783,6 +1857,11 @@ fn delegation_process_cleanup_uncertain_checkpoint_survives_duplicate_exit() {
     let first = turn.checkpoints();
     assert_eq!(first.len(), 1);
     assert_eq!(first[0]["observations"][0]["outcome"], "unknown");
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.child_id, &first[0], None)
+    };
+    let authority_requests = checkpoint_and_admission_requests(&turn.transport);
     let token = {
         let inner = turn.state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&turn.child_id).unwrap()];
@@ -1793,8 +1872,23 @@ fn delegation_process_cleanup_uncertain_checkpoint_survives_duplicate_exit() {
     assert_eq!(turn.checkpoints().len(), 1);
     turn.state.stop_session(&turn.child_id).unwrap();
     let retried = turn.checkpoints();
-    assert_eq!(retried.len(), 2, "Stop retries the original uncertain checkpoint owner");
-    assert_eq!(retried[1]["observations"], first[0]["observations"], "retry cannot substitute a new report");
+    assert_eq!(retried, first, "Stop cannot authorize an uncertain checkpoint replay");
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport), authority_requests);
+    assert_unknown_checkpoint_custody_after_reload(
+        &turn.state, &turn.child_id, &first[0], &original,
+    );
+    assert!(owner.tree.is_confirmed());
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+    assert_eq!(turn.checkpoints(), [first[0].clone(), first[0].clone()]);
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority_requests.into_iter().chain([first[0].clone()]).collect::<Vec<_>>());
+    turn.state.handle_runtime_exit_if_matches(&turn.child_id, &token, Some("later cleanup-only notice")).unwrap();
+    assert_eq!(turn.checkpoints().len(), 2, "duplicate exit never replays the original after recovery");
     assert!(owner.tree.is_confirmed());
 }
 

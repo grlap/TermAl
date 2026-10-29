@@ -842,7 +842,7 @@ fn engram_recovery_proof_cancel_readback_uses_real_serializer_and_complete_persi
         record.message_positions = build_message_positions(&record.session.messages);
     }
     let path = fixture._root.path().join("proof.sqlite");
-    persist_persisted_state_to_sqlite(&path, &PersistedState::from_inner(&inner)).unwrap();
+    persist_state(&path, &inner).unwrap();
     let connection = open_sqlite_state_connection(&path).unwrap();
     let encoded: String = connection
         .query_row(

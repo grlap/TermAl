@@ -249,3 +249,120 @@ fn root_recovery_revalidates_abandoned_reporter_after_unlocked_selection() {
     assert_eq!(fixture.claimed.state.inner.lock().unwrap().engram_named_root_journal, journals,
         "a currently available reporter retains its executable intent");
 }
+
+#[test]
+fn root_recovery_skips_excluded_preferred_and_first_readers() {
+    for (preferred, all_excluded) in [(true, false), (false, false), (true, true), (false, true)] {
+        let fixture = RecoveryHoldFixture::new(2, 1);
+        let excluded = fixture.claimed.session_id.clone();
+        let healthy = "session-healthy-root-reader".to_owned();
+        let (ledger, binding) = {
+            let mut inner = fixture.claimed.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&excluded).unwrap();
+            let original = inner.sessions[index].clone();
+            let target = AppState::engram_source_root_target_locked(&inner, &excluded)
+                .unwrap().unwrap();
+            let token = original.engram.routing_token.clone().unwrap();
+            let grant = "retained-root-reader-grant".to_owned();
+            let request = EngramControlRequest::TurnCheckpoint {
+                routing_token: token.clone(),
+                grant_id: grant.clone(),
+                next_intent: EngramNextIntent::Exit,
+                report: EngramTurnReport::default(),
+                idempotency_key: "retained-root-reader-checkpoint".to_owned(),
+            };
+            let debt = EngramSessionObligation {
+                id: "retained-root-reader-duty".to_owned(),
+                project_id: original.session.project_id.clone().unwrap(),
+                authority: fixture.store.clone(),
+                authority_confirmed: true,
+                connection: target.connection,
+                external_ref: format!("termal:session:{excluded}"),
+                local_session_id: excluded.clone(),
+                owner_generation: 1,
+                prompt_id: None,
+                routing_token: token,
+                grant_id: grant,
+                kind: EngramSessionObligationKind::CheckpointContainment,
+                phase: EngramSessionObligationPhase::Sent,
+                basis: EngramSessionObligationBasis::CheckpointUnsettled,
+                reason_code: "checkpoint_failed".to_owned(),
+                frozen_request: serde_json::to_value(request).unwrap(),
+                settlement_evidence: Value::Null,
+            };
+            inner.engram_session_obligations =
+                inner.engram_session_obligations.with_entry(debt.clone()).unwrap();
+            let mut successor = original.clone();
+            successor.session.id = healthy.clone();
+            successor.engram.routing_token = Some("healthy-root-reader-token".to_owned());
+            inner.sessions = vec![original, successor];
+            assert_eq!(inner.sessions[0].session.id, excluded);
+            inner.engram_work_source_roots.iter_mut().find(|root| {
+                root.store == fixture.store && root.claim_id == fixture.owner.binding.claim_id
+            }).unwrap().named_by_session = if preferred {
+                excluded.clone()
+            } else {
+                "session-absent-root-namer".to_owned()
+            };
+            inner.engram_work_naming_history.iter_mut()
+                .find(|history| history.work_id == fixture.owner.binding.work_id).unwrap()
+                .unresolved_runs = vec![fixture.owner.binding.clone()];
+            assert!(engram_admission_obligation_locked(&inner, &excluded).is_some());
+            if all_excluded {
+                let mut successor_debt = debt;
+                successor_debt.id.push_str("-successor");
+                successor_debt.local_session_id = healthy.clone();
+                successor_debt.connection.session_id = healthy.clone();
+                successor_debt.external_ref = format!("termal:session:{healthy}");
+                successor_debt.routing_token = "healthy-root-reader-token".to_owned();
+                successor_debt.grant_id.push_str("-successor");
+                successor_debt.frozen_request = serde_json::to_value(
+                    EngramControlRequest::TurnCheckpoint {
+                        routing_token: successor_debt.routing_token.clone(),
+                        grant_id: successor_debt.grant_id.clone(),
+                        next_intent: EngramNextIntent::Exit,
+                        report: EngramTurnReport::default(),
+                        idempotency_key: "successor-root-reader-checkpoint".to_owned(),
+                    },
+                ).unwrap();
+                inner.engram_session_obligations =
+                    inner.engram_session_obligations.with_entry(successor_debt).unwrap();
+            }
+            assert_eq!(engram_admission_obligation_locked(&inner, &healthy).is_some(), all_excluded);
+            assert!(AppState::engram_source_root_target_locked(&inner, &excluded)
+                .unwrap().is_none());
+            assert_eq!(AppState::engram_source_root_target_locked(&inner, &healthy)
+                .unwrap().is_none(), all_excluded);
+            let reporter = inner.engram_named_root_journal[0].pending.as_ref().unwrap();
+            assert!(!AppState::engram_root_reporter_available(&inner, reporter));
+            if all_excluded {
+                assert!(engram_root_recovery_reader_target_locked(
+                    &inner, &fixture.store, Some(&excluded)).is_none());
+            }
+            (serde_json::to_value(&inner.engram_session_obligations).unwrap(),
+                inner.sessions[1].engram.work_binding.clone().unwrap())
+        };
+        fixture.claimed.transport.enable_named_roots(&healthy, &binding);
+        let before = fixture.claimed.transport.requests().len();
+        let clock = fixture.claimed.state.engram_budget_clock();
+        fixture.claimed.state.recover_engram_authority_batch_until(
+            &fixture.store, &fixture.owner, clock.now() + DEADLOCK_GUARD, true, None,
+        ).unwrap();
+        let requests = fixture.claimed.transport.requests();
+        assert_eq!(requests.len() - before, usize::from(!all_excluded),
+            "only a healthy reader can perform the canonical recovery read");
+        assert!(requests[before..].iter().all(|request| {
+            request.connection.session_id == healthy
+                && request.request["operation"] == "named_root_read"
+        }), "an excluded preferred/first reader must never perform an RPC");
+        let inner = fixture.claimed.state.inner.lock().unwrap();
+        assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), ledger);
+        assert!(engram_admission_obligation_locked(&inner, &excluded).is_some());
+        assert_eq!(inner.engram_work_naming_history.iter()
+            .find(|history| history.work_id == fixture.owner.binding.work_id).unwrap()
+            .unresolved_runs.is_empty(), !all_excluded,
+            "only the healthy successor resolves the retained run");
+        assert!(matches!(fixture.claimed.runtime_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)));
+    }
+}

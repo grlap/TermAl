@@ -184,7 +184,8 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id)?;
             let queued = inner.sessions[index].queued_prompts.front()?;
-            if engram_queue_head_refused_as_interrupted(&inner.sessions[index]) {
+            if engram_queue_head_refused_as_interrupted(&inner.sessions[index])
+                && !containment_retained_reconciliation_allowed(&inner, session_id) {
                 return None;
             }
             let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
@@ -304,6 +305,18 @@ impl AppState {
         allow_blocked_dispatch: bool,
         pending_engram: Option<EngramPendingDispatch>,
     ) -> Result<Option<StartedTurn>> {
+        if engram_admission_obligation_locked(inner, &inner.sessions[index].session.id).is_some() {
+            return Ok(None);
+        }
+        // None may mean evaluation was withheld by an obligation that has
+        // since settled off-lock. It is never an ungated result under ON.
+        if pending_engram.is_none()
+            && Self::engram_session_requires_dispatch_card_locked(
+                inner, &inner.sessions[index].session.id,
+            )
+        {
+            return Ok(None);
+        }
         // An obsolete admission cannot promote or abandon its successor.
         if let Some(EngramPendingDispatch {
             evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
@@ -1425,9 +1438,11 @@ impl AppState {
                     self.commit_locked(&mut inner)?;
                     return Ok(None);
                 }
+                let contained_reconciliation = containment_retained_reconciliation_allowed(&inner, session_id);
                 let record = &mut inner.sessions[index];
                 if engram_queue_head_refused_as_interrupted(record)
                     && !record.engram.recovered_admission
+                    && !contained_reconciliation
                 {
                     return Ok(None);
                 }
@@ -1570,6 +1585,20 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
+        let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
+        if let Some(
+            QueuedDrainOwner::Resume(retry_owner)
+            | QueuedDrainOwner::AdmissionRetry(retry_owner),
+        ) = &owner {
+            self.settle_certified_checkpoint_before_admission(session_id, Some(retry_owner))
+                .map_err(|error| anyhow!(error.message))?;
+        }
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if engram_admission_obligation_locked(&inner, session_id).is_some() {
+                return Ok(None);
+            }
+        }
         self.prepare_dedicated_runtime_reset_off_lock(session_id, false)?;
         // An explicit Send/Resume bypass is permission for the queue head
         // that existed when this drain began, not for a successor exposed by
@@ -1916,6 +1945,7 @@ impl AppState {
                 }
                 if engram_queue_head_refused_as_interrupted(record)
                     && !record.engram.recovered_admission
+                    && !containment_retained_reconciliation_allowed(&inner, session_id)
                 {
                     return Ok(None);
                 }
@@ -2036,7 +2066,8 @@ impl AppState {
                 .cloned()
                 .expect("validated Engram queue head should remain current");
             let queued_prompt_id = queued_after_evaluation.pending_prompt.id.clone();
-            if engram_queue_head_refused_as_interrupted(&inner.sessions[index]) {
+            if engram_queue_head_refused_as_interrupted(&inner.sessions[index])
+                && !containment_retained_reconciliation_allowed(&inner, session_id) {
                 return Ok(None);
             }
             let Some(started) = self.start_next_queued_turn_locked(
@@ -2154,6 +2185,37 @@ impl AppState {
         request: SendMessageRequest,
         followup: Option<&DelegationRecord>,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
+        if self.queue_user_behind_contained_head(session_id, &request, followup)? {
+            return Ok(DispatchTurnResult::Queued);
+        }
+        if self.queue_ordinary_behind_checkpoint(session_id, &request, followup)? {
+            return Ok(DispatchTurnResult::Queued);
+        }
+        let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
+        let checkpoint_preflight = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            certified_checkpoint_replay_target_locked(&inner, session_id, None).is_some()
+        };
+        if checkpoint_preflight {
+            if request.text.trim().is_empty() && request.attachments.is_empty() {
+                return Err(ApiError::bad_request("prompt cannot be empty"));
+            }
+            parse_prompt_image_attachments(&request.attachments)?;
+            // Settle the old operation before this Send creates or admits a
+            // prompt. Success confers no exception to the ordinary checks.
+            if let Err(error) = self.settle_certified_checkpoint_before_admission(session_id, None) {
+                // A failed exact retry may become Unknown. Keep the new
+                // envelope queued without treating that duty as settled.
+                if self.queue_ordinary_behind_checkpoint(session_id, &request, followup)? {
+                    return Ok(DispatchTurnResult::Queued);
+                }
+                return Err(error);
+            }
+        }
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            require_no_engram_local_dispatch_obligation(&inner, session_id)?;
+        }
         let recovery_pending = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -2378,6 +2440,7 @@ impl AppState {
                 prompt = rendered_prompt;
             }
         }
+        require_no_engram_local_dispatch_obligation(&inner, session_id)?;
         let project_reset_fenced = inner.sessions[index].engram.project_reset_in_progress
             || engram_project_for_session_locked(&inner, session_id)
                 .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
@@ -2424,6 +2487,7 @@ impl AppState {
             && (queued_prompt_source == QueuedPromptSource::Mailbox
                 || capacity_automatic_prompt);
 
+        require_no_engram_local_dispatch_obligation(&inner, session_id)?;
         let mut message_id = inner.next_message_id();
         let still_refused = refused_relay_head.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]));
         let record = &inner.sessions[index];

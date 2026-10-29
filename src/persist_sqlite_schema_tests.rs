@@ -19,7 +19,7 @@ mod sqlite_schema_tests {
 
     #[test]
     fn sqlite_schema_guard_rejects_noncurrent_versions_before_creating_state_tables() {
-        for unsupported_version in ["1", "3", "4", "2-metadata-units-2-handoff-2"] {
+        for unsupported_version in ["1", "3", "4", "5", "2-metadata-units-2-handoff-2"] {
             let connection =
                 rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
             connection
@@ -136,12 +136,12 @@ mod sqlite_schema_tests {
                 )
                 .expect("fresh metadata authority count should be queryable"),
             0,
-            "schema initialization alone must remain a valid never-persisted database"
+            "fresh metadata authority uses units, never a legacy app_state row"
         );
         assert_eq!(
             first_normalized_state_authority_table_with_rows(&connection)
                 .expect("fresh authority tables should be inspectable"),
-            None
+            Some("state_metadata_units")
         );
     }
 
@@ -243,7 +243,7 @@ mod sqlite_schema_tests {
             let encoded = format!(r#"{{"{embedded_key}":[{{"id":"legacy"}}]}}"#);
             connection
                 .execute(
-                    "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
+                    "INSERT OR REPLACE INTO app_state(key, value_json) VALUES(?1, ?2)",
                     rusqlite::params![SQLITE_METADATA_KEY, encoded],
                 )
                 .expect("embedded app-state fixture should insert");
@@ -266,7 +266,7 @@ mod sqlite_schema_tests {
         seed_primary2_state_schema_for_test(&connection);
         connection
             .execute(
-                "INSERT INTO app_state(key, value_json) VALUES(?1, '{ not json')",
+                "INSERT OR REPLACE INTO app_state(key, value_json) VALUES(?1, '{ not json')",
                 rusqlite::params![SQLITE_METADATA_KEY],
             )
             .expect("malformed app-state fixture should insert");
@@ -292,6 +292,8 @@ mod sqlite_schema_tests {
                 .expect("file-backed sqlite should open");
             ensure_sqlite_state_schema_for_path(&connection, &path)
                 .expect("fresh current schema should initialize");
+            connection.execute("DELETE FROM state_metadata_units", [])
+                .expect("remove the explicit fresh metadata to exercise missing authority");
             connection
                 .execute(
                     "INSERT INTO sessions(id, value_json) VALUES('session-existing', '{}')",
@@ -343,7 +345,7 @@ mod sqlite_schema_tests {
             seed_primary2_state_schema_for_test(&connection);
             connection
                 .execute(
-                    "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
+                    "INSERT OR REPLACE INTO app_state(key, value_json) VALUES(?1, ?2)",
                     rusqlite::params![
                         SQLITE_METADATA_KEY,
                         r#"{"nextSessionNumber":1,"nextMessageNumber":1,"projects":"wrong","sessions":[]}"#

@@ -954,7 +954,7 @@ fn a_refused_checkpoints_drained_batches_are_stamped_for_the_store() {
     }
     let before = stamp(&turn);
     turn.state
-        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("stale_fence"));
+        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("stale_fence"), true);
 
     assert!(turn.record(|record| record.engram.pending_batches.is_empty()));
     assert!(stamp(&turn) > before, "the drained batch must reach the store");

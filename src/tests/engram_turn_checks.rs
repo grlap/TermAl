@@ -872,6 +872,18 @@ impl CheckedTurn {
         turns: usize,
         named: bool,
     ) -> Self {
+        Self::start_with_opening_and_setup(label, claimed, subdirectory, checkpoints, turns, named, None)
+    }
+
+    fn start_with_opening_and_setup(
+        label: &str,
+        claimed: bool,
+        subdirectory: Option<&str>,
+        checkpoints: Vec<ScriptedEngramControlResponse>,
+        turns: usize,
+        named: bool,
+        setup: Option<fn(&CheckedTurn)>,
+    ) -> Self {
         use_toolchain_label(Some(FIXTURE_TOOLCHAIN));
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime(&format!("engram-turn-check-{label}"));
@@ -957,6 +969,7 @@ impl CheckedTurn {
             transport,
             _runtime_rx: runtime_rx,
         };
+        if let Some(setup) = setup { setup(&turn); }
         let state = &turn.state;
         let session_id = &turn.session_id;
         if named {
@@ -2718,7 +2731,7 @@ fn a_refused_report_with_checks_falls_back_to_the_turns_own_observation() {
     });
 
     turn.state
-        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("redacted"));
+        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("redacted"), false);
     assert_eq!(
         turn.state
             .cached_engram_turn_report(&turn.session_id, CHECK_GRANT),
@@ -2726,7 +2739,7 @@ fn a_refused_report_with_checks_falls_back_to_the_turns_own_observation() {
         "the first refusal falls back to the turn's own observation"
     );
     turn.state
-        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("redacted"));
+        .forget_refused_engram_turn_report(&turn.session_id, CHECK_GRANT, Some("redacted"), false);
     assert!(
         turn.state
             .cached_engram_turn_report(&turn.session_id, CHECK_GRANT)
@@ -4494,29 +4507,33 @@ fn a_refused_report_with_evidence_is_retried_as_the_turns_own_observation() {
         refused.get("verification_evidence").is_some(),
         "{refused:#}"
     );
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.session_id, &refused, None)
+    };
     turn.state
         .kill_session(&turn.session_id)
-        .expect("terminal cleanup closes the grant again");
-
-    let closes = checkpoints(&turn);
-    assert_eq!(closes.len(), 2);
-    let retry = &closes[1];
-    assert!(retry.get("verification_evidence").is_none(), "{retry:#}");
-    assert!(retry.get("environment_evidence").is_none());
-    assert_eq!(
-        observations(retry).len(),
-        1,
-        "the turn's own observation only"
-    );
-    let key = |checkpoint: &Value| {
-        checkpoint["idempotency_key"]
-            .as_str()
-            .expect("an idempotency key")
-            .to_owned()
-    };
-    assert!(key(&refused).contains(":evidence:"));
-    assert!(!key(retry).contains(":evidence:"));
-    assert_ne!(key(&refused), key(retry));
+        .expect("administrative removal retains original-result debt");
+    assert_eq!(checkpoints(&turn), [refused.clone()]);
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(loaded.find_session_index(&turn.session_id).is_none());
+    assert_unknown_checkpoint_custody(&loaded, &turn.session_id, &refused, Some(&original));
+    let summary = engram_control_recovery_summaries(&loaded).into_iter()
+        .find(|summary| summary.session_id == turn.session_id).unwrap();
+    assert!(summary.excluded && !summary.settlement_confirmed);
+    assert!(summary.next_actions.is_empty());
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+    let authority = checkpoint_and_admission_requests(&turn.transport);
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    let recovered = assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+    assert_eq!(checkpoints(&turn), [refused.clone(), refused.clone()]);
+    assert!(refused["idempotency_key"].as_str().unwrap().contains(":evidence:"));
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority.into_iter().chain([refused]).collect::<Vec<_>>());
+    assert_eq!(recovered.original.id, operation.original.id);
 }
 
 /// Engram refuses evidence it cannot tie to the checkpoint with one of three
@@ -4524,11 +4541,11 @@ fn a_refused_report_with_evidence_is_retried_as_the_turns_own_observation() {
 /// (`environment_fingerprint_mismatch`), a reference to no environment record
 /// (`environment_evidence_not_found`), and an environment recorded under
 /// another capability-map revision, or cited from another run or source
-/// revision (`environment_basis_mismatch`). TermAl lists none of them: each
-/// is a remote answer, and any remote answer refusing a report drops its
-/// evidence, so the grant is closed with the turn's own observation. The
-/// checkpoint card names the code. The message reads like a lost call, so
-/// nothing here can depend on its text; the lost-call counterpart is
+/// revision (`environment_basis_mismatch`). A remote error is not a matching
+/// receipt for the original checkpoint. Keep the full evidence in canonical
+/// custody and recover only that original request. The checkpoint card names
+/// the code. The message reads like a lost call, so nothing here can depend
+/// on its text; the lost-call counterpart is
 /// `a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence`.
 #[test]
 fn environment_evidence_refusals_fall_back_and_name_their_code_on_the_card() {
@@ -4570,31 +4587,39 @@ fn environment_evidence_refusals_fall_back_and_name_their_code_on_the_card() {
             }),
             "{code}: the checkpoint card names the stable code"
         );
+        let original = {
+            let inner = turn.state.inner.lock().unwrap();
+            assert_unknown_checkpoint_custody(&inner, &turn.session_id, &refused, None)
+        };
         turn.state
             .kill_session(&turn.session_id)
-            .expect("terminal cleanup closes the grant again");
-
-        let closes = checkpoints(&turn);
-        assert_eq!(closes.len(), 2, "{code}");
-        let retry = &closes[1];
-        assert!(
-            retry.get("verification_evidence").is_none()
-                && retry.get("environment_evidence").is_none(),
-            "{code}: {retry:#}"
-        );
-        assert_eq!(
-            observations(retry).len(),
-            1,
-            "{code}: the turn's own observation only"
-        );
+            .expect("removal preserves original debt independently of its row");
+        assert_eq!(checkpoints(&turn), [refused.clone()], "{code}");
+        let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+        assert!(loaded.find_session_index(&turn.session_id).is_none());
+        assert_unknown_checkpoint_custody(&loaded, &turn.session_id, &refused, Some(&original));
+        let summary = engram_control_recovery_summaries(&loaded).into_iter()
+            .find(|summary| summary.session_id == turn.session_id).unwrap();
+        assert!(summary.excluded && !summary.settlement_confirmed);
+        assert!(summary.next_actions.is_empty());
+        let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+        turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+        let authority = checkpoint_and_admission_requests(&turn.transport);
+        let now = chrono::Utc::now();
+        turn.state.engram_abort_retry_tick(now);
+        turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+        assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+        assert_eq!(checkpoints(&turn), [refused.clone(), refused.clone()], "{code}");
+        assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+            authority.into_iter().chain([refused]).collect::<Vec<_>>());
     }
 }
 
 /// The counterpart of
 /// `environment_evidence_refusals_fall_back_and_name_their_code_on_the_card`:
 /// a call lost in transport is not an answer, so a message naming an
-/// environment refusal code does not drop the evidence. The retry resends
-/// the report as it was.
+/// environment refusal code does not drop the evidence. Ordinary kill keeps
+/// that exact unresolved report in durable custody without another close.
 #[test]
 fn a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence() {
     let turn = CheckedTurn::start_with(
@@ -4614,27 +4639,32 @@ fn a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence() {
         lost.get("verification_evidence").is_some() && lost.get("environment_evidence").is_some(),
         "{lost:#}"
     );
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.session_id, &lost, None)
+    };
     turn.state
         .kill_session(&turn.session_id)
-        .expect("terminal cleanup closes the grant again");
+        .expect("inactive original report debt can outlive its owner");
 
     let closes = checkpoints(&turn);
-    assert_eq!(closes.len(), 2);
-    let retry = &closes[1];
-    for field in [
-        "observations",
-        "verification_evidence",
-        "environment_evidence",
-    ] {
-        assert_eq!(retry[field], lost[field], "{field} is resent unchanged");
-    }
+    assert_eq!(closes.len(), 1, "ordinary kill cannot authorize another checkpoint");
+    assert_eq!(closes[0], lost, "the entire original wire report is retained");
     assert!(
-        retry["idempotency_key"]
+        lost["idempotency_key"]
             .as_str()
             .expect("an idempotency key")
             .contains(":evidence:"),
-        "{retry:#}"
+        "{lost:#}"
     );
+    {
+        let inner = turn.state.inner.lock().unwrap();
+        assert!(inner.find_session_index(&turn.session_id).is_none());
+        assert_unknown_checkpoint_custody(&inner, &turn.session_id, &lost, Some(&original));
+    }
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(loaded.find_session_index(&turn.session_id).is_none());
+    assert_unknown_checkpoint_custody(&loaded, &turn.session_id, &lost, Some(&original));
 }
 
 /// A linked worktree of the turn's repository at `.worktrees/wt`, made the
@@ -4850,3 +4880,6 @@ mod unended_closures;
 
 #[path = "engram_checkpoint_non_application.rs"]
 mod checkpoint_non_application;
+
+#[path = "engram_checkpoint_result_recovery.rs"]
+mod checkpoint_result_recovery;

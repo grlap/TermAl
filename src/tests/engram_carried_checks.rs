@@ -5068,9 +5068,8 @@ fn a_closer_that_claims_after_the_winners_reply_was_lost_replays_the_winners_rep
     // snapshots; the loser stops before its claim. The winner claims,
     // consumes the run into its report, and its reply is lost: the claim
     // ends, the grant stays open with that report cached. Other work found in
-    // the worktree afterwards cannot change it. The loser then claims, finds
-    // the cached report, discards its own snapshot's candidate, and sends the
-    // winner's request verbatim.
+    // the worktree afterwards cannot change it. The later closer must not
+    // replace that report or infer replay authority from its unchanged key.
     let label = "carried-cached-loser";
     let turn = CheckedTurn::start_with_opening(
         label,
@@ -5103,6 +5102,11 @@ fn a_closer_that_claims_after_the_winners_reply_was_lost_replays_the_winners_rep
     closers.join(winner);
     let first = checkpoint_requests(&turn);
     assert_eq!(first.len(), 1, "{first:#?}");
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.session_id, &first[0], None)
+    };
+    let authority_requests = checkpoint_and_admission_requests(&turn.transport);
     assert_credited(&turn, &first[0], &run, "succeeded");
     let report = cached_report(&turn);
     assert_eq!(
@@ -5127,20 +5131,31 @@ fn a_closer_that_claims_after_the_winners_reply_was_lost_replays_the_winners_rep
     loser_gate.release();
     closers.join(loser);
     let checkpoints = checkpoint_requests(&turn);
-    assert_eq!(checkpoints.len(), 2, "{checkpoints:#?}");
-    assert_eq!(
-        checkpoints[1], checkpoints[0],
-        "the loser replays the winner's request verbatim"
+    assert_eq!(checkpoints, first, "a later closer cannot replay an Unknown request");
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport), authority_requests);
+    assert_unknown_checkpoint_custody_after_reload(
+        &turn.state, &turn.session_id, &first[0], &original,
     );
     turn.record(|record| {
         assert!(
             record.engram.carried_checks.is_empty(),
             "the run was consumed once"
         );
-        assert_eq!(
-            record.engram.active_grant_id, None,
-            "the replay closed the grant"
-        );
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(CHECK_GRANT));
+    });
+
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+    assert_eq!(checkpoint_requests(&turn), [first[0].clone(), first[0].clone()]);
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority_requests.into_iter().chain([first[0].clone()]).collect::<Vec<_>>());
+    turn.record(|record| {
+        assert!(record.engram.active_grant_id.is_none());
+        assert!(record.engram.carried_checks.is_empty(), "the credited run is not consumed again");
     });
 }
 
@@ -5150,7 +5165,7 @@ fn a_new_closer_after_a_lost_reply_replays_the_cached_report_and_settles_nothing
     // stays carried and its report goes without it; that report's reply is
     // lost. A closer that starts afterwards finds the cached report at its
     // first look: it takes no settlement snapshot of the run still carried,
-    // and sends the first request verbatim.
+    // without consuming that run or replacing the unresolved original.
     let label = "carried-cached-new-closer";
     let turn = CheckedTurn::start_with_opening(
         label,
@@ -5173,6 +5188,11 @@ fn a_new_closer_after_a_lost_reply_replays_the_cached_report_and_settles_nothing
     missed.wait_completed(guard());
     let first = checkpoint_requests(&turn);
     assert_eq!(first.len(), 1, "{first:#?}");
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.session_id, &first[0], None)
+    };
+    let authority_requests = checkpoint_and_admission_requests(&turn.transport);
     assert!(
         first[0].get("verification_evidence").is_none(),
         "{:#}",
@@ -5201,19 +5221,80 @@ fn a_new_closer_after_a_lost_reply_replays_the_cached_report_and_settles_nothing
         "the new closer took no settlement snapshot"
     );
     let checkpoints = checkpoint_requests(&turn);
-    assert_eq!(checkpoints.len(), 2, "{checkpoints:#?}");
-    assert_eq!(
-        checkpoints[1], checkpoints[0],
-        "the new closer sends the first request verbatim"
+    assert_eq!(checkpoints, first, "a new closer cannot replay an Unknown request");
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport), authority_requests);
+    assert_unknown_checkpoint_custody_after_reload(
+        &turn.state, &turn.session_id, &first[0], &original,
     );
     turn.record(|record| {
-        assert_eq!(record.engram.active_grant_id, None);
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(CHECK_GRANT));
         assert_eq!(
             record.engram.carried_checks.len(),
             1,
             "the run is still carried, for a later grant"
         );
     });
+    // Runtime captures are deliberately not serializable. Compare their
+    // fields and capture identities in memory; restart retains only a marker.
+    let independent_run = turn.record(|record| record.engram.carried_checks[0].clone());
+    let independent_markers = turn.record(|record| record.engram.carried_checks.iter()
+        .map(EngramCarriedCheck::marker).collect::<Vec<_>>());
+    assert_eq!(independent_markers.len(), 1);
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    let recovered = assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+    assert_eq!(checkpoint_requests(&turn), [first[0].clone(), first[0].clone()]);
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport),
+        authority_requests.into_iter().chain([first[0].clone()]).collect::<Vec<_>>());
+    turn.record(|record| {
+        assert!(record.engram.active_grant_id.is_none());
+        assert_eq!(record.engram.carried_checks.len(), 1, "recovery does not settle an uncredited run");
+        let current = &record.engram.carried_checks[0];
+        let prior = &independent_run;
+        assert_eq!((current.ends_by_report, &current.runtime, &current.work_id, &current.claim_id,
+            current.claim_fence, current.root_generation, &current.run_directory, &current.terminal_digest),
+            (prior.ends_by_report, &prior.runtime, &prior.work_id, &prior.claim_id,
+            prior.claim_fence, prior.root_generation, &prior.run_directory, &prior.terminal_digest));
+        assert_eq!((current.launcher_gone, current.run_missing, current.terminal_conflict,
+            current.ambiguous, &current.ruled_out_runs, &current.fence, current.terminal_at,
+            current.terminal_observed_at, &current.potential, &current.bind_targets),
+            (prior.launcher_gone, prior.run_missing, prior.terminal_conflict,
+            prior.ambiguous, &prior.ruled_out_runs, &prior.fence, prior.terminal_at,
+            prior.terminal_observed_at, &prior.potential, &prior.bind_targets));
+        let current = &current.check;
+        let prior = &prior.check;
+        assert_eq!((&current.grant_id, &current.key, current.sequence, &current.command,
+            &current.target, &current.started_at, current.started_order, &current.sandbox),
+            (&prior.grant_id, &prior.key, prior.sequence, &prior.command,
+            &prior.target, &prior.started_at, prior.started_order, &prior.sandbox));
+        assert!(Arc::ptr_eq(&current.toolchain, &prior.toolchain));
+        assert!(Arc::ptr_eq(&current.start_basis, &prior.start_basis));
+        assert!(prior.declared.is_none() && current.declared.is_none());
+        assert!(prior.end.is_none() && current.end.is_none());
+        assert!(prior.watcher_cargo_candidates.is_empty() && current.watcher_cargo_candidates.is_empty());
+        assert_eq!((current.overlapped, &current.overlap_cause, &current.fenced_by_outstanding,
+            &current.watcher_fence, &current.watcher_provenance, &current.watcher_exempted,
+            current.runtime_output_cut, current.ended_at, current.keyed_by_line),
+            (prior.overlapped, &prior.overlap_cause, &prior.fenced_by_outstanding,
+            &prior.watcher_fence, &prior.watcher_provenance, &prior.watcher_exempted,
+            prior.runtime_output_cut, prior.ended_at, prior.keyed_by_line));
+        assert_eq!(PersistedSessionRecord::from_record(record).engram_carried_launches, independent_markers);
+    });
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    let row: String = connection.query_row("SELECT value_json FROM sessions WHERE id=?1",
+        [&turn.session_id], |row| row.get(0)).unwrap();
+    let persisted: Value = serde_json::from_str(&row).unwrap();
+    assert_eq!(persisted["engramCarriedLaunches"], serde_json::to_value(&independent_markers).unwrap());
+    drop(connection);
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session_id).unwrap()];
+    assert!(record.engram.carried_checks.is_empty(), "restart cannot restore runtime-only credit");
+    let lost_credit = EngramHost::carried_lost_to_restart_line(&independent_markers[0]);
+    assert!(record.engram.pending_source_root_line.as_deref().unwrap().contains(&lost_credit));
+    assert_eq!(recovered.original.id, operation.original.id);
 }
 
 #[test]
@@ -5221,8 +5302,8 @@ fn an_explicit_refusal_of_the_report_that_consumed_a_carried_run_sends_its_fallb
     // The run is consumed into the report at the publication cut, and Engram
     // refuses that checkpoint explicitly. The grant's cached report becomes
     // the report's fallback, which carries no verification of the gate, and
-    // the grant's next closer sends exactly that. The consumed run stays
-    // consumed. That differs from a lost reply, whose report is replayed.
+    // a local fallback cache is not authority to send a changed request. The
+    // consumed run stays consumed and the canonical refused report survives.
     let label = "carried-refused-report";
     let turn = CheckedTurn::start_with_opening(
         label,
@@ -5259,6 +5340,16 @@ fn an_explicit_refusal_of_the_report_that_consumed_a_carried_run_sends_its_fallb
     closers.join(first_closer);
     let first = held.sent();
     assert_eq!(first.len(), 1, "{first:#?}");
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        let operation = inner.engram_session_obligations.checkpoint_operations.iter()
+            .find(|operation| operation.protection.local_session_id == turn.session_id
+                && serde_json::to_value(&operation.original.request).unwrap() == first[0]).unwrap();
+        operation.validate().unwrap();
+        assert!(matches!(operation.attempts[0].result, Some(EngramCheckpointAttemptResult::Refused { .. })));
+        serde_json::to_value(operation).unwrap()
+    };
+    let authority_requests = checkpoint_and_admission_requests(&turn.transport);
     assert_eq!(
         first[0],
         expected_checkpoint_request(&turn, &first[0], &report),
@@ -5281,20 +5372,19 @@ fn an_explicit_refusal_of_the_report_that_consumed_a_carried_run_sends_its_fallb
     run_closer(&turn);
     assert!(!untouched.was_taken(), "it took no settlement snapshot");
     let sent = held.sent();
-    assert_eq!(sent.len(), 2, "{sent:#?}");
-    assert_eq!(
-        sent[1],
-        expected_checkpoint_request(&turn, &sent[1], &fallback),
-        "the fallback's complete request"
-    );
-    assert!(
-        sent[1].get("verification_evidence").is_none(),
-        "{:#}",
-        sent[1]
-    );
+    assert_eq!(sent, first, "a refusal cannot license a changed fallback request");
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport), authority_requests);
+    let held_operation = assert_original_checkpoint_held_after_reload(&turn.state, &original);
+    assert!(matches!(held_operation.attempts[0].result, Some(EngramCheckpointAttemptResult::Refused { .. })));
+    let now = chrono::Utc::now();
+    turn.state.engram_abort_retry_tick(now);
+    turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_eq!(held.sent(), first, "an explicit Refuse remains held on automatic retry");
+    assert_eq!(checkpoint_and_admission_requests(&turn.transport), authority_requests);
+    assert_original_checkpoint_held_after_reload(&turn.state, &original);
     assert_eq!(checkpoint_requests(&turn), sent);
     turn.record(|record| {
-        assert_eq!(record.engram.active_grant_id, None);
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some(CHECK_GRANT));
         assert!(record.engram.carried_checks.is_empty(), "not brought back");
     });
 }

@@ -12,7 +12,14 @@ fn primary2_fixture_copy(app: &AppState) -> PathBuf {
         required_state_meta_value(&source, "schema_version").unwrap(),
         SQLITE_SCHEMA_VERSION
     );
-    let metadata = read_persisted_metadata_json(&source).unwrap().unwrap();
+    let mut metadata: Value =
+        serde_json::from_str(&read_persisted_metadata_json(&source).unwrap().unwrap()).unwrap();
+    assert_eq!(
+        metadata.as_object_mut().unwrap().remove("engramSessionObligations"),
+        Some(json!(EngramSessionObligationLedger::empty())),
+        "a historical specimen cannot discard modern obligation custody"
+    );
+    let metadata = serde_json::to_string(&metadata).unwrap();
     let mut rows = source.prepare("SELECT value_json FROM sessions").unwrap();
     for encoded in rows.query_map([], |row| row.get::<_, String>(0)).unwrap() {
         let record: PersistedSessionRecord = serde_json::from_str(&encoded.unwrap()).unwrap();

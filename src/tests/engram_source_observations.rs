@@ -595,6 +595,22 @@ fn source_observation_refused_closing_report_does_not_advance_the_accounted_base
     let _ = received_prompt(&claimed);
     fs::write(worktree.join("README.md"), "change whose report Engram refuses\n").unwrap();
     claimed.state.finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token()).unwrap();
+    let original_request = claimed.transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint"
+            && request.request["grant_id"] == refused.as_str()).unwrap().request;
+    let (original, pending_close) = {
+        let inner = claimed.state.inner.lock().unwrap();
+        let operation = inner.engram_session_obligations.checkpoint_operations.iter()
+            .find(|operation| operation.protection.local_session_id == claimed.session_id
+                && serde_json::to_value(&operation.original.request).unwrap() == original_request).unwrap();
+        operation.validate().unwrap();
+        assert!(matches!(operation.attempts[0].result, Some(EngramCheckpointAttemptResult::Refused { .. })));
+        (
+            serde_json::to_value(operation).unwrap(),
+            serde_json::to_value(&inner.engram_source_sightings[0].pending_close).unwrap(),
+        )
+    };
+    let authority_requests = checkpoint_and_admission_requests(&claimed.transport);
     {
         let inner = claimed.state.inner.lock().unwrap();
         let owner = &inner.engram_source_sightings[0];
@@ -611,9 +627,8 @@ fn source_observation_refused_closing_report_does_not_advance_the_accounted_base
         assert_eq!(&plan.sighting, &pending.sighting);
     }
 
-    // The next turn's admission closes the still-open grant bare and binds
-    // again (the fixture answers the status read), then its opening reports
-    // the owed change from the accounted baseline.
+    // The next prompt cannot discard the refused request, close bare, or
+    // advance the source baseline without authoritative settlement.
     let next = format!("turn-observation-{label}-after-grant");
     claimed.transport.responses.lock().unwrap().extend([
         checkpoint_reply(&refused), rebind_reply(&format!("turn-observation-{label}-token")),
@@ -621,26 +636,39 @@ fn source_observation_refused_closing_report_does_not_advance_the_accounted_base
     ]);
     claimed.transport.work_bindings.lock().unwrap().push_back(Ok(Some(
         test_control_work_binding(&format!("turn-observation-{label}"), 1))));
-    let outcome = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
-    let operations = claimed.transport.requests().iter()
-        .map(|request| request.request["operation"].as_str().unwrap_or("?").to_owned()).collect::<Vec<_>>();
-    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Delivered), "{outcome:?}; {operations:?}");
-    let _ = received_prompt(&claimed);
-    // The refused report is never resent: every later close of that grant
-    // went bare.
+    let outcome = claimed.state.dispatch_turn(&claimed.session_id, SendMessageRequest {
+        text: "Continue after the refused report.".to_owned(),
+        expanded_text: None,
+        attachments: Vec::new(),
+        source_session_id: None,
+        source_mailbox: None,
+    }).expect("the send should retain its prompt");
+    assert!(matches!(outcome, DispatchTurnResult::Queued));
+    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert_eq!(checkpoint_and_admission_requests(&claimed.transport), authority_requests);
+    let held = assert_original_checkpoint_held_after_reload(&claimed.state, &original);
+    assert!(matches!(held.attempts[0].result, Some(EngramCheckpointAttemptResult::Refused { .. })));
+    let now = chrono::Utc::now();
+    claimed.state.engram_abort_retry_tick(now);
+    claimed.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_eq!(checkpoint_and_admission_requests(&claimed.transport), authority_requests);
+    assert_original_checkpoint_held_after_reload(&claimed.state, &original);
     let refused_closes = claimed.transport.requests().into_iter()
         .filter(|request| request.request["operation"] == "turn_checkpoint" && request.request["grant_id"] == refused.as_str())
         .collect::<Vec<_>>();
-    assert!(refused_closes.len() >= 2, "{operations:?}");
-    assert!(refused_closes.iter().skip(1).all(|close| close.request.get("observations").is_none()));
-    let intent = claimed.state.inner.lock().unwrap().engram_source_sightings.iter()
-        .flat_map(|owner| &owner.observations).find(|intent| intent.grant_id == next).cloned()
-        .unwrap_or_else(|| panic!("a refused closing change must be reported at the next opening: {operations:?}"));
-    assert_eq!(intent.baseline.as_ref(), Some(&baseline));
-    assert_ne!(intent.sighting.basis.source_revision, baseline.basis.source_revision);
-    assert!(claimed.transport.requests().iter().any(|request| request.request["operation"] == "execution_observe"
-        && request.request["idempotency_key"] == format!("termal-observe:{}", intent.id).as_str()),
-        "the owed change reaches Engram as an inter-turn observation");
+    assert_eq!(refused_closes.len(), 1, "no bare fallback replaces the original");
+    assert_eq!(refused_closes[0].request, original_request);
+    let inner = claimed.state.inner.lock().unwrap();
+    assert!(!inner.engram_source_sightings.iter().flat_map(|owner| &owner.observations)
+        .any(|intent| intent.grant_id == next));
+    let owner = &inner.engram_source_sightings[0];
+    assert_eq!(owner.latest.as_ref(), Some(&baseline));
+    assert_eq!(serde_json::to_value(&owner.pending_close).unwrap(), pending_close);
+    drop(inner);
+    let loaded = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+    let owner = &loaded.engram_source_sightings[0];
+    assert_eq!(owner.latest.as_ref(), Some(&baseline));
+    assert_eq!(serde_json::to_value(&owner.pending_close).unwrap(), pending_close);
 }
 
 fn execution_observe_count(claimed: &ClaimedRoot) -> usize {
@@ -832,6 +860,19 @@ fn source_observation_lost_close_accepted_by_recovery_is_the_next_equal_baseline
     let _ = received_prompt(&claimed);
     fs::write(worktree.join("README.md"), "change whose checkpoint reply is lost\n").unwrap();
     claimed.state.finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token()).unwrap();
+    let original_request = claimed.transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint"
+            && request.request["grant_id"] == lost.as_str()).unwrap().request;
+    let (original, pending_close) = {
+        let inner = claimed.state.inner.lock().unwrap();
+        (
+            assert_selected_unknown_checkpoint_custody(
+                &inner, &claimed.session_id, &original_request, None,
+            ),
+            serde_json::to_value(&inner.engram_source_sightings[0].pending_close).unwrap(),
+        )
+    };
+    let authority_requests = checkpoint_and_admission_requests(&claimed.transport);
     {
         let inner = claimed.state.inner.lock().unwrap();
         let owner = &inner.engram_source_sightings[0];
@@ -839,8 +880,11 @@ fn source_observation_lost_close_accepted_by_recovery_is_the_next_equal_baseline
         assert_eq!(owner.pending_close.as_ref().and_then(|pending| pending.reported_by.as_deref()), Some(lost.as_str()));
     }
 
-    // The next turn's recovery closes the grant with the report this process
-    // kept, Engram accepts it, and the opening at that revision is Equal.
+    // The next prompt first settles the exact original. A matching receipt
+    // advances only its measured baseline before the new opening sees Equal.
+    let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    claimed.transport.work_bindings.lock().unwrap().extend(
+        (0..3).map(|_| Ok(operation.original.work_binding.clone())));
     let next = format!("turn-observation-{label}-after-grant");
     claimed.transport.responses.lock().unwrap().extend([
         checkpoint_reply(&lost), rebind_reply(&format!("turn-observation-{label}-token")),
@@ -854,27 +898,51 @@ fn source_observation_lost_close_accepted_by_recovery_is_the_next_equal_baseline
     claimed.record(|record| record.engram.next_bind_retry_at = None);
     queue_test_engram_prompt(&claimed.state, &claimed.session_id,
         "Continue after the lost close.", QueuedPromptSource::User, None);
+    assert_unknown_checkpoint_custody_after_reload(&claimed.state, &claimed.session_id, &original_request, &original);
+    let now = chrono::Utc::now();
+    claimed.state.engram_abort_retry_tick(now);
+    claimed.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+    assert_original_checkpoint_recovered_after_reload(&claimed.state, &original);
+    assert_eq!(checkpoint_and_admission_requests(&claimed.transport),
+        authority_requests.iter().cloned().chain([original_request.clone()]).collect::<Vec<_>>());
     let dispatch = claimed.state.start_next_queued_turn_off_lock(&claimed.session_id, false, false)
         .expect("the queue should be inspected")
-        .expect("the queued prompt should rebind and dispatch")
+        .expect("the queued prompt dispatches after original-result settlement")
         .dispatch;
-    let outcome = deliver_turn_dispatch(&claimed.state, dispatch);
-    let operations = claimed.transport.requests().iter()
-        .map(|request| request.request["operation"].as_str().unwrap_or("?").to_owned()).collect::<Vec<_>>();
-    let preview = claimed.record(|record| record.session.preview.clone());
-    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Delivered), "{outcome:?}; {preview}; {operations:?}");
+    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert_original_checkpoint_recovered_after_reload(&claimed.state, &original);
+    let requests = checkpoint_and_admission_requests(&claimed.transport);
+    let expected = authority_requests.into_iter().chain([original_request.clone()]).collect::<Vec<_>>();
+    assert_eq!(&requests[..expected.len()], expected.as_slice());
+    assert_eq!(requests[expected.len()..].iter().map(|request| request["operation"].as_str().unwrap()).collect::<Vec<_>>(),
+        ["session_bind", "turn_evaluate"], "Begin belongs to dispatch delivery");
+    let recovered = claimed.transport.requests().into_iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint" && request.request["grant_id"] == lost.as_str())
+        .map(|request| request.request).collect::<Vec<_>>();
+    assert_eq!(recovered, [original_request.clone(), original_request]);
+    assert!(matches!(deliver_turn_dispatch(&claimed.state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
     let _ = received_prompt(&claimed);
-    let recovery = claimed.transport.requests().into_iter().rev()
-        .find(|request| request.request["operation"] == "turn_checkpoint" && request.request["grant_id"] == lost.as_str())
-        .expect("the lost grant is closed by recovery").request;
-    assert!(recovery.get("observations").is_some(), "the recovery carries the kept report: {recovery}");
-    assert_eq!(execution_observe_count(&claimed), observed, "an accepted change is not reported twice: {operations:?}");
+    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+        "only one new prompt reaches the provider");
+    let delivered = checkpoint_and_admission_requests(&claimed.transport);
+    assert_eq!(&delivered[..expected.len()], expected.as_slice());
+    assert_eq!(delivered[expected.len()..].iter().map(|request| request["operation"].as_str().unwrap()).collect::<Vec<_>>(),
+        ["session_bind", "turn_evaluate", "turn_begin"]);
+    assert_eq!(execution_observe_count(&claimed), observed);
     let inner = claimed.state.inner.lock().unwrap();
     assert!(!inner.engram_source_sightings.iter().flat_map(|owner| &owner.observations)
         .any(|intent| intent.grant_id == next));
     let owner = &inner.engram_source_sightings[0];
+    let expected_close: Option<EngramPendingClose> = serde_json::from_value(pending_close).unwrap();
+    let expected_sighting = expected_close.unwrap().sighting;
+    assert_eq!(owner.latest.as_ref(), Some(&expected_sighting));
+    assert_ne!(owner.latest.as_ref(), Some(&baseline));
     assert!(owner.pending_close.is_none());
-    assert_ne!(owner.latest.as_ref().unwrap().basis.source_revision, baseline.basis.source_revision);
+    drop(inner);
+    let loaded = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+    let owner = &loaded.engram_source_sightings[0];
+    assert_eq!(owner.latest.as_ref(), Some(&expected_sighting));
+    assert!(owner.pending_close.is_none());
 }
 
 #[test]

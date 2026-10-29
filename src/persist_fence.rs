@@ -26,6 +26,7 @@ enum PersistFenceTarget {
         content: Value,
     },
     EngramWorkAuthority(Box<EngramAuthorityImage>),
+    EngramProjectContainment(Box<EngramProjectContainmentFence>),
     /// An operator release of a retained named root: its audit record and
     /// the removal of its selection, both in the committed metadata
     /// (`engram_named_root_release.rs`).
@@ -105,6 +106,7 @@ enum PersistFenceTarget {
 impl PersistFenceTarget {
     fn is_in_delta(&self, delta: &PersistDelta) -> bool {
         match self {
+            Self::EngramProjectContainment(_) => false,
             Self::Federation(_) | Self::FederationBindings(_) => false,
             Self::EngramWorkAuthority(image) => {
                 ![
@@ -212,6 +214,7 @@ impl PersistFenceTarget {
             None
         };
         match self {
+            Self::EngramProjectContainment(image) => image.is_already_durable(connection),
             Self::Federation(expected) => federation_committed_image_matches(connection, expected),
             Self::FederationBindings(expected) => expected.is_already_durable(connection),
             Self::EngramCausalCard {

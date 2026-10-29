@@ -1,5 +1,18 @@
 // Metadata unit shape, bounded inventory and validated read projections.
 
+// Frozen units-2/handoff inventory. Later safety fields are never accepted
+// merely because the current writer knows how to project them.
+const METADATA_UNIT_PREDECESSOR_FIELDS: &[&str] = &[
+    "federation", "preferences", "revision", "nextSessionNumber", "nextMessageNumber",
+    "projects", "engramRetiredWorkAuthorityGrants", "engramWorkSourceRoots",
+    "engramNamedRootJournal", "engramWorkNamingHistory", "engramNamedRootReleaseAudit",
+    "engramSourceSightings", "engramSourceRootGeneration", "pendingCoordinationScopeDeletions",
+    "pendingResponseBoardProjectDetachments", "ignoredDiscoveredCodexThreadIds",
+    "orchestratorInstances", "delegationWaits", "testRunCardsEpoch", "testRunCards",
+    "testRunRegistrations", "testRunObservations", "testRunCompacted", "testRunWaits",
+    "workspaceLayouts", "sessions", "codex",
+];
+
 const METADATA_UNIT_FIELDS: &[&str] = &[
     "federation",
     "preferences",
@@ -8,6 +21,7 @@ const METADATA_UNIT_FIELDS: &[&str] = &[
     "nextMessageNumber",
     "projects",
     "engramRetiredWorkAuthorityGrants",
+    "engramSessionObligations",
     "engramWorkSourceRoots",
     "engramNamedRootJournal",
     "engramWorkNamingHistory",
@@ -53,6 +67,7 @@ fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUn
         "engramRetiredWorkAuthorityGrants",
         &metadata.engram_retired_work_authority_grants
     );
+    field!("engramSessionObligations", &metadata.engram_session_obligations);
     field!("engramWorkSourceRoots", &metadata.engram_work_source_roots);
     field!(
         "engramNamedRootJournal",
@@ -150,7 +165,15 @@ fn read_metadata_units(connection: &rusqlite::Connection) -> Result<PersistMetad
 }
 
 fn validate_metadata_unit_inventory(units: &PersistMetadataUnits) -> Result<()> {
-    for field in METADATA_UNIT_FIELDS {
+    validate_metadata_unit_inventory_for_floor(units, true)
+}
+
+fn validate_metadata_unit_inventory_for_floor(
+    units: &PersistMetadataUnits,
+    requires_obligations: bool,
+) -> Result<()> {
+    let fields = if requires_obligations { METADATA_UNIT_FIELDS } else { METADATA_UNIT_PREDECESSOR_FIELDS };
+    for field in fields {
         let Some((kind, encoded)) = units.get(&(field.to_string(), String::new())) else {
             return Err(anyhow!("missing required metadata descriptor `{field}`"));
         };
@@ -161,6 +184,7 @@ fn validate_metadata_unit_inventory(units: &PersistMetadataUnits) -> Result<()> 
             | "engramSourceRootGeneration"
             | "testRunCardsEpoch" => "value",
             "federation"
+            | "engramSessionObligations"
             | "preferences"
             | "pendingResponseBoardProjectDetachments"
             | "testRunCards"
@@ -186,7 +210,7 @@ fn validate_metadata_unit_inventory(units: &PersistMetadataUnits) -> Result<()> 
     }
     if units
         .keys()
-        .any(|(field, _)| !METADATA_UNIT_FIELDS.contains(&field.as_str()))
+        .any(|(field, _)| !fields.contains(&field.as_str()))
     {
         return Err(anyhow!("unsupported metadata field"));
     }
@@ -305,7 +329,8 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
         Some(
             version
             @ ("2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION
-                | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_SCHEMA_VERSION),
+                | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_OBSERVATION_SCHEMA_VERSION
+                | SQLITE_CHECKPOINT_RESULT_PREDECESSOR | SQLITE_SCHEMA_VERSION),
         ) => Ok(version.to_owned()),
         Some(version) => Err(reject_unsupported_state_schema(format!(
             "unsupported metadata storage version `{version}`"
@@ -340,7 +365,16 @@ fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Opt
             .optional()
             .map_err(Into::into);
     }
-    let units = read_metadata_units(connection)?;
+    let units = if matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR) {
+        read_metadata_units(connection)?
+    } else {
+        let units = read_metadata_units_unchecked(connection)?;
+        if !units.is_empty() || !metadata_units_are_uninitialized(connection)? {
+            validate_metadata_unit_inventory_for_floor(&units, false)?;
+            metadata_units_to_value(&units)?;
+        }
+        units
+    };
     if units.is_empty() {
         return Ok(None);
     }
@@ -354,8 +388,7 @@ fn read_persisted_metadata_field(
     field: &str,
 ) -> Result<Option<Value>> {
     let version = persisted_metadata_storage_version(connection)?;
-    if !matches!(version.as_str(), SQLITE_METADATA_UNITS_VERSION
-        | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_SCHEMA_VERSION) {
+    if version != SQLITE_SCHEMA_VERSION {
         return read_persisted_metadata_json(connection)?
             .map(|encoded| -> Result<Option<Value>> {
                 let mut value: Value = serde_json::from_str(&encoded)?;
@@ -415,7 +448,10 @@ fn read_metadata_for_fence(
     fields: &[&str],
 ) -> Result<Option<PersistedState>> {
     let mut value = serde_json::json!({
-        "nextSessionNumber": 0, "nextMessageNumber": 0, "projects": [], "sessions": []
+        "nextSessionNumber": 0, "nextMessageNumber": 0, "projects": [], "sessions": [],
+        // This selected-field projection is never a whole-store reader.
+        // A containment fence explicitly replaces this field below.
+        "engramSessionObligations": EngramSessionObligationLedger::empty()
     });
     for field in fields {
         let Some(field_value) = read_persisted_metadata_field(connection, field)? else {

@@ -32,11 +32,27 @@ impl FenceFixture {
     }
 
     fn new() -> Self {
+        Self::new_with_encoding("UTF-8")
+    }
+
+    fn new_with_encoding(encoding: &str) -> Self {
         let (tx, rx) = mpsc::channel();
+        let root = TestTempRoot::create("persist-fence");
+        let path = root.path().join("termal.sqlite");
+        let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
+        connection.pragma_update(None, "encoding", encoding).unwrap();
+        // Keep the chosen connection through schema creation: an encoding
+        // selected on a still-empty database does not survive its last close.
+        ensure_sqlite_state_schema_for_load_path(&connection, &path).unwrap();
+        let actual: String = connection.pragma_query_value(None, "encoding", |row| row.get(0)).unwrap();
+        assert_eq!(actual, encoding);
+        let inner = StateInner::new();
+        inner.metadata_predecessor.store(metadata_unit_generation(&connection).unwrap(), std::sync::atomic::Ordering::Release);
+        let cache = SqlitePersistConnectionCache::from_validated_connection(Some((path, connection)));
         Self {
-            cache: SqlitePersistConnectionCache::new(),
-            root: TestTempRoot::create("persist-fence"),
-            inner: Arc::new(StateMutex::new(StateInner::new())),
+            cache,
+            root,
+            inner: Arc::new(StateMutex::new(inner)),
             tx,
             rx,
             batch: PersistFenceBatch::default(),

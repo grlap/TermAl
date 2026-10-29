@@ -1,212 +1,156 @@
-//! A turn's natural closing checkpoint fails with control_unavailable, the
-//! transient control failure of the 2026-10-05 stuck session, while the next
-//! prompt is queued behind it. The withheld prompt must recover by itself
-//! once control returns, never wait for Resume: its park schedules the shared
-//! admission retry, the retry's rebind settles the prior grant before any new
-//! evaluate, and the prompt is delivered exactly once. An uncertain grant
-//! keeps its explicit hold.
-//!
-//! Owns these witnesses only, on the parent's CausalRoot fixture (scripted
-//! budget clock, stateful producer behind the fault transport, real blocking
-//! persist writer; no sleeps, no synthetic load), for both ways the close can
-//! fail: applied with its reply lost, and never started. Does not own the
-//! retry schedule (`engram_retry_schedule.rs`), its time bound, or the
-//! refused and mismatched recovery holds, which the closing-checkpoint retry
-//! witnesses beside this module cover. New module beside the causal tests,
-//! created instead of growing them.
-
+//! A transient transport failure is not a producer certificate about the
+//! original checkpoint. The exact duty stays separate from the successor's
+//! admission: returning control, timer ticks and additional uncertainty cannot
+//! authorize status/rebind recovery or consume the queued prompt.
 use super::*;
-
-fn prompts(receiver: &mpsc::Receiver<CodexRuntimeCommand>) -> usize {
-    receiver
-        .try_iter()
-        .filter(|command| matches!(command, CodexRuntimeCommand::Prompt { .. }))
-        .count()
-}
 
 fn read<T>(fixture: &CausalRoot, look: impl FnOnce(&SessionRecord) -> T) -> T {
     let inner = fixture.state.inner.lock().unwrap();
     look(&inner.sessions[inner.find_session_index(&fixture.session).unwrap()])
 }
 
-fn sent(fixture: &CausalRoot, operation: &str) -> usize {
-    fixture.transport.attempts.lock().unwrap().get(operation).copied().unwrap_or(0)
-}
-
-/// Turn N closes with its checkpoint failing as `mode` says, the queued
-/// continuation parks behind it, and the closing failure is control_unavailable.
 fn closed_with_control_unavailable(mode: CausalFaultMode) -> (CausalRoot, Value) {
     let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
     *fixture.transport.mode.lock().unwrap() = mode;
-    let (token, original_head, _) = fixture.start_and_queue();
-    let _ = fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
+    let (token, head, _) = fixture.start_and_queue();
+    let _ = fixture.state.finish_turn_ok_if_runtime_matches(&fixture.session, &token);
     fixture.await_causal_publication();
-    let cards = fixture.durable_cards();
-    assert!(
-        cards.iter().any(|card| card["causalFailure"]["operation"] == "turn_checkpoint"
+    assert!(fixture.durable_cards().iter().any(|card|
+        card["causalFailure"]["operation"] == "turn_checkpoint"
             && card["causalFailure"]["originalCode"] == "control_unavailable"),
-        "the natural close failed with control_unavailable: {cards:?}"
-    );
-    assert_eq!(prompts(&fixture.receiver), 0, "the continuation is withheld");
-    (fixture, original_head)
+        "the real closing request failed with control_unavailable");
+    assert!(fixture.receiver.try_recv().is_err(), "the continuation is withheld");
+    (fixture, head)
 }
 
-/// Runs the two-second tick past the scheduled retry, as `retry_when_due`
-/// does for the closing-checkpoint retry witnesses.
-fn retry_when_due(fixture: &CausalRoot) {
-    let clock = fixture.state.engram_budget_clock();
-    let (backoff, waiter, due) = read(fixture, |record| {
-        (
-            record.engram.next_bind_retry_at,
-            record.engram.abort_retry_fence.clone(),
-            record.engram.admission_retry.as_ref().map(|retry| retry.due_at.clone()),
-        )
-    });
-    let due = due.expect("the park schedules the shared admission retry");
-    if let Some(left) = backoff.and_then(|at| at.checked_duration_since(clock.now())) {
-        clock.advance(left + Duration::from_millis(1));
-    }
-    if let Some(waiter) = waiter {
-        // Bounded on the fence's own clock, as its deadline is.
-        waiter
-            .0
-            .wait_until(waiter.0.now() + crate::tests::phase_sync::DEADLOCK_GUARD);
-    }
-    let at = chrono::DateTime::parse_from_rfc3339(&due)
-        .unwrap()
-        .with_timezone(&chrono::Utc)
-        + chrono::Duration::milliseconds(1);
-    fixture.state.engram_abort_retry_tick(at);
-    fixture.state.engram_abort_retry_tick(at);
+fn exact_checkpoint(fixture: &CausalRoot) -> Value {
+    let inner = fixture.state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
+    let operation = record.engram.checkpoint_operation.as_ref().expect("original checkpoint");
+    assert!(matches!(operation.attempts.last().unwrap().result,
+        Some(EngramCheckpointAttemptResult::Unknown { .. })));
+    let canonical = inner.engram_session_obligations.checkpoint_operations.iter()
+        .find(|current| current.original.id == operation.original.id).expect("independent duty");
+    let original = serde_json::to_value(operation).unwrap();
+    assert_eq!(original, serde_json::to_value(canonical).unwrap());
+    assert_eq!(original["original"]["request"],
+        fixture.transport.lost_request.lock().unwrap().clone().unwrap());
+    assert!(engram_session_obligation_locked(&inner, &fixture.session).is_some());
+    original
 }
 
-/// The 2026-10-05 case, both ways the close can fail. The withheld prompt's
-/// park schedules the shared admission retry (on a base without that retry,
-/// this is where the Resume-only hold shows). When it is due, the prior grant
-/// is settled before the one new evaluate (closed once by the recovery
-/// checkpoint when the producer still holds it open, cleared when it is
-/// already closed), and the prompt is delivered exactly once.
+fn tick_keeps_the_duty(fixture: &CausalRoot, head: &Value, checkpoint: &Value) {
+    let before = fixture.transport.attempts.lock().unwrap().clone();
+    fixture.state.engram_budget_clock().advance(Duration::from_secs(3600));
+    let at = chrono::Utc::now() + chrono::Duration::hours(1);
+    fixture.state.engram_abort_retry_tick(at);
+    fixture.state.engram_abort_retry_tick(at);
+    assert_eq!(*fixture.transport.attempts.lock().unwrap(), before,
+        "the protected close cannot turn into status, bind, checkpoint or Evaluate");
+    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
+    assert_eq!(exact_checkpoint(fixture), *checkpoint);
+    let (retry, queued) = read(fixture, |record| (
+        record.engram.admission_retry.clone(),
+        serde_json::to_value(&record.queued_prompts.front().unwrap().pending_prompt).unwrap(),
+    ));
+    assert!(retry.is_none(), "no admission retry is scheduled behind independent authority");
+    assert_eq!(queued, *head, "the successor remains queued");
+}
+
 #[test]
-fn a_control_unavailable_close_recovers_the_withheld_prompt_without_resume() {
-    for (mode, closes_on_recovery) in [
-        (CausalFaultMode::NeverStarted, true),
-        (CausalFaultMode::LostReply, false),
+fn a_control_unavailable_close_retains_its_request_when_control_returns() {
+    for (mode, applied) in [
+        (CausalFaultMode::NeverStarted, 0),
+        (CausalFaultMode::LostReply, 1),
     ] {
         let _placement = TestTempRootDirectoryScope::repository_local();
-        let (fixture, original_head) = closed_with_control_unavailable(mode);
-        let (retry, preview) = read(&fixture, |record| {
-            (record.engram.admission_retry.clone(), record.session.preview.clone())
-        });
-        let retry = retry.expect("the park schedules the shared admission retry, not a Resume-only hold");
-        assert_eq!(retry.prompt_id, original_head["id"].as_str().unwrap());
-        assert!(preview.contains("retrying automatically"), "{preview}");
-        let checkpoints_before = sent(&fixture, "turn_checkpoint");
-        let evaluates_before = sent(&fixture, "turn_evaluate");
-        let applied_before = fixture.transport.application_count("turn_checkpoint");
-
-        retry_when_due(&fixture);
-
-        assert_eq!(prompts(&fixture.receiver), 1, "delivered exactly once, without Resume");
-        assert_eq!(read(&fixture, |record| record.queued_prompts.len()), 0);
-        assert_eq!(sent(&fixture, "turn_evaluate"), evaluates_before + 1, "one new evaluate");
-        if closes_on_recovery {
-            assert_eq!(sent(&fixture, "turn_checkpoint"), checkpoints_before + 1, "one recovery close");
-            assert_eq!(
-                fixture.transport.application_count("turn_checkpoint"),
-                applied_before + 1,
-                "the prior grant closed exactly once"
-            );
-        } else {
-            assert_eq!(sent(&fixture, "turn_checkpoint"), checkpoints_before,
-                "a grant the producer already closed is cleared, not closed again");
-            assert_eq!(fixture.transport.application_count("turn_checkpoint"), applied_before);
-        }
-        let lost = fixture.transport.lost_request.lock().unwrap().clone().unwrap();
-        assert_ne!(
-            read(&fixture, |record| record.engram.active_grant_id.clone()).as_deref(),
-            lost["grant_id"].as_str(),
-            "the prior grant was settled"
-        );
+        let (fixture, head) = closed_with_control_unavailable(mode);
+        let checkpoint = exact_checkpoint(&fixture);
+        assert_eq!(fixture.transport.application_count("turn_checkpoint"), applied);
+        assert_eq!(fixture.transport.attempts.lock().unwrap()["turn_checkpoint"], 1);
+        assert!(read(&fixture, |record| record.engram.admission_retry.is_none()));
+        tick_keeps_the_duty(&fixture, &head, &checkpoint);
+        assert_eq!(fixture.transport.application_count("turn_checkpoint"), applied,
+            "local recovery does not invent another application or receipt");
     }
 }
 
-/// The successor's own admission window bounds its automatic retry even while
-/// the previous turn's grant is still open after that turn's failed close:
-/// that grant is not the successor's applied begin, so it exempts nothing.
-/// Past the successor's deadline no automatic attempt starts, and the
-/// successor holds for Resume or Cancel.
 #[test]
-fn a_successors_window_bounds_its_retry_while_the_prior_grant_is_still_open() {
+fn a_successor_stays_unadmitted_while_the_prior_checkpoint_is_unsettled() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (fixture, original_head) = closed_with_control_unavailable(CausalFaultMode::NeverStarted);
-    let (prior_grant, window, enforced) = read(&fixture, |record| {
-        (
-            record.engram.active_grant_id.clone(),
-            record.engram.begin_preparation_lineage.clone(),
-            engram_admission_budget_enforced(record).is_some(),
-        )
-    });
-    assert!(prior_grant.is_some(), "the previous turn's grant is still open");
-    let window = window.expect("the successor's window started when it was accepted");
-    assert_eq!(window.prompt_id, original_head["id"].as_str().unwrap());
-    assert!(enforced, "the previous turn's open grant does not exempt the successor's window");
-    let deadline = chrono::DateTime::parse_from_rfc3339(&window.deadline)
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let total = |fixture: &CausalRoot| fixture.transport.attempts.lock().unwrap().values().sum::<usize>();
-    let before = total(&fixture);
-    let at = deadline + chrono::Duration::milliseconds(1);
-    fixture.state.engram_abort_retry_tick(at);
-    fixture.state.engram_abort_retry_tick(at);
-    assert_eq!(total(&fixture), before, "no automatic attempt past the successor's deadline");
-    assert_eq!(prompts(&fixture.receiver), 0, "nothing delivered");
-    let (retry, held, preview) = read(&fixture, |record| {
-        (
-            record.engram.admission_retry.clone(),
-            record.queued_prompts.len(),
-            record.session.preview.clone(),
-        )
-    });
-    assert_eq!(retry, None, "the automatic retry ends");
-    assert_eq!(held, 1, "the successor is retained");
-    assert!(
-        preview.starts_with("Engram: automatic re-admission exhausted after"),
-        "the exhaustion hold: {preview}"
-    );
+    let (fixture, head) = closed_with_control_unavailable(CausalFaultMode::NeverStarted);
+    let checkpoint = exact_checkpoint(&fixture);
+    let (grant, lineage, prepared) = read(&fixture, |record| (
+        record.engram.active_grant_id.clone(),
+        record.engram.begin_preparation_lineage.clone(),
+        record.queued_prompts.front().unwrap().has_engram_intent(),
+    ));
+    assert!(grant.is_some(), "the original grant remains locally open");
+    assert!(lineage.is_none(), "an excluded successor has not started an admission window");
+    assert!(!prepared, "no successor Bind/Evaluate/Begin is prepared");
+    tick_keeps_the_duty(&fixture, &head, &checkpoint);
 }
 
-/// An uncertain grant is truly unknown authority: its scheduled retry is
-/// dropped when due, nothing is sent and the prompt stays held.
 #[test]
 fn an_uncertain_grant_after_a_control_unavailable_close_keeps_the_hold() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (fixture, _) = closed_with_control_unavailable(CausalFaultMode::NeverStarted);
-    let due = read(&fixture, |record| {
-        record.engram.admission_retry.as_ref().map(|retry| retry.due_at.clone())
-    })
-    .expect("the park schedules the shared admission retry");
-    {
+    let (fixture, head) = closed_with_control_unavailable(CausalFaultMode::NeverStarted);
+    let checkpoint = exact_checkpoint(&fixture);
+    let uncertain = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.uncertain_grant_id = record.engram.active_grant_id.clone();
+        let grant = record.engram.active_grant_id.clone().expect("original grant");
+        record.engram.uncertain_grant_id = Some(grant.clone());
+        grant
+    };
+    tick_keeps_the_duty(&fixture, &head, &checkpoint);
+    assert_eq!(read(&fixture, |record| record.engram.uncertain_grant_id.clone()).as_deref(),
+        Some(uncertain.as_str()), "the extra uncertainty is not silently cleared");
+}
+
+#[test]
+fn project_containment_applied_and_unapplied_unknown_reports_allow_fresh_off_use() {
+    for (mode, applied) in [
+        (CausalFaultMode::NeverStarted, 0),
+        (CausalFaultMode::LostReply, 1),
+    ] {
+        let _placement = TestTempRootDirectoryScope::repository_local();
+        let (fixture, head) = closed_with_control_unavailable(mode);
+        let checkpoint = exact_checkpoint(&fixture);
+        fixture.state.cancel_queued_prompt(&fixture.session, head["id"].as_str().unwrap()).unwrap();
+        let project_id = {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let project_id = engram_project_for_session_locked(&inner, &fixture.session).unwrap().id.clone();
+            inner.projects.iter_mut().find(|project| project.id == project_id).unwrap()
+                .engram.as_mut().unwrap().turn_gated_control = false;
+            fixture.state.commit_locked(&mut inner).unwrap();
+            project_id
+        };
+        let attempts = fixture.transport.attempts.lock().unwrap().clone();
+        let dispatch = match fixture.state.dispatch_turn(&fixture.session, SendMessageRequest {
+            text: "Fresh OFF work; do not replay the old prompt.".into(),
+            expanded_text: None, attachments: Vec::new(), source_session_id: None, source_mailbox: None,
+        }).unwrap() {
+            DispatchTurnResult::Dispatched(dispatch) => dispatch,
+            DispatchTurnResult::Queued | DispatchTurnResult::DispatchedAfterQueue(_) =>
+                panic!("quiescent OFF report debt must dispatch the fresh prompt directly"),
+        };
+        assert!(dispatch.engram_dispatch_generation().is_none());
+        let token = dispatch.runtime_token().clone();
+        assert!(matches!(deliver_turn_dispatch(&fixture.state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+        assert!(matches!(fixture.receiver.recv_timeout(DEADLOCK_GUARD).unwrap(), CodexRuntimeCommand::Prompt { .. }));
+        fixture.state.finish_turn_ok_if_runtime_matches(&fixture.session, &token).unwrap();
+        assert_eq!(exact_checkpoint(&fixture), checkpoint);
+        assert_eq!(*fixture.transport.attempts.lock().unwrap(), attempts);
+        assert_eq!(fixture.transport.application_count("turn_checkpoint"), applied);
+        let mut inner = fixture.state.inner.lock().unwrap();
+        inner.projects.iter_mut().find(|project| project.id == project_id).unwrap()
+            .engram.as_mut().unwrap().turn_gated_control = true;
+        fixture.state.commit_locked(&mut inner).unwrap();
+        assert!(AppState::engram_binding_target_for_session_shape_locked(&inner, &fixture.session, true)
+            .unwrap().is_none());
+        assert!(require_no_engram_local_dispatch_obligation(&inner, &fixture.session).is_err());
+        assert!(engram_session_obligation_locked(&inner, &fixture.session).is_some());
     }
-    let total = |fixture: &CausalRoot| fixture.transport.attempts.lock().unwrap().values().sum::<usize>();
-    let before = total(&fixture);
-    fixture.state.engram_budget_clock().advance(Duration::from_secs(3600));
-    let at = chrono::DateTime::parse_from_rfc3339(&due)
-        .unwrap()
-        .with_timezone(&chrono::Utc)
-        + chrono::Duration::milliseconds(1);
-    fixture.state.engram_abort_retry_tick(at);
-    fixture.state.engram_abort_retry_tick(at);
-    assert_eq!(total(&fixture), before, "nothing is sent for an uncertain grant");
-    assert_eq!(prompts(&fixture.receiver), 0, "the prompt stays held");
-    let (retry, held) = read(&fixture, |record| {
-        (record.engram.admission_retry.clone(), record.queued_prompts.len())
-    });
-    assert_eq!(retry, None, "the automatic retry ends");
-    assert_eq!(held, 1, "the prompt is retained for an explicit decision");
 }

@@ -157,6 +157,12 @@ impl AppState {
     /// from the UI trash icon. Proxied to the remote backend when
     /// `session.remote_target` is set.
     fn kill_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            require_no_engram_removal_obligation(
+                &inner, &source_observation_removal_set(&inner, session_id), &BTreeMap::new(),
+            )?;
+        }
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
@@ -167,8 +173,10 @@ impl AppState {
                 .map(|record| record.federation_native_creation_id.clone())
         };
         let engram_session_ids_to_terminate = self.prepare_source_observation_delete(session_id, true)?;
+        let mut teardown_checkpoints = BTreeMap::new();
         for terminating_session_id in &engram_session_ids_to_terminate {
-            self.checkpoint_engram_turn_off_lock(
+            let mut published_checkpoint = None;
+            self.checkpoint_engram_turn_with_retry_owner_off_lock(
                 terminating_session_id,
                 EngramCheckpointPurpose::Teardown,
                 None,
@@ -176,7 +184,16 @@ impl AppState {
                 EngramNextIntent::Exit,
                 Some(EngramExecutionOutcome::Unknown),
                 None,
+                None,
+                false,
+                None,
+                None,
+                Some(&mut published_checkpoint),
+                None,
             );
+            if let Some(key) = published_checkpoint {
+                teardown_checkpoints.insert(terminating_session_id.clone(), key);
+            }
             self.wait_for_engram_checkpoint_completion(terminating_session_id);
             self.shutdown_engram_session_process_if_bound(terminating_session_id);
         }
@@ -194,6 +211,7 @@ impl AppState {
             // Recompute the subtree under the final lock: a concurrent child
             // or capture must not turn a whole-set refusal into partial removal.
             let sessions = source_observation_removal_set(&inner, session_id);
+            require_no_engram_removal_obligation(&inner, &sessions, &teardown_checkpoints)?;
             if let Some(blocker) = source_observation_removal_blocker(&inner, &sessions) {
                 retain_source_observation_removal_locked(&mut inner, &sessions);
                 self.commit_locked(&mut inner).map_err(|error| {
@@ -469,7 +487,11 @@ impl AppState {
         let delivery = {
             #[cfg(test)]
             let _local = self.test_api_phase_timer("resume_local_mutation", Some(session_id));
-            self.resume_local_session_queue(session_id, None)?
+            if self.resume_off_checkpoint_receipt(session_id)? {
+                None
+            } else {
+                self.resume_local_session_queue(session_id, None)?
+            }
         };
         if let Some(delivery) = delivery {
             delivery.into_public_result()?;
@@ -500,6 +522,27 @@ impl AppState {
         mut owner: Option<EngramQueuedAdmissionOwner>,
         capacity_nonce: Option<&str>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        if let Some(owner) = owner.as_ref() {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.find_visible_session_index(session_id)
+                .is_some_and(|index| !owner.matches(&inner.sessions[index])) {
+                return Ok(capacity_nonce.map(|_| TurnDispatchDeliveryOutcome::Superseded));
+            }
+        }
+        let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
+        if capacity_nonce.is_none() {
+            self.settle_certified_checkpoint_before_admission(session_id, owner.as_ref())?;
+        }
+        let _containment_recovery = if capacity_nonce.is_none() {
+            self.begin_contained_admission_resume(session_id)?
+        } else { None };
+        let _contained_begin_replay = if capacity_nonce.is_none() && _containment_recovery.is_none() {
+            self.begin_contained_begin_replay_resume(session_id)?
+        } else { None };
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            require_no_engram_admission_obligation(&inner, session_id)?;
+        }
         if let Some(nonce) = capacity_nonce {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if !inner.find_visible_session_index(session_id).is_some_and(|index|

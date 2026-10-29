@@ -2951,6 +2951,10 @@ struct AgentReadiness {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
+    /// Unresolved session settlement is separate from the applied project
+    /// settings. This projection contains no private recovery wire values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_control_recovery: Vec<EngramControlRecoverySummary>,
     revision: u64,
     /// UUID generated at `AppState::new_with_paths` boot; see
     /// `HealthResponse::server_instance_id` for semantics. Carried on

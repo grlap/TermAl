@@ -858,6 +858,7 @@ mod state_broadcast_mailbox_tests {
 
     fn snapshot(revision: u64) -> StateResponse {
         StateResponse {
+            engram_control_recovery: Vec::new(),
             revision,
             server_instance_id: "test-instance".to_owned(),
             codex: CodexState::default(),
@@ -1772,6 +1773,11 @@ struct StateInner {
     /// TermAl retired. Unlike project settings, this survives project deletion
     /// so recreating the same Engram store cannot reuse a retired credential.
     engram_retired_work_authority_grants: PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
+    engram_session_obligations: EngramSessionObligationLedger,
+    // Runtime receipts only. Boot reconstructs matching committed confirmations.
+    engram_confirmed_containment_ids: BTreeSet<String>,
+    // Volatile custody; deliberately absent from PersistedState.
+    engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts,
     /// The source roots agents named for claimed Engram work
     /// (`engram_source_roots.rs`), persisted so a restart keeps them.
     engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
@@ -1950,6 +1956,9 @@ impl StateInner {
             engram_work_naming_history: PersistTracked::default(),
             engram_named_root_release_audit: PersistTracked::default(),
             engram_source_sightings: PersistTracked::default(),
+            engram_session_obligations: EngramSessionObligationLedger::empty(),
+            engram_confirmed_containment_ids: BTreeSet::new(),
+            engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts::default(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),

@@ -413,7 +413,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | GET | `/api/reviews/{change_set_id}/summary` | Read review-thread summary counts |
 | POST | `/api/projects` | Create project |
 | DELETE | `/api/projects/{id}` | Remove the local project reference and return `StateResponse`. Existing sessions and orchestrator instances are detached from the project and remain visible outside project scope. Remote-backed projects are removed only from local state; this route does not delete project data on the remote backend. |
-| PATCH | `/api/projects/{id}/engram` | Enable/disable repository-declared Engram Base and independently opt into default-off premium `turnGatedControl`. No grant field is accepted. Strict resets preserve checkpoint refusal unless the guarded [absent-session recovery](features/engram-host-adapter.md#strict-save-and-absent-control-sessions) proves the exact retained authority absent. All absence probes share one twenty-second deadline from the first eligible probe (not a whole-Save timeout); late evidence refuses with retained authority. Windows batch wrappers are not admitted for inspection. |
+| PATCH | `/api/projects/{id}/engram` | Enable/disable repository-declared Engram Base and independently opt into default-off premium `turnGatedControl`. No grant field is accepted. Same-connection premium OFF durably applies the setting with separate `engramControlRecovery` exclusions for unresolved sessions; a checkpoint refusal alone does not veto containment. Other strict resets preserve checkpoint refusal unless the guarded [absent-session recovery](features/engram-host-adapter.md#strict-save-and-absent-control-sessions) proves the exact retained authority absent. All absence probes share one twenty-second deadline from the first eligible probe (not a whole-Save timeout); late evidence refuses with retained authority. Windows batch wrappers are not admitted for inspection. |
 | POST | `/api/projects/{id}/engram/verify` | Scoped `readiness --json` v1 verification; twenty-second process budget, no doctor fallback. Requires expected project/database identity and matched path policy; premium requires `turn_gated` assurance. Returns ready/fullAudit:not_run/path status/timing, never healthy. 400 refused/unsupported; 404 missing; 409 settings changed/reset; 422 malformed body; 429 busy. See [host readiness and audit](features/engram-host-adapter.md). |
 | POST | `/api/projects/{id}/engram/audit` | Explicit whole-store `doctor --json` Full Audit; separate result, warnings, timestamp and elapsed time. Five-minute bound; never saves settings. Same-origin + X-TermAl-Operator-Action:engram-full-audit intent gate (403). 400 diagnostic/identity failure; 404 missing; 409 changed configuration; 429 audit busy. |
 | POST | `/api/projects/pick` | Pick a local project root |
@@ -784,28 +784,40 @@ from running instances. Normalized session and delegation rows are independent
 startup failure boundaries: a malformed record is reported and skipped rather
 than aborting the process and hiding every healthy session. The primary state
 database must use the current normalized authority: all required state
-tables with their canonical column sets, `schema_version=2-metadata-units-2-handoff-1`,
+tables with their canonical column sets,
+`schema_version=2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`,
 `prompt_history_storage_version=1`, and no metadata-embedded session,
 delegation, or prompt-history records. Unrelated extra tables are tolerated.
 Metadata units must pass complete inventory, kind, member-count and typed
 validation; they may be absent only while all normalized session, message, overview,
 prompt-history, delegation, and board-card tables are empty after fresh schema
-initialization. Only the five columns added by retained
+initialization of a supported predecessor. The current joint floor requires
+the explicit `engramSessionObligations` ledger, including
+both `entries` and `checkpointOperations`, even when both are empty. Fresh
+initialization and supported predecessor migration install it atomically;
+missing safety metadata in an already-current store is refused. Migration
+preserves retained legacy uncertainty and cannot reconstruct a missing old
+checkpoint request or prove remote settlement from absent history.
+Only the five columns added by retained
 message-overview and response-board maintenance may initially be absent;
 unexpected columns reject, and the post-maintenance shape must be canonical.
 Any parseable session row carrying an array-valued obsolete
 `session.promptHistory` key is rejected, including an empty array. Non-array
-values and malformed session JSON remain row-level quarantine concerns.
+values and malformed ordinary session JSON remain row-level quarantine concerns.
+An existing checkpoint's exact operation and exclusion live independently in
+mandatory metadata before its first send. A present session mirror must match
+that protection; malformed or inconsistent safety mirrors refuse the load
+before ordinary session filtering. A missing or quarantined session row never
+discards the protected request or its producer exclusion.
 Validation runs before persistent PRAGMAs or schema maintenance. Supported
-primary-2 and emergency-units-1 stores first normalize atomically to units-2.
-A second immediate transaction validates that committed image and advances
-only the handoff reader floor, preserving unit rows, generation, session JSON
-and raw federation state. Neither recovery nor a handoff can run between stages.
-A second-stage failure leaves valid units-2; reopening can finish the floor.
-Unsupported or partial schemas refuse with reset guidance. Older units-2
-binaries refuse the handoff floor before modifying the store. The units-2
-offline rollback artifact also refuses this stronger feature floor; reverting
-the executable or relabeling the header is not a supported rollback.
+primary-2 and emergency-units-1 stores normalize to units-2, then advance through
+the ordinary-handoff floor to the joint obligation floor in one immediate
+transaction. A units-2 or handoff store starts at its corresponding stage.
+Unrelated metadata-unit and session bytes remain exact, and adding the ledger
+advances the metadata generation. Unsupported, mixed or partial formats refuse;
+the unpublished numeric 3/4 drafts have no migration path. Older binaries refuse
+the joint marker before modifying the store. An executable downgrade is not a
+rollback path for an obligation-bearing store.
 
 Coordination bootstrap runs before the persist worker, coordination stores,
 and HTTP listener. An empty `coordination.sqlite` is initialized atomically

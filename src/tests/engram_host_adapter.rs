@@ -3,6 +3,9 @@
 #[path = "engram_session_reconciliation.rs"]
 mod session_reconciliation;
 
+#[path = "engram_project_containment.rs"]
+mod project_containment;
+
 #[path = "engram_root_dispatch.rs"]
 mod root_dispatch;
 
@@ -1786,6 +1789,9 @@ fn delegated_turn_binds_evaluates_begins_and_checkpoints_once() {
     let project_id = create_test_project(&state, &root, "Engram project");
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
     enable_test_project_engram(&state, &project_id, &root);
+    // This already admitted transport has no executable on disk. Closing its
+    // grant must not re-run project enablement's executable validation.
+    assert!(!root.join("engram-fixture").exists());
 
     let transport = ScriptedEngramControlTransport::new([
         bind_reply("parent-token"),
@@ -2673,7 +2679,7 @@ fn routing_token_replay_from_another_session_is_withheld_without_begin() {
 }
 
 #[test]
-fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() {
+fn checkpoint_required_refusal_keeps_mailbox_wake_queued_with_original_report() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-checkpoint-required");
     state.select_test_scripted_engram_budget_clock();
@@ -2694,14 +2700,6 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
         grant_reply("checkpoint-open-grant"),
         begin_reply("checkpoint-open-grant"),
         checkpoint_refusal_reply("checkpoint_required"),
-        ScriptedEngramControlResponse::Reply(Ok(json!({
-            "phase": "turn_open",
-            "open_grant_id": "checkpoint-open-grant"
-        }))),
-        checkpoint_reply("checkpoint-open-grant"),
-        rebind_reply("checkpoint-child-token"),
-        grant_reply("checkpoint-mailbox-grant"),
-        begin_reply("checkpoint-mailbox-grant"),
     ]);
     state.install_control_test_transport(transport.clone());
 
@@ -2742,10 +2740,30 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
     state
         .finish_turn_ok_if_runtime_matches(&child_id, &runtime_token)
         .expect("turn completion should tolerate checkpoint refusal");
+    let (original, ledger) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let child = &inner.sessions[inner.find_session_index(&child_id).unwrap()];
+        let original = child.engram.checkpoint_operation.as_ref()
+            .expect("the refused original report must remain owned");
+        original.validate().unwrap();
+        assert!(selected_checkpoint_operation(&inner.engram_session_obligations, original).is_some(),
+            "the mirror must equal the independently retained canonical operation");
+        assert!(matches!(original.attempts.last().unwrap().result.as_ref(),
+            Some(EngramCheckpointAttemptResult::Refused { response })
+                if response == &json!({ "decision": "refuse", "code": "checkpoint_required" })));
+        assert_eq!(serde_json::to_value(&original.original.request).unwrap(),
+            transport.requests().last().unwrap().request);
+        assert!(engram_admission_obligation_locked(&inner, &child_id).is_some());
+        assert!(!inner.engram_pending_checkpoint_receipts.entries
+            .contains_key(&checkpoint_receipt_key(original)),
+            "a refused reply is not an accepted receipt awaiting local accounting");
+        (serde_json::to_value(original).unwrap(),
+            serde_json::to_value(&inner.engram_session_obligations).unwrap())
+    };
     queue_test_engram_prompt(
         &state,
         &child_id,
-        "Mailbox wake must repair the prior checkpoint without user input.",
+        "Mailbox wake must retain the unresolved original report.",
         QueuedPromptSource::Mailbox,
         Some(MessageSource::mailbox(
             parent_session_id,
@@ -2758,17 +2776,16 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
             },
         )),
     );
-    let dispatch = state
+    let queued = {
+        let inner = state.inner.lock().unwrap();
+        let child = &inner.sessions[inner.find_session_index(&child_id).unwrap()];
+        serde_json::to_value(&child.queued_prompts.front().unwrap().pending_prompt).unwrap()
+    };
+    assert!(state
         .start_next_queued_turn_off_lock(&child_id, false, false)
         .expect("checkpoint-required queue inspection should succeed")
-        .expect("mailbox wake should repair and dispatch")
-        .dispatch;
-    deliver_turn_dispatch(&state, dispatch).expect("repaired mailbox wake should reach runtime");
-    assert!(matches!(
-        recv_within_guard(&runtime_rx, "mailbox prompt should reach runtime")
-            .expect("mailbox prompt should reach runtime"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+        .is_none(), "a mailbox wake is not settlement or certified replay permission");
+    assert!(runtime_rx.try_recv().is_err(), "the held wake sends no provider command");
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
         let child = inner
@@ -2776,11 +2793,19 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
             .iter()
             .find(|record| record.session.id == child_id)
             .expect("child should exist");
-        assert!(child.queued_prompts.is_empty());
+        assert_eq!(child.queued_prompts.len(), 1);
+        assert_eq!(serde_json::to_value(&child.queued_prompts.front().unwrap().pending_prompt).unwrap(), queued);
+        assert_eq!(serde_json::to_value(child.engram.checkpoint_operation.as_ref().unwrap()).unwrap(), original);
+        assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), ledger);
+        assert!(engram_admission_obligation_locked(&inner, &child_id).is_some());
+        assert!(!inner.engram_pending_checkpoint_receipts.entries
+            .contains_key(&checkpoint_receipt_key(child.engram.checkpoint_operation.as_ref().unwrap())));
         assert_eq!(
             child.engram.active_grant_id.as_deref(),
-            Some("checkpoint-mailbox-grant")
+            Some("checkpoint-open-grant")
         );
+        assert_eq!(child.engram.routing_token.as_deref(), Some("checkpoint-child-token"));
+        assert!(child.engram.begins_recorded);
     }
     assert_eq!(
         transport
@@ -2788,8 +2813,8 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
             .iter()
             .filter(|request| request.request["operation"] == "turn_evaluate")
             .count(),
-        2,
-        "the repaired mailbox wake must evaluate normally"
+        1,
+        "only the original turn was evaluated"
     );
     let operations = transport
         .requests()
@@ -2808,12 +2833,7 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
             "session_bind",
             "turn_evaluate",
             "turn_begin",
-            "turn_checkpoint",
-            "session_status",
-            "turn_checkpoint",
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin"
+            "turn_checkpoint"
         ]
     );
 }
@@ -5944,6 +5964,75 @@ fn engram_mcp_grant_clear_waits_for_a_lifecycle_checkpoint_before_teardown() {
     assert!(record.engram.active_grant_id.is_none());
     assert!(!record.engram.checkpoint_in_progress);
     assert!(record.engram.checkpoint_owner_generation.is_none());
+}
+
+#[test]
+fn engram_mcp_grant_clear_wait_rechecks_owner_and_settings_before_teardown() {
+    for settings_race in [false, true] {
+        let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+            FixtureBudgetClock::Scripted,
+            if settings_race { "grant-clear-settings-race" } else { "grant-clear-owner-race" },
+            Some("grant-old"),
+        );
+        let session_id = session_ids.last().unwrap().clone();
+        let (step, gate) = gated_engram_step("turn_checkpoint", checkpoint_reply("grant-open"));
+        let transport = GatedEngramControlTransport::new([step]);
+        state.install_control_test_transport(transport.clone());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session_id).unwrap();
+            let record = inner.session_mut_by_index(index).unwrap();
+            record.engram.routing_token = Some("routing-open".into());
+            record.engram.active_grant_id = Some("grant-open".into());
+        }
+        let checkpoint_state = state.clone();
+        let checkpoint_session = session_id.clone();
+        let checkpoint = std::thread::spawn(move || {
+            checkpoint_state.checkpoint_engram_turn_off_lock(
+                &checkpoint_session, EngramCheckpointPurpose::TurnTerminal,
+                None, None, EngramNextIntent::Wait, None, None,
+            );
+        });
+        gate.wait();
+        let waiting = observe_next_engram_project_reset_checkpoint_wait(&state, &session_id);
+        let clear_state = state.clone();
+        let clear_project = project_id.clone();
+        let clear = std::thread::spawn(move || {
+            clear_state.update_project_engram_settings(
+                &clear_project, real_fixture_engram_settings(&root),
+            )
+        });
+        recv_within_guard(&waiting, "grant clear must reach the original lifecycle wait").unwrap();
+        let (settings, ledger) = {
+            let mut inner = state.inner.lock().unwrap();
+            if settings_race {
+                let project = inner.projects.iter_mut().find(|project| project.id == project_id).unwrap();
+                project.engram.as_mut().unwrap().deadline_ms = Some(12_345);
+            } else {
+                let index = inner.find_session_index(&session_id).unwrap();
+                let record = inner.session_mut_by_index(index).unwrap();
+                record.engram.dispatch_generation += 1;
+            }
+            (inner.find_project(&project_id).unwrap().engram.clone(),
+                serde_json::to_value(&inner.engram_session_obligations).unwrap())
+        };
+        let error = clear.join().expect("grant-clear caller should not panic")
+            .err().expect("a changed checkpoint owner or settings cannot be cleared");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        {
+            let inner = state.inner.lock().unwrap();
+            assert_eq!(inner.find_project(&project_id).unwrap().engram, settings);
+            assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), ledger);
+            assert!(!inner.engram_project_resets.contains(&project_id));
+            let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+            assert_eq!(record.engram.active_grant_id.as_deref(), Some("grant-open"));
+            assert!(record.engram.checkpoint_in_progress);
+        }
+        assert_eq!(transport.requests().len(), 1);
+        assert!(transport.shutdowns().is_empty(), "no teardown before the lifecycle close");
+        gate.release();
+        checkpoint.join().expect("original lifecycle caller should finish");
+    }
 }
 
 #[test]
@@ -9567,7 +9656,7 @@ fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &st
 }
 
 #[test]
-fn timed_out_wait_checkpoint_and_later_exit_use_distinct_idempotency_keys() {
+fn timed_out_wait_checkpoint_survives_later_kill_with_its_original_identity() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-checkpoint-intent-keys");
     state.select_test_scripted_engram_budget_clock();
@@ -9634,41 +9723,166 @@ fn timed_out_wait_checkpoint_and_later_exit_use_distinct_idempotency_keys() {
     state
         .finish_turn_ok_if_runtime_matches(&child_id, &runtime_token)
         .expect("turn completion should tolerate the wait checkpoint deadline");
+    let original_request = transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the wait checkpoint was sent").request;
+    let original = {
+        let inner = state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &child_id, &original_request, None)
+    };
     state
         .kill_session(&child_id)
-        .expect("terminal cleanup should retry the same grant with exit intent");
+        .expect("inactive original report debt can outlive its removed owner");
 
     let checkpoints = transport
         .requests()
         .into_iter()
         .filter(|request| request.request["operation"] == "turn_checkpoint")
         .collect::<Vec<_>>();
-    assert_eq!(checkpoints.len(), 2);
+    assert_eq!(checkpoints.len(), 1, "ordinary kill cannot authorize a second close");
     assert_eq!(checkpoints[0].request["grant_id"], grant_id);
-    assert_eq!(checkpoints[1].request["grant_id"], grant_id);
     assert_eq!(checkpoints[0].request["next_intent"], "wait");
-    assert_eq!(checkpoints[1].request["next_intent"], "exit");
-    // Each key folds the turn's observation behind its intent component.
+    assert_eq!(checkpoints[0].request, original_request);
     assert!(
         checkpoints[0].request["idempotency_key"]
             .as_str()
             .expect("idempotency key")
             .starts_with(&format!("termal-checkpoint:{child_id}:{grant_id}:wait:")),
     );
-    assert!(
-        checkpoints[1].request["idempotency_key"]
-            .as_str()
-            .expect("idempotency key")
-            .starts_with(&format!("termal-checkpoint:{child_id}:{grant_id}:exit:")),
-    );
-    assert_ne!(
-        checkpoints[0].request["idempotency_key"], checkpoints[1].request["idempotency_key"],
-        "Engram fingerprints next_intent, so wait and exit must not reuse a key"
-    );
-    assert_eq!(
-        checkpoints[0].request["observations"], checkpoints[1].request["observations"],
-        "the exit retry repeats the observation the timed-out wait built"
-    );
+    {
+        let inner = state.inner.lock().unwrap();
+        assert!(inner.find_session_index(&child_id).is_none());
+        assert_unknown_checkpoint_custody(&inner, &child_id, &original_request, Some(&original));
+    }
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(loaded.find_session_index(&child_id).is_none());
+    assert_unknown_checkpoint_custody(&loaded, &child_id, &original_request, Some(&original));
+}
+
+// Compare the complete mandatory operation, including immutable request,
+// authority, grant, owner generations and attempt provenance, outside its row.
+fn assert_unknown_checkpoint_custody(
+    inner: &StateInner,
+    session_id: &str,
+    request: &Value,
+    expected: Option<&Value>,
+) -> Value {
+    let count = inner.engram_session_obligations.checkpoint_operations.iter()
+        .filter(|operation| operation.protection.local_session_id == session_id)
+        .count();
+    assert_eq!(count, 1);
+    assert_selected_unknown_checkpoint_custody(inner, session_id, request, expected)
+}
+
+fn assert_selected_unknown_checkpoint_custody(
+    inner: &StateInner,
+    session_id: &str,
+    request: &Value,
+    expected: Option<&Value>,
+) -> Value {
+    let operations = inner.engram_session_obligations.checkpoint_operations.iter()
+        .filter(|operation| operation.protection.local_session_id == session_id
+            && serde_json::to_value(&operation.original.request).unwrap() == *request)
+        .collect::<Vec<_>>();
+    assert_eq!(operations.len(), 1);
+    let operation = operations[0];
+    operation.validate().unwrap();
+    assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), *request);
+    assert_eq!(operation.attempts.len(), 1);
+    assert!(matches!(operation.attempts[0].result, Some(EngramCheckpointAttemptResult::Unknown { .. })));
+    assert!(!matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+    assert_ne!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+    assert!(engram_obligation_requires_exclusion(inner, &operation.protection));
+    assert!(!inner.engram_confirmed_containment_ids.contains(&operation.original.id));
+    let image = serde_json::to_value(operation).unwrap();
+    if let Some(index) = inner.find_session_index(session_id) {
+        let mirror = inner.sessions[index].engram.checkpoint_operation.as_ref().unwrap();
+        assert_eq!(serde_json::to_value(mirror).unwrap(), image);
+    }
+    if let Some(expected) = expected {
+        assert_eq!(&image, expected, "original request and custody remain immutable");
+    }
+    image
+}
+
+fn assert_unknown_checkpoint_custody_after_reload(
+    state: &AppState,
+    session_id: &str,
+    request: &Value,
+    original: &Value,
+) {
+    {
+        let inner = state.inner.lock().unwrap();
+        assert_selected_unknown_checkpoint_custody(&inner, session_id, request, Some(original));
+    }
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    assert_selected_unknown_checkpoint_custody(&loaded, session_id, request, Some(original));
+}
+
+fn assert_original_checkpoint_image(
+    inner: &StateInner,
+    original: &EngramCheckpointOperation,
+    recovered: bool,
+) -> EngramCheckpointOperation {
+    let canonical = inner.engram_session_obligations.checkpoint_operations.iter()
+        .find(|operation| operation.original.id == original.original.id)
+        .expect("the selected canonical original survives");
+    canonical.validate().unwrap();
+    assert_eq!(serde_json::to_value(&canonical.original).unwrap(),
+        serde_json::to_value(&original.original).unwrap(),
+        "the entire immutable original, including connection, request, report and key");
+    assert!(canonical.attempts.len() >= original.attempts.len());
+    assert_eq!(serde_json::to_value(&canonical.attempts[..original.attempts.len()]).unwrap(),
+        serde_json::to_value(&original.attempts).unwrap(),
+        "later attempts preserve all prior attempt identity and outcomes");
+    if recovered {
+        assert!(matches!(canonical.attempts.last().unwrap().result,
+            Some(EngramCheckpointAttemptResult::Accepted)));
+        assert!(matches!(canonical.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+        assert_eq!(canonical.protection.phase, EngramSessionObligationPhase::Confirmed);
+        assert!(inner.engram_confirmed_containment_ids.contains(&original.original.id));
+        assert!(!engram_obligation_requires_exclusion(inner, &canonical.protection));
+    } else {
+        assert!(!matches!(canonical.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+        assert_ne!(canonical.protection.phase, EngramSessionObligationPhase::Confirmed);
+        assert!(!inner.engram_confirmed_containment_ids.contains(&original.original.id));
+        assert!(engram_obligation_requires_exclusion(inner, &canonical.protection));
+    }
+    canonical.clone()
+}
+
+fn assert_original_checkpoint_recovered_after_reload(
+    state: &AppState,
+    original: &Value,
+) -> EngramCheckpointOperation {
+    let original: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    {
+        let inner = state.inner.lock().unwrap();
+        assert_original_checkpoint_image(&inner, &original, true);
+    }
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    assert_original_checkpoint_image(&loaded, &original, true)
+}
+
+fn assert_original_checkpoint_held_after_reload(
+    state: &AppState,
+    original: &Value,
+) -> EngramCheckpointOperation {
+    let original: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+    {
+        let inner = state.inner.lock().unwrap();
+        assert_original_checkpoint_image(&inner, &original, false);
+    }
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    assert_original_checkpoint_image(&loaded, &original, false)
+}
+
+fn checkpoint_and_admission_requests(transport: &ScriptedEngramControlTransport) -> Vec<Value> {
+    transport.requests().into_iter().filter_map(|request| {
+        matches!(request.request["operation"].as_str(),
+            Some("turn_checkpoint" | "session_bind" | "turn_evaluate" | "turn_begin"))
+            .then_some(request.request)
+    }).collect()
 }
 
 #[test]

@@ -552,6 +552,255 @@ fn initial_child_post_begin_persistence_unknown_reports_a_held_delegation_and_se
     }
 }
 
+struct AfterRejectedCheckpointReply {
+    scripted: Arc<ScriptedEngramControlTransport>,
+    after: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl EngramControlTransport for AfterRejectedCheckpointReply {
+    fn read_observation_policy(
+        &self, connection: &EngramConnectionConfig, store: &EngramAuthorityStoreKey,
+        timeout: Duration, host_workdir: &FsPath,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.scripted.read_observation_policy(connection, store, timeout, host_workdir)
+    }
+
+    fn read_work_binding(
+        &self, connection: &EngramConnectionConfig, preference: EngramBindingPreference<'_>,
+        timeout: Duration,
+    ) -> Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.scripted.read_work_binding(connection, preference, timeout)
+    }
+
+    fn read_held_claims(
+        &self, connection: &EngramConnectionConfig, timeout: Duration,
+    ) -> Result<EngramHeldClaims, EngramTransportError> {
+        self.scripted.read_held_claims(connection, timeout)
+    }
+
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: Duration,
+    ) -> std::result::Result<Value, EngramTransportError> {
+        let response = self.scripted.request(connection, request, timeout);
+        if matches!(request, EngramControlRequest::TurnCheckpoint { .. })
+            && let Some(after) = self.after.lock().unwrap().take()
+        {
+            after();
+        }
+        response
+    }
+
+    fn shutdown_session(&self, session_id: &str) {
+        self.scripted.shutdown_session(session_id);
+    }
+}
+
+#[test]
+fn rejected_checkpoint_receipt_keeps_custody_on_owner_drift_or_failed_commit() {
+    for failure in ["head", "successor", "stop", "runtime", "turn", "dispatch", "persist"] {
+        let (state, session, receiver, scripted) = root_fixture([
+            bind_reply("rejected-token"), grant_reply("rejected-grant"),
+            begin_reply("rejected-grant"), checkpoint_reply("rejected-grant"),
+        ]);
+        let dispatch = root_dispatch(&state, &session, false);
+        let generation = dispatch.engram_dispatch_generation().unwrap();
+        assert!(matches!(state.prepare_engram_turn_delivery_off_lock(&session, generation),
+            EngramTurnDeliveryPreparation::Ready));
+        if failure == "successor" {
+            queue_test_engram_prompt(&state, &session, "successor at receipt",
+                QueuedPromptSource::User, None);
+        }
+        drop(receiver);
+        let original_head = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            let queued = if failure == "successor" { record.queued_prompts.back().unwrap() }
+                else { record.queued_prompts.front().unwrap() };
+            queued.pending_prompt.clone()
+        };
+        let (replacement_runtime, replacement_receiver) = test_codex_runtime_handle("receipt-owner-replacement");
+        let replacement_token = SessionRuntime::Codex(replacement_runtime.clone()).runtime_token().unwrap();
+        let store = state.persistence_path.as_ref().clone();
+        let before_receipt = store.with_extension("before-rejected-receipt.sqlite");
+        let saved_store = before_receipt.clone();
+        let changed_state = state.clone();
+        let changed_session = session.clone();
+        state.install_control_test_transport(Arc::new(AfterRejectedCheckpointReply {
+            scripted: scripted.clone(),
+            after: Mutex::new(Some(Box::new(move || {
+                if failure == "persist" {
+                    // The send/intent and interruption are already durable.
+                    // Fail the receipt+retirement cut, preserving that file.
+                    fs::rename(&store, &saved_store).unwrap();
+                    fs::create_dir(&store).unwrap();
+                } else {
+                    let mut inner = changed_state.inner.lock().unwrap();
+                    let index = inner.find_session_index(&changed_session).unwrap();
+                    let record = inner.session_mut_by_index(index).unwrap();
+                    match failure {
+                        "head" => record.queued_prompts.front_mut().unwrap()
+                            .pending_prompt.text = "replacement at receipt".into(),
+                        "successor" => { record.queued_prompts.pop_front(); }
+                        "stop" => {
+                            let token = record.runtime.runtime_token().unwrap();
+                            record.claim_runtime_stop(RuntimeStopOwnerKind::LostRuntimeTerminalization, token);
+                        }
+                        "runtime" => record.runtime = SessionRuntime::Codex(replacement_runtime),
+                        "turn" => record.active_turn_generation += 1,
+                        "dispatch" => record.engram.dispatch_generation += 1,
+                        _ => unreachable!(),
+                    }
+                }
+            }))),
+        }));
+        let outcome = handoff_prepared_turn_dispatch(&state, dispatch);
+        if matches!(failure, "stop" | "runtime" | "turn") {
+            assert!(matches!(outcome, Ok(HandoffPreparedTurnDispatchOutcome::Superseded)),
+                "the replacement owner supersedes the rejected dispatch: {failure}: {outcome:?}");
+        } else {
+            outcome.expect_err("provider channel is closed");
+        }
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        let operation = inner.engram_session_obligations.checkpoint_operations.iter()
+            .find(|operation| operation.protection.local_session_id == session).unwrap();
+        assert!(engram_obligation_requires_exclusion(&inner, &operation.protection));
+        assert!(!inner.engram_confirmed_containment_ids.contains(&operation.original.id));
+        if failure == "persist" {
+            assert!(inner.engram_pending_checkpoint_receipts.entries.values().any(|entry| entry.accepted));
+            assert_eq!(record.engram.dispatch_generation, generation + 1);
+            assert!(record.queued_prompts.is_empty());
+            assert!(record.engram.active_grant_id.is_none());
+            assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+        } else {
+            assert_eq!(record.engram.dispatch_generation, generation + if failure == "dispatch" { 1 } else { 0 });
+            assert_eq!(record.queued_prompts.len(), 1);
+            assert_eq!(record.queued_prompts[0].pending_prompt.id, original_head.id);
+            assert_eq!(record.queued_prompts[0].pending_prompt.text,
+                if failure == "head" { "replacement at receipt" } else { original_head.text.as_str() });
+            if failure == "runtime" {
+                assert!(record.runtime.matches_runtime_token(&replacement_token));
+            }
+            assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+            assert_ne!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+        }
+        drop(inner);
+        if failure == "persist" {
+            let loaded = load_state(&before_receipt).unwrap().unwrap();
+            let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
+            assert_eq!(record.engram.dispatch_generation, generation);
+            assert!(record.queued_prompts[0].engram_interrupted);
+            let operation = loaded.engram_session_obligations.checkpoint_operations.iter()
+                .find(|operation| operation.protection.local_session_id == session).unwrap();
+            assert!(engram_obligation_requires_exclusion(&loaded, &operation.protection));
+            assert!(!matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+        } else {
+            let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+            let operation = loaded.engram_session_obligations.checkpoint_operations.iter()
+                .find(|operation| operation.protection.local_session_id == session).unwrap();
+            operation.validate().unwrap();
+            assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+            assert_ne!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+            assert!(engram_obligation_requires_exclusion(&loaded, &operation.protection));
+            let request = scripted.requests().into_iter()
+                .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
+            assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), request);
+        }
+        assert!(replacement_receiver.try_recv().is_err());
+        assert_eq!(scripted.requests().iter()
+            .filter(|request| request.request["operation"] == "turn_checkpoint").count(), 1);
+    }
+}
+
+#[test]
+fn rejected_checkpoint_retirement_recovers_a_failed_ack_without_restart_or_resend() {
+    let (state, session, receiver, scripted) = root_fixture([
+        bind_reply("ack-token"), grant_reply("ack-grant"),
+        begin_reply("ack-grant"), checkpoint_reply("ack-grant"),
+    ]);
+    let dispatch = root_dispatch(&state, &session, false);
+    let generation = dispatch.engram_dispatch_generation().unwrap();
+    assert!(matches!(state.prepare_engram_turn_delivery_off_lock(&session, generation),
+        EngramTurnDeliveryPreparation::Ready));
+    queue_test_engram_prompt(&state, &session, "successor after delayed ACK",
+        QueuedPromptSource::User, None);
+    drop(receiver);
+    let clock = state.engram_budget_clock();
+    let budget = {
+        let inner = state.inner.lock().unwrap();
+        engram_project_for_session_locked(&inner, &session).unwrap()
+            .engram.as_ref().unwrap().call_timeout()
+    };
+    state.install_control_test_transport(Arc::new(AfterRejectedCheckpointReply {
+        scripted: scripted.clone(),
+        // A valid reply consumes its existing call budget. Receipt publication
+        // can commit, but the following ACK must fail its expired deadline.
+        after: Mutex::new(Some(Box::new(move || clock.advance(budget)))),
+    }));
+    handoff_prepared_turn_dispatch(&state, dispatch).expect_err("provider channel is closed");
+    let retained = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        assert!(record.runtime_stop_owner.is_none());
+        assert_eq!(record.engram.dispatch_generation, generation + 1);
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after delayed ACK");
+        assert!(!record.queued_prompts[0].has_engram_intent());
+        let operation = inner.engram_session_obligations.checkpoint_operations.iter()
+            .find(|operation| operation.protection.local_session_id == session).unwrap();
+        assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+        assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+        assert!(engram_obligation_requires_exclusion(&inner, &operation.protection));
+        assert!(inner.engram_pending_checkpoint_receipts.entries.values().any(|entry| entry.accepted));
+        serde_json::to_value(operation).unwrap()
+    };
+    // Observe the committed file without replacing the running StateInner.
+    let request = scripted.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
+    let _durable = load_rejected_checkpoint_retirement(&state, &session, generation, &request);
+    assert!(state.account_pending_checkpoint_receipt(&session).unwrap());
+    assert!(!state.account_pending_checkpoint_receipt(&session).unwrap());
+    let inner = state.inner.lock().unwrap();
+    let operation = inner.engram_session_obligations.checkpoint_operations.iter()
+        .find(|operation| operation.protection.local_session_id == session).unwrap();
+    assert_eq!(serde_json::to_value(operation).unwrap(), retained);
+    assert!(!engram_obligation_requires_exclusion(&inner, &operation.protection));
+    assert!(inner.engram_pending_checkpoint_receipts.entries.is_empty());
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after delayed ACK");
+    assert!(!record.queued_prompts[0].has_engram_intent());
+    assert_eq!(scripted.requests().iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint").count(), 1);
+}
+
+fn load_rejected_checkpoint_retirement(
+    state: &AppState,
+    session: &str,
+    failed_generation: u64,
+    request: &Value,
+) -> StateInner {
+    // Read the actual writer's SQLite cut, without a shutdown/final persist.
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(session).unwrap()];
+    assert!(record.engram.dispatch_generation > failed_generation);
+    let operation = loaded.engram_session_obligations.checkpoint_operations.iter()
+        .find(|operation| operation.protection.local_session_id == session).unwrap();
+    operation.validate().unwrap();
+    assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), *request);
+    assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+    assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+    assert!(matches!(operation.attempts.last().unwrap().result, Some(EngramCheckpointAttemptResult::Accepted)));
+    let retired_id = operation.attempts.last().unwrap().queued_prompt_id.as_ref().unwrap();
+    assert!(!record.queued_prompts.iter().any(|queued| &queued.pending_prompt.id == retired_id));
+    assert!(!engram_obligation_requires_exclusion(&loaded, &operation.protection));
+    loaded
+}
+
 #[test]
 fn admitted_channel_rejection_checkpoints_and_retires_only_its_exact_owner() {
     let (state, session, receiver, _) = root_fixture([]);
@@ -595,14 +844,9 @@ fn admitted_channel_rejection_checkpoints_and_retires_only_its_exact_owner() {
     );
     assert!(durable.queued_prompts[0].engram_evaluate.is_none());
 
-    let reloaded = {
-        let inner = state.inner.lock().unwrap();
-        let encoded = serde_json::to_vec(&PersistedState::from_inner(&inner)).unwrap();
-        serde_json::from_slice::<PersistedState>(&encoded)
-            .unwrap()
-            .into_inner()
-            .unwrap()
-    };
+    let request = transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
+    let reloaded = load_rejected_checkpoint_retirement(&state, &session, failed_generation, &request);
     let reloaded_record = &reloaded.sessions[reloaded.find_session_index(&session).unwrap()];
     assert!(reloaded_record.engram.active_grant_id.is_none());
     assert_eq!(reloaded_record.queued_prompts.len(), 1);
@@ -768,14 +1012,9 @@ fn admitted_fast_discovery_failure_cannot_replay_checkpointed_authority() {
     );
     assert!(durable.queued_prompts[0].engram_evaluate.is_none());
 
-    let reloaded = {
-        let inner = state.inner.lock().unwrap();
-        let encoded = serde_json::to_vec(&PersistedState::from_inner(&inner)).unwrap();
-        serde_json::from_slice::<PersistedState>(&encoded)
-            .unwrap()
-            .into_inner()
-            .unwrap()
-    };
+    let request = transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
+    let reloaded = load_rejected_checkpoint_retirement(&state, &session, failed_generation, &request);
     let reloaded_record = &reloaded.sessions[reloaded.find_session_index(&session).unwrap()];
     assert!(reloaded_record.engram.active_grant_id.is_none());
     assert_eq!(reloaded_record.queued_prompts.len(), 1);

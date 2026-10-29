@@ -451,15 +451,27 @@ impl AppState {
     ) -> Result<Self> {
         // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
-        let (loaded_state, mut boot_persistence_connection) =
-            load_state_for_boot(&persistence_path)?;
+        let (loaded_state, mut boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
+        if boot_persistence_connection.is_none() {
+            if let Some(parent) = persistence_path.parent() {
+                create_local_state_directory(parent)?;
+            }
+            let connection = open_sqlite_state_connection_unconfigured(&persistence_path)?;
+            ensure_sqlite_state_schema_for_path(&connection, &persistence_path)?;
+            boot_persistence_connection = Some(connection);
+        }
         let mut inner =
             loaded_state.unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
-        prepare_federation_boot(
-            &mut inner,
-            &persistence_path,
-            &mut boot_persistence_connection,
-        )?;
+        if inner.metadata_predecessor.load(std::sync::atomic::Ordering::Acquire) == 0 {
+            // Fresh initialization committed before this live source exists.
+            // Capture its confirmed predecessor before any boot effects.
+            inner.metadata_predecessor.store(
+                metadata_unit_generation(boot_persistence_connection.as_ref()
+                    .ok_or_else(|| anyhow!("initialized boot metadata connection disappeared"))?)?,
+                std::sync::atomic::Ordering::Release,
+            );
+        }
+        prepare_federation_boot(&mut inner, &persistence_path, &mut boot_persistence_connection)?;
         let host_workdir = engram_host_workdir(&persistence_path)?;
         inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(host_workdir.clone()));
         #[cfg(test)]

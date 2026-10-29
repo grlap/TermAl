@@ -929,6 +929,10 @@ fn test_app_state() -> AppState {
     // This constructor bypasses AppState::new_with_paths. Mirror its private
     // host launch policy before fixtures enable Engram or replay an intent.
     let mut inner = StateInner::new();
+    let connection = open_sqlite_state_connection_unconfigured(&persistence_path).unwrap();
+    ensure_sqlite_state_schema_for_path(&connection, &persistence_path).unwrap();
+    inner.metadata_predecessor.store(metadata_unit_generation(&connection).unwrap(), std::sync::atomic::Ordering::Release);
+    drop(connection);
     inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(
         engram_host_workdir(&persistence_path).expect("fixture persistence directory"),
     ));
@@ -1457,6 +1461,7 @@ fn sample_remote_orchestrator_state(
     TestRemoteState {
         sessions,
         state: StateResponse {
+            engram_control_recovery: Vec::new(),
             revision,
             // Tests simulate a remote snapshot; a stable stub id is fine
             // since remote-state sync doesn't consume the field today.

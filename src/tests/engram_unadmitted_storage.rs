@@ -2,13 +2,14 @@
 use super::*;
 
 const PREDECESSOR: &str = "2-metadata-units-2-handoff-1";
-const SUCCESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
+const SUCCESSOR: &str = SQLITE_SCHEMA_VERSION;
 
 fn predecessor() -> rusqlite::Connection {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
     seed_current_state_core_tables(&connection);
     seed_current_state_auxiliary_tables(&connection);
     seed_current_state_metadata(&connection);
+    connection.execute("DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations'", []).unwrap();
     connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [PREDECESSOR]).unwrap();
     connection
 }
@@ -16,13 +17,14 @@ fn predecessor() -> rusqlite::Connection {
 #[test]
 fn unadmitted_runtime_reporting_storage_upgrades_exact_predecessor_before_new_custody() {
     let connection = predecessor();
-    let metadata = read_metadata_units_unchecked(&connection).unwrap();
+    let mut metadata = read_metadata_units_unchecked(&connection).unwrap();
+    metadata.extend(metadata_value_to_units(json!({"engramSessionObligations": EngramSessionObligationLedger::empty()})).unwrap());
     let generation = metadata_unit_generation(&connection).unwrap();
     ensure_sqlite_state_schema_for_load(&connection).unwrap();
     assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), SUCCESSOR);
     assert_eq!(SQLITE_SCHEMA_VERSION, SUCCESSOR);
     assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), metadata);
-    assert_eq!(metadata_unit_generation(&connection).unwrap(), generation);
+    assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
     ensure_sqlite_state_schema_for_load(&connection).unwrap();
 }
 
@@ -86,13 +88,14 @@ fn unadmitted_review_predecessor_upgrade_keeps_ignored_legacy_mailboxes() {
         connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [version]).unwrap();
         connection.execute_batch("CREATE TABLE mailboxes(id TEXT PRIMARY KEY);
             INSERT INTO mailboxes VALUES('obsolete-but-retained');").unwrap();
-        let metadata = read_metadata_units_unchecked(&connection).unwrap();
+        let mut metadata = read_metadata_units_unchecked(&connection).unwrap();
+        metadata.extend(metadata_value_to_units(json!({"engramSessionObligations": EngramSessionObligationLedger::empty()})).unwrap());
         let generation = metadata_unit_generation(&connection).unwrap();
         ensure_sqlite_state_schema_for_load(&connection)
             .expect("a supported predecessor's ignored legacy table must not prevent upgrade");
         assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), SUCCESSOR);
         assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), metadata);
-        assert_eq!(metadata_unit_generation(&connection).unwrap(), generation);
+        assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
         assert_eq!(connection.query_row("SELECT id FROM mailboxes", [], |row| row.get::<_, String>(0)).unwrap(),
             "obsolete-but-retained");
     }

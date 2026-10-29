@@ -1098,6 +1098,9 @@ impl AppState {
         let mut wall_now = None;
         let mut changed = false;
         for index in 0..inner.sessions.len() {
+            if engram_session_obligation_locked(inner, &inner.sessions[index].session.id).is_some() {
+                continue;
+            }
             if !engram_begin_preparation_boot_hold(&inner.sessions[index]) {
                 continue;
             }
@@ -1216,6 +1219,23 @@ impl AppState {
             return Ok(None);
         }
         let gated = Self::engram_session_requires_dispatch_card_locked(&inner, session_id);
+        if containment_retained_reconciliation_allowed(&inner, session_id) {
+            // The durable original entry and this synchronous Resume's exact
+            // permit select reconciliation, even with transport failure history.
+            // Keep the interrupted head and generic recovery state unchanged;
+            // each subsequent guard must validate the same permit again.
+            let record = inner.session_mut_by_index(index).expect("visible session");
+            let lineage = record.engram.begin_preparation_lineage.clone();
+            if renew_engram_admission_budget_for_resume(record, wall_now) {
+                if let Err(error) = self.commit_locked(&mut inner) {
+                    inner.session_mut_by_index(index).expect("visible session")
+                        .engram.begin_preparation_lineage = lineage;
+                    return Err(ApiError::internal(format!(
+                        "failed persisting the retained reconciliation budget: {error:#}")));
+                }
+            }
+            return Ok(EngramQueuedAdmissionOwner::capture(&inner.sessions[index]));
+        }
         if inner.sessions[index].queued_prompts.front()
             .is_some_and(|head| head.engram_ordinary_handoff)
         {
@@ -1231,7 +1251,11 @@ impl AppState {
             return Err(self.refuse_engram_queue_resume_locked(&mut inner, index,
                 "Engram control is off for this project; enable it to reconcile the retained prompt, or cancel it"));
         }
-        let resume = engram_begin_preparation_resume(&inner.sessions[index]);
+        let resume = if containment_begin_replay_resume_allowed(&inner, session_id) {
+            EngramBeginPreparationResume::ReconcilePrepared
+        } else {
+            engram_begin_preparation_resume(&inner.sessions[index])
+        };
         let reconcile = resume == EngramBeginPreparationResume::ReconcileRetained;
         // The original store and settings own a retained request. Never turn
         // an explicit Resume into authorization on a different authority.
@@ -1274,7 +1298,7 @@ impl AppState {
                  be saved locally; it starts by itself once saved. Nothing was sent.",
             ));
         }
-        match engram_begin_preparation_resume(record) {
+        match resume {
             EngramBeginPreparationResume::NotHeld => {
                 if gated
                     && engram_queue_head_refused_as_interrupted(record)
@@ -1314,7 +1338,7 @@ impl AppState {
             | EngramBeginPreparationResume::ReconcilePrepared
             | EngramBeginPreparationResume::ReconcileRetained => {}
         }
-        let keep_pending = matches!(engram_begin_preparation_resume(record),
+        let keep_pending = matches!(resume,
             EngramBeginPreparationResume::ReleasablePending
                 | EngramBeginPreparationResume::ReconcilePrepared);
         if let Some(code) = record.engram.disabled_reason.as_deref() {

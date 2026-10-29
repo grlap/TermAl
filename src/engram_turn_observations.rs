@@ -823,6 +823,7 @@ impl AppState {
         session_id: &str,
         grant_id: &str,
         code: Option<&str>,
+        drain_batches: bool,
     ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
@@ -831,7 +832,9 @@ impl AppState {
         // A batch gate the refused checkpoint carried can no longer be bound,
         // whatever became of the report: its members are told now
         // (`engram_batch_binds.rs`).
-        if Self::drain_engram_refused_batches(&mut inner, index, session_id, grant_id, code)
+        // Ordinary checkpoint batches are disposed with their validated
+        // Refused publication, rather than before that result is retained.
+        if drain_batches && Self::drain_engram_refused_batches(&mut inner, index, session_id, grant_id, code)
             && let Err(error) = self.commit_locked(&mut inner)
         {
             eprintln!("engram> session={session_id} failed persisting drained batch gates: {error:#}");

@@ -111,6 +111,9 @@ const SQLITE_METADATA_UNITS_SCHEMA: &str = "
 struct PersistMetadataUnitCache {
     generation: u64,
     units: PersistMetadataUnits,
+    // Derived from the exact encoded ledger unit, never an authority source.
+    checkpoint_index: Option<Arc<PersistCheckpointMirrorIndex>>,
+    changed_checkpoint_owners: BTreeSet<String>,
 }
 
 include!("persist_metadata_units_codec.rs");
@@ -249,6 +252,11 @@ fn write_metadata_units(
             rusqlite::params![field, key, kind, encoded])?;
         changed = true;
     }
+    let (checkpoint_index, changed_checkpoint_owners) = checkpoint_write_cut_index(
+        previous,
+        &desired,
+        cached.filter(|cache| cache.generation == generation),
+    )?;
     let generation = if changed || coupled_changes {
         let next = generation
             .checked_add(1)
@@ -265,91 +273,17 @@ fn write_metadata_units(
     Ok(PersistMetadataUnitCache {
         generation,
         units: desired,
+        checkpoint_index,
+        changed_checkpoint_owners,
     })
 }
 
-// Only the known, validated primary-2 image is migrated. The transaction changes
-// both the authority and its version marker, so an interrupted migration leaves
-// either the entire old format or the entire new format. Old builds fail closed.
+// All supported storage and semantic floors migrate in one immediate
+// transaction, including the strict metadata-unit and obligation contracts.
+#[cfg(test)]
 fn migrate_metadata_units(connection: &rusqlite::Connection) -> Result<()> {
-    if !sqlite_state_user_table_names(connection)?.contains("meta") {
-        // Preserve the typed compatibility refusal before probing an obsolete
-        // database, and before any schema or persistent PRAGMA mutation.
-        return validate_current_sqlite_state_schema(connection);
-    }
-    let version: Option<String> = connection
-        .query_row(
-            "SELECT value FROM meta WHERE key='schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(source_version @ ("2" | "2-metadata-units-1")) = version.as_deref() else {
-        return Ok(());
-    };
-    let old_tables: Vec<_> = CURRENT_SQLITE_STATE_TABLE_COLUMNS
-        .iter()
-        .filter(|(name, _)| source_version != "2" || *name != "state_metadata_units")
-        .copied()
-        .collect();
-    validate_sqlite_state_table_columns(connection, &old_tables, true)?;
-    if required_state_meta_value(connection, SQLITE_PROMPT_HISTORY_STORAGE_KEY)?
-        != SQLITE_PROMPT_HISTORY_STORAGE_VERSION
-    {
-        return Err(reject_unsupported_state_schema(
-            "invalid legacy prompt-history storage",
-        ));
-    }
-    validate_optional_federation_host_identity(connection)?;
-    validate_no_legacy_embedded_state(connection)?;
-    let tx =
-        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)?;
-    // A second process may have completed the migration while we awaited BEGIN.
-    if required_state_meta_value(&tx, "schema_version")? != source_version {
-        tx.commit()?;
-        return Ok(());
-    }
-    validate_no_legacy_embedded_state(&tx)?;
-    let encoded = read_persisted_metadata_json(&tx)?;
-    if source_version == "2" {
-        tx.execute_batch(SQLITE_METADATA_UNITS_SCHEMA)?;
-    }
-    if let Some(encoded) = encoded {
-        // Preserve the raw federation subtrees: their digest is an authority
-        // marker, and serde defaults must not silently change that image.
-        let value: Value = serde_json::from_str(&encoded)?;
-        let typed: PersistedState = serde_json::from_value(value.clone())?;
-        let mut complete = metadata_units_to_value(&project_metadata_units(&typed)?)?;
-        let fields = value
-            .as_object()
-            .ok_or_else(|| anyhow!("metadata is not an object"))?;
-        for (name, raw) in fields {
-            if name == "delegations" && raw.as_array().is_some_and(Vec::is_empty) {
-                continue;
-            }
-            if !METADATA_UNIT_FIELDS.contains(&name.as_str()) {
-                return Err(anyhow!("unsupported legacy metadata field `{name}`"));
-            }
-            complete[name] = raw.clone();
-        }
-        let desired = metadata_value_to_units(complete)?;
-        // Raw legacy values may deserialize through serde's sequence support
-        // while violating this format's fixed kinds. Refuse before committing
-        // either the units or their authoritative reader-floor marker.
-        validate_metadata_unit_inventory(&desired)?;
-        metadata_units_to_value(&desired)?;
-        write_metadata_units(&tx, desired, None, &[], None, false)?;
-    }
-    tx.execute(
-        "UPDATE meta SET value=?1 WHERE key='schema_version'",
-        [SQLITE_METADATA_UNITS_VERSION],
-    )?;
-    tx.commit()
-        .context("failed to migrate normalized metadata authority")?;
-    persist_observe_metadata_commit();
-    Ok(())
+    prepare_sqlite_obligation_reader_floor(connection, false).map(|_| ())
 }
-
 fn legacy_metadata_units_to_value(mut units: PersistMetadataUnits) -> Result<Value> {
     // Units-1 had no tail count. Validate all information it did retain; its
     // absent trailing members cannot be reconstructed from stale app_state.
@@ -368,7 +302,7 @@ fn legacy_metadata_units_to_value(mut units: PersistMetadataUnits) -> Result<Val
         if !key.is_empty() {
             *counts.entry(field.clone()).or_default() += 1;
         }
-        if !METADATA_UNIT_FIELDS.contains(&field.as_str()) {
+        if !METADATA_UNIT_PREDECESSOR_FIELDS.contains(&field.as_str()) {
             return Err(anyhow!("unsupported units-1 metadata field `{field}`"));
         }
     }

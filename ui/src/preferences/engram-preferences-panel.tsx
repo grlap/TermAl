@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { updateEngramHostSettings, type StateResponse } from "../api";
+import { EngramControlRecoveryPanel } from "../engram-control-recovery";
 import {
   describeProjectEngramState,
   EngramProjectSettingsPanel,
@@ -101,6 +102,7 @@ export function EngramPreferencesPanel({
 
   return (
     <section className="settings-panel-stack engram-preferences-panel">
+      <EngramControlRecoveryPanel />
       <article className="message-card prompt-settings-card engram-host-settings-card">
         <div className="settings-section-header">
           <div>

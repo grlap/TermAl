@@ -14,6 +14,8 @@ fn metadata_units_rollback_sql() -> String {
 mod ordinary_handoff_reader_floor_tests {
     use super::*;
 
+    const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
+
     fn units_store() -> rusqlite::Connection {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         seed_units_store(&connection);
@@ -24,6 +26,7 @@ mod ordinary_handoff_reader_floor_tests {
         seed_current_state_core_tables(&connection);
         seed_current_state_auxiliary_tables(&connection);
         seed_current_state_metadata(&connection);
+        connection.execute("DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations'", []).unwrap();
         connection
             .execute(
                 "INSERT INTO meta VALUES('metadata_units_generation','7')",
@@ -67,7 +70,7 @@ mod ordinary_handoff_reader_floor_tests {
                 "INSERT INTO app_state VALUES(?1,?2)",
                 rusqlite::params![
                     SQLITE_METADATA_KEY,
-                    serde_json::to_string(&metadata).unwrap()
+                    predecessor_metadata(&metadata).to_string()
                 ],
             )
             .unwrap();
@@ -76,6 +79,34 @@ mod ordinary_handoff_reader_floor_tests {
 
     fn version(connection: &rusqlite::Connection) -> String {
         required_state_meta_value(connection, "schema_version").unwrap()
+    }
+
+    fn predecessor_metadata(metadata: &PersistedState) -> Value {
+        let mut value = serde_json::to_value(metadata).unwrap();
+        value.as_object_mut().unwrap().remove("engramSessionObligations");
+        value
+    }
+
+    // Only a test comparison view supplies the field absent in frozen formats.
+    // Production readers must validate the predecessor before extending it.
+    fn predecessor_comparison(encoded: &str) -> PersistedState {
+        let mut value: Value = serde_json::from_str(encoded).unwrap();
+        assert!(value.get("engramSessionObligations").is_none());
+        value["engramSessionObligations"] = serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn database_image(connection: &rusqlite::Connection) -> Vec<(String, String, Vec<Vec<rusqlite::types::Value>>)> {
+        let tables = connection.prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").unwrap()
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        tables.into_iter().map(|(name, schema)| {
+            let mut statement = connection.prepare(&format!("SELECT * FROM \"{}\" ORDER BY 1,2", name.replace('"', "\"\""))).unwrap();
+            let columns = statement.column_count();
+            let rows = statement.query_map([], |row| (0..columns).map(|index| row.get(index)).collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()).unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            (name, schema, rows)
+        }).collect()
     }
 
     fn prepare(connection: &rusqlite::Connection, load: bool) -> Result<()> {
@@ -112,18 +143,26 @@ mod ordinary_handoff_reader_floor_tests {
         )
     }
 
+    fn joint_extension(mut predecessor: (PersistMetadataUnits, u64, Vec<(String, String)>, String)) -> (PersistMetadataUnits, u64, Vec<(String, String)>, String) {
+        assert!(!predecessor.0.keys().any(|(field, _)| field == "engramSessionObligations"));
+        predecessor.0.extend(metadata_value_to_units(json!({"engramSessionObligations": EngramSessionObligationLedger::empty()})).unwrap());
+        predecessor.1 += 1;
+        predecessor
+    }
+
     #[test]
     fn admission_contract_reader_floor_preserves_units_and_uncertain_sessions() {
         for load in [false, true] {
             let connection = units_store();
             let before = image(&connection);
+            let expected = joint_extension(before);
             let raw_federation = read_federation_persist_image(&connection).unwrap();
             prepare(&connection, load).unwrap();
             assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
             assert_eq!(
                 image(&connection),
-                before,
-                "only the semantic header changes"
+                expected,
+                "only the mandatory ledger and its generation extend the predecessor authority"
             );
             assert_eq!(
                 read_federation_persist_image(&connection).unwrap(),
@@ -131,7 +170,7 @@ mod ordinary_handoff_reader_floor_tests {
             );
             assert!(read_persisted_metadata_json(&connection).unwrap().is_some());
             prepare(&connection, load).unwrap();
-            assert_eq!(image(&connection), before, "reopen is idempotent");
+            assert_eq!(image(&connection), expected, "reopen is idempotent");
         }
     }
 
@@ -144,7 +183,7 @@ mod ordinary_handoff_reader_floor_tests {
                 prepare(&connection, load).unwrap();
                 assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
                 let after = read_persisted_metadata_json(&connection).unwrap().unwrap();
-                let before: PersistedState = serde_json::from_str(&before).unwrap();
+                let before = predecessor_comparison(&before);
                 let after: PersistedState = serde_json::from_str(&after).unwrap();
                 assert_eq!(
                     project_metadata_units(&before).unwrap(),
@@ -155,10 +194,12 @@ mod ordinary_handoff_reader_floor_tests {
     }
 
     #[test]
-    fn admission_contract_reader_floor_failed_second_stage_keeps_valid_units_predecessor() {
+    fn admission_contract_reader_floor_failed_second_stage_keeps_original_predecessor() {
         for source in ["2", "2-metadata-units-1"] {
             for load in [false, true] {
                 let connection = legacy_store(source);
+                let before = database_image(&connection);
+                let metadata = read_persisted_metadata_json(&connection).unwrap().unwrap();
                 connection
                     .execute_batch(
                         &format!("CREATE TRIGGER refuse_handoff_floor BEFORE UPDATE OF value ON meta
@@ -168,21 +209,15 @@ mod ordinary_handoff_reader_floor_tests {
                     .unwrap();
                 let error = prepare(&connection, load).unwrap_err();
                 assert!(format!("{error:#}").contains("injected handoff floor failure"));
-                assert_eq!(version(&connection), SQLITE_METADATA_UNITS_VERSION);
-                validate_sqlite_state_schema_for_version(
-                    &connection,
-                    SQLITE_METADATA_UNITS_VERSION,
-                )
-                .unwrap();
-                validate_no_legacy_embedded_state(&connection).unwrap();
-                let predecessor = read_metadata_units(&connection).unwrap();
+                assert_eq!(version(&connection), source);
+                assert_eq!(database_image(&connection), before, "all stages roll back together");
                 assert!(connection.is_autocommit());
                 connection
                     .execute_batch("DROP TRIGGER refuse_handoff_floor")
                     .unwrap();
                 prepare(&connection, load).unwrap();
                 assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
-                assert_eq!(read_metadata_units(&connection).unwrap(), predecessor);
+                assert_eq!(read_metadata_units(&connection).unwrap(), project_metadata_units(&predecessor_comparison(&metadata)).unwrap());
             }
         }
     }
@@ -197,10 +232,10 @@ mod ordinary_handoff_reader_floor_tests {
             WHEN new.key='schema_version' BEGIN SELECT RAISE(IGNORE); END;",
             )
             .unwrap();
-        let error = advance_sqlite_state_reader_floor(&connection, true)
+        let error = prepare_sqlite_obligation_reader_floor(&connection, true)
             .err()
             .unwrap();
-        assert!(format!("{error:#}").contains("exact predecessor"));
+        assert!(format!("{error:#}").contains("predecessor changed"));
         assert_eq!(version(&connection), SQLITE_METADATA_UNITS_VERSION);
         assert_eq!(image(&connection), before);
         assert!(connection.is_autocommit());
@@ -211,15 +246,10 @@ mod ordinary_handoff_reader_floor_tests {
         for load in [false, true] {
             let connection = units_store();
             // Model another opener completing after the outer predecessor read.
-            connection
-                .execute(
-                    "UPDATE meta SET value=?1 WHERE key='schema_version'",
-                    [SQLITE_SCHEMA_VERSION],
-                )
-                .unwrap();
+            prepare(&connection, load).unwrap();
             let before = image(&connection);
             let changes = connection.total_changes();
-            advance_sqlite_state_reader_floor(&connection, load).unwrap();
+            prepare_sqlite_obligation_reader_floor(&connection, load).unwrap();
             assert_eq!(connection.total_changes(), changes);
             assert_eq!(image(&connection), before);
             connection
@@ -229,7 +259,7 @@ mod ordinary_handoff_reader_floor_tests {
                 )
                 .unwrap();
             let changes = connection.total_changes();
-            assert!(advance_sqlite_state_reader_floor(&connection, load).is_err());
+            assert!(prepare_sqlite_obligation_reader_floor(&connection, load).is_err());
             assert_eq!(connection.total_changes(), changes);
             assert_eq!(version(&connection), "future");
         }
@@ -261,7 +291,9 @@ mod ordinary_handoff_reader_floor_tests {
     #[test]
     fn admission_contract_reader_floor_rejects_unknown_formats_before_mutation() {
         for load in [false, true] {
-            for unknown in ["1", "3", "4", "future", "2-metadata-units-2-handoff-2"] {
+            for unknown in ["1", "3", "4", "future", "2-metadata-units-2-handoff-2",
+                "2-metadata-units-2-handoff-1-obligations-1",
+                "2-metadata-units-2-handoff-1-obligations-1-unadmitted-outbox-1"] {
                 let connection = units_store();
                 connection
                     .execute(
@@ -303,16 +335,22 @@ mod ordinary_handoff_reader_floor_tests {
             let connection = rusqlite::Connection::open_in_memory().unwrap();
             prepare(&connection, load).unwrap();
             assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
-            assert!(read_persisted_metadata_json(&connection).unwrap().is_none());
+            let metadata = read_persisted_metadata_json(&connection).unwrap().unwrap();
+            let persisted: PersistedState = serde_json::from_str(&metadata).unwrap();
+            assert_eq!(serde_json::to_value(persisted.engram_session_obligations).unwrap(), serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap());
+            assert_eq!(metadata_unit_generation(&connection).unwrap(), 1);
+            let before = database_image(&connection);
             prepare(&connection, load).unwrap();
             assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
+            assert_eq!(database_image(&connection), before);
         }
     }
 
     #[test]
-    fn admission_contract_reader_floor_reopens_committed_normalization_after_floor_failure() {
+    fn admission_contract_reader_floor_reopens_original_predecessor_after_floor_failure() {
         let root = TestTempRoot::create("handoff-interstage-reopen");
         let path = root.path().join("state.sqlite");
+        let before;
         {
             let connection = rusqlite::Connection::open(&path).unwrap();
             seed_primary2_state_schema_for_test(&connection);
@@ -322,10 +360,11 @@ mod ordinary_handoff_reader_floor_tests {
                     "INSERT INTO app_state VALUES(?1,?2)",
                     rusqlite::params![
                         SQLITE_METADATA_KEY,
-                        serde_json::to_string(&metadata).unwrap()
+                        predecessor_metadata(&metadata).to_string()
                     ],
                 )
                 .unwrap();
+            before = database_image(&connection);
             connection
                 .execute_batch(
                     &format!("CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
@@ -334,18 +373,20 @@ mod ordinary_handoff_reader_floor_tests {
                 )
                 .unwrap();
             assert!(prepare(&connection, true).is_err());
-            assert_eq!(version(&connection), SQLITE_METADATA_UNITS_VERSION);
+            assert_eq!(version(&connection), "2");
+            assert_eq!(database_image(&connection), before);
         }
         let connection = rusqlite::Connection::open(&path).unwrap();
-        assert_eq!(version(&connection), SQLITE_METADATA_UNITS_VERSION);
-        let before = image(&connection);
+        assert_eq!(version(&connection), "2");
+        assert_eq!(database_image(&connection), before);
+        let metadata = read_persisted_metadata_json(&connection).unwrap().unwrap();
         validate_no_legacy_embedded_state(&connection).unwrap();
         connection
             .execute_batch("DROP TRIGGER fail_feature")
             .unwrap();
         prepare(&connection, true).unwrap();
         assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
-        assert_eq!(image(&connection), before);
+        assert_eq!(read_metadata_units(&connection).unwrap(), project_metadata_units(&predecessor_comparison(&metadata)).unwrap());
     }
 
     #[test]
@@ -372,7 +413,7 @@ mod ordinary_handoff_reader_floor_tests {
     #[test]
     fn admission_contract_units_rollback_supported_floor_executes_same_sql() {
         let connection = units_store();
-        let before = read_metadata_units(&connection).unwrap();
+        let before = read_metadata_units_unchecked(&connection).unwrap();
         connection
             .execute_batch(&metadata_units_rollback_sql())
             .expect("the supported units floor must execute the rollback rather than fail parsing");
@@ -385,8 +426,9 @@ mod ordinary_handoff_reader_floor_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let restored: PersistedState = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(project_metadata_units(&restored).unwrap(), before);
+        let restored: Value = serde_json::from_str(&encoded).unwrap();
+        assert!(restored.get("engramSessionObligations").is_none());
+        assert_eq!(metadata_value_to_units(restored).unwrap(), before);
     }
 
     #[test]

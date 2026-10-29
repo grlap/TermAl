@@ -159,7 +159,7 @@ quarantine set so a later synchronous full-snapshot persistence fallback does
 not misinterpret the isolated row as a user deletion; the original SQLite row
 stays available for recovery or inspection.
 
-`meta.schema_version` is `2-metadata-units-2-handoff-1`, and
+`meta.schema_version` is `2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`, and
 `meta.prompt_history_storage_version` is `1`. Existing databases must contain
 all required tables above, but may retain unrelated tables from earlier development
 builds. Each required table must have exactly the column set shown above,
@@ -170,7 +170,29 @@ maintenance; after maintenance all required tables must match the canonical sets
 Before any schema maintenance or persistent PRAGMA runs, startup also requires
 both metadata markers. Complete units must reconstruct the current
 `PersistedState` shape with validated kinds, counts and keys before defaults.
-An absent unit image is accepted only when
+The joint floor requires an explicit `engramSessionObligations` object ledger
+outside normalized session rows. Its supported containment and retirement
+records preserve original authority, owner, requests and evidence; unsupported,
+missing, malformed or conflicting records refuse the whole reader before
+maintenance, recovery or rewrite. The supported path is primary-2 or emergency
+units-1 to units-2, then `2-metadata-units-2-handoff-1`, then the joint floor.
+The landed `2-metadata-units-2-handoff-1-unadmitted-outbox-1` source also
+upgrades directly, preserving its active captures, closing jobs and pending
+observation requests byte-for-byte. Earlier sources containing those custody
+keys refuse before normalization, including null or empty values.
+All stages run in one immediate transaction, with no intermediate feature
+effects. Existing unrelated unit rows and normalized session bytes survive
+unchanged; adding the ledger advances the metadata generation. A failed floor
+write rolls back unit rows, generation and every header transition together.
+The units-2, handoff and outbox-only readers refuse the joint marker before mutation.
+The checkpoint-result-1 inventory also includes preservation of existing
+pending-batch session fields when their producer, Test input, source and target
+fences belong to one validated canonical original. Whole-state recovery stages
+those fields until ledger, mirrors and project provenance are checked; unmatched
+inputs keep their former lost-credit behavior. Matched inputs remain receipt
+custody until exact owned accounting converts them in the Accepted transaction.
+An absent predecessor unit image can migrate only when generation, provenance
+and normalized authority all agree that the store is uninitialized, and
 `sessions`, `messages`, `session_overviews`, `session_prompt_histories`,
 `delegations`, and `board_cards` contain no rows; the schema-seeded default
 response-board tab does not count as persisted app metadata. Startup rejects
@@ -179,22 +201,34 @@ arrays in metadata (and fail-closed non-null values of the wrong type), or an ar
 `session.promptHistory` key in a parseable `sessions.value_json` row, including
 an empty array. A non-array prompt-history value is damaged row data rather
 than legacy authority and remains a row-level quarantine concern, as does
-malformed session JSON. Fresh databases create every table and both markers in
-one immediate transaction. Any unsupported or partial shape is rejected with
-move/delete reset guidance. The supported primary-2 and emergency-units-1
-formats migrate atomically to units-2 after validation; other obsolete local
-formats have no alternate hydration path. Missing optional history in units-1
-cannot be retrospectively recovered or certified by the upgrade.
+malformed session JSON. Fresh databases create every table, both markers and
+complete metadata units including an explicit empty ledger in one immediate transaction. The joint floor
+refuses absent metadata even in an otherwise empty store. Other unsupported or
+partial shapes receive reset guidance; there is no fallback hydration path.
+The unpublished numeric 3/4 drafts and experimental ledger-bearing predecessors
+are unsupported. Missing optional history in units-1 cannot be retrospectively
+recovered or certified by the upgrade. Legacy `app_state` bytes remain migration
+provenance and are never current metadata authority or a write target.
 
-The units-2 layout and the handoff reader floor are separate contracts.
-An immediate transaction validates complete units-2 authority and changes only
-the primary header to `2-metadata-units-2-handoff-1`. Normalization and this
-floor change are two atomic stages, not one combined transaction. Recovery,
-provider dispatch and marker-bearing writes start only after both succeed.
-A failed floor change leaves the valid units-2 predecessor for a later reopen.
-Session JSON, raw metadata units, generation and federation state are unchanged
-by the floor-only stage. Older readers and the units-2 offline rollback script
-refuse the handoff floor; a header downgrade cannot remove delivery uncertainty.
+The ordinary full and delta writers check checkpoint mirrors before committing
+their transaction. A bounded collection pass may defer a session row after
+capturing newer ledger metadata; that mixed cut rolls back instead of saving a
+store that the strict startup reader would refuse. The writer leaves its source
+generation and session watermark unadopted, fails the pending durability fence,
+and retries from a fresh capture. Post-commit integrity checks keep their
+existing behavior.
+
+This check uses the existing metadata-unit cache's derived checkpoint index.
+An unchanged ledger field shares its index. The field uses the ordinary object
+descriptor and three member units; a change to any of them rebuilds and compares
+its operation index once. The transaction then probes session rows
+by primary key only for changed session rows and owners of changed or retired
+operations, including deferred and quarantined owners. Its row work depends on
+those changes, not on unrelated persisted session history. A cold cache derives
+its index from the predecessor units already loaded under the generation check.
+This bounds the additional index and row-probe work. It does not remove the
+existing eager ledger capture, serialization or encoded-unit equality work,
+which still depends on the ledger's byte size even when its index is shared.
 
 ## API Shape
 
@@ -350,7 +384,8 @@ The normalized transcript schema and bounded HTTP reads are implemented:
   current-schema databases using `WITHOUT ROWID` are converted once, after
   startup authority validation, by an atomic copy/rebuild that preserves rows,
   constraints, indexes, triggers, views, and foreign-key relationships. The
-  transcript layout remains unchanged under units-2; unsupported logical schemas still reject.
+  transcript layout does not change the logical reader floor; unsupported
+  logical schemas still reject.
 - Saving a changed session upserts only new or changed message contents and
   deletes only truncated or replaced identities. Unchanged retained messages
   and the cold transcript prefix keep their rows, including during metadata-only

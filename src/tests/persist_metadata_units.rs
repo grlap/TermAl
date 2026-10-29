@@ -15,6 +15,8 @@ fn metadata_units_connection(fixture: &FenceFixture) -> &rusqlite::Connection {
 }
 
 fn metadata_units_seed_legacy(connection: &rusqlite::Connection, metadata: &PersistedState) {
+    let mut legacy = serde_json::to_value(metadata).unwrap();
+    legacy.as_object_mut().unwrap().remove("engramSessionObligations");
     connection
         .execute_batch(include_str!("fixtures/state_schema2.sql"))
         .unwrap();
@@ -36,7 +38,7 @@ fn metadata_units_seed_legacy(connection: &rusqlite::Connection, metadata: &Pers
             "INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
             rusqlite::params![
                 SQLITE_METADATA_KEY,
-                serde_json::to_string(metadata).unwrap()
+                serde_json::to_string(&legacy).unwrap()
             ],
         )
         .unwrap();
@@ -293,7 +295,9 @@ fn metadata_collection_capture_skips_unchanged_collections() {
     let _delta = fixture.collect();
     scope.finish(true, &PersistTickTimings::default());
     let snapshot = observer.snapshot_at(std::time::Instant::now());
-    let root_values = ["federation", "codex", "preferences", "testRunCardsEpoch"];
+    let root_values = [
+        "federation", "codex", "preferences", "engramSessionObligations", "testRunCardsEpoch",
+    ];
     let cloned = &snapshot.recent[0].counts.metadata_cloned_fields;
     assert_eq!(
         cloned
@@ -302,7 +306,7 @@ fn metadata_collection_capture_skips_unchanged_collections() {
             .filter(|field| root_values.contains(field))
             .collect::<Vec<_>>(),
         root_values,
-        "small root values retain the existing federation guard snapshot"
+        "eager root values retain the federation guard snapshot and checkpoint custody"
     );
     assert_eq!(
         cloned
@@ -721,8 +725,7 @@ fn metadata_units_old_reader(connection: &rusqlite::Connection) -> Result<Value>
 }
 
 // This offline rollback contract is only for the pre-handoff units layout.
-fn metadata_units_rollback_connection(fixture: &FenceFixture) -> &rusqlite::Connection {
-    let connection = metadata_units_connection(fixture);
+fn metadata_units_seed_rollback_predecessor(connection: &rusqlite::Connection) {
     // Extend the existing historical fixture owner; never downgrade custody.
     assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION,
         "only construct the historical fixture from the known current layout");
@@ -735,9 +738,37 @@ fn metadata_units_rollback_connection(fixture: &FenceFixture) -> &rusqlite::Conn
         [], |row| row.get(0),
     ).unwrap();
     assert_eq!(custody_rows, 0, "historical rollback fixture must contain no observation custody");
-    connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",
-        [SQLITE_METADATA_UNITS_VERSION]).unwrap();
-    connection
+    let ledger: EngramSessionObligationLedger = serde_json::from_value(
+        read_persisted_metadata_field(connection, "engramSessionObligations").unwrap().unwrap(),
+    ).unwrap();
+    assert!(ledger.entries.is_empty() && ledger.checkpoint_operations.is_empty());
+    connection.execute_batch("BEGIN IMMEDIATE;
+        DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations';
+        UPDATE meta SET value='2-metadata-units-2' WHERE key='schema_version';
+        COMMIT;").unwrap();
+}
+
+// A private typed comparison view for a deliberately seeded old format. It is
+// never stored or supplied to the production reader as validity evidence.
+fn metadata_units_predecessor_view(mut value: Value) -> PersistedState {
+    assert!(value.get("engramSessionObligations").is_none());
+    value["engramSessionObligations"] = serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn metadata_units_rollback_refuses_joint_floor_without_mutating_its_authority() {
+    let fixture = FenceFixture::new();
+    let connection = metadata_units_connection(&fixture);
+    let original = read_metadata_units_unchecked(connection).unwrap();
+    let generation = metadata_unit_generation(connection).unwrap();
+    assert!(connection.execute_batch(&metadata_units_rollback_sql()).is_err());
+    if !connection.is_autocommit() {
+        connection.execute_batch("ROLLBACK").unwrap();
+    }
+    assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION);
+    assert_eq!(read_metadata_units_unchecked(connection).unwrap(), original);
+    assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
 }
 
 #[test]
@@ -789,8 +820,9 @@ fn metadata_units_offline_rollback_materializes_current_counters_and_collections
         inner.revision = 7001;
     }
     fixture.write(&fixture.collect()).unwrap();
-    let connection = metadata_units_rollback_connection(&fixture);
+    let connection = metadata_units_connection(&fixture);
     let expected = metadata_units_metadata(connection);
+    metadata_units_seed_rollback_predecessor(connection);
     connection
         .execute_batch(&metadata_units_rollback_sql())
         .unwrap();
@@ -800,8 +832,7 @@ fn metadata_units_offline_rollback_materializes_current_counters_and_collections
             .unwrap()
             .contains("state_metadata_units")
     );
-    let legacy: PersistedState =
-        serde_json::from_value(metadata_units_old_reader(connection).unwrap()).unwrap();
+    let legacy = metadata_units_predecessor_view(metadata_units_old_reader(connection).unwrap());
     assert_eq!(
         serde_json::to_value(&legacy).unwrap(),
         serde_json::to_value(&expected).unwrap()

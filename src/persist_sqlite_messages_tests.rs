@@ -365,17 +365,30 @@ mod sqlite_message_storage_tests {
 
     #[test]
     fn rejected_startup_authority_does_not_convert_existing_messages() {
-        let connection = connection(true);
-        connection
+        let mut connection = connection(true);
+        save(&mut connection, &session(2));
+        let messages = snapshot(&connection);
+        let removed = connection
             .execute(
-                "INSERT INTO app_state VALUES(?1, ?2)",
-                rusqlite::params![SQLITE_METADATA_KEY, "{invalid metadata"],
+                "DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations'",
+                [],
             )
             .unwrap();
+        assert!(
+            removed > 0,
+            "the current mandatory authority must be present before corruption"
+        );
         let changes = connection.total_changes();
-        assert!(ensure_sqlite_state_schema_for_load(&connection).is_err());
+        let error = ensure_sqlite_state_schema_for_load(&connection)
+            .err()
+            .expect("missing current authority must reject startup");
+        assert!(
+            format!("{error:#}").contains("engramSessionObligations"),
+            "{error:#}"
+        );
         assert!(without_rowid(&connection));
         assert_eq!(connection.total_changes(), changes);
+        assert_eq!(snapshot(&connection), messages);
     }
 
     #[test]

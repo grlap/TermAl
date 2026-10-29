@@ -47,6 +47,7 @@ fn stable_text_hash(value: &str) -> String {
 fn empty_state_events_response(server_instance_id: String) -> StateResponse {
     debug_assert!(!server_instance_id.trim().is_empty());
     StateResponse {
+        engram_control_recovery: Vec::new(),
         revision: 0,
         server_instance_id,
         codex: CodexState::default(),

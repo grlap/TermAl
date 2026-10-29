@@ -561,6 +561,7 @@ impl StateInner {
                 named_by != session_id
             });
             self.removed_session_ids.push(session_id);
+            self.compact_removed_checkpoint_history();
         }
     }
 

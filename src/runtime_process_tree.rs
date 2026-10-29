@@ -611,6 +611,12 @@ impl AppState {
     }
 
     fn prepare_dedicated_runtime_reset_off_lock(&self, session_id: &str, model_refresh: bool) -> Result<()> {
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            (if model_refresh { require_no_engram_session_obligation(&inner, session_id) }
+                else { require_no_engram_local_admission_obligation(&inner, session_id) })
+                .map_err(|error| anyhow!(error.message))?;
+        }
         self.retry_retained_dedicated_cleanup(session_id)?;
         #[cfg(not(windows))]
         { let _ = (session_id, model_refresh); return Ok(()); }
@@ -618,6 +624,9 @@ impl AppState {
         {
             let captured = {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
+                (if model_refresh { require_no_engram_session_obligation(&inner, session_id) }
+                    else { require_no_engram_local_admission_obligation(&inner, session_id) })
+                    .map_err(|error| anyhow!(error.message))?;
                 let Some(index) = inner.find_session_index(session_id) else { return Ok(()); };
                 let record = &mut inner.sessions[index];
                 let refresh_restarts = model_refresh && matches!(record.session.agent, Agent::Claude | Agent::OpenCode | Agent::Kimi);

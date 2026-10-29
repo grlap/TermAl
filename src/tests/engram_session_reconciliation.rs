@@ -91,6 +91,10 @@ fn next_settings(state: &AppState, project: &str) -> EngramProjectSettings {
     let inner = state.inner.lock().unwrap();
     let mut settings = inner.find_project(project).unwrap().engram.clone().unwrap();
     settings.turn_gated_control = false;
+    // These strict Save/probe tests also change the connection's timeout.
+    // This valid configuration change reaches the original late absence and
+    // final-save fences; an early validation refusal would not test them.
+    settings.deadline_ms = Some(settings.deadline_ms.unwrap_or(1_000).saturating_add(1));
     settings
 }
 

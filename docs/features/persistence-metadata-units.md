@@ -5,10 +5,25 @@ See the [storage layout](sqlite-session-storage.md) and
 session, transcript and writer contracts.
 
 The metadata layout is `2-metadata-units-2`. The current primary reader floor,
-`2-metadata-units-2-handoff-1`, additionally requires preserving ordinary
-provider-handoff uncertainty in normalized session rows. The metadata inventory
-and counts are unchanged; the units-2 rollback script refuses that stronger
-floor. Federation profile versioning is independent of this local reader floor.
+`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`, requires preserving ordinary
+provider-handoff uncertainty in normalized session rows and the mandatory
+`engramSessionObligations` ledger. Supported predecessors advance through
+units-2 and handoff-1 in one transaction before that ledger is installed; the
+extension preserves unrelated raw metadata and advances its generation once.
+The direct `obligations-1` predecessor advances to `checkpoint-result-1` by
+validating its complete typed metadata and session mirrors in an IMMEDIATE
+transaction, then changing only the schema header. Raw metadata units, session
+rows and their generation remain unchanged. The successor understands the
+checkpoint invocation result `Refused`; finding that result under the old
+header rejects the load, including inside an adopted original checkpoint.
+Legacy Unknown history is preserved and never inferred to be Refused.
+The same B16 floor preserves narrowly validated original-checkpoint pending
+batch receipt inputs in existing session fields across restart. It does not
+restore launcher verification; unprovable inputs retain lost-credit behavior.
+This custody interpretation is part of the unpublished checkpoint-result-1
+inventory, without an additional field, ledger or reader suffix.
+The units-2 rollback script refuses these stronger floors. Federation profile
+versioning is independent of this local reader floor.
 Growing root collections
 are stored in `state_metadata_units`, with a descriptor per root field and
 one row per member. Scalars, including allocation counters and the SSE
@@ -77,7 +92,7 @@ Only locally owned session/message identities contribute allocator floors.
 Remote-proxy transcript IDs remain peer-owned opaque values and cannot advance
 or exhaust the local allocator.
 
-The existing persistence diagnostics endpoint reports at most 27 fixed field
+The existing persistence diagnostics endpoint reports at most 28 fixed field
 names per tick, within its existing 16-tick ring. Each field reports desired
 unit count and encoded bytes, attempted upserts/deletes and payload bytes,
 and committed upserts/deletes and payload bytes. COMMIT success is separate
@@ -102,9 +117,11 @@ An unchanged collection is omitted from the captured image; the existing
 writer retains its units from the verified durable predecessor. Successful
 delta and synchronous full writes publish the stamps they actually captured.
 The small roots `federation`, `codex`, `preferences` and `testRunCardsEpoch`
-remain eager. An omitted collection cannot prove absence: late or
+remain eager. The mandatory `engramSessionObligations` ledger also stays eager,
+including its complete descriptor and member units, so its snapshot and
+encoding costs still grow with the ledger. An omitted collection cannot prove absence: late or
 absence-sensitive fences use the existing scoped read-back on the committed
-writer connection. No new cache, storage shape or reader floor is introduced.
+writer connection. Collection omission adds no storage shape or reader floor.
 
 Emergency units-1 did not record counts and its primary-2 migration allowed
 omitted default fields. Upgrade rejects its detectable corruption, including

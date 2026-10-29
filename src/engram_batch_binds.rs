@@ -46,11 +46,9 @@ const ENGRAM_OWED_BIND_TICK_BUDGET: Duration = Duration::from_secs(20);
 const ENGRAM_OWED_BIND_CONFIRM_FLOOR: Duration = Duration::from_secs(5);
 
 /// A passed gate with members, credited into a checkpoint that has not
-/// answered yet. It is persisted with its session: a restart before the
-/// answer cannot learn the gate's record any more, so loading tells each
-/// member's holder to run its gate again (`engram_batch_member_lost_line`).
-/// A refused checkpoint, or one not confirmed within
-/// `ENGRAM_OWED_BIND_MAX_MINUTES`, drains it with a line per member.
+/// answered yet. Exact immutable-original receipt inputs survive restart and
+/// wait for that original's result. Other interrupted launch credit is lost.
+/// Refusal and expiry drain only inputs without such canonical custody.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramPendingBatch {
@@ -64,6 +62,94 @@ struct EngramPendingBatch {
     /// When the gate was credited (RFC 3339).
     #[serde(default)]
     pended_at: String,
+}
+
+// This is persisted receipt input, not restored launch credit. Only the exact
+// successful producer and Test input in an immutable original can retain it.
+fn checkpoint_pending_batch_matches_original(batch: &EngramPendingBatch,
+    operation: &EngramCheckpointOperation) -> bool {
+    let EngramControlRequest::TurnCheckpoint { grant_id, report, .. } = &operation.original.request
+        else { return false };
+    if batch.checkpoint_grant_id != *grant_id
+        || operation.original.settings.authority_store_key.as_ref() != Some(&operation.protection.authority)
+        || operation.original.work_binding.is_none()
+        || engram_parse_time(&batch.pended_at).is_none()
+        || engram_parse_time(&batch.measurement.measured_at).is_none()
+        || batch.targets.is_empty() {
+        return false;
+    }
+    let mut producers = report.observations.iter()
+        .filter(|producer| producer.observation_id == batch.producer_observation_id);
+    let Some(producer) = producers.next() else { return false };
+    if producers.next().is_some() || producer.outcome != EngramExecutionOutcome::Succeeded {
+        return false;
+    }
+    let Some(source) = &producer.source_basis else { return false };
+    if source.workspace_id != batch.measurement.workspace_id
+        || source.source_revision != batch.measurement.source_revision
+        || producer.observed_at.as_deref().and_then(engram_parse_time)
+            != engram_parse_time(&batch.measurement.measured_at) {
+        return false;
+    }
+    let inputs = report.verification_evidence.iter().filter(|input| {
+        let EngramObservationReference::ObservationId { observation_id } = &input.producer_observation;
+        input.check_kind == EngramVerificationKind::Test && observation_id == &batch.producer_observation_id
+    }).count();
+    let mut targets = HashSet::new();
+    inputs == 1 && batch.targets.iter().all(|target| {
+        !target.work_id.trim().is_empty() && !target.claim_id.trim().is_empty()
+            && !target.short_ref.trim().is_empty() && target.claim_fence > 0 && target.root_generation > 0
+            && targets.insert(&target.work_id)
+    })
+}
+
+fn pending_checkpoint_batch_owner<'a>(inner: &'a StateInner, session_id: &str,
+    batch: &EngramPendingBatch) -> Option<&'a EngramCheckpointOperation> {
+    let record = &inner.sessions[inner.find_session_index(session_id)?];
+    let project = record.session.project_id.as_deref().and_then(|id| inner.find_project(id))
+        .or_else(|| engram_project_for_session_locked(inner, session_id))?;
+    let mut candidates = inner.engram_session_obligations.checkpoint_operations.iter().filter(|operation| {
+        operation.protection.local_session_id == session_id
+            && operation.protection.project_id == project.id
+            && std::path::Path::new(&project.root_path) == operation.original.connection.project_root
+            && operation.validate().is_ok()
+            && (operation.has_uncertain_checkpoint_history()
+                || matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }
+                    | EngramExistingCheckpointProgress::Retained)
+                || operation.attempts.last().is_some_and(|attempt| attempt.result.is_none()))
+            && record.engram.checkpoint_operation.as_ref().is_none_or(|mirror|
+                serde_json::to_value(mirror).ok() == serde_json::to_value(operation).ok())
+            && checkpoint_pending_batch_matches_original(batch, operation)
+    });
+    let operation = candidates.next()?;
+    candidates.next().is_none().then_some(operation)
+}
+
+fn retained_checkpoint_pending_batches(inner: &StateInner, session_id: &str) -> Vec<EngramPendingBatch> {
+    let Some(index) = inner.find_session_index(session_id) else { return Vec::new() };
+    inner.sessions[index].engram.pending_batches.iter()
+        .filter(|batch| pending_checkpoint_batch_owner(inner, session_id, batch).is_some())
+        .cloned().collect()
+}
+
+// These inputs live in the session row, not in the canonical report. An
+// administrative action cannot remove that row or its project context before
+// the existing batch owner has converted and settled them.
+fn engram_session_has_checkpoint_batch_custody(inner: &StateInner, session_id: &str) -> bool {
+    inner.find_session_index(session_id).is_some_and(|index| {
+        !inner.sessions[index].engram.owed_binds.is_empty()
+            || inner.sessions[index].engram.pending_batches.iter()
+                .any(|batch| pending_checkpoint_batch_owner(inner, session_id, batch).is_some())
+    })
+}
+
+fn engram_project_has_checkpoint_batch_custody(inner: &StateInner, project_id: &str) -> bool {
+    inner.sessions.iter().any(|record| {
+        (record.session.project_id.as_deref() == Some(project_id)
+            || engram_project_for_session_locked(inner, &record.session.id)
+                .is_some_and(|project| project.id == project_id))
+            && engram_session_has_checkpoint_batch_custody(inner, &record.session.id)
+    })
 }
 
 /// The members of a full gate launched in `root` by the session at `index`,
@@ -557,6 +643,45 @@ fn engram_owed_bind_credentials(target: &EngramBindingTarget) -> (String, Option
 }
 
 impl AppState {
+    fn owe_checkpoint_batch_binds_locked(inner: &mut StateInner, session_id: &str,
+        operation: &EngramCheckpointOperation, receipt: &EngramCheckpointReceipt) -> Result<bool> {
+        let Some(index) = inner.find_session_index(session_id) else { return Ok(false) };
+        let record = &inner.sessions[index];
+        let selected = record.engram.pending_batches.iter().filter(|batch|
+            pending_checkpoint_batch_owner(inner, session_id, batch)
+                .is_some_and(|owner| owner.original.id == operation.original.id))
+            .cloned().collect::<Vec<_>>();
+        if selected.is_empty() { return Ok(false) }
+        let EngramControlRequest::TurnCheckpoint { report, grant_id, .. } = &operation.original.request
+            else { bail!("Not a checkpoint") };
+        if &receipt.grant_id != grant_id || receipt._confirmed_cursor < receipt._cursor
+            || receipt.checkpoint.as_ref().is_none_or(|id| !is_engram_record_id(id)) {
+            bail!("Checkpoint batch receipt is not confirmed")
+        }
+        let mut pending = selected.clone();
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let settlement = engram_owe_batch_binds(&mut pending, report, receipt, &now);
+        if !pending.is_empty() || !settlement.lines.is_empty() {
+            bail!("Checkpoint receipt does not name the exact pending batch inputs")
+        }
+        let mut owed_binds = record.engram.owed_binds.clone();
+        for owed in settlement.owed {
+            if let Some(previous) = owed_binds.iter().find(|previous|
+                previous.original == owed.original && previous.target.work_id == owed.target.work_id
+                    && previous.target.claim_id == owed.target.claim_id
+                    && previous.target.claim_fence == owed.target.claim_fence
+                    && previous.target.root_generation == owed.target.root_generation) {
+                if previous.target != owed.target || previous.measurement != owed.measurement {
+                    bail!("Checkpoint batch conflicts with independently owed custody")
+                }
+            } else { owed_binds.push(owed); }
+        }
+        let record = inner.session_mut_by_index(index).expect("checkpoint batch owner");
+        record.engram.pending_batches.retain(|batch| !selected.contains(batch));
+        record.engram.owed_binds = owed_binds;
+        Ok(true)
+    }
+
     /// After the checkpoint of `session_id` answered with `receipt` for
     /// `report`: the pending batches of that checkpoint become owed binds,
     /// persisted before any of them is sent, and members that can never be
@@ -569,11 +694,23 @@ impl AppState {
         receipt: &EngramCheckpointReceipt,
     ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if Self::owe_engram_batch_binds_locked(&mut inner, session_id, report, receipt)
+            && let Err(error) = self.commit_locked(&mut inner) {
+            eprintln!("engram> session={session_id} failed persisting owed batch binds: {error:#}");
+        }
+    }
+
+    fn owe_engram_batch_binds_locked(
+        inner: &mut StateInner,
+        session_id: &str,
+        report: &EngramTurnReport,
+        receipt: &EngramCheckpointReceipt,
+    ) -> bool {
         let Some(index) = inner.find_session_index(session_id) else {
-            return;
+            return false;
         };
         if inner.sessions[index].engram.pending_batches.is_empty() {
-            return;
+            return false;
         }
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let record = inner
@@ -582,7 +719,7 @@ impl AppState {
         let settlement =
             engram_owe_batch_binds(&mut record.engram.pending_batches, report, receipt, &now);
         if settlement.owed.is_empty() && settlement.lines.is_empty() {
-            return;
+            return false;
         }
         for line in settlement.lines {
             eprintln!("engram> session={session_id} {line}");
@@ -591,9 +728,7 @@ impl AppState {
         record.engram.owed_binds.extend(settlement.owed);
         // Taken pending batches are stored settled, so a restart never tells
         // their members again.
-        if let Err(error) = self.commit_locked(&mut inner) {
-            eprintln!("engram> session={session_id} failed persisting owed batch binds: {error:#}");
-        }
+        true
     }
 
     /// Engram refused the checkpoint of `session_id`'s grant `grant_id`: a
@@ -606,32 +741,45 @@ impl AppState {
         grant_id: &str,
         code: Option<&str>,
     ) -> bool {
+        let lines = Self::take_engram_refused_batches(inner, index, session_id, grant_id, code);
+        let drained = !lines.is_empty();
+        for line in lines {
+            eprintln!("engram> session={session_id} {line}");
+            inner.sessions[index].engram.set_pending_source_root_line(line);
+        }
+        drained
+    }
+
+    fn take_engram_refused_batches(
+        inner: &mut StateInner,
+        index: usize,
+        session_id: &str,
+        grant_id: &str,
+        code: Option<&str>,
+    ) -> Vec<String> {
         if !inner.sessions[index]
             .engram
             .pending_batches
             .iter()
             .any(|batch| batch.checkpoint_grant_id == grant_id)
         {
-            return false;
+            return Vec::new();
         }
+        let protected = inner.sessions[index].engram.pending_batches.iter()
+            .filter(|batch| pending_checkpoint_batch_owner(inner, session_id, batch).is_some())
+            .cloned().collect::<Vec<_>>();
         // Through the stamping accessor, so the caller's commit stores it.
         let Some(record) = inner.session_mut_by_index(index) else {
-            return false;
+            return Vec::new();
         };
-        let lines = engram_drain_pending_batches(
+        engram_drain_pending_batches(
             &mut record.engram.pending_batches,
-            |batch| batch.checkpoint_grant_id == grant_id,
+            |batch| batch.checkpoint_grant_id == grant_id && !protected.contains(batch),
             &format!(
                 "Engram refused the checkpoint that carried the batch gate ({})",
                 code.unwrap_or("unknown")
             ),
-        );
-        let drained = !lines.is_empty();
-        for line in lines {
-            eprintln!("engram> session={session_id} {line}");
-            record.engram.set_pending_source_root_line(line);
-        }
-        drained
+        )
     }
 
     /// One tick of the owed binds of every session, on their own thread
@@ -650,11 +798,15 @@ impl AppState {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let mut drained = false;
             for index in 0..inner.sessions.len() {
+                let session_id = inner.sessions[index].session.id.clone();
+                let protected = inner.sessions[index].engram.pending_batches.iter()
+                    .filter(|batch| pending_checkpoint_batch_owner(&inner, &session_id, batch).is_some())
+                    .cloned().collect::<Vec<_>>();
                 let engram = &inner.sessions[index].engram;
                 let due = engram
                     .pending_batches
                     .iter()
-                    .any(|batch| engram_pending_batch_expired(batch, now))
+                    .any(|batch| !protected.contains(batch) && engram_pending_batch_expired(batch, now))
                     || engram.owed_binds.iter().any(|owed| {
                         matches!(engram_owed_bind_step(owed, now), EngramOwedBindStep::GiveUp(_))
                     });
@@ -668,7 +820,7 @@ impl AppState {
                     .expect("session index should be valid");
                 let lines = engram_drain_pending_batches(
                     &mut record.engram.pending_batches,
-                    |batch| engram_pending_batch_expired(batch, now),
+                    |batch| !protected.contains(batch) && engram_pending_batch_expired(batch, now),
                     &format!(
                         "the checkpoint that carried the batch gate was not confirmed within \
                          {ENGRAM_OWED_BIND_MAX_MINUTES} minutes"

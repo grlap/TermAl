@@ -109,6 +109,12 @@ fn engram_session_authority_in_project<'a>(
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
+    // Recovery uses its frozen original connection explicitly. Generic target
+    // construction must not bootstrap, probe or replace an excluded session,
+    // including when current project gating is disabled or boot is retrying.
+    if engram_admission_obligation_locked(inner, connection_session_id).is_some() {
+        return Ok(None);
+    }
     let Some(settings) = project.engram.as_ref() else {
         return Ok(None);
     };

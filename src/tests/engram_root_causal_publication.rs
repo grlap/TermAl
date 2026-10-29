@@ -34,7 +34,6 @@ fn causal_writer_publication_boundary(fail: bool) {
     *fixture.writer_gate.lock().unwrap() = Some(CausalWriterGate {
         arrived: arrived_tx, release: release_rx, any_tick: false,
     });
-    fixture.fail_writes.store(fail, std::sync::atomic::Ordering::Release);
     let (before_commit, emitted_before_commit, projections_hidden, persistence_normalized) = std::thread::scope(|scope| {
         let release = CausalWriterRelease(release_tx);
         let state = fixture.state.clone();
@@ -47,6 +46,9 @@ fn causal_writer_publication_boundary(fail: bool) {
                 );
             }).unwrap();
         let arrived = arrived_rx.recv_timeout(DEADLOCK_GUARD);
+        // Reject this optional causal-card transaction only. The checkpoint's
+        // mandatory identity/send-intent writes must succeed before its RPC.
+        fixture.fail_writes.store(fail, std::sync::atomic::Ordering::Release);
         // Always release before asserting or joining, including a failed
         // diagnostic. No writer survives the scope or temporary store owner.
         let visible = visible_causes(&fixture);
@@ -232,11 +234,10 @@ fn root_causal_dispatch_record_and_park_do_not_wait_on_publication() {
     assert!(published.iter().any(|cause| cause["operation"] == "turn_evaluate"));
 }
 
-// Kill removes the session after its teardown checkpoint, so the writer is
-// held before the call: the failed checkpoint's causal card can then not be
-// acknowledged while kill runs, and kill must still return.
+// The teardown's exact identity must be durable before its RPC. Holding the
+// writer before kill blocks that mandatory cut, not optional causal publication.
 #[test]
-fn root_causal_kill_session_does_not_wait_on_publication() {
+fn root_causal_kill_session_waits_for_checkpoint_identity_before_sending() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
     let _ = fixture.start_and_queue();
@@ -248,28 +249,40 @@ fn root_causal_kill_session_does_not_wait_on_publication() {
         any_tick: true,
     });
     let _ = fixture.state.persist_tx.send(PersistRequest::Delta);
-    let (held, returned, checkpointed) = std::thread::scope(|scope| {
+    let (held, prepared, returned_early, checkpointed_early, result) = std::thread::scope(|scope| {
         let release = CausalWriterRelease(release_tx);
         let held = arrived_rx.recv_timeout(DEADLOCK_GUARD).is_ok();
+        let (prepared_tx, prepared_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let state = fixture.state.clone();
         let session = fixture.session.clone();
         let worker = std::thread::Builder::new()
             .stack_size(8 * 1024 * 1024)
             .spawn_scoped(scope, move || {
-                let _ = state.kill_session(&session);
-                let _ = done_tx.send(());
+                TEST_ENGRAM_BEFORE_TURN_CHECKPOINT_REQUEST.with(|hook| {
+                    *hook.borrow_mut() = Some(Box::new(move || {
+                        prepared_tx.send(()).unwrap();
+                    }));
+                });
+                let _ = done_tx.send(state.kill_session(&session));
             })
             .unwrap();
-        let returned = done_rx.recv_timeout(DEADLOCK_GUARD).is_ok();
-        let checkpointed = fixture.transport.lost_request.lock().unwrap().is_some();
+        let prepared = prepared_rx.recv_timeout(DEADLOCK_GUARD).is_ok();
+        let returned_early = done_rx.try_recv().is_ok();
+        let checkpointed_early = fixture.transport.lost_request.lock().unwrap().is_some();
         drop(release);
-        let _ = worker.join();
-        (held, returned, checkpointed)
+        worker.join().unwrap();
+        let result = done_rx.recv_timeout(DEADLOCK_GUARD);
+        (held, prepared, returned_early, checkpointed_early, result)
     });
     assert!(held, "the writer was held before kill");
-    assert!(checkpointed, "kill sent its failing teardown checkpoint");
-    assert!(returned, "kill waited on its optional causal publication");
+    assert!(prepared, "kill published its original checkpoint identity");
+    assert!(!checkpointed_early, "no RPC precedes the mandatory writer ACK");
+    assert!(!returned_early, "kill still owns its checkpoint durability wait");
+    result.expect("kill returned after writer release").expect("kill completed");
+    assert!(fixture.transport.lost_request.lock().unwrap().is_some(),
+        "the original teardown checkpoint is sent after its identity ACK");
+    assert_eq!(fixture.transport.attempts.lock().unwrap()["turn_checkpoint"], 1);
     assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
 }
 

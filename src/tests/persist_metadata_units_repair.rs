@@ -169,7 +169,7 @@ fn metadata_units_migration_refuses_sequence_shaped_struct_before_committing_mar
                 .unwrap();
         }
         let encoded = read_persisted_metadata_json(&connection).unwrap().unwrap();
-        let _: PersistedState = serde_json::from_str(&encoded).unwrap();
+        let _ = metadata_units_predecessor_view(serde_json::from_str(&encoded).unwrap());
         let before_units =
             (source_version != "2").then(|| read_metadata_units_unchecked(&connection).unwrap());
         let provenance: String = connection
@@ -550,7 +550,8 @@ fn metadata_units_rollback_refuses_incomplete_or_orphan_authority_before_drop() 
         fixture.wait_record("first");
         fixture.wait_record("second");
         fixture.write(&fixture.collect()).unwrap();
-        let connection = metadata_units_rollback_connection(&fixture);
+        let connection = metadata_units_connection(&fixture);
+        metadata_units_seed_rollback_predecessor(connection);
         connection.execute_batch(fault).unwrap();
         let before = read_metadata_units_unchecked(connection).unwrap();
         assert!(
@@ -562,7 +563,7 @@ fn metadata_units_rollback_refuses_incomplete_or_orphan_authority_before_drop() 
         if !connection.is_autocommit() {
             connection.execute_batch("ROLLBACK").unwrap();
         }
-        assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
+        assert_eq!(metadata_units_version(connection), "2-metadata-units-2");
         assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
         assert_eq!(
             connection
@@ -579,7 +580,8 @@ fn metadata_units_rollback_keeps_unsigned_counter_precision() {
     let mut fixture = FenceFixture::new();
     fixture.inner.lock().unwrap().next_message_number = u64::MAX - 1;
     fixture.write(&fixture.collect()).unwrap();
-    let connection = metadata_units_rollback_connection(&fixture);
+    let connection = metadata_units_connection(&fixture);
+    metadata_units_seed_rollback_predecessor(connection);
     connection
         .execute_batch(&metadata_units_rollback_sql())
         .unwrap();
@@ -590,7 +592,7 @@ fn metadata_units_rollback_keeps_unsigned_counter_precision() {
 #[test]
 fn metadata_units_rollback_preserves_non_nul_object_keys_without_prefix_collisions() {
     for encoding in ["UTF-8", "UTF-16le", "UTF-16be"] {
-        let mut fixture = FenceFixture::new();
+        let mut fixture = FenceFixture::new_with_encoding(encoding);
         let path = fixture.root.path().join("termal.sqlite");
         {
             let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
@@ -616,7 +618,7 @@ fn metadata_units_rollback_preserves_non_nul_object_keys_without_prefix_collisio
             .unwrap()
             .pending_response_board_project_detachments = expected.clone().into();
         fixture.write(&fixture.collect()).unwrap();
-        let connection = metadata_units_rollback_connection(&fixture);
+        let connection = metadata_units_connection(&fixture);
         let actual_encoding: String = connection
             .pragma_query_value(None, "encoding", |row| row.get(0))
             .unwrap();
@@ -626,11 +628,11 @@ fn metadata_units_rollback_preserves_non_nul_object_keys_without_prefix_collisio
             expected,
             "the keys are valid before rollback"
         );
+        metadata_units_seed_rollback_predecessor(connection);
         connection
             .execute_batch(&metadata_units_rollback_sql())
             .unwrap();
-        let restored: PersistedState =
-            serde_json::from_value(metadata_units_old_reader(connection).unwrap()).unwrap();
+        let restored = metadata_units_predecessor_view(metadata_units_old_reader(connection).unwrap());
         assert_eq!(
             restored.pending_response_board_project_detachments, expected,
             "{encoding}"
@@ -649,7 +651,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
     // aggregation loses NUL suffixes. Refusal is the supported alternative
     // to silent loss; ordinary keys still have exact-preservation coverage.
     for encoding in ["UTF-8", "UTF-16le", "UTF-16be"] {
-        let mut fixture = FenceFixture::new();
+        let mut fixture = FenceFixture::new_with_encoding(encoding);
         let path = fixture.root.path().join("termal.sqlite");
         {
             let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
@@ -675,7 +677,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
             .unwrap()
             .pending_response_board_project_detachments = expected.clone().into();
         fixture.write(&fixture.collect()).unwrap();
-        let connection = metadata_units_rollback_connection(&fixture);
+        let connection = metadata_units_connection(&fixture);
         let actual_encoding: String = connection
             .pragma_query_value(None, "encoding", |row| row.get(0))
             .unwrap();
@@ -684,6 +686,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
             metadata_units_metadata(connection).pending_response_board_project_detachments,
             expected
         );
+        metadata_units_seed_rollback_predecessor(connection);
         let before = read_metadata_units_unchecked(connection).unwrap();
         let generation = metadata_unit_generation(connection).unwrap();
         let error = connection
@@ -697,7 +700,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
         );
         assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
         assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
-        assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
+        assert_eq!(metadata_units_version(connection), "2-metadata-units-2");
         assert_eq!(
             connection
                 .query_row("SELECT count(*) FROM app_state", [], |row| row
@@ -709,7 +712,7 @@ fn metadata_units_rollback_refuses_nul_object_keys_without_mutating_authority() 
         connection.execute_batch("ROLLBACK").unwrap();
         assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
         assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
-        assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
+        assert_eq!(metadata_units_version(connection), "2-metadata-units-2");
         assert_eq!(
             connection
                 .query_row("SELECT count(*) FROM app_state", [], |row| row
@@ -752,7 +755,8 @@ fn metadata_units_rollback_late_marker_failure_restores_dropped_units_and_app_st
     let mut fixture = FenceFixture::new();
     fixture.wait_record("late-rollback-failure");
     fixture.write(&fixture.collect()).unwrap();
-    let connection = metadata_units_rollback_connection(&fixture);
+    let connection = metadata_units_connection(&fixture);
+    metadata_units_seed_rollback_predecessor(connection);
     let before = read_metadata_units_unchecked(connection).unwrap();
     let generation = metadata_unit_generation(connection).unwrap();
     connection
@@ -768,7 +772,7 @@ fn metadata_units_rollback_late_marker_failure_restores_dropped_units_and_app_st
     assert!(error.to_string().contains("injected late rollback failure"));
     assert!(!connection.is_autocommit());
     connection.execute_batch("ROLLBACK").unwrap();
-    assert_eq!(metadata_units_version(connection), SQLITE_METADATA_UNITS_VERSION);
+    assert_eq!(metadata_units_version(connection), "2-metadata-units-2");
     assert_eq!(read_metadata_units_unchecked(connection).unwrap(), before);
     assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
     assert_eq!(

@@ -1156,15 +1156,10 @@ fn commit_prepared_begin_fence(
         .unwrap();
 }
 
-#[test]
-fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("token"),
-        grant_reply("grant"),
-        begin_reply("grant"),
-        checkpoint_reply("grant"),
-        status_reply("sync_required"),
-    ]);
+fn writer_backed_checkpoint_fixture(
+    responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
+) -> (RootFixture, mpsc::Receiver<PersistRequest>) {
+    let (state, session, receiver, transport) = root_fixture(responses);
     let dispatch = root_dispatch(&state, &session, false);
     let (persist_tx, persist_rx) = mpsc::channel();
     let state = AppState {
@@ -1200,19 +1195,104 @@ fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
         receiver.try_recv().unwrap(),
         CodexRuntimeCommand::Prompt { .. }
     ));
+    drop(cache);
+    ((state, session, receiver, transport), persist_rx)
+}
+
+// The manual receiver stays connected until the finishing worker is joined:
+// queued deltas cannot fall back to synchronous writes. Shutdown is only this
+// fixture driver's completion marker, sent after finish has returned.
+fn drive_writer_backed_checkpoint_finish(
+    state: &AppState,
+    session: &str,
+    persist_rx: &mpsc::Receiver<PersistRequest>,
+    transport: &ScriptedEngramControlTransport,
+    commit: bool,
+) -> Vec<(EngramExistingCheckpointProgress, usize)> {
     let token = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         assert!(record.queued_prompts.is_empty());
         record.runtime.runtime_token().unwrap()
     };
-    state
-        .finish_turn_ok_if_runtime_matches(&session, &token)
-        .unwrap();
-    assert_eq!(operations(&transport).last().unwrap(), "turn_checkpoint");
-    // Read only this fixture's SQLite row: queue removal has not been written.
-    let durable: PersistedSessionRecord =
-        serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            let result = state.finish_turn_ok_if_runtime_matches(session, &token);
+            state.persist_tx.send(PersistRequest::Shutdown).unwrap();
+            result
+        });
+        let mut cuts = Vec::new();
+        let mut batch = PersistFenceBatch::default();
+        let mut cache = SqlitePersistConnectionCache::new();
+        loop {
+            let request = persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
+            let finished = matches!(&request, PersistRequest::Shutdown);
+            let is_fence = matches!(&request, PersistRequest::Fence(_));
+            if is_fence {
+                let progress = {
+                    let inner = state.inner.lock().unwrap();
+                    inner.engram_session_obligations.checkpoint_operations.iter()
+                        .find(|operation| operation.protection.local_session_id == session)
+                        .map(|operation| operation.progress.clone())
+                };
+                let sent = transport.requests().iter()
+                    .filter(|request| request.request["operation"] == "turn_checkpoint").count();
+                cuts.push((progress, sent));
+            }
+            batch.accept(request);
+            if is_fence || finished {
+                if commit {
+                    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
+                    persist_delta_with_fences(&mut cache, state.persistence_path.as_path(),
+                        &delta, &mut batch).unwrap();
+                } else {
+                    // No collection or write occurs after the genuine begun
+                    // cut. Resolve the owned fence explicitly, not by a timer.
+                    batch.fail(PersistFenceError::WorkerStopped);
+                }
+            }
+            if finished { break; }
+        }
+        worker.join().unwrap().unwrap();
+        cuts.into_iter().map(|(progress, sent)| {
+            (progress.expect("each checkpoint fence must retain its canonical operation"), sent)
+        }).collect()
+    })
+}
+
+#[test]
+fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
+    let ((state, session, receiver, transport), persist_rx) = writer_backed_checkpoint_fixture([
+        bind_reply("token"), grant_reply("grant"), begin_reply("grant"),
+        status_reply("sync_required"),
+    ]);
+    let before = fs::read(state.persistence_path.as_path()).unwrap();
+    let begin = transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_begin").unwrap().request;
+    let durable_before = persisted_session_json(&state, &session);
+    let cuts = drive_writer_backed_checkpoint_finish(&state, &session, &persist_rx, &transport, false);
+    assert!(matches!(cuts.as_slice(), [(EngramExistingCheckpointProgress::Retained, 0)]));
+    assert_eq!(fs::read(state.persistence_path.as_path()).unwrap(), before,
+        "a failed first checkpoint fence cannot write the queued removal or send intent");
+    assert_eq!(persisted_session_json(&state, &session), durable_before);
+    assert_eq!(operations(&transport), ["session_bind", "turn_evaluate", "turn_begin"]);
+    assert_eq!(begin["grant_id"], "grant");
+    assert!(begin["idempotency_key"].as_str().is_some_and(|key| !key.is_empty()));
+
+    // This is the actual file after the finishing worker has stopped. Reload
+    // the whole state so no newer in-memory ledger accompanies an older row.
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let durable = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
+    let evaluate = durable.queued_prompts[0].engram_evaluate.as_ref().unwrap();
+    let prepared = evaluate.prepared_begin.as_ref().expect("the durable Begin identity");
+    let evaluate_request = serde_json::to_value(&evaluate.request).unwrap();
+    assert_eq!(begin, json!({
+        "operation": "turn_begin",
+        "routing_token": evaluate_request["routing_token"],
+        "grant_id": prepared.grant_id,
+        "delivery_tokens": prepared.delivery_tokens,
+        "idempotency_key": prepared.idempotency_key,
+    }), "the loaded queued Begin must be the exact request sent before handoff");
     assert_eq!(
         durable.queued_prompts[0]
             .engram_evaluate
@@ -1222,16 +1302,25 @@ fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
             .as_deref(),
         Some("grant")
     );
-    drop(cache);
-    drop(persist_rx); // new-process fixture uses synchronous persistence below
+    // Load retains the durable Begin as recovered admission. Reconciliation
+    // marks the queued interruption only after the producer status is read.
+    assert!(durable.engram.recovered_admission);
+    assert!(!durable.queued_prompts[0].engram_interrupted);
+    assert!(receiver.try_recv().is_err(), "the original provider prompt was consumed exactly once");
+    // Only after the untouched crash cut is proved and the old worker joined
+    // do we retire its unwritten requests and install the loaded state.
+    assert!(persist_rx.try_recv().is_err());
+    drop(persist_rx);
+    assert_eq!(fs::read(state.persistence_path.as_path()).unwrap(), before,
+        "disposing the old receiver cannot trigger a fallback or late write");
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index] = durable.into_record().unwrap();
-        // Even independent session-token cleanup must not erase the queue's marker.
-        inner.sessions[index].engram.active_grant_id = None;
-        inner.recover_interrupted_sessions();
+        let clock = inner.engram_budget_clock.clone();
+        *inner = loaded;
+        inner.engram_budget_clock = clock;
     }
+    // Boot restores process-private wiring after loading the complete state.
+    state.install_control_test_transport(transport.clone());
     let error = state
         .resume_session_queue(&session)
         .err()
@@ -1247,13 +1336,45 @@ fn writer_backed_handoff_checkpoint_crash_never_replays_durable_begun_prompt() {
             "session_bind",
             "turn_evaluate",
             "turn_begin",
-            "turn_checkpoint",
             "session_status"
         ]
     );
     let durable: PersistedSessionRecord =
         serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
     assert!(durable.queued_prompts[0].engram_interrupted);
+}
+
+#[test]
+fn writer_backed_handoff_checkpoint_settles_only_after_its_durable_cuts() {
+    let ((state, session, receiver, transport), persist_rx) = writer_backed_checkpoint_fixture([
+        bind_reply("token"), grant_reply("grant"), begin_reply("grant"), checkpoint_reply("grant"),
+    ]);
+    let cuts = drive_writer_backed_checkpoint_finish(&state, &session, &persist_rx, &transport, true);
+    assert!(matches!(cuts.as_slice(), [
+        (EngramExistingCheckpointProgress::Retained, 0),
+        (EngramExistingCheckpointProgress::PossiblySent, 0),
+        (EngramExistingCheckpointProgress::Accepted { .. }, 1),
+    ]), "send waits for both intent cuts and settlement waits for its receipt: {cuts:?}");
+    assert_eq!(operations(&transport),
+        ["session_bind", "turn_evaluate", "turn_begin", "turn_checkpoint"]);
+    let request = transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
+    assert!(record.queued_prompts.is_empty());
+    let operation = loaded.engram_session_obligations.checkpoint_operations.iter()
+        .find(|operation| operation.protection.local_session_id == session).unwrap();
+    operation.validate().unwrap();
+    assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), request);
+    assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+    assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+    assert_eq!(operation.protection.authority_confirmed,
+        operation.original.settings.authority_store_key.is_some(),
+        "routing provenance is independent of the accepted checkpoint settlement");
+    assert!(loaded.engram_confirmed_containment_ids.contains(&operation.original.id));
+    assert!(!engram_obligation_requires_exclusion(&loaded, &operation.protection));
+    assert!(receiver.try_recv().is_err(), "no second provider prompt follows checkpoint settlement");
+    drop(persist_rx);
 }
 
 #[test]

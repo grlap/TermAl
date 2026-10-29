@@ -227,6 +227,7 @@ export type UseAppLiveStateParams = {
 };
 
 export type UseAppLiveStateReturn = {
+  engramControlRecovery: readonly import("./api").EngramControlRecoverySummary[];
   testRunWaits: readonly import("./test-run-waits").TestRunWaitRecord[];
   testRunWaitFailures: import("./test-run-waits").TestRunWaitFailures;
   dismissTestRunWaitFailure: (sessionId: string) => void;

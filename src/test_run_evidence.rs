@@ -163,6 +163,22 @@ impl AppState {
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
     ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let changed = Self::settle_test_run_verification_receipt_locked(
+            &mut inner, report, receipt, store, binding,
+        );
+        self.persist_test_run_evidence_batch_locked(&mut inner, changed, Vec::new());
+    }
+
+    // The recovery publisher includes these exact mutations in its first
+    // Accepted transaction, together with batch conversion and confirmation.
+    fn settle_test_run_verification_receipt_locked(
+        inner: &mut StateInner,
+        report: &EngramTurnReport,
+        receipt: &EngramCheckpointReceipt,
+        store: &EngramAuthorityStoreKey,
+        binding: &EngramControlWorkBinding,
+    ) -> Vec<TestRunCommandObservation> {
         // Engram's transactional TurnCheckpointReceipt returns one verification
         // ObjectId per input in input order. Missing legacy fields, partial
         // lists, repeated IDs or malformed IDs never constitute settlement.
@@ -171,7 +187,7 @@ impl AppState {
             .as_ref()
             .filter(|id| test_run_object_id_valid(id))
         else {
-            return;
+            return Vec::new();
         };
         if receipt.verification_evidence.len() != report.verification_evidence.len()
             || receipt._confirmed_cursor < receipt._cursor
@@ -186,9 +202,9 @@ impl AppState {
                 .len()
                 != receipt.verification_evidence.len()
         {
-            return;
+            return Vec::new();
         }
-        // Resolve the report once before taking StateInner. Keep the first
+        // Resolve the report once. Keep the first
         // producer and the original input order, including repeated references:
         // an already-settled association may match a later receipt input.
         let mut producers = HashMap::new();
@@ -217,9 +233,8 @@ impl AppState {
                 .push((*producer, record_id));
         }
         if settlements.is_empty() {
-            return;
+            return Vec::new();
         }
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let mut changed = Vec::new();
         for row in inner.test_run_observations.values_mut() {
             // Most retained history belongs to another store or binding.
@@ -267,7 +282,7 @@ impl AppState {
                 changed.push(row.clone());
             }
         }
-        self.persist_test_run_evidence_batch_locked(&mut inner, changed, Vec::new());
+        changed
     }
 
     fn revalidate_test_run_lifecycle(

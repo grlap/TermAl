@@ -127,6 +127,7 @@ struct StateDiffPayload<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateDiffHeader<'a> {
+    engram_control_recovery: &'a [EngramControlRecoverySummary],
     codex: &'a CodexState,
     agent_readiness: &'a [AgentReadiness],
     preferences: &'a AppPreferences,
@@ -218,6 +219,7 @@ fn state_diff_payload<'a>(
     // Exhaustive on purpose: a new `StateResponse` field must decide whether
     // it is a header slice, a keyed collection, or carried elsewhere.
     let StateResponse {
+        engram_control_recovery,
         revision,
         server_instance_id,
         codex,
@@ -266,6 +268,7 @@ fn state_diff_payload<'a>(
         revision: *revision,
         server_instance_id,
         header: StateDiffHeader {
+            engram_control_recovery,
             codex,
             agent_readiness,
             preferences,

@@ -798,7 +798,10 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
 async fn sqlite_stored_workspace_theme_id_is_ignored_on_load_and_dropped_on_save() {
     let state = test_app_state();
     let path = state.persistence_path.as_path();
-    persist_state(path, &StateInner::new()).expect("current SQLite fixture should persist");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        persist_state(path, &inner).expect("current SQLite fixture should persist");
+    }
     let mut metadata = sqlite_metadata_state_value(path);
     let mut layout = json!({
         "id": "workspace-stored",
@@ -4140,7 +4143,7 @@ fn prompt_history_uses_an_independent_persist_delta_watermark() {
 #[test]
 fn local_history_cursor_and_page_share_the_persisted_read_path() {
     let state = test_app_state();
-    let mut inner = StateInner::new();
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
     let session_id = inner
         .create_session(
             Agent::Claude,
@@ -4180,7 +4183,8 @@ fn local_history_cursor_and_page_share_the_persisted_read_path() {
     let loaded = load_state(state.persistence_path.as_ref())
         .expect("indexed transcript should load")
         .expect("persisted state should exist");
-    *state.inner.lock().expect("state mutex poisoned") = loaded;
+    *inner = loaded;
+    drop(inner);
 
     // The cursor (65) and every returned row (1..64) are outside the retained
     // 66..129 in-memory suffix, forcing the request through the shared SQLite
@@ -4247,14 +4251,22 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
         make_persist_test_delegation("delegation-mismatched", &parent_id, &child_id);
     inner.delegations.push(delegation.clone());
     inner.delegations.push(mismatched_delegation.clone());
-    // Export one immutable initial image into three independent empty stores.
-    // Subsequent writes use the source loaded from each store's own lineage.
-    let initial = PersistedState::from_inner(&inner);
-    persist_state_from_persisted(&session_row_path, &initial)
-        .expect("session-row state should persist");
-    persist_state_from_persisted(&delegation_row_path, &initial)
-        .expect("delegation-row state should persist");
-    persist_state_from_persisted(&metadata_path, &initial).expect("metadata state should persist");
+    // Each empty store gets its own source lineage from the same full image.
+    // Capture only after that store's mandatory reader floor is initialized.
+    let initial = persisted_state_value(&inner);
+    for path in [&session_row_path, &delegation_row_path, &metadata_path] {
+        let mut snapshot: PersistedState = serde_json::from_value(initial.clone())
+            .expect("the fixture metadata and session rows should decode");
+        // Delegations are a normalized-table carrier, skipped by metadata
+        // serde. Keep the exact fixture rows alongside each independent image.
+        snapshot.delegations = inner.delegations.clone();
+        let source = snapshot.into_inner()
+            .expect("the initial fixture image should restore");
+        persist_state(path, &source).expect("the independent fixture store should persist");
+        assert_eq!(sqlite_table_ids(path, "delegations"),
+            vec![delegation.id.clone(), mismatched_delegation.id.clone()],
+            "both specimen rows must exist before either is corrupted");
+    }
 
     {
         let connection =

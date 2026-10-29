@@ -122,7 +122,14 @@ enum AtomicTurnFailureMode<'a> {
 struct RejectedEngramDeliveryOwner {
     dispatch_generation: u64,
     grant_id: String,
+    prompt_id: String,
     intent_fingerprint: String,
+}
+
+struct RejectedEngramCheckpointOwner {
+    delivery: RejectedEngramDeliveryOwner,
+    active_turn_generation: u64,
+    stop: RuntimeStopOwner,
 }
 
 impl<'a> AtomicTurnFailureMode<'a> {
@@ -1137,6 +1144,7 @@ impl AppState {
         Some(RejectedEngramDeliveryOwner {
             dispatch_generation,
             grant_id,
+            prompt_id: queued.pending_prompt.id.clone(),
             intent_fingerprint: engram_turn_intent_fingerprint(
                 &queued.pending_prompt.text,
                 queued.pending_prompt.expanded_text.as_deref(),
@@ -1172,7 +1180,8 @@ impl AppState {
             )
             && record.engram.active_grant_id.as_deref() == Some(owner.grant_id.as_str())
             && record.queued_prompts.front().is_some_and(|queued| {
-                queued.promoted_message_index.is_some()
+                queued.pending_prompt.id == owner.prompt_id
+                    && queued.promoted_message_index.is_some()
                     && queued
                         .engram_evaluate
                         .as_ref()
@@ -1375,13 +1384,29 @@ impl AppState {
         // recovery have no live handle to match. Passing a token would make
         // the checkpoint helper refuse the owned stop-in-progress case.
         let checkpoint_token = None;
+        let rejected_checkpoint_owner = match mode {
+            AtomicTurnFailureMode::RejectedDelivery { token, active_turn_generation, owner_generation }
+                if rejected_engram_owner.is_some() && rejected_engram_owner_durably_interrupted =>
+            {
+                Some(RejectedEngramCheckpointOwner {
+                    delivery: rejected_engram_owner.as_ref().expect("rejected owner").clone(),
+                    active_turn_generation,
+                    stop: RuntimeStopOwner {
+                        kind: RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                        token: Some(token.clone()),
+                        generation: owner_generation,
+                    },
+                })
+            }
+            _ => None,
+        };
         let checkpoint_outcome =
             if rejected_engram_owner.is_some() && !rejected_engram_owner_durably_interrupted {
                 EngramCheckpointOutcome::Skipped
             } else {
                 // A matching runtime reported a confirmed failure; a missing
                 // runtime or a rejected delivery leaves the ending unknown.
-                self.checkpoint_engram_turn_off_lock(
+                self.checkpoint_engram_turn_with_retry_owner_off_lock(
                     session_id,
                     EngramCheckpointPurpose::TurnTerminal,
                     checkpoint_token,
@@ -1395,6 +1420,12 @@ impl AppState {
                         },
                     ),
                     None,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    rejected_checkpoint_owner.as_ref(),
                 )
             };
         let cleaned = error_message.trim();
@@ -1549,7 +1580,8 @@ impl AppState {
                     let owner_is_current = record.engram.dispatch_generation
                         == owner.dispatch_generation
                         && record.queued_prompts.front().is_some_and(|queued| {
-                            queued.promoted_message_index.is_some()
+                            queued.pending_prompt.id == owner.prompt_id
+                                && queued.promoted_message_index.is_some()
                                 && queued
                                     .engram_evaluate
                                     .as_ref()

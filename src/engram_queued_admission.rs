@@ -352,7 +352,9 @@ impl AppState {
         owner: &EngramQueuedAdmissionOwner,
         operation: &str,
     ) -> std::result::Result<(), EngramTransportError> {
-        self.queued_engram_owner_is_current(session_id, owner)
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        (inner.find_session_index(session_id).is_some_and(|i| owner.matches(&inner.sessions[i]))
+            && engram_admission_obligation_locked(&inner, session_id).is_none())
             .then_some(())
             .ok_or_else(|| {
                 EngramTransportError::local_state(format!(
@@ -537,16 +539,14 @@ impl AppState {
                 "Only a turn_begin is prepared for replay",
             )));
         };
-        let replay = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let (replay, prepared, original_evaluate) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id).ok_or_else(|| {
                 unprepared(EngramTransportError::local_state(
                     "Session removed before Begin preparation",
                 ))
             })?;
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
+            let record = &inner.sessions[index];
             if !owner.matches(record) {
                 return Err(unprepared(EngramTransportError::local_state(
                     "Begin preparation no longer owns the queued prompt",
@@ -554,8 +554,8 @@ impl AppState {
             }
             let evaluate = record
                 .queued_prompts
-                .front_mut()
-                .and_then(|queued| queued.engram_evaluate.as_mut())
+                .front()
+                .and_then(|queued| queued.engram_evaluate.as_ref())
                 .ok_or_else(|| {
                     unprepared(EngramTransportError::local_state(
                         "The queued prompt has no retained evaluate to carry its Begin",
@@ -565,7 +565,7 @@ impl AppState {
                 prepared.grant_id == *grant_id && prepared.idempotency_key == *idempotency_key
             });
             let replay = replayed.is_some();
-            evaluate.prepared_begin = Some(EngramPreparedBegin {
+            let prepared = EngramPreparedBegin {
                 idempotency_key: idempotency_key.clone(),
                 grant_id: grant_id.clone(),
                 delivery_tokens: delivery_tokens.clone(),
@@ -575,21 +575,43 @@ impl AppState {
                 ),
                 phase: EngramPreparedBeginPhase::Prepared,
                 delivered_range,
-            });
-            replay
+            };
+            (replay, prepared, serde_json::to_value(evaluate).expect("retained Evaluate"))
         };
         // A record this preparation replays may have been sent before (a
         // begin-unknown replay, or a saved prepared begin whose pending marker
         // a restart dropped): only this host's pending begin, or a record this
         // preparation writes afresh, is proven never sent.
         let replayed_possibly_sent = replay && kind != EngramBeginPreparationKind::Pending;
+        let contained_successor = self.transfer_contained_admission(session_id, owner, begin, &prepared, &original_evaluate)
+            .map_err(|error| EngramBeginPreparationFailure {
+                error, transient: false, pending: !replayed_possibly_sent,
+                possibly_sent: replayed_possibly_sent,
+            })?;
+        if !contained_successor {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let record = inner.find_session_index(session_id)
+                .and_then(|index| inner.session_mut_by_index(index))
+                .filter(|record| owner.matches(record))
+                .ok_or_else(|| unprepared(EngramTransportError::local_state(
+                    "Begin preparation lost its queued owner before installation")))?;
+            let evaluate = record.queued_prompts.front_mut()
+                .and_then(|head| head.engram_evaluate.as_mut())
+                .ok_or_else(|| unprepared(EngramTransportError::local_state(
+                    "Begin preparation lost its retained Evaluate")))?;
+            if serde_json::to_value(&*evaluate).ok().as_ref() != Some(&original_evaluate) {
+                return Err(unprepared(EngramTransportError::local_state(
+                    "Begin preparation's retained Evaluate changed before installation")));
+            }
+            evaluate.prepared_begin = Some(prepared);
+        }
         match self.confirm_engram_admission_durable_classified(session_id, deadline, owner) {
             Ok(()) | Err((_, EngramAdmissionDurabilityFault::Late)) => Ok(replayed_possibly_sent),
             Err((error, fault)) => {
                 // Kept as this host's pending begin only when proven never
                 // sent: a possibly sent replay is never marked pending.
                 let kept_pending = !replayed_possibly_sent
-                    && match (kind, &fault) {
+                    && (contained_successor || match (kind, &fault) {
                         (
                             EngramBeginPreparationKind::First
                             | EngramBeginPreparationKind::Pending,
@@ -600,7 +622,7 @@ impl AppState {
                             EngramAdmissionDurabilityFault::Fence(PersistFenceError::WriteFailed(_)),
                         ) => true,
                         _ => false,
-                    };
+                    });
                 // A possibly sent replay is never withdrawn.
                 let possibly_sent = replayed_possibly_sent;
                 if !kept_pending && !possibly_sent {
@@ -1055,7 +1077,7 @@ impl AppState {
         target: &mut EngramBindingTarget,
         owner: &EngramQueuedAdmissionOwner,
     ) -> std::result::Result<bool, EngramTransportError> {
-        let (prepared, bind, cold, begin_recovery) = {
+        let (prepared, bind, cold, begin_recovery, contained_reconciliation) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(&target.connection.session_id) else {
                 return Ok(false);
@@ -1080,7 +1102,9 @@ impl AppState {
             // restart checkpoint closes its possibly begun grant first.
             let begin_recovery = engram_begin_replay_pending(record).is_some()
                 || engram_begin_reconstruction_pending(record).is_some();
-            (prepared, bind, record.engram.recovered_admission, begin_recovery)
+            let contained = containment_retained_reconciliation_allowed(
+                &inner, &target.connection.session_id);
+            (prepared, bind, record.engram.recovered_admission || contained, begin_recovery, contained)
         };
         if let Some(bind) = bind {
             if bind.connection != target.connection
@@ -1166,6 +1190,17 @@ impl AppState {
                 owner,
                 "Recovered session status",
             )?;
+            if contained_reconciliation
+                && (status.open_grant_state.as_deref() == Some("begun")
+                    || status.open_grant_id.is_some()
+                        && status.open_grant_state.as_deref() != Some("issued"))
+            {
+                // This scope owns only the original admission replay. A
+                // status read cannot lend it authority to close another duty.
+                return Err(EngramTransportError::local_state(
+                    "Retained admission found independent or unknown producer grant state; containment remains armed",
+                ));
+            }
             if prepared.begun_grant_id.is_some()
                 || target.active_grant_id.is_some()
                 || status.open_grant_state.as_deref() == Some("begun")
@@ -1515,6 +1550,20 @@ impl AppState {
             .ok_or_else(|| {
                 EngramTransportError::local_state("Session was removed before evaluation")
             })?;
+        // The original retained request may cross an OFF interruption only
+        // in its exact, acknowledged synchronous Resume scope. Preserve the
+        // interrupted flag; ordinary and background callers keep the hold.
+        let contained_reconciliation =
+            containment_retained_reconciliation_allowed(&inner, &intent.session_id);
+        if engram_session_obligation_locked(&inner, &intent.session_id).is_some() {
+            if !contained_reconciliation {
+                return Err(EngramTransportError::local_state("Retained evaluation requires its exact acknowledged Resume scope"));
+            }
+            if inner.sessions[index].queued_prompts.front().is_some_and(|head| head.engram_evaluate.is_none()) {
+                drop(inner);
+                return self.prepare_contained_bind_evaluate(target, intent, owner, request);
+            }
+        }
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -1536,7 +1585,7 @@ impl AppState {
                 "Queued prompt was canceled before evaluation",
             ));
         };
-        if queued.engram_interrupted && !abort_retry_hold {
+        if queued.engram_interrupted && !abort_retry_hold && !contained_reconciliation {
             return Err(EngramTransportError::local_state(
                 "Interrupted Engram authorization requires explicit reconciliation; prompt retained",
             ));

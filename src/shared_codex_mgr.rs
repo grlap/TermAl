@@ -472,9 +472,16 @@ impl AppState {
         };
 
         let token = RuntimeToken::Codex(runtime_id.to_owned());
+        let mut exit_error = None;
         for (session_id, was_busy) in session_exits {
             let session_error = was_busy.then_some(error_message).flatten();
-            self.handle_runtime_exit_if_matches(&session_id, &token, session_error)?;
+            if let Err(error) = self.handle_runtime_exit_if_matches(&session_id, &token, session_error) {
+                // Complete the cascade and retire the removed shared process,
+                // even if one session's local completion cannot be published.
+                if exit_error.is_none() {
+                    exit_error = Some(error);
+                }
+            }
         }
         for session_id in engram_rebind_session_ids {
             self.rebind_engram_session_after_runtime_loss(&session_id);
@@ -483,6 +490,9 @@ impl AppState {
             removed_runtime.kill().with_context(|| {
                 format!("failed to terminate shared Codex runtime `{runtime_id}`")
             })?;
+        }
+        if let Some(error) = exit_error {
+            return Err(error);
         }
         Ok(())
     }

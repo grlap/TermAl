@@ -12,6 +12,7 @@ import {
 } from "react";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { TestRunsProvider } from "./test-runs-context";
+import { EngramControlRecoveryContext } from "./engram-control-recovery";
 import { openTestRunsInWorkspaceState } from "./workspace";
 import { DialogCloseIcon } from "./message-card-icons";
 import type { KimiApprovalMode, OpenCodeApprovalMode } from "./types";
@@ -897,6 +898,7 @@ export default function App() {
 
   const {
     adoptState,
+    engramControlRecovery,
     testRuns,
     testRunWaits,
     testRunWaitFailures,
@@ -2121,6 +2123,9 @@ export default function App() {
   }
 
   return (
+    <EngramControlRecoveryContext.Provider value={{ entries: engramControlRecovery,
+      projects, sessions, onInspect: sessionId => { setIsSettingsOpen(false); handleSidebarSessionClick(sessionId); },
+      onStop: sessionId => { void handleStopSession(sessionId); }, stopping: stoppingSessionIds }}>
     <TestRunsProvider runs={testRuns} waits={testRunWaits} failures={testRunWaitFailures}
       dismissFailure={dismissTestRunWaitFailure} snapshotReady={hasAdoptedStateSnapshot} open={(sessionId = null, target, allProjects = false) => {
       setWorkspace(current => applyControlPanelLayout(openTestRunsInWorkspaceState(
@@ -2417,5 +2422,6 @@ export default function App() {
       />
     </div>
     </TestRunsProvider>
+    </EngramControlRecoveryContext.Provider>
   );
 }

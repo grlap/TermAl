@@ -4,6 +4,7 @@
 import { useState } from "react";
 
 import type { StateResponse } from "./api";
+import { EngramControlRecoveryPanel } from "./engram-control-recovery";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { useDialogEscapeDismiss } from "./dialog-escape-dismiss";
 import {
@@ -108,6 +109,7 @@ export function EngramProjectSettingsDialog({
                 }}
                 onVerified={onVerified}
               />
+              <EngramControlRecoveryPanel projectId={project.id} onInspect={onClose} />
             </div>
           </div>
         </div>

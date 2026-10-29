@@ -340,6 +340,10 @@ fn deliver_prepared_turn_dispatch_now(
             .prepare_engram_turn_delivery_off_lock(dispatch.session_id(), dispatch_generation)
         {
             EngramTurnDeliveryPreparation::Ready => {}
+            EngramTurnDeliveryPreparation::ControlRecovery => {
+                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
+                return TurnDispatchDeliveryOutcome::Held { error: None };
+            }
             EngramTurnDeliveryPreparation::ObservationRecovery => {
                 note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
                 return TurnDispatchDeliveryOutcome::Held { error: None };
@@ -615,6 +619,15 @@ fn handoff_prepared_turn_dispatch(
             drop(relay_link);
             return reject_federation(error);
         }
+    }
+    if engram_session_obligation_locked(&inner, &session_id).is_some()
+        && !(engram_generation.is_none()
+            && engram_unmediated_checkpoint_dispatch_allowed(
+                &inner, &session_id, Some(active_turn_generation),
+            )) {
+        drop(inner);
+        note_held_before_hand_off(state, &session_id, active_turn_generation, federation_identity.as_ref());
+        return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
     }
     let index = inner.find_session_index(&session_id);
     let mut opening_diagnostic_delivery = None;
@@ -1807,7 +1820,8 @@ async fn update_project_engram_settings(
 ) -> Result<Json<StateResponse>, ApiError> {
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("Engram project settings", rejection))?;
-    // Disable remains an unconditional recovery path, including under load.
+    // Disable skips readiness admission; retained control duties still fence
+    // connection changes in the settings transaction.
     let permit = if request.enabled {
         Some(acquire_engram_readiness(limiter)?)
     } else {

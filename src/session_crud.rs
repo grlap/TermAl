@@ -1142,6 +1142,30 @@ static TEST_ENGRAM_PROJECT_RESET_RELEASE_GATES: LazyLock<
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[cfg(test)]
+thread_local! {
+    static TEST_ENGRAM_SETTINGS_MUTATION_BOUNDARY: std::cell::RefCell<
+        Option<(&'static str, Box<dyn FnOnce()>)>
+    > = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn run_engram_settings_mutation_boundary(boundary: &'static str) {
+    TEST_ENGRAM_SETTINGS_MUTATION_BOUNDARY.with(|slot| {
+        let callback = {
+            let mut slot = slot.borrow_mut();
+            if slot.as_ref().is_some_and(|(expected, _)| *expected == boundary) {
+                slot.take().map(|(_, callback)| callback)
+            } else {
+                None
+            }
+        };
+        if let Some(callback) = callback {
+            callback();
+        }
+    });
+}
+
+#[cfg(test)]
 static TEST_ENGRAM_QUARANTINE_PRECOMMIT_TRANSITIONS: LazyLock<
     Mutex<HashMap<String, (String, bool)>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -1775,9 +1799,9 @@ impl AppState {
         settings.home = Some(host_settings.home.clone());
         settings.deadline_ms = None;
         // Verify always probes the proposed runtime, even when the Enabled
-        // toggle is currently off. Disabling remains an unconditional recovery
-        // action on Save, but a successful Verify proves the fields are ready
-        // for a later enable.
+        // toggle is currently off. Save skips readiness when disabled, while
+        // retained control duties still prevent replacing their connection.
+        // A successful Verify proves the fields are ready for a later enable.
         settings.enabled = true;
         normalize_engram_project_paths(&mut settings)?;
         validate_engram_project_home_for_update(&settings)?;
@@ -1944,6 +1968,79 @@ impl AppState {
             settings.work_authority_grant = None;
         }
         normalize_engram_project_paths(&mut settings)?;
+        // The public project PATCH does not carry these admitted private
+        // fields. A change of gating alone must neither revoke its work
+        // authority nor refresh the original connection's deadline.
+        if expected_host_settings.is_some()
+            && let Some(current) = project_snapshot.engram.as_ref()
+            && current.enabled && settings.enabled
+            && current.turn_gated_control != settings.turn_gated_control
+            && current.binary_path == settings.binary_path && current.home == settings.home
+        {
+            settings.work_authority_grant = current.work_authority_grant.clone();
+            settings.deadline_ms = current.deadline_ms;
+        }
+        // Inactive original reports may outlive settings changes. Their frozen
+        // connection and admission exclusion remain independent of new settings.
+        // Lowering only turn gating keeps the original authority connection.
+        // It must remain possible when that connection cannot answer readiness
+        // or a session's close; the dedicated path journals each unresolved duty.
+        if let Some(current) = project_snapshot.engram.as_ref() {
+            let mut same_connection = current.clone();
+            same_connection.turn_gated_control = false;
+            same_connection.acceptance_evaluation = settings.acceptance_evaluation.clone();
+            let mut candidate = settings.clone();
+            candidate.authority_store_key = current.authority_store_key.clone();
+            if current.enabled && current.turn_gated_control && candidate == same_connection {
+                let authority = validate_engram_containment_authority(&project_snapshot, &candidate)?;
+                return self.apply_engram_project_containment(
+                    &project_snapshot, candidate, authority, expected_host_settings.as_ref());
+            }
+        }
+        if let Some(current) = project_snapshot.engram.as_ref() {
+            let mut restored = current.clone();
+            restored.turn_gated_control = true;
+            restored.acceptance_evaluation = settings.acceptance_evaluation.clone();
+            let mut candidate = settings.clone();
+            candidate.authority_store_key = current.authority_store_key.clone();
+            if current.enabled && !current.turn_gated_control && restored == candidate {
+                let unresolved = {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    engram_project_has_unresolved_obligations(&inner, &project_id)
+                };
+                if unresolved {
+                    return self.restore_contained_engram_gating(
+                        &project_snapshot, candidate, expected_host_settings.as_ref());
+                }
+            }
+        }
+        // Clearing only the project grant still waits for an ordinary lifecycle
+        // close already owned by its caller. Waiting grants no reset authority;
+        // the complete administrative classifier below runs again afterward.
+        if project_snapshot.engram.as_ref().is_some_and(|current| {
+            let mut cleared = current.clone();
+            cleared.work_authority_grant = None;
+            let mut candidate = settings.clone();
+            candidate.authority_store_key = current.authority_store_key.clone();
+            current.work_authority_grant.is_some() && candidate == cleared
+        }) {
+            self.wait_for_engram_lifecycle_checkpoint_before_grant_clear(&project_snapshot)?;
+        }
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if engram_project_has_administrative_blocker(&inner, &project_id) {
+                let mut candidate = settings.clone();
+                candidate.authority_store_key = project_snapshot.engram.as_ref()
+                    .and_then(|current| current.authority_store_key.clone());
+                if project_snapshot.engram.as_ref() == Some(&candidate) {
+                    return Ok(self.snapshot_from_inner(&inner));
+                }
+                return Err(ApiError::conflict(
+                    "Engram settings cannot replace an unresolved control connection; inspect the retained recovery obligations first"));
+            }
+        }
+        #[cfg(test)]
+        run_engram_settings_mutation_boundary("after_precheck");
         let pure_authority_clear = project_snapshot.engram.as_ref().is_some_and(|current| {
             current.work_authority_grant.is_some()
                 && settings.work_authority_grant.is_none()
@@ -2105,6 +2202,11 @@ impl AppState {
             ) =
                 {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if engram_project_has_administrative_blocker(&inner, &project_id) {
+                        return Err(ApiError::conflict(
+                            "Engram settings cannot replace an unresolved control connection; inspect the retained recovery obligations first",
+                        ));
+                    }
                     if inner.engram_project_resets.contains(&project_id) {
                         return Err(ApiError::conflict(
                             "Engram project settings are already being reset",
@@ -2205,6 +2307,8 @@ impl AppState {
             drop(preflight_phase);
             #[cfg(test)]
             apply_engram_quarantine_precommit_transition(self, &project_id);
+            #[cfg(test)]
+            run_engram_settings_mutation_boundary("before_commit");
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(project_index) = inner
                 .projects
@@ -2231,6 +2335,7 @@ impl AppState {
                 },
             );
             if !fence_is_valid
+                || engram_project_has_administrative_blocker(&inner, &project_id)
                 || project.root_path != project_snapshot.root_path
                 || project.remote_id != project_snapshot.remote_id
                 || project.engram != project_snapshot.engram
@@ -2451,8 +2556,11 @@ impl AppState {
                                 &error,
                                 ENGRAM_CONTROL_SETTLE_TIMEOUT,
                             );
-                            checkpoint_failures
-                                .push(format!("session {}: {error}", target.connection.session_id));
+                            checkpoint_failures.push(engram_project_checkpoint_failure(
+                                &project_id,
+                                &target.connection.session_id,
+                                &error,
+                            ));
                         }
                         for target in claims.claimed {
                             let _checkpoint_phase = engram_project_reset_phase(
@@ -2474,9 +2582,10 @@ impl AppState {
                                         &error,
                                         started_at.elapsed(),
                                     );
-                                    checkpoint_failures.push(format!(
-                                        "session {}: {error}",
-                                        target.connection.session_id
+                                    checkpoint_failures.push(engram_project_checkpoint_failure(
+                                        &project_id,
+                                        &target.connection.session_id,
+                                        &error,
                                     ));
                                 }
                             }
@@ -2620,7 +2729,8 @@ impl AppState {
             let project = inner
                 .find_project(&project_id)
                 .ok_or_else(|| ApiError::not_found("project not found"))?;
-            if project.root_path != project_snapshot.root_path
+            if engram_project_has_administrative_blocker(&inner, &project_id)
+                || project.root_path != project_snapshot.root_path
                 || project.remote_id != project_snapshot.remote_id
                 || project.engram != project_snapshot.engram
             {
@@ -2637,6 +2747,10 @@ impl AppState {
             let reset_target_candidates = session_ids
                 .iter()
                 .map(|session_id| {
+                    if engram_session_has_administrative_checkpoint_debt(&inner, session_id)
+                    {
+                        return Ok(None);
+                    }
                     project_engram_binding_target_locked(&inner, session_id).map_err(|error| {
                         ApiError::internal(format!(
                             "failed snapshotting old Engram binding: {error}"
@@ -2794,8 +2908,11 @@ impl AppState {
                         .expect("reset target should carry an active grant"),
                 )),
                 Err(error) => {
-                    let mut failure =
-                        format!("session {}: {}", target.connection.session_id, error);
+                    let mut failure = engram_project_checkpoint_failure(
+                        &project_id,
+                        &target.connection.session_id,
+                        &error,
+                    );
                     if !best_effort_checkpoint_cleanup
                         && engram_checkpoint_can_inspect_absence(&error)
                     {
@@ -2882,6 +2999,8 @@ impl AppState {
             }
         }
         let commit_phase = reset_timer.phase("commit", None);
+        #[cfg(test)]
+        run_engram_settings_mutation_boundary("before_commit");
         let (adapter, final_session_ids, revocation_batch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let reset_still_in_progress = inner
@@ -2902,10 +3021,13 @@ impl AppState {
                 return Err(ApiError::not_found("project not found"));
             };
             let project = &inner.projects[project_index];
-            if project.root_path != project_snapshot.root_path
+            if engram_project_has_administrative_blocker(&inner, &project_id)
+                || project.root_path != project_snapshot.root_path
                 || project.remote_id != project_snapshot.remote_id
                 || project.engram != project_snapshot.engram
                 || !reset_still_in_progress
+                || (!same_authority_store
+                    && engram_project_has_checkpoint_batch_custody(&inner, &project_id))
                 || expected_host_settings
                     .as_ref()
                     .is_some_and(|expected| inner.preferences.engram != *expected)
@@ -3008,6 +3130,9 @@ impl AppState {
             inner.projects[project_index].engram = Some(settings.clone());
             for session_id in &final_session_ids {
                 if let Some(index) = inner.find_session_index(session_id) {
+                    let has_retained_checkpoint_debt =
+                        engram_session_has_administrative_checkpoint_debt(&inner, session_id);
+                    let pending_batches = retained_checkpoint_pending_batches(&inner, session_id);
                     let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
                     retire_source_observation_locked(&mut inner, index);
                     let source_observation_gate = inner.sessions[index].engram.source_observation_gate.clone();
@@ -3060,7 +3185,7 @@ impl AppState {
                     // (`engram_begin_preparation_retry.rs`).
                     let begin_preparation_lineage =
                         take_engram_admission_budget_for_settings_reset(record);
-                    record.engram = EngramSessionState {
+                    let next_engram = EngramSessionState {
                         source_observation_gate,
                         source_observation_delete_requested: record
                             .engram
@@ -3084,6 +3209,10 @@ impl AppState {
                         unadmitted_worker_running: record.engram.unadmitted_worker_running,
                         ..EngramSessionState::default()
                     };
+                    record.engram = preserve_checkpoint_debt_after_local_reset(
+                        next_engram, &record.engram, has_retained_checkpoint_debt,
+                        pending_batches, same_authority_store,
+                    );
                     for line in carried_lines {
                         eprintln!("engram> session={} {line}", record.session.id);
                         record.engram.set_pending_source_root_line(line);
@@ -3400,10 +3529,7 @@ impl AppState {
                 decision: EngramControlCardDecision::Degraded,
                 dispatch: EngramControlCardDispatch::SentOnGrant,
                 refusal_code: Some(
-                    error
-                        .code
-                        .clone()
-                        .unwrap_or_else(|| "checkpoint_failed".to_owned()),
+                    engram_containment_error_code(error.code.as_deref(), "checkpoint_failed").to_owned(),
                 ),
                 defer_code: None,
                 grant_id: Some(grant_id.to_owned()),
@@ -3440,7 +3566,11 @@ impl AppState {
             let error = EngramTransportError::deadline(
                 "timed out waiting to claim the Engram checkpoint after its current owner",
             );
-            let failure = format!("session {}: {}", target.connection.session_id, error);
+            let failure = engram_project_checkpoint_failure(
+                project_id,
+                &target.connection.session_id,
+                &error,
+            );
             if best_effort_cleanup {
                 self.record_engram_project_reset_checkpoint_failure(
                     target,
@@ -3622,6 +3752,102 @@ impl AppState {
             }
             pending = still_pending;
             drop(inner);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn wait_for_engram_lifecycle_checkpoint_before_grant_clear(
+        &self,
+        project: &Project,
+    ) -> Result<(), ApiError> {
+        let conflict = || ApiError::conflict(
+            "Engram lifecycle checkpoint changed while waiting to clear the project grant",
+        );
+        let owners = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            // Ordinary custody is bounded and spans transport plus both ACKs.
+            // Keep its immutable request/attempt identity, not a new owner.
+            inner.engram_pending_checkpoint_receipts.entries.iter()
+                .filter(|(_, pending)| pending.origin == EngramCheckpointReceiptOrigin::Ordinary
+                    && pending.accounting)
+                .filter_map(|(key, pending)| {
+                    inner.engram_session_obligations.checkpoint_operations.iter()
+                        .find(|operation| operation.original.id == key.0
+                            && operation.protection.project_id == project.id
+                            && operation.original.checkpoint_owner_generation.is_none())
+                        .map(|operation| (operation.clone(), pending.identity.clone()))
+                })
+                .collect::<Vec<_>>()
+        };
+        if owners.is_empty() {
+            return Ok(());
+        }
+        let deadline = std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT;
+        loop {
+            let busy = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let current_project = inner.find_project(&project.id).ok_or_else(conflict)?;
+                if current_project.root_path != project.root_path
+                    || current_project.remote_id != project.remote_id
+                    || current_project.engram != project.engram
+                    || inner.engram_project_resets.contains(&project.id)
+                {
+                    return Err(conflict());
+                }
+                let mut busy = false;
+                for (original, identity) in &owners {
+                    let id = &original.protection.local_session_id;
+                    let record = inner.find_session_index(id)
+                        .and_then(|index| inner.sessions.get(index)).ok_or_else(conflict)?;
+                    let current = record.engram.checkpoint_operation.as_ref()
+                        .and_then(|mirror| selected_checkpoint_operation(
+                            &inner.engram_session_obligations, mirror)).ok_or_else(conflict)?;
+                    let attempt = original.attempts.last().ok_or_else(conflict)?;
+                    if !record.is_local_session()
+                        || engram_project_for_session_locked(&inner, id)
+                            .is_none_or(|owner| owner.id != project.id)
+                        || checkpoint_receipt_identity(current).ok().as_ref() != Some(identity)
+                        || !project.engram.as_ref().is_some_and(|settings|
+                            settings.same_admission_settings(&original.original.settings))
+                        || record.engram.dispatch_generation != attempt.dispatch_generation
+                        || record.active_turn_generation != attempt.active_turn_generation
+                        || format!("{:?}", record.runtime.runtime_token()) != attempt.runtime_episode
+                        || record.engram.checkpoint_owner_generation.is_some()
+                        || record.engram.work_binding != original.original.work_binding
+                        || record.engram.routing_token.as_deref()
+                            != Some(original.protection.routing_token.as_str())
+                        || record.engram.active_grant_id.as_ref().is_some_and(|grant|
+                            grant != &original.protection.grant_id)
+                        || record.engram.active_grant_id.is_none()
+                            && !matches!(current.progress, EngramExistingCheckpointProgress::Accepted { .. })
+                    {
+                        return Err(conflict());
+                    }
+                    let pending = inner.engram_pending_checkpoint_receipts.entries
+                        .get(&checkpoint_receipt_key(original));
+                    if pending.is_some_and(|pending| pending.identity != *identity
+                        || pending.origin != EngramCheckpointReceiptOrigin::Ordinary)
+                    {
+                        return Err(conflict());
+                    }
+                    if record.engram.checkpoint_in_progress
+                        || pending.is_some_and(|pending| pending.accounting)
+                    {
+                        busy = true;
+                        #[cfg(test)]
+                        notify_engram_project_reset_checkpoint_wait(self, id);
+                    }
+                }
+                busy
+            };
+            if !busy {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(ApiError::conflict(
+                    "Engram project settings are busy with an in-flight lifecycle checkpoint",
+                ));
+            }
             std::thread::sleep(Duration::from_millis(5));
         }
     }
@@ -4471,6 +4697,10 @@ impl AppState {
             .to_owned();
         let project_snapshot = {
             let inner = self.inner.lock().expect("state mutex poisoned");
+            if engram_project_has_administrative_blocker(&inner, &project_id)
+                || engram_project_has_checkpoint_batch_custody(&inner, &project_id) {
+                return Err(ApiError::conflict("project has unresolved Engram control recovery obligations"));
+            }
             inner
                 .find_project(&project_id)
                 .cloned()
@@ -4487,6 +4717,10 @@ impl AppState {
         project_id: &str,
     ) -> Result<StateResponse, ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if engram_project_has_administrative_blocker(&inner, project_id)
+            || engram_project_has_checkpoint_batch_custody(&inner, project_id) {
+            return Err(ApiError::conflict("project has unresolved Engram control recovery obligations"));
+        }
         let Some(project_index) = inner
             .projects
             .iter()
@@ -4567,6 +4801,9 @@ impl AppState {
             authority_revocation_targets,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if engram_project_has_administrative_blocker(&inner, &project_id) {
+                return Err(ApiError::conflict("project has unresolved Engram control recovery obligations"));
+            }
             let project = inner
                 .find_project(&project_id)
                 .ok_or_else(|| ApiError::not_found("project not found"))?;
@@ -4584,6 +4821,9 @@ impl AppState {
             let reset_target_candidates = session_ids
                 .iter()
                 .map(|session_id| {
+                    if engram_session_has_administrative_checkpoint_debt(&inner, session_id) {
+                        return Ok(None);
+                    }
                     let has_durable_control_authority = inner
                         .find_session_index(session_id)
                         .and_then(|index| inner.sessions.get(index))
@@ -4753,6 +4993,8 @@ impl AppState {
             )));
         }
 
+        #[cfg(test)]
+        run_engram_settings_mutation_boundary("before_delete_commit");
         let commit_phase = reset_timer.phase("commit", None);
         let (
             adapter,
@@ -4782,6 +5024,8 @@ impl AppState {
             ) || !inner
                 .engram_project_resets
                 .is_owned_by(&project_id, project_reset_generation)
+                || engram_project_has_administrative_blocker(&inner, &project_id)
+                || engram_project_has_checkpoint_batch_custody(&inner, &project_id)
             {
                 drop(inner);
                 self.abort_engram_project_reset(
@@ -4851,6 +5095,8 @@ impl AppState {
             let removed_project = inner.projects.remove(project_index);
             for session_id in &final_session_ids {
                 if let Some(index) = inner.find_session_index(session_id) {
+                    let has_retained_checkpoint_debt =
+                        engram_session_has_administrative_checkpoint_debt(&inner, session_id);
                     let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
                     retire_source_observation_locked(&mut inner, index);
                     let source_observation_gate = inner.sessions[index].engram.source_observation_gate.clone();
@@ -4873,7 +5119,7 @@ impl AppState {
                     // worktree its workdir resolved to stays, keyed by that
                     // workdir, so a session in a turn keeps counting only
                     // where it works.
-                    record.engram = EngramSessionState {
+                    let next_engram = EngramSessionState {
                         source_observation_gate,
                         source_observation_delete_requested: record
                             .engram
@@ -4896,6 +5142,10 @@ impl AppState {
                         unadmitted_worker_running: record.engram.unadmitted_worker_running,
                         ..EngramSessionState::default()
                     };
+                    record.engram = preserve_checkpoint_debt_after_local_reset(
+                        next_engram, &record.engram, has_retained_checkpoint_debt,
+                        Vec::new(), false,
+                    );
                 }
             }
             for instance in &mut inner.orchestrator_instances {

@@ -52,7 +52,19 @@ import {
   requestJsonFirst,
 } from "./api-request";
 
+/** Public recovery projection; never contains retained requests or credentials. */
+export type EngramControlRecoverySummary = {
+  projectId: string;
+  sessionId: string;
+  operation: string;
+  code: string;
+  excluded: boolean;
+  settlementConfirmed: boolean;
+  nextActions: string[];
+};
+
 export type StateResponse = {
+  engramControlRecovery?: EngramControlRecoverySummary[];
   testRunWaits?: import("./test-run-waits").TestRunWaitRecord[];
   testRuns?: import("./test-runs").TestRunSummary[];
   revision: number;

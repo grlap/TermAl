@@ -74,6 +74,7 @@ import {
   type CreateSessionResponse,
   type DelegationStateSummary,
   type DelegationWaitRecord,
+  type EngramControlRecoverySummary,
   type StateResponse,
 } from "./api";
 import { mergeStateDiffRows, type StateDiffEvent } from "./app-live-state-diff";
@@ -195,6 +196,8 @@ function rememberServerInstanceId(
   }
 }
 
+const EMPTY_ENGRAM_CONTROL_RECOVERY: readonly EngramControlRecoverySummary[] = [];
+
 export function useAppLiveState(
   params: UseAppLiveStateParams,
 ): UseAppLiveStateReturn {
@@ -282,6 +285,8 @@ export function useAppLiveState(
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const [testRuns, setTestRuns] = useState<TestRunSummary[]>([]);
+  const [engramControlRecovery, setEngramControlRecovery] =
+    useState<readonly EngramControlRecoverySummary[]>(EMPTY_ENGRAM_CONTROL_RECOVERY);
   const [testRunWaits, setTestRunWaits] = useState<readonly TestRunWaitRecord[]>([]);
   const [testRunWaitFailures, setTestRunWaitFailures] = useState<import("./test-run-waits").TestRunWaitFailures>({});
   const seenTestRunWaitFailuresRef = useRef(new Map<string, import("./test-run-waits").TestRunWaitFailure>());
@@ -1648,6 +1653,10 @@ export function useAppLiveState(
 
   // Header slices, shared by full and diff adoption; both pass absolute slices.
   function adoptStateHeaderSlices(nextState: StateResponse) {
+    // Absolute canonical projection: removing a session never settles its debt.
+    const nextRecovery = nextState.engramControlRecovery ?? EMPTY_ENGRAM_CONTROL_RECOVERY;
+    setEngramControlRecovery(current => JSON.stringify(current) === JSON.stringify(nextRecovery)
+      ? current : nextRecovery);
     const currentCodexState = codexStateRef.current;
     const currentAgentReadiness = agentReadinessRef.current;
     const currentProjects = projectsRef.current;
@@ -1898,6 +1907,7 @@ export function useAppLiveState(
 
   return {
     adoptState,
+    engramControlRecovery,
     testRuns,
     testRunWaits,
     testRunWaitFailures,

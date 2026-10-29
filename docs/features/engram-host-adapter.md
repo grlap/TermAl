@@ -90,14 +90,12 @@ Ordinary degraded handoff saves a marker on the queue head and waits for its
 local durability acknowledgement before sending to the provider. Permission
 to perform that handoff is process-local and belongs to the exact head and
 turn. A marker loaded after restart means provider delivery is unknown;
-neither Resume nor disabling control makes it replayable. The primary reader floor
-`2-metadata-units-2-handoff-1` protects this meaning from older readers.
-Supported primary-2 and units-1 stores first normalize transactionally to
-`2-metadata-units-2`; a second transaction advances only the semantic floor.
-Both stages finish before recovery or handoff, preserving session JSON, units,
-authority and uncertain Begin records. If the second stage fails, the store
-remains at units-2 without exposing the new handoff feature;
-newer or unknown formats are refused before recovery or rewriting.
+neither Resume nor disabling control makes it replayable. The primary reader
+floor `2-metadata-units-2-handoff-1` protects this meaning from older readers.
+The current joint floor `2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1` migrates
+supported predecessors through units-2 and handoff-1 in one transaction,
+preserving session JSON, authority and uncertain Begin records. Unsupported
+numeric drafts and unknown floors are refused before recovery or rewriting.
 
 Boot recovery retains eager work for open or uncertain grants, exact retained
 operations and legacy records that may hide an unrecorded Begin. Existing
@@ -4373,6 +4371,303 @@ releases the fence, TermAl drains the queue against the new settings:
 - with only premium disabled, Base MCP/context remains active and ordinary
   delivery resumes; and
 - with Engram disabled, neither Base nor premium work is composed.
+
+Turning only `turnGatedControl` from true to false under the same enabled
+connection is containment. Settings, original recovery identities and session
+exclusions commit together, with a writer acknowledgement before settlement
+requests. A refused or unavailable checkpoint leaves that session excluded;
+the applied project flag remains false and unaffected sessions may proceed.
+The response and state snapshots list unresolved sessions separately in
+`engramControlRecovery`, with project/session identity, operation, code,
+`excluded`, `settlementConfirmed`, and supported next actions. Inspect the
+session through its existing detail route; a still-running session can use
+the existing Stop route. A Stop request is not a confirmed interruption.
+Private connections, requests, tokens and grant identities are not in this view.
+The UI presents this canonical projection under Settings > Engram and in each
+project's Engram settings. Global recovery remains available even if the project
+no longer declares Engram. Entries identify the original session and unresolved
+operation with a public explanation, independently of session rows or transcript
+cards. Full state hydration, reconnect and live diff updates share the same
+projection; the UI keeps no separate debt ledger. An absent session has no
+Inspect, Resume, Stop or clear-debt action. Existing sessions offer only
+advertised, usable actions, and Inspect closes settings to reveal that session.
+Changing control settings never removes an unresolved entry; only a canonical
+confirmed-settlement update or removal does. Unknown operation/reason values
+receive a generic explanation instead of exposing private diagnostic text.
+Independent checkpoint or interruption obligations have no general settlement
+scheduler in this slice. Inspecting, stopping, waiting, toggling control, or
+restarting does not by itself settle that debt; it remains visibly excluded.
+
+An unresolved original turn checkpoint has a separate result-recovery path.
+It retains the exact original request, report, key, grant, routing and store
+authority. A current recovery owner may replay that request after confirming
+the same authority and work binding, including through a replacement Engram
+process or after loading a restarted host. It never uses a fresh SessionBind
+to escape the retained operation. Both pre-send persistence cuts and the
+accepted result's local acknowledgement remain required. An absent session
+can retain and recover its canonical operation without inventing a session row.
+
+The existing retry tick schedules this work through the shared bounded slots
+and retry cadence. Automatic attempts stop at the persisted attempt limit;
+explicit recovery still requires a valid current owner. A later busy or expired
+invocation does not prove an earlier Unknown was unapplied. A stored Refuse is
+kept as an invocation result and does not settle older uncertainty. Only the
+matching authoritative Checkpointed result can settle the original operation.
+Accepted results awaiting local acknowledgement use local accounting without
+another wire request. Original-head retirement is exact; a successor or an
+independent obligation is not discharged by recovering an older checkpoint.
+An inactive original checkpoint, including an unowned Accepted ordinary reply
+or an unsettled OFF checkpoint, may outlive explicit local session/project
+removal or settings changes, including same-store re-enable.
+Those administrative actions preserve its complete immutable request and report
+in mandatory metadata; they do not confirm settlement or release admission.
+An existing session keeps its canonical mirror when disabled or detached from
+its deleted project. A live flight, active receipt accounting, receipt custody
+with a matching live owner, and independent duties still retain their owners.
+An idle receipt whose original owner no longer matches does not block local
+administration; it supplies no settlement or admission authority.
+An already Confirmed OFF entry with its exact accepted receipt keeps the
+existing boot materialization rule after owner removal. That receipt is real
+settlement evidence; Sent or failed entries and ordinary Accepted-but-unowned
+entries whose protection remains Sent do not gain confirmation from removal.
+Disable and project detach retain the original debt's grant and mirror only;
+grants successfully closed by the reset follow ordinary identity clearing.
+Boot restores the durable exclusion, not a live
+checkpoint flight from the previous process.
+
+An explicitly OFF or disabled project, or a detached session, may start a fresh unmediated local turn
+when every matching unresolved duty is inactive, unowned original checkpoint
+report debt and the provider is quiescent. A replacement grant, uncertain or
+possibly-sent Begin, live receipt/accounting/flight/status owner, active provider
+or independent duty prevents this exception. Promotion and final provider
+handoff both check the current settings and owner. The original prompt is never
+replayed, and local completion or Stop cannot reuse or settle the old grant.
+The complete original debt remains durable and reported. Re-enabling control
+keeps the first Bind/Evaluate/Begin and automatic boot rebind excluded until
+supported original reconciliation succeeds. No generic replay API is added.
+A fatal session error does not count as an operator OFF decision: while project
+control is ON, its disabled reason cannot authorize unmediated dispatch.
+
+An ordinary closing checkpoint publishes its claim together with its complete
+original request, report, key, connection, work binding and owner identity.
+Mandatory metadata protects that operation before transport; its session field
+is a validated mirror. The writer acknowledges the retained image and the
+conservative send-intent boundary before the first RPC. OFF adopts this same
+operation and its explicit owner lineage. Its original matching callback can
+record the full receipt and owned local effects, then acknowledge them, without
+starting another checkpoint. That receipt settles only the checkpoint component;
+an independent runtime, head, Bind or Begin duty stays excluded. Frozen history
+is unchanged, and separate typed progress records the actual settlement.
+
+While an ordinary ON checkpoint is the sole excluding duty, a valid local
+root Send may persist a plain queued envelope. It starts no control call or
+provider work, preserves mailbox provenance and pause state, and borrows none
+of the checkpoint's ownership. Healthy acknowledged completion drains through
+the ordinary lifecycle; an unknown result keeps execution withheld. A caller
+that ends releases only its exact local operation/attempt flight reservation,
+leaving the independently retained duty and any newer caller untouched.
+
+Checkpoint transport reserves bounded volatile reply custody before sending:
+at most 16 entries and 64 MiB of aggregate reservations, including identity,
+card and response representation. A bounded encoder allows up to six times
+the 256 KiB accepted control-frame bound for the retained JSON representation;
+adapter results are checked at this boundary too. Unknown fields are retained.
+The sidecar's read-until-newline allocation precedes its frame-size check;
+this custody bound does not certify bounded transport allocation.
+
+OFF-created checkpoints share this same custody budget. If an accepted receipt
+cannot yet be published or acknowledged, its complete value remains in volatile
+custody and the original duty stays excluded. The recovery view offers
+`resume_local_accounting` through the existing Resume action. While control is
+OFF, that invocation only accounts the retained receipt under its original
+identity and one deadline; it sends no RPC and does not dispatch or drain a
+queued prompt. Changed ownership or settings keep the receipt and exclusion.
+The receipt is acknowledged before the live grant is cleared, and the cleared
+row is acknowledged before exclusion is released. Automatic admission and
+capacity retries cannot select this local OFF accounting path. A restart may
+lose volatile custody; unresolved durable duties remain excluded.
+
+A complete prospective ledger, every affected enclosing image and the session
+mirror must validate before publication, including late or missing-session
+responses. If a received receipt cannot be accounted locally, it stays in
+operation/attempt-owned volatile custody and the durable duty stays excluded.
+Ordinary snapshots never serialize that buffer. Existing local accounting may
+retry the same receipt without another RPC; no release or verification/batch
+effect is supplied by the buffer alone. A crash can lose an uncommitted reply,
+but cannot erase its prior valid durable request or imply settlement. Capacity
+pressure does not prune history or enlarge durable metadata limits.
+
+Original-checkpoint recovery uses an action-specific view of the validated
+metadata and matching session mirror, rather than ordinary binding eligibility.
+Local OFF adoption can preserve an in-flight operation alongside a runtime duty.
+Certified replay requires the latest actual producer certificate, unchanged
+enabled settings and exact live owner; it never refreshes the frozen work binding.
+A separately owned status read uses only the original connection and token for
+diagnostics. It cannot clear the checkpoint duty or supply a binding target.
+The generic admission and binding exclusions remain in effect throughout.
+
+Original-result recovery uses the existing shared retry scheduler. The original
+invocation counts as attempt one. With one through seven allocated attempts,
+the delays before the next attempt are respectively 2, 5, 10, 20, 30, 60 and
+60 seconds, plus deterministic positive jitter of at most 20%. At eight or
+more allocated attempts the delay is ten minutes plus the same bounded jitter;
+there is no lifetime eight-attempt stop. Read-only policy and binding probes
+precede allocation, so failed probes consume no attempt. The existing local
+schedule counts consecutive passes that fail before allocation, saturating at
+eight, and uses the greater of this count and the durable attempt count to
+choose the delay. Early probe success does not reset this history if a later
+preflight step fails. Only a newly allocated durable attempt or Accepted
+progress resets it; temporary owner ineligibility and repeated Send/Resume
+triggers retain the due time. Each tick starts at most one original recovery, oldest due
+first, within the four shared retry slots after ordinary admission retries.
+Accepted results can finish local accounting without another network attempt.
+If that component's exact stored receipt and effects are proved but its selected
+enclosure has independent unsettled custody, recovery reports held, retains the
+exclusion, and schedules the ten-minute class. Re-entry proves the stored cut
+without rewriting unchanged accounting or acknowledgement state. A failed proof
+uses the short local retry delay; after restart a fresh proof is required before
+the held class applies. The enclosure's own settlement remains independent.
+
+Restart derives a minimum delay class from the durable attempt lineage and
+schedules a full delay from the first new tick. The additional local failure
+counter restarts at zero, so an original with few allocated attempts may get
+a fresh bounded fast grace per process; this is not a restart-independent rate
+guarantee. A durable slow lineage never returns to the fast class.
+Repeated restarts can postpone progress. With healthy authority, a stable owner,
+an available shared slot and storage capacity, the slow class becomes eligible
+within twelve minutes plus a tick after scheduling. This is a conditional
+eligibility bound, not an unconditional completion guarantee or a change to the
+two-minute canary stop condition.
+
+The existing limit of 65,536 attempts is per original operation. At that limit,
+network recovery reports explicit capacity backpressure and retains every
+identity, attempt and exclusion; it never reuses a possibly-sent attempt or
+discards history. Aggregate ledger byte limits can also apply earlier. Capacity
+maintenance needs a separate supported workflow; continued recovery beyond the
+storage limit is not promised. Already Accepted local accounting remains
+available without allocating another attempt.
+
+For an owned matching receipt, its first Accepted result, evidence associations,
+owed batch binds and original confirmation are published together. The writer
+rejects an incoherent checkpoint mirror cut; ACK additionally reads back the
+actual evidence and batch images before exclusion release. An adopted enclosing
+duty sharing the checkpoint ID requires its own confirmation proof. A refusal
+retains only its validated diagnostic code, not private extension payloads.
+This boundary also applies to ordinary closing checkpoints and valid rejected
+delivery settlement. A fresh host loading the Accepted cut already has the
+evidence and batch effects; it needs no volatile reply pool to reconstruct them.
+A late non-owning reply can settle evidence addressed by its exact original
+store, binding, source and producer identity, but cannot convert successor-owned
+pending batches or retire its queued head. Failed persistence keeps receipt
+custody until the existing local accounting path proves the durable cut.
+
+Pending batch inputs with one unambiguous validated canonical original survive
+restart before Accepted and after an unowned Accepted reply. Their grant,
+successful producer, unique Test input, source measurement and original target
+fences must match; their original timestamps and targets are retained. This is
+receipt custody, not restored launcher verification. These matched inputs are
+protected from the ordinary pending expiry and later-invocation refusal drains.
+Only the exact Checkpointed receipt and a current safe accounting owner convert
+the matched slice. Existing owed identities deduplicate by original record and
+target fences; conflicting measurements or targets refuse conversion without
+discarding custody. Successor and unmatched slices are never consumed. Inputs
+without canonical provenance keep the existing lost-credit policy at load.
+
+The existing certified-not-applied retry remains finite and on demand. A busy
+or expired invocation records its qualified result against one local attempt;
+the next supported original-runtime close, ordinary Send settlement preflight,
+or binding settlement may claim one new attempt on the same original request
+and key. It cannot replace the report or use an old certificate after a later
+unknown result. The protected attempt and send boundary are acknowledged before
+replay. Settlement does not authorize admission: current settings, owner and all
+exclusions are checked again before the same caller may Bind, Evaluate, Begin
+or deliver a provider turn. Its existing admission budget includes preflight.
+Reservation, writer acknowledgement, checkpoint RPC, any permitted status read
+and continuation share that caller's absolute deadline, without a new phase budget.
+An invalid checkpoint token followed by an invalid status token supplies no
+settlement evidence and cannot erase the request or authorize a fresh Bind.
+
+Only a matching checkpoint receipt or supported `turn_grant_read` proving
+that exact original grant completed, expired or was superseded can clear its
+local reference, under the final original owner/generation fence. An issued,
+begun, absent, malformed or mismatched read does not establish terminality;
+a refusal code does not establish NeverSent. A terminal grant read alone
+does not account for an existing checkpoint's report, checks or owed close;
+those duties and their exact request remain protected. Exact pending Begin
+recovery is retained rather than replaced by a fresh bind. Its session cannot bypass the
+obligation through ungated dispatch, Resume, queue replacement, generic bind
+or boot recovery. Still-running affected providers use the existing Stop
+lifecycle, and remain unresolved until interruption is confirmed.
+
+A supported command on PATH remains the original executable configuration.
+Containment still validates local home, executable shape, declaration and any
+previously admitted store identity. A legacy connection without that identity
+can retain a prospective route as unconfirmed provenance: it cannot initialize
+the store, authenticate a settlement, enable admission or retire a grant. The
+public gating-only PATCH preserves the existing work authority and deadline.
+
+A validated return to gating ON preserves every unresolved obligation and sends
+no control request. Explicit Resume can reconcile a retained admission only
+when the original frozen image identifies the exact Bind or Evaluate, queued
+prompt and current owner, with no independent grant, checkpoint, possibly sent
+Begin or provider-interruption duty. Other sessions and fresh Send remain
+excluded from admission. With gating OFF, a plain user prompt may be appended
+behind an already retained, paused root-session head; it neither starts nor
+changes that head's recovery, and sends no control or provider request.
+A matching Evaluate grant transfers that one admission into its exact
+prepared-Begin protocol only after the successor queue and typed ledger proof
+are acknowledged together. This is a transfer, not terminal-grant evidence.
+The original Begin expiry, root/work, delivery and persistence fences still
+apply. Failed preparation keeps the transferred successor; restart treats a
+saved prepared Begin as potentially sent. A known Refuse or Defer preserves
+its actual withheld decision and records it with the ledger, without a grant
+or provider handoff. Missing or contradictory recovery evidence stays excluded.
+
+The joint `2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1` reader floor keeps these obligations in mandatory metadata outside session
+rows. Its `entries` and `checkpointOperations` collections are mandatory known
+fields, with explicit empty collections representing no retained operation.
+Containment, issued-grant retirement and pre-OFF existing-checkpoint protection
+are read and enforced by every reader of the joint obligation floor;
+an unavailable retirement handler leaves its record visibly excluded. Only
+positive NeverSent evidence permits the retirement producer's distinct-key
+SessionBind protocol. Confirmed containment history is retained; its exclusion
+lifts only after the writer acknowledgement, or a matching committed image at
+restart. A retained admission transfer must still match its current exact
+head, Evaluate and prepared Begin. Once a matching Begin result transfers
+responsibility to the ordinary grant lifecycle, that progress is committed
+explicitly with the successor. A still-unbegun prepared transfer additionally
+requires the original enabled admission settings and authority before and after
+its local acknowledgement and at boot; OFF revokes that permission even if a
+prior latch existed. No-grant decisions and terminal or begun-successor
+settlement keep their separate proof rules; a missing head alone is never
+proof of progress.
+Distinct completed admission cycles retain their original operation/head/owner
+identities without blocking a later OFF cycle. Unsupported ledger shapes
+refuse the whole load, before effects.
+Ordinary handoff uncertainty from the handoff-1 reader floor remains unchanged.
+Ordinary successful checkpoint reports keep only the latest full operation per
+session once older operations are Confirmed and durably acknowledged. Publishing
+a different successor close retires that eligible history in the same metadata
+transaction. The existing session-removal transaction also retires eligible
+history of removed sessions; later checkpoint publications can reclaim it once
+its active receipt custody ends. Unresolved or unacknowledged operations, active receipt/flight
+owners, reused wire identities and operations linked by containment entries
+remain intact. Compaction grants no replay permission: an old callback without
+its exact canonical operation cannot change a successor. Transcript control
+cards and processed verification receipts retain their existing audit owners.
+
+Session deletion checks the complete transitive delegation subtree before
+teardown and again under the final removal lock. Live flights, owned receipt custody
+and independent duties keep their session rows available for supported recovery.
+Inactive original checkpoint debt can remain after explicit removal, including
+the exact operation and attempt published by that deletion's own teardown.
+Its unresolved metadata is retained without declaring the report settled.
+Strictly matched pending batch targets and measurements remain in their
+session row, and converted member binds retain their own accounting lifetime.
+Session or project deletion is refused while those inputs or their project
+context are still needed. Supported same-store settings resets preserve them
+through the existing session-state owner. This does not alter OFF dispatch
+eligibility or settle an independent enclosing duty.
 
 Developer-principal, binary/home changes and project deletion retain the same
 generation-fenced runtime teardown and checkpoint ordering as other premium

@@ -1051,6 +1051,13 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
                     .to_string_lossy()
                     .into_owned(),
             );
+            // This regression begins a real admitted authority before saving
+            // its begun receipt. Supply that local identity in the fixture;
+            // a prospective legacy route cannot prove the old producer store.
+            let root = PathBuf::from(&inner.find_project(&project).unwrap().root_path);
+            let key = materialize_fixture_engram_store(&root, &root);
+            inner.projects.iter_mut().find(|p| p.id == project).unwrap()
+                .engram.as_mut().unwrap().authority_store_key = Some(key);
         }
         let dispatch = root_dispatch(&state, &session, false);
         assert!(matches!(
@@ -1150,7 +1157,39 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
                 .count(),
             1
         );
+        let unresolved = {
+            let inner = state.inner.lock().unwrap();
+            engram_session_obligation_locked(&inner, &session).cloned()
+        };
         state.cancel_queued_prompt(&session, &prompt).unwrap();
+        if let Some(original) = unresolved {
+            // OFF containment has not consumed the scripted checkpoint reply.
+            // Cancel removes the prompt, not its independent begun-grant duty.
+            assert!(!transport.requests().iter().any(|request|
+                request.request["operation"] == "turn_checkpoint"));
+            let original_image: EngramUnsettledControlImage =
+                serde_json::from_value(original.frozen_request.clone()).unwrap();
+            assert_eq!(original_image.queued_prompts[0].engram_evaluate.as_ref()
+                .unwrap().begun_grant_id.as_deref(), Some("grant"));
+            assert!(state.resume_session_queue(&session).is_err());
+            assert!(receiver.try_recv().is_err());
+            state.shutdown_persist_blocking();
+            let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+            let kept = engram_session_obligation_locked(&loaded, &session)
+                .expect("Cancel and restart retain the independent duty");
+            assert_eq!(serde_json::to_value(kept).unwrap(), serde_json::to_value(original).unwrap());
+            let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
+            assert_eq!(record.queued_prompts.len(), 1);
+            assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after disable");
+            continue;
+        }
+        // The positive branch needs an actually consumed matching checkpoint,
+        // not merely disabled settings or an unused scripted response.
+        let requests = transport.requests();
+        let checkpoints = requests.iter().filter(|request|
+            request.request["operation"] == "turn_checkpoint").collect::<Vec<_>>();
+        assert_eq!(checkpoints.len(), 1);
+        assert_eq!(checkpoints[0].request["grant_id"], "grant");
         state.resume_session_queue(&session).unwrap();
         let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
             panic!("successor should reach provider");

@@ -586,10 +586,33 @@ fn assert_root_causal_failure(operation: &'static str, ordinal: usize) {
             origin["causalFailure"]["continuationId"],
             original_head["id"]
         );
-        assert!(failed["causalFailure"]["continuationReason"]
-            .as_str()
-            .unwrap()
-            .contains("no new Evaluate"));
+        assert_eq!(
+            failed["causalFailure"]["continuationReason"],
+            "Closing checkpoint not settled; continuation cannot assume the prior grant closed."
+        );
+        let (checkpoint, canonical, excluded, grant) = {
+            let inner = fixture.state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
+            let checkpoint = record.engram.checkpoint_operation.clone();
+            let canonical = checkpoint.as_ref().and_then(|operation| {
+                selected_checkpoint_operation(&inner.engram_session_obligations, operation).cloned()
+            });
+            (
+                checkpoint,
+                canonical,
+                engram_admission_obligation_locked(&inner, &fixture.session).is_some(),
+                record.engram.active_grant_id.clone(),
+            )
+        };
+        let checkpoint = checkpoint.expect("the original lost report remains owed");
+        checkpoint.validate().unwrap();
+        assert_eq!(
+            serde_json::to_value(canonical.expect("canonical debt equals its session mirror")).unwrap(),
+            serde_json::to_value(&checkpoint).unwrap()
+        );
+        assert_eq!(serde_json::to_value(&checkpoint.original.request).unwrap(), lost);
+        assert_eq!(grant.as_deref(), lost["grant_id"].as_str());
+        assert!(excluded, "the retained original report withholds new admission");
         assert_eq!(
             fixture.transport.attempts.lock().unwrap()["turn_evaluate"],
             1
@@ -782,6 +805,12 @@ fn root_causal_checkpoint_link_rejects_stale_unrelated_reset_and_settled_causes(
     let _placement = TestTempRootDirectoryScope::repository_local();
     let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
     let (token, _, _) = fixture.start_and_queue();
+    let target = {
+        let inner = fixture.state.inner.lock().unwrap();
+        AppState::engram_binding_target_for_session_shape_locked(&inner, &fixture.session, true)
+    }
+    .unwrap()
+    .expect("capture the original authority before checkpoint debt excludes admission");
     // Exercise the actual checkpoint before admission's legitimate promotion.
     fixture.state.checkpoint_engram_turn_off_lock(
         &fixture.session,
@@ -792,30 +821,37 @@ fn root_causal_checkpoint_link_rejects_stale_unrelated_reset_and_settled_causes(
         Some(EngramExecutionOutcome::Succeeded),
         None,
     );
-    let mut inner = fixture.state.inner.lock().unwrap();
-    let target =
-        AppState::engram_binding_target_for_session_shape_locked(&inner, &fixture.session, true)
-            .unwrap()
-            .unwrap();
-    let index = inner.find_session_index(&fixture.session).unwrap();
-    let record = &mut inner.sessions[index];
-    let owner = EngramQueuedAdmissionOwner::capture(record).unwrap();
-    assert!(engram_checkpoint_cause_for_owner(record, &target, &owner).is_some());
+    let (current_target, record) = {
+        let inner = fixture.state.inner.lock().unwrap();
+        (
+            AppState::engram_binding_target_for_session_shape_locked(&inner, &fixture.session, true),
+            inner
+                .find_session_index(&fixture.session)
+                .map(|index| inner.sessions[index].clone()),
+        )
+    };
+    assert!(
+        current_target.unwrap().is_none(),
+        "original checkpoint debt excludes generic admission"
+    );
+    let mut record = record.expect("the original session remains present");
+    let owner = EngramQueuedAdmissionOwner::capture(&record).unwrap();
+    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_some());
     let mut stale = owner.clone();
     stale.prompt_id = "unrelated-head".to_owned();
-    assert!(engram_checkpoint_cause_for_owner(record, &target, &stale).is_none());
+    assert!(engram_checkpoint_cause_for_owner(&record, &target, &stale).is_none());
     stale = owner.clone();
     stale.active_turn_generation += 1;
-    assert!(engram_checkpoint_cause_for_owner(record, &target, &stale).is_none());
+    assert!(engram_checkpoint_cause_for_owner(&record, &target, &stale).is_none());
     record.engram.project_reset_in_progress = true;
-    assert!(engram_checkpoint_cause_for_owner(record, &target, &owner).is_none());
+    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_none());
     record.engram.project_reset_in_progress = false;
     record.runtime_stop_in_progress = true;
-    assert!(engram_checkpoint_cause_for_owner(record, &target, &owner).is_none());
+    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_none());
     record.runtime_stop_in_progress = false;
     let mut other_target = target.clone();
     other_target.connection.actor_id.push_str("-replacement");
-    assert!(engram_checkpoint_cause_for_owner(record, &other_target, &owner).is_none());
+    assert!(engram_checkpoint_cause_for_owner(&record, &other_target, &owner).is_none());
     // A later successful card for the same grant masks its old failure even
     // before the normal settlement clears the local grant.
     let mut success = record
@@ -838,7 +874,7 @@ fn root_causal_checkpoint_link_rejects_stale_unrelated_reset_and_settled_causes(
         author: Author::Assistant,
         card: success,
     });
-    assert!(engram_checkpoint_cause_for_owner(record, &target, &owner).is_none());
+    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_none());
 }
 
 #[test]

@@ -1489,6 +1489,7 @@ impl AppState {
         sessions: Vec<StateSessionSummary>,
     ) -> StateResponse {
         StateResponse {
+            engram_control_recovery: engram_control_recovery_summaries(inner),
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
             codex: inner.codex.clone(),

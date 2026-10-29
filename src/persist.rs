@@ -30,10 +30,13 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("termal.sqlite")
 }
 
-// The layout and its semantic reader floor evolve independently.
+// The joint floor inherits units-2 and ordinary handoff, and additionally
+// requires canonical containment, retirement and checkpoint custody metadata.
 const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
 const SQLITE_OBSERVATION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1";
-const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
+const SQLITE_OBSERVATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
+const SQLITE_CHECKPOINT_RESULT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1";
+const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
@@ -995,6 +998,7 @@ fn load_state_for_boot(
 
 include!("persist_metadata_units.rs");
 include!("persist_sqlite_schema.rs");
+include!("persist_sqlite_obligations.rs");
 
 include!("persist_sqlite_overview.rs");
 include!("persist_sqlite_messages.rs");
@@ -1009,9 +1013,16 @@ fn ensure_sqlite_state_schema_for_path(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<()> {
+    ensure_sqlite_state_schema_for_path_with_initialization(connection, path).map(|_| ())
+}
+
+fn ensure_sqlite_state_schema_for_path_with_initialization(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+) -> Result<bool> {
     let write_lock = sqlite_state_write_lock(path);
     let _write_guard = lock_sqlite_state_writer(&write_lock);
-    let setup = ensure_sqlite_state_schema(connection).with_context(|| {
+    let setup = ensure_sqlite_state_schema_with_initialization(connection).with_context(|| {
         format!(
             "failed to validate or initialize state database `{}`",
             path.display()
@@ -1038,6 +1049,7 @@ fn ensure_sqlite_state_schema_for_load_path(
 include!("persist_sqlite_schema_tests.rs");
 #[cfg(test)]
 include!("persist_sqlite_reader_floor_tests.rs");
+include!("persist_sqlite_obligations_tests.rs");
 
 fn load_state_from_sqlite_with_connection(
     path: &FsPath,
@@ -1317,9 +1329,18 @@ fn persist_locked_state_to_sqlite(path: &FsPath, inner: &StateInner) -> Result<u
         create_local_state_directory(parent)?;
     }
     let mut connection = open_sqlite_state_connection_unconfigured(path)?;
-    ensure_sqlite_state_schema_for_path(&connection, path)?;
+    let initialized = ensure_sqlite_state_schema_for_path_with_initialization(&connection, path)?;
     let writer = sqlite_state_write_lock(path);
     let guard = lock_sqlite_state_writer(&writer);
+    if initialized && inner.metadata_predecessor.load(std::sync::atomic::Ordering::Acquire) == 0 {
+        let generation = metadata_unit_generation(&connection)?;
+        if generation != 1 {
+            bail!("fresh metadata predecessor changed before source capture");
+        }
+        // This source is still held, and no snapshot has been made here yet.
+        // Never apply this adoption to an already captured delta.
+        inner.metadata_predecessor.store(generation, std::sync::atomic::Ordering::Release);
+    }
     let persisted = PersistedState::from_inner(inner);
     let metadata = persisted.metadata_only();
     persist_state_parts_via_connection(
@@ -1457,6 +1478,8 @@ fn persist_state_parts_via_connection(
             )
         })?;
     }
+    validate_sqlite_checkpoint_write_cut(&tx, &committed_metadata, &serialized_sessions)
+        .context("refusing incoherent checkpoint persistence cut")?;
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
     metadata
@@ -1840,6 +1863,8 @@ fn persist_delta_via_cache_inner(
                 &serialized_sessions,
                 serialized_delegations,
             )?;
+            validate_sqlite_checkpoint_write_cut(&tx, &committed_metadata, &serialized_sessions)
+                .context("refusing incoherent checkpoint persistence cut")?;
             Ok((tx, committed_metadata))
         });
     timings.statements = statements_started.elapsed();

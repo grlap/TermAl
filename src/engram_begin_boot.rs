@@ -191,6 +191,9 @@ impl AppState {
         let mut clock_now = None;
         let mut changed = false;
         for index in 0..inner.sessions.len() {
+            if engram_session_obligation_locked(inner, &inner.sessions[index].session.id).is_some() {
+                continue;
+            }
             let Some(plan) = engram_begin_boot_plan(&inner.sessions[index]) else {
                 continue;
             };
