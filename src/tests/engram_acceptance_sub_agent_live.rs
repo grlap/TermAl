@@ -137,7 +137,7 @@ fn live_sub_agent_host_submission_is_accepted_under_each_required_policy() {
         assert_eq!(response.mode, AcceptanceEvaluationMode::SubAgent);
         assert_eq!(response.receipt["evaluation"]["mode"], "sub_agent");
         assert_eq!(response.receipt["evaluation"]["passed"], 1);
-        let hash = response.receipt["evaluation"]["hash"].as_str().unwrap();
+        let hash = response.receipt["evaluation"]["evaluation"].as_str().unwrap();
         let evaluation = fixture.object(hash);
         assert_eq!(evaluation["mode"], "sub_agent");
         assert_eq!(evaluation["evaluator"]["session_id"], child.child_session_id);

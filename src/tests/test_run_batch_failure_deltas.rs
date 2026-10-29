@@ -1,9 +1,10 @@
 // Regression child of test_run_registration.rs, using its real observation
-// fixture. Owns the publication contract of an evidence batch whose
-// stopped-worker synchronous save fails: every changed row publishes its
-// failed tracking at its own allocated revision, and no revision is reused.
-// Does not own the batch's fences or durable saves (test_run_lifecycle_batch.rs)
-// or delta allocation itself (sse_broadcast.rs). New file, not split from another.
+// fixture. Owns the failure-publication contract of both test-run observation
+// writers: an evidence batch whose stopped-worker synchronous save fails, and
+// the single-row writer. Every changed row publishes its failed tracking at a
+// revision its own commit allocated, and no revision is reused. Does not own
+// the batch's fences or durable saves (test_run_lifecycle_batch.rs) or delta
+// allocation itself (sse_broadcast.rs). New file, not split from another.
 use super::*;
 
 /// A second live row in the same exact lifecycle as `row`.
@@ -98,4 +99,48 @@ fn a_batch_whose_revision_cannot_advance_publishes_no_reused_revision() {
     for id in &ids {
         assert!(inner.test_runs.observations_failed.contains(id), "the failed save is still tracked");
     }
+}
+
+/// Persists one row through the single-row writer and returns what it published.
+fn persist_single_row(fixture: &RunFixture, id: &str) -> Vec<(u64, TestRunSummary)> {
+    let row = fixture.state.inner.lock().unwrap().test_run_observations[id].clone();
+    let mut deltas = fixture.state.subscribe_delta_events();
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        fixture.state.persist_test_command_observation_locked(&mut inner, row);
+    }
+    changed_runs(&mut deltas)
+}
+
+#[test]
+fn the_single_row_writer_with_an_exhausted_revision_publishes_no_reused_revision() {
+    let (fixture, [id, _], _, _, _) = failing_stopped_worker_batch("single-row-exhausted");
+    fixture.state.inner.lock().unwrap().revision = u64::MAX;
+    let published = persist_single_row(&fixture, &id);
+    assert!(
+        published.is_empty(),
+        "the single-row writer may not publish at a revision it did not allocate: {:?}",
+        published.iter().map(|(revision, run)| (*revision, run.run_id.clone())).collect::<Vec<_>>()
+    );
+    let inner = fixture.state.inner.lock().unwrap();
+    assert_eq!(inner.revision, u64::MAX);
+    assert!(inner.test_runs.observations_failed.contains(&id), "the failed save is still tracked");
+    assert!(!inner.test_runs.observations_durable.contains(&id));
+}
+
+#[test]
+fn the_single_row_writer_still_publishes_a_failed_save_at_its_allocated_revision() {
+    let (fixture, [id, _], _, _, _) = failing_stopped_worker_batch("single-row-failed-save");
+    let before = fixture.state.inner.lock().unwrap().revision;
+    let published = persist_single_row(&fixture, &id);
+    assert_eq!(
+        published.iter().map(|(revision, run)| (*revision, run.run_id.clone())).collect::<Vec<_>>(),
+        [(before + 1, id.clone())],
+        "a save that fails after allocation still publishes its failure at that revision"
+    );
+    assert_eq!(published[0].1.registration.tracking_durability.as_deref(), Some("failed"));
+    let inner = fixture.state.inner.lock().unwrap();
+    assert_eq!(inner.revision, before + 1);
+    assert!(inner.test_runs.observations_failed.contains(&id));
+    assert!(!inner.test_runs.observations_durable.contains(&id));
 }

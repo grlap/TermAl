@@ -799,7 +799,25 @@ directory itself before the first stage, when Git ignores it and no
 a temporary sibling (`target` plus random characters) that the watcher does
 not ignore, and the first build in a fresh worktree would refuse its own
 gate. A command run through Claude's PowerShell tool is not reported
-to TermAl, so only the watcher can see what it writes. Once the run has
+to TermAl, so only the watcher can see what it writes. While a carried
+gate can still be credited and has not settled, TermAl denies any Claude
+session's Write, Edit, MultiEdit or NotebookEdit request whose target lies
+in the gate's worktree, including the holder's own and a subagent's, before
+it is allowed: the target is resolved against the session's directory and
+through links, an approval given later is checked again, and the denial says
+which gate it protects. A run read as ended stays protected until it
+settles, since the watcher reports late, and only a checkpoint of its holder
+on the claim that launched it settles it. While its holder is focused on
+another claim it settles only after the holder makes that claim its focus
+again, so it can stay protected until it expires six hours after its launch;
+the denial names the holder and when the protection ends. A gate already
+fenced, refused or expired is not protected. A target is judged as
+the watcher judges a change there: a worktree nested inside the gate's is
+its own, and the watcher's ignored directories and the `.tmp/` at the
+worktree's root are not protected. A denied request writes nothing, so the
+gate keeps its credit. Bash commands, Codex patches, other processes and
+anything that bypasses Claude's permission request are not covered; their
+writes still refuse the gate as above. Once the run has
 ended, a write no longer refuses it, except a change the watcher reports
 late, which may have landed while it ran; a source change still there at the
 checkpoint does. A host restart during the run loses the credit, and TermAl

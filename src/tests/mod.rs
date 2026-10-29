@@ -163,6 +163,7 @@ mod prompt_delivery;
 mod prompt_delivery_codex_write;
 mod provider_capacity_retry;
 mod queued_prompt_durability;
+mod read_only_quoted_separators;
 mod read_only_refusal_rules;
 mod remote;
 mod federation_control_fixture;

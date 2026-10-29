@@ -329,6 +329,37 @@ impl EngramHost<'_> {
             .note_engram_observed_workspace_file_changes(changes, observation, arrival);
     }
 
+    /// Whether a change in the directory keyed `directory_key`, at the entry
+    /// `name`, lies in the scratch directory at the root of the worktree keyed
+    /// `worktree`, which the workspace watcher leaves out
+    /// (`engram_is_worktree_scratch`).
+    pub(crate) fn is_worktree_scratch(
+        worktree: &str,
+        directory_key: &str,
+        name: Option<&str>,
+    ) -> bool {
+        engram_is_worktree_scratch(worktree, directory_key, name)
+    }
+
+    /// Whether the carried check `carried` is too old at `now` to be credited
+    /// (`engram_carried_check_expired`).
+    pub(crate) fn carried_check_expired(
+        carried: &EngramCarriedCheck,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        engram_carried_check_expired(carried, now)
+    }
+
+    /// When the carried check `carried` becomes too old to be credited: its
+    /// launch plus `ENGRAM_CARRIED_CHECK_TTL_SECONDS`, or `None` when its
+    /// launch time cannot be read (`engram_carried_check_expired`).
+    pub(crate) fn carried_check_expires_at(
+        carried: &EngramCarriedCheck,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        engram_parse_time(&carried.check.started_at)
+            .map(|launched| launched + chrono::Duration::seconds(ENGRAM_CARRIED_CHECK_TTL_SECONDS))
+    }
+
     /// The test-run index ticked: a carried gate's terminal record is read as
     /// soon as the tick finds it. Its one caller, the test-run index thread,
     /// is not built into tests, which call the poll directly.

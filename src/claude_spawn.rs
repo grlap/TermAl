@@ -567,6 +567,51 @@ fn write_private_claude_mcp_config(
     Ok(guard)
 }
 
+/// The setting with which Claude Code can be pointed at a shell other than
+/// the bash it finds itself.
+const CLAUDE_CODE_GIT_BASH_PATH_ENV: &str = "CLAUDE_CODE_GIT_BASH_PATH";
+
+/// What will run the Bash tool of the Claude process `command` starts, from
+/// the environment it hands that process: its own settings and removals,
+/// over the environment it inherits.
+fn claude_bash_tool_shell(command: &Command) -> ClaudeBashToolShell {
+    claude_bash_tool_shell_from_env(command.get_envs(), std::env::vars_os().map(|(key, _)| key))
+}
+
+/// The decision behind `claude_bash_tool_shell`, from a launch's `explicit`
+/// settings (`None` for a removal) and the names it `inherited`. Any
+/// `CLAUDE_CODE_GIT_BASH_PATH`, in any letter case and with any value (empty
+/// or not Unicode too), leaves the shell unproven, so the read-only checker
+/// stays strict. An inherited one counts unless the launch removes that exact
+/// name.
+fn claude_bash_tool_shell_from_env<'a>(
+    explicit: impl IntoIterator<Item = (&'a std::ffi::OsStr, Option<&'a std::ffi::OsStr>)>,
+    inherited: impl IntoIterator<Item = std::ffi::OsString>,
+) -> ClaudeBashToolShell {
+    let names_setting = |key: &std::ffi::OsStr| {
+        key.to_str()
+            .is_some_and(|key| key.eq_ignore_ascii_case(CLAUDE_CODE_GIT_BASH_PATH_ENV))
+    };
+    let mut removed = Vec::new();
+    let mut set = false;
+    for (key, value) in explicit {
+        if names_setting(key) {
+            match value {
+                Some(_) => set = true,
+                None => removed.push(key.to_owned()),
+            }
+        }
+    }
+    let inherited = inherited
+        .into_iter()
+        .any(|key| names_setting(&key) && !removed.contains(&key));
+    if set || inherited {
+        ClaudeBashToolShell::Unproven
+    } else {
+        ClaudeBashToolShell::ClaudeCodeDefault
+    }
+}
+
 /// Spawns Claude runtime.
 fn spawn_claude_runtime(
     state: AppState,
@@ -618,6 +663,8 @@ fn spawn_claude_runtime(
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
+    // Decided once, from the environment the process is handed.
+    let bash_tool_shell = claude_bash_tool_shell(&command);
 
     command
         .stdin(Stdio::piped())
@@ -726,7 +773,8 @@ fn spawn_claude_runtime(
                 reader_replay_prompt.clone(),
                 reader_cwd.clone(),
             )
-            .with_compact_hook(reader_compact_hook);
+            .with_compact_hook(reader_compact_hook)
+            .with_bash_tool_shell(bash_tool_shell);
             let mut frames =
                 ClaudeReaderFrames::new(&context, reader_input_tx.clone(), model_options_tx);
             let mut recorder =

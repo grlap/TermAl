@@ -14,6 +14,9 @@ struct HistoryService {
     scan: Option<std::thread::JoinHandle<HistoryReads>>,
     release_id: Option<String>,
     commits: Arc<Mutex<HashMap<String, std::time::Instant>>>,
+    // One-shot schedule hook: the writer reports it reached its next tick,
+    // then waits for release before draining or collecting anything.
+    writer_gate: Arc<Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>>,
     root: PathBuf,
     cleaned: mpsc::Receiver<std::result::Result<(), String>>,
     url: String,
@@ -41,7 +44,8 @@ impl HistoryService {
             state: Some(state), runtime: Some(runtime), server: None, stop: None,
             writer: None, scan: None, release_id: None,
             broadcaster: None, broadcast_stop, broadcast_barrier, events,
-            commits: Default::default(), root, cleaned, url: String::new(),
+            commits: Default::default(), writer_gate: Default::default(),
+            root, cleaned, url: String::new(),
         };
         let stop = service.broadcast_stop.clone();
         let senders = service.state.as_ref().unwrap().state_broadcast_senders.clone();
@@ -57,6 +61,7 @@ impl HistoryService {
         let inner = state.inner.clone();
         let path = state.persistence_path.clone();
         let commits = service.commits.clone();
+        let gate = service.writer_gate.clone();
         service.writer = Some(std::thread::spawn(move || {
             TEST_HISTORY_COMMITTED.with(|slot| {
                 *slot.borrow_mut() = Some(Box::new(move |delta| {
@@ -75,6 +80,11 @@ impl HistoryService {
                 if outcome == PersistWorkerWaitOutcome::Exit {
                     fences.fail(PersistFenceError::WorkerStopped);
                     break;
+                }
+                let held = gate.lock().unwrap().take();
+                if let Some((reached, release)) = held {
+                    let _ = reached.send(());
+                    let _ = release.recv();
                 }
                 let shutdown = fences.drain(&rx, outcome == PersistWorkerWaitOutcome::Shutdown);
                 fences.mark_in_tick();
@@ -97,6 +107,16 @@ impl HistoryService {
             axum::serve(listener, router).with_graceful_shutdown(async { let _ = stopped.await; }).await
         }));
         service
+    }
+
+    /// Holds the writer at its next tick: returns the receiver that reports
+    /// the writer reached it and the sender that releases it. Dropping the
+    /// sender also releases it.
+    fn hold_next_writer_tick(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        assert!(self.writer_gate.lock().unwrap().replace((reached_tx, release_rx)).is_none());
+        (reached_rx, release_tx)
     }
 
     fn serialized_failure_events(&mut self) -> String {

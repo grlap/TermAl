@@ -161,6 +161,7 @@ fn tracker_decision(
         ClaudeHostAdmission {
             control_plane: false,
             tracker_reads,
+            bash_tool_shell: ClaudeBashToolShell::Unproven,
         },
     )
     .unwrap()
@@ -337,6 +338,7 @@ fn tracker_reads_are_admitted_for_a_running_non_evaluator_child_with_the_hosts_s
         ClaudeHostAdmission {
             control_plane: false,
             tracker_reads: true,
+            bash_tool_shell: ClaudeBashToolShell::Unproven,
         }
     );
     // The parent is no delegation child, and an unknown session is nobody.

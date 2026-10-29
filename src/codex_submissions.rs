@@ -677,6 +677,31 @@ impl AppState {
 
         drop(inner);
 
+        // An approval given later is checked again: a write the user accepts
+        // after a gate started in its worktree is denied, and the card shows
+        // it rejected (`claude_gate_write_guard.rs`).
+        let gate_denial = claude_runtime_action.as_ref().and_then(|(_, pending)| {
+            matches!(
+                decision,
+                ApprovalDecision::Accepted | ApprovalDecision::AcceptedForSession
+            )
+            .then(|| {
+                self.claude_gate_write_guard_for(
+                    session_id,
+                    &pending.request_id,
+                    &pending.tool_name,
+                    &pending.tool_input,
+                    &pending.cwd,
+                )
+            })
+            .flatten()
+        });
+        let decision = if gate_denial.is_some() {
+            ApprovalDecision::Rejected
+        } else {
+            decision
+        };
+
         if let Some((handle, pending)) = claude_runtime_action {
             if decision == ApprovalDecision::AcceptedForSession {
                 if let Some(mode) = pending.permission_mode_for_session.clone() {
@@ -692,6 +717,9 @@ impl AppState {
             }
 
             let response = match decision {
+                ApprovalDecision::Rejected if gate_denial.is_some() => {
+                    gate_denial.expect("the gate denial was found")
+                }
                 ApprovalDecision::Accepted | ApprovalDecision::AcceptedForSession => {
                     ClaudePermissionDecision::Allow {
                         request_id: pending.request_id.clone(),

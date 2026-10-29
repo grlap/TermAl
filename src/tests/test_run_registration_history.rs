@@ -1,9 +1,12 @@
 // Owns structural and separately scheduled timing evidence under real history.
+// The structural case runs its durability budget on a scripted budget clock,
+// so machine load cannot decide it; the scheduled measurement keeps real time.
 // Does not change launcher budgets, fake durability, or measure the old host.
 use super::*;
 
 include!("test_run_registration_history_seed.rs");
 include!("test_run_registration_history_service.rs");
+include!("test_run_registration_history_clock.rs");
 
 #[derive(Default)]
 struct HistoryReads {
@@ -34,6 +37,11 @@ fn history_registration_cases(count: usize, enforce_budget: bool) {
     let project = create_test_project(&state, &root, "History registration");
     let owner = create_test_project_session(&state, Agent::Codex, &project, &root);
     let mut service = HistoryService::new(state);
+    if !enforce_budget {
+        // Structural evidence only: the fence's 5 s budget runs on a scripted
+        // clock that nothing advances, so a loaded writer cannot expire it.
+        service.state.as_ref().unwrap().select_test_scripted_engram_budget_clock();
+    }
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut seed = HistorySeed::new(&root, &owner, count);
         history_registration_case(&mut service, &root, &owner, &seed, "cold", enforce_budget);

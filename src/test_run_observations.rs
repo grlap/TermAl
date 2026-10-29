@@ -665,12 +665,15 @@ impl AppState {
         let id = observation.execution_id.clone();
         inner.test_runs.observations_durable.remove(&id);
         inner.test_runs.observations_failed.remove(&id);
+        let before = inner.revision;
         let result = self.commit_persisted_delta_locked_with_dispatch(inner);
         // The commit allocates its revision before attempting persistence.
         // Even a failed write publishes the factual tracking failure at that
         // revision, after its disposition is known, without a second commit
-        // or a global snapshot that would make the delta redundant.
-        let revision = inner.revision;
+        // or a global snapshot that would make the delta redundant. A commit
+        // that could not allocate a revision publishes nothing: the current
+        // revision already belongs to an earlier change.
+        let revision = (inner.revision != before).then_some(inner.revision);
         match result {
             Ok((_, PersistDispatch::Synchronous)) => {
                 inner.test_runs.observations_durable.insert(id);
@@ -707,7 +710,9 @@ impl AppState {
         }
         // Publication remains available when durability fails: its explicit
         // failed tracking state warns the operator instead of hiding the run.
-        if let Some(row) = inner.test_run_observations.get(&observation.execution_id) {
+        if let Some(revision) = revision
+            && let Some(row) = inner.test_run_observations.get(&observation.execution_id)
+        {
             let run = test_run_public_observation(inner, row);
             self.publish_delta_locked(inner, DeltaEvent::TestRunChanged { revision, run });
         }

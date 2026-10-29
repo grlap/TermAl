@@ -85,9 +85,9 @@ fn one_independent_evaluator_records_two_whole_attempts() {
         let evaluation = &receipt["evaluation"];
         assert_eq!(evaluation["passed"], 1, "{receipt:#}");
         assert_eq!(evaluation["verdicts_total"], 1, "{receipt:#}");
-        let hash = evaluation["hash"]
+        let hash = evaluation["evaluation"]
             .as_str()
-            .expect("producer evaluation hash")
+            .expect("producer evaluation record id")
             .to_owned();
         hashes.push(hash);
     }

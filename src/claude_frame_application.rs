@@ -47,6 +47,9 @@ struct ClaudeRuntimeContext {
     /// The SessionStart compact hook this runtime registered at initialize,
     /// if any (`claude_compact_hook.rs`).
     compact_hook: Option<Arc<ClaudeCompactHook>>,
+    /// What runs this runtime's Bash tool, decided once at spawn
+    /// (`claude_bash_tool_shell`): unproven, and so strict, unless set.
+    bash_tool_shell: ClaudeBashToolShell,
 }
 
 /// The control requests this runtime sent, by request id, with the origin
@@ -157,12 +160,19 @@ impl ClaudeRuntimeContext {
             replay_prompt,
             cwd,
             compact_hook: None,
+            bash_tool_shell: ClaudeBashToolShell::Unproven,
         }
     }
 
     /// This runtime's SessionStart compact hook, decided before initialize.
     fn with_compact_hook(mut self, compact_hook: Option<Arc<ClaudeCompactHook>>) -> Self {
         self.compact_hook = compact_hook;
+        self
+    }
+
+    /// What runs this runtime's Bash tool, decided at spawn.
+    fn with_bash_tool_shell(mut self, bash_tool_shell: ClaudeBashToolShell) -> Self {
+        self.bash_tool_shell = bash_tool_shell;
         self
     }
 
@@ -541,6 +551,31 @@ fn apply_claude_control(
             }
         }
         ClaudeControlStep::Request(origin) => {
+            // A file write Claude asks permission for, into a running gate's
+            // worktree, is denied before any policy can allow it, whoever
+            // asks: nothing is written, so the gate keeps its credit. Writes
+            // Claude makes without asking (acceptEdits, allow rules,
+            // bypassPermissions) never reach this point
+            // (`claude_gate_write_guard.rs`).
+            if let Some(denial) =
+                context
+                    .state
+                    .claude_gate_write_guard(&context.session_id, message, &context.cwd)
+            {
+                if let Some(request_id) = request_id {
+                    frames.control_origins.record(request_id, origin.clone());
+                }
+                return match send_claude_permission_response(
+                    &frames.input_tx,
+                    denial,
+                    "deny a write into a running gate's worktree",
+                ) {
+                    Ok(()) => ClaudeFrameApplied::Continue,
+                    Err(err) => ClaudeFrameApplied::TerminateRuntime(format!(
+                        "failed to handle Claude control request: {err:#}"
+                    )),
+                };
+            }
             // Approval mode and delegation-child identity are read under one
             // state lock so the attendedness policy never sees a torn pair.
             let (approval_mode, delegation_child) = match context
@@ -569,9 +604,12 @@ fn apply_claude_control(
                 approval_mode,
                 delegation_child,
                 &context.cwd,
-                context
-                    .state
-                    .claude_host_admission(&context.session_id, message),
+                ClaudeHostAdmission {
+                    bash_tool_shell: context.bash_tool_shell,
+                    ..context
+                        .state
+                        .claude_host_admission(&context.session_id, message)
+                },
             ) {
                 Ok(action) => action,
                 Err(err) => {

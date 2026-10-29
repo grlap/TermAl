@@ -118,6 +118,20 @@ fn test_run_diagnostic_id(value: &str) -> String {
     value.chars().filter(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_')).take(128).collect()
 }
 
+const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = Duration::from_secs(5);
+
+/// The registration's durability deadline. On real time it is measured from
+/// `requested`, the instant before the capture lock, exactly as before the
+/// budget clock was consulted; a scripted fixture clock measures from its own
+/// current reading, which only the fixture advances.
+fn test_run_registration_deadline(clock: &EngramBudgetClock, requested: std::time::Instant) -> std::time::Instant {
+    if matches!(clock, EngramBudgetClock::Real) {
+        requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
+    } else {
+        clock.now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
+    }
+}
+
 struct TestRunRegistrationDiagnostics {
     started: std::time::Instant,
     phase_started: std::time::Instant,
@@ -137,6 +151,8 @@ struct TestRunRegistrationDiagnostics {
     lock_observation_loss: Arc<std::sync::atomic::AtomicU64>,
     spans: Vec<(&'static str, Duration, Duration)>,
     fence_deadline: Option<std::time::Instant>,
+    // The clock the fence deadline is measured on.
+    fence_clock: EngramBudgetClock,
     durability_confirmed: bool,
     published: bool,
     failure_phase: Option<(&'static str, Duration)>,
@@ -165,6 +181,7 @@ impl TestRunRegistrationDiagnostics {
             lock_observation_loss: Arc::new(0.into()),
             spans: Vec::with_capacity(16),
             fence_deadline: None,
+            fence_clock: EngramBudgetClock::Real,
             durability_confirmed: false,
             published: false,
             failure_phase: None,
@@ -234,7 +251,7 @@ impl TestRunRegistrationDiagnostics {
             self.operation_id, self.attempt_ordinal, self.server_instance, self.method,
             self.request_digest.as_deref().unwrap_or("unavailable"),
             if self.method == "POST" { "5000" } else { "not_applicable" },
-            self.fence_deadline.map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()).as_millis().to_string()).unwrap_or_else(|| "not_started".to_owned()),
+            self.fence_deadline.map(|deadline| deadline.saturating_duration_since(self.fence_clock.now()).as_millis().to_string()).unwrap_or_else(|| "not_started".to_owned()),
             self.durability_confirmed, self.published, test_run_truncate(&locks, 384), test_run_truncate(&spans, 640),
         );
         test_run_truncate(&fields, 1600)
@@ -505,11 +522,18 @@ impl AppState {
             return Err(ApiError::bad_request("test run worktree is outside the configured project"));
         }
         if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        diagnostics.fence_deadline = Some(deadline);
+        let requested = std::time::Instant::now();
+        diagnostics.fence_deadline = Some(requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
         diagnostics.enter("capture_registration");
-        let (expected, dispatch) = {
+        let (expected, dispatch, clock, deadline) = {
             let mut inner = diagnostics.lock(&self.inner);
+            // The durability budget runs on the state's budget clock, as the
+            // observation fence's does. Real time keeps the start taken
+            // before this lock, so a lock wait still counts against it.
+            let clock = inner.engram_budget_clock_snapshot();
+            let deadline = test_run_registration_deadline(&clock, requested);
+            diagnostics.fence_deadline = Some(deadline);
+            diagnostics.fence_clock = clock.clone();
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::conflict("test run initiating session changed"))?;
@@ -621,7 +645,7 @@ impl AppState {
                     diagnostics.cause = Some(format!("{error:#}"));
                     ApiError::internal("test run registration persistence failed")
                 })?;
-            (expected, dispatch)
+            (expected, dispatch, clock, deadline)
         };
         diagnostics.writer_progress = Some(match dispatch {
             PersistDispatch::BackgroundQueued => "background Delta queued".to_owned(),
@@ -629,9 +653,10 @@ impl AppState {
         });
         if matches!(dispatch, PersistDispatch::BackgroundQueued) {
             diagnostics.enter("durability_fence_send");
-            let (fence, waiter) = PersistFence::new(
+            let (fence, waiter) = PersistFence::new_with_clock(
                 PersistFenceTarget::TestRunRegistration(expected.clone()),
                 deadline,
+                clock,
             );
             self.persist_tx
                 .send(PersistRequest::Fence(Box::new(fence)))

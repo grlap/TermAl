@@ -562,9 +562,11 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
             ClaudePendingApproval {
                 permission_mode_for_session: Some("acceptEdits".to_owned()),
                 request_id: "claude-route-request".to_owned(),
+                tool_name: "Edit".to_owned(),
                 tool_input: json!({
                     "path": "src/main.rs"
                 }),
+                cwd: "/tmp".to_owned(),
             },
         )
         .expect("pending Claude approval should be registered");

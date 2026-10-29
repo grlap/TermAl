@@ -151,6 +151,8 @@ impl AppState {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 read_only_child_tracker_reads_allowed_locked(&inner, session_id)
             },
+            // The runtime's reader, which knows how it was spawned, sets this.
+            bash_tool_shell: ClaudeBashToolShell::Unproven,
         }
     }
 }
@@ -166,6 +168,24 @@ struct ClaudeHostAdmission {
     /// (`read_only_child_tracker_reads_allowed_locked`). Which calls are reads
     /// is decided per request by `engram_mcp_tool_call_only_reads`.
     tracker_reads: bool,
+    /// What runs this runtime's Bash tool, decided once at spawn
+    /// (`claude_bash_tool_shell`). Unproven unless the runtime's reader says
+    /// otherwise.
+    bash_tool_shell: ClaudeBashToolShell,
+}
+
+/// What TermAl knows about the shell Claude Code runs its Bash tool in,
+/// decided once at spawn from the environment handed to the process.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ClaudeBashToolShell {
+    /// Not proven to be bash: a shell-changing setting is in the spawned
+    /// environment, or the runtime was not started by TermAl's launch path.
+    /// The read-only checker stays strict.
+    #[default]
+    Unproven,
+    /// Claude Code chooses its own bash (Git Bash on Windows): the spawned
+    /// environment holds no `CLAUDE_CODE_GIT_BASH_PATH`.
+    ClaudeCodeDefault,
 }
 
 impl From<bool> for ClaudeHostAdmission {
@@ -174,6 +194,7 @@ impl From<bool> for ClaudeHostAdmission {
         Self {
             control_plane,
             tracker_reads: false,
+            bash_tool_shell: ClaudeBashToolShell::Unproven,
         }
     }
 }
@@ -318,7 +339,9 @@ fn classify_claude_control_request(
             approval: ClaudePendingApproval {
                 permission_mode_for_session: request.permission_mode_for_session,
                 request_id: request.request_id,
+                tool_name: request.tool_name,
                 tool_input: request.tool_input,
+                cwd: cwd.to_owned(),
             },
         },
         ClaudeApprovalMode::AutoApprove => {
@@ -327,9 +350,14 @@ fn classify_claude_control_request(
                 updated_input: request.tool_input,
             })
         }
-        ClaudeApprovalMode::ReadOnlyAutoApprove => ClaudeControlRequestAction::Respond(
-            read_only_claude_permission_decision(request, cwd, host_admission.tracker_reads),
-        ),
+        ClaudeApprovalMode::ReadOnlyAutoApprove => {
+            ClaudeControlRequestAction::Respond(read_only_claude_permission_decision(
+                request,
+                cwd,
+                host_admission.tracker_reads,
+                host_admission.bash_tool_shell,
+            ))
+        }
         ClaudeApprovalMode::Plan => {
             ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
                 request_id: request.request_id,
@@ -501,11 +529,12 @@ fn read_only_claude_permission_decision(
     request: ClaudeToolPermissionRequest,
     cwd: &str,
     tracker_reads: bool,
+    bash_tool_shell: ClaudeBashToolShell,
 ) -> ClaudePermissionDecision {
     let tracker_word = engram_mcp_tool_word(&request.tool_name);
     let allowed = match tracker_word {
         Some(word) => tracker_reads && engram_mcp_tool_call_only_reads(word, &request.tool_input),
-        None => claude_tool_permission_request_is_read_only(&request, cwd),
+        None => claude_tool_permission_request_is_read_only(&request, cwd, bash_tool_shell),
     };
     if allowed {
         return ClaudePermissionDecision::Allow {
@@ -525,65 +554,166 @@ fn read_only_claude_permission_decision(
     }
 }
 
-// Read-only Claude reviewer children need unattended review commands, but the
-// parser is intentionally conservative: unsupported shell syntax denies by
-// default, and only simple stderr-to-dev-null redirection is tolerated.
-fn claude_tool_permission_request_is_read_only(
-    request: &ClaudeToolPermissionRequest,
-    cwd: &str,
-) -> bool {
-    match request.tool_name.as_str() {
-        // ToolSearch only discovers definitions; executing the discovered tool
-        // gets its own permission request (and control-plane authority check).
-        "Read" | "LS" | "Glob" | "Grep" | "ToolSearch" => true,
-        // Loading skill instructions is not a workspace write. Any tools the
-        // skill subsequently requests still pass through this permission gate.
-        "Skill" => true,
-        // The Windows PowerShell tool is DENIED for read-only reviewers. It carries
-        // its command in the same `command` field, so an earlier revision routed it
-        // through the Bash reader below. That reader implements BASH grammar, and
-        // every attempt to bolt PowerShell onto it produced a security defect:
-        //
-        //   * `echo (Set-Content x y)` — PowerShell EVALUATES a parenthesized
-        //     sub-expression. Survived only because the tokenizer happens to fail
-        //     closed on `(`.
-        //   * `git status 2>/dev/null` — the reader strips that literal before its
-        //     `>` gate, then approves the ORIGINAL; PowerShell writes the file
-        //     `<drive>\dev\null`.
-        //   * `cd (Set-Content x y)` — the `cd ` head reached `continue` before the
-        //     tokenizer ran: arbitrary-path WRITE.
-        //   * `g\it status` — the tokenizer de-escapes `\` per bash, so it reads as
-        //     `git`; PowerShell treats `\` as a PATH SEPARATOR and executes
-        //     `.\g\it(.cmd/.ps1)` FROM THE REVIEWED TREE: arbitrary code execution
-        //     from the reviewed tree: arbitrary code execution.
-        //
-        // Four defects, each a fresh denylist entry on a parser that models the
-        // wrong language, and the escapes got worse each time. `&` (call operator),
-        // `--%` (stop-parsing), and profile side effects are still unexamined. So
-        // the rule is structural rather than another patch: a bash parser may only
-        // gate bash.
-        //
-        // Cost is nil — reviewers already do their work through the Bash tool (Git
-        // Bash on Windows), and this arm never cleared anything beyond `git …`
-        // anyway. Restoring PowerShell needs its OWN fail-closed checker, not a
-        // re-route through this one.
-        "PowerShell" => false,
-        "Bash" => request
-            .tool_input
-            .get("command")
-            .and_then(Value::as_str)
-            .is_some_and(|command| claude_bash_command_is_read_only(command, cwd)),
-        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => false,
-        _ => false,
+use claude_read_only_tool_permission::{
+    ClaudeBashExecutor, claude_tool_permission_request_is_read_only,
+};
+
+/// The read-only Claude permission adapter, in a module of its own so that
+/// only its Bash arm can make the `ClaudeBashExecutor` proof that selects the
+/// bash checker mode.
+mod claude_read_only_tool_permission {
+    use super::*;
+
+    /// Proof that a command is checked for Claude Code's Bash tool, which
+    /// runs bash (Git Bash on Windows). Its private field means only this
+    /// module can make one: a construction anywhere else does not compile, so
+    /// no other caller can select `ClaudeBashQuotedSeparators::KeptForBash`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) struct ClaudeBashExecutor(());
+
+    // Read-only Claude reviewer children need unattended review commands, but the
+    // parser is intentionally conservative: unsupported shell syntax denies by
+    // default, and only simple stderr-to-dev-null redirection is tolerated.
+    pub(super) fn claude_tool_permission_request_is_read_only(
+        request: &ClaudeToolPermissionRequest,
+        cwd: &str,
+        bash_tool_shell: ClaudeBashToolShell,
+    ) -> bool {
+        match request.tool_name.as_str() {
+            // ToolSearch only discovers definitions; executing the discovered tool
+            // gets its own permission request (and control-plane authority check).
+            "Read" | "LS" | "Glob" | "Grep" | "ToolSearch" => true,
+            // Loading skill instructions is not a workspace write. Any tools the
+            // skill subsequently requests still pass through this permission gate.
+            "Skill" => true,
+            // The Windows PowerShell tool is DENIED for read-only reviewers. It carries
+            // its command in the same `command` field, so an earlier revision routed it
+            // through the Bash reader below. That reader implements BASH grammar, and
+            // every attempt to bolt PowerShell onto it produced a security defect:
+            //
+            //   * `echo (Set-Content x y)` — PowerShell EVALUATES a parenthesized
+            //     sub-expression. Survived only because the tokenizer happens to fail
+            //     closed on `(`.
+            //   * `git status 2>/dev/null` — the reader strips that literal before its
+            //     `>` gate, then approves the ORIGINAL; PowerShell writes the file
+            //     `<drive>\dev\null`.
+            //   * `cd (Set-Content x y)` — the `cd ` head reached `continue` before the
+            //     tokenizer ran: arbitrary-path WRITE.
+            //   * `g\it status` — the tokenizer de-escapes `\` per bash, so it reads as
+            //     `git`; PowerShell treats `\` as a PATH SEPARATOR and executes
+            //     `.\g\it(.cmd/.ps1)` FROM THE REVIEWED TREE: arbitrary code execution
+            //     from the reviewed tree: arbitrary code execution.
+            //
+            // Four defects, each a fresh denylist entry on a parser that models the
+            // wrong language, and the escapes got worse each time. `&` (call operator),
+            // `--%` (stop-parsing), and profile side effects are still unexamined. So
+            // the rule is structural rather than another patch: a bash parser may only
+            // gate bash.
+            //
+            // Cost is nil — reviewers already do their work through the Bash tool (Git
+            // Bash on Windows), and this arm never cleared anything beyond `git …`
+            // anyway. Restoring PowerShell needs its OWN fail-closed checker, not a
+            // re-route through this one.
+            "PowerShell" => false,
+            // Claude Code's Bash tool runs bash (Git Bash on Windows), so this arm
+            // alone may keep a quoted `|` or `&` inside its argument. TermAl does
+            // not choose that shell; the guarantee is Claude Code's. A runtime
+            // spawned with a setting that changes it stays strict
+            // (`claude_bash_tool_shell`).
+            "Bash" => {
+                let separators = match bash_tool_shell {
+                    ClaudeBashToolShell::ClaudeCodeDefault => {
+                        ClaudeBashQuotedSeparators::KeptForBash(ClaudeBashExecutor(()))
+                    }
+                    ClaudeBashToolShell::Unproven => ClaudeBashQuotedSeparators::Refused,
+                };
+                request
+                    .tool_input
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| {
+                        claude_bash_command_is_read_only_with(command, cwd, separators)
+                    })
+            }
+            "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => false,
+            _ => false,
+        }
     }
 }
 
+/// `command` without its stderr discards: each `2>/dev/null` or
+/// `2> /dev/null` that stands as a word of its own, at the start or after
+/// unescaped whitespace, and before the end, whitespace, `|` or `&`. Any other
+/// occurrence returns `None`. Removing it as text would join its neighbours,
+/// so `\2>/dev/null'` would leave `\'`: an escaped quote to the splitter
+/// while bash reads a real one, hiding a real separator inside a quote.
+fn claude_bash_strip_stderr_discard(command: &str) -> Option<String> {
+    const FORMS: [&str; 2] = ["2> /dev/null", "2>/dev/null"];
+    let mut stripped = String::with_capacity(command.len());
+    let mut copied = 0;
+    for (index, _) in command.char_indices() {
+        if index < copied {
+            continue;
+        }
+        let Some(form) = FORMS
+            .iter()
+            .find(|form| command[index..].starts_with(**form))
+        else {
+            continue;
+        };
+        let mut before = command[..index].chars().rev();
+        let starts_word = match before.next() {
+            None => true,
+            Some(' ' | '\t') => before.next() != Some('\\'),
+            Some(_) => false,
+        };
+        let ends_word = matches!(
+            command[index + form.len()..].chars().next(),
+            None | Some(' ' | '\t' | '|' | '&')
+        );
+        if !starts_word || !ends_word {
+            return None;
+        }
+        stripped.push_str(&command[copied..index]);
+        copied = index + form.len();
+    }
+    stripped.push_str(&command[copied..]);
+    Some(stripped)
+}
+
+/// Whether a read-only Bash check may find a `|` or `&` inside quotes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClaudeBashQuotedSeparators {
+    /// Split at every `|`, `||` and `&&`, quoted or not, so a quoted one
+    /// leaves an unterminated quote and the command is refused. For every
+    /// caller whose shell is not proven to be bash.
+    Refused,
+    /// Keep a quoted `|` or `&` inside its argument
+    /// (`claude_bash_top_level_segments`), in a pattern reader's segment
+    /// only; a command with one in any other segment is refused
+    /// (`claude_bash_tokens_read_patterns`). Only for an executor proven to run
+    /// bash, since the quoting rules of other shells differ: the proof can be
+    /// made only by the Claude Bash permission adapter.
+    KeptForBash(ClaudeBashExecutor),
+}
+
+/// The read-only check for a command whose shell is not proven to be bash: a
+/// quoted separator is refused. Every caller but the Claude Bash permission
+/// adapter uses this.
 fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
+    claude_bash_command_is_read_only_with(command, cwd, ClaudeBashQuotedSeparators::Refused)
+}
+
+fn claude_bash_command_is_read_only_with(
+    command: &str,
+    cwd: &str,
+    separators: ClaudeBashQuotedSeparators,
+) -> bool {
     // Detect background separators on the ORIGINAL command, before the
-    // `2>/dev/null` strip below. That strip is a naive text replace, so on input
-    // like `echo x \2>/dev/null& touch y` it would delete `2>/dev/null` and leave
-    // `\&`, making the real background `&` look escaped to the (escape-aware)
-    // separator gate. Bash escapes the `2`, not the `&`.
+    // `2>/dev/null` strip below. On input like `echo x \2>/dev/null& touch y`, a
+    // text replace would delete `2>/dev/null` and leave `\&`, making the real
+    // background `&` look escaped to the (escape-aware) separator gate. Bash
+    // escapes the `2`, not the `&`. The strip below also refuses that shape.
     if claude_bash_command_has_background_separator(command) {
         return false;
     }
@@ -594,12 +724,12 @@ fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
     // is deliberately not a general Bash interpreter: dynamic loop values,
     // nested control flow, unknown variables, and trailing commands fail closed.
     if command.trim_start().starts_with("for ") {
-        return claude_bash_literal_for_loop_is_read_only(command, cwd);
+        return claude_bash_literal_for_loop_is_read_only(command, cwd, separators);
     }
 
-    let normalized = command
-        .replace("2> /dev/null", "")
-        .replace("2>/dev/null", "");
+    let Some(normalized) = claude_bash_strip_stderr_discard(command) else {
+        return false;
+    };
     if normalized.contains('\n')
         || normalized.contains('\r')
         || normalized.contains(';')
@@ -611,8 +741,37 @@ fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
         return false;
     }
 
-    let pipe_normalized = normalized.replace("&&", "|").replace("||", "|");
-    let segments: Vec<&str> = pipe_normalized.split('|').map(str::trim).collect();
+    let segments = match separators {
+        // Split at every `|`, `||` and `&&`, as text: a quoted one leaves an
+        // unterminated quote in a segment, which the tokenizer refuses.
+        ClaudeBashQuotedSeparators::Refused => normalized
+            .replace("&&", "|")
+            .replace("||", "|")
+            .split('|')
+            .map(|segment| segment.trim().to_owned())
+            .collect::<Vec<_>>(),
+        // Split only at a `|`, `||` or `&&` outside quotes, so a `|` or `&`
+        // inside a quoted argument (a grep alternation) stays in it. A shape
+        // the splitter cannot place for every shell fails closed
+        // (`claude_bash_top_level_segments`). Only a pattern reader may hold a
+        // quoted separator, and it must still pass every check below: the
+        // other commands' checks were written for master's split and may read
+        // a `|` in an argument as plain text where the program does not (sed's
+        // `\|re|` address), so any other segment holding one is refused.
+        ClaudeBashQuotedSeparators::KeptForBash(_) => {
+            let Some(segments) = claude_bash_top_level_segments(&normalized) else {
+                return false;
+            };
+            if !segments
+                .iter()
+                .all(|segment| claude_bash_segment_may_hold_quoted_separator(segment))
+            {
+                return false;
+            }
+            segments
+        }
+    };
+    let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
 
     // `cd <dir> && git ...` can retarget git to a *different* repo whose on-disk
     // `.git/config` carries `core.fsmonitor`/`diff.external`/`core.pager` exec sinks
@@ -681,7 +840,11 @@ fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
     true
 }
 
-fn claude_bash_literal_for_loop_is_read_only(command: &str, cwd: &str) -> bool {
+fn claude_bash_literal_for_loop_is_read_only(
+    command: &str,
+    cwd: &str,
+    separators: ClaudeBashQuotedSeparators,
+) -> bool {
     const MAX_LOOP_VALUES: usize = 64;
     const MAX_BODY_COMMANDS: usize = 16;
 
@@ -733,7 +896,7 @@ fn claude_bash_literal_for_loop_is_read_only(command: &str, cwd: &str) -> bool {
             // Validate the body as one shell sequence, not isolated commands.
             // Directory changes persist between `;` clauses and iterations, so
             // separate checks would miss `cd other; git status` retargeting Git.
-            claude_bash_command_is_read_only(&commands.join(" && "), cwd)
+            claude_bash_command_is_read_only_with(&commands.join(" && "), cwd, separators)
         })
     })
 }
@@ -786,6 +949,218 @@ fn claude_bash_top_level_semicolon_clauses(command: &str) -> Option<Vec<String>>
     }
     clauses.push(final_clause.to_owned());
     Some(clauses)
+}
+
+/// Whether a segment from `claude_bash_top_level_segments` may hold the `|`
+/// or `&` it holds, which can only be inside quotes there: it holds none, or
+/// its command, as the tokenizer reads it, is a pattern reader
+/// (`claude_bash_tokens_read_patterns`). A necessary condition only: the
+/// segment's own checks still decide whether it reads only.
+fn claude_bash_segment_may_hold_quoted_separator(segment: &str) -> bool {
+    if !segment.contains(['|', '&']) {
+        return true;
+    }
+    claude_bash_segment_tokens(segment).is_some_and(|tokens| {
+        claude_bash_tokens_read_patterns(&tokens.iter().map(String::as_str).collect::<Vec<_>>())
+    })
+}
+
+/// Whether `tokens` run a pattern reader whose words may hold a `|` or `&`:
+/// `grep`, `rg`, `git grep`, or `git log` whose every word holding one is the
+/// pattern of a `--grep` option (`claude_git_log_separators_are_grep_patterns`).
+/// Judged from the command word and from git's subcommand, found past the
+/// leading options git's own check accepts (`claude_git_subcommand_index`),
+/// never from a substring. It admits no command the per-command checks do not.
+fn claude_bash_tokens_read_patterns(tokens: &[&str]) -> bool {
+    match tokens {
+        ["grep" | "rg", ..] => true,
+        ["git", ..] => {
+            let Some(index) = claude_git_subcommand_index(tokens) else {
+                return false;
+            };
+            match tokens.get(index).copied() {
+                Some("grep") => true,
+                Some("log") => claude_git_log_separators_are_grep_patterns(&tokens[index + 1..]),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Whether, in the words after `git log`, every word holding a `|` or `&` is
+/// the pattern of a `--grep` option, and at least one is: `--grep=<pattern>`,
+/// or the word after a bare `--grep`. Every other option must be one whose
+/// words are known, `--name=value` or a flag below that takes no value, since
+/// any other could take the next word as its value; after `--` every word is
+/// a path, and none may hold one.
+fn claude_git_log_separators_are_grep_patterns(arguments: &[&str]) -> bool {
+    const FLAGS: &[&str] = &[
+        "--oneline",
+        "--all",
+        "--no-merges",
+        "--first-parent",
+        "--reverse",
+        "--stat",
+        "--name-only",
+        "--name-status",
+        "--no-color",
+        "-i",
+        "--regexp-ignore-case",
+        "-E",
+        "--extended-regexp",
+        "-F",
+        "--fixed-strings",
+        "-P",
+        "--perl-regexp",
+        "--all-match",
+        "--invert-grep",
+    ];
+    let mut held = false;
+    let mut index = 0;
+    while let Some(&argument) = arguments.get(index) {
+        if argument == "--" {
+            return held
+                && arguments[index + 1..]
+                    .iter()
+                    .all(|path| !path.contains(['|', '&']));
+        }
+        if argument == "--grep" {
+            let Some(pattern) = arguments.get(index + 1) else {
+                return false;
+            };
+            held |= pattern.contains(['|', '&']);
+            index += 2;
+            continue;
+        }
+        if argument.contains(['|', '&']) {
+            if !argument.starts_with("--grep=") {
+                return false;
+            }
+            held = true;
+        } else if argument.starts_with('-')
+            && !argument.contains('=')
+            && !FLAGS.contains(&argument)
+            // `-<number>`, a count, takes no value.
+            && !(argument.len() > 1
+                && argument[1..].chars().all(|character| character.is_ascii_digit()))
+        {
+            return false;
+        }
+        index += 1;
+    }
+    held
+}
+
+/// The index in `tokens` (`git` first) of git's subcommand, past the leading
+/// options git's own check accepts; `None` for any other leading option.
+fn claude_git_subcommand_index(tokens: &[&str]) -> Option<usize> {
+    let mut index = 1;
+    while let Some(option) = tokens.get(index).copied() {
+        match option {
+            // Flag-only global options that cannot retarget the repository,
+            // force a pager, or relocate the git binary.
+            "--no-pager" | "-P" | "--no-optional-locks" => index += 1,
+            // First non-option token is the subcommand.
+            _ if !option.starts_with('-') => break,
+            // Any other leading option is unknown -> fail closed.
+            _ => return None,
+        }
+    }
+    Some(index)
+}
+
+/// The pipeline and list segments of `command`, split at each `|`, `||` and
+/// `&&` that is outside quotes and not escaped, each trimmed (an empty one is
+/// kept, for the caller to refuse). Quotes and escapes are stepped exactly as
+/// `claude_bash_top_level_semicolon_clauses` and `claude_bash_segment_tokens`
+/// step them: single quotes escape nothing, inside double quotes a `\` takes
+/// the next character, and outside quotes a `\` takes the next character. The
+/// segments keep their quotes and escapes for the tokenizer. `None`, so the
+/// command is refused, for what cannot be placed the same way by every shell
+/// that may run it, or is malformed:
+/// - an unterminated quote, or a `\` with nothing after it;
+/// - a `|` or `&` escaped outside quotes: a literal to bash, an operator to
+///   PowerShell;
+/// - a lone `&` (a background job, or bash's `|&`);
+/// - a `|` or `&` inside quotes in a command that also holds `\"`: inside
+///   double quotes bash keeps `\"` in the string, PowerShell ends it there,
+///   so the quoted separator may be a real one;
+/// - a `|` or `&` inside quotes in a command that also holds a `\'` or `\"`
+///   outside quotes (a literal quote to bash, a quote opener to PowerShell)
+///   or a typographic quote U+2018 to U+201F (a quote to PowerShell only):
+///   either can move where PowerShell's quote ends;
+/// - a `|` or `&` inside quotes in a command that also holds `--%`:
+///   PowerShell's stop-parsing token, after which it ignores quotes until
+///   the next `|`, so the quoted separator may be a real one.
+fn claude_bash_top_level_segments(command: &str) -> Option<Vec<String>> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut quoted_separator = false;
+    let mut escaped_quote_outside = false;
+    let mut characters = command.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        if let Some(active_quote) = quote {
+            current.push(character);
+            if active_quote == '"' && character == '\\' {
+                let next = characters.next()?;
+                quoted_separator |= matches!(next, '|' | '&');
+                current.push(next);
+            } else if character == active_quote {
+                quote = None;
+            } else {
+                quoted_separator |= matches!(character, '|' | '&');
+            }
+            continue;
+        }
+
+        match character {
+            '\\' => {
+                let next = characters.next()?;
+                if matches!(next, '|' | '&') {
+                    return None;
+                }
+                escaped_quote_outside |= matches!(next, '\'' | '"');
+                current.push(character);
+                current.push(next);
+            }
+            '\'' | '"' => {
+                quote = Some(character);
+                current.push(character);
+            }
+            '|' => {
+                if characters.peek() == Some(&'|') {
+                    characters.next();
+                }
+                segments.push(std::mem::take(&mut current).trim().to_owned());
+            }
+            '&' => {
+                if characters.next() != Some('&') {
+                    return None;
+                }
+                segments.push(std::mem::take(&mut current).trim().to_owned());
+            }
+            _ => current.push(character),
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    if quoted_separator
+        && (command.contains("\\\"")
+            || escaped_quote_outside
+            || command.contains("--%")
+            || command
+                .chars()
+                .any(|character| ('\u{2018}'..='\u{201F}').contains(&character)))
+    {
+        return None;
+    }
+    segments.push(current.trim().to_owned());
+    Some(segments)
 }
 
 fn claude_bash_strip_keyword<'a>(clause: &'a str, keyword: &str) -> Option<&'a str> {
@@ -1350,18 +1725,9 @@ fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
     // Re-enabling `-C` requires TermAl to neutralize those sinks in the
     // reviewer child's git environment; the checker only approves the agent's
     // verbatim command and cannot do it here.
-    let mut index = 1;
-    while let Some(option) = tokens.get(index).copied() {
-        match option {
-            // Flag-only global options that cannot retarget the repository,
-            // force a pager, or relocate the git binary.
-            "--no-pager" | "-P" | "--no-optional-locks" => index += 1,
-            // First non-option token is the subcommand.
-            _ if !option.starts_with('-') => break,
-            // Any other leading option is unknown -> fail closed.
-            _ => return false,
-        }
-    }
+    let Some(index) = claude_git_subcommand_index(tokens) else {
+        return false;
+    };
 
     // Rebuild `[git, subcommand, args...]` so the downstream helpers, which use
     // `.skip(2)`, keep their positional assumptions. A value-taking option with

@@ -62,6 +62,11 @@ mod reported_ends;
 #[path = "engram_batch_gate_flow.rs"]
 mod batch_gate_flow;
 
+// The host's guard on Claude file writes into a running gate's worktree, a
+// child module so this file does not grow further.
+#[path = "engram_gate_write_guard.rs"]
+mod gate_write_guard;
+
 #[test]
 fn a_full_gate_launch_is_carried_dropped_or_ordinary_by_its_line_and_result() {
     use EngramLaunchDisposition::{Carry, Drop, Ordinary};
