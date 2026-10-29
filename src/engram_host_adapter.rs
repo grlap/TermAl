@@ -986,8 +986,16 @@ struct EngramTransportError {
     message: String,
     /// The process this call meant to run never started, so it cannot have
     /// written anything. Only a failed spawn says so: every later failure
-    /// leaves a write's outcome open.
+    /// leaves a write's outcome open. It also marks Engram control as
+    /// unavailable (`EngramCausalFailure::control_availability`).
     process_never_started: bool,
+    /// The control transport failed before it handed any byte of this
+    /// call's request frame to the control worker, the only writer to the
+    /// process (`engram_control_transport.rs`). The request provably never
+    /// reached Engram, so its remote application is "not started"; unlike
+    /// `process_never_started` it says nothing about control availability,
+    /// so an exhausted budget or a worker race stays a hold.
+    request_never_sent: bool,
     /// The control sidecar this failure was observed on, when the transport
     /// saw one (`engram_control_transport.rs`); `None` is never filled in.
     control_process: Option<EngramControlProcessEvidence>,
@@ -1006,6 +1014,7 @@ impl EngramTransportError {
             code: Some("control_binding_unavailable".to_owned()),
             message: message.into(),
             process_never_started: true,
+            request_never_sent: false,
             control_process: None,
         }
     }
@@ -1017,6 +1026,7 @@ impl EngramTransportError {
             code: Some("deadline_exceeded".to_owned()),
             message: message.into(),
             process_never_started: false,
+            request_never_sent: false,
             control_process: None,
         }
     }
@@ -1028,8 +1038,34 @@ impl EngramTransportError {
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
             process_never_started: false,
+            request_never_sent: false,
             control_process: None,
         }
+    }
+
+    /// Marks a failure the control transport saw before it handed any byte
+    /// of this call's request frame to the control worker, which is the
+    /// only writer to the process: the request provably never reached
+    /// Engram. The error's kind is kept for `counts_for_circuit_breaker`
+    /// and `disables_session`, and control availability is unchanged; only
+    /// the remote application becomes "not started".
+    fn request_never_sent(mut self) -> Self {
+        self.request_never_sent = true;
+        self
+    }
+
+    /// Whether the host stopped this request before handing it to the
+    /// control transport (a guard, a preparation or a budget check), so it
+    /// is unsent and is no evidence about the transport's health. A
+    /// failure the transport itself proved unsent (`request_never_sent`)
+    /// is not one: it still counts for the circuit and backoff, and a
+    /// protocol failure still disables the session.
+    fn stopped_before_transport(&self) -> bool {
+        !self.request_never_sent
+            && self.causal_failure.as_ref().is_some_and(|cause| {
+                cause.remote_application == EngramRemoteApplication::NotStarted
+                    && !cause.transport_unsent
+            })
     }
 
     /// A transport failure before any process existed.
@@ -1048,6 +1084,7 @@ impl EngramTransportError {
             code: Some("unknown_control_schema".to_owned()),
             message: message.into(),
             process_never_started: false,
+            request_never_sent: false,
             control_process: None,
         }
     }
@@ -1059,6 +1096,7 @@ impl EngramTransportError {
             code: Some(error.code),
             message: error.message,
             process_never_started: false,
+            request_never_sent: false,
             control_process: None,
         }
     }
@@ -1070,6 +1108,7 @@ impl EngramTransportError {
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
             process_never_started: false,
+            request_never_sent: false,
             control_process: None,
         }
     }
@@ -7124,9 +7163,11 @@ impl AppState {
                             // reached Engram, so it is no transport failure:
                             // no circuit count, no bind backoff, and no rebind
                             // that would expire the pending begin's grant.
-                            let unsent = error.causal_failure.as_ref().is_some_and(|cause| {
-                                cause.remote_application == EngramRemoteApplication::NotStarted
-                            });
+                            // A begin the transport itself proved unsent is
+                            // not kept this way: its failure is still the
+                            // transport's, and it takes the possibly-begun
+                            // path below with its exact replay.
+                            let unsent = error.stopped_before_transport();
                             let kept_pending_unsent = unsent
                                 && replaying.is_none()
                                 && !reconstructing

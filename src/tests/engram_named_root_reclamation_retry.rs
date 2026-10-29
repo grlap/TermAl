@@ -93,9 +93,11 @@ impl EngramControlTransport for StartupExhaustedRootReader {
             budgets.push(timeout);
             if budgets.len() == 1 {
                 self.clock.advance(timeout);
+                // As the real transport classifies it: before the hand-off.
                 return Err(EngramTransportError::deadline(
                     "Engram admission budget exhausted during process startup",
-                ));
+                )
+                .request_never_sent());
             }
         }
         self.control.request(connection, request, timeout)

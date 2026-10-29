@@ -194,24 +194,43 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         request: &EngramControlRequest,
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError> {
+        // Only the control worker writes to the process, and only after it
+        // receives this request from the channel below. Every failure before
+        // that hand-off provably sent no byte of the request frame, so it is
+        // marked `request_never_sent`. A deadline, EOF or protocol failure
+        // after the hand-off may follow a partial or complete write and
+        // keeps the outcome unknown.
         let started_at = std::time::Instant::now();
         let encoded = serde_json::to_vec(request).map_err(|err| {
             EngramTransportError::protocol(format!("failed encoding request: {err}"))
+                .request_never_sent()
         })?;
         if encoded.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES {
             return Err(EngramTransportError::protocol(
                 "Engram request exceeds the maximum control frame",
-            ));
+            )
+            .request_never_sent());
         }
 
-        let process = self.process_for(connection)?;
+        // Spawn, attach, resume and the startup handshake only read from the
+        // process; none of them writes this request. A program that could
+        // not be resolved at all already says its process never started
+        // (`spawn_failed`), which keeps its own meaning.
+        let process = self.process_for(connection).map_err(|error| {
+            if error.process_never_started {
+                error
+            } else {
+                error.request_never_sent()
+            }
+        })?;
         if started_at.elapsed() >= timeout {
             // This request sent no frame. Leave the registered process for a
             // later request with a fresh budget; repeated cold starts could
             // otherwise prevent bounded lifecycle reads from ever progressing.
             return Err(EngramTransportError::deadline(
                 "Engram admission budget exhausted during process startup",
-            ));
+            )
+            .request_never_sent());
         }
         let (reply_tx, reply_rx) = mpsc::channel();
         process
@@ -221,12 +240,15 @@ impl EngramControlTransport for ProcessEngramControlTransport {
                 reply: reply_tx,
             })
             .map_err(|err| {
+                // The worker had already dropped its receiver, so it never
+                // took this request and wrote none of it.
                 let evidence = observe_engram_control_process(&process.process);
                 self.discard_process(&connection.session_id, &process);
                 EngramTransportError::transport(format!(
                     "Engram control worker is unavailable: {err}"
                 ))
                 .with_control_process(evidence)
+                .request_never_sent()
             })?;
 
         let remaining = timeout.saturating_sub(started_at.elapsed());

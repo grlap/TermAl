@@ -35,6 +35,10 @@ struct ReplayScript {
     lose_after_apply: AtomicUsize,
     /// Begins (only) that fail before reaching the producer.
     unavailable: AtomicUsize,
+    /// Begins (only) that the control transport proves it never handed over,
+    /// as `ProcessEngramControlTransport` reports a dropped worker or a
+    /// startup budget run out (`request_never_sent`).
+    transport_unsent: AtomicUsize,
     /// Every begin and evaluate fails before reaching the producer.
     all_unavailable: AtomicBool,
     /// The next replayed begin (not the first send) is refused with this.
@@ -95,6 +99,14 @@ impl ScriptedReplay {
         self.script.begin_bounds.lock().unwrap().push(timeout);
         if self.begin_fails_before_producer() {
             return Err(EngramTransportError::transport(UNAVAILABLE));
+        }
+        if self
+            .script
+            .transport_unsent
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+            .is_ok()
+        {
+            return Err(EngramTransportError::transport(UNAVAILABLE).request_never_sent());
         }
         if replay && let Some((entered, release)) = self.script.hold_replay.lock().unwrap().take() {
             entered.send(()).unwrap();
@@ -304,6 +316,44 @@ fn begin_replay_applied_begin_is_delivered_once_without_resume() {
         "the retained head reaches the provider exactly once"
     );
     assert_eq!(uncertain(&state, &session), None, "settled by the receipt");
+    assert_eq!(retained(&state, &session), 0);
+}
+
+/// A begin the control transport proved it never handed over is classified
+/// not started on its card, yet kept possibly begun, as every transport
+/// failure of a begin is. With no Resume, its exact begin is replayed
+/// automatically with the original key, grant and tokens, and the head
+/// reaches the provider exactly once without a fresh evaluate. The failure
+/// still counts for the transport's circuit.
+#[test]
+fn begin_replay_of_a_transport_unsent_begin_is_exact_and_delivered_once() {
+    let script = ReplayScript::default();
+    script.transport_unsent.store(1, Ordering::SeqCst);
+    let (state, session, receiver, transport) = replay_fixture(script);
+    let first = deliver_into_begin_unknown(&state, &session, &receiver, &transport);
+    let cause = begin_cause(&state, &session).expect("the begin card names its cause");
+    assert_eq!(cause["remoteApplication"], "not_started", "{cause}");
+    assert_eq!(cause["transportUnsent"], true, "{cause}");
+    assert!(
+        with_record(&state, &session, |record| record.engram.consecutive_transport_failures) >= 1,
+        "the transport's failure is counted"
+    );
+
+    // Past the transport failure's backoff and the replay's due time; once
+    // delivered, later ticks find nothing left to replay.
+    for _ in 0..3 {
+        tick_past_due(&state, &session);
+    }
+
+    assert_eq!(begins(&transport).len(), 2, "the unsent begin is replayed once");
+    assert_every_begin_is(&transport, &first);
+    assert_eq!(evaluates(&transport).len(), 1, "no fresh evaluate");
+    assert_eq!(
+        abort_retry::prompts_received(&receiver),
+        1,
+        "the retained head reaches the provider exactly once"
+    );
+    assert_eq!(uncertain(&state, &session), None, "settled by the replay's receipt");
     assert_eq!(retained(&state, &session), 0);
 }
 

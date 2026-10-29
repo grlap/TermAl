@@ -38,17 +38,20 @@ fn engram_begin_replay_pending(record: &SessionRecord) -> Option<&EngramPrepared
 /// Whether a dispatch card's cause admits replay of its exact prepared begin.
 /// Transport failures, deadlines and ordinary structured errors leave it
 /// unknown. A certified no-change invocation is replayable too; it never
-/// settles an earlier attempt of the retained begin. A producer refusal,
-/// protocol mismatch or local hold that never sent the begin keeps its own
-/// distinguishable hold. So does an error that invalidates the routing token:
+/// settles an earlier attempt of the retained begin. So is a begin the
+/// control transport proved it never handed over (`transport_unsent`): it
+/// is kept possibly begun, and its exact replay is the only send. A
+/// producer refusal, protocol mismatch or local hold that never sent the
+/// begin keeps its own distinguishable hold. So does an error that invalidates the routing token:
 /// the same begin under that token can never be answered, and a rebind to get
 /// another could expire the grant. Retain an explicit hold naming that error.
 fn engram_cause_allows_begin_replay(cause: &EngramCausalFailure) -> bool {
     cause.operation == "turn_begin"
-        && matches!(
+        && (matches!(
             cause.remote_application,
             EngramRemoteApplication::Unknown | EngramRemoteApplication::NotApplied
-        )
+        ) || (cause.transport_unsent
+            && cause.remote_application == EngramRemoteApplication::NotStarted))
         && matches!(
             cause.failure_class,
             EngramCausalFailureClass::Transport

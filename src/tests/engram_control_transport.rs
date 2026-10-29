@@ -47,6 +47,17 @@ fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
     let error = transport.request(&connection, &expired, Duration::ZERO).unwrap_err();
     assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
     assert!(error.message.contains("budget exhausted during process startup"));
+    // The request was never handed to the worker: it is proven unsent, not
+    // an unknown outcome, and keeps its deadline kind for circuit accounting.
+    // An exhausted budget is no proof that control is unavailable, so the
+    // cause withholds availability and the turn stays a hold.
+    assert!(error.request_never_sent);
+    assert!(!error.process_never_started);
+    assert!(error.counts_for_circuit_breaker());
+    let cause = EngramCausalFailure::request(&error, &expired);
+    assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+    assert!(!cause.control_availability);
+    assert!(!engram_ordinary_availability_cause(&cause));
     let prepared = transport.processes.lock().unwrap()
         .get(&connection.session_id).cloned()
         .expect("an unsent request must leave the prepared process available to a later pass");
@@ -56,6 +67,221 @@ fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
     let (token, _) = process_fixture_bind(&transport, &connection, "startup-budget-bind");
     assert!(!token.is_empty());
     assert!(Arc::ptr_eq(&prepared, &transport.process_for(&connection).unwrap()));
+    transport.shutdown_session(&connection.session_id);
+}
+
+fn unsent_boundary_connection(
+    temp_root: &TestTempRoot,
+    binary_path: PathBuf,
+    session_id: &str,
+) -> EngramConnectionConfig {
+    let project_file = temp_root.path().join(".engram-project");
+    EngramConnectionConfig {
+        binary_path,
+        project_file,
+        home: temp_root.path().to_path_buf(),
+        project_root: temp_root.path().to_path_buf(),
+        actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
+        session_id: session_id.to_owned(),
+    }
+}
+
+fn unsent_boundary_bind(title: String, key: &str) -> EngramControlRequest {
+    EngramControlRequest::SessionBind {
+        external_ref: "termal:unsent-boundary".to_owned(),
+        title,
+        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
+        mediated_effects: vec![EngramEffect::Observe],
+        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
+        work_binding: None,
+        idempotency_key: key.to_owned(),
+    }
+}
+
+/// An oversize request is refused before any process is consulted, so no
+/// byte of it can have reached Engram.
+#[test]
+fn an_oversize_request_frame_is_proven_unsent_and_starts_no_process() {
+    let temp_root = TestTempRoot::create("engram-control-oversize-unsent");
+    fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
+    let connection = unsent_boundary_connection(
+        &temp_root,
+        real_engram_control_fixture_path(),
+        "engram-fixture-oversize",
+    );
+    let transport = real_process_fixture_transport(temp_root.path());
+    let oversize = unsent_boundary_bind(
+        "x".repeat(ENGRAM_CONTROL_MAX_FRAME_BYTES + 1),
+        "oversize-bind",
+    );
+
+    let error = transport
+        .request(&connection, &oversize, DEADLOCK_GUARD)
+        .expect_err("an oversize frame must be refused");
+
+    assert_eq!(error.kind, EngramTransportErrorKind::Protocol);
+    assert!(error.message.contains("exceeds the maximum control frame"));
+    assert!(error.request_never_sent);
+    // Still a protocol failure for the session's disable rule.
+    assert!(error.disables_session());
+    assert_eq!(
+        EngramCausalFailure::request(&error, &oversize).remote_application,
+        EngramRemoteApplication::NotStarted
+    );
+    assert!(
+        transport.processes.lock().unwrap().is_empty(),
+        "no control process may be started for a frame that cannot be sent"
+    );
+}
+
+/// A control process whose startup handshake fails was only read from, so
+/// it never received the request. The fixture starts and prints its own
+/// ready line, which this transport does not expect: the failure is in
+/// `process_for`, after the process ran, on every platform.
+#[test]
+fn a_startup_handshake_failure_is_proven_unsent() {
+    let temp_root = TestTempRoot::create("engram-control-handshake-unsent");
+    fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
+    let connection = unsent_boundary_connection(
+        &temp_root,
+        real_engram_control_fixture_path(),
+        "engram-fixture-handshake-unsent",
+    );
+    let transport = ProcessEngramControlTransport::with_startup_handshake(
+        temp_root.path().to_path_buf(),
+        "a-ready-line-the-fixture-never-prints",
+        DEADLOCK_GUARD,
+    );
+    let request = unsent_boundary_bind("Handshake failure".to_owned(), "handshake-unsent-bind");
+
+    let error = transport
+        .request(&connection, &request, DEADLOCK_GUARD)
+        .expect_err("a mismatched startup handshake must fail");
+
+    assert!(error.request_never_sent, "{error}");
+    assert!(!error.process_never_started, "the process did start: {error}");
+    let cause = EngramCausalFailure::request(&error, &request);
+    assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+    assert!(!cause.control_availability);
+    assert!(transport.processes.lock().unwrap().is_empty());
+}
+
+/// The Begin consumer keeps a fresh begin pending, with no transport
+/// accounting, only when the host stopped it before the transport. A begin
+/// the transport proved unsent is still the transport's failure: it counts
+/// for the circuit and a protocol failure disables the session. Only a
+/// process that never started marks control unavailable.
+#[test]
+fn only_a_host_stopped_request_skips_transport_accounting() {
+    let with_cause = |mut error: EngramTransportError, not_started: bool| {
+        let mut cause = EngramCausalFailure::error(&error, "turn_begin", None, &[]);
+        if not_started {
+            cause.remote_application = EngramRemoteApplication::NotStarted;
+        }
+        error.causal_failure = Some(cause);
+        error
+    };
+
+    // The adapter's own pre-transmission stop (a guard or budget): its own
+    // hold, never the possibly-begun replay.
+    let host_stopped = with_cause(EngramTransportError::deadline("Begin budget ran out"), true);
+    assert!(host_stopped.stopped_before_transport());
+    assert!(!engram_cause_allows_begin_replay(
+        host_stopped.causal_failure.as_ref().unwrap()
+    ));
+
+    // The transport proved these unsent; they stay transport failures, and
+    // the saved cause carries the distinction.
+    for (transport_unsent, replays) in [
+        (EngramTransportError::transport("worker gone").request_never_sent(), true),
+        (
+            EngramTransportError::deadline("budget exhausted during process startup")
+                .request_never_sent(),
+            true,
+        ),
+        // A protocol failure disables the session; it is never replayed.
+        (EngramTransportError::protocol("oversize frame").request_never_sent(), false),
+    ] {
+        let cause = EngramCausalFailure::error(&transport_unsent, "turn_begin", None, &[]);
+        assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+        assert!(cause.transport_unsent);
+        assert!(!cause.control_availability, "{transport_unsent}");
+        assert_eq!(engram_cause_allows_begin_replay(&cause), replays, "{transport_unsent}");
+        let restored: EngramCausalFailure =
+            serde_json::from_value(serde_json::to_value(&cause).unwrap()).unwrap();
+        assert!(restored.transport_unsent, "a restored card keeps the distinction");
+        let error = with_cause(transport_unsent, false);
+        assert!(!error.stopped_before_transport(), "{error}");
+        assert!(
+            error.counts_for_circuit_breaker() || error.disables_session(),
+            "the transport's failure still takes its accounting: {error}"
+        );
+    }
+
+    // A possibly sent failure is neither.
+    let possibly_sent = with_cause(EngramTransportError::deadline("call exceeded"), false);
+    assert!(!possibly_sent.stopped_before_transport());
+
+    // A process that never started keeps its availability meaning, and is
+    // not marked as the transport's unsent request.
+    let spawn = EngramTransportError::spawn_failed("missing binary");
+    let cause = EngramCausalFailure::error(&spawn, "session_bind", None, &[]);
+    assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+    assert!(cause.control_availability);
+    assert!(!cause.transport_unsent);
+}
+
+/// The boundary of "proven unsent": once the request frame has been handed
+/// to the control worker, a later deadline or early exit may follow a
+/// partial or complete write, so the outcome stays unknown.
+#[test]
+fn a_failure_after_the_request_frame_is_handed_to_the_worker_stays_possibly_sent() {
+    let temp_root = TestTempRoot::create("engram-control-sent-boundary");
+    let project_file = temp_root.path().join(".engram-project");
+    let connection = unsent_boundary_connection(
+        &temp_root,
+        real_engram_control_fixture_path(),
+        "engram-fixture-sent-boundary",
+    );
+    let transport = real_process_fixture_transport(temp_root.path());
+    let request = unsent_boundary_bind("Sent boundary".to_owned(), "sent-boundary-bind");
+
+    // The hang fixture reads the frame and never replies. The process is
+    // started first, and the budget is long enough that encoding and the
+    // registry lookup cannot run it out before the hand-off on a loaded host:
+    // the deadline this asserts is the one after the hand-off.
+    fs::write(&project_file, "fixture-hang\n").unwrap();
+    transport
+        .process_for(&connection)
+        .expect("the hang fixture should start before the request");
+    let deadline = transport
+        .request(&connection, &request, Duration::from_secs(2))
+        .expect_err("the hang fixture must hit the deadline");
+    assert_eq!(deadline.kind, EngramTransportErrorKind::Deadline);
+    assert!(
+        deadline.message.contains("control call exceeded"),
+        "the post-hand-off deadline, not the startup budget: {deadline}"
+    );
+    assert!(!deadline.request_never_sent);
+    assert!(!deadline.process_never_started);
+    assert_eq!(
+        EngramCausalFailure::request(&deadline, &request).remote_application,
+        EngramRemoteApplication::Unknown
+    );
+
+    // The EOF fixture ends the exchange without a reply.
+    fs::write(&project_file, "fixture-eof\n").unwrap();
+    let eof = transport
+        .request(&connection, &request, DEADLOCK_GUARD)
+        .expect_err("the EOF fixture must fail");
+    assert_eq!(eof.kind, EngramTransportErrorKind::Transport);
+    assert!(!eof.request_never_sent);
+    assert!(!eof.process_never_started);
+    assert_eq!(
+        EngramCausalFailure::request(&eof, &request).remote_application,
+        EngramRemoteApplication::Unknown
+    );
     transport.shutdown_session(&connection.session_id);
 }
 

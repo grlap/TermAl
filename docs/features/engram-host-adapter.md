@@ -3092,7 +3092,11 @@ A begin whose outcome is unknown leaves its grant possibly begun: a reply lost
 after the send, a transport failure or deadline after it, or a structured
 error reply, whatever card code that failure carries. A producer refusal, a
 mismatched receipt or a local hold that never sent the begin is not unknown,
-and keeps its own hold. Such a begin is settled only by replaying it exactly
+and keeps its own hold. A begin the control transport proved it never handed
+to its worker (a worker already gone, or the startup budget run out before
+the hand-off) is no local hold: its card cause says `not_started` with
+`transportUnsent`, the failure counts for the transport's circuit, and its
+grant is kept possibly begun, so it takes the same exact replay. Such a begin is settled only by replaying it exactly
 (`src/engram_begin_replay.rs`). The head is begin-unknown while its retained
 evaluate's prepared begin names the session's uncertain grant and no grant is
 active.

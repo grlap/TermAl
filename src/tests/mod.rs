@@ -241,6 +241,7 @@ mod turns;
 mod work_visualizer;
 mod workspace;
 mod workspace_labels;
+mod prompt_target_parity;
 
 #[derive(Default)]
 struct TestRecorder {

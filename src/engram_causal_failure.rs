@@ -51,6 +51,14 @@ struct EngramCausalFailure {
     authority_fingerprint: Option<String>,
     #[serde(default)]
     control_process: EngramControlProcessObservation,
+    /// The control transport proved this request never reached Engram
+    /// (`EngramTransportError::request_never_sent`). It tells a request the
+    /// transport could not hand over, whose possibly begun Begin keeps its
+    /// exact replay, from a host-local hold that never handed it over
+    /// (`EngramTransportError::stopped_before_transport`). Saved with the
+    /// cause, so a restored card keeps the distinction.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    transport_unsent: bool,
 }
 
 /// The control sidecar a failure was observed on. Explicitly unavailable when
@@ -210,7 +218,10 @@ impl EngramCausalFailure {
                 == EngramInvocationApplication::CertifiedNotApplied
             {
                 EngramRemoteApplication::NotApplied
-            } else if error.process_never_started {
+            } else if error.process_never_started || error.request_never_sent {
+                // `request_never_sent` proves only that this request did not
+                // reach Engram; control availability above stays tied to a
+                // process that never started.
                 EngramRemoteApplication::NotStarted
             } else {
                 EngramRemoteApplication::Unknown
@@ -225,6 +236,7 @@ impl EngramCausalFailure {
                 .as_ref()
                 .map(EngramControlProcessObservation::from)
                 .unwrap_or_default(),
+            transport_unsent: error.request_never_sent,
         }
     }
 
@@ -252,7 +264,12 @@ impl EngramCausalFailure {
             wire["idempotency_key"].as_str(),
             &secrets,
         );
-        if error.causal_failure.is_none() && error.kind == EngramTransportErrorKind::Protocol {
+        // An unsent protocol failure (an oversize or unencodable request) had
+        // no response to validate; it keeps the request boundary.
+        if error.causal_failure.is_none()
+            && error.kind == EngramTransportErrorKind::Protocol
+            && !error.request_never_sent
+        {
             cause.boundary = "Engram control response validation".to_owned();
         }
         cause

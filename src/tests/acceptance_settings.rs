@@ -204,6 +204,68 @@ fn acceptance_settings_argv_replaces_whole_policy_with_cas_and_stable_key() {
 }
 
 #[test]
+fn acceptance_settings_idempotency_key_charset_and_length_are_each_checked() {
+    const PREFIX: &str = "termal-policy-";
+    let mut request = change("reader".into());
+    // Each key passes the prefix check, so only the character check can
+    // refuse it.
+    for key in [
+        "termal-policy-a\nb",
+        "termal-policy-a b",
+        "termal-policy-a;b",
+        "termal-policy-a_b",
+        "termal-policy-\u{e4}",
+    ] {
+        assert!(key.starts_with(PREFIX), "{key:?}");
+        request.idempotency_key = key.into();
+        assert!(request.args("operator").is_err(), "{key:?}");
+    }
+    // The length bound, with valid characters: at it, and one past it.
+    let at_bound = format!("{PREFIX}{}", "a".repeat(100 - PREFIX.len()));
+    assert_eq!(at_bound.len(), 100);
+    request.idempotency_key = at_bound.clone();
+    assert!(request.args("operator").is_ok());
+    request.idempotency_key = format!("{at_bound}a");
+    assert!(request.args("operator").is_err());
+}
+
+#[test]
+fn acceptance_settings_actor_is_a_single_argv_token() {
+    let request = change("reader".into());
+    let plain = request.args("operator").unwrap();
+    let at = plain
+        .iter()
+        .position(|arg| arg == "--authorized-by=operator")
+        .expect("the plain actor's token");
+    for actor in [
+        "op erator",
+        "op=erator",
+        "op\"erator",
+        "op'erator",
+        "op;erator",
+        "op$(touch x)",
+        "--op",
+        "op\nerator",
+    ] {
+        let args = request.args(actor).unwrap();
+        assert_eq!(args.len(), plain.len(), "{actor:?}: {args:?}");
+        let holding = args
+            .iter()
+            .enumerate()
+            .filter(|(_, arg)| arg.contains(actor))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(holding, [at], "{actor:?}: {args:?}");
+        assert_eq!(args[at], format!("--authorized-by={actor}"), "{actor:?}");
+        for (index, (arg, plain_arg)) in args.iter().zip(&plain).enumerate() {
+            if index != at {
+                assert_eq!(arg, plain_arg, "{actor:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn acceptance_settings_options_and_required_flags_match_captured_binary_usage() {
     let help = include_str!("fixtures/engram-acceptance-policy-set-help.txt");
     let usage = help
