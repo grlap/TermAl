@@ -907,6 +907,160 @@ test("a named live test with no result line, or a count that does not cover the 
   assert.deepEqual(missingLiveTests([liveWitness], ""), [liveWitness]);
 });
 
+// A test's own diagnostics, written outside libtest's capture, can split
+// `test NAME ... ` from its status, as in the pinned live run that recorded
+// `test NAME ... engram> …` and then a standalone `ok`.
+const splitResult = (name, status, diagnostics = ["engram> session=session-1 [TermAl] Check credit: not recorded"]) => [
+  `test ${name} ... ${diagnostics[0] ?? ""}`.trimEnd(),
+  ...diagnostics.slice(1),
+  status,
+];
+const libtestLog = (lines, passed, failed) => [
+  `running ${passed + failed} tests`,
+  ...lines,
+  "",
+  `test result: ${failed ? "FAILED" : "ok"}. ${passed} passed; ${failed} failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.10s`,
+].join("\n");
+
+test("a named live test's status split from its name by diagnostics still counts once", () => {
+  const names = [liveWitness, liveSibling];
+  // The status on a line of its own, after one diagnostic or several, passed or failed.
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    ...splitResult(liveWitness, "ok"),
+    `test ${liveSibling} ... ok`,
+  ], 2, 0)), []);
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    ...splitResult(liveWitness, "FAILED", ["engram> first", "engram> second", "  indented detail"]),
+    ...splitResult(liveSibling, "ok", []),
+  ], 1, 1)), []);
+  assert.deepEqual(missingLiveTests(names, `\u001b[0m${libtestLog([
+    ...splitResult(liveWitness, "\u001b[32mok\u001b[0m"),
+    `test ${liveSibling} ... ok`,
+  ], 2, 0)}`), []);
+
+  // A started test whose status never comes stays missing: the next test's
+  // start, the terminal count, or the end of the log ends the wait.
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    `test ${liveWitness} ... engram> no status follows`,
+    `test ${liveSibling} ... ok`,
+    "ok",
+  ], 2, 0)), [liveWitness]);
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    `test ${liveSibling} ... ok`,
+    `test ${liveWitness} ... engram> no status follows`,
+  ], 2, 0)), [liveWitness]);
+  // The terminal count ends the wait, so output after it (a wrapper's own
+  // `ok`, say) cannot complete a test started before it.
+  assert.deepEqual(missingLiveTests(names, `${libtestLog([
+    `test ${liveSibling} ... ok`,
+    `test ${liveWitness} ... engram> no status follows`,
+  ], 2, 0)}\nok\n`), [liveWitness]);
+  // A cut log reports the started test, whose status never came.
+  assert.deepEqual(missingLiveTests(names, [
+    "running 2 tests",
+    `test ${liveSibling} ... ok`,
+    `test ${liveWitness} ... engram> the log is cut here`,
+  ].join("\n")), [liveWitness]);
+
+  // Only a line that is exactly the status pairs: a diagnostic ending in
+  // `ok`, a stray `ok` with nothing started, and an ignored test do not.
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    `test ${liveWitness} ... engram> looks ok`,
+    "engram> still ok",
+    `test ${liveSibling} ... ok`,
+  ], 2, 0)), [liveWitness]);
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    "ok",
+    `test ${liveSibling} ... ok`,
+  ], 2, 0)), [liveWitness]);
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    `test ${liveWitness} ... ignored`,
+    "ok",
+    `test ${liveSibling} ... ok`,
+  ], 2, 0)), [liveWitness]);
+
+  // A split status of an unrelated test does not stand in for a named one.
+  const unrelated = "tests::engram_host_adapter::root_recovery_live::an_unrelated_test";
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    ...splitResult(unrelated, "ok"),
+    `test ${liveSibling} ... ok`,
+  ], 2, 0)), [liveWitness]);
+
+  // The counts must still cover exactly the named tests: a duplicate result
+  // or a count that disagrees reports every name.
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    ...splitResult(liveWitness, "ok"),
+    `test ${liveWitness} ... ok`,
+    `test ${liveSibling} ... ok`,
+  ], 3, 0)), names);
+  assert.deepEqual(missingLiveTests(names, libtestLog([
+    ...splitResult(liveWitness, "ok"),
+    `test ${liveSibling} ... ok`,
+  ], 3, 0)), names);
+  assert.deepEqual(missingLiveTests(names, [
+    ...splitResult(liveWitness, "ok"),
+    `test ${liveSibling} ... ok`,
+  ].join("\n")), names);
+});
+
+test("a filtered live run whose status a diagnostic split passes, and the child exit still decides", async (t) => {
+  await repository(t, async (root, env) => {
+    const names = [liveWitness, liveSibling];
+    const childStage = (output, exitCode) => ({
+      name: "engram-live",
+      command: process.execPath,
+      args: ["-e", `process.stdout.write(${JSON.stringify(output)}); process.exitCode = ${exitCode};`],
+      liveTests: names,
+    });
+
+    // The shape of the pinned run that read as FAIL although libtest passed
+    // and the child exited 0.
+    const splitPass = await createRun({
+      root,
+      stages: [childStage(libtestLog([
+        ...splitResult(liveWitness, "ok"),
+        `test ${liveSibling} ... ok`,
+      ], 2, 0), 0)],
+    }, env);
+    const passed = await executeRun(splitPass, env);
+    assert.equal(passed.state, "passed");
+    assert.equal(passed.exitCode, 0);
+    assert.equal(passed.stages[0].error ?? null, null);
+    assert.deepEqual(passed.stages[0].tests, { runner: "cargo-libtest", passed: 2, failed: 0, ignored: 0 });
+    assert.match(await summarize(splitPass), /^PASS /mu);
+
+    // A split FAILED is a result, so nothing is missing; the child's
+    // nonzero exit still fails the run.
+    const splitFail = await createRun({
+      root,
+      stages: [childStage(libtestLog([
+        ...splitResult(liveWitness, "FAILED"),
+        `test ${liveSibling} ... ok`,
+      ], 1, 1), 101)],
+    }, env);
+    const failed = await executeRun(splitFail, env);
+    assert.equal(failed.state, "failed");
+    assert.equal(failed.exitCode, 101);
+    assert.equal(failed.stages[0].code, 101);
+    assert.equal(failed.stages[0].error?.includes("named live tests did not run") ?? false, false);
+    assert.deepEqual(failed.stages[0].tests, { runner: "cargo-libtest", passed: 1, failed: 1, ignored: 0 });
+
+    // A split start with no status and a child that exits 0 still fails as
+    // missing, naming the test.
+    const noStatus = await createRun({
+      root,
+      stages: [childStage(libtestLog([
+        `test ${liveWitness} ... engram> no status follows`,
+        `test ${liveSibling} ... ok`,
+      ], 2, 0), 0)],
+    }, env);
+    const missing = await executeRun(noStatus, env);
+    assert.equal(missing.state, "failed");
+    assert.equal(missing.stages[0].code, 0);
+    assert.equal(missing.stages[0].error, `named live tests did not run: ${liveWitness}`);
+  });
+});
+
 test("a filtered live run passes only when every named test ran, and records the names", async (t) => {
   await repository(t, async (root, env) => {
     const names = [liveWitness, liveSibling];

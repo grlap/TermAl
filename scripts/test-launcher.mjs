@@ -333,15 +333,38 @@ export function liveStage(platform = process.platform, env = process.env, names 
  * The named tests a filtered live stage's log shows no result for, read
  * from libtest's per-test lines, or every name when the counts do not cover
  * exactly the named tests. An empty list means each named test ran once.
+ *
+ * Named live tests run one at a time, so libtest prints `test NAME ... `
+ * and then the status. Output the test writes outside libtest's capture,
+ * such as a child process's diagnostics, can land in between and push the
+ * status onto a line of its own. The started name is therefore kept until
+ * its status arrives: on the same line, or later as a line that is exactly
+ * `ok` or `FAILED`. Another test's start or the terminal count ends the
+ * wait, leaving that name without a result.
  */
 export function missingLiveTests(names, log) {
   const counts = focusedTestCounts(log);
   const ran = new Set();
+  let started = null;
   for (const raw of log.split(/\r?\n/u)) {
     // eslint-disable-next-line no-control-regex
     const plain = raw.replace(/\u001b\[[0-9;?]*[A-Za-z]/gu, "").trim();
-    const line = /^test (\S+) \.\.\. (?:ok|FAILED)\b/u.exec(plain);
-    if (line) ran.add(line[1]);
+    const line = /^test (\S+) \.\.\.(?: (.*))?$/u.exec(plain);
+    if (line) {
+      const rest = line[2] ?? "";
+      started = null;
+      if (/^(?:ok|FAILED)\b/u.test(rest)) ran.add(line[1]);
+      // Any other libtest status (`ignored`) is final; anything else is
+      // output that interrupted the line before its status.
+      else if (!/^ignored\b/u.test(rest)) started = line[1];
+      continue;
+    }
+    if (started !== null && /^(?:ok|FAILED)$/u.test(plain)) {
+      ran.add(started);
+      started = null;
+    } else if (/^test result: /u.test(plain)) {
+      started = null;
+    }
   }
   const missing = names.filter((name) => !ran.has(name));
   if (missing.length) return missing;
