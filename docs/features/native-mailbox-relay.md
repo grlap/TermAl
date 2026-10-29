@@ -21,6 +21,10 @@ do not promise a native relay wake. An explicit native address without a direct
 pair is refused without a routing fallback.
 Its normal mailbox wake can start the recipient's turn; it grants no executor
 placement, enrolls no session in a mailbox domain and moves no local history.
+[Remote full gates](remote-full-gates.md) use this relay to request a run on a
+satellite and to deliver its completion. The enrolled pair comes from
+[satellite onboarding](satellite-onboarding.md). See
+[project status](project-status.md) for what runs across real hosts today.
 
 ## Identity and prerequisites
 

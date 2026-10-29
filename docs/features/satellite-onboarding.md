@@ -217,3 +217,14 @@ Repeat this configuration and checklist for a second or third satellite. No
 roster or satellite count is compiled into the implementation. A platform must
 also have its verified platform lane before real placement is enabled. A fake
 link test proves the protocol contract; real machines remain a separate pilot.
+
+On real machines, as of 2026-10-29:
+- A Windows central host runs with a Windows satellite and a Mac satellite.
+- After a network renumbering, the Windows satellite reconnected on its own.
+  The Mac reconnected after a manual fix: an SSH key restriction on the Mac,
+  pinned to the central's old IP address, was corrected by hand.
+- A live evaluation of hostname recovery on the running hosts is still owed.
+- Each satellite can run the five-stage gate as a
+  [remote full gate](remote-full-gates.md).
+
+See [project status](project-status.md).

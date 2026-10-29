@@ -12,6 +12,17 @@ executor proxies remain the separate mechanism in
 each slice with its own tests, review and gate; enabling it on real machines
 is a separate, explicit operator step.
 
+As of 2026-10-29 that step has been taken for one domain:
+- A Windows central host runs with two satellites, a second Windows machine and
+  a Mac. Cross-host mail wakes idle satellite sessions.
+- The five-stage gate runs on both satellites as
+  [remote full gates](remote-full-gates.md).
+- A program cannot yet send a prompt directly to a chosen remote session.
+- Restart recovery after an address change still needs its live evaluation.
+
+See [project status](project-status.md) for the dated snapshot, including the
+open problems and what comes next.
+
 This brief is the accepted cross-host design in the repository's own words. It
 replaces the earlier plan, in which remote-backed proxy records joined
 mailboxes as local sessions and remote servers relayed coordination through a
@@ -1035,6 +1046,10 @@ cross-host coordination.
 
 - [Satellite onboarding](satellite-onboarding.md): operator setup, the named
   verification checklist and the independent Engram readiness step.
+- [Remote full gates](remote-full-gates.md): running the five-stage gate on a
+  satellite and reporting it back to the central coordinator.
+- [Project status](project-status.md): what runs on real machines today, its
+  limits and what comes next.
 
 - [Durable agent mailboxes](agent-mailboxes.md): today's mailbox contract,
   which every host keeps operation for operation.

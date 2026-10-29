@@ -278,7 +278,25 @@ export function messageChangeMarker(message: Message) {
         .map((file) => `${file.kind}:${file.path}`)
         .join("|")}`;
     case "engramControl":
-      return `${message.type}:${message.stage}:${message.decision}:${message.refusalCode ?? "none"}:${message.latencyMs.total}:${JSON.stringify(message.causalFailure ?? null)}`;
+      // Every field that decides whether the card collapses is in the marker,
+      // so a same-id change of classification alone re-renders the card.
+      // Serialized structurally, with null for an absent field, so no field
+      // value can collide with another field's absence.
+      return `${message.type}:${JSON.stringify([
+        message.schemaVersion,
+        message.stage,
+        message.assurance,
+        message.decision,
+        message.dispatch,
+        message.failMode,
+        message.refusalCode ?? null,
+        message.deferCode ?? null,
+        message.repairArmed ?? null,
+        message.nextIntent ?? null,
+        message.latencyMs.total,
+        message.causalFailure ?? null,
+        message.directives ?? null,
+      ])}`;
     case "subagentResult":
       return `${message.type}:${message.title.length}:${message.summary.length}`;
     case "approval":

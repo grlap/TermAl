@@ -1,11 +1,12 @@
 # TermAl Feature Briefs
 
-This directory holds feature-specific references and design briefs that used to
-live inline in [`docs/bugs.md`](../bugs.md).
+This directory holds feature-specific references and design briefs. Bugs,
+known limitations and implementation follow-ups are tracked in Engram, not in
+a Markdown file. Use the files here for feature behavior, design decisions and
+future plans.
 
-Use [`docs/bugs.md`](../bugs.md) for active bugs, known design limitations, and
-small implementation follow-ups. Use the files here for feature behavior,
-design decisions, and future plans.
+For a dated snapshot of what works now, the active limitations and what comes
+next, see [Project Status](./project-status.md).
 
 ## Implemented References
 
@@ -34,10 +35,14 @@ design decisions, and future plans.
 - [Workspace Terminal](./workspace-terminal.md)
 - [Session Virtualized Transcript](./session-virtualized-transcript.md)
 - [Work Visualizer](./work-visualizer.md)
+- [Central Control Plane, Satellite Hosts And Cross-Host Mailboxes](./central-control-plane.md): running on real machines; some slices are still planned
+- [Satellite Onboarding](./satellite-onboarding.md)
+- [Federation Link](./federation-link.md)
+- [Remote Full Gates](./remote-full-gates.md)
+- [Project Status](./project-status.md): dated snapshot
 
 ## Planned Or Exploratory Briefs
 
-- [Central Control Plane, Satellite Hosts And Cross-Host Mailboxes](./central-control-plane.md)
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Agent Delegation Sessions](./agent-delegation-sessions.md)
 - [Conversation Overview Map](./conversation-overview-map.md)

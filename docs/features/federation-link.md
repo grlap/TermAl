@@ -110,3 +110,10 @@ A multi-user threat model needs the separate encrypted-channel design.
 The initial validation uses fake OS boundaries and loopback links on one machine,
 including two TermAl test processes. It does not establish macOS readiness or
 validate real SSH provisioning.
+
+Since then, the link has run between real machines: a Windows central host with
+a Windows satellite and a Mac satellite. See [project status](project-status.md)
+for what that covers.
+- An SSH process that ends before the first handshake now reports a lost link
+  rather than a startup timeout. Each peer reports a fixed class for the SSH
+  failure. See [connection diagnostics](satellite-onboarding.md#connection-diagnostics).

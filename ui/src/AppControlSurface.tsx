@@ -66,6 +66,10 @@ import {
   type SessionWorkingBreakdown,
 } from "./session-list-filter";
 import { sessionWorkActivity, sessionWorkLabel } from "./session-work-activity";
+import {
+  WorkingSessionsBreakdownDescription,
+  WorkingSessionsChipLabel,
+} from "./working-sessions-chip";
 import type { RunningRunsByOwner } from "./test-runs";
 import type { SessionListSearchResult } from "./session-find";
 import type {
@@ -1329,18 +1333,16 @@ export function AppControlSurface({
                     }
                     title="Top-level sessions in the selected project scope with a foreground turn (active or stopping) or owned running test-run work in the background. A session with both counts once."
                   >
-                    Working sessions ({controlSurfaceSessionFilterCounts.working})
+                    <WorkingSessionsChipLabel
+                      count={controlSurfaceSessionFilterCounts.working}
+                      breakdown={controlSurfaceWorkingBreakdown}
+                    />
                   </button>
-                  {controlSurfaceSessionFilterCounts.working > 0 ? (
-                    <span
-                      id={`${surfaceId}-working-breakdown`}
-                      className="sidebar-status-breakdown"
-                      title="A session with a foreground turn and background work counts in both."
-                    >
-                      {controlSurfaceWorkingBreakdown.foreground} foreground ·{" "}
-                      {controlSurfaceWorkingBreakdown.background} background
-                    </span>
-                  ) : null}
+                  <WorkingSessionsBreakdownDescription
+                    id={`${surfaceId}-working-breakdown`}
+                    count={controlSurfaceSessionFilterCounts.working}
+                    breakdown={controlSurfaceWorkingBreakdown}
+                  />
                   <button
                     className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "asking" ? "selected" : ""}`}
                     type="button"

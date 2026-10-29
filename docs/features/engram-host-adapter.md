@@ -19,6 +19,17 @@ The local Engram integration has two independent tiers:
   is enabled, the existing host-private bind/evaluate/begin/checkpoint protocol
   can withhold a prompt until Engram authorizes that exact turn.
 
+**Where the tiers are deployed (2026-10-29):**
+- Turn-gated control has been ON for the Engram project since 2026-10-29,
+  after a passed steady-state canary.
+- It stays OFF for the TermAl projects until the fix for the long
+  project-settings reset lands. That reset held all project sessions for about
+  36 minutes, at about 3850 sessions, during the enable.
+- Retained prompts can stay interrupted after control is switched off and on
+  again. A fix has landed, but its evaluation is still open.
+
+See [project status](project-status.md#active-limitations-and-open-top-priority-problems).
+
 Premium admission covers both ordinary root sessions and delegation children,
 including direct sends and queued user, mailbox, and orchestrator turns. A root
 uses its session-shaped binding; a child retains its delegation-shaped effects

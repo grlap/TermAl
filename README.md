@@ -56,6 +56,50 @@ view with its own project selector. It offers Dependencies, Hierarchy, Labels,
 Table, and Memories views, with explicit refresh. Opening it does not enable
 the integration, create a claim, or change tracker data.
 
+## Where TermAl stands
+
+As of 2026-10-29 (master `3fc13725`). The full snapshot, with limitations
+and next steps, is in [Project status](docs/features/project-status.md).
+
+**Works now**
+
+- **Federation on real machines.** A Windows central host is linked to a
+  second Windows machine and a Mac.
+  - Saved endpoints can use DNS hostnames, so an address change needs no new
+    pairing.
+  - Cross-host mail wakes idle satellite sessions.
+  - See the [central control plane](docs/features/central-control-plane.md)
+    and [satellite onboarding](docs/features/satellite-onboarding.md).
+- **Remote full gates.** The five-stage gate runs on a satellite and reports
+  back to the coordinator. It passed on master on both the Windows satellite
+  and the Mac. See [Remote full gates](docs/features/remote-full-gates.md).
+- **Turn-gated control for the Engram project.** It has been ON there since
+  2026-10-29, after a passed steady-state canary. A turn normally waits for
+  Engram's authorization. The one bounded exception: a fresh ordinary root
+  prompt whose control request provably never started is delivered, marked
+  degraded, when control is unavailable. See the
+  [Engram host adapter](docs/features/engram-host-adapter.md).
+
+**Active limitations**
+
+- Turn-gated control stays OFF for the TermAl projects until the fix for the
+  long project-settings reset lands. That reset held all project sessions for
+  about 36 minutes during the Engram enable. The fix is in progress.
+- A program cannot yet send a prompt directly to a chosen session on another
+  machine. A mailbox message is the supported route.
+- The running hosts do not yet have the SSH link diagnostics now on master.
+  Until they run a build with them, an early SSH failure still shows as a
+  startup timeout, without its cause.
+- Federation recovery after a restart still needs its live evaluation.
+
+**Next**
+
+1. Run the SSH link diagnostics on the live hosts and evaluate hostname
+   recovery there.
+2. Bound the control reset, then enable turn-gated control for TermAl.
+3. Close the open turn-gated control repairs.
+4. Add direct remote prompts.
+
 ## Architecture
 
 ```
@@ -467,7 +511,11 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
   - [Conversation overview map](docs/features/conversation-overview-map.md) — the one-call minimap
   - [Virtualized transcripts](docs/features/session-virtualized-transcript.md) — bounded paging for huge sessions
   - [Project-scoped remotes](docs/features/project-scoped-remotes.md) — remote binding at project level
-  - [Central control plane](docs/features/central-control-plane.md) — planned design: central host, satellite hosts, cross-host mailboxes
+  - [Project status](docs/features/project-status.md) — dated snapshot: what works, active limitations, what comes next
+  - [Central control plane](docs/features/central-control-plane.md) — central host, satellite hosts, cross-host mailboxes; running on a Windows central with Windows and Mac satellites
+  - [Satellite onboarding](docs/features/satellite-onboarding.md) — adding a satellite, verification, hostname recovery
+  - [Federation link](docs/features/federation-link.md) — the OpenSSH link between the central host and each satellite
+  - [Remote full gates](docs/features/remote-full-gates.md) — running the five-stage gate on a satellite
 
 ## License
 

@@ -3844,6 +3844,7 @@ textarea {
   gap: 0.7rem;
   padding-top: 0.95rem;
   border-top: 1px solid var(--line);
+  container: sidebar-status / inline-size;
 }
 
 .sidebar-status-chips {
@@ -3876,10 +3877,26 @@ textarea {
   color: var(--ink);
 }
 
-.sidebar-status-breakdown {
-  align-self: center;
-  color: var(--muted);
-  font-size: 0.82em;
+/* The Working chip's foreground/background split (working-sessions-chip.tsx):
+   the full form while the Status section is at least 28rem wide, else the
+   compact form. The full chip is about 24rem with one-digit counts, so the
+   threshold leaves room for two-digit counts without wrapping in the pill. */
+.sidebar-status-split {
+  margin-inline-start: 0.35em;
+}
+
+.sidebar-status-split-compact {
+  display: none;
+}
+
+@container sidebar-status (max-width: 28rem) {
+  .sidebar-status-split-full {
+    display: none;
+  }
+
+  .sidebar-status-split-compact {
+    display: inline;
+  }
 }
 
 .session-filter-empty {

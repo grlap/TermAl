@@ -326,3 +326,25 @@ describe("buildMessagePages", () => {
     expect(estimateMessageHeight).not.toHaveBeenCalled();
   });
 });
+
+describe("estimateConversationMessageHeight for Engram control cards", () => {
+  const routine: Extract<Message, { type: "engramControl" }> = {
+    id: "engram-routine", type: "engramControl", author: "assistant", timestamp: "10:00",
+    schemaVersion: 1, stage: "checkpoint", assurance: "turn_gated", decision: "grant",
+    dispatch: "sent_on_grant", latencyMs: { total: 3 }, failMode: "enforced",
+  };
+
+  it("estimates a routine card from its collapsed height", () => {
+    expect(estimateConversationMessageHeight(routine)).toBe(120);
+  });
+
+  it("keeps the expanded estimate for a card that stays expanded", () => {
+    expect(estimateConversationMessageHeight({ ...routine, nextIntent: "wait" })).toBe(176);
+    expect(
+      estimateConversationMessageHeight({
+        ...routine,
+        directives: [{ directiveId: "d-1", kind: "k", audience: "a", satisfaction: "s" }],
+      }),
+    ).toBe(208);
+  });
+});

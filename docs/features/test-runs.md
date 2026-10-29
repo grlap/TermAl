@@ -586,8 +586,13 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
     `stopping`) and sessions with owned background work, each counted once;
     **Completed** leaves out an idle session with background work. Asking and
     Error keep their status buckets, so such a session can also be working.
-  - Beside the Working chip, "F foreground · B background" counts each kind;
-    a session with both counts in each.
+  - The Working chip shows the split itself: "Working sessions (N) · F
+    foreground / B background", or "Working sessions (N) (F/B)" when the
+    Status section is narrower than 28rem. The compact form spells
+    the split out in its tooltip. The chip's accessible description spells it
+    out in either form, while its accessible name stays "Working sessions
+    (N)". A session with both kinds of work counts in each, and with no
+    working session the chip shows no split.
   - Each row says "Foreground turn", "Background work" or "Foreground turn +
     background work". During a turn, a run the turn started in the foreground
     (`detached: false`) is part of the turn; a host-observed run without a
@@ -1278,3 +1283,9 @@ and a run that has left the index shows "not indexed" and no elapsed time.
   in which a launcher run is one kind of execution.
 - [Handoff Ledger](./handoffs.md): a recorded next step the host offers its
   owner when a run ends or is credited, with no wake needed.
+- [Remote Full Gates](./remote-full-gates.md): the five-stage gate run on a
+  satellite and reported back to the central coordinator.
+- [Satellite Onboarding](./satellite-onboarding.md): adding the satellite a
+  remote gate runs on.
+- [Project Status](./project-status.md): the latest remote gate results and
+  the open problems.

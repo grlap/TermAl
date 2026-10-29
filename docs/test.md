@@ -98,6 +98,9 @@ after it exits. Focused commands retain their existing dependency requirements.
 
 ### Git prerequisite and remote runners
 
+To run the full gate on a satellite host and report it to the central
+coordinator, see [remote full gates](features/remote-full-gates.md).
+
 The launcher's minimum Git capability for locating run artifacts is
 `git rev-parse --absolute-git-dir`, already documented in
 [Git 2.13.7](https://git-scm.com/docs/git-rev-parse/2.13.7).

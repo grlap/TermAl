@@ -120,7 +120,11 @@ describe("App test-run badge", () => {
       await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
       expect(screen.getByRole("button", { name: "Working sessions (1)" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Completed (0)" })).toBeVisible();
-      expect(screen.getByText("0 foreground · 1 background")).toBeVisible();
+      const workingChip = screen.getByRole("button", { name: "Working sessions (1)" });
+      expect(workingChip).toHaveTextContent("Working sessions (1)· 0 foreground / 1 background(0/1)");
+      expect(workingChip).toHaveAccessibleDescription(
+        "0 foreground / 1 background. A session with a foreground turn and background work counts in both.",
+      );
       expect(screen.getByText("Background work")).toBeVisible();
       expect(document.querySelector('.session-row-status-badge[data-work="background"]')).not.toBeNull();
       expect(railButton()).toHaveAccessibleName("Open Test Runs (1 active run)");
@@ -134,7 +138,8 @@ describe("App test-run badge", () => {
       expect(screen.getByRole("button", { name: "Working sessions (0)" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Completed (1)" })).toBeVisible();
       expect(screen.queryByText("Background work")).toBeNull();
-      expect(document.querySelector(".sidebar-status-breakdown")).toBeNull();
+      expect(document.querySelector(".sidebar-status-split")).toBeNull();
+      expect(screen.getByRole("button", { name: "Working sessions (0)" })).not.toHaveAttribute("aria-describedby");
       expect(document.querySelector('.session-row-status-badge[data-work="background"]')).toBeNull();
     });
   });

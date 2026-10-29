@@ -1,5 +1,6 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useId, useState } from "react";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
+import { isRoutineEngramControl } from "./engram-control-routine";
 import {
   CheckIcon,
   CollapseIcon,
@@ -400,7 +401,7 @@ export const MessageCard = memo(
           />
         );
       case "engramControl":
-        return <EngramControlCard message={message} />;
+        return <EngramControlCard message={message} searchQuery={searchQuery} />;
       case "subagentResult":
         return (
           <SubagentResultCard
@@ -543,7 +544,24 @@ function engramLatencyDetail(latency: EngramControlMessage["latencyMs"]) {
     : `Latency: ${latency.total} ms`;
 }
 
-function EngramControlCard({ message }: { message: EngramControlMessage }) {
+function EngramControlCard({
+  message,
+  searchQuery = "",
+}: {
+  message: EngramControlMessage;
+  searchQuery?: string;
+}) {
+  // Routine cards start collapsed; any other card is expanded on every render,
+  // so a card that later turns actionable can never stay hidden. A manual
+  // expansion belongs to this card identity and survives ordinary rerenders.
+  // An active transcript search opens every card, because search indexes the
+  // details, as the other collapsible cards do.
+  const routine = isRoutineEngramControl(message);
+  const isSearchExpanded = searchQuery.trim().length > 0;
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const detailsId = useId();
+  const detailsExpanded =
+    !routine || isSearchExpanded || expandedId === message.id;
   // An own-property lookup: the code comes from the wire, and a name such as
   // `constructor` must not resolve to an inherited member.
   const codeBoundary =
@@ -586,37 +604,65 @@ function EngramControlCard({ message }: { message: EngramControlMessage }) {
 
   return (
     <article className="message-card reasoning-card engram-control-card">
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={
+          routine && !isSearchExpanded ? (
+            <button
+              className="command-icon-button engram-control-details-toggle"
+              type="button"
+              onClick={() =>
+                setExpandedId(detailsExpanded ? null : message.id)
+              }
+              aria-label={
+                detailsExpanded ? "Hide Engram details" : "Show Engram details"
+              }
+              aria-expanded={detailsExpanded}
+              aria-controls={detailsId}
+              title={
+                detailsExpanded ? "Hide Engram details" : "Show Engram details"
+              }
+            >
+              {detailsExpanded ? <CollapseIcon /> : <ExpandIcon />}
+            </button>
+          ) : undefined
+        }
+      />
       <div className="card-label">Engram · {message.stage}</div>
       <h3>{title}</h3>
-      <p className="support-copy">{details.join(" · ")}</p>
-      {message.causalFailure ? (
-        <div className="engram-causal-failure">
-          <p className="support-copy">
-            Operation: {message.causalFailure.operation} · Failure: {message.causalFailure.failureClass} · Original code: {message.causalFailure.originalCode ?? "unavailable"}
-          </p>
-          <p className="support-copy">{message.causalFailure.message}</p>
-          <p className="support-copy">
-            Boundary: {message.causalFailure.boundary} · Attempt: {message.causalFailure.attemptId ?? "unavailable"} · Remote application: {message.causalFailure.remoteApplication === "refused" ? "request refused (prior application not determined)" : message.causalFailure.remoteApplication === "not_started" ? "this request did not start (prior application not determined)" : message.causalFailure.remoteApplication === "not_applied" ? "this invocation committed no changes (prior application not determined)" : "unknown"}
-          </p>
-          <p className="support-copy">
-            Control process: {message.causalFailure.controlProcess?.identity ?? "unavailable"} · Exit state: {message.causalFailure.controlProcess?.exitState ?? "unavailable"}
-          </p>
-          <p className="support-copy">{message.causalFailure.continuationReason}</p>
+      {detailsExpanded ? (
+        <div className="engram-control-details" id={detailsId}>
+          <p className="support-copy">{details.join(" · ")}</p>
+          {message.causalFailure ? (
+            <div className="engram-causal-failure">
+              <p className="support-copy">
+                Operation: {message.causalFailure.operation} · Failure: {message.causalFailure.failureClass} · Original code: {message.causalFailure.originalCode ?? "unavailable"}
+              </p>
+              <p className="support-copy">{message.causalFailure.message}</p>
+              <p className="support-copy">
+                Boundary: {message.causalFailure.boundary} · Attempt: {message.causalFailure.attemptId ?? "unavailable"} · Remote application: {message.causalFailure.remoteApplication === "refused" ? "request refused (prior application not determined)" : message.causalFailure.remoteApplication === "not_started" ? "this request did not start (prior application not determined)" : message.causalFailure.remoteApplication === "not_applied" ? "this invocation committed no changes (prior application not determined)" : "unknown"}
+              </p>
+              <p className="support-copy">
+                Control process: {message.causalFailure.controlProcess?.identity ?? "unavailable"} · Exit state: {message.causalFailure.controlProcess?.exitState ?? "unavailable"}
+              </p>
+              <p className="support-copy">{message.causalFailure.continuationReason}</p>
+            </div>
+          ) : message.decision === "degraded" && codeBoundary ? (
+            <p className="support-copy">
+              Failure: {message.refusalCode} · Boundary: {codeBoundary} · The full cause is not
+              published with this card.
+            </p>
+          ) : message.decision === "degraded" ? (
+            <p className="support-copy">Original failure details unavailable; this card does not identify the failed operation or remote application.</p>
+          ) : null}
+          {message.directives?.map((directive) => (
+            <p className="support-copy" key={directive.directiveId}>
+              {directive.kind} · {directive.audience} · {directive.satisfaction}
+            </p>
+          ))}
         </div>
-      ) : message.decision === "degraded" && codeBoundary ? (
-        <p className="support-copy">
-          Failure: {message.refusalCode} · Boundary: {codeBoundary} · The full cause is not
-          published with this card.
-        </p>
-      ) : message.decision === "degraded" ? (
-        <p className="support-copy">Original failure details unavailable; this card does not identify the failed operation or remote application.</p>
       ) : null}
-      {message.directives?.map((directive) => (
-        <p className="support-copy" key={directive.directiveId}>
-          {directive.kind} · {directive.audience} · {directive.satisfaction}
-        </p>
-      ))}
     </article>
   );
 }

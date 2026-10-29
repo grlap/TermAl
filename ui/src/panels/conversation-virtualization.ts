@@ -49,6 +49,7 @@
 
 import type { Message } from "../types";
 import { shouldCollapseDelegationFanInMessage } from "../delegation-fan-in";
+import { isRoutineEngramControl } from "../engram-control-routine";
 import { shouldCollapseLongPeerMessage } from "../long-peer-message";
 import {
   SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
@@ -78,6 +79,9 @@ const MAX_ESTIMATED_TEXT_MESSAGE_HEIGHT = 4800;
 // plus `.command-success-summary`; status and command/output length do not
 // affect the collapsed presentation.
 const ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX = 120;
+// A routine Engram control card renders collapsed (meta row, stage label and
+// title) until the reader expands it; its measurement replaces this estimate.
+const ESTIMATED_COLLAPSED_ENGRAM_CONTROL_HEIGHT_PX = 120;
 // Production CSS measured 127.39 px in headless Chrome at default density,
 // Avenir Next, and the 34rem user-bubble width. Round up by ~13% so an unseen
 // card is slightly more likely to shrink than grow when its real measurement
@@ -380,7 +384,9 @@ export function estimateConversationMessageHeight(
     case "thinking":
       return Math.min(900, Math.max(140, 112 + message.lines.length * 28));
     case "engramControl":
-      return 176 + (message.directives?.length ?? 0) * 32;
+      return isRoutineEngramControl(message)
+        ? ESTIMATED_COLLAPSED_ENGRAM_CONTROL_HEIGHT_PX
+        : 176 + (message.directives?.length ?? 0) * 32;
     case "command":
       return ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX;
     case "testRun":
