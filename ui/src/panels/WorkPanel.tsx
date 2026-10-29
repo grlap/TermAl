@@ -6,7 +6,7 @@ import type { Project } from "../types";
 import type { WorkFilters, WorkItem } from "../work-visualizer-api";
 import { useWorkList } from "./use-work-list";
 import { WorkItemDetails } from "./WorkItemDetails";
-import type { WorkSelection } from "./WorkRow";
+import type { WorkRevealRequest, WorkSelection } from "./WorkRow";
 import { WORK_SORT_COLUMNS, defaultWorkSortDirection, sortWorkRows, type WorkSort, type WorkSortKey } from "./work-sort";
 import { WorkTime } from "./work-time";
 import { WorkTable } from "./WorkTable";
@@ -17,6 +17,7 @@ import { WorkLabelPicker } from "./WorkLabelPicker";
 import { groupWorkLabels, matchesWorkLabels, type WorkLabelMode } from "./work-labels";
 import { matchesWorkDisplayFilters, workSourceKey } from "./work-display-filters";
 import { WorkPaging } from "./WorkPaging";
+import { WorkUrgentStrip } from "./WorkUrgentStrip";
 import "./work-panel.css";
 
 const PROJECT_KEY = "termal-work-project";
@@ -55,7 +56,10 @@ function WorkProjectView({ projectId }: { projectId: string }) {
   const [filters, setFilters] = useState(draft);
   const [view, setView] = useState<Exclude<WorkView, "memories">>("dependencies");
   const [memories, setMemories] = useState(false);
-  const [sort, setSort] = useState<WorkSort | null>(null);
+  // Highest priority first by default: Engram's source order is oldest first,
+  // so in a large project a new P0 would otherwise sit below many older rows.
+  // "Source order" stays one choice in the Sort control.
+  const [sort, setSort] = useState<WorkSort | null>({ key: "priority", direction: "asc" });
   function submit(event: FormEvent) { event.preventDefault(); setFilters({ ...draft }); }
   return <>
     <div className="work-view-switch" role="group" aria-label="Work view">
@@ -138,6 +142,15 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
     focusNewSelection.current = true;
     setSelection({ source: item.source, ref: item.shortRef, group, view });
   };
+  // An Urgent strip row selects like any row, and also asks the active view to
+  // reveal the item: a tree expands its collapsed ancestors and Labels its
+  // first label group, so the row and its details mount with this selection.
+  const [stripReveal, setStripReveal] = useState<WorkRevealRequest | null>(null);
+  const selectUrgent = (item: WorkItem, trigger: HTMLButtonElement) => {
+    const closing = detailTrigger.current === trigger && !!selection;
+    select(item, trigger, view === "labels" ? groupWorkLabels([item])[0]?.key : undefined);
+    if (!closing) setStripReveal(current => ({ item, seq: (current?.seq ?? 0) + 1 }));
+  };
   const hideSelection = () => { setSelection(null); detailTrigger.current = null; };
   const closeDetails = () => {
     // The row button may be gone (collapsed ancestor, view switch, filter):
@@ -203,12 +216,16 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
       </div>
       <p>{loadedSummary}; {rows.length} visible. Filters and sorting (the control above or a table header) apply only to loaded rows.</p>
       <p className="work-panel-caption">Read completed: <WorkTime value={result.observedAt} />. Refresh for current data.</p>
+      {/* Every open P0 and P1 matching the filters stays reachable whatever
+          the view's structure puts first; a row opens its details in the
+          active view. */}
+      <WorkUrgentStrip rows={rows} selection={visibleSelection} onSelect={selectUrgent} />
       <div className="work-panel-body">
         <div className="work-panel-list" ref={listContainer} onScroll={event => { if (active) scrollPosition.current = event.currentTarget.scrollTop; }} tabIndex={0} role="region" aria-label="Work list">
           {view === "table"
             ? <WorkTable viewport={listContainer} rows={rows} selection={visibleSelection} onSelect={select} sort={sort} onSortChange={onSortChange} onLabel={filterLabel} renderDetails={renderDetails} />
-            : view === "labels" ? <WorkLabels viewport={listContainer} rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />
-              : <WorkTree key={view} viewport={listContainer} rows={rows} universe={loaded} mode={view} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} />}
+            : view === "labels" ? <WorkLabels viewport={listContainer} rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} reveal={stripReveal} />
+              : <WorkTree key={view} viewport={listContainer} rows={rows} universe={loaded} mode={view} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} reveal={stripReveal} />}
           {rows.length === 0 && <p>{result.sources.some(source => source.state === "error")
             ? "No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view."
             : total === 0 ? "No work items in this snapshot." : "No matching rows in the loaded page(s). More source items may exist."}</p>}

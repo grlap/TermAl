@@ -45,7 +45,7 @@ export function describeProjectEngramState(
     return `Verify failed · ${verification.detail}`;
   }
   if (project.engramOperatorDisabled) {
-    return "Declared · operator vetoed";
+    return "Declared · turned off in TermAl";
   }
   if (project.engram?.enabled && project.engram.turnGatedControl) {
     return "Enabled · turn-gated control";
@@ -54,6 +54,23 @@ export function describeProjectEngramState(
     return "Enabled · base";
   }
   return "Declared · ready to enable";
+}
+
+// Why "Save & enable" cannot be used right now, or null when it can.
+function describeSaveUnavailableReason(
+  busy: boolean,
+  verification: EngramProjectVerification | null,
+): string | null {
+  if (busy) {
+    return "Save & enable is unavailable while another action finishes.";
+  }
+  if (!verification) {
+    return "Save & enable needs a successful Verify first.";
+  }
+  if (!verification.verified) {
+    return "Save & enable is unavailable: the last Verify failed. Fix the errors above and Verify again.";
+  }
+  return null;
 }
 
 export function EngramProjectSettingsPanel({
@@ -199,7 +216,7 @@ export function EngramProjectSettingsPanel({
       onVerified(project.id, {
         verified: true,
         checkedAt: Date.now(),
-        detail: "Operator vetoed",
+        detail: "Disabled in TermAl",
       });
     } catch (disableError) {
       setError(errorMessage(disableError));
@@ -209,6 +226,11 @@ export function EngramProjectSettingsPanel({
   }
 
   const saveDisabled = busy || !verification?.verified;
+  const saveUnavailableReason = describeSaveUnavailableReason(
+    busy,
+    verification,
+  );
+  const saveReasonId = `${idPrefix}-save-reason`;
   const canDisable = project.engram?.enabled === true;
   const currentVerificationState: ProjectEngramVerificationState | undefined =
     verification
@@ -236,6 +258,12 @@ export function EngramProjectSettingsPanel({
           {describeProjectEngramState(project, currentVerificationState)}
         </span>
       </div>
+      {project.engramDeclared && project.engramOperatorDisabled ? (
+        <p className="settings-panel-copy" role="status">
+          Engram is turned off for this project in TermAl. To turn it on:
+          Verify, then Save &amp; enable.
+        </p>
+      ) : null}
 
       <label
         className="remote-settings-toggle"
@@ -367,11 +395,17 @@ export function EngramProjectSettingsPanel({
           className="primary-button"
           type="button"
           disabled={saveDisabled}
+          aria-describedby={saveUnavailableReason ? saveReasonId : undefined}
           onClick={() => void handleSave()}
         >
           {isSaving ? "Saving…" : "Save & enable"}
         </button>
       </div>
+      {saveUnavailableReason ? (
+        <p id={saveReasonId} className="create-session-field-hint">
+          {saveUnavailableReason}
+        </p>
+      ) : null}
       <p className="create-session-field-hint">
         Disable is the global per-project kill switch for both tiers.
         Re-enabling requires a successful Verify followed by Save &amp; enable.

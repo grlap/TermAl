@@ -111,10 +111,12 @@ describe("WorkPanel", () => {
     showTable();
     const column = (index: number) => within(screen.getByRole("table")).getAllByRole("row").slice(1).map(row => within(row).getAllByRole("cell")[index]!.textContent);
     const header = (name: string) => screen.getByRole("columnheader", { name });
-    // Source order until a header is chosen; every header is a button, so it
+    // Priority first until a header is chosen; every header is a button, so it
     // is reachable from the keyboard, and reports its state through aria-sort.
-    expect(column(3)).toEqual(["feature", "task", "bug"]);
+    expect(column(3)).toEqual(["task", "feature", "bug"]);
+    expect(header("Priority")).toHaveAttribute("aria-sort", "ascending");
     expect(header("Kind")).toHaveAttribute("aria-sort", "none");
+    expect(screen.getByRole("combobox", { name: "Sort (loaded rows)" })).toHaveValue("priority");
     fireEvent.click(screen.getByRole("button", { name: "Kind" }));
     expect(column(3)).toEqual(["bug", "feature", "task"]);
     expect(header("Kind")).toHaveAttribute("aria-sort", "ascending");

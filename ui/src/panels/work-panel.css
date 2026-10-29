@@ -24,6 +24,13 @@
 .work-view-switch button { border-radius: 999px; padding: 0.3rem 0.75rem; color: var(--muted); }
 .work-view-switch button[aria-pressed="true"] { color: var(--ink); background: var(--surface-white); border-color: var(--ink); font-weight: 600; }
 
+/* The Urgent strip stays bounded so the views below remain on screen. */
+.work-urgent { flex: none; border: 1px solid var(--line); border-radius: var(--button-radius-tight); padding: 0.25rem 0.5rem; margin-bottom: 0.5rem; }
+.work-urgent-toggle { font-weight: 600; text-align: left; }
+.work-urgent-list { list-style: none; margin: 0.25rem 0 0; padding: 0; max-height: 12rem; overflow: auto; }
+.work-urgent-row { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+.work-urgent-title { text-align: left; white-space: normal; min-width: 0; }
+
 /* The selected item expands vertically in the list, including narrow panes. */
 .work-panel-body { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; }
 .work-item-details { min-width: 0; }

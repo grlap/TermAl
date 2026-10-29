@@ -19,6 +19,69 @@ import {
 import { useCommittedRef } from "./use-committed-ref";
 import { useStableEvent } from "./use-stable-event";
 
+const MESSAGE_SLOT_SELECTOR = ".virtualized-message-slot[data-message-id]";
+const DEFERRED_CONTENT_PENDING_SELECTOR = '[data-deferred-content-pending="true"]';
+const PROVENANCE_SCAN_SELECTOR =
+  `${MESSAGE_SLOT_SELECTOR}, ${DEFERRED_CONTENT_PENDING_SELECTOR}`;
+
+/**
+ * Returns the ids of the page's message slots whose content is fully
+ * rendered: every slot with a `data-message-id`, in document order, except a
+ * slot with a pending deferred-content marker anywhere below it. One subtree
+ * query finds slots and markers together; each marker then excludes every
+ * slot it sits inside (not the slot it is on). When the ids equal `previous`,
+ * `previous` itself is returned so repeated measurements allocate nothing.
+ */
+export function collectFullyRenderedMessageIds(
+  pageNode: Element,
+  previous?: readonly string[],
+): readonly string[] {
+  const slots: HTMLElement[] = [];
+  let pendingSlots: Set<Element> | null = null;
+  for (const element of pageNode.querySelectorAll<HTMLElement>(
+    PROVENANCE_SCAN_SELECTOR,
+  )) {
+    if (element.matches(MESSAGE_SLOT_SELECTOR)) {
+      slots.push(element);
+    }
+    if (!element.matches(DEFERRED_CONTENT_PENDING_SELECTOR)) {
+      continue;
+    }
+    let ancestorSlot = element.parentElement?.closest(MESSAGE_SLOT_SELECTOR);
+    while (
+      ancestorSlot &&
+      ancestorSlot !== pageNode &&
+      pageNode.contains(ancestorSlot)
+    ) {
+      pendingSlots ??= new Set();
+      pendingSlots.add(ancestorSlot);
+      ancestorSlot = ancestorSlot.parentElement?.closest(MESSAGE_SLOT_SELECTOR);
+    }
+  }
+
+  let ids: string[] | null = null;
+  let count = 0;
+  for (const slot of slots) {
+    if (pendingSlots?.has(slot)) {
+      continue;
+    }
+    const messageId = slot.dataset.messageId!;
+    if (ids === null && previous?.[count] !== messageId) {
+      ids = previous ? previous.slice(0, count) : [];
+    }
+    ids?.push(messageId);
+    count += 1;
+  }
+  if (ids !== null) {
+    return ids;
+  }
+  // Every id so far matched `previous`; it is reusable unless it is longer.
+  if (previous !== undefined && previous.length === count) {
+    return previous;
+  }
+  return (previous ?? []).slice(0, count);
+}
+
 export function shouldFlushVirtualizedPageHeightLayout({
   flushLayout,
   hasUserScrollInteraction,
@@ -108,15 +171,22 @@ export function useVirtualizedConversationPageHeightChange({
       // reintroduce its height under a key now owned by different content.
       return;
     }
-    const measuredIdentity: PageMeasurementIdentity = {
-      ...currentPageIdentity,
-      fullyRenderedMessageIds: pageNode
-        ? Array.from(pageNode.querySelectorAll<HTMLElement>(
-            ".virtualized-message-slot[data-message-id]",
-          )).filter((slot) => !slot.querySelector('[data-deferred-content-pending="true"]'))
-            .map((slot) => slot.dataset.messageId!)
-        : undefined,
-    };
+    // Provenance is recomputed on every measurement, equal height included:
+    // placeholder activation can change it without changing geometry.
+    const previousIdentity = measuredPageIdentityRef.current[pageKey];
+    const fullyRenderedMessageIds = pageNode
+      ? collectFullyRenderedMessageIds(
+          pageNode,
+          previousIdentity?.fullyRenderedMessageIds,
+        )
+      : undefined;
+    const measuredIdentity: PageMeasurementIdentity =
+      previousIdentity !== undefined &&
+      previousIdentity.messages === currentPageIdentity.messages &&
+      previousIdentity.hasTrailingGap === currentPageIdentity.hasTrailingGap &&
+      previousIdentity.fullyRenderedMessageIds === fullyRenderedMessageIds
+        ? previousIdentity
+        : { ...currentPageIdentity, fullyRenderedMessageIds };
     const previousHeight = pageHeightsRef.current[pageKey];
     if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
       measuredPageIdentityRef.current[pageKey] = measuredIdentity;

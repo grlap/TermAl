@@ -105,6 +105,20 @@ Engram's server-side search. Search, exact label and availability apply on
 **Apply filters**; kind, lifecycle, label-picker and sorting controls apply
 immediately. Visible selection and scroll position survive display changes
 (subject to the browser's scroll extent when fewer rows remain).
+Sorting defaults to Priority ascending (P0 first; equal rows keep their order by
+id), so the most urgent work leads every view however large the project is;
+choose **Source order** in the Sort control for Engram's own listing order
+(oldest first). Because Priority is then the active column, a first click on
+its header reverses it, as on any active column.
+Above the views, the **Urgent** strip lists the open P0 and P1 rows among the
+loaded rows that match the current filters (P0 first, then P1, each by id),
+under a count heading ("Urgent: N P0, M P1") that also collapses and expands
+it. With the default filters that is every loaded open P0 and P1. It scrolls
+within a capped height so the views stay on screen, and it reaches rows the
+active view's structure puts further down, such as unlinked items after the
+Dependencies view's blocked chains. A strip row selects that item and opens its
+details in the active view, first expanding whatever hides it there: the
+item's collapsed tree ancestors, or its first label group in Labels.
 Lifecycle defaults to Open; Closed includes completed, cancelled and superseded
 work. All also includes Proposed. The existing Updated sort orders rows newest
 first. Ready and Blocked include only open work. Only explicit Refresh, a

@@ -6,23 +6,36 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkWindow, type WorkViewport } from "./use-work-window";
 import type { WorkItem } from "../work-visualizer-api";
 import { MAX_TREE_DEPTH, buildDependencyForest, buildHierarchyForest, workItemKey, type WorkTreeNode } from "./work-tree";
-import { WorkRowUpdated, WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer } from "./WorkRow";
+import { WorkRowUpdated, WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer, type WorkRevealRequest } from "./WorkRow";
 import { WorkLabelChips } from "./WorkLabels";
 
 export type WorkTreeMode = "dependencies" | "hierarchy";
 
-export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, renderDetails, onHideSelection, viewport }: {
+export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel, renderDetails, onHideSelection, viewport, reveal: revealRequest }: {
   rows: readonly WorkItem[]; universe: readonly WorkItem[]; mode: WorkTreeMode; selection: WorkSelection | null;
   onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void;
   onLabel?: (label: string) => void;
   renderDetails?: WorkDetailsRenderer; onHideSelection?: () => void;
   viewport?: WorkViewport;
+  reveal?: WorkRevealRequest | null;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const forest = useMemo(
     () => (mode === "dependencies" ? buildDependencyForest(rows, universe) : buildHierarchyForest(rows, universe)),
     [rows, universe, mode],
   );
+  // A reveal request from outside the tree (the Urgent strip) expands every
+  // collapsed ancestor of the item's canonical row during this render, so the
+  // row and its details mount in the same commit as the selection. A request
+  // seen before this tree mounted is not replayed.
+  const [revealSeen, setRevealSeen] = useState(revealRequest?.seq);
+  if (revealRequest && revealRequest.seq !== revealSeen) {
+    setRevealSeen(revealRequest.seq);
+    const target = forest.placedAt.get(workItemKey(revealRequest.item));
+    if (target && [...collapsed].some(key => target.startsWith(`${key}/`))) {
+      setCollapsed(new Set([...collapsed].filter(key => !target.startsWith(`${key}/`))));
+    }
+  }
   // The source is worth a glyph only when the loaded rows come from more
   // than one tracker.
   const mixedSources = useMemo(() => new Set(universe.map(row => row.source)).size > 1, [universe]);

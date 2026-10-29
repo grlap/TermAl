@@ -205,7 +205,7 @@ describe("EngramProjectSettingsDialog", () => {
     expect(mockVerifyProjectEngramSettings).not.toHaveBeenCalled();
     expect(callbacks.onVerified).toHaveBeenCalledWith(
       "project-1",
-      expect.objectContaining({ verified: true, detail: "Operator vetoed" }),
+      expect.objectContaining({ verified: true, detail: "Disabled in TermAl" }),
     );
   });
 

@@ -8,6 +8,8 @@ import type { WorkItem } from "../work-visualizer-api";
 import { WorkTime } from "./work-time";
 
 export type WorkSelection = { source: string; ref: string; group?: string };
+/** A request, from outside a view, to expand whatever hides `item` in it; each new `seq` is one request. */
+export type WorkRevealRequest = { item: WorkItem; seq: number };
 export type WorkDetailsRenderer = (item: WorkItem, group?: string) => ReactNode;
 
 export function WorkRowUpdated({ item }: { item: WorkItem }) {

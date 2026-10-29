@@ -4,7 +4,7 @@ import { Fragment, useMemo, useState } from "react";
 import { useWorkWindow, type WorkViewport } from "./use-work-window";
 import type { WorkItem } from "../work-visualizer-api";
 import { groupWorkLabels, workLabels } from "./work-labels";
-import { WorkRowUpdated, WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer } from "./WorkRow";
+import { WorkRowUpdated, WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection, type WorkDetailsRenderer, type WorkRevealRequest } from "./WorkRow";
 
 export function WorkLabelChips({ item, onLabel }: { item: WorkItem; onLabel?: (label: string) => void }) {
   const labels = workLabels(item);
@@ -17,13 +17,26 @@ export function WorkLabelChips({ item, onLabel }: { item: WorkItem; onLabel?: (l
   </div>;
 }
 
-export function WorkLabels({ rows, mixedSources, selection, onSelect, onLabel, renderDetails, onHideSelection, viewport }: {
+export function WorkLabels({ rows, mixedSources, selection, onSelect, onLabel, renderDetails, onHideSelection, viewport, reveal }: {
   rows: readonly WorkItem[]; mixedSources: boolean; selection: WorkSelection | null;
   onSelect: (item: WorkItem, trigger: HTMLButtonElement, group?: string) => void; onLabel: (label: string) => void;
   renderDetails?: WorkDetailsRenderer; onHideSelection?: () => void; viewport?: WorkViewport;
+  reveal?: WorkRevealRequest | null;
 }) {
   const groups = useMemo(() => groupWorkLabels(rows), [rows]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  // A reveal request from outside (the Urgent strip) expands the item's first
+  // label group, the group its selection names, during this render, so the
+  // row and its details mount with the selection. Earlier requests are not
+  // replayed when the view mounts.
+  const [revealSeen, setRevealSeen] = useState(reveal?.seq);
+  if (reveal && reveal.seq !== revealSeen) {
+    setRevealSeen(reveal.seq);
+    const group = groupWorkLabels([reveal.item])[0]?.key;
+    if (group !== undefined && collapsed.has(group)) {
+      setCollapsed(new Set([...collapsed].filter(key => key !== group)));
+    }
+  }
   const entries = useMemo(() => groups.flatMap(group => [
     { key: `heading:${group.key}`, group, item: null as WorkItem | null },
     ...(collapsed.has(group.key) ? [] : group.items.map(item => ({ key: JSON.stringify([group.key, item.source, item.id]), group, item }))),

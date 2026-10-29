@@ -66,6 +66,9 @@ describe("Work serial paging", () => {
     expect(screen.getByRole("button", { name: "item-0 — Task 0" })).toBe(existing);
     expect(existing).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("complementary", { name: "Work item details" })).toBeInTheDocument();
+    // Source order shows how the pages merged: the second page follows the
+    // first. (The default Priority sort would order these equal P2 rows by id.)
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort (loaded rows)" }), { target: { value: "" } });
     expect([...container.querySelectorAll(".work-row-ref")].map(node => node.textContent))
       .toEqual(Array.from({ length: 40 }, (_, i) => `item-${i}`));
     expect(screen.getByText("End of work list.")).toBeInTheDocument();
