@@ -2,8 +2,8 @@
 // Does not open a TCP port or carry keys in logs. New pipe bridge beside federation_process.rs.
 
 fn federation_stdio_control(
-    mut input: std::process::ChildStdin,
-    mut output: std::process::ChildStdout,
+    mut input: impl std::io::Write + Send + 'static,
+    mut output: impl std::io::Read + Send + 'static,
 ) -> Result<FederationControlIo, ApiError> {
     let (local, bridge) = tokio::io::duplex(FEDERATION_FRAME_LIMIT);
     let (mut reader, mut writer) = tokio::io::split(bridge);
@@ -18,6 +18,7 @@ fn federation_stdio_control(
             let mut bytes = [0; 4096];
             loop {
                 let count = match std::io::Read::read(&mut output, &mut bytes) {
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     Ok(0) | Err(_) => break,
                     Ok(count) => count,
                 };
@@ -28,6 +29,10 @@ fn federation_stdio_control(
                     break;
                 }
             }
+            // Generic split halves share ownership of the duplex stream. The
+            // stdin reader may still be waiting, so dropping this half alone
+            // does not publish EOF to the asynchronous control reader.
+            let _ = read_runtime.block_on(writer.shutdown());
         })
         .map_err(|_| federation_transport_unavailable())?;
     std::thread::Builder::new()

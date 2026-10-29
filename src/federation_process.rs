@@ -5,9 +5,30 @@ struct FederationSshProcess {
     child: Option<Child>,
     input: Option<std::process::ChildStdin>,
     output: Option<std::process::ChildStdout>,
+    diagnostic: FederationSshDiagnostics,
 }
 
 impl FederationSshProcess {
+    fn from_child(mut child: Child) -> Result<Self, ApiError> {
+        let diagnostic = Arc::new(Mutex::new(FederationSshDiagnostic::default()));
+        let input = child.stdin.take();
+        let output = child.stdout.take();
+        let stderr = child.stderr.take();
+        let process = Self {
+            child: Some(child),
+            input,
+            output,
+            diagnostic: diagnostic.clone(),
+        };
+        if let Some(stderr) = stderr {
+            std::thread::Builder::new()
+                .name("federation-stderr".to_owned())
+                .spawn(move || federation_read_ssh_diagnostics(stderr, &diagnostic))
+                .map_err(|_| federation_transport_unavailable())?;
+        }
+        Ok(process)
+    }
+
     fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
         let input = self
             .input
@@ -21,10 +42,18 @@ impl FederationSshProcess {
     }
     fn child_exited(&mut self) -> Result<bool, ApiError> {
         match self.child.as_mut() {
-            Some(child) => child
-                .try_wait()
-                .map(|status| status.is_some())
-                .map_err(|_| federation_transport_unavailable()),
+            Some(child) => {
+                let status = child
+                    .try_wait()
+                    .map_err(|_| federation_transport_unavailable())?;
+                if let Some(status) = &status {
+                    self.diagnostic
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .exit(status);
+                }
+                Ok(status.is_some())
+            }
             None => Ok(true),
         }
     }
@@ -36,18 +65,32 @@ impl FederationSshProcess {
 
     fn reap(&mut self) -> Result<(), ApiError> {
         if let Some(child) = self.child.as_mut() {
-            if !matches!(child.try_wait(), Ok(Some(_))) {
+            let status = child.try_wait();
+            if let Ok(Some(status)) = &status {
+                self.diagnostic
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .exit(status);
+            } else {
+                self.diagnostic
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .cleanup_requested = true;
                 if let Err(error) = child.kill() {
                     eprintln!("federation SSH cleanup could not stop owned child: {error}");
                 }
             }
-            if let Err(error) = child.wait() {
+            let status = child.wait().map_err(|error| {
                 eprintln!("federation SSH cleanup could not reap owned child: {error}");
-                return Err(ApiError::internal(
+                ApiError::internal(
                     "federation SSH cleanup unresolved; operator reconciliation required",
                 )
-                .with_kind(ApiErrorKind::FederationSshCleanupUnknown));
-            }
+                .with_kind(ApiErrorKind::FederationSshCleanupUnknown)
+            })?;
+            self.diagnostic
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .exit(&status);
             self.child.take();
         }
         Ok(())
@@ -95,17 +138,11 @@ fn start_federation_ssh(
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    let mut child = command
+    let child = command
         .spawn()
         .map_err(|_| federation_transport_unavailable())?;
-    let input = child.stdin.take();
-    let output = child.stdout.take();
-    Ok(FederationSshProcess {
-        child: Some(child),
-        input,
-        output,
-    })
+    FederationSshProcess::from_child(child)
 }

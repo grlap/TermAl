@@ -21,6 +21,7 @@ async fn federation_central_monitor(
     let start_channel = client.channel.clone();
     let start_stop = stop.clone();
     let started = tokio::time::Instant::now();
+    if let Some(reporter) = &attempt.reporter { reporter.stage("sshSpawn"); }
     let mut process = federation_os_operation(
         move || {
             if *start_stop.borrow()
@@ -50,6 +51,10 @@ async fn federation_central_monitor(
             false,
         )
     })?;
+    if let Some(reporter) = &attempt.reporter {
+        reporter.ssh(process.diagnostics());
+        reporter.stage("controlStartup");
+    }
     let outcome = async {
         let mut control = process.take_control_stream().map_err(|error| federation_attestation_error(
             &client.channel, None, "startup", "controlStreamUnavailable", error, false))?;
@@ -76,6 +81,7 @@ async fn federation_central_monitor(
                 },
             }
             let mut first_probe = true;
+            if let Some(reporter) = &attempt.reporter { reporter.stage("authenticated"); }
             loop {
                 if !first_probe { tokio::select! {
                     _ = federation_wait_stop(stop) => return Ok(()),
@@ -122,6 +128,7 @@ async fn federation_central_monitor(
         outcome
     }.await;
     client.channel.invalidate();
+    if let Some(reporter) = &attempt.reporter { reporter.stage("sshCleanup"); }
     if let Err(error) = federation_os_operation(
         move || process.shutdown(),
         None,

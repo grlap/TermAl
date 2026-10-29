@@ -212,7 +212,12 @@ async fn federation_established_failure_keeps_observed_credential_fence() {
     let refused_material = fixture
         .event(|e| matches!(e, Event::Attempt(StatusCode::CONFLICT)))
         .await;
+    let observation = fixture.app.federation_registry_view().unwrap();
+    let worker = observation["peers"].as_array().unwrap().iter()
+        .find(|peer| peer["host"]["hostId"] == fixture.id).unwrap()["attestation"]["worker"].clone();
     fixture.finish(runtime).await;
+    assert_eq!(worker["stage"], "materialChanged");
+    assert_eq!(worker["quarantinedForRuntime"], false);
     assert!(
         refused_material,
         "a retry must retain material observed before its own connect committed"
@@ -250,7 +255,13 @@ async fn federation_unknown_cleanup_quarantines_instead_of_replacing() {
     // shutdown joins that worker and makes the final state stable.
     let quarantined = runtime.quarantined.clone();
     let id = fixture.id.clone();
+    let app = fixture.app.clone();
     fixture.finish(runtime).await;
+    let view = app.federation_registry_view().unwrap();
+    let worker = &view["peers"].as_array().unwrap().iter()
+        .find(|peer| peer["host"]["hostId"] == id).unwrap()["attestation"]["worker"];
     assert!(classified);
     assert!(quarantined.lock().unwrap().contains(&id));
+    assert_eq!(worker["stage"], "runtimeQuarantine");
+    assert_eq!(worker["quarantinedForRuntime"], true);
 }

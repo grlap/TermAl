@@ -16,10 +16,12 @@ trait FederationSshChild: Send {
         ))
     }
     fn child_exited(&mut self) -> Result<bool, ApiError>;
+    fn diagnostics(&self) -> Option<FederationSshDiagnostics> { None }
     fn shutdown(self: Box<Self>) -> Result<(), ApiError>;
 }
 
 impl FederationSshChild for FederationSshProcess {
+    fn diagnostics(&self) -> Option<FederationSshDiagnostics> { Some(self.diagnostic.clone()) }
     fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
         FederationSshProcess::take_control_stream(self)
     }
@@ -119,6 +121,7 @@ struct FederationAttemptState {
     material: Option<[u8; 32]>,
     material_changed: bool,
     unresolved: Arc<AtomicBool>,
+    reporter: Option<FederationWorkerReporter>,
 }
 
 impl FederationAttemptState {

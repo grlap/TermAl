@@ -11,6 +11,7 @@ async fn federation_serve_peer(
     attempt: &mut FederationAttemptState,
     io: &FederationRuntimeIo,
 ) -> Result<(), ApiError> {
+    if let Some(reporter) = &attempt.reporter { reporter.stage("credentialRead"); }
     federation_validate_credential_basis(app, snapshot, &basis, stop)?;
     let read = FederationCredentialRead::start(snapshot.clone(), &basis, io.credentials.clone())
         .inspect_err(|_| {
@@ -23,6 +24,7 @@ async fn federation_serve_peer(
     // own result even though its basis settlement guard is still held.
     let Some(completed) = read
         .wait(stop, io.credential_reporting_deadline, |state| {
+            if let Some(reporter) = &attempt.reporter { reporter.stage("credentialSettlement"); }
             eprintln!(
                 "federation peer {} credential read: {state}",
                 snapshot.peer.host_id
@@ -43,6 +45,7 @@ async fn federation_serve_peer(
         FederationRole::Satellite => snapshot.endpoint.satellite_federation_port,
         FederationRole::Standalone => return Err(federation_stale_link()),
     };
+    if let Some(reporter) = &attempt.reporter { reporter.stage("listenerBind"); }
     let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port)))
         .await
         .map_err(|_| federation_transport_unavailable())?;
@@ -138,6 +141,7 @@ async fn federation_serve_peer(
     // Material is adopted on the validated captured basis. Pending connection
     // commits take their own settlement guards as before.
     drop(settlement);
+    if let Some(reporter) = &attempt.reporter { reporter.stage("serving"); }
     let result = if snapshot.local_role == FederationRole::Central {
         match credentials.known_hosts {
             Some(known_hosts) => {

@@ -12,9 +12,21 @@ struct FederationAttestationObservation {
     enrollment_generation: u64,
     attempt_owner: u64,
     attempt_channel: Option<String>,
+    worker: Option<FederationWorkerObservation>,
 }
 
 impl FederationAttestationObservation {
+    fn project_for(&self, peer: &FederationPeerRecord) -> Value {
+        let mut value = self.project();
+        let current = self.enrollment_generation == peer.enrollment_generation
+            && self.transport_generation == peer.transport_generation;
+        let attempted = self.attempt_owner != 0 || self.last_stage.is_some();
+        value["currentBasis"] = json!(attempted.then_some(current));
+        if !current && self.last_stage.is_some() { value["state"] = json!("historical"); }
+        value["worker"] = self.worker.as_ref().map(|worker| worker.project(peer)).unwrap_or(Value::Null);
+        value
+    }
+
     fn project(&self) -> Value {
         json!({"state": if self.failures >= 3 { "failing" } else if self.failures > 0 { "retrying" }
             else if self.owner > 0 { "authenticated" } else { "unverified" },

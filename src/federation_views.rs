@@ -20,7 +20,7 @@ impl AppState {
                 "verificationCurrent":peer.verified_on(inner.federation.links.get(&peer.identity.host_id)),
                 "lastObserved":peer.last_observed,
                 "attestation":inner.federation_attestation.get(&peer.identity.host_id)
-                    .map(FederationAttestationObservation::project).unwrap_or_else(|| FederationAttestationObservation::default().project())})
+                    .map(|observation| observation.project_for(peer)).unwrap_or_else(|| FederationAttestationObservation::default().project_for(peer))})
         }).collect();
         Ok(json!({"enabled":inner.preferences.federation.enabled,
             "version":inner.federation.version,

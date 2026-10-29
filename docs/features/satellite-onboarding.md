@@ -48,6 +48,33 @@ The order, each step on the named host:
 
 Settings and enrollment are not themselves proof of a link.
 
+## Connection diagnostics
+
+`GET /api/federation` reports each peer's existing `attestation` observation.
+`currentBasis: false` and `state: "historical"` label a prior transport's
+attestation; its `startupExpired` is not evidence of a new SSH attempt.
+`currentBasis: null` means no attestation attempt has been recorded yet,
+including when a worker is still reading credentials before its first proof.
+The optional `worker` object reports the current worker ID, owning server
+instance, attempt number, enrollment and transport generations, start/update
+times and stage. Its own `currentBasis` identifies whether that progress
+belongs to the current peer record.
+
+`retryBackoff` includes `retryAfterMs`. `materialChanged` and
+`runtimeQuarantine` identify the existing hard-fence parks; the latter also
+sets `quarantinedForRuntime`. These observations do not clear those fences
+or grant routing authority. `ssh` contains exit status, whether cleanup was
+requested, and a fixed stderr class (`nameResolution`, `connect`,
+`authentication`, `hostKey`, `forward`, or `unknown`). Classification uses
+at most the first 4096 bytes while continuing to drain the pipe; raw stderr
+and credentials are never returned. `stderrComplete` and `truncated` state
+the limits of that evidence. A cleanup-requested exit does not establish
+why the connection originally failed.
+
+An owned child's stdout EOF or read error closes the async control input;
+before a complete hello it is `linkDownBeforeHello`. An alive silent or
+partial-hello child remains subject to the unchanged startup deadline.
+
 ## Explicit verification
 
 The operator requests verification on the central TermAl host for that entry.

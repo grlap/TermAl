@@ -314,11 +314,13 @@ async fn federation_run_peer(
 ) {
     let mut retry = FederationBackoff::default();
     let mut attempt = FederationAttemptState::default();
+    attempt.reporter = Some(FederationWorkerReporter::new(app.clone(), basis.clone()));
     loop {
         if *stop.borrow() {
             return;
         }
         if basis.is_settling() {
+            if let Some(reporter) = &attempt.reporter { reporter.stage("credentialSettlement"); }
             tokio::select! {
                 _ = federation_wait_stop(&mut stop) => return,
                 _ = tokio::time::sleep(io.reconcile_interval) => {}
@@ -329,6 +331,7 @@ async fn federation_run_peer(
             .read()
             .expect("federation basis lock poisoned")
             .clone();
+        if let Some(reporter) = &mut attempt.reporter { reporter.begin(); }
         let result = match app.federation_reconnect_snapshot(&expected) {
             Ok(snapshot) => {
                 federation_serve_peer(
@@ -355,6 +358,7 @@ async fn federation_run_peer(
             let cleanup_unknown =
                 matches!(error.kind, Some(ApiErrorKind::FederationSshCleanupUnknown));
             if cleanup_unknown || attempt.unresolved.load(Ordering::SeqCst) {
+                if let Some(reporter) = &attempt.reporter { reporter.stage("runtimeQuarantine"); }
                 quarantined
                     .lock()
                     .expect("federation quarantine mutex poisoned")
@@ -364,18 +368,21 @@ async fn federation_run_peer(
                     expected.peer.host_id
                 );
             }
-            #[cfg(test)]
-            (io.attempt_finished)(&result);
             if cleanup_unknown
                 || attempt.unresolved.load(Ordering::SeqCst)
                 || attempt.material_changed
             {
                 if attempt.material_changed {
+                    if !cleanup_unknown && !attempt.unresolved.load(Ordering::SeqCst) {
+                        if let Some(reporter) = &attempt.reporter { reporter.stage("materialChanged"); }
+                    }
                     eprintln!(
                         "federation peer {} paused: enrolled credential material changed",
                         expected.peer.host_id
                     );
                 }
+                #[cfg(test)]
+                (io.attempt_finished)(&result);
                 // Only locally proven hard fences park. Remote 409/403 and
                 // temporary durability holds remain bounded retry outcomes.
                 federation_wait_stop(&mut stop).await;
@@ -383,10 +390,15 @@ async fn federation_run_peer(
             }
         }
         if *stop.borrow() {
+            #[cfg(test)]
+            if result.is_err() { (io.attempt_finished)(&result); }
             return;
         }
         let delay = retry.next_delay();
         retry.record_failure();
+        if let Some(reporter) = &attempt.reporter { reporter.retry(delay); }
+        #[cfg(test)]
+        if result.is_err() { (io.attempt_finished)(&result); }
         tokio::select! {
             _ = federation_wait_stop(&mut stop) => return,
             _ = tokio::time::sleep(delay) => {}

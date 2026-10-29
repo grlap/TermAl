@@ -200,6 +200,7 @@ mod federation_rpc;
 mod federation_loopback;
 mod federation_listener_io;
 mod federation_link;
+mod federation_stdio_bridge;
 mod federation_enrollment;
 mod federation_credentials;
 mod federation_bounds;
