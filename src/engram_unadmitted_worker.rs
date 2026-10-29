@@ -432,9 +432,31 @@ impl AppState {
             return Ok(());
         };
         let diagnostic = match &next.envelopes[envelope_index].delivery {
+            // An identity collision is told as such: this report was
+            // rejected unapplied because an earlier, different operation
+            // holds its key, which is named; that operation is not known.
+            EngramRuntimeObservationDelivery::Refused { code, message }
+                if code == ENGRAM_IDEMPOTENCY_CONFLICT_CODE =>
+            {
+                Some(format!(
+                    "Engram rejected the observation of the runtime-started turn as an identity collision ({code}): \
+                     an earlier, different operation already holds its key ({message}). This report was not recorded \
+                     and is not sent again; the earlier operation is not known. Its checks remain uncredited."
+                ))
+            }
             EngramRuntimeObservationDelivery::Refused { code, .. } => Some(format!(
                 "Engram refused the observation of the runtime-started turn ({code}). Its checks remain uncredited."
             )),
+            // A bounded replay that never got a certain answer leaves the
+            // outcome open: Engram may have recorded any of its attempts.
+            EngramRuntimeObservationDelivery::LocalFailure { code, message }
+                if code == "runtime_observation_retry_exhausted" =>
+            {
+                Some(format!(
+                    "Whether Engram recorded the observation of the runtime-started turn is unresolved ({code}): {message}. \
+                     The request is kept and not sent again; read the item's observations before deciding. Its checks remain uncredited."
+                ))
+            }
             EngramRuntimeObservationDelivery::LocalFailure { code, message } => Some(format!(
                 "Runtime-started turn not reported to Engram ({code}): {message}. Its checks remain uncredited."
             )),

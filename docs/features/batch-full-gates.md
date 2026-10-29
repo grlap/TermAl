@@ -57,8 +57,25 @@ to its own item only.
      never binds twice. Each send holds the session's binding while it runs,
      like a bind: a change of the project's Engram settings waits for it, and
      one that came first stops it;
-  3. Engram's answer settles the member: bound, already bound, or refused.
-     An uncertain answer (a lost call, a busy store, an unreadable receipt) is
+  3. Engram's answer settles the member: bound, already bound, refused, or
+     rejected as an identity collision. Only a refusal that wrote nothing
+     (`verification_bind_refused`, or `invalid_request` from an Engram that
+     cannot decode the bind) is final. An idempotency conflict under the
+     member's key is a terminal identity collision: Engram compares the stored
+     intent before any bind write, so this bind was rejected unapplied, and
+     an earlier, different operation holds the key. The member is told it is
+     not recorded, with the key and the bind's provenance, never as bound;
+     that notice is also written to the session's transcript in the same
+     stored write that retires the owed bind, and the bind is never sent
+     again under that key or a new one. If that write fails, this process
+     still sends nothing more, but the store keeps the owed bind unchanged:
+     a host restarted from it sends the identical request once more, which
+     Engram rejects again unapplied. What the earlier operation is, or
+     did, is not known. A build from before this rule (one that answers an
+     idempotency conflict as already bound) keeps that wrong classification
+     for the binds it processes itself, for example after a rollback. An
+     uncertain answer (a lost call, a busy store, a storage error, a code
+     this build does not know, an unreadable receipt) is
      sent again with backoff (5 seconds to 8 minutes); a refusal of the
      session's credentials asks for a rebind and waits for the fresh token.
      TermAl rebinds for it only while the session is idle, since a rebind
@@ -78,6 +95,12 @@ one and never push a source-root line out:
   bound to that item; run its gate again, or give it the missing turn first.
 - `the full gate is unconfirmed for <item>: <why>; it may or may not be
   bound.` Check the item's own run before running its gate again.
+- `the full gate is not recorded for <item>: Engram rejected this bind as an
+  identity collision: an earlier, different operation already holds its key
+  (key <key>; original <record>; work <work>; <detail>; claim <claim> fence
+  <fence> root generation <generation>); the bind is not sent again, and the
+  earlier operation is not known.` Run the item's gate again if it needs the
+  credit.
 
 ## Restarts and resets
 

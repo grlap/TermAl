@@ -304,6 +304,218 @@ fn credentials_engram_refuses_are_refreshed_before_the_bind_is_sent_again() {
     assert!(turn.record(|record| record.engram.owed_binds.is_empty()));
 }
 
+/// The session's row and its transcript rows, each as the JSON stored, read
+/// from the SQLite store itself.
+fn stored_session(turn: &CheckedTurn) -> (Value, Vec<String>) {
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path())
+        .expect("the store opens");
+    let row: String = connection
+        .query_row(
+            "SELECT value_json FROM sessions WHERE id = ?1",
+            [&turn.session_id],
+            |row| row.get(0),
+        )
+        .expect("the session row is stored");
+    let mut statement = connection
+        .prepare("SELECT value_json FROM messages WHERE session_id = ?1 ORDER BY position")
+        .expect("the transcript query prepares");
+    let messages: Vec<String> = statement
+        .query_map([&turn.session_id], |row| row.get::<_, String>(0))
+        .expect("the transcript rows read")
+        .map(|row| row.expect("a transcript row reads"))
+        .collect();
+    (
+        serde_json::from_str(&row).expect("the session row is JSON"),
+        messages,
+    )
+}
+
+/// Stored transcript rows that disclose an identity collision.
+fn stored_collision_notices(turn: &CheckedTurn) -> Vec<String> {
+    stored_session(turn)
+        .1
+        .into_iter()
+        .filter(|message| message.contains(ENGRAM_BIND_COLLISION_PHRASE))
+        .collect()
+}
+
+/// The owed bind collides: the next tick sends it and Engram answers with an
+/// idempotency conflict. Returns the request sent.
+fn collide(turn: &CheckedTurn) -> Value {
+    answer_next(
+        turn,
+        Err(EngramTransportError::remote(EngramControlErrorBody {
+            code: "control_operation_idempotency_conflict".to_owned(),
+            message: "the idempotency key was used for another request".to_owned(),
+        })),
+    );
+    tick(turn);
+    let binds = requests_of(turn, "verification_bind");
+    assert_eq!(binds.len(), 1, "{binds:#?}");
+    binds[0].clone()
+}
+
+/// Engram answers the bind with an idempotency conflict: an earlier,
+/// different operation holds the key, and this bind was rejected unapplied.
+/// The member is told it is not recorded, as an identity collision with its
+/// key, never as bound; the notice is written to the session's transcript by
+/// the same commit that retires the owed bind; and nothing is sent again,
+/// neither by this process nor by a host restarted from the store.
+#[test]
+fn an_identity_collision_retires_its_bind_with_a_durable_notice_and_no_resend() {
+    let (turn, _, _) = owed_batch_turn("carried-batch-collision");
+    tick(&turn);
+    // Before the answer, the store holds the decided owed bind and no notice.
+    let (row, _) = stored_session(&turn);
+    assert_eq!(
+        row["engramOwedBinds"].as_array().map(Vec::len),
+        Some(1),
+        "{row:#}"
+    );
+    assert!(stored_collision_notices(&turn).is_empty());
+    let sent = collide(&turn);
+    assert!(
+        turn.record(|record| record.engram.owed_binds.is_empty()),
+        "the collision retires the owed bind"
+    );
+    let notices: Vec<String> = turn.record(|record| {
+        record
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Text { author: Author::System, text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .filter(|text| text.contains(ENGRAM_BIND_COLLISION_PHRASE))
+            .collect()
+    });
+    assert_eq!(notices.len(), 1, "one durable transcript notice: {notices:?}");
+    let notice = &notices[0];
+    let key = sent["idempotency_key"].as_str().unwrap();
+    assert!(notice.contains(key), "{notice}");
+    assert!(notice.contains("not recorded"), "{notice}");
+    assert!(!notice.contains("(bound)"), "{notice}");
+    // Later ticks have nothing to send: never again under this key or a new one.
+    turn.state.engram_owed_binds_tick(
+        chrono::Utc::now() + chrono::Duration::minutes(10),
+        DEADLOCK_GUARD,
+    );
+    assert_eq!(requests_of(&turn, "verification_bind").len(), 1);
+
+    // The settlement is in the store: the row has no owed bind left, and the
+    // transcript holds the one notice naming the key.
+    let (row, _) = stored_session(&turn);
+    assert!(row.get("engramOwedBinds").is_none(), "{row:#}");
+    let stored = stored_collision_notices(&turn);
+    assert_eq!(stored.len(), 1, "{stored:?}");
+    assert!(stored[0].contains(key), "{}", stored[0]);
+
+    // A state loaded from that store has nothing to reschedule, and a host
+    // restarted from it sends no bind.
+    let path = turn.state.persistence_path.as_path();
+    let loaded = load_state(path)
+        .expect("the state loads")
+        .expect("a state was stored");
+    let index = loaded
+        .find_session_index(&turn.session_id)
+        .expect("the session loads");
+    assert!(loaded.sessions[index].engram.owed_binds.is_empty());
+    turn.state.trigger_shutdown_signal();
+    turn.state.shutdown_persist_blocking();
+    let transport = ScriptedEngramControlTransport::new(vec![]);
+    let restarted = AppState::new_with_paths_engram_transport_and_clock_for_test(
+        turn.root.to_string_lossy().into_owned(),
+        path.to_path_buf(),
+        turn.state.orchestrator_templates_path.as_path().to_path_buf(),
+        transport.clone(),
+        EngramBudgetClock::scripted(),
+    )
+    .expect("a host restarts from the store");
+    restarted.engram_owed_binds_tick(
+        chrono::Utc::now() + chrono::Duration::minutes(10),
+        DEADLOCK_GUARD,
+    );
+    assert!(
+        !transport
+            .requests()
+            .iter()
+            .any(|recorded| recorded.request["operation"] == "verification_bind"),
+        "a settled collision is never rescheduled after a restart"
+    );
+    restarted.trigger_shutdown_signal();
+    restarted.shutdown_persist_blocking();
+}
+
+/// The commit that would settle a collision fails while the process lives:
+/// the entry is already retired in memory, so nothing is sent again, and the
+/// store still holds the owed bind unchanged, without a notice. Only that
+/// unsettled store, loaded again, sends the bind once more, and then as the
+/// identical request under the same key, which Engram rejects again unapplied.
+#[test]
+fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_identically_after_reload() {
+    let (turn, _, _) = owed_batch_turn("carried-batch-collision-unstored");
+    tick(&turn);
+    let (before, _) = stored_session(&turn);
+    assert_eq!(
+        before["engramOwedBinds"].as_array().map(Vec::len),
+        Some(1),
+        "{before:#}"
+    );
+    // Fail exactly the write that would retire the stored owed bind.
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path())
+        .expect("the store opens");
+    connection
+        .execute_batch(&format!(
+            "CREATE TRIGGER fail_collision_settlement BEFORE UPDATE ON sessions
+             WHEN NEW.id = '{}'
+               AND instr(OLD.value_json, '\"engramOwedBinds\"') > 0
+               AND instr(NEW.value_json, '\"engramOwedBinds\"') = 0
+             BEGIN SELECT RAISE(ABORT, 'fixture collision settlement failure'); END;",
+            turn.session_id
+        ))
+        .expect("the trigger installs");
+    let sent = collide(&turn);
+    assert!(turn.record(|record| record.engram.owed_binds.is_empty()));
+
+    // While the process lives, nothing is sent again.
+    turn.state.engram_owed_binds_tick(
+        chrono::Utc::now() + chrono::Duration::minutes(10),
+        DEADLOCK_GUARD,
+    );
+    assert_eq!(requests_of(&turn, "verification_bind").len(), 1);
+
+    // The store is as before the answer: the owed bind unchanged, no notice.
+    let (after, _) = stored_session(&turn);
+    assert_eq!(after["engramOwedBinds"], before["engramOwedBinds"]);
+    assert!(stored_collision_notices(&turn).is_empty());
+
+    // Loaded again, the unsettled entry is sent as the identical request.
+    connection
+        .execute_batch("DROP TRIGGER fail_collision_settlement")
+        .expect("the trigger drops");
+    drop(connection);
+    let loaded = load_state(turn.state.persistence_path.as_path())
+        .expect("the state loads")
+        .expect("a state was stored");
+    let index = loaded
+        .find_session_index(&turn.session_id)
+        .expect("the session loads");
+    let owed = &loaded.sessions[index].engram.owed_binds;
+    assert_eq!(owed.len(), 1, "{owed:?}");
+    assert_eq!(
+        engram_owed_bind_step(&owed[0], chrono::Utc::now()),
+        EngramOwedBindStep::Send
+    );
+    let token = sent["routing_token"].as_str().expect("the bind names its token");
+    let replay = engram_owed_bind_request(&owed[0], token).expect("the bind is decided");
+    assert_eq!(
+        serde_json::to_value(replay).expect("the request serializes"),
+        sent,
+        "the identical request under the same key"
+    );
+}
+
 #[test]
 fn a_credential_refusal_never_rebinds_a_session_while_its_turn_is_open() {
     let (turn, _, _) = owed_batch_turn("carried-batch-busy-refresh");

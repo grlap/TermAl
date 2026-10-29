@@ -156,9 +156,58 @@ fn runtime_observation_session_entry_is_durable(
     Ok(reports.is_some_and(|reports| reports.contains(expected)))
 }
 
+/// Engram's `execution_observe` refusals that record nothing for the refused
+/// request (Engram docs/features/behavioral-control-plane.md: "Each refusal
+/// records nothing"). Only these settle an envelope as refused.
+const ENGRAM_EXECUTION_OBSERVE_PRE_WRITE_REFUSALS: &[&str] = &[
+    "invalid_request",
+    "execution_observation_invalid",
+    "execution_observation_basis_mismatch",
+    "execution_observation_policy_basis_mismatch",
+];
+
+/// Engram's answer that an earlier, different operation already holds an
+/// envelope's idempotency key. Engram compares the stored intent before any
+/// write, so it rejected this report unapplied: a terminal identity
+/// collision, settled as `Refused` with this code and its key named.
+const ENGRAM_IDEMPOTENCY_CONFLICT_CODE: &str = "control_operation_idempotency_conflict";
+
+/// How a failed send of one retained envelope, keyed `key`, settles. Only a
+/// refusal Engram documents as recording nothing is final (`Refused`), and
+/// so is an identity collision, which is told distinctly and never sent
+/// again under this key or a new one. Every other error, transport
+/// ambiguity and any other Remote code alike (a storage error, a code this
+/// build does not know), proves nothing about what was recorded: the
+/// identical request stays pending for its bounded replay.
+fn engram_runtime_observation_failure_delivery(
+    error: EngramTransportError,
+    key: &str,
+) -> EngramRuntimeObservationDelivery {
+    let remote_code = (error.kind == EngramTransportErrorKind::Remote
+        && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied)
+        .then(|| error.code.clone())
+        .flatten();
+    match remote_code.as_deref() {
+        Some(code) if ENGRAM_EXECUTION_OBSERVE_PRE_WRITE_REFUSALS.contains(&code) => {
+            EngramRuntimeObservationDelivery::Refused {
+                code: code.to_owned(),
+                message: error.message,
+            }
+        }
+        Some(ENGRAM_IDEMPOTENCY_CONFLICT_CODE) => EngramRuntimeObservationDelivery::Refused {
+            code: ENGRAM_IDEMPOTENCY_CONFLICT_CODE.to_owned(),
+            message: format!("key {key}: {}", error.message),
+        },
+        _ => EngramRuntimeObservationDelivery::Pending {
+            last_error: Some(error.message),
+        },
+    }
+}
+
 // Return a new immutable version to install by CAS. Transport ambiguity keeps
-// the original request pending. A definitive refusal settles that envelope
-// with its code; it never pauses a queue or retries as if permission existed.
+// the original request pending. A documented record-nothing refusal settles
+// that envelope with its code; it never pauses a queue or retries as if
+// permission existed.
 fn deliver_runtime_observation_envelope(
     adapter: &EngramHostAdapter,
     report: &EngramRuntimeObservationReport,
@@ -231,26 +280,7 @@ fn deliver_runtime_observation_envelope(
                 last_error: Some(error.message),
             },
         },
-        Err(error) => match error.kind {
-            EngramTransportErrorKind::Remote
-                if error.invocation_application()
-                    != EngramInvocationApplication::CertifiedNotApplied
-                    && !error
-                        .code
-                        .as_deref()
-                        .is_some_and(engram_admission_code_retries) =>
-            {
-                EngramRuntimeObservationDelivery::Refused {
-                    code: error
-                        .code
-                        .unwrap_or_else(|| "execution_observation_refused".to_owned()),
-                    message: error.message,
-                }
-            }
-            _ => EngramRuntimeObservationDelivery::Pending {
-                last_error: Some(error.message),
-            },
-        },
+        Err(error) => engram_runtime_observation_failure_delivery(error, &observation.idempotency_key),
     };
     Ok(next)
 }

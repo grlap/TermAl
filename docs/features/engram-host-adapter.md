@@ -1164,10 +1164,27 @@ with `account_if_eligible` and unknown causality
   eligibility. It keeps the pinned capture policy in the wire when other
   policy details changed; the producer judges `account_if_eligible`.
   Unavailable or disabled policy has a visible local-failure diagnostic.
-  Busy, expired-request and other recognized transient replies retain the
-  immutable request with the existing backoff. After eight failed attempts,
-  delivery or capture ends visibly rather than retrying forever. A definitive
-  producer refusal names its code and settles that envelope. Malformed
+  Only `execution_observe`'s documented refusals that record nothing
+  (`invalid_request`, `execution_observation_invalid`,
+  `execution_observation_basis_mismatch`,
+  `execution_observation_policy_basis_mismatch`) are final: they name their
+  code and settle that envelope as refused. An idempotency conflict under the
+  envelope's key is a terminal identity collision: Engram compares the stored
+  intent before any write, so this report was rejected unapplied, and an
+  earlier, different operation holds the key. The envelope settles as refused
+  with code `control_operation_idempotency_conflict` and its key, the session
+  is told it was rejected as an identity collision and not recorded, and it is
+  never sent again under that key or a new one; what the earlier operation is
+  is not known. If the write that stores this settlement fails, this process
+  still sends nothing more, but the store keeps the pending report: a host
+  restarted from it sends the identical request once more, which Engram
+  rejects again unapplied. Every other
+  reply, a busy store, an expired request, a storage error, a code this build
+  does not know or a transport failure, retains the immutable request for the
+  identical replay with the existing backoff. After eight failed attempts,
+  delivery or capture ends visibly rather than retrying forever, and an
+  exhausted delivery is told as unresolved, since any attempt may have been
+  recorded. Malformed
   retained wire becomes a visible local failure and does not starve later
   reports. Settled request/receipt bodies and failed closing jobs are currently
   retained; diagnostics and eligibility reads are per envelope.

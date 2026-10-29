@@ -24,6 +24,8 @@ enum ReplyMode {
     LoseFirst,
     TransientFirst(&'static str),
     Refuse,
+    /// Engram holds a different stored request under the report's key.
+    Conflict,
 }
 
 /// A producer, rather than a host-side reporting implementation. Its replay
@@ -172,6 +174,7 @@ impl EngramControlTransport for ObservationProducer {
                 )
                 .unwrap();
                 if self.mode != ReplyMode::Refuse
+                    && self.mode != ReplyMode::Conflict
                     && !(matches!(self.mode, ReplyMode::TransientFirst(_)) && attempt == 1)
                 {
                     records.insert(key, (wire.clone(), receipt.clone()));
@@ -206,6 +209,10 @@ impl EngramControlTransport for ObservationProducer {
             ReplyMode::Refuse => Err(EngramTransportError::remote(EngramControlErrorBody {
                 code: "execution_observation_policy_basis_mismatch".to_owned(),
                 message: "definitive producer refusal".to_owned(),
+            })),
+            ReplyMode::Conflict => Err(EngramTransportError::remote(EngramControlErrorBody {
+                code: "control_operation_idempotency_conflict".to_owned(),
+                message: "the idempotency key was used for another request".to_owned(),
             })),
             ReplyMode::LoseFirst if attempt == 1 => Err(EngramTransportError::transport(
                 "receipt lost after the producer committed the immutable request",
@@ -694,6 +701,292 @@ async fn definitive_refusal_names_its_code_without_holding_or_retrying_the_turn(
         SessionStatus::Idle
     );
     fixture.assert_no_granted_activity();
+}
+
+/// An idempotency conflict is a terminal identity collision: Engram compared
+/// the stored intent before any write, so this report was rejected unapplied,
+/// and an earlier, different operation holds its key. It settles as refused
+/// with the conflict code and its key, is told as an identity collision (not
+/// recorded, the earlier operation not known), is stored durably in the
+/// session row, and is never sent again under its key or a new one.
+#[tokio::test]
+async fn an_identity_collision_is_terminal_disclosed_and_not_sent_again() {
+    let mut fixture = ReportingTurn::new("unadmitted-conflict", true, ReplyMode::Conflict, false);
+    let mut deltas = fixture.turn.state.subscribe_delta_events();
+    let (idle, idle_rx) = mpsc::channel();
+    *fixture
+        .turn
+        .state
+        .runtime_observation_lifetime
+        .install_hook
+        .lock()
+        .unwrap() = Some(Arc::new(move |phase| {
+        if phase == "idle" {
+            let _ = idle.send(());
+        }
+    }));
+    fixture.finish();
+    fixture.observation();
+    let reason = tokio::time::timeout(DEADLOCK_GUARD, async {
+        loop {
+            let delta = deltas.recv().await.unwrap();
+            if delta.contains("identity collision") {
+                break delta;
+            }
+        }
+    })
+    .await
+    .expect("an identity collision must become a visible diagnostic");
+    assert!(reason.contains("control_operation_idempotency_conflict"), "{reason}");
+    assert!(reason.contains("not recorded"), "{reason}");
+    assert!(reason.contains("earlier operation is not known"), "{reason}");
+    idle_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+    assert_eq!(fixture.producer.requests().len(), 1, "never sent again");
+    let report = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
+    assert!(
+        report.envelopes.iter().any(|envelope| matches!(
+            &envelope.delivery,
+            EngramRuntimeObservationDelivery::Refused { code, message }
+                if code == "control_operation_idempotency_conflict" && message.starts_with("key ")
+        )),
+        "the envelope settles as a refused collision naming its key: {:?}",
+        report.envelopes
+    );
+    assert!(
+        runtime_observation_report_is_durable(
+            &fixture.turn.state.persistence_path,
+            &fixture.turn.session_id,
+            &report
+        )
+        .unwrap(),
+        "the settled collision is stored in the session row"
+    );
+    fixture.assert_no_granted_activity();
+
+    // A host restarted from that store loads the settled report and never
+    // schedules it again.
+    let state = fixture.turn.state.clone();
+    state.trigger_shutdown_signal();
+    state.shutdown_persist_blocking();
+    let restarted = restart_reporting_state(&fixture.turn.root, &state, fixture.producer.clone());
+    install_reporting_source_capture(&restarted);
+    let restarting = restarted.clone();
+    std::thread::spawn(move || restarting.run_post_listen_boot())
+        .join()
+        .unwrap()
+        .unwrap();
+    restarted.start_runtime_observation_worker(&fixture.turn.session_id);
+    {
+        let inner = restarted.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
+        let loaded = &record.engram.unadmitted_reports;
+        assert_eq!(loaded.len(), 1, "{loaded:?}");
+        assert!(loaded[0].is_settled(), "{loaded:?}");
+        assert!(
+            loaded[0].envelopes.iter().any(|envelope| matches!(
+                &envelope.delivery,
+                EngramRuntimeObservationDelivery::Refused { code, .. }
+                    if code == ENGRAM_IDEMPOTENCY_CONFLICT_CODE
+            )),
+            "{loaded:?}"
+        );
+        assert!(!record.engram.unadmitted_worker_running, "nothing is left to deliver");
+    }
+    assert_eq!(fixture.producer.requests().len(), 1, "never sent again after a restart");
+    restarted.trigger_shutdown_signal();
+    restarted.shutdown_persist_blocking();
+}
+
+/// The write that would settle a collision fails while the process lives:
+/// the envelope is settled in memory, so nothing is sent again, and the store
+/// still holds the pending report without the collision. Only a host
+/// restarted from that unsettled store sends the report once more, as the
+/// identical request under the same key, which Engram rejects again
+/// unapplied; that settlement is then stored.
+#[test]
+fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_identically_after_restart() {
+    let mut fixture = ReportingTurn::new("unadmitted-conflict-unstored", true, ReplyMode::Conflict, true);
+    fixture.finish();
+    let first = fixture.observation();
+    assert!(first.durable_before_send);
+    // The producer holds its answer: the stored image is the pending report.
+    let pending = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
+    let path = fixture.turn.state.persistence_path.as_ref().clone();
+    let session_id = fixture.turn.session_id.clone();
+    assert!(runtime_observation_report_is_durable(&path, &session_id, &pending).unwrap());
+    // Fail exactly the write that would store the collision.
+    let connection = rusqlite::Connection::open(&path).expect("the store opens");
+    connection
+        .execute_batch(&format!(
+            "CREATE TRIGGER fail_observation_collision BEFORE UPDATE ON sessions
+             WHEN NEW.id = '{session_id}'
+               AND instr(NEW.value_json, '{ENGRAM_IDEMPOTENCY_CONFLICT_CODE}') > 0
+             BEGIN SELECT RAISE(ABORT, 'fixture collision settlement failure'); END;"
+        ))
+        .expect("the trigger installs");
+    let (idle, idle_rx) = mpsc::channel();
+    *fixture
+        .turn
+        .state
+        .runtime_observation_lifetime
+        .install_hook
+        .lock()
+        .unwrap() = Some(Arc::new(move |phase| {
+        if phase == "idle" {
+            let _ = idle.send(());
+        }
+    }));
+    fixture.producer.release();
+    idle_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+
+    // Settled in memory, so the live worker sends nothing again.
+    let settled = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
+    assert!(settled.is_settled(), "{settled:?}");
+    fixture.turn.state.start_runtime_observation_worker(&session_id);
+    assert_eq!(fixture.producer.requests().len(), 1, "never sent again while the process lives");
+    // The store is unsettled: the pending report, no collision.
+    assert!(runtime_observation_report_is_durable(&path, &session_id, &pending).unwrap());
+    assert!(!runtime_observation_report_is_durable(&path, &session_id, &settled).unwrap());
+
+    // A host restarted from that store sends the identical request once more.
+    let state = fixture.turn.state.clone();
+    state.trigger_shutdown_signal();
+    state.shutdown_persist_blocking();
+    connection
+        .execute_batch("DROP TRIGGER fail_observation_collision")
+        .expect("the trigger drops");
+    drop(connection);
+    let restarted = restart_reporting_state(&fixture.turn.root, &state, fixture.producer.clone());
+    install_reporting_source_capture(&restarted);
+    let (idle, idle_rx) = mpsc::channel();
+    *restarted.runtime_observation_lifetime.install_hook.lock().unwrap() =
+        Some(Arc::new(move |phase| {
+            if phase == "idle" {
+                let _ = idle.send(());
+            }
+        }));
+    let restarting = restarted.clone();
+    let boot = std::thread::spawn(move || restarting.run_post_listen_boot());
+    let replay = fixture.observation();
+    assert_eq!(replay.request, first.request, "the identical request under the same key");
+    assert!(replay.durable_before_send);
+    boot.join().unwrap().unwrap();
+    let stored = loop {
+        idle_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+        let report = {
+            let inner = restarted.inner.lock().unwrap();
+            inner.sessions[inner.find_session_index(&session_id).unwrap()]
+                .engram
+                .unadmitted_reports[0]
+                .clone()
+        };
+        if report.is_settled() {
+            break report;
+        }
+    };
+    assert!(
+        stored.envelopes.iter().any(|envelope| matches!(
+            &envelope.delivery,
+            EngramRuntimeObservationDelivery::Refused { code, .. }
+                if code == ENGRAM_IDEMPOTENCY_CONFLICT_CODE
+        )),
+        "{stored:?}"
+    );
+    assert_eq!(fixture.producer.requests().len(), 2);
+    // Shutting down drains the restarted host's writer, then the settlement
+    // is read back from the store.
+    restarted.trigger_shutdown_signal();
+    restarted.shutdown_persist_blocking();
+    assert!(runtime_observation_report_is_durable(&path, &session_id, &stored).unwrap());
+}
+
+/// Each answer to one retained envelope settles it by the Engram contract:
+/// only `execution_observe`'s four documented refusals, which record
+/// nothing, are final; an idempotency conflict is a terminal identity
+/// collision naming its key; any other error, Remote or not, stays pending
+/// for the identical replay.
+#[test]
+fn each_failed_delivery_settles_by_the_execution_observe_contract() {
+    let remote = |code: &str| {
+        EngramTransportError::remote(EngramControlErrorBody {
+            code: code.to_owned(),
+            message: format!("Engram answered {code}"),
+        })
+    };
+    for code in [
+        "invalid_request",
+        "execution_observation_invalid",
+        "execution_observation_basis_mismatch",
+        "execution_observation_policy_basis_mismatch",
+    ] {
+        match engram_runtime_observation_failure_delivery(remote(code), "report-key") {
+            EngramRuntimeObservationDelivery::Refused { code: refused, .. } => {
+                assert_eq!(refused, code)
+            }
+            other => panic!("{code} records nothing and is final: {other:?}"),
+        }
+    }
+    match engram_runtime_observation_failure_delivery(
+        remote("control_operation_idempotency_conflict"),
+        "report-key",
+    ) {
+        EngramRuntimeObservationDelivery::Refused { code, message } => {
+            assert_eq!(code, ENGRAM_IDEMPOTENCY_CONFLICT_CODE);
+            assert!(message.starts_with("key report-key"), "{message}");
+        }
+        other => panic!("a conflict is a terminal identity collision: {other:?}"),
+    }
+    let mut codeless = remote("ignored");
+    codeless.code = None;
+    for error in [
+        remote("storage_error"),
+        remote("a_code_from_a_later_engram"),
+        remote("control_store_busy"),
+        // Certified not applied: this invocation wrote nothing, but an
+        // earlier one may have; replayed, never refused.
+        remote("control_request_expired"),
+        codeless,
+        EngramTransportError::transport("the control process exited"),
+        EngramTransportError::deadline("no answer within the call bound"),
+    ] {
+        let label = format!("{:?} {:?}", error.kind, error.code);
+        assert!(
+            matches!(
+                engram_runtime_observation_failure_delivery(error, "report-key"),
+                EngramRuntimeObservationDelivery::Pending { .. }
+            ),
+            "{label}"
+        );
+    }
+}
+
+/// A Remote code that proves nothing about what Engram recorded, a storage
+/// error or a code this build does not know, is not a refusal: the identical
+/// request is sent again.
+#[test]
+fn an_undocumented_remote_error_replays_the_same_request_instead_of_refusing_it() {
+    for code in ["storage_error", "a_code_from_a_later_engram"] {
+        let mut fixture = ReportingTurn::new(
+            &format!("unadmitted-unresolved-{code}"),
+            true,
+            ReplyMode::TransientFirst(code),
+            false,
+        );
+        fixture.finish();
+        let first = fixture.observation();
+        let retry = fixture.observation();
+        assert_eq!(first.request, retry.request, "retry after {code} keeps every request byte");
+        assert_eq!(fixture.producer.records.lock().unwrap().len(), 1);
+        assert!(
+            !fixture
+                .turn
+                .record(system_notices)
+                .iter()
+                .any(|notice| notice.contains("Engram refused")),
+            "{code}"
+        );
+        fixture.assert_no_granted_activity();
+    }
 }
 
 #[test]

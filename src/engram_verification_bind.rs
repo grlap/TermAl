@@ -261,13 +261,19 @@ enum EngramBindOutcome {
     /// Engram wrote the bound record (or replays the one it wrote).
     Bound { verification: String, replayed: bool },
     /// The member is bound from this gate already: Engram refused a second
-    /// binding of it, or holds a committed bind under this request's key
-    /// (an idempotency conflict: the key is this gate's and this member's
-    /// alone, and Engram keeps a key only when its bind commits).
+    /// binding of it.
     AlreadyBound,
-    /// Engram refused to bind the member, with a refusal the same request
-    /// meets again: it stays unbound.
+    /// Engram refused to bind the member, with a typed refusal that wrote
+    /// nothing and that the same request meets again: it stays unbound.
     Final(String),
+    /// Engram rejected this bind as an identity collision: an earlier,
+    /// different operation already holds its key
+    /// (`control_operation_idempotency_conflict`). Engram compares the stored
+    /// intent before any bind write, so this request was rejected unapplied,
+    /// but what the earlier operation is, or did, is not known. Terminal:
+    /// never bound, never sent again under this key or a new one; its line
+    /// names the key and the rejected bind's provenance.
+    Collision(String),
     /// Nothing is known to be written: send the identical request again.
     Resend(String),
     /// Engram refused this connection's credentials. That says nothing of an
@@ -280,22 +286,38 @@ enum EngramBindOutcome {
 /// Engram's error codes that a resend of the same request can settle (Engram
 /// src/host.rs `store_error_code`): an expiry Engram certifies wrote nothing,
 /// a busy store, and the generic storage error, which covers a failed commit.
-/// Every other code Engram sends is a refusal that the same bytes meet again.
 const ENGRAM_BIND_RESEND_CODES: &[&str] = &[
     "control_request_expired",
     "control_store_busy",
     "storage_error",
 ];
 
+/// Engram's refusals of a bind that provably wrote nothing (Engram
+/// docs/features/acceptance-evaluation.md, `verification_bind`: "Any failure
+/// refuses the whole request with `verification_bind_refused`, and nothing
+/// is written for any target"; and a request it cannot decode at all). Any
+/// other code is no proof that nothing was written: the identical request is
+/// sent again, bounded, and an unconfirmed bind is disclosed as such.
+const ENGRAM_BIND_PRE_WRITE_REFUSALS: &[&str] = &["verification_bind_refused", "invalid_request"];
+
+/// The words every identity-collision line carries
+/// (`EngramBindOutcome::Collision`). A settled entry whose line has them is
+/// also written to the session's transcript, durably, in the same commit
+/// that retires it (`apply_engram_owed_binds`).
+const ENGRAM_BIND_COLLISION_PHRASE: &str = "Engram rejected this bind as an identity collision";
+
 /// How `result`, the answer to binding one member `short_ref`, settles it.
-/// An idempotency conflict means the member is bound; a refusal of the
-/// connection is resent under refreshed credentials; an expiry, a busy store,
-/// a storage error and every answer that did not reach Engram or came back
-/// unreadable (a lost or timed-out response, a failed process) are resent as
-/// they are, since Engram replays a committed request by its key and never
-/// binds twice. Any other code Engram sends, its refusal of the bind or one
-/// this build does not know (such as an Engram without `verification_bind`
-/// answering `invalid_request`), is final, and its holder is told.
+/// A refusal of the connection is resent under refreshed credentials. Only
+/// Engram's typed refusals that wrote nothing (`ENGRAM_BIND_PRE_WRITE_REFUSALS`,
+/// such as an Engram without `verification_bind` answering
+/// `invalid_request`) are final. An idempotency conflict is a terminal
+/// identity collision: this request was rejected unapplied, and an earlier,
+/// different operation holds its key. Every other
+/// answer, an expiry, a busy store, a storage error, a code this build does
+/// not know, or one that did not reach Engram or came back unreadable, is
+/// resent as it is, since Engram replays a committed request by its key and
+/// never binds twice; the resend is bounded, and the holder is told when no
+/// certain answer came.
 fn engram_bind_outcome(
     result: std::result::Result<Value, EngramTransportError>,
     original: &str,
@@ -351,12 +373,22 @@ fn engram_bind_outcome(
         {
             EngramBindOutcome::AlreadyBound
         }
-        "control_operation_idempotency_conflict" => EngramBindOutcome::AlreadyBound,
+        // Named with its key and original, so the disclosure keeps the
+        // rejected bind's identity; the owed entry adds its target provenance.
+        "control_operation_idempotency_conflict" => EngramBindOutcome::Collision(format!(
+            "key {}; original {original}; work {work_id}; {detail}",
+            engram_bind_idempotency_key(original, work_id)
+        )),
         // The connection is refused, not the bind: final for that routing
         // token only (`engram_code_invalidates_routing_token`).
         code if engram_code_invalidates_routing_token(code) => EngramBindOutcome::Refresh(detail),
         code if ENGRAM_BIND_RESEND_CODES.contains(&code) => EngramBindOutcome::Resend(detail),
-        _ => EngramBindOutcome::Final(format!("Engram refused it ({detail})")),
+        code if ENGRAM_BIND_PRE_WRITE_REFUSALS.contains(&code) => {
+            EngramBindOutcome::Final(format!("Engram refused it ({detail})"))
+        }
+        // A code that proves nothing about what was written: the identical
+        // request again, never a new identity.
+        _ => EngramBindOutcome::Resend(detail),
     }
 }
 
@@ -369,6 +401,14 @@ fn engram_bind_notice_line(short_ref: &str, outcome: &EngramBindOutcome) -> Opti
              (bound), on its own run."
         )),
         EngramBindOutcome::Final(reason) => Some(engram_batch_not_recorded_line(short_ref, reason)),
+        EngramBindOutcome::Collision(detail) => Some(engram_batch_not_recorded_line(
+            short_ref,
+            &format!(
+                "{ENGRAM_BIND_COLLISION_PHRASE}: an earlier, different operation already holds \
+                 its key ({detail}); the bind is not sent again, and the earlier operation is \
+                 not known"
+            ),
+        )),
         EngramBindOutcome::Resend(_) | EngramBindOutcome::Refresh(_) => None,
     }
 }

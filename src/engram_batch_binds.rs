@@ -576,6 +576,15 @@ fn engram_owed_bind_answered(
     outcome: EngramBindOutcome,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Option<String> {
+    // A collision's line also names the rejected bind's target provenance,
+    // so the durable disclosure keeps its original identity.
+    let outcome = match outcome {
+        EngramBindOutcome::Collision(detail) => EngramBindOutcome::Collision(format!(
+            "{detail}; claim {} fence {} root generation {}",
+            owed.target.claim_id, owed.target.claim_fence, owed.target.root_generation
+        )),
+        other => other,
+    };
     match engram_bind_notice_line(&owed.target.short_ref, &outcome) {
         Some(line) => Some(line),
         None => {
@@ -624,11 +633,26 @@ struct EngramOwedBindWork {
     owed: Vec<EngramOwedBind>,
 }
 
+/// How a worked entry settled: the line its holder is told, and whether
+/// Engram's answer was an identity collision, whose disclosure is also stored
+/// in the session's transcript by the commit that retires the entry.
+#[derive(Debug, PartialEq, Eq)]
+struct EngramOwedBindSettled {
+    line: String,
+    collision: bool,
+}
+
+impl EngramOwedBindSettled {
+    fn told(line: String) -> Self {
+        Self { line, collision: false }
+    }
+}
+
 /// What working one session's owed binds left to apply under the lock.
 #[derive(Default)]
 struct EngramOwedBindResult {
-    /// Each worked entry as it now stands, with its line when it settled.
-    entries: Vec<(EngramOwedBind, Option<String>)>,
+    /// Each worked entry as it now stands, with how it settled when it did.
+    entries: Vec<(EngramOwedBind, Option<EngramOwedBindSettled>)>,
     /// Engram refused the session's credentials: rebind before sending.
     refresh: bool,
     /// The credentials the work used (`engram_abort_authority` and routing
@@ -1035,7 +1059,7 @@ impl AppState {
         for mut entry in owed {
             let step = engram_owed_bind_step(&entry, now);
             if let EngramOwedBindStep::GiveUp(line) = step {
-                result.entries.push((entry, Some(line)));
+                result.entries.push((entry, Some(EngramOwedBindSettled::told(line))));
                 continue;
             }
             if step == EngramOwedBindStep::Wait {
@@ -1123,7 +1147,7 @@ impl AppState {
                     }
                     EngramBindDecision::Skip(reason) => {
                         let line = engram_batch_not_recorded_line(&entry.target.short_ref, &reason);
-                        result.entries.push((entry, Some(line)));
+                        result.entries.push((entry, Some(EngramOwedBindSettled::told(line))));
                     }
                     // Not final: read again on a later attempt, within the cap.
                     EngramBindDecision::Unknown(why) => {
@@ -1165,8 +1189,10 @@ impl AppState {
                 &entry.target.short_ref,
                 &entry.target.work_id,
             );
-            let line = engram_owed_bind_answered(&mut entry, outcome, now);
-            result.entries.push((entry, line));
+            let collision = matches!(outcome, EngramBindOutcome::Collision(_));
+            let settled = engram_owed_bind_answered(&mut entry, outcome, now)
+                .map(|line| EngramOwedBindSettled { line, collision });
+            result.entries.push((entry, settled));
         }
         result
     }
@@ -1235,7 +1261,7 @@ impl AppState {
     fn apply_engram_owed_binds(
         &self,
         session_id: &str,
-        entries: Vec<(EngramOwedBind, Option<String>)>,
+        entries: Vec<(EngramOwedBind, Option<EngramOwedBindSettled>)>,
     ) -> Vec<EngramOwedBind> {
         if entries.is_empty() {
             return Vec::new();
@@ -1249,7 +1275,8 @@ impl AppState {
             .expect("session index should be valid");
         let mut unconfirmed = Vec::new();
         let mut changed = false;
-        for (entry, line) in entries {
+        let mut collisions = Vec::new();
+        for (entry, settled) in entries {
             let Some(position) = record
                 .engram
                 .owed_binds
@@ -1258,10 +1285,17 @@ impl AppState {
             else {
                 continue;
             };
-            match line {
-                Some(line) => {
+            match settled {
+                Some(EngramOwedBindSettled { line, collision }) => {
                     record.engram.owed_binds.remove(position);
                     eprintln!("engram> session={session_id} {line}");
+                    // An identity collision retires its entry only with a
+                    // durable disclosure: the transcript notice below is
+                    // stored by the same commit as this removal. The pending
+                    // line, which is not stored, also reaches the next prompt.
+                    if collision {
+                        collisions.push(line.clone());
+                    }
                     record.engram.set_pending_source_root_line(line);
                     changed = true;
                 }
@@ -1277,6 +1311,21 @@ impl AppState {
                     }
                 }
             }
+        }
+        for text in collisions {
+            let message = Message::Text {
+                attachments: Vec::new(),
+                id: inner.next_message_id(),
+                timestamp: stamp_now(),
+                author: Author::System,
+                text,
+                expanded_text: None,
+                source: None,
+            };
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            push_message_on_record(record, message);
         }
         if changed && let Err(error) = self.commit_locked(&mut inner) {
             eprintln!("engram> session={session_id} failed persisting owed batch binds: {error:#}");

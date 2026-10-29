@@ -210,6 +210,37 @@ fn an_owed_bind_is_decided_once_then_sent_with_backoff_until_its_cap() {
     engram_owed_bind_answered(&mut entry, EngramBindOutcome::Refresh("superseded".to_owned()), at(5));
     assert_eq!(engram_owed_bind_step(&entry, at(19)), EngramOwedBindStep::Wait);
     assert_eq!(engram_owed_bind_step(&entry, at(20)), EngramOwedBindStep::Send);
+    // An identity collision settles the member with a terminal line naming
+    // the key and the rejected bind's target provenance, never "bound", and
+    // counts no attempt: the caller retires the entry with that line.
+    let mut collided = entry.clone();
+    let line = engram_owed_bind_answered(
+        &mut collided,
+        EngramBindOutcome::Collision("key k; control_operation_idempotency_conflict".to_owned()),
+        at(20),
+    )
+    .expect("a collision is told to its holder");
+    assert!(line.contains(ENGRAM_BIND_COLLISION_PHRASE), "{line}");
+    assert!(line.contains("key k"), "{line}");
+    assert!(
+        line.contains(&format!(
+            "claim {} fence {} root generation {}",
+            entry.target.claim_id, entry.target.claim_fence, entry.target.root_generation
+        )),
+        "{line}"
+    );
+    assert!(!line.contains("(bound)"), "{line}");
+    assert_eq!(collided.attempts, entry.attempts, "no attempt is counted");
+    // The crash boundary: until the commit that retires it, the stored entry
+    // is unchanged. After a reload it is sent once more, as the identical
+    // request under the same key, which Engram rejects again without a write.
+    let reloaded = engram_owed_bind_after_load(entry.clone(), NOW);
+    assert_eq!(engram_owed_bind_step(&reloaded, at(0)), EngramOwedBindStep::Send);
+    let wire = |owed: &EngramOwedBind| {
+        serde_json::to_value(engram_owed_bind_request(owed, "token").expect("decided"))
+            .expect("the request serializes")
+    };
+    assert_eq!(wire(&reloaded), wire(&entry), "the identical request, never a new key");
     // A settling answer gives the holder its line.
     let mut bound = entry.clone();
     assert_eq!(

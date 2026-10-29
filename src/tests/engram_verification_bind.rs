@@ -329,15 +329,24 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
         )),
         EngramBindOutcome::AlreadyBound
     );
-    // A committed bind under this gate's and this member's key, with other
-    // bytes: Engram keeps a key only when its bind commits, so it is bound.
-    assert_eq!(
-        outcome(remote(
-            "control_operation_idempotency_conflict",
-            "the idempotency key was used for another request"
-        )),
-        EngramBindOutcome::AlreadyBound
-    );
+    // An earlier, different operation under this gate's and this member's
+    // key: Engram rejected this bind unapplied. A terminal identity
+    // collision, never claimed bound, naming the key, original and work.
+    match outcome(remote(
+        "control_operation_idempotency_conflict",
+        "the idempotency key was used for another request",
+    )) {
+        EngramBindOutcome::Collision(detail) => {
+            assert!(
+                detail.contains(&engram_bind_idempotency_key(&original, "work-member")),
+                "{detail}"
+            );
+            assert!(detail.contains(&format!("original {original}")), "{detail}");
+            assert!(detail.contains("work work-member"), "{detail}");
+            assert!(detail.contains("control_operation_idempotency_conflict"), "{detail}");
+        }
+        other => panic!("an idempotency conflict is an identity collision: {other:?}"),
+    }
     // Engram checked the member and refused it, or another item is the one
     // already bound: unbound for good.
     for message in [
@@ -366,19 +375,24 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
             "{code}"
         );
     }
-    // Any other code Engram sends is met again by the same request, so it is
-    // final and its holder is told: an Engram without verification_bind, an
-    // uninitialised store, a code this build does not know.
+    // Only a request Engram cannot decode at all wrote nothing and is met
+    // again by the same bytes: final, and its holder is told (an Engram
+    // without verification_bind).
+    match outcome(remote("invalid_request", "unknown variant `verification_bind`")) {
+        EngramBindOutcome::Final(reason) => assert!(reason.contains("invalid_request"), "{reason}"),
+        other => panic!("invalid_request: {other:?}"),
+    }
+    // Any other code is no proof that nothing was written: the identical
+    // request is sent again, bounded, never under a new key.
     for (code, message) in [
-        ("invalid_request", "unknown variant `verification_bind`"),
         ("store_not_initialized", "the store is not initialised"),
         ("task_access_denied", "denied"),
         ("a_code_from_a_later_engram", "refused"),
     ] {
-        match outcome(remote(code, message)) {
-            EngramBindOutcome::Final(reason) => assert!(reason.contains(code), "{reason}"),
-            other => panic!("{code}: {other:?}"),
-        }
+        assert!(
+            matches!(outcome(remote(code, message)), EngramBindOutcome::Resend(_)),
+            "{code}"
+        );
     }
     // Resent with the same bytes: an expiry Engram certifies wrote nothing,
     // a busy store, a storage error (a failed commit among them), and every
@@ -429,4 +443,18 @@ fn the_holder_is_told_each_member_bound_or_not_with_its_reason() {
         engram_bind_notice_line("w-member", &EngramBindOutcome::Refresh("superseded".to_owned())),
         None
     );
+    // An identity collision is told as not recorded, never as bound, with
+    // its key, and that it is not sent again; the earlier operation is not
+    // claimed known.
+    let collision = engram_bind_notice_line(
+        "w-member",
+        &EngramBindOutcome::Collision("key termal-verification-bind:o:w; conflict".to_owned()),
+    )
+    .expect("a collision is told to its holder");
+    assert!(collision.contains("the full gate is not recorded for w-member"), "{collision}");
+    assert!(collision.contains(ENGRAM_BIND_COLLISION_PHRASE), "{collision}");
+    assert!(collision.contains("termal-verification-bind:o:w"), "{collision}");
+    assert!(collision.contains("not sent again"), "{collision}");
+    assert!(collision.contains("earlier operation is not known"), "{collision}");
+    assert!(!collision.contains("(bound)"), "{collision}");
 }
