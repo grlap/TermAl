@@ -2020,6 +2020,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
     let state = AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         federation_peer_handles: FederationPeerHandles::default(),
+        host_utilization: Arc::new(host_utilization::Cache::default()),
         federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
         test_run_phase_traces: TestRunPhaseTraces::default(),
         default_workdir: default_workdir.clone(),

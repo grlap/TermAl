@@ -13,6 +13,7 @@ struct FederationRpcClient {
 
 enum FederationRpcRoute {
     Health(FederationLinkLease),
+    HostUtilization(FederationLinkLease),
     Onboarding(FederationLinkLease, FederationOnboardingRpc),
     Mailbox(FederationLinkLease, FederationMailboxRequest),
     NativeBinding(FederationLinkLease, FederationNativeBindingRequest),

@@ -871,6 +871,7 @@ impl AppState {
             agent_readiness_cache,
             agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
             federation_peer_handles: FederationPeerHandles::default(),
+            host_utilization: Arc::new(host_utilization::Cache::default()),
             federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
             test_run_phase_traces: TestRunPhaseTraces::default(),
             remote_registry: Arc::new(

@@ -71,6 +71,7 @@ impl FederationRpcClient {
         let _permit = self.channel.bound.try_acquire()?;
         let (lease, path) = match &route {
             FederationRpcRoute::Health(lease) => (lease, "/federation/v1/health"),
+            FederationRpcRoute::HostUtilization(lease) => (lease, "/federation/v1/host-utilization"),
             FederationRpcRoute::Onboarding(lease, probe) => (lease, probe.path()),
             FederationRpcRoute::Mailbox(lease, request) => (lease,
                 if matches!(request.operation, FederationMailboxOperation::Directory { alias_basis: true }) {
@@ -105,6 +106,7 @@ impl FederationRpcClient {
         let url = format!("http://{}{path}", self.address);
         let builder = match &route {
             FederationRpcRoute::Health(_) => self.client.get(url),
+            FederationRpcRoute::HostUtilization(_) => self.client.get(url),
             FederationRpcRoute::Onboarding(_, probe) => probe.request(&self.client, url),
             FederationRpcRoute::Mailbox(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::ExecutorWake(_, body) => self.client.post(url).json(body),
@@ -133,8 +135,11 @@ impl FederationRpcClient {
         }
         let mut rpc_stage = "counter";
         let mut rpc_status = None;
+        let telemetry = matches!(&route, FederationRpcRoute::HostUtilization(_));
+        let mut allocated_counter = None;
         let request = async {
             let counter = self.allocate_authenticated_counter(&context).await?;
+            allocated_counter = Some(counter);
             // A cancelled caller is not settlement. The independent watchdog
             // also fences abandoned futures, preserving the allocation floor.
             if !context.watchdog_started.swap(true, Ordering::SeqCst) {
@@ -298,8 +303,18 @@ impl FederationRpcClient {
         };
         #[cfg(test)]
         let request_started_at = std::time::Instant::now();
-        match self.channel.control.clock.timeout(Duration::from_secs(10), request).await {
+        let timeout = if telemetry { host_utilization::PEER_DEADLINE } else { Duration::from_secs(10) };
+        match self.channel.control.clock.timeout(timeout, request).await {
             Ok(Ok(result)) => result,
+            failure if telemetry && (failure.is_err()
+                || matches!(rpc_stage, "execute" | "responseBody" | "decode")) => {
+                // This GET has no application outcome to recover. Settle its
+                // counter on a bounded read failure; it must not retire a
+                // healthy pair merely because telemetry was unavailable.
+                // MAC/replay/authority failures still use the security fence.
+                if let Some(counter) = allocated_counter { context.settle(counter); }
+                Err(federation_transport_unavailable())
+            }
             _failure => {
                 self.channel.observe_rpc_terminal(&context, if _failure.is_err() {
                     "rpcDeadlineExpired"

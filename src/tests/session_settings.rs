@@ -788,6 +788,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         federation_peer_handles: FederationPeerHandles::default(),
+        host_utilization: Arc::new(host_utilization::Cache::default()),
         federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
         test_run_phase_traces: TestRunPhaseTraces::default(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),

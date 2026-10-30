@@ -27,6 +27,7 @@ fn federation_router(
     };
     Router::new()
         .route("/federation/v1/health", get(federation_health))
+        .route("/federation/v1/host-utilization", get(host_utilization::serve_pair))
         .route("/federation/v1/mailbox/native-binding", post(serve_federation_native_binding))
         .route("/federation/v1/mailbox/binding", post(serve_federation_binding_command))
         .route("/federation/v1/mailbox/participation", post(serve_federation_participation))

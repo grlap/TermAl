@@ -26,6 +26,10 @@ satellite and to deliver its completion. The enrolled pair comes from
 [satellite onboarding](satellite-onboarding.md). See
 [project status](project-status.md) for what runs across real hosts today.
 
+[Host utilization](host-utilization.md) uses the same authenticated pair for
+read-only cached metrics. It remains independent of mailbox wake and peer
+health and grants no runner or process-control authority.
+
 ## Identity and prerequisites
 
 Both hosts must support version 1 of `/federation/v1/mailbox/relay`, with an

@@ -916,7 +916,7 @@ fn try_write_test_http_response(
     stream.shutdown(std::net::Shutdown::Write)
 }
 
-fn test_app_state() -> AppState {
+pub(crate) fn test_app_state() -> AppState {
     let server_instance_id = Uuid::new_v4().to_string();
     let test_temp_root = Arc::new(TestTempRoot::create("termal-test-state"));
     let default_workdir = test_temp_root.path().to_string_lossy().into_owned();
@@ -992,6 +992,7 @@ fn test_app_state() -> AppState {
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         federation_peer_handles: FederationPeerHandles::default(),
+        host_utilization: Arc::new(host_utilization::Cache::default()),
         federation_executor_wake_signal: Arc::new(FederationExecutorWakeSignal::default()),
         test_run_phase_traces: TestRunPhaseTraces::default(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),

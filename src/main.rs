@@ -21,6 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 mod engram_host;
 use engram_host::{EngramHost, EngramRecorderObservation};
 mod host_command;
+mod host_utilization;
 use host_command::Command;
 #[cfg(windows)]
 mod windows_launch;
@@ -176,6 +177,8 @@ async fn run_server() -> Result<()> {
     // and, from then on, how this instance ends.
     let host_lifecycle = HostLifecycle::start(&state);
     let federation_runtime = start_federation_runtime(state.clone());
+    let utilization_runtime = host_utilization::Runtime::start(state.clone())
+        .context("failed to start host utilization sampler")?;
 
     println!("TermAl backend");
     println!("listening: http://{bound}");
@@ -216,6 +219,7 @@ async fn run_server() -> Result<()> {
         .await
         .context("backend server failed");
     federation_runtime.shutdown().await;
+    utilization_runtime.shutdown().await;
     match tokio::task::spawn_blocking(move || post_listen_boot_worker.join()).await {
         Ok(Ok(())) => {}
         _ => eprintln!("startup> post-listen boot worker join failed during shutdown"),
@@ -361,6 +365,7 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .route("/api/settings", post(update_app_settings))
         .route("/api/federation", get(get_federation))
+        .merge(host_utilization::routes())
         .route("/api/federation/journal", get(get_federation_journal))
         .route(
             "/api/federation/executor-operation",

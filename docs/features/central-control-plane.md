@@ -23,6 +23,10 @@ As of 2026-10-29 that step has been taken for one domain:
 See [project status](project-status.md) for the dated snapshot, including the
 open problems and what comes next.
 
+[Host utilization](host-utilization.md) exposes cached whole-host CPU, memory,
+configured-volume and network observations through the existing authenticated
+pair, with a Central aggregate that retains disconnected hosts explicitly.
+
 This brief is the accepted cross-host design in the repository's own words. It
 replaces the earlier plan, in which remote-backed proxy records joined
 mailboxes as local sessions and remote servers relayed coordination through a

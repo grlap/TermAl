@@ -1348,6 +1348,8 @@ struct AppState {
     remote_registry: Arc<RemoteRegistry>,
     /// Runtime-only handles; the supervisor owns insert/remove and shutdown.
     federation_peer_handles: FederationPeerHandles,
+    /// Observational cache; never persisted or used for execution admission.
+    host_utilization: Arc<host_utilization::Cache>,
     federation_executor_wake_signal: Arc<FederationExecutorWakeSignal>,
     test_run_phase_traces: TestRunPhaseTraces,
     /// Tracks the newest `_sseFallback` revision already recovered per remote

@@ -29,6 +29,8 @@ async fn federation_authenticate_message(
     // retryable refusal, never a reason to fence the pair's link.
     let outcome_request = parts.method == axum::http::Method::POST
         && parts.uri.path() == FEDERATION_EXECUTOR_OUTCOME_ROUTE;
+    let telemetry_request = parts.method == axum::http::Method::GET
+        && parts.uri.path() == "/federation/v1/host-utilization";
     let durable_request = mailbox_request || relay_request || binding_request || executor_request;
     let request_limit = if executor_request {
         32 * 1024
@@ -37,7 +39,9 @@ async fn federation_authenticate_message(
     } else {
         4096
     };
-    let response_limit = if executor_request {
+    let response_limit = if telemetry_request {
+        host_utilization::RESPONSE_BYTES
+    } else if executor_request {
         32 * 1024
     } else if mailbox_request || relay_request {
         FEDERATION_MAILBOX_RESPONSE_BYTES
@@ -154,6 +158,8 @@ async fn federation_authenticate_message(
                         mailbox_intent.as_ref(), "handler_deadline"),
                     Err(_) if outcome_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
                         "remote wake outcome query handler deadline").into_response(),
+                    Err(_) if telemetry_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
+                        "host utilization cache unavailable").into_response(),
                     Err(_) => {
                         state
                             .channel
@@ -178,7 +184,15 @@ async fn federation_authenticate_message(
     let (mut parts, body) = response.into_parts();
     let body =
         match state.channel.control.clock.timeout_at(deadline, axum::body::to_bytes(body, response_limit)).await {
-            Ok(body) => body.map_err(|_| federation_transport_unavailable())?,
+            Ok(Ok(body)) => body,
+            _ if telemetry_request => {
+                // Oversized/unavailable telemetry is an authenticated read
+                // refusal, not an unsigned reply that retires the healthy link.
+                parts.status = StatusCode::SERVICE_UNAVAILABLE;
+                parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+                axum::body::Bytes::from_static(b"{\"error\":\"host utilization cache unavailable\"}")
+            }
+            Ok(Err(_)) => return Err(federation_transport_unavailable()),
             Err(_) => return Ok(federation_request_timeout()),
         };
     let response = federation_response_representation(
