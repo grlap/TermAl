@@ -12913,6 +12913,11 @@ textarea {
   font-size: 0.72rem;
 }
 
+.mailbox-wake-summary {
+  display: block;
+  color: var(--muted);
+}
+
 .mailbox-thread-detail pre {
   max-height: 22em;
   overflow: auto;

@@ -466,6 +466,53 @@ async fn mailbox_relay_public_remote_proxy_send_reply_read_ack_keeps_local_histo
         "targetSessionId":format!("host:{}::{}", peer.local.host_id, caller),"message":"opposite host sends first","idempotencyKey":"opposite-first" })).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let opposite_first: MailboxAppendReceipt = response.json().await.unwrap();
+    // The relayed send result's line names the public locator the caller
+    // holds, never the home's local id.
+    let home_local = MailboxRelayLocator::decode(&opposite_first.message_id, true)
+        .unwrap()
+        .expect("a relayed receipt carries a public locator")
+        .id;
+    let note = opposite_first
+        .receipt_note
+        .as_deref()
+        .expect("the relayed send result carries its line");
+    assert_eq!(
+        note,
+        mailbox_send_receipt_note(
+            &opposite_first.notification_disposition,
+            &opposite_first.message_id,
+            false
+        )
+    );
+    assert!(!note.contains(&format!("messageId: \"{home_local}\"")), "{note}");
+    // The sender's exact read of it through the relay reports the home's
+    // current state as of the read.
+    let response = fixture
+        .client
+        .get(format!(
+            "{satellite_url}/mailbox-messages/{}",
+            opposite_first.message_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let current: Value = response.json().await.unwrap();
+    assert_eq!(current["id"], opposite_first.message_id.as_str());
+    assert_eq!(current["currentStatus"]["recipientAcknowledged"], false);
+    assert!(
+        current["currentStatus"]["summary"]
+            .as_str()
+            .unwrap()
+            .starts_with("As of "),
+        "{current}"
+    );
+    let native_creation = {
+        let inner = fixture.satellite.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&fixture.native).unwrap()]
+            .federation_native_creation_id
+            .clone()
+    };
     let response = fixture
         .client
         .post(format!("{central_url}/mailboxes/send"))
@@ -490,6 +537,13 @@ async fn mailbox_relay_public_remote_proxy_send_reply_read_ack_keeps_local_histo
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let sent: MailboxAppendReceipt = response.json().await.unwrap();
     assert!(sent.duplicate);
+    assert_eq!(
+        sent.receipt_note.as_deref(),
+        Some(
+            mailbox_send_receipt_note(&sent.notification_disposition, &sent.message_id, true)
+                .as_str()
+        )
+    );
     assert_eq!(
         sent.mailbox_id, opposite_first.mailbox_id,
         "opposite-first public requests share the immutable central home"
@@ -850,6 +904,30 @@ async fn mailbox_relay_public_remote_proxy_send_reply_read_ack_keeps_local_histo
             .home,
         locator.home
     );
+    // With the relay link down, the sender's exact read of a message at the
+    // remote home says the current status is unavailable and nothing more.
+    {
+        let mut inner = fixture.satellite.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.native).unwrap();
+        inner.sessions[index].federation_native_creation_id = native_creation;
+    }
+    fixture.satellite_channel.invalidate();
+    let response = fixture
+        .client
+        .get(format!(
+            "{satellite_url}/mailbox-messages/{}",
+            opposite_first.message_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let unavailable: Value = response.json().await.unwrap();
+    let error = unavailable["error"].as_str().expect("an error message");
+    assert!(error.starts_with("current status unavailable:"), "{error}");
+    assert!(error.contains("says nothing about delivery"), "{error}");
+    assert!(!error.contains("reconcile the original operation"), "{error}");
+    assert!(unavailable.get("currentStatus").is_none());
     satellite_api.finish().await;
     central_api.finish().await;
     central_domain.finish().await;

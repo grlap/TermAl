@@ -540,7 +540,12 @@ fn coordination_cli_mailbox_send_resolves_names_and_posts_through_the_bridge() {
                         "notificationDisposition": "deliveredToIdleSession",
                         "duplicate": false,
                         "senderProcessedThrough": 9,
-                        "senderCursorAdvanced": true
+                        "senderCursorAdvanced": true,
+                        "receiptNote": mailbox_send_receipt_note(
+                            "deliveredToIdleSession",
+                            "mailbox-message-1",
+                            false
+                        )
                     }),
                 )
             }
@@ -583,6 +588,126 @@ fn coordination_cli_mailbox_send_resolves_names_and_posts_through_the_bridge() {
     assert_eq!(output["resolvedFrom"], "termal::codex");
     assert_eq!(output["sequence"], 9);
     assert_eq!(output["duplicate"], false);
+    // The receipt fields are unchanged, and the host's line, which labels the
+    // disposition as the wake status at send time and names the exact read,
+    // is passed on as sent.
+    assert_eq!(output["notificationDisposition"], "deliveredToIdleSession");
+    let note = output["receiptNote"].as_str().expect("a receipt note");
+    assert_eq!(
+        note,
+        mailbox_send_receipt_note("deliveredToIdleSession", "mailbox-message-1", false)
+    );
+    assert!(note.contains("Wake status AT SEND TIME: deliveredToIdleSession"), "{note}");
+    assert!(note.contains("this is not current status"), "{note}");
+    assert!(
+        note.contains("termal_read_mailbox_message({messageId: \"mailbox-message-1\"})"),
+        "{note}"
+    );
+    assert!(note.contains("read-message --message-id mailbox-message-1"), "{note}");
+}
+
+/// The human send line says the message is stored, labels its wake status
+/// as of send time, and names the exact read; the exact read prints the
+/// current status it observed.
+#[test]
+fn coordination_cli_send_says_stored_and_read_message_prints_current_status() {
+    let receipt = json!({
+        "sessionId": "session-peer",
+        "mailboxId": "mailbox-1",
+        "messageId": "mailbox-message-7",
+        "sequence": 7,
+        "unreadDepth": 1,
+        "notificationDisposition": "durableButNotWoken",
+        "duplicate": false,
+        "senderProcessedThrough": 7,
+        "senderCursorAdvanced": true
+    });
+    let mut rendered = Vec::new();
+    render_coordination_cli_output(
+        &CoordinationCliCommand::MailboxSend {
+            as_session: "session-root".to_owned(),
+            to: "session-peer".to_owned(),
+            message: CoordinationCliMessageSource::Inline("hello".to_owned()),
+            idempotency_key: "key".to_owned(),
+            topic: None,
+            state_stamp: None,
+            class: None,
+        },
+        &receipt,
+        &mut rendered,
+    )
+    .expect("the receipt renders");
+    let sent = String::from_utf8(rendered).unwrap();
+    let lines = sent.lines().collect::<Vec<_>>();
+    assert!(lines[0].starts_with("stored for session-peer via mailbox-1: message mailbox-message-7 #7"), "{sent}");
+    assert!(lines[0].contains("wake status at send time durableButNotWoken"), "{sent}");
+    assert!(!sent.contains("delivered to"), "{sent}");
+    // A receipt from an older host has no line of its own, and the CLI makes
+    // none up.
+    assert_eq!(lines.len(), 1, "{sent}");
+
+    // The host's own line is printed as sent.
+    let mut with_note = receipt.clone();
+    with_note["receiptNote"] =
+        json!(mailbox_send_receipt_note("durableButNotWoken", "mailbox-message-7", false));
+    let mut rendered = Vec::new();
+    render_coordination_cli_output(
+        &CoordinationCliCommand::MailboxSend {
+            as_session: "session-root".to_owned(),
+            to: "session-peer".to_owned(),
+            message: CoordinationCliMessageSource::Inline("hello".to_owned()),
+            idempotency_key: "key".to_owned(),
+            topic: None,
+            state_stamp: None,
+            class: None,
+        },
+        &with_note,
+        &mut rendered,
+    )
+    .expect("the receipt renders");
+    let sent = String::from_utf8(rendered).unwrap();
+    let lines = sent.lines().collect::<Vec<_>>();
+    assert_eq!(
+        lines[1],
+        "  Message saved. Wake was unconfirmed when sent; this is not current status. Do not resend based on this receipt alone. If current status is needed, use termal_read_mailbox_message({messageId: \"mailbox-message-7\"}) or `termal mailbox read-message --message-id mailbox-message-7`.",
+        "{sent}"
+    );
+
+    let message = json!({
+        "id": "mailbox-message-7",
+        "mailboxId": "mailbox-1",
+        "sequence": 7,
+        "senderSessionId": "session-root",
+        "senderName": "Root",
+        "targetSessionId": "session-peer",
+        "targetName": "Peer",
+        "createdAt": "2026-10-30T00:00:00Z",
+        "class": "routine",
+        "body": "hello",
+        "notificationState": "deliveredToIdleSession",
+        "currentStatus": {
+            "observedAt": "2026-10-30T00:01:00Z",
+            "notificationState": "deliveredToIdleSession",
+            "recipientAcknowledged": false,
+            "summary": "As of 2026-10-30T00:01:00Z: Notification delivered to the recipient's session. Not yet acknowledged by the recipient."
+        }
+    });
+    let mut rendered = Vec::new();
+    render_coordination_cli_output(
+        &CoordinationCliCommand::MailboxReadMessage {
+            as_session: "session-root".to_owned(),
+            message_id: "mailbox-message-7".to_owned(),
+        },
+        &message,
+        &mut rendered,
+    )
+    .expect("the exact message renders");
+    let read = String::from_utf8(rendered).unwrap();
+    assert!(
+        read.contains("  current status: As of 2026-10-30T00:01:00Z: Notification delivered to the recipient's session. Not yet acknowledged by the recipient.\n"),
+        "{read}"
+    );
+    assert!(read.contains("  recipientAcknowledged: false\n"), "{read}");
 }
 
 #[test]

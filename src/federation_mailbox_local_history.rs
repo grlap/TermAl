@@ -41,7 +41,7 @@ impl AppState {
             Ok(Some(MailboxAppendReceipt { notification_cause: None, mailbox_id: stored.mailbox_id,
                 message_id: stored.message_id, sequence: stored.sequence, unread_depth: stored.unread_depth_at_append,
                 notification_disposition: disposition, duplicate: true, sender_processed_through: through,
-                sender_cursor_advanced: false }))
+                sender_cursor_advanced: false, receipt_note: None }))
         }).await
     }
 

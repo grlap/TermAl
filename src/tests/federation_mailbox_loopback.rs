@@ -258,6 +258,12 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(exact["notificationCause"], "remote wake pending; awaiting matching durable receiver receipt");
+    // The supported remote exact read carries the mailbox home's current
+    // projection: not yet acknowledged by its recipient, the reader here.
+    assert_eq!(exact["currentStatus"]["notificationState"], exact["notificationState"]);
+    assert_eq!(exact["currentStatus"]["recipientAcknowledged"], false);
+    assert!(exact["currentStatus"]["observedAt"].is_string());
+    assert!(exact["currentStatus"]["summary"].is_string());
     let ack_path = format!("mailboxes/{mailbox}/acknowledge");
     let (status, acked) = api(
         &client,
@@ -269,6 +275,29 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(acked["unreadCount"], 0);
+    let (status, exact) = api(
+        &client,
+        satellite_port,
+        &native.session,
+        &format!("mailbox-messages/{}", reply.message_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        exact["currentStatus"]["recipientAcknowledged"], true,
+        "the recipient's own acknowledgement shows in the next exact read"
+    );
+    let summary = exact["currentStatus"]["summary"].as_str().unwrap();
+    assert!(
+        summary.starts_with(&format!(
+            "As of {}: ",
+            exact["currentStatus"]["observedAt"].as_str().unwrap()
+        )),
+        "{summary}"
+    );
+    assert!(summary.ends_with(" The recipient has acknowledged it."), "{summary}");
+    assert!(exact["notificationSummary"].is_string(), "{exact}");
     let (status, _) = api(
         &client,
         satellite_port,
@@ -337,6 +366,21 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
             "{path}"
         );
     }
+    // With the mailbox home down, the exact read says the current status is
+    // unavailable; it shows no stale state and calls nothing a failed delivery.
+    let (status, unavailable) = api(
+        &client,
+        satellite_port,
+        &native.session,
+        &format!("mailbox-messages/{}", reply.message_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let error = unavailable["error"].as_str().expect("an error message");
+    assert!(error.starts_with("current status unavailable:"), "{error}");
+    assert!(error.contains("says nothing about delivery"), "{error}");
+    assert!(unavailable.get("currentStatus").is_none());
     let (next, inspection) = tokio::task::spawn_blocking(move || {
         let value = satellite.command(json!({"command":"inspect"}));
         (satellite, value)

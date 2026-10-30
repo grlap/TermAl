@@ -546,7 +546,9 @@ async fn retry_federation_intent_route(
     AxumPath((session, key)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<MailboxAppendReceipt>, ApiError> {
-    retry_retained_federation_intent(state, session, key).await.map(Json)
+    retry_retained_federation_intent(state, session, key)
+        .await
+        .map(|receipt| Json(receipt.with_receipt_note()))
 }
 
 async fn retry_retained_federation_intent(

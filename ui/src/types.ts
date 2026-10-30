@@ -829,6 +829,9 @@ export type MailboxMessage = {
   stateStamp?: string | null;
   body: string;
   notificationState: string;
+  // The host's one plain-language sentence for `notificationState`, shared
+  // with the API, the delegation tools and the CLI.
+  notificationSummary?: string | null;
   notificationCause?: string | null;
 };
 

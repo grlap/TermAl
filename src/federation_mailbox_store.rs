@@ -57,7 +57,12 @@ impl MailboxStore {
         // Take the store resource before link/state, exactly as the write
         // adapters do; never call a locking store helper under StateInner.
         let connection = self.connection()?;
-        let message = connection
+        // One read transaction, as for a local exact read: the message, the
+        // membership and the recipient's cursor come from one snapshot.
+        let read = connection
+            .unchecked_transaction()
+            .context("failed to begin the mailbox message read")?;
+        let mut message = read
             .query_row(
                 "SELECT id, mailbox_id, sequence, sender_session_id, sender_name,
              target_session_id,target_name,created_at,class,topic,state_stamp,body,
@@ -71,7 +76,8 @@ impl MailboxStore {
             .ok_or_else(|| {
                 mailbox_store_error(MailboxStoreErrorKind::NotFound, "mailbox message not found")
             })?;
-        require_mailbox_participant(&connection, &message.mailbox_id, actor)?;
+        require_mailbox_participant(&read, &message.mailbox_id, actor)?;
+        attach_mailbox_message_current_status(&read, &mut message)?;
         let _authority = authority.lock()?;
         Ok(message)
     }

@@ -166,7 +166,7 @@ impl MailboxStore {
                                 mailbox_id: message.mailbox_id, message_id: message.message_id,
                                 sequence: message.sequence, unread_depth: message.unread_depth_at_append,
                                 notification_disposition: "durableButNotWoken".to_owned(),
-                                duplicate: true, sender_processed_through: cursor, sender_cursor_advanced: false,
+                                duplicate: true, sender_processed_through: cursor, sender_cursor_advanced: false, receipt_note: None,
                             })
                         }
                         "refused" | "abandoned" => FederationDeliveryOutcome::Terminal(FederationDeliveryTerminal {

@@ -1741,3 +1741,23 @@ fn structured_review_result_rejects_root_and_nonreviewer_callers() {
         .expect_err("explorer children must not submit review results");
     assert_eq!(explorer_error.status, StatusCode::BAD_REQUEST);
 }
+
+/// The review-result receipt goes only to the delegated child, which cannot use
+/// the root-only exact read, so the route returns it without a receipt line.
+#[tokio::test]
+async fn review_result_route_receipt_names_no_root_only_read() {
+    let (state, _root_sender_id, parent) = mailbox_test_state();
+    let (_delegation_id, child_id) = install_required_review_delegation(&state, &parent);
+    let (status, Json(receipt)) = submit_delegation_review_result(
+        AxumPath(child_id),
+        State(state.clone()),
+        Ok(Json(structured_review_request())),
+    )
+    .await
+    .expect("the child submits its review result");
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(receipt.receipt_note.is_none());
+    let encoded = serde_json::to_value(&receipt).unwrap();
+    assert!(encoded["messageId"].is_string());
+    assert!(encoded.get("receiptNote").is_none(), "{encoded}");
+}

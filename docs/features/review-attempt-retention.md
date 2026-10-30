@@ -149,7 +149,13 @@ call `termal_get_session_result` as itself with the original `delegationId`,
 `outputOffset`/`outputLimit` page. This reads an already confirmed archive
 publication; it does not retain a new cut or promote a provisional submission.
 The current parent-scoped view and parent attempt-only selection keep their
-existing behavior. Other roots must supply the exact result identity.
+existing behavior. Other roots must supply the exact result identity. An
+eligible root of the original project that selects only a `submissionAttempt`
+receives 400 `exact_identity_required`; an absent delegation and an ineligible
+or foreign-project caller keep the plain 404, so existence does not leak. The
+original project is decided as for the exact read: the commissioning stamp, then
+a stamped archive snapshot, and consistent native facts only for an unstamped
+legacy record, so moving its sessions later does not redirect the diagnostic.
 
 The host records the original project at commissioning and in the authenticated
 archive snapshot, including an explicit recorded-without-project basis. A new

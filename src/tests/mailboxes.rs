@@ -561,6 +561,133 @@ async fn mailbox_cursor_http_duplicate_reports_current_cursor_without_advancing(
     }
 }
 
+/// The actual serialized send results carry the shared at-send line with the
+/// returned id: the HTTP route's JSON, the delegation tool's output built from
+/// it, and the CLI's printed lines. A duplicate keeps the original at-send
+/// disposition, while the exact read reports the state as it is now and the
+/// recipient's acknowledgement on its own. No other context is needed to act.
+#[tokio::test]
+async fn serialized_send_results_say_at_send_time_and_the_exact_read_says_current() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let send_path = format!("/api/sessions/{sender_id}/mailboxes/send");
+    let body = json!({
+        "targetSessionId": target_id,
+        "message": "status wording",
+        "idempotencyKey": "status-wording"
+    });
+    let first = mailbox_cursor_http_post(&state, send_path.clone(), body.clone()).await;
+    let message_id = first["messageId"].as_str().unwrap().to_owned();
+    let mailbox_id = first["mailboxId"].as_str().unwrap().to_owned();
+    let at_send = first["notificationDisposition"].as_str().unwrap().to_owned();
+    assert_eq!(at_send, "queuedBehindActiveTurn", "the busy target queues the wake");
+    let note = first["receiptNote"].as_str().expect("the send result carries its line");
+    assert_eq!(note, mailbox_send_receipt_note(&at_send, &message_id, false));
+    assert!(
+        note.starts_with("Message saved. Wake status AT SEND TIME: queuedBehindActiveTurn ("),
+        "{note}"
+    );
+    assert!(note.contains("this is not current status. Do not resend based on this receipt alone."), "{note}");
+    assert!(
+        note.contains(&format!("termal_read_mailbox_message({{messageId: \"{message_id}\"}})")),
+        "{note}"
+    );
+
+    // The wake state moves on and the recipient acknowledges.
+    state
+        .mailbox_store
+        .set_notification_state(&message_id, "deliveredToIdleSession")
+        .unwrap();
+    state
+        .mailbox_store
+        .read_range(&target_id, &mailbox_id, None, 10)
+        .unwrap();
+    state
+        .mailbox_store
+        .acknowledge(&target_id, &mailbox_id, 0, first["sequence"].as_u64().unwrap())
+        .unwrap();
+
+    // A duplicate send still reports the original at-send disposition.
+    let duplicate = mailbox_cursor_http_post(&state, send_path, body).await;
+    assert_eq!(duplicate["duplicate"], true);
+    assert_eq!(duplicate["messageId"], message_id.as_str());
+    assert_eq!(duplicate["notificationDisposition"], at_send.as_str());
+    let duplicate_note = duplicate["receiptNote"].as_str().unwrap().to_owned();
+    assert_eq!(duplicate_note, mailbox_send_receipt_note(&at_send, &message_id, true));
+    assert!(duplicate_note.starts_with("Duplicate send: the original message was saved earlier. Wake status AT SEND TIME: queuedBehindActiveTurn ("));
+
+    // The exact read reports the current state as of the read.
+    let response = app_router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/sessions/{sender_id}/mailbox-messages/{message_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("the exact read route should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+    let exact: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let current = &exact["currentStatus"];
+    assert_eq!(current["notificationState"], "deliveredToIdleSession");
+    assert_eq!(current["recipientAcknowledged"], true);
+    let observed_at = current["observedAt"].as_str().unwrap();
+    assert_eq!(
+        current["summary"],
+        format!(
+            "As of {observed_at}: Notification delivered to the recipient's session. The recipient has acknowledged it."
+        )
+    );
+    assert_eq!(exact["notificationSummary"], "Notification delivered to the recipient's session.");
+    assert_eq!(
+        state.mailbox_store.list_for_session(&target_id).unwrap()[0].unread_count,
+        0
+    );
+
+    // The delegation tool and the CLI pass the host's serialized line on as is.
+    let host_receipt = duplicate.clone();
+    let (tool_output, printed) = tokio::task::spawn_blocking(move || {
+        let (base_url, _, server) =
+            crate::delegation_mcp_tests::spawn_test_mcp_http_server(1, move |request| {
+                assert_eq!(request.path, "/api/sessions/session-parent/mailboxes/send");
+                (202, host_receipt.clone())
+            });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+        let output = bridge
+            .tool_send_to_session(json!({
+                "sessionId": "session-peer",
+                "message": "status wording",
+                "idempotencyKey": "status-wording"
+            }))
+            .unwrap();
+        server.join().unwrap();
+        let mut rendered = Vec::new();
+        render_coordination_cli_output(
+            &CoordinationCliCommand::MailboxSend {
+                as_session: "session-parent".to_owned(),
+                to: "session-peer".to_owned(),
+                message: CoordinationCliMessageSource::Inline("status wording".to_owned()),
+                idempotency_key: "status-wording".to_owned(),
+                topic: None,
+                state_stamp: None,
+                class: None,
+            },
+            &output,
+            &mut rendered,
+        )
+        .unwrap();
+        (output, String::from_utf8(rendered).unwrap())
+    })
+    .await
+    .unwrap();
+    assert_eq!(tool_output["receiptNote"], duplicate_note.as_str());
+    assert_eq!(tool_output["notificationDisposition"], at_send.as_str());
+    assert_eq!(tool_output["messageId"], message_id.as_str());
+    let expected_line = format!("  {duplicate_note}");
+    assert_eq!(printed.lines().nth(1), Some(expected_line.as_str()), "{printed}");
+}
+
 #[tokio::test]
 async fn mailbox_cursor_http_reply_receipt_supports_next_cas_without_list() {
     let (state, sender_id, target_id) = mailbox_test_state();

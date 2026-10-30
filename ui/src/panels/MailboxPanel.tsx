@@ -418,6 +418,11 @@ export function MailboxPanel({
                           {message.notificationCause
                             ? ` · ${message.notificationCause}`
                             : null}
+                          {message.notificationSummary ? (
+                            <span className="mailbox-wake-summary">
+                              {message.notificationSummary}
+                            </span>
+                          ) : null}
                         </dd>
                       </div>
                       <div>

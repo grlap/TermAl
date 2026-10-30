@@ -1828,3 +1828,304 @@ fn mailbox_sender_cursor_never_skips_an_unread_peer_message() {
         "the unread peer message must remain unread and countable"
     );
 }
+
+/// An exact read projects the message's current state: its own wake state
+/// and its recipient's cursor, never the sender's. The send receipt stays as
+/// it was when the wake state later moves, and a recipient can acknowledge a
+/// message that was never woken.
+#[test]
+fn exact_read_projects_current_wake_and_recipient_acknowledgement() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let receipt = store.append(&test_input()).unwrap();
+    let current = |reader: &str| {
+        store
+            .read_message(reader, &receipt.message_id)
+            .expect("a participant reads the exact message")
+            .current_status
+            .expect("an exact read carries the current status")
+    };
+
+    let stored = current("session-sender");
+    assert_eq!(stored.notification_state, receipt.notification_disposition);
+    assert!(!stored.recipient_acknowledged);
+    assert!(chrono::DateTime::parse_from_rfc3339(&stored.observed_at).is_ok());
+    assert_eq!(
+        stored.summary,
+        format!(
+            "As of {}: No wake confirmed; the message remains stored. Not yet acknowledged by the recipient.",
+            stored.observed_at
+        )
+    );
+    // The sender's own cursor already covers its message: that is no
+    // acknowledgement by the recipient.
+    assert!(receipt.sender_cursor_advanced);
+    assert!(receipt.sender_processed_through >= receipt.sequence);
+    // Finalize the original send's outcome, so the duplicate below replays
+    // it instead of waiting for a finalizer that this test never runs.
+    store
+        .record_initial_dispatch_outcome(&receipt.message_id, "durableButNotWoken")
+        .expect("the original receipt finalizes before the duplicate");
+
+    for (state, sentence) in [
+        ("queuedBehindActiveTurn", "Wake queued; it waits for the recipient's active turn to end."),
+        ("deliveredToIdleSession", "Notification delivered to the recipient's session."),
+        ("recoveredWake", "Wake queued for the recipient by recovery."),
+        ("heldBehindPausedQueue", "Wake held; it waits for the recipient's paused queue to be resumed."),
+        ("waitingForAutomaticRetry", "Wake held; it waits for the recipient's due automatic retry, which clears it by itself."),
+        ("waitingForProviderCapacity", "Wake held; it waits for provider capacity."),
+        ("durableButNotWoken", "No wake confirmed; the message remains stored."),
+    ] {
+        store.set_notification_state(&receipt.message_id, state).unwrap();
+        for reader in ["session-sender", "session-target"] {
+            let message = store.read_message(reader, &receipt.message_id).unwrap();
+            assert_eq!(message.notification_summary, sentence, "{reader}: {state}");
+            let now = message
+                .current_status
+                .expect("an exact read carries the current status");
+            assert_eq!(now.notification_state, state, "{reader}");
+            assert!(!now.recipient_acknowledged, "{reader}: {state}");
+            assert_eq!(
+                now.summary,
+                format!(
+                    "As of {}: {sentence} Not yet acknowledged by the recipient.",
+                    now.observed_at
+                ),
+                "{reader}: {state}"
+            );
+        }
+        // A page read carries the same shared sentence for the state. The
+        // sender's cursor already covers its own message, so replay from 0.
+        let page = store
+            .read_range("session-sender", &receipt.mailbox_id, Some(0), 10)
+            .unwrap();
+        assert_eq!(page.messages.len(), 1, "{state}");
+        assert_eq!(page.messages[0].notification_summary, sentence, "{state}");
+    }
+    assert!(
+        mailbox_wake_state_sentence("aFutureState").contains("`aFutureState`"),
+        "an unrecognised state is reported as such, never as a failure"
+    );
+
+    // The idempotent receipt is unchanged after the wake state moved.
+    let duplicate = store.append(&test_input()).unwrap();
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.message_id, receipt.message_id);
+    assert_eq!(duplicate.notification_disposition, receipt.notification_disposition);
+
+    // Acknowledged without any wake: the state still says no wake was
+    // confirmed, and the recipient's acknowledgement is reported on its own.
+    store
+        .read_range("session-target", &receipt.mailbox_id, None, 10)
+        .unwrap();
+    store
+        .acknowledge("session-target", &receipt.mailbox_id, 0, receipt.sequence)
+        .expect("the recipient acknowledges its issued page");
+    for reader in ["session-sender", "session-target"] {
+        let acknowledged = current(reader);
+        assert_eq!(acknowledged.notification_state, "durableButNotWoken");
+        assert!(acknowledged.recipient_acknowledged, "{reader}");
+        assert_eq!(
+            acknowledged.summary,
+            format!(
+                "As of {}: No wake confirmed; the message remains stored. The recipient has acknowledged it.",
+                acknowledged.observed_at
+            )
+        );
+    }
+}
+
+/// Every send receipt carries one line beside its disposition: saved, the
+/// wake status AT SEND TIME (or "unconfirmed when sent"), that it is not
+/// current status, no resend on the receipt alone, and the exact read with
+/// the receipt's own returned id. It never asks for a resend or a poll and
+/// never promises a wake.
+#[test]
+fn every_send_receipt_line_names_its_exact_id_and_the_current_status_read() {
+    let id = "remote:home-1:mailbox-message-42";
+    for duplicate in [false, true] {
+        for disposition in [
+            "deliveredToIdleSession",
+            "queuedBehindActiveTurn",
+            "recoveredWake",
+            "heldBehindPausedQueue",
+            "waitingForAutomaticRetry",
+            "waitingForProviderCapacity",
+            "durableButNotWoken",
+        ] {
+            let line = mailbox_send_receipt_note(disposition, id, duplicate);
+            let lead = if duplicate {
+                "Duplicate send: the original message was saved earlier. "
+            } else {
+                "Message saved. "
+            };
+            assert!(line.starts_with(lead), "{line}");
+            // A duplicate always names its receipt's disposition AT SEND TIME.
+            if disposition == "durableButNotWoken" && !duplicate {
+                assert!(
+                    line.contains("Wake was unconfirmed when sent; this is not current status."),
+                    "{line}"
+                );
+            } else {
+                assert!(
+                    line.contains(&format!("Wake status AT SEND TIME: {disposition} (")),
+                    "{line}"
+                );
+                assert!(line.contains("); this is not current status."), "{line}");
+            }
+            assert!(line.contains(" Do not resend based on this receipt alone. "), "{line}");
+            assert!(
+                line.ends_with(&format!(
+                    "If current status is needed, use termal_read_mailbox_message({{messageId: \"{id}\"}}) or `termal mailbox read-message --message-id {id}`."
+                )),
+                "{line}"
+            );
+            let lower = line.to_lowercase();
+            for misleading in [
+                "will be woken",
+                "will wake",
+                "guarantee",
+                "poll",
+                "retry the send",
+                "send it again",
+                "resend it",
+            ] {
+                assert!(!lower.contains(misleading), "{disposition}: `{misleading}` in {line}");
+            }
+        }
+    }
+    assert_eq!(
+        mailbox_send_receipt_note("durableButNotWoken", "mailbox-message-7", false),
+        "Message saved. Wake was unconfirmed when sent; this is not current status. Do not resend based on this receipt alone. If current status is needed, use termal_read_mailbox_message({messageId: \"mailbox-message-7\"}) or `termal mailbox read-message --message-id mailbox-message-7`."
+    );
+
+    // The store's receipt gets its line from the HTTP send route; the line
+    // names that receipt's own id and disposition, and the JSON fields stay.
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let receipt = store.append(&test_input()).unwrap();
+    assert!(receipt.receipt_note.is_none());
+    let expected =
+        mailbox_send_receipt_note(&receipt.notification_disposition, &receipt.message_id, false);
+    let noted = receipt.clone().with_receipt_note();
+    assert_eq!(noted.receipt_note.as_deref(), Some(expected.as_str()));
+    let encoded = serde_json::to_value(&noted).unwrap();
+    assert_eq!(encoded["notificationDisposition"], receipt.notification_disposition.as_str());
+    assert_eq!(encoded["messageId"], receipt.message_id.as_str());
+    assert_eq!(encoded["receiptNote"], expected.as_str());
+}
+
+/// The exact read issues no page receipt and moves no cursor, page reads carry
+/// no current projection, and only participants can read the message.
+#[test]
+fn exact_read_moves_no_cursor_and_page_reads_carry_no_current_status() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let receipt = store.append(&test_input()).unwrap();
+    let cursor = |session: &str| {
+        mailbox_processed_through(&store.connection().unwrap(), &receipt.mailbox_id, session)
+            .unwrap()
+    };
+    let (target_before, sender_before) = (cursor("session-target"), cursor("session-sender"));
+    for _ in 0..2 {
+        store.read_message("session-target", &receipt.message_id).unwrap();
+        store.read_message("session-sender", &receipt.message_id).unwrap();
+    }
+    assert_eq!(cursor("session-target"), target_before);
+    assert_eq!(cursor("session-sender"), sender_before);
+    assert!(
+        store
+            .acknowledge("session-target", &receipt.mailbox_id, target_before, receipt.sequence)
+            .is_err(),
+        "an exact read issues no page, so it authorizes no acknowledgement"
+    );
+    let page = store
+        .read_range("session-target", &receipt.mailbox_id, None, 10)
+        .unwrap();
+    assert!(!page.messages.is_empty());
+    assert!(page.messages.iter().all(|message| message.current_status.is_none()));
+    assert!(store.read_message("session-stranger", &receipt.message_id).is_err());
+}
+
+/// A remote mailbox home that cannot answer makes the exact read say that the
+/// current status is unavailable, keeping the status and cause and claiming
+/// nothing about delivery. Any other error is left as it was, and the same
+/// store's later supported read still projects the current state.
+#[test]
+fn an_unanswered_mailbox_home_reads_as_current_status_unavailable() {
+    for status in [
+        StatusCode::BAD_GATEWAY,
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::GATEWAY_TIMEOUT,
+    ] {
+        let error = mailbox_current_status_unavailable(ApiError::from_status(status, "peer link is down"));
+        assert_eq!(error.status, status);
+        assert!(error.message.starts_with("current status unavailable:"), "{}", error.message);
+        assert!(error.message.contains("says nothing about delivery"));
+        assert!(error.message.contains("peer link is down"));
+        assert_eq!(error.message, mailbox_current_status_unavailable_text("peer link is down"));
+        assert!(error.message.contains("try the read again later"));
+    }
+    // Guidance written for another operation is cut from the cause: an exact
+    // read never tells the reader to retry an original send.
+    let unknown = mailbox_current_status_unavailable(ApiError::from_status(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "native mailbox relay reply identity/version mismatch; outcome unknown; retry the original request with the same idempotencyKey",
+    ));
+    assert!(
+        unknown
+            .message
+            .ends_with("try the read again later (native mailbox relay reply identity/version mismatch)"),
+        "{}",
+        unknown.message
+    );
+    assert!(!unknown.message.contains("retry the original request"), "{}", unknown.message);
+    assert!(!unknown.message.contains("idempotencyKey"), "{}", unknown.message);
+    // A relay link that is down or changed reads as unavailable; a membership
+    // or enrollment change is left as it was.
+    let stale = mailbox_relay_current_status_unavailable(federation_stale_link());
+    assert_eq!(stale.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(stale.message.starts_with("current status unavailable:"), "{}", stale.message);
+    assert!(!stale.message.contains("reconcile the original operation"), "{}", stale.message);
+    for status in [
+        StatusCode::BAD_GATEWAY,
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::GATEWAY_TIMEOUT,
+    ] {
+        let transport = mailbox_relay_current_status_unavailable(ApiError::from_status(
+            status,
+            "relay transport gave no answer",
+        ));
+        assert_eq!(transport.status, StatusCode::SERVICE_UNAVAILABLE, "{status}");
+        assert_eq!(
+            transport.message,
+            mailbox_current_status_unavailable_text("relay transport gave no answer")
+        );
+    }
+    let missing = mailbox_relay_current_status_unavailable(ApiError::not_found(
+        "native mailbox message not found",
+    ));
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    assert_eq!(missing.message, "native mailbox message not found");
+    let unenrolled = mailbox_relay_current_status_unavailable(ApiError::conflict(
+        NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE,
+    ));
+    assert_eq!(unenrolled.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(unenrolled.message.starts_with("current status unavailable:"));
+    let changed = mailbox_relay_current_status_unavailable(ApiError::conflict(
+        "native mailbox enrollment/home changed; no fallback",
+    ));
+    assert_eq!(changed.status, StatusCode::CONFLICT);
+    assert_eq!(changed.message, "native mailbox enrollment/home changed; no fallback");
+    let not_found = mailbox_current_status_unavailable(ApiError::not_found("mailbox message not found"));
+    assert_eq!(not_found.message, "mailbox message not found");
+
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let receipt = store.append(&test_input()).unwrap();
+    assert!(store
+        .read_message("session-sender", &receipt.message_id)
+        .unwrap()
+        .current_status
+        .is_some());
+}

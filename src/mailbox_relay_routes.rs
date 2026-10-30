@@ -55,12 +55,39 @@ fn public_mailbox_relay_message(
     Ok(message)
 }
 
+const NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE: &str =
+    "native mailbox relay requires an enrolled authenticated peer with relay support";
+
+/// An exact read whose remote home the relay cannot reach now: the link is
+/// down or changed, no relay peer handle is held, or the transport gave no
+/// usable answer. It reads as 503 current status unavailable; any other
+/// error, such as a membership or enrollment change, is left as it was.
+fn mailbox_relay_current_status_unavailable(error: ApiError) -> ApiError {
+    let link_down = error.status == StatusCode::CONFLICT
+        && (error.message == federation_stale_link().message
+            || error.message == NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE);
+    let no_usable_answer = matches!(
+        error.status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    );
+    if link_down || no_usable_answer {
+        return mailbox_current_status_unavailable(ApiError::from_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error.message,
+        ));
+    }
+    error
+}
+
 fn public_mailbox_relay_receipt(
     home: &MailboxRelayHome,
     mut receipt: MailboxAppendReceipt,
 ) -> Result<MailboxAppendReceipt, ApiError> {
     receipt.mailbox_id = MailboxRelayLocator::encode(home, &receipt.mailbox_id, false)?;
     receipt.message_id = MailboxRelayLocator::encode(home, &receipt.message_id, true)?;
+    // The home's own line names its local id; the send route writes the line
+    // again for the locator the caller holds.
+    receipt.receipt_note = None;
     Ok(receipt)
 }
 
@@ -107,7 +134,7 @@ impl AppState {
             ));
         }
         let handle=self.federation_peer_handle(&peer.peer.host_id)
-            .ok_or_else(||ApiError::conflict("native mailbox relay requires an enrolled authenticated peer with relay support"))?;
+            .ok_or_else(||ApiError::conflict(NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE))?;
         let lease = handle.channel.current_lease()?;
         lease.with_current(self, |_, current| {
             if !current.same_transport_as(&peer) {
@@ -620,6 +647,9 @@ impl AppState {
             .into_iter()
             .find(|conversation| conversation.home == locator.home)
             .ok_or_else(|| ApiError::not_found("native mailbox home membership not found"))?;
+        // Only a remote home can leave the current status unavailable; a
+        // local home's errors are this host's own.
+        let remote_home = conversation.home.host != actor.host;
         let message = self
             .call_native_mailbox_home(
                 &actor,
@@ -630,7 +660,14 @@ impl AppState {
                     message_id: locator.id,
                 },
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                if remote_home {
+                    mailbox_relay_current_status_unavailable(error)
+                } else {
+                    error
+                }
+            })?;
         public_mailbox_relay_message(&locator.home, message)
     }
 

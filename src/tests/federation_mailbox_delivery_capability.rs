@@ -207,6 +207,9 @@ async fn federation_delivery_capability_positive_control_and_unsupported_retry_p
         .send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
     assert_eq!(duplicate.message_id, committed.message_id);
     assert!(duplicate.duplicate);
+    // The retry route's send result carries the same shared at-send line.
+    assert_eq!(duplicate.receipt_note.as_deref(), Some(mailbox_send_receipt_note(
+        &duplicate.notification_disposition, &duplicate.message_id, true).as_str()));
     let ordinary_duplicate: MailboxAppendReceipt = client.post(format!("{base}/mailboxes/send"))
         .json(&payload("committed")).send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
     assert_eq!(ordinary_duplicate.message_id, committed.message_id,

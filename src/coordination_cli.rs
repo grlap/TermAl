@@ -899,6 +899,20 @@ fn render_coordination_cli_message(message: &Value, out: &mut impl Write) -> Res
         "  notificationState: {}",
         coordination_cli_field(message, "notificationState")
     )?;
+    // Only an exact read carries the current projection; its summary opens
+    // with "As of <observedAt>:".
+    if let Some(current) = message.get("currentStatus").filter(|value| value.is_object()) {
+        writeln!(
+            out,
+            "  current status: {}",
+            coordination_cli_field(current, "summary")
+        )?;
+        writeln!(
+            out,
+            "  recipientAcknowledged: {}",
+            coordination_cli_field(current, "recipientAcknowledged")
+        )?;
+    }
     writeln!(out)?;
     writeln!(out, "{}", coordination_cli_body(message))?;
     writeln!(out)?;
@@ -1018,19 +1032,28 @@ fn render_coordination_cli_output(
                 }
             }
         }
-        CoordinationCliCommand::MailboxSend { .. } => writeln!(
-            out,
-            "delivered to {} via {}: message {} #{} (duplicate {}, notification {}, unreadDepth {}, senderProcessedThrough {}, senderCursorAdvanced {})",
-            coordination_cli_field(output, "sessionId"),
-            coordination_cli_field(output, "mailboxId"),
-            coordination_cli_field(output, "messageId"),
-            coordination_cli_field(output, "sequence"),
-            coordination_cli_field(output, "duplicate"),
-            coordination_cli_field(output, "notificationDisposition"),
-            coordination_cli_field(output, "unreadDepth"),
-            coordination_cli_field(output, "senderProcessedThrough"),
-            coordination_cli_field(output, "senderCursorAdvanced"),
-        )?,
+        // A receipt says the message is stored for the recipient; its wake
+        // status is fixed at send time, so it is labelled as such and the
+        // exact read that tells the current state is named.
+        CoordinationCliCommand::MailboxSend { .. } => {
+            writeln!(
+                out,
+                "stored for {} via {}: message {} #{} (duplicate {}, wake status at send time {}, unreadDepth {}, senderProcessedThrough {}, senderCursorAdvanced {})",
+                coordination_cli_field(output, "sessionId"),
+                coordination_cli_field(output, "mailboxId"),
+                coordination_cli_field(output, "messageId"),
+                coordination_cli_field(output, "sequence"),
+                coordination_cli_field(output, "duplicate"),
+                coordination_cli_field(output, "notificationDisposition"),
+                coordination_cli_field(output, "unreadDepth"),
+                coordination_cli_field(output, "senderProcessedThrough"),
+                coordination_cli_field(output, "senderCursorAdvanced"),
+            )?;
+            // The host's own line, printed as sent; an older host sends none.
+            if let Some(note) = output.get("receiptNote").and_then(Value::as_str) {
+                writeln!(out, "  {}", sanitize_coordination_cli_text(note, false))?;
+            }
+        }
         CoordinationCliCommand::MailboxRead { mailbox_id, .. } => {
             writeln!(
                 out,

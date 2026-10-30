@@ -488,3 +488,105 @@ fn nonparent_error_branches_keep_exact_conflict_status_and_reason() {
         assert!(error.message.starts_with(expected), "{case}: {}", error.message);
     }
 }
+
+#[test]
+fn attempt_only_read_by_an_eligible_root_names_the_missing_identity_and_writes_nothing() {
+    let (state, parent, delegation, _, reader, id) = access_fixture();
+    let attempt_only = DelegationResultSelection { submission_attempt: Some(1), result_id: None };
+    let before = changes(&state);
+    for error in [
+        state.get_delegation_result_selected(&reader, &delegation, &attempt_only).err().unwrap(),
+        state.get_delegation_result_output_selected(&reader, &delegation, 0, 256, &attempt_only).err().unwrap(),
+    ] {
+        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{}", error.message);
+        assert!(error.message.starts_with("exact_identity_required"), "{}", error.message);
+    }
+    assert_eq!(changes(&state), before, "a refused attempt-only read retains nothing");
+    // The exact identity still reads, and the parent keeps its attempt-only view.
+    assert_eq!(
+        state.get_delegation_result_selected(&reader, &delegation, &selection(&id)).unwrap().result_id.as_deref(),
+        Some(id.as_str())
+    );
+    assert!(state.get_delegation_result_selected(&parent, &delegation, &attempt_only).is_ok());
+}
+
+fn assert_plain_not_found(error: ApiError, case: &str) {
+    assert_eq!(error.status, StatusCode::NOT_FOUND, "{case}: {}", error.message);
+    assert!(!error.message.contains("exact_identity_required"), "{case}: {}", error.message);
+}
+
+#[test]
+fn attempt_only_read_keeps_the_plain_not_found_for_ineligible_and_absent_cases() {
+    let attempt_only = DelegationResultSelection { submission_attempt: Some(1), result_id: None };
+    let (state, _, _, _, reader, _) = access_fixture();
+    assert_plain_not_found(
+        state.get_delegation_result_selected(&reader, "delegation-does-not-exist", &attempt_only).err().unwrap(),
+        "absent",
+    );
+    for case in ["child", "foreign", "hidden", "proxy", "removed"] {
+        let (state, _, delegation, child, reader, _) = access_fixture();
+        let actor = if case == "child" { child } else { reader };
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&actor).unwrap();
+            match case {
+                "foreign" => inner.sessions[index].session.project_id = Some("other-project".into()),
+                "hidden" => inner.sessions[index].hidden = true,
+                "proxy" => { inner.sessions[index].remote_id = Some("remote".into()); inner.sessions[index].remote_session_id = Some("remote-root".into()); },
+                "removed" => { inner.remove_session_at(index); },
+                _ => {},
+            }
+        }
+        let before = changes(&state);
+        assert_plain_not_found(state.get_delegation_result_selected(&actor, &delegation, &attempt_only).err().unwrap(), case);
+        assert_plain_not_found(
+            state.get_delegation_result_output_selected(&actor, &delegation, 0, 256, &attempt_only).err().unwrap(),
+            case,
+        );
+        assert_eq!(changes(&state), before, "{case}: a refused attempt-only read retains nothing");
+    }
+}
+
+#[test]
+fn attempt_only_diagnostic_follows_the_stamped_archive_after_native_session_drift() {
+    let (state, parent, delegation, child) = terminal_review("Original legacy-project output.");
+    let (reader, later) = {
+        let mut inner = state.inner.lock().unwrap();
+        for actor in [&parent, &child] {
+            let index = inner.find_session_index(actor).unwrap();
+            inner.sessions[index].session.project_id = Some("original-project".into());
+        }
+        let reader = inner.create_session(Agent::Codex, None, state.default_workdir.clone(),
+            Some("original-project".into()), None).session.id.clone();
+        let later = inner.create_session(Agent::Codex, None, state.default_workdir.clone(),
+            Some("later-project".into()), None).session.id.clone();
+        (reader, later)
+    };
+    let (snapshot, _) = state.retain_review_attempt(&parent, &delegation, 1).unwrap();
+    assert_eq!(snapshot.original_project_id.as_deref(), Some("original-project"));
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_delegation_index(&delegation).unwrap();
+        assert!(!inner.delegations[index].project_basis_recorded, "legacy record without a commissioning stamp");
+        assert!(inner.delegations[index].original_project_id.is_none());
+        for actor in [&parent, &child] {
+            let index = inner.find_session_index(actor).unwrap();
+            inner.sessions[index].session.project_id = Some("later-project".into());
+        }
+    }
+    let attempt_only = DelegationResultSelection { submission_attempt: Some(1), result_id: None };
+    let before = changes(&state);
+    for error in [
+        state.get_delegation_result_selected(&reader, &delegation, &attempt_only).err().unwrap(),
+        state.get_delegation_result_output_selected(&reader, &delegation, 0, 256, &attempt_only).err().unwrap(),
+    ] {
+        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{}", error.message);
+        assert!(error.message.starts_with("exact_identity_required"), "{}", error.message);
+    }
+    assert_plain_not_found(state.get_delegation_result_selected(&later, &delegation, &attempt_only).err().unwrap(), "later packet");
+    assert_plain_not_found(
+        state.get_delegation_result_output_selected(&later, &delegation, 0, 256, &attempt_only).err().unwrap(),
+        "later output",
+    );
+    assert_eq!(changes(&state), before, "attempt-only diagnostics read custody without writing");
+}

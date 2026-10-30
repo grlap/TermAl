@@ -61,6 +61,16 @@ struct MailboxMessage {
     #[serde(default, skip_serializing)]
     unread_depth_at_append: u64,
     notification_state: String,
+    /// The shared sentence for `notification_state`
+    /// (`mailbox_wake_state_sentence`), for every reader, the UI included.
+    /// Empty from mailbox homes that predate it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    notification_summary: String,
+    /// The exact-message read's current projection
+    /// (`attach_mailbox_message_current_status`); absent on page reads and
+    /// from mailbox homes that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    current_status: Option<MailboxMessageCurrentStatus>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +115,23 @@ struct MailboxAppendReceipt {
     duplicate: bool,
     sender_processed_through: u64,
     sender_cursor_advanced: bool,
+    /// The receipt's plain-language line (`mailbox_send_receipt_note`), set
+    /// where the API returns the receipt, after any id rewriting, so it names
+    /// the id the caller holds. Never stored with the receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    receipt_note: Option<String>,
+}
+
+impl MailboxAppendReceipt {
+    /// This receipt with its line, written for the id it carries now.
+    fn with_receipt_note(mut self) -> Self {
+        self.receipt_note = Some(mailbox_send_receipt_note(
+            &self.notification_disposition,
+            &self.message_id,
+            self.duplicate,
+        ));
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1239,10 +1266,10 @@ async fn send_mailbox_message(
 ) -> Result<(StatusCode, Json<MailboxAppendReceipt>), ApiError> {
     let request = request.message;
     if let Some(receipt) = state.replay_original_native_mailbox_send(&sender_session_id, &request).await? {
-        return Ok((StatusCode::ACCEPTED, Json(receipt)));
+        return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
     }
     if let Some(receipt)=state.send_native_mailbox_relay(&sender_session_id,&request).await? {
-        return Ok((StatusCode::ACCEPTED,Json(receipt)));
+        return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
     }
     if !matches!(mailbox_reference_handle(&request.target_session_id), Ok(None)) {
         return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
@@ -1267,7 +1294,7 @@ async fn send_mailbox_message(
             let receipt = run_blocking_api(move || state.append_native_mailbox_message_and_notify(
                 &sender_session_id, request, NativeMailboxNamespace::Local,
             )).await?;
-            return Ok((StatusCode::ACCEPTED, Json(receipt)));
+            return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
         }
     }
     state.ensure_automatic_mailbox_participation(&sender_session_id, false).await?;
@@ -1275,16 +1302,16 @@ async fn send_mailbox_message(
         if request.class.as_deref().is_some_and(|class| class != "routine") {
             return Err(ApiError::bad_request("durable mailboxes currently support only class `routine`"));
         }
-        let receipt = state.federation_mailbox_operation(&sender_session_id,FederationMailboxOperation::Send {
+        let receipt: MailboxAppendReceipt = state.federation_mailbox_operation(&sender_session_id,FederationMailboxOperation::Send {
             target:request.target_session_id,message:request.message,key:request.idempotency_key,
             topic:request.topic,state_stamp:request.state_stamp }).await?;
-        return Ok((StatusCode::ACCEPTED,Json(receipt)));
+        return Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())));
     }
     let receipt = run_blocking_api(move || {
         state.append_mailbox_message_and_notify(&sender_session_id, request)
     })
     .await?;
-    Ok((StatusCode::ACCEPTED, Json(receipt)))
+    Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())))
 }
 
 async fn submit_delegation_review_result(
@@ -1297,6 +1324,8 @@ async fn submit_delegation_review_result(
     let receipt =
         run_blocking_api(move || state.submit_delegation_review_result(&child_session_id, request))
             .await?;
+    // No receipt line here: its only reader is the delegated child, and the
+    // line's exact-read action is for root sessions.
     Ok((StatusCode::ACCEPTED, Json(receipt)))
 }
 
@@ -1439,11 +1468,13 @@ async fn read_mailbox_message(
     State(state): State<AppState>,
 ) -> Result<Json<MailboxMessage>, ApiError> {
     if let Some(locator)=MailboxRelayLocator::decode(&message_id,true)? {
+        // The relay read says itself when its remote home cannot answer.
         return state.read_native_mailbox_relay_message(&session_id,locator).await.map(Json);
     }
     if !state.owns_original_mailbox_resource(&session_id, &message_id, true).await?
         && state.federation_mailbox_actor_if_bound(&session_id)?.is_some() {
-        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::ReadMessage { message_id }).await.map(Json);
+        return state.federation_mailbox_operation(&session_id,FederationMailboxOperation::ReadMessage { message_id }).await
+            .map(Json).map_err(mailbox_current_status_unavailable);
     }
     let message = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
@@ -1967,6 +1998,7 @@ impl MailboxStore {
                     duplicate: true,
                     sender_processed_through,
                     sender_cursor_advanced: false,
+                    receipt_note: None,
                 },
                 finalization: None,
             });
@@ -2139,6 +2171,7 @@ impl MailboxStore {
                 duplicate: false,
                 sender_processed_through,
                 sender_cursor_advanced,
+                receipt_note: None,
             },
             finalization: Some(finalization),
         })
@@ -2788,7 +2821,12 @@ impl MailboxStore {
 
     fn read_message(&self, session_id: &str, message_id: &str) -> Result<MailboxMessage> {
         let connection = self.connection()?;
-        let message = connection
+        // One read transaction: the message, the caller's membership and the
+        // recipient's cursor come from the same snapshot.
+        let read = connection
+            .unchecked_transaction()
+            .context("failed to begin the mailbox message read")?;
+        let mut message = read
             .query_row(
                 "SELECT id, mailbox_id, sequence, sender_session_id, sender_name,
                         target_session_id, target_name, created_at, class, topic,
@@ -2810,7 +2848,8 @@ impl MailboxStore {
                 ),
                 other => anyhow!(other),
             })?;
-        require_mailbox_participant(&connection, &message.mailbox_id, session_id)?;
+        require_mailbox_participant(&read, &message.mailbox_id, session_id)?;
+        attach_mailbox_message_current_status(&read, &mut message)?;
         Ok(message)
     }
 
@@ -3217,6 +3256,7 @@ fn mailbox_message_for_idempotency_key(
 }
 
 fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailboxMessage> {
+    let notification_state: String = row.get(14)?;
     Ok(MailboxMessage {
         notification_cause: None,
         id: row.get(0)?,
@@ -3233,7 +3273,9 @@ fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mailbox
         body: row.get(11)?,
         idempotency_key: row.get(12)?,
         unread_depth_at_append: row.get(13)?,
-        notification_state: row.get(14)?,
+        notification_summary: mailbox_wake_state_sentence(&notification_state),
+        notification_state,
+        current_status: None,
     })
 }
 

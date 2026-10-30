@@ -918,6 +918,83 @@ impl AppState {
         Ok(review_attempt_key(&snapshot.delegation_id, slot.slot))
     }
 
+    /// Reads only: no recovery, retention or lifecycle work runs here.
+    fn refuse_attempt_only_read_by_eligible_root(
+        &self,
+        requester: &str,
+        delegation: &str,
+    ) -> Result<(), ApiError> {
+        let (record, requester_project, recorded_project) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_delegation_index(delegation) else {
+                return Ok(());
+            };
+            let record = inner.delegations[index].clone();
+            if record.parent_session_id == requester || record.mode != DelegationMode::Reviewer {
+                return Ok(());
+            }
+            let Ok(requester_project) = review_requester_project_locked(&inner, requester) else {
+                return Ok(());
+            };
+            let recorded = review_original_project_locked(&inner, &record).map(str::to_owned);
+            (record, requester_project, recorded)
+        };
+        // The same project authority as the exact read: immutable
+        // commissioning data first, then a stamped archive snapshot. Live
+        // session facts decide only a legacy record that has neither, so a
+        // later move of its parent and child cannot redirect the diagnostic.
+        let original = if record.project_basis_recorded || record.original_project_id.is_some() {
+            recorded_project
+        } else {
+            match self.stamped_archive_project(&record) {
+                Ok(Some(stamped)) => stamped,
+                Ok(None) => recorded_project,
+                Err(()) => return Ok(()),
+            }
+        };
+        if original.as_deref() != Some(requester_project.as_str()) {
+            return Ok(());
+        }
+        Err(ApiError::bad_request(
+            "exact_identity_required: a root other than the parent reads an original review \
+             only by its exact submissionAttempt and resultId",
+        ))
+    }
+
+    /// The original project stamped in an authenticated archive snapshot of
+    /// this delegation: `Ok(Some(project))` when a snapshot records its basis
+    /// (`None` inside meaning recorded without a project), `Ok(None)` when no
+    /// snapshot carries a stamp, and `Err(())` when custody cannot be read.
+    /// Read-only; damaged rows are skipped, as in the exact read.
+    fn stamped_archive_project(&self, record: &DelegationRecord) -> Result<Option<Option<String>>, ()> {
+        let rows = self.review_custody_rows_read_only(Some(record.child_session_id.as_str()), &record.id)
+            .map_err(|_| ())?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        let Some(key) = self.mailbox_store.review_attempt_auth_key(false).map_err(|_| ())? else {
+            return Err(());
+        };
+        for row in &rows {
+            let Ok(slot) = decode_review_value::<ReviewCustodySlot>(&row.body, &key) else { continue; };
+            let Some(candidate) = slot.candidate.as_ref() else { continue; };
+            if slot.delegation_id != record.id || row.sender_session_id != slot.child_session_id {
+                continue;
+            }
+            let Ok(body) = serde_json::to_string(candidate) else { continue; };
+            let Ok(snapshot) = decode_review_value::<ReviewAttemptSnapshot>(&body, &key) else { continue; };
+            if snapshot.parent_session_id != record.parent_session_id
+                || snapshot.child_session_id != record.child_session_id
+            {
+                continue;
+            }
+            if snapshot.project_basis_recorded || snapshot.original_project_id.is_some() {
+                return Ok(Some(snapshot.original_project_id));
+            }
+        }
+        Ok(None)
+    }
+
     fn resolve_review_selection(
         &self,
         parent: &str,
@@ -939,6 +1016,11 @@ impl AppState {
                     "retained review result identity does not match a confirmed publication",
                 ));
         }
+        // Attempt-only selection is the parent's. An eligible root of the
+        // original project that omits the result identity is told what it
+        // must supply; anyone else keeps the parent lookup's plain 404, so
+        // existence never leaks to a foreign or ineligible caller.
+        self.refuse_attempt_only_read_by_eligible_root(parent, delegation)?;
         // Internal custody must match the actual cut being cleared. Explicit
         // API selection instead returns the latest confirmed version, even if
         // the current semantic cut has returned to an older published value.

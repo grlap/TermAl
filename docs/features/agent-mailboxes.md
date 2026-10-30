@@ -338,6 +338,63 @@ The SQLite column `notification_disposition` is the legacy storage name for
 this mutable `notificationState`; it is not the immutable receipt disposition,
 which is stored separately in `dispatch_outcome`.
 
+A receipt therefore says that the message is saved for its recipient and what
+the wake looked like AT SEND TIME, never that it was delivered or read, and
+never current status. `durableButNotWoken` on a receipt means only that the
+wake was unconfirmed when the message was sent; it is not a failed delivery.
+Every send result (the HTTP response, `termal_send_to_session` and
+`termal mailbox send`) carries `receiptNote`, one plain-language line beside
+the unchanged receipt fields. For `durableButNotWoken` it reads:
+
+> Message saved. Wake was unconfirmed when sent; this is not current status.
+> Do not resend based on this receipt alone. If current status is needed, use
+> termal_read_mailbox_message({messageId: "ID"}) or
+> `termal mailbox read-message --message-id ID`.
+
+Any other disposition reads "Wake status AT SEND TIME: <disposition> (<its
+sentence>); this is not current status." in the second place. A duplicate
+opens with "Duplicate send: the original message was saved earlier." and
+always names its receipt's disposition in that AT SEND TIME form. ID is the
+receipt's own returned `messageId`: a local id, or the public relay locator
+after relay translation, never the home's local id. The line promises no wake
+or retry and never asks for a resend or a poll. The CLI prints "stored for …"
+with the "wake status at send time", then this line. The host writes the
+line; the delegation tool and the CLI pass it on as sent and make none up for
+an older host that sends none. A delegated reviewer's review-result receipt
+carries no line, because the exact read it would name is for root sessions.
+
+To learn the current state, read the message by its id
+(`termal_read_mailbox_message`, `termal mailbox read-message --message-id ID`,
+or `GET /api/sessions/{session}/mailbox-messages/{id}`). That exact read
+returns `currentStatus`, derived by the mailbox's home in one read and stored
+nowhere:
+- `observedAt`: when it was read, not when anything changed;
+- `notificationState`: the current wake state above;
+- `recipientAcknowledged`: the recipient's own cursor has reached this message;
+  the sender's cursor never counts, and an acknowledgement is the recipient's
+  protocol acknowledgement, not proof that the content was acted on;
+- `summary`: "As of <observedAt>: <wake sentence> <acknowledgement>", where
+  the acknowledgement is "The recipient has acknowledged it." or "Not yet
+  acknowledged by the recipient.", reported apart from the wake. The states
+  are not a ladder: a message can be read and acknowledged without any wake,
+  and no wording says that a wake never happened. A held state says what it
+  waits for (an active turn, a paused queue to be resumed, a due automatic
+  retry that clears by itself, provider capacity).
+Every message, from a page read or the exact read, also carries
+`notificationSummary`, the same wake sentence for its `notificationState`;
+the UI shows it beside the state. One formatter
+(`src/mailbox_status_text.rs`) writes all of these lines for the API, the
+tools, the CLI and the UI.
+Page reads carry no `currentStatus`. The exact read issues no page receipt,
+moves no cursor and wakes nobody. When a remote mailbox home cannot be reached
+(the relay link is down or changed, no relay peer is held, or the transport
+gives no usable answer), the read fails with "current status unavailable: the
+message's mailbox home could not be reached or gave no usable answer, which
+says nothing about delivery; try the read again later (<cause>)", keeping
+only the cause's first clause; no receipt or cached state stands in for it.
+A local home's own errors, and a membership or enrollment change, are
+reported as they are.
+
 Every row commits first as `durableButNotWoken`. A successful initial dispatch
 records its receipt outcome and advances the row to the corresponding state. A
 failed wake remains recoverable; recovery advances the state to

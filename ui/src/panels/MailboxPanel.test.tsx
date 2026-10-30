@@ -48,6 +48,7 @@ describe("MailboxPanel", () => {
       {
         ...message(1),
         notificationState: "durableButNotWoken",
+        notificationSummary: "No wake confirmed; the message remains stored.",
         notificationCause: "remote wake delivery arrives with M4",
       },
     ]);
@@ -60,6 +61,25 @@ describe("MailboxPanel", () => {
     expect(
       screen.getByText("durableButNotWoken · remote wake delivery arrives with M4"),
     ).toBeTruthy();
+    // The host's shared sentence for the state is shown as sent.
+    expect(
+      screen.getByText("No wake confirmed; the message remains stored."),
+    ).toHaveClass("mailbox-wake-summary");
+  });
+
+  it("shows no wake sentence when an older host sends none", async () => {
+    vi.mocked(listMailboxes).mockResolvedValue([
+      { id: "mailbox-1", participants: [], latestSequence: 1, unreadCount: 1 },
+    ]);
+    vi.mocked(readMailbox).mockResolvedValue([message(1)]);
+    const { container } = render(
+      <MailboxPanel mailboxId="mailbox-1" sessionId="session-codex" />,
+    );
+    await screen.findByText("#1");
+    const row = container.querySelector(".mailbox-thread-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button"));
+    expect(screen.getByText("deliveredToIdleSession")).toBeTruthy();
+    expect(container.querySelector(".mailbox-wake-summary")).toBeNull();
   });
 
   it("renders newest-first pages with honest lagging-cursor state and never acknowledges", async () => {

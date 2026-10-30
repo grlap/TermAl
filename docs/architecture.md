@@ -516,6 +516,11 @@ basis, pending publication and unvalidated submission return `409` with
 `project_basis_missing`, `review_result_pending` and `review_result_unvalidated`
 respectively. Selected responses include live `reviewAttemptState` separately
 from immutable retained content. No child control or execution authority follows.
+Such a root that sends `submissionAttempt` without `resultId` receives `400`
+`exact_identity_required`; its original project is decided as for the exact read
+(commissioning stamp, then a stamped archive snapshot, then consistent native
+facts for an unstamped legacy record), and every other non-parent caller keeps
+the plain `404`.
 
 `GET /api/sessions/{id}` is always a bounded transcript read. It returns the
 newest 20 messages by default; `?tail=N` requires
