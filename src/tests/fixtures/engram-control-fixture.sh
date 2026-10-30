@@ -141,26 +141,10 @@ esac
 
 case " $original_args " in
   *" authority revoke "*)
-    printf '%s entered\n' "$$" >> "$engram_home/authority-revoke-phases"
+    # Engram removed `authority revoke` (cut B): journal any call and refuse it as Engram does.
     printf '%s\n' "$original_args" > "$engram_home/engram-authority-revoke-args.txt"
-    printf '%s argv-written\n' "$$" >> "$engram_home/authority-revoke-phases"
-    mode=$(tr -d '\r\n' < "$project_file")
-    printf '%s mode-read\n' "$$" >> "$engram_home/authority-revoke-phases"
-    if [ "$mode" = "fixture-authority-revoke-fail" ]; then
-      printf '%s\n' 'scripted authority revoke failure' >&2
-      exit 9
-    fi
-    if [ "$mode" = "fixture-authority-revoke-fail-once" ]; then
-      fail_once_marker="$engram_home/engram-authority-revoke-failed-once"
-      if [ ! -e "$fail_once_marker" ]; then
-        : > "$fail_once_marker"
-        printf '%s\n' 'scripted one-time authority revoke failure' >&2
-        exit 9
-      fi
-    fi
-    printf '%s\n' 'fixture-revocation-hash'
-    printf '%s exiting\n' "$$" >> "$engram_home/authority-revoke-phases"
-    exit 0
+    printf '%s\n' "error: unrecognized subcommand 'revoke'" >&2
+    exit 2
     ;;
 esac
 

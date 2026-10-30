@@ -250,17 +250,6 @@ $report = @{cwd=[Environment]::CurrentDirectory;argv=@($args);home=$env:ENGRAM_H
             .status
             .success()
     );
-    run_engram_authority_revoke_command(
-        &binary,
-        &marker,
-        &home,
-        &worktree,
-        "fixture-grant",
-        "fixture-reason",
-        timeout,
-        &host,
-    )
-    .unwrap();
     run_engram_json_command(
         &connection,
         &["work", "ls", "--session-id", "fixture-session"],
@@ -309,9 +298,10 @@ $report = @{cwd=[Environment]::CurrentDirectory;argv=@($args);home=$env:ENGRAM_H
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
+    // TermAl no longer sends `authority revoke`, so that family is gone.
     assert_eq!(
         reports.len(),
-        6,
+        5,
         "every finite host launch family actually ran"
     );
     for report in &reports {
@@ -331,7 +321,7 @@ $report = @{cwd=[Environment]::CurrentDirectory;argv=@($args);home=$env:ENGRAM_H
             "explicit store home: {report}"
         );
     }
-    for report in &reports[2..5] {
+    for report in &reports[1..4] {
         assert_eq!(report["home"], home.to_string_lossy().as_ref());
         assert_eq!(report["actor"], "fixture-actor");
         assert_eq!(report["session"], "fixture-session");

@@ -99,28 +99,10 @@ if ($workIndex -ge 0 -and ($args -contains "next")) {
 }
 
 if (($args -contains "authority") -and ($args -contains "revoke")) {
-    $revocationPhases = Join-Path $engramHome "authority-revoke-phases"
-    [System.IO.File]::AppendAllText($revocationPhases, "$PID entered`n")
-    $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
-    [System.IO.File]::AppendAllText($revocationPhases, "$PID mode-read`n")
+    # Engram removed `authority revoke` (cut B): journal any call and refuse it as Engram does.
     $args | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $engramHome "engram-authority-revoke-args.json")
-    [System.IO.File]::AppendAllText($revocationPhases, "$PID argv-written`n")
-    if ($mode -eq "fixture-authority-revoke-fail") {
-        [Console]::Error.WriteLine("scripted authority revoke failure")
-        exit 9
-    }
-    if ($mode -eq "fixture-authority-revoke-fail-once") {
-        $failOnceMarker = Join-Path $engramHome "engram-authority-revoke-failed-once"
-        if (-not (Test-Path -LiteralPath $failOnceMarker)) {
-            Set-Content -LiteralPath $failOnceMarker -Value "failed"
-            [Console]::Error.WriteLine("scripted one-time authority revoke failure")
-            exit 9
-        }
-    }
-    [Console]::Out.WriteLine("fixture-revocation-hash")
-    [Console]::Out.Flush()
-    [System.IO.File]::AppendAllText($revocationPhases, "$PID exiting`n")
-    exit 0
+    [Console]::Error.WriteLine("error: unrecognized subcommand 'revoke'")
+    exit 2
 }
 
 if (($args -contains "doctor") -or ($args -contains "readiness")) {

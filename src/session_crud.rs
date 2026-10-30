@@ -861,6 +861,16 @@ fn append_engram_mcp_rotation_notices_locked(
 }
 
 const ENGRAM_BACKGROUND_REVOCATION_DEGRADED_NOTICE: &str = "Engram cleanup warning: TermAl saved these settings, but could not confirm revocation of previously retired work authority. Restore the configured Engram binary and home so cleanup can be retried. No grant material is shown here.";
+#[cfg(test)]
+thread_local! {
+    /// Test-only, one-shot: the next authority-settlement commit on this thread
+    /// fails, so tests reach the existing revert-and-report path, which a moot
+    /// revoke can still reach only when persisting the settlement fails.
+    static TEST_FAIL_NEXT_ENGRAM_AUTHORITY_SETTLEMENT_COMMIT: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+const ENGRAM_RETIRED_AUTHORITY_SETTLED_NOTICE: &str = "Engram cleanup notice: previously retired work authority was settled without a revoke, because Engram no longer supports work-authority grants. No grant material is shown here.";
 const ENGRAM_PROJECT_FENCE_RELEASE_DEGRADED_NOTICE: &str = "Engram cleanup warning: TermAl saved these settings and released the exact runtime cleanup fences, but project reset ownership changed before final cleanup bookkeeping completed. Inspect the current Engram settings before retrying the operation. No grant material is shown here.";
 const ENGRAM_CLEANUP_WARNING_SEPARATOR: &str = "\n\n";
 
@@ -997,35 +1007,35 @@ fn unresolved_engram_authority_retirement_failure(
     )
 }
 
+/// Settles each retired work-authority grant target as moot, with no command.
+/// Engram removed work-authority grants and its `authority revoke` command in
+/// cut B, so no Engram build honours a grant or can revoke one; the host's
+/// own turn grants are unaffected. Each target handed in is logged without its
+/// grant hash; a runtime's installed target can be handed in, and logged, again
+/// by a later settings change. A target whose identity was unavailable still reports
+/// `unresolved_failure` as before; only the revoke itself became moot.
 fn revoke_project_engram_authority_off_lock(
     targets: &[EngramAuthorityRevocationTarget],
     reason: Option<&str>,
     unresolved_failure: Option<String>,
-    host_workdir: &FsPath,
+    _host_workdir: &FsPath,
 ) -> EngramAuthorityRevocationAttempts {
-    let Some(reason) = reason else {
+    if reason.is_none() {
         return EngramAuthorityRevocationAttempts {
             confirmed_targets: Vec::new(),
             failure: unresolved_failure,
         };
-    };
-    let mut confirmed_targets = Vec::new();
-    let mut failures = unresolved_failure.into_iter().collect::<Vec<_>>();
-    for (index, target) in targets.iter().enumerate() {
-        match revoke_engram_project_work_authority(target, reason, host_workdir) {
-            Ok(()) => confirmed_targets.push(target.clone()),
-            Err(error) => failures.push(format!("revocation target {}: {error}", index + 1)),
-        }
     }
-    let failure = (!failures.is_empty()).then(|| {
-        format!(
-            "the old Engram work-authority grant could not be revoked for one or more runtime targets; a residual MCP child may still mutate until it exits: {}",
-            failures.join("; ")
-        )
-    });
+    for target in targets {
+        eprintln!(
+            "engram> retired work-authority grant (project_root={}) settled as moot: \
+             Engram removed work-authority grants (cut B); no revoke sent",
+            target.project_root
+        );
+    }
     EngramAuthorityRevocationAttempts {
-        confirmed_targets,
-        failure,
+        confirmed_targets: targets.to_vec(),
+        failure: unresolved_failure,
     }
 }
 
@@ -1420,6 +1430,79 @@ struct EngramProjectResetCheckpointClaims {
 }
 
 impl AppState {
+    /// Settles, once, every retired work-authority grant whose revoke was never
+    /// confirmed: Engram removed work-authority grants and their revoke in cut
+    /// B, so no later attempt can confirm one, and each would otherwise be
+    /// retried for ever. Each is logged without its grant hash and removed from
+    /// the ledger; a project still showing the background-revocation warning
+    /// for one of them shows a settled notice instead. One commit persists it
+    /// all, so a later boot finds nothing to settle; if that commit fails, the
+    /// ledger and notices are restored and the next boot settles them again.
+    /// Confirmed entries stay as they are. The ledger's shape is unchanged.
+    fn settle_retired_engram_work_authority_grants_after_boot(&self) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let settled = inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .filter(|tombstone| !tombstone.revoke_confirmed)
+            .cloned()
+            .collect::<Vec<_>>();
+        if settled.is_empty() {
+            return;
+        }
+        let previous_ledger = inner.engram_retired_work_authority_grants.clone();
+        let notice_updates = inner
+            .projects
+            .iter()
+            .enumerate()
+            .filter(|(_, project)| {
+                engram_cleanup_warning_contains(
+                    project.engram_cleanup_warning.as_deref(),
+                    ENGRAM_BACKGROUND_REVOCATION_DEGRADED_NOTICE,
+                ) && settled
+                    .iter()
+                    .any(|tombstone| retired_engram_authority_belongs_to_project(tombstone, project))
+            })
+            .map(|(index, project)| {
+                let previous = project.engram_cleanup_warning.clone();
+                let next = add_engram_cleanup_warning(
+                    remove_engram_cleanup_warning(
+                        previous.as_deref(),
+                        ENGRAM_BACKGROUND_REVOCATION_DEGRADED_NOTICE,
+                    )
+                    .as_deref(),
+                    ENGRAM_RETIRED_AUTHORITY_SETTLED_NOTICE,
+                );
+                (index, previous, next)
+            })
+            .collect::<Vec<_>>();
+        inner
+            .engram_retired_work_authority_grants
+            .retain(|tombstone| tombstone.revoke_confirmed);
+        for (index, _, next) in &notice_updates {
+            inner.projects[*index].engram_cleanup_warning = next.clone();
+        }
+        if let Err(error) = self.commit_locked(&mut inner) {
+            inner.engram_retired_work_authority_grants = previous_ledger.into();
+            for (index, previous, _) in notice_updates {
+                inner.projects[index].engram_cleanup_warning = previous;
+            }
+            eprintln!(
+                "engram> could not persist the settlement of {} retired work-authority grant(s); \
+                 the next boot settles them again: {error:#}",
+                settled.len()
+            );
+            return;
+        }
+        for tombstone in &settled {
+            eprintln!(
+                "engram> retired work-authority grant (project={}, retired_at={}) settled as moot: \
+                 Engram removed work-authority grants (cut B); no revoke sent",
+                tombstone.project_id, tombstone.retired_at
+            );
+        }
+    }
+
     fn note_engram_background_authority_revocation_degraded(&self, project_id: &str) {
         self.note_engram_cleanup_degraded(
             project_id,
@@ -1552,7 +1635,7 @@ impl AppState {
         if !ledger_changed && cleared_project_warnings.is_empty() {
             return failure;
         }
-        if let Err(error) = self.commit_locked(&mut inner) {
+        if let Err(error) = self.commit_engram_authority_settlement_locked(&mut inner) {
             inner.engram_retired_work_authority_grants = previous.into();
             for (index, previous_warning, _) in cleared_project_warnings {
                 inner.projects[index].engram_cleanup_warning = previous_warning;
@@ -1565,6 +1648,18 @@ impl AppState {
             });
         }
         failure
+    }
+
+    /// The commit that persists a revocation settlement. Tests can make it
+    /// fail once (`TEST_FAIL_NEXT_ENGRAM_AUTHORITY_SETTLEMENT_COMMIT`).
+    fn commit_engram_authority_settlement_locked(&self, inner: &mut StateInner) -> Result<u64> {
+        // Test-only: reaches the caller's existing revert-and-report path,
+        // the only way a settlement can still fail now that revoke is moot.
+        #[cfg(test)]
+        if TEST_FAIL_NEXT_ENGRAM_AUTHORITY_SETTLEMENT_COMMIT.with(|fail| fail.replace(false)) {
+            return Err(anyhow!("test-forced authority settlement commit failure"));
+        }
+        self.commit_locked(inner)
     }
 
     fn shutdown_revoked_engram_mcp_runtimes(

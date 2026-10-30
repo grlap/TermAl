@@ -85,6 +85,7 @@ mod engram_readiness;
 mod engram_readiness_test_seam;
 mod engram_recovery_format;
 mod engram_recovery_validation;
+mod engram_retired_authority_settlement;
 mod engram_retry_hold_projection;
 // The source-root naming tests (engram_source_root_naming.rs) are mounted
 // under engram_host_adapter's turn_observations module, whose ClaimedRoot

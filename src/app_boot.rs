@@ -983,6 +983,10 @@ impl AppState {
     }
 
     fn run_post_listen_boot_after_readiness(&self, engram_plan: EngramBootRecoveryPlan) {
+        // Retired work-authority grants no Engram build can revoke any more
+        // are settled once, visibly. A settings change that reaches one first
+        // settles it through the revoke step instead; either way none is sent.
+        self.settle_retired_engram_work_authority_grants_after_boot();
         // Structured reviewer envelopes live in coordination.sqlite. Recover
         // them before wait reconciliation so a restart between mailbox append
         // and primary-state recording cannot resume a parent with a false

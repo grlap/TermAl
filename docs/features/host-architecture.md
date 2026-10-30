@@ -270,11 +270,16 @@ change twelve existing source files: the last two call sites above
   Engram sees it only as a `workspace_id`.
 - TermAl does not send `reported_source_change`, although it already
   distinguishes the three cases that field names.
-- `engram authority revoke` is still built at
-  `engram_host_adapter.rs:1798`. Engram has no such
-  command. The path can run only for an unconfirmed entry of a persisted
-  ledger that current configurations cannot create; it is dead code (section
-  13).
+- TermAl sends no `engram authority revoke`. Engram removed work-authority
+  grants, and with them that command, in its cut B (commit 182c123). The
+  host-private turn grants of the control protocol are a different thing and
+  remain. A persisted retired-grant entry whose revoke was never confirmed
+  can only come from before that change. It is settled as moot once, at boot,
+  with a log line and no command
+  (`settle_retired_engram_work_authority_grants_after_boot`,
+  `session_crud.rs`). A retirement handed to the revoke step is settled the
+  same way (`revoke_project_engram_authority_off_lock`). The ledger keeps its
+  shape, so state written before the change still loads.
 
 ### 2.8 Process launch
 
@@ -850,7 +855,11 @@ What follows is what TermAl calls and what TermAl guarantees on top.
 | Diagnostics | `readiness --json`, `doctor --json`, `control-session-inspect` |
 | Agent-facing | the MCP child per session |
 
-`authority revoke` is removed from this list: Engram has no such command.
+`authority revoke` is not on this list. Engram removed work-authority grants and
+that command in its cut B, and TermAl no longer sends it: a leftover retired
+grant is settled as moot instead (section 2.7). This concerns work-authority
+grants only. The turn grants that `turn_begin` and `turn_checkpoint` carry are
+the control protocol's own and are unchanged.
 
 **What TermAl guarantees on top.**
 

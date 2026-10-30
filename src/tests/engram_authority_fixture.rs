@@ -1,5 +1,7 @@
-//! Native authority-command fixture for Stop-ordering tests. Real PowerShell
-//! and shell CLI conformance remains in the Engram host-adapter fixture tests.
+//! Native Engram-command fixture for Stop-ordering tests: readiness and
+//! work-context reads. It no longer emulates `authority revoke`, which TermAl
+//! does not send. Real PowerShell and shell CLI conformance remains in the
+//! Engram host-adapter fixture tests.
 
 use super::*;
 
@@ -111,31 +113,7 @@ fn authority_command() {
         .unwrap();
         return;
     }
-    assert_eq!(args.len(), 12, "authority command argv: {args:?}");
-    assert_eq!(
-        &args[4..],
-        [
-            "authority",
-            "revoke",
-            "--revoked-by",
-            "termal:host",
-            "--reason",
-            "TermAl project Engram work-authority grant removed",
-            "--",
-            "grant-old",
-        ]
-    );
-    #[cfg(windows)]
-    fs::write(
-        root.join("engram-authority-revoke-args.json"),
-        serde_json::to_vec(&args).unwrap(),
-    )
-    .expect("journal exact authority argv");
-    #[cfg(not(windows))]
-    fs::write(
-        root.join("engram-authority-revoke-args.txt"),
-        args.join(" "),
-    )
-    .expect("journal authority argv");
-    fs::write(output, "fixture-revocation-hash\n").unwrap();
+    // TermAl sends no `authority revoke` (Engram removed work-authority
+    // grants); that or any other command reaching this fixture is a test error.
+    panic!("unexpected Engram fixture argv: {args:?}");
 }
