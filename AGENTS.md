@@ -249,9 +249,10 @@ in Engram::Advisor's session, recorded verbatim):
   ref is evidence only. A full gate run by the standard launcher on the
   exact test ref counts as the landing gate for that tree on any host, with
   the same weight as one run on Windows, when its results record the same
-  fingerprint before and after and that result has been imported on the host
-  that evaluates and lands the change as a recognized check record bound to
-  the recorded tree id; it gates only a landing whose master commit has that
+  fingerprint before and after and the integration owner has
+  recorded on the item the run id, host, commit, tree id and the
+  launcher's before and after fingerprints from that run's results;
+  it gates only a landing whose master commit has that
   tree id, and until then it is evidence only. A change that touches
   Windows-only code or tests also needs the relevant gate on Windows. In
   this remote flow, reviews finish before the push and the gate runs on the
