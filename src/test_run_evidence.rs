@@ -193,10 +193,12 @@ impl AppState {
         // Engram's transactional TurnCheckpointReceipt returns one verification
         // ObjectId per input in input order. Missing legacy fields, partial
         // lists, repeated IDs or malformed IDs never constitute settlement.
+        // These are Engram record ids (32 hex, or 64 for older records), not
+        // content fingerprints: `is_engram_record_id` is their one validator.
         let Some(checkpoint) = receipt
             .checkpoint
             .as_ref()
-            .filter(|id| test_run_object_id_valid(id))
+            .filter(|id| is_engram_record_id(id))
         else {
             return Vec::new();
         };
@@ -205,7 +207,7 @@ impl AppState {
             || receipt
                 .verification_evidence
                 .iter()
-                .any(|id| !test_run_object_id_valid(id))
+                .any(|id| !is_engram_record_id(id))
             || receipt
                 .verification_evidence
                 .iter()

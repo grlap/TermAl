@@ -19,6 +19,9 @@ mod observation_review;
 #[path = "test_run_final_unbound.rs"]
 mod final_unbound;
 
+#[path = "test_run_receipt_record_ids.rs"]
+mod receipt_record_ids;
+
 #[path = "test_run_compaction.rs"]
 mod compaction;
 
