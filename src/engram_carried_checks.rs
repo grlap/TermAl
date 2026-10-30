@@ -2360,13 +2360,19 @@ fn engram_credit_carried_checks(
         let Some(artifact) = artifact_candidates.get(&(check.check.grant_id.clone(), check.check.sequence)) else { continue; };
         let grant_identity = sha256_hex(check.check.grant_id.as_bytes());
         let tool_identity = sha256_hex(check.check.key.as_bytes());
-        let candidates: Vec<_> = inner.test_run_observations.values().filter(|row| {
-            row.summary.owner_session_id.as_deref() == Some(session_id)
-                && row.grant_identity.as_deref() == Some(grant_identity.as_str())
-                && row.tool_identity == tool_identity && row.summary.started_at.as_deref() == Some(check.check.started_at.as_str())
-        }).map(|row| row.execution_id.clone()).collect();
-        if candidates.len() == 1 && let Some(row) = inner.test_run_observations.get_mut(&candidates[0]) {
-            row.artifact = Some(artifact.clone());
+        // The owner/grant/tool bucket narrows candidates; every original
+        // predicate still decides, over the whole bucket, in key order.
+        let bucket = (Some(session_id.to_owned()), Some(grant_identity.clone()), tool_identity.clone());
+        let candidates: Vec<_> = inner.test_run_observations.index().check(&bucket)
+            .filter_map(|key| inner.test_run_observations.get(key))
+            .filter(|row| {
+                row.summary.owner_session_id.as_deref() == Some(session_id)
+                    && row.grant_identity.as_deref() == Some(grant_identity.as_str())
+                    && row.tool_identity == tool_identity && row.summary.started_at.as_deref() == Some(check.check.started_at.as_str())
+            }).map(|row| row.execution_id.clone()).collect();
+        if candidates.len() == 1
+            && inner.test_run_observations.update(&candidates[0], |row| row.artifact = Some(artifact.clone())).is_some()
+        {
             inner.test_runs.observations_durable.remove(&candidates[0]);
         }
     }

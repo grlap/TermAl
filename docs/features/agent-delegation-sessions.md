@@ -497,6 +497,14 @@ child transcript and is available in UTF-8-safe pages from
 repeat with `nextOffsetBytes` until `complete` is true. This keeps every tool
 response bounded without requiring children to write ad hoc temporary files.
 
+For a reviewer follow-up, retain and select each submission attempt explicitly.
+Both result routes and the MCP tool accept `submissionAttempt`; retained
+responses return a `resultId` to pin subsequent pages. These reads use the
+committed terminal snapshot rather than a newer child transcript. Omitting the
+selector keeps the current-attempt view and does not promise immutable paging.
+See [review attempt retention](review-attempt-retention.md) for custody limits,
+legacy gaps and the standard immutable per-attempt exporter.
+
 For every newly spawned `mode: reviewer` delegation, the compact packet is no
 longer reconstructed from human-readable output. TermAl appends the versioned
 submission contract to the child bootstrap prompt after the repository-owned
@@ -1481,7 +1489,9 @@ Implementation order:
 POST /api/sessions/{parentSessionId}/delegations
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result
+GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result?submissionAttempt=1
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result/output?offsetBytes=0&limitBytes=4096
+GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result/output?submissionAttempt=1&resultId={resultId}&offsetBytes=0&limitBytes=4096
 POST /api/sessions/{parentSessionId}/delegations/{delegationId}/cancel
 POST /api/sessions/{parentSessionId}/delegations/{delegationId}/followup
 POST /api/sessions/{parentSessionId}/delegation-waits

@@ -127,11 +127,15 @@ fn observed_terminal_legacy_background_marker_is_reconciled_without_runtime_repl
     let id = start(&fixture, &session, "legacy-background-key", LAUNCH);
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let row = inner.test_run_observations.get_mut(&id).unwrap();
+        let mut row = inner.test_run_observations.get_mut(&id).unwrap();
         // Persist the old background acknowledgement shape with its runtime
         // still alive. A restart or runtime replacement must not be required.
         row.launch_only = true;
-        let row = row.clone();
+        let row = {
+            let snapshot = (*row).clone();
+            drop(row);
+            snapshot
+        };
         fixture
             .state
             .persist_test_command_observation_locked(&mut inner, row);

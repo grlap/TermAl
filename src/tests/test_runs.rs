@@ -986,7 +986,7 @@ fn unsent_deltas_leave_the_previous_entries_in_the_index() {
             .expect("state mutex poisoned")
             .test_runs
             .entries
-            .clone()
+            .to_vec()
     };
     let before: HashMap<String, TestRunEntry> = entries(&fixture)
         .into_iter()

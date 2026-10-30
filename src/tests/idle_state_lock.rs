@@ -72,8 +72,8 @@ fn registered_history(count: usize) -> RunFixture {
     let mut inner = fixture.state.inner.lock().unwrap();
     for ordinal in 0..count {
         let execution = format!("observed-history-{ordinal:04}");
-        let registration = {
-            let disk = Arc::make_mut(&mut inner.test_runs.entries[ordinal].disk);
+        let registration = inner.test_runs.entries.update(ordinal, |entry| {
+            let disk = Arc::make_mut(&mut entry.disk);
             disk.locator_identity = Some(format!("fixture-locator-{ordinal}"));
             TestRunRegistration {
                 run_id: disk.run_id.clone(),
@@ -95,8 +95,8 @@ fn registered_history(count: usize) -> RunFixture {
                 validated_unbound: true,
                 monitoring_interrupted_at: None,
             }
-        };
-        let row = inner.test_run_observations.get_mut(&execution).unwrap();
+        });
+        let mut row = inner.test_run_observations.get_mut(&execution).unwrap();
         row.runtime_identity = Some("fixture-original-runtime".to_owned());
         row.validated_unbound = true;
         row.summary.state = TestRunState::Passed;
@@ -104,8 +104,9 @@ fn registered_history(count: usize) -> RunFixture {
         row.summary.exit_code = Some(0);
         row.final_unbound_proof = Some(TestRunFinalUnboundProof {
             version: 1,
-            terminal_identity: test_run_final_unbound_identity(row).unwrap(),
+            terminal_identity: test_run_final_unbound_identity(&row).unwrap(),
         });
+        drop(row);
         inner.test_runs.observations_durable.insert(execution);
         inner
             .test_runs
@@ -184,11 +185,11 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
     let visits = |count| {
         let fixture = populated_history(count);
         let mut inner = fixture.state.inner.lock().unwrap();
-        for row in inner.test_run_observations.values_mut() {
+        inner.test_run_observations.for_each_mut(|row| {
             row.summary.state = TestRunState::Passed;
             row.summary.ended_at = Some("2026-10-25T00:01:00Z".to_owned());
             row.summary.exit_code = Some(0);
-        }
+        });
         let before = inner.test_run_observations.clone();
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
         TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
@@ -240,12 +241,12 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
         fixture.state.persist_tx = persist_tx;
         let mut inner = fixture.state.inner.lock().unwrap();
         let id = "observed-history-0000";
-        for row in inner.test_run_observations.values_mut() {
+        inner.test_run_observations.for_each_mut(|row| {
             if row.execution_id != id {
                 row.summary.ended_at = Some("2026-10-25T00:01:00Z".to_owned());
                 row.summary.state = TestRunState::Passed;
             }
-        }
+        });
         let before = inner.test_run_observations.clone();
         let terminal = inner.test_runs.entries[0].summary.clone();
         assert!(before[id].summary.ended_at.is_none());
@@ -314,7 +315,8 @@ fn terminal_retention_refuses_wrong_identity_and_preserves_native_terminal_proof
     for mismatch in ["owner", "worktree", "directory", "request", "run", "digest"] {
         let fixture = populated_history(1);
         let mut inner = fixture.state.inner.lock().unwrap();
-        let row = inner.test_run_observations.values_mut().next().unwrap();
+        let first = inner.test_run_observations.keys().next().unwrap().clone();
+        let mut row = inner.test_run_observations.get_mut(&first).unwrap();
         match mismatch {
             "owner" => row.summary.owner_session_id = Some("another-owner".to_owned()),
             "worktree" => row.summary.worktree.push_str("-another-worktree"),
@@ -338,6 +340,7 @@ fn terminal_retention_refuses_wrong_identity_and_preserves_native_terminal_proof
             }
             _ => unreachable!(),
         }
+        drop(row);
         let before = inner.test_run_observations.clone();
         fixture
             .state
@@ -817,7 +820,7 @@ fn idle_history_pending_compaction_is_polled_at_an_unchanged_revision_and_fenced
     fixture.state.state_broadcast_mailbox = Some(Arc::new(StateBroadcastMailbox::default()));
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let row = inner.test_run_observations.get_mut(execution).unwrap();
+        let mut row = inner.test_run_observations.get_mut(execution).unwrap();
         row.runtime_identity = Some("fixture-original-runtime".to_owned());
         row.validated_unbound = true;
         row.summary.state = TestRunState::Passed;
@@ -825,8 +828,9 @@ fn idle_history_pending_compaction_is_polled_at_an_unchanged_revision_and_fenced
         row.summary.exit_code = Some(0);
         row.final_unbound_proof = Some(TestRunFinalUnboundProof {
             version: 1,
-            terminal_identity: test_run_final_unbound_identity(row).unwrap(),
+            terminal_identity: test_run_final_unbound_identity(&row).unwrap(),
         });
+        drop(row);
         inner
             .test_runs
             .observations_durable

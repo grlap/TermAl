@@ -82,6 +82,8 @@ pub(super) fn delegation_child(
         &DelegationWritePolicy::ReadOnly,
     );
     inner.delegations.push(DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: delegation_id,
         parent_session_id: parent.to_owned(),
         child_session_id: child_session_id.clone(),

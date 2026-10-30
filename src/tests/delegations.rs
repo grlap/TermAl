@@ -34,6 +34,8 @@ fn attach_parked_claude_runtime_to_delegation_child(
 #[test]
 fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
     let record = DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: "delegation-tooling-test".to_owned(),
         parent_session_id: "session-parent".to_owned(),
         child_session_id: "session-child".to_owned(),
@@ -2680,6 +2682,8 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
 
         let now = stamp_now();
         inner.delegations.push(DelegationRecord {
+            original_project_id: None,
+            project_basis_recorded: false,
             id: delegation_id.clone(),
             parent_session_id: parent_session_id.clone(),
             child_session_id: child_session_id.clone(),

@@ -290,6 +290,8 @@ fn structured_result_is_durable_before_child_archive_and_active_review_is_not_re
 #[test]
 fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
     let record = DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: "delegation-marker-test".to_owned(),
         parent_session_id: "session-parent".to_owned(),
         child_session_id: "session-child".to_owned(),
@@ -342,6 +344,8 @@ fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
 #[test]
 fn non_reviewer_delegation_prompt_does_not_inject_review_result_protocol() {
     let record = DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: "delegation-explorer-prompt".to_owned(),
         parent_session_id: "session-parent".to_owned(),
         child_session_id: "session-child".to_owned(),
@@ -868,7 +872,7 @@ fn durable_review_envelope_repairs_terminal_observation_before_state_recording()
     };
     let appended = state
         .mailbox_store
-        .append(&input)
+        .append_delegation_review_result(&input)
         .expect("mailbox append should commit before the simulated interruption");
     state
         .mailbox_store
@@ -1223,7 +1227,7 @@ async fn structured_review_envelopes_stay_out_of_routine_mailbox_surfaces() {
     assert_eq!(ordinary.mailbox_id, receipt.mailbox_id);
     state
         .mailbox_store
-        .append(&MailboxAppendInput {
+        .append_delegation_review_result(&MailboxAppendInput {
             sender_session_id: submission.child_session_id,
             sender_name: "Structured reviewer".to_owned(),
             target_session_id: parent_session_id.clone(),

@@ -290,6 +290,25 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         [Console]::Out.Flush()
         continue
     }
+    # Terminal control-startup replies: one flushed error line answering the
+    # frame, then a nonzero exit, with no dispatch.
+    if ($mode -eq "fixture-startup-busy") {
+        Write-ControlError "control_startup_busy" "Engram control startup could not acquire the store."
+        exit 3
+    }
+    if ($mode -eq "fixture-startup-refused") {
+        Write-ControlError "control_startup_refused" "Engram control startup was refused."
+        exit 3
+    }
+    # Request-level error replies on a healthy connection, which continues.
+    if ($mode -eq "fixture-remote-storage-error") {
+        Write-ControlError "storage_error" "COMMIT or rollback failed"
+        continue
+    }
+    if ($mode -eq "fixture-remote-unknown-code") {
+        Write-ControlError "fixture_future_code" "a code this host does not know"
+        continue
+    }
     $request = $line | ConvertFrom-Json
     $rootRead = Join-Path $engramHome 'root-lifecycle-read.json'
     if ($request.operation -eq "named_root_read" -and (Test-Path -LiteralPath $rootRead)) {

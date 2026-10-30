@@ -327,6 +327,10 @@ fn successful_followup_restore_with_failed_local_commit_retains_archive_compensa
     };
     let admission = DelegationFollowupAdmission {
         state: state.clone(),
+        reservation_id: {
+            let inner = state.inner.lock().unwrap();
+            inner.delegation_followup_admissions[&previous.id].reservation_id
+        },
         previous: previous.clone(),
         restore_candidate,
         released: false,

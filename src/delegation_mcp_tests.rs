@@ -125,6 +125,8 @@ pub(crate) struct TestMcpHttpRequest {
 
 fn serialized_delegation_child_state(child_session_id: &str, mode: DelegationMode) -> Value {
     let record = DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: "delegation-reviewer-fixture".to_owned(),
         parent_session_id: "session-root".to_owned(),
         child_session_id: child_session_id.to_owned(),
@@ -551,6 +553,8 @@ fn delegation_mcp_result_tool_advertises_bounded_full_output_paging() {
             .expect("result tool should have a description")
             .contains("authoritative untruncated child output")
     );
+    assert!(result_tool["description"].as_str().unwrap()
+        .contains("command statuses and child claims are not host-recorded verification"));
     assert_eq!(
         result_tool["inputSchema"]["properties"]["outputOffset"]["minimum"],
         0
@@ -563,6 +567,51 @@ fn delegation_mcp_result_tool_advertises_bounded_full_output_paging() {
         result_tool["inputSchema"]["properties"]["outputLimit"]["maximum"],
         8192
     );
+    assert_eq!(result_tool["inputSchema"]["properties"]["submissionAttempt"]["minimum"], 1);
+    assert!(result_tool["inputSchema"]["properties"]["resultId"].is_object());
+}
+
+#[test]
+fn delegation_mcp_result_tool_pins_the_explicit_attempt_on_packet_and_page_requests() {
+    for serving_root in ["session-parent", "session-eligible-reader"] {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, |request| {
+        assert!(request.path.contains("submissionAttempt=3&resultId=review-result-abc"));
+        (200, json!({"submissionAttempt":3,"resultId":"review-result-abc"}))
+    });
+    let bridge = TermalDelegationMcpBridge::new(serving_root.to_owned(), base_url).unwrap();
+    bridge.tool_get_session_result(json!({"delegationId":"delegation-retained","submissionAttempt":3,"resultId":"review-result-abc"})).unwrap();
+    bridge.tool_get_session_result(json!({"delegationId":"delegation-retained","submissionAttempt":3,"resultId":"review-result-abc","outputOffset":256,"outputLimit":256})).unwrap();
+    server.join().unwrap();
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests[0].path, format!("/api/sessions/{serving_root}/delegations/delegation-retained/result?submissionAttempt=3&resultId=review-result-abc"));
+    assert_eq!(requests[1].path, format!("/api/sessions/{serving_root}/delegations/delegation-retained/result/output?offsetBytes=256&limitBytes=256&submissionAttempt=3&resultId=review-result-abc"));
+    }
+}
+
+#[test]
+fn delegation_mcp_result_tool_encodes_query_metacharacters_in_result_identity() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, |_| (200, json!({})));
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
+    for output in [false, true] {
+        let mut arguments = json!({
+            "delegationId": "delegation-retained",
+            "submissionAttempt": 3,
+            "resultId": "x&offsetBytes=0 +\"value\""
+        });
+        if output {
+            arguments["outputOffset"] = json!(256);
+        }
+        bridge.tool_get_session_result(arguments).unwrap();
+    }
+    server.join().unwrap();
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        assert!(request.path.ends_with(
+            "submissionAttempt=3&resultId=x%26offsetBytes%3D0%20%2B%22value%22"
+        ));
+        assert!(!request.path.contains("&offsetBytes=0"));
+    }
 }
 
 #[test]

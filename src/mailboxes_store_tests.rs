@@ -358,6 +358,23 @@ fn mailbox_explicit_read_and_exact_lookup_cannot_bypass_an_unissued_gap() {
         .unwrap();
 }
 
+/// An upgrade from a schema older than the review custody floor builds that
+/// floor's covering index; a historical fixture made from a current store must
+/// drop it first, as no database of that version ever had it.
+fn assert_review_custody_index(connection: &rusqlite::Connection) {
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='mailbox_messages_topic_key_sender'",
+                [],
+                |r| r.get::<_, u64>(0)
+            )
+            .unwrap(),
+        1,
+        "the upgrade builds the review custody covering index"
+    );
+}
+
 #[test]
 fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
     let root = MailboxTestRoot::new();
@@ -392,6 +409,7 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
              DROP TABLE federation_mailbox_intents;
              DROP TABLE federation_mailbox_retired_namespaces;
              DROP TABLE mailbox_read_pages;
+             DROP INDEX mailbox_messages_topic_key_sender;
              UPDATE meta SET value = '1' WHERE key = 'coordination_schema_version';",
             )
             .unwrap();
@@ -427,6 +445,7 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
         )
         .unwrap();
     validate_current_coordination_schema(&store.connection().unwrap()).unwrap();
+    assert_review_custody_index(&store.connection().unwrap());
 }
 
 #[test]
@@ -459,6 +478,7 @@ fn mailbox_version_two_upgrade_preserves_receipts_and_cursor_without_coverage() 
              DROP TABLE federation_mailbox_dedup;
              DROP TABLE federation_mailbox_intents;
              DROP TABLE federation_mailbox_retired_namespaces;
+             DROP INDEX mailbox_messages_topic_key_sender;
             UPDATE meta SET value='2' WHERE key='coordination_schema_version';",
             )
             .unwrap();
@@ -494,6 +514,7 @@ fn mailbox_version_two_upgrade_preserves_receipts_and_cursor_without_coverage() 
         0
     );
     validate_current_coordination_schema(&connection).unwrap();
+    assert_review_custody_index(&connection);
 }
 
 #[test]
@@ -516,6 +537,7 @@ fn mailbox_version_three_upgrade_preserves_delivery_records_and_receipts() {
              DROP TABLE mailbox_relay_store;
              DROP TABLE mailbox_continuation_declarations;
              DROP TABLE federation_executor_operations;
+             DROP INDEX mailbox_messages_topic_key_sender;
              UPDATE meta SET value='3' WHERE key='coordination_schema_version';
              INSERT INTO federation_mailbox_intents
               (sender_session_id,idempotency_key,sender_host_id,owner_session_id,owner_creation_id,
@@ -538,6 +560,7 @@ fn mailbox_version_three_upgrade_preserves_delivery_records_and_receipts() {
     store.acknowledge_page("session-target", &message.mailbox_id, &receipt).unwrap();
     let connection = store.connection().unwrap();
     validate_current_coordination_schema(&connection).unwrap();
+    assert_review_custody_index(&connection);
     assert_eq!(mailbox_processed_through(&connection, &message.mailbox_id, "session-target").unwrap(), 1);
     for (query, expected) in [
         ("SELECT envelope_json || ':' || state || ':' || payload FROM federation_mailbox_intents", "envelope:appendOutcomeUnknown:payload"),

@@ -17,6 +17,8 @@ const REVIEW_CODE_COMMAND: &str = include_str!("../../.claude/commands/review-co
 
 fn delegation_record(agent: Agent, write_policy: DelegationWritePolicy) -> DelegationRecord {
     DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: "delegation-read-guidance".to_owned(),
         parent_session_id: "session-parent".to_owned(),
         child_session_id: "session-child".to_owned(),

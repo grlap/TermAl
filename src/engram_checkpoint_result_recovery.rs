@@ -145,7 +145,10 @@ impl EngramCheckpointResultOwner {
                 let loaded_binding = matches!(record.runtime, SessionRuntime::None)
                     && record.active_turn_generation == 0 && record.engram.rebind_required
                     && record.engram.work_binding.is_none();
+                // A session disabled because its control refused to start
+                // fails closed: nothing of it is recovered automatically.
                 if !record.is_local_session() || record.hidden
+                    || record.engram.disabled_reason.as_deref() == Some(ENGRAM_CONTROL_STARTUP_REFUSED_CODE)
                     || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
                     || record.runtime_stop_in_progress || record.runtime_stop_owner.is_some()
                     || record.engram.project_reset_in_progress || record.engram.bind_in_progress
@@ -201,6 +204,13 @@ impl EngramCheckpointResultOwner {
     }
 }
 
+// The session a terminal control-startup failure is accounted against: the
+// captured owner's, and only while that owner still matches (its project
+// settings and authority, its receipt identity and its session image).
+fn checkpoint_startup_failure_session(inner: &StateInner, owner: &EngramCheckpointResultOwner) -> Option<String> {
+    owner.matches(inner).then(|| owner.operation.protection.local_session_id.clone())
+}
+
 fn publish_checkpoint_recovery_operation(inner: &mut StateInner, operation: EngramCheckpointOperation) -> Result<()> {
     let mut ledger = inner.engram_session_obligations.clone();
     let slot = ledger.checkpoint_operations.iter_mut()
@@ -243,7 +253,7 @@ impl AppState {
                 bail!("Original checkpoint recovery trigger changed")
             }
             record.engram.checkpoint_operation.as_ref()
-                .filter(|operation| EngramCheckpointResultOwner::capture(&inner, &operation.original.id).is_some())
+                .filter(|operation| self.capture_checkpoint_result_owner(&inner, &operation.original.id).is_some())
                 .map(|operation| operation.original.id.clone())
         };
         let Some(id) = id else { return Ok(false) };
@@ -275,7 +285,7 @@ impl AppState {
         let (eligible, retained) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let eligible = inner.engram_session_obligations.checkpoint_operations.iter()
-                .filter(|operation| EngramCheckpointResultOwner::capture(&inner, &operation.original.id).is_some())
+                .filter(|operation| self.capture_checkpoint_result_owner(&inner, &operation.original.id).is_some())
                 .map(|operation| (operation.original.id.clone(),
                     operation.attempts.last().expect("validated operation").id.clone(),
                     operation.attempts.len(), matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. })))
@@ -286,6 +296,12 @@ impl AppState {
                 .filter(|operation| operation.protection.phase != EngramSessionObligationPhase::Confirmed
                     || !inner.engram_confirmed_containment_ids.contains(&operation.original.id))
                 .map(|operation| operation.original.id.clone()).collect::<HashSet<_>>();
+            // Settled originals leave the startup-refusal holds as well,
+            // pruned under the same state lock as the snapshot: every hold is
+            // published under that lock, so none added since can be lost.
+            self.engram_retry_slots.checkpoint_startup_refused.lock()
+                .expect("checkpoint startup refusals poisoned")
+                .retain(|id, _| retained.contains(id));
             (eligible, retained)
         };
         let mut due = Vec::new();
@@ -312,6 +328,81 @@ impl AppState {
                 Err(_) => eprintln!("engram> checkpoint original-result recovery panicked; original duty retained"),
             }
         }
+    }
+
+    // Other failures on this path stay local to the original. A terminal
+    // control-startup reply is evidence about the control itself. Refused
+    // holds this original (`checkpoint_original_startup_refused_held`), and,
+    // with busy, is accounted against the session as on every other control
+    // path: refused disables it, busy counts for the circuit breaker. The
+    // accounting applies only while the captured owner still matches, so a
+    // late reply from an old control never touches a replacement's session.
+    fn record_terminal_control_startup_failure(&self, owner: &EngramCheckpointResultOwner,
+        error: &EngramTransportError) {
+        if !error.is_terminal_control_startup() { return }
+        // The accounting and then the hold are published under one state
+        // lock, so a hold whose accounting disabled the session is armed.
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(session_id) = checkpoint_startup_failure_session(&inner, owner) {
+            Self::record_engram_transport_failure_locked(&mut inner, &session_id, error);
+        }
+        if error.code.as_deref() == Some(ENGRAM_CONTROL_STARTUP_REFUSED_CODE) {
+            self.hold_checkpoint_original_after_startup_refusal_locked(&inner, &owner.operation.original.id);
+        }
+    }
+
+    // Published under the state lock, after the refusal's accounting. The
+    // hold is armed when its session is disabled for this code now; a hold
+    // whose accounting was fenced off, or whose row is gone, starts unarmed.
+    // A hold already armed stays armed.
+    fn hold_checkpoint_original_after_startup_refusal_locked(&self, inner: &StateInner, operation_id: &str) {
+        let disabled = inner.engram_session_obligations.checkpoint_operations.iter()
+            .find(|operation| operation.original.id == operation_id)
+            .and_then(|operation| inner.find_session_index(&operation.protection.local_session_id))
+            .is_some_and(|index| inner.sessions[index].engram.disabled_reason.as_deref()
+                == Some(ENGRAM_CONTROL_STARTUP_REFUSED_CODE));
+        let mut held = self.engram_retry_slots.checkpoint_startup_refused.lock()
+            .expect("checkpoint startup refusals poisoned");
+        let armed = held.entry(operation_id.to_owned()).or_insert(false);
+        *armed |= disabled;
+    }
+
+    // The hold is process-local, like the fatal disabled reason it mirrors,
+    // and a restart releases it. Within the process only a real re-enable
+    // releases it: the session seen disabled for this code (which arms the
+    // hold) and later no longer so. A hold whose session was never disabled
+    // for it (its accounting was fenced off) or whose row is gone lasts until
+    // restart. An original no longer in the ledger leaves the map here.
+    fn checkpoint_original_startup_refused_held(&self, inner: &StateInner, operation_id: &str) -> bool {
+        let mut held = self.engram_retry_slots.checkpoint_startup_refused.lock()
+            .expect("checkpoint startup refusals poisoned");
+        let Some(armed) = held.get(operation_id).copied() else { return false };
+        let Some(operation) = inner.engram_session_obligations.checkpoint_operations.iter()
+            .find(|operation| operation.original.id == operation_id) else {
+            held.remove(operation_id);
+            return false;
+        };
+        let disabled = inner.find_session_index(&operation.protection.local_session_id)
+            .map(|index| inner.sessions[index].engram.disabled_reason.as_deref()
+                == Some(ENGRAM_CONTROL_STARTUP_REFUSED_CODE));
+        match disabled {
+            Some(true) => {
+                held.insert(operation_id.to_owned(), true);
+                true
+            }
+            Some(false) if armed => {
+                held.remove(operation_id);
+                false
+            }
+            _ => true,
+        }
+    }
+
+    // Every automatic or admission-triggered recovery captures its owner here.
+    fn capture_checkpoint_result_owner(&self, inner: &StateInner, operation_id: &str)
+        -> Option<EngramCheckpointResultOwner> {
+        if self.checkpoint_original_startup_refused_held(inner, operation_id) { return None }
+        EngramCheckpointResultOwner::capture(inner, operation_id)
     }
 
     // One bounded result-recovery action. No generic admission guard is relaxed.
@@ -385,7 +476,7 @@ impl AppState {
     fn recover_original_checkpoint_result_once(&self, operation_id: &str) -> Result<(bool, bool)> {
         let (candidate, adapter, clock) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(owner) = EngramCheckpointResultOwner::capture(&inner, operation_id) else { return Ok((false, false)) };
+            let Some(owner) = self.capture_checkpoint_result_owner(&inner, operation_id) else { return Ok((false, false)) };
             (owner, inner.engram_host_adapter.clone(), inner.engram_budget_clock_snapshot())
         };
         let session_id = candidate.operation.protection.local_session_id.clone();
@@ -410,12 +501,17 @@ impl AppState {
             adapter.read_observation_policy(&candidate.operation.original.connection,
                 &candidate.operation.protection.authority,
                 deadline.saturating_duration_since(clock.now()))
-                .map_err(|error| anyhow!("{error}"))?;
+                .map_err(|error| {
+                    // A refused probe holds the original too, though no
+                    // attempt was allocated for it.
+                    self.record_terminal_control_startup_failure(&candidate, &error);
+                    anyhow!("{error}")
+                })?;
         }
         let (mut owner, reservation) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if !candidate.matches(&inner) { bail!("Original checkpoint recovery owner changed during preflight") }
-            let Some(mut owner) = EngramCheckpointResultOwner::capture(&inner, operation_id) else { return Ok((false, false)) };
+            let Some(mut owner) = self.capture_checkpoint_result_owner(&inner, operation_id) else { return Ok((false, false)) };
             let accepted = matches!(owner.operation.progress, EngramExistingCheckpointProgress::Accepted { .. });
             if !accepted {
                 if owner.operation.attempts.len() >= ENGRAM_CHECKPOINT_ATTEMPT_CAPACITY { bail!("Checkpoint attempt capacity exhausted") }
@@ -494,6 +590,9 @@ impl AppState {
                         let result = if error.invocation_application() == EngramInvocationApplication::CertifiedNotApplied {
                             EngramCheckpointAttemptResult::CertifiedNotApplied { code: error.code.clone().expect("qualified producer code") }
                         } else { EngramCheckpointAttemptResult::Unknown { code: error.code.clone() } };
+                        // Before the fallible retain, so its failure cannot
+                        // skip the hold or the session's accounting.
+                        self.record_terminal_control_startup_failure(&owner, &error);
                         self.retain_checkpoint_recovery_result(&owner, None, result)?;
                         return Err(anyhow!("Original checkpoint result remains unresolved: {error}"));
                     }

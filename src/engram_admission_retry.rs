@@ -32,12 +32,13 @@
 /// A prepared begin whose acknowledgement is pending enters it too: its
 /// attempt acknowledges that same begin again and sends it
 /// (`engram_begin_preparation_retry.rs`).
-const ENGRAM_ADMISSION_RETRY_CODES: [&str; 6] = [
+const ENGRAM_ADMISSION_RETRY_CODES: [&str; 7] = [
     "deadline_exceeded",
     "control_unavailable",
     "control_circuit_open",
     "control_backoff",
     "dispatch_budget_exhausted",
+    ENGRAM_CONTROL_STARTUP_BUSY_CODE,
     ENGRAM_BEGIN_PREPARATION_PENDING_CODE,
 ];
 

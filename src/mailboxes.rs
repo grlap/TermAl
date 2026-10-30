@@ -77,6 +77,8 @@ struct MailboxAppendInput {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MailboxIdempotencyRecord {
+    sender_session_id: String,
+    idempotency_key: String,
     mailbox_id: String,
     message_id: String,
     sequence: u64,
@@ -1658,7 +1660,7 @@ impl MailboxStore {
             .delegation_review_recovery_guard
             .lock()
             .expect("delegation review recovery guard mutex poisoned");
-        self.append(input)
+        self.append_with_delivery_policy_inner(input, None, None, || Ok(()), |_, _| Ok(()), true)
     }
 
     fn read_delegation_review_result_for_recovery(
@@ -1881,7 +1883,15 @@ impl MailboxStore {
     }
 
     fn append_with_delivery_policy<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>, authorize: impl FnOnce() -> Result<G>, after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>) -> Result<MailboxAppendResult> {
-        validate_mailbox_append_input(input)?;
+        self.append_with_delivery_policy_inner(input, delivery, relay, authorize, after_authorize, false)
+    }
+
+    fn append_with_delivery_policy_inner<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>, authorize: impl FnOnce() -> Result<G>, after_authorize: impl FnOnce(&rusqlite::Transaction<'_>, &G) -> Result<()>, internal_review: bool) -> Result<MailboxAppendResult> {
+        if internal_review {
+            validate_mailbox_append_shape(input)?;
+        } else {
+            validate_mailbox_append_input(input)?;
+        }
         if let Some((relay, _))=relay {
             if relay.input().map_err(|error|relay_store_error(&error.message))? != *input {
                 return Err(relay_store_error("native relay append input changed"));
@@ -1991,6 +2001,7 @@ impl MailboxStore {
             &input.sender_session_id,
             &input.sender_name,
             &now,
+            internal_review,
         )?;
         upsert_mailbox_participant(
             &transaction,
@@ -1998,6 +2009,7 @@ impl MailboxStore {
             &input.target_session_id,
             &input.target_name,
             &now,
+            internal_review,
         )?;
 
         let sequence = transaction
@@ -2033,7 +2045,8 @@ impl MailboxStore {
                  FROM mailbox_messages
                  WHERE mailbox_id = ?1
                    AND target_session_id = ?2
-                   AND sequence > ?3",
+                   AND sequence > ?3
+                   AND (topic IS NULL OR topic NOT GLOB 'delegation-review-*')",
                 rusqlite::params![&mailbox_id, &input.target_session_id, processed_through],
                 |row| row.get::<_, u64>(0),
             )
@@ -2482,7 +2495,7 @@ impl MailboxStore {
                       WHERE unread.mailbox_id = mine.mailbox_id
                         AND unread.target_session_id = ?1
                         AND unread.sequence > mine.processed_through
-                        AND COALESCE(unread.topic, '') != ?3
+                        AND COALESCE(unread.topic, '') NOT GLOB ?3
                     ),
                     message.sender_session_id, message.sender_name, message.topic
              FROM mailbox_participants mine
@@ -2494,12 +2507,12 @@ impl MailboxStore {
                 WHERE candidate.mailbox_id = mine.mailbox_id
                   AND candidate.sequence > mine.processed_through
                   AND candidate.target_session_id = ?1
-                  AND COALESCE(candidate.topic, '') != ?3
+                  AND COALESCE(candidate.topic, '') NOT GLOB ?3
               )
              WHERE mine.session_id = ?1
                AND mine.mailbox_id = ?2
                AND mine.left_at IS NULL",
-            rusqlite::params![session_id, mailbox_id, DELEGATION_REVIEW_RESULT_TOPIC],
+            rusqlite::params![session_id, mailbox_id, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],
             |row| {
                 Ok(MailboxUnreadWakeup {
                     mailbox_id: mailbox_id.to_owned(),
@@ -2540,7 +2553,7 @@ impl MailboxStore {
                         AND unread.target_session_id = ?1
                         AND unread.sequence > mine.processed_through
                         AND unread.sequence <= ?3
-                        AND COALESCE(unread.topic, '') != ?4
+                        AND COALESCE(unread.topic, '') NOT GLOB ?4
                     ),
                     message.sender_session_id, message.sender_name, message.topic
              FROM mailbox_participants mine
@@ -2553,7 +2566,7 @@ impl MailboxStore {
                   AND candidate.sequence > mine.processed_through
                   AND candidate.sequence <= ?3
                   AND candidate.target_session_id = ?1
-                  AND COALESCE(candidate.topic, '') != ?4
+                  AND COALESCE(candidate.topic, '') NOT GLOB ?4
               )
              WHERE mine.session_id = ?1
                AND mine.mailbox_id = ?2
@@ -2562,7 +2575,7 @@ impl MailboxStore {
                 session_id,
                 mailbox_id,
                 through_sequence,
-                DELEGATION_REVIEW_RESULT_TOPIC
+                DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
             ],
             |row| {
                 Ok(MailboxUnreadWakeup {
@@ -2608,7 +2621,7 @@ impl MailboxStore {
                           WHERE unread.mailbox_id = m.id
                             AND unread.target_session_id = ?1
                             AND unread.sequence > mine.processed_through
-                            AND COALESCE(unread.topic, '') != ?3
+                            AND COALESCE(unread.topic, '') NOT GLOB ?3
                         ),
                         message.sender_session_id, message.sender_name, message.topic
                  FROM mailboxes m
@@ -2624,7 +2637,7 @@ impl MailboxStore {
                     WHERE candidate.mailbox_id = m.id
                       AND candidate.sequence > mine.processed_through
                       AND candidate.target_session_id = ?1
-                      AND COALESCE(candidate.topic, '') != ?3
+                      AND COALESCE(candidate.topic, '') NOT GLOB ?3
                       AND (
                         ?2 = 1
                         OR (?2 = 0 AND candidate.notification_disposition = 'durableButNotWoken')
@@ -2637,7 +2650,7 @@ impl MailboxStore {
             .context("failed to prepare unread mailbox wake-up query")?;
         let rows = statement
             .query_map(
-                rusqlite::params![session_id, recovery_mode, DELEGATION_REVIEW_RESULT_TOPIC],
+                rusqlite::params![session_id, recovery_mode, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],
                 |row| {
                     Ok(MailboxUnreadWakeup {
                         mailbox_id: row.get(0)?,
@@ -2715,7 +2728,7 @@ impl MailboxStore {
                  WHERE mailbox_id = ?1 AND sequence > ?2
                    AND NOT (
                      target_session_id = ?4
-                     AND COALESCE(topic, '') = ?5
+                     AND COALESCE(topic, '') GLOB ?5
                    )
                  ORDER BY sequence
                  LIMIT ?3",
@@ -2728,7 +2741,7 @@ impl MailboxStore {
                     after_sequence,
                     limit + 1,
                     session_id,
-                    DELEGATION_REVIEW_RESULT_TOPIC
+                    DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
                 ],
                 mailbox_message_from_row,
             )
@@ -2785,9 +2798,9 @@ impl MailboxStore {
                  WHERE id = ?1
                    AND NOT (
                      target_session_id = ?2
-                     AND COALESCE(topic, '') = ?3
+                     AND COALESCE(topic, '') GLOB ?3
                    )",
-                rusqlite::params![message_id, session_id, DELEGATION_REVIEW_RESULT_TOPIC],
+                rusqlite::params![message_id, session_id, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],
                 mailbox_message_from_row,
             )
             .map_err(|err| match err {
@@ -2904,13 +2917,13 @@ impl MailboxStore {
                 && transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM mailbox_messages WHERE mailbox_id = ?1
                  AND sequence > ?2 AND sequence <= ?3
-                 AND NOT (target_session_id = ?4 AND COALESCE(topic, '') = ?5))",
+                 AND NOT (target_session_id = ?4 AND COALESCE(topic, '') GLOB ?5))",
                     rusqlite::params![
                         mailbox_id,
                         current,
                         page.0,
                         session_id,
-                        DELEGATION_REVIEW_RESULT_TOPIC
+                        DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
                     ],
                     |row| row.get::<_, bool>(0),
                 )?
@@ -2952,7 +2965,7 @@ impl MailboxStore {
             let unissued = transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM mailbox_messages m WHERE m.mailbox_id = ?1
                  AND m.sequence > ?2 AND m.sequence <= ?3
-                 AND NOT (m.target_session_id = ?4 AND COALESCE(m.topic, '') = ?5)
+                 AND NOT (m.target_session_id = ?4 AND COALESCE(m.topic, '') GLOB ?5)
                  AND NOT EXISTS(SELECT 1 FROM mailbox_read_pages p
                      WHERE p.mailbox_id = m.mailbox_id AND p.session_id = ?4
                      AND p.after_sequence < m.sequence
@@ -2962,7 +2975,7 @@ impl MailboxStore {
                     current,
                     processed_through,
                     session_id,
-                    DELEGATION_REVIEW_RESULT_TOPIC
+                    DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
                 ],
                 |row| row.get::<_, bool>(0),
             )?;
@@ -3073,6 +3086,17 @@ fn mailbox_sqlite_write_error(operation: &str, err: rusqlite::Error) -> anyhow::
 }
 
 fn validate_mailbox_append_input(input: &MailboxAppendInput) -> Result<()> {
+    validate_mailbox_append_shape(input)?;
+    if reserved_delegation_review_message(input.topic.as_deref(), &input.idempotency_key) {
+        return Err(mailbox_store_error(
+            MailboxStoreErrorKind::Validation,
+            "delegation review topics and keys are reserved for internal result custody",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_mailbox_append_shape(input: &MailboxAppendInput) -> Result<()> {
     if input.sender_session_id == input.target_session_id {
         return Err(mailbox_store_error(
             MailboxStoreErrorKind::Validation,
@@ -3141,6 +3165,7 @@ fn upsert_mailbox_participant(
     session_id: &str,
     display_name: &str,
     now: &str,
+    preserve_name: bool,
 ) -> Result<()> {
     transaction
         .execute(
@@ -3148,8 +3173,8 @@ fn upsert_mailbox_participant(
                mailbox_id, session_id, display_name, processed_through, joined_at, left_at
              ) VALUES(?1, ?2, ?3, 0, ?4, NULL)
              ON CONFLICT(mailbox_id, session_id) DO UPDATE SET
-               display_name = excluded.display_name",
-            rusqlite::params![mailbox_id, session_id, display_name, now],
+               display_name = CASE WHEN ?5 THEN display_name ELSE excluded.display_name END",
+            rusqlite::params![mailbox_id, session_id, display_name, now, preserve_name],
         )
         .context("failed to upsert mailbox participant")?;
     Ok(())
@@ -3169,6 +3194,8 @@ fn mailbox_message_for_idempotency_key(
         rusqlite::params![sender_session_id, idempotency_key],
         |row| {
             Ok(MailboxIdempotencyRecord {
+                sender_session_id: sender_session_id.to_owned(),
+                idempotency_key: idempotency_key.to_owned(),
                 mailbox_id: row.get(0)?,
                 message_id: row.get(1)?,
                 sequence: row.get(2)?,
@@ -3231,7 +3258,7 @@ fn mailbox_summaries_for_session_with_empty(
                       WHERE unread.mailbox_id = m.id
                         AND unread.target_session_id = ?1
                         AND unread.sequence > mine.processed_through
-                        AND COALESCE(unread.topic, '') != ?2
+                        AND COALESCE(unread.topic, '') NOT GLOB ?2
                     ),
                     latest.body, latest.created_at
              FROM mailboxes m
@@ -3243,7 +3270,7 @@ fn mailbox_summaries_for_session_with_empty(
                 SELECT MAX(candidate.sequence)
                 FROM mailbox_messages candidate
                 WHERE candidate.mailbox_id = m.id
-                  AND COALESCE(candidate.topic, '') != ?2
+                  AND COALESCE(candidate.topic, '') NOT GLOB ?2
               )
              WHERE mine.left_at IS NULL AND (?3 OR latest.id IS NOT NULL)
              ORDER BY COALESCE(latest.created_at, m.created_at) DESC, m.id",
@@ -3251,7 +3278,7 @@ fn mailbox_summaries_for_session_with_empty(
         .context("failed to prepare mailbox summary query")?;
     let rows = statement
         .query_map(
-            rusqlite::params![session_id, DELEGATION_REVIEW_RESULT_TOPIC, include_empty],
+            rusqlite::params![session_id, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN, include_empty],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

@@ -37,8 +37,21 @@ fn assert_units(fixture: &FenceFixture, expected: &PersistMetadataUnits) {
 #[test]
 fn every_metadata_collection_mutable_borrow_marks_its_field() {
     let mut checked = Vec::new();
+    macro_rules! touch {
+        (borrow, $inner:ident, $field:ident) => {
+            let _borrow = &mut *$inner.$field;
+        };
+        // A history store has no mutable borrow; its no-op retain stamps it
+        // exactly as the map's own mutable borrow did.
+        (store, $inner:ident, $field:ident) => {
+            $inner.$field.retain(|_, _| true);
+        };
+    }
     macro_rules! check {
-        ($field:ident, $wire:literal) => {{
+        ($field:ident, $wire:literal) => {
+            check!($field, $wire, borrow)
+        };
+        ($field:ident, $wire:literal, $mode:ident) => {{
             let mut fixture = FenceFixture::new();
             fixture.write(&fixture.collect()).unwrap();
             assert!(observed_collect(&fixture).1.is_empty());
@@ -46,7 +59,7 @@ fn every_metadata_collection_mutable_borrow_marks_its_field() {
                 let mut inner = fixture.inner.lock().unwrap();
                 // A mutable borrow without a value change is deliberately
                 // conservative. Its payload cannot be reached without marking.
-                let _borrow = &mut *inner.$field;
+                touch!($mode, inner, $field);
             }
             let (delta, fields) = observed_collect(&fixture);
             assert_eq!(fields, vec![$wire]);
@@ -85,9 +98,9 @@ fn every_metadata_collection_mutable_borrow_marks_its_field() {
     check!(orchestrator_instances, "orchestratorInstances");
     check!(delegation_waits, "delegationWaits");
     check!(test_run_cards, "testRunCards");
-    check!(test_run_registrations, "testRunRegistrations");
-    check!(test_run_observations, "testRunObservations");
-    check!(test_run_compacted, "testRunCompacted");
+    check!(test_run_registrations, "testRunRegistrations", store);
+    check!(test_run_observations, "testRunObservations", store);
+    check!(test_run_compacted, "testRunCompacted", store);
     check!(test_run_waits, "testRunWaits");
     check!(workspace_layouts, "workspaceLayouts");
 

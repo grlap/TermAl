@@ -358,6 +358,23 @@ while IFS= read -r line; do
     fixture-malformed)
       printf '%s\n' '{"status":'
       ;;
+    # Terminal control-startup replies: one flushed error line answering the
+    # frame, then a nonzero exit, with no dispatch.
+    fixture-startup-busy)
+      write_error control_startup_busy 'Engram control startup could not acquire the store.'
+      exit 3
+      ;;
+    fixture-startup-refused)
+      write_error control_startup_refused 'Engram control startup was refused.'
+      exit 3
+      ;;
+    # Request-level error replies on a healthy connection, which continues.
+    fixture-remote-storage-error)
+      write_error storage_error 'COMMIT or rollback failed'
+      ;;
+    fixture-remote-unknown-code)
+      write_error fixture_future_code 'a code this host does not know'
+      ;;
     fixture-stateful*)
       operation=$(json_field "$line" operation)
       request_token=$(json_field "$line" routing_token)

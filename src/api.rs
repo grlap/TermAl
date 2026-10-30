@@ -1650,10 +1650,13 @@ async fn get_delegation_status(
 async fn get_delegation_result(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
+    query: Result<Query<DelegationResultSelection>, QueryRejection>,
 ) -> Result<Json<DelegationResultResponse>, ApiError> {
-    let response =
-        run_blocking_api(move || state.get_delegation_result(&parent_session_id, &delegation_id))
-            .await?;
+    let Query(selection) = query
+        .map_err(|rejection| api_query_rejection("delegation result query", rejection))?;
+    let response = run_blocking_api(move || {
+        state.get_delegation_result_selected(&parent_session_id, &delegation_id, &selection)
+    }).await?;
     Ok(Json(response))
 }
 
@@ -1666,11 +1669,15 @@ async fn get_delegation_result_output(
     let Query(query) = query
         .map_err(|rejection| api_query_rejection("delegation result output query", rejection))?;
     let response = run_blocking_api(move || {
-        state.get_delegation_result_output(
+        state.get_delegation_result_output_selected(
             &parent_session_id,
             &delegation_id,
             query.offset_bytes,
             query.limit_bytes,
+            &DelegationResultSelection {
+                submission_attempt: query.submission_attempt,
+                result_id: query.result_id,
+            },
         )
     })
     .await?;

@@ -115,7 +115,7 @@ fn only_exact_durable_registration_overrides_discovered_project() {
             if mode == "pending" {
                 inner.test_runs.registered.remove(&fixture.run_id);
             } else {
-                let row = inner.test_run_registrations.get_mut(&fixture.run_id).unwrap();
+                let mut row = inner.test_run_registrations.get_mut(&fixture.run_id).unwrap();
                 if mode == "different-request" {
                     row.request_identity = "b".repeat(64);
                 } else if mode == "different-native-locator" {

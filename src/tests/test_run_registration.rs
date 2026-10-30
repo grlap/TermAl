@@ -706,7 +706,8 @@ fn evidence_fixture(
     };
     let id = {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let row = inner.test_run_observations.values_mut().next().unwrap();
+        let first = inner.test_run_observations.keys().next().unwrap().clone();
+        let mut row = inner.test_run_observations.get_mut(&first).unwrap();
         row.validated_unbound = false;
         row.work_binding = Some(binding.clone());
         row.evidence.push(TestRunEvidenceAssociation {
@@ -950,7 +951,7 @@ fn every_associated_work_must_settle_and_true_dominates_unknown() {
         Some(false)
     );
     let mut inner = fixture.state.inner.lock().unwrap();
-    let row = inner.test_run_observations.get_mut(&id).unwrap();
+    let mut row = inner.test_run_observations.get_mut(&id).unwrap();
     let mut second = row.evidence[0].clone();
     second.producer_observation_id = "2".repeat(64);
     second.binding.work_id = "second-work".to_owned();
@@ -959,6 +960,7 @@ fn every_associated_work_must_settle_and_true_dominates_unknown() {
     second.checkpoint_id = None;
     second.lifecycle_read = None;
     row.evidence.push(second);
+    drop(row);
     drop(inner);
     let summary = fixture.summary(&id);
     assert_eq!(
@@ -971,10 +973,11 @@ fn every_associated_work_must_settle_and_true_dominates_unknown() {
         "first lifecycle completion cannot discharge another check"
     );
     let mut inner = fixture.state.inner.lock().unwrap();
-    let row = inner.test_run_observations.get_mut(&id).unwrap();
+    let mut row = inner.test_run_observations.get_mut(&id).unwrap();
     row.evidence[1].verification_record_id = Some("3".repeat(64));
     row.evidence[1].checkpoint_id = Some("4".repeat(64));
     row.evidence[1].reported_outcome = EngramExecutionOutcome::Failed;
+    drop(row);
     drop(inner);
     assert_eq!(
         fixture

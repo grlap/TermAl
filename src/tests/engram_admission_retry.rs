@@ -1903,6 +1903,8 @@ fn an_ordinary_drain_still_recovers_a_session_without_a_retry_record() {
 /// not exist, so a best-effort delegation bind considers only the parent.
 fn delegation_with_parent(parent: &str) -> DelegationRecord {
     DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: "delegation-of-a-retry-head".to_owned(),
         parent_session_id: parent.to_owned(),
         child_session_id: "absent-child".to_owned(),
@@ -2586,3 +2588,6 @@ mod control_non_application;
 
 #[path = "engram_admission_budget_bound.rs"]
 mod admission_budget_bound;
+
+#[path = "engram_control_startup_admission.rs"]
+mod control_startup_admission;

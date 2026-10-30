@@ -200,6 +200,8 @@ pub(super) fn install_evaluator_delegation(
     let child_index = inner.find_session_index(&child_session_id).unwrap();
     inner.sessions[child_index].session.parent_delegation_id = Some(delegation_id.clone());
     inner.delegations.push(DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: delegation_id.clone(),
         parent_session_id: parent_session_id.to_owned(),
         child_session_id: child_session_id.clone(),
@@ -5612,6 +5614,10 @@ fn acceptance_followup_cannot_rearm_an_evaluator_while_another_judges_the_task()
     };
     let mut admission = DelegationFollowupAdmission {
         state: state.clone(),
+        reservation_id: {
+            let inner = state.inner.lock().unwrap();
+            inner.delegation_followup_admissions[&previous.id].reservation_id
+        },
         previous: previous.clone(),
         restore_candidate: false,
         released: false,

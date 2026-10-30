@@ -15,6 +15,9 @@ mod root_recovery_live;
 #[path = "engram_control_transport.rs"]
 mod control_transport;
 
+#[path = "engram_control_startup_codes.rs"]
+mod control_startup_codes;
+
 #[path = "engram_fixture_contracts.rs"]
 mod fixture_contracts;
 
@@ -4337,6 +4340,8 @@ fn link_engram_mcp_test_descendant(
     child.session.status = SessionStatus::Active;
     child.session.preview = "Running delegated review...".to_owned();
     inner.delegations.push(DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: delegation_id,
         parent_session_id: parent_session_id.to_owned(),
         child_session_id: child_session_id.to_owned(),

@@ -1117,7 +1117,7 @@ impl EngramTransportError {
         matches!(
             self.kind,
             EngramTransportErrorKind::Deadline | EngramTransportErrorKind::Transport
-        )
+        ) || self.is_control_startup_busy()
     }
 
     fn disables_session(&self) -> bool {
@@ -1131,14 +1131,40 @@ impl EngramTransportError {
                             | "unknown_control_schema"
                             | "control_policy_missing"
                             | "work_claim_mismatch"
+                            | ENGRAM_CONTROL_STARTUP_REFUSED_CODE
                     )
                 ))
     }
 
     fn keeps_control_process_alive(&self) -> bool {
+        self.kind == EngramTransportErrorKind::Remote && !self.is_terminal_control_startup()
+    }
+
+    /// Engram's terminal control-startup reply: the one error line its control
+    /// process writes in answer to the first frame before it exits nonzero,
+    /// with that frame never dispatched. Matched on the remote code alone,
+    /// never on the message. Startup itself may have written, so this is
+    /// neither a process that never started nor a certified non-application.
+    fn is_terminal_control_startup(&self) -> bool {
         self.kind == EngramTransportErrorKind::Remote
+            && matches!(
+                self.code.as_deref(),
+                Some(ENGRAM_CONTROL_STARTUP_BUSY_CODE | ENGRAM_CONTROL_STARTUP_REFUSED_CODE)
+            )
+    }
+
+    /// A busy control startup: the store could not be acquired. Not fatal; it
+    /// takes the recovery an unavailable control takes (a backoff, then the
+    /// bounded status/rebind re-admission of the exact retained request).
+    fn is_control_startup_busy(&self) -> bool {
+        self.kind == EngramTransportErrorKind::Remote
+            && self.code.as_deref() == Some(ENGRAM_CONTROL_STARTUP_BUSY_CODE)
     }
 }
+
+/// Engram's terminal control-startup codes (`is_terminal_control_startup`).
+const ENGRAM_CONTROL_STARTUP_BUSY_CODE: &str = "control_startup_busy";
+const ENGRAM_CONTROL_STARTUP_REFUSED_CODE: &str = "control_startup_refused";
 
 impl std::fmt::Display for EngramTransportError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1266,6 +1292,10 @@ struct ScriptedEngramControlTransport {
     /// (`scripted_no_root_sighting`).
     sighting_reads: Mutex<VecDeque<std::result::Result<Value, EngramTransportError>>>,
     shutdowns: Mutex<Vec<String>>,
+    /// Errors the next `read_observation_policy` probes return, in order,
+    /// before the readiness model answers; and how many probes it answered.
+    observation_policy_errors: Mutex<VecDeque<EngramTransportError>>,
+    observation_policy_reads: std::sync::atomic::AtomicUsize,
 }
 
 /// A version-1 `named_root_sighting_read` answer binding no root, for the
@@ -1323,6 +1353,8 @@ impl ScriptedEngramControlTransport {
             held_claims: Mutex::new(VecDeque::new()),
             sighting_reads: Mutex::new(VecDeque::new()),
             shutdowns: Mutex::new(Vec::new()),
+            observation_policy_errors: Mutex::new(VecDeque::new()),
+            observation_policy_reads: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -1352,6 +1384,8 @@ impl ScriptedEngramControlTransport {
             held_claims: Mutex::new(VecDeque::new()),
             sighting_reads: Mutex::new(VecDeque::new()),
             shutdowns: Mutex::new(Vec::new()),
+            observation_policy_errors: Mutex::new(VecDeque::new()),
+            observation_policy_reads: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -1418,6 +1452,10 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
         &self, _connection: &EngramConnectionConfig, expected_store: &EngramAuthorityStoreKey, _timeout: Duration,
         _host_workdir: &FsPath,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.observation_policy_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(error) = self.observation_policy_errors.lock().unwrap().pop_front() {
+            return Err(error);
+        }
         let mut roots = self.named_roots.lock().unwrap();
         let roots = roots.as_mut().ok_or_else(|| {
             EngramTransportError::protocol("no observation readiness model configured")
@@ -5542,11 +5580,26 @@ impl AppState {
         }
         match &outcome {
             Ok(()) => self.record_engram_transport_success(session_id),
+            // A control that refused to start also holds this original from
+            // automatic result recovery, published under the same state lock
+            // as the accounting that disables the session, which arms it.
+            Err(error)
+                if error.is_terminal_control_startup()
+                    && error.code.as_deref() == Some(ENGRAM_CONTROL_STARTUP_REFUSED_CODE) =>
+            {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                Self::record_engram_transport_failure_locked(&mut inner, session_id, error);
+                self.hold_checkpoint_original_after_startup_refusal_locked(&inner, &operation.original.id);
+            }
             Err(error) => self.record_engram_transport_failure(session_id, error),
         }
+        // A terminal control-startup reply answered the frame before
+        // dispatching it, so Engram judged no report: it is kept for the
+        // next close, as after a lost call.
         if let Err(error) = &outcome
             && error.kind == EngramTransportErrorKind::Remote
             && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
+            && !error.is_terminal_control_startup()
             && !engram_status_error_requires_fresh_bind(error)
             && !report.is_empty()
         {
@@ -9386,6 +9439,7 @@ impl AppState {
                     (!error.disables_session()
                         && (error.invocation_application()
                             == EngramInvocationApplication::CertifiedNotApplied
+                            || error.is_control_startup_busy()
                             || matches!(
                                 error.kind,
                                 EngramTransportErrorKind::Deadline

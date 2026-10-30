@@ -223,6 +223,12 @@ struct EngramRetrySlots {
     deferred_due: Arc<std::sync::atomic::AtomicUsize>,
     boot_pending: Arc<std::sync::atomic::AtomicBool>,
     checkpoint_due: Arc<Mutex<BTreeMap<String, EngramCheckpointRetryState>>>,
+    /// Checkpoint originals whose control refused to start
+    /// (`control_startup_refused`), each with whether its session has since
+    /// been seen disabled for that code: held from automatic recovery like a
+    /// fatal disabled reason, and like one released by a restart or by that
+    /// session's re-enable (`checkpoint_original_startup_refused_held`).
+    checkpoint_startup_refused: Arc<Mutex<HashMap<String, bool>>>,
 }
 
 /// One attempt's place under the cap, released when the attempt completes,

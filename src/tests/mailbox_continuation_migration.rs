@@ -47,6 +47,22 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
         .collect()
 }
 
+/// The upgrade from v4 builds the review custody floor's covering index, which
+/// the v4 fixture drops because no v4 database ever had it.
+fn assert_review_custody_index(connection: &rusqlite::Connection) {
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='mailbox_messages_topic_key_sender'",
+                [],
+                |row| row.get::<_, u64>(0),
+            )
+            .unwrap(),
+        1,
+        "the upgrade builds the review custody covering index"
+    );
+}
+
 fn version(connection: &rusqlite::Connection) -> String {
     connection
         .query_row(
@@ -97,6 +113,7 @@ fn populated_v4() -> (TestTempRoot, PathBuf) {
              DROP TABLE mailbox_relay_associations;
              DROP TABLE mailbox_relay_store;
              DROP TABLE mailbox_continuation_declarations;
+             DROP INDEX mailbox_messages_topic_key_sender;
              UPDATE meta SET value='4' WHERE key='coordination_schema_version';
              INSERT INTO federation_mailbox_intents
               (sender_session_id,idempotency_key,sender_host_id,owner_session_id,owner_creation_id,
@@ -130,6 +147,7 @@ fn mailbox_version_four_upgrade_preserves_exact_executor_and_mailbox_records() {
     assert_eq!(executor.stage, "received");
     ensure_sqlite_coordination_schema(&connection).unwrap();
     validate_current_coordination_schema(&connection).unwrap();
+    assert_review_custody_index(&connection);
     assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
     assert_eq!(retained_rows(&connection), before);
     // Contract specimen of the old exact-v4 guard, not an old binary run.
@@ -196,6 +214,7 @@ fn mailbox_version_four_failed_upgrade_rolls_back_schema_marker_and_records() {
     assert_eq!(retained_rows(&connection), before);
     ensure_sqlite_coordination_schema(&connection).unwrap();
     assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
+    assert_review_custody_index(&connection);
     assert_eq!(retained_rows(&connection), before);
 }
 
@@ -220,6 +239,7 @@ fn mailbox_version_four_concurrent_opener_rechecks_current_schema() {
     ensure_sqlite_coordination_schema(&connection).unwrap();
     assert!(upgraded.load(Ordering::SeqCst));
     validate_current_coordination_schema(&connection).unwrap();
+    assert_review_custody_index(&connection);
     assert_eq!(retained_rows(&connection), before);
     assert_eq!(
         connection

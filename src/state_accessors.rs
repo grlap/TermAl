@@ -457,6 +457,8 @@ mod visible_session_hydration_error_tests {
         .expect("test state should initialize");
         let _persist_shutdown = PersistWorkerShutdown(&state);
         let record = DelegationRecord {
+            original_project_id: None,
+            project_basis_recorded: false,
             id: "delegation-1".to_owned(),
             parent_session_id: "parent-session".to_owned(),
             child_session_id: "child-session".to_owned(),

@@ -25,8 +25,8 @@ impl MailboxStore {
         let now = stamp_now();
         transaction.execute("INSERT INTO mailboxes(id,participant_key,created_at,next_sequence) VALUES(?1,?2,?3,1) ON CONFLICT(participant_key) DO NOTHING",
             rusqlite::params![id,key,now])?;
-        upsert_mailbox_participant(&transaction, &id, &actor.session_id, &actor.name, &now)?;
-        upsert_mailbox_participant(&transaction, &id, &target.session_id, &target.name, &now)?;
+        upsert_mailbox_participant(&transaction, &id, &actor.session_id, &actor.name, &now, false)?;
+        upsert_mailbox_participant(&transaction, &id, &target.session_id, &target.name, &now, false)?;
         let summary =
             mailbox_summaries_for_session_with_empty(&transaction, &actor.session_id, true)?
                 .into_iter()
@@ -63,8 +63,8 @@ impl MailboxStore {
              target_session_id,target_name,created_at,class,topic,state_stamp,body,
              idempotency_key,unread_depth_at_append,notification_disposition
              FROM mailbox_messages WHERE id=?1
-             AND NOT(target_session_id=?2 AND COALESCE(topic,'')=?3)",
-                rusqlite::params![message_id, actor, DELEGATION_REVIEW_RESULT_TOPIC],
+             AND NOT(target_session_id=?2 AND COALESCE(topic,'') GLOB ?3)",
+                rusqlite::params![message_id, actor, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN],
                 mailbox_message_from_row,
             )
             .optional()?

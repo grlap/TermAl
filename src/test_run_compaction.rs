@@ -529,29 +529,41 @@ impl AppState {
         let generation = read.latest_event.as_ref().map(|event| event.generation);
         let mut changed = Vec::new();
         let mut validated = Vec::new();
-        for row in inner.test_run_compacted.values_mut() {
-            let mut updated = false;
-            for observation in &mut row.observations {
-                let Some(first) = observation.evidence.iter().position(|association| {
-                    test_run_lifecycle_binding_matches(association, store, binding)
-                }) else {
-                    continue;
-                };
-                for association in &mut observation.evidence[first..] {
-                    if test_run_lifecycle_binding_matches(association, store, binding)
-                        && generation == association.source_basis.source_root_generation
-                    {
-                        association.lifecycle_read = Some(Arc::clone(read));
-                        validated.push((
-                            observation.execution_id.clone(),
-                            association.producer_observation_id.clone(),
-                        ));
-                        updated = true;
+        // The exact lifecycle's compacted bucket, in key order, replaces the
+        // full compacted scan; the original predicates still decide.
+        let key = TestRunLifecycleKey::new(
+            store, &binding.root_execution_id, &binding.work_id, &binding.run_id, &binding.claim_id,
+        );
+        let rows: Vec<String> = inner.test_run_compacted.index().lifecycle(&key).cloned().collect();
+        #[cfg(test)]
+        TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(count.get() + rows.len()));
+        for row_key in &rows {
+            // Revalidation fills only nested lifecycle reads: no indexed field.
+            let revalidated = inner.test_run_compacted.update_unindexed_fields(row_key, |row| {
+                let mut updated = false;
+                for observation in &mut row.observations {
+                    let Some(first) = observation.evidence.iter().position(|association| {
+                        test_run_lifecycle_binding_matches(association, store, binding)
+                    }) else {
+                        continue;
+                    };
+                    for association in &mut observation.evidence[first..] {
+                        if test_run_lifecycle_binding_matches(association, store, binding)
+                            && generation == association.source_basis.source_root_generation
+                        {
+                            association.lifecycle_read = Some(Arc::clone(read));
+                            validated.push((
+                                observation.execution_id.clone(),
+                                association.producer_observation_id.clone(),
+                            ));
+                            updated = true;
+                        }
                     }
                 }
-            }
-            if updated {
-                changed.push(row.clone());
+                updated.then(|| row.clone())
+            });
+            if let Some(Some(row)) = revalidated {
+                changed.push(row);
             }
         }
         inner.test_runs.lifecycle_revalidated.extend(validated);

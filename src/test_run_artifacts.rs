@@ -68,25 +68,26 @@ impl AppState {
         }
         drop(projection);
         for (id, terminal, digest) in terminal {
-            let Some(row) = inner.test_run_observations.get_mut(&id) else {
+            let Some(row) = inner.test_run_observations.update(&id, |row| {
+                // Keep original execution identity, provenance and authority.
+                // The result digest fences later artifact replacement
+                // independently of the request match that established it.
+                if let Some(artifact) = &mut row.artifact {
+                    artifact.terminal_digest = Some(digest);
+                }
+                row.summary.state = terminal.state;
+                row.summary.ended_at = terminal.ended_at;
+                row.summary.exit_code = terminal.exit_code;
+                row.summary.interrupted = terminal.interrupted;
+                row.summary.unknown_reason = terminal.unknown_reason;
+                row.summary.error = terminal.error;
+                row.summary.current_stage = terminal.current_stage;
+                row.summary.stages = terminal.stages;
+                row.summary.detail_version = terminal.detail_version;
+                row.clone()
+            }) else {
                 continue;
             };
-            // Keep original execution identity, provenance and authority. The
-            // result digest fences later artifact replacement independently
-            // of the request match that established the association.
-            if let Some(artifact) = &mut row.artifact {
-                artifact.terminal_digest = Some(digest);
-            }
-            row.summary.state = terminal.state;
-            row.summary.ended_at = terminal.ended_at;
-            row.summary.exit_code = terminal.exit_code;
-            row.summary.interrupted = terminal.interrupted;
-            row.summary.unknown_reason = terminal.unknown_reason;
-            row.summary.error = terminal.error;
-            row.summary.current_stage = terminal.current_stage;
-            row.summary.stages = terminal.stages;
-            row.summary.detail_version = terminal.detail_version;
-            let row = row.clone();
             self.persist_test_command_observation_locked(inner, row);
         }
     }

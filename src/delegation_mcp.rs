@@ -1224,6 +1224,19 @@ impl TermalDelegationMcpBridge {
     fn tool_get_session_result(&self, arguments: Value) -> Result<Value> {
         let delegation_id =
             required_path_identifier(arguments.get("delegationId"), "delegationId")?;
+        let attempt = arguments.get("submissionAttempt")
+            .map(|value| required_u64(Some(value), "submissionAttempt"))
+            .transpose()?;
+        if attempt.is_some_and(|attempt| attempt == 0 || attempt > u32::MAX as u64) {
+            bail!("submissionAttempt must be a positive 32-bit integer");
+        }
+        let result_id = arguments.get("resultId")
+            .map(|value| required_path_identifier(Some(value), "resultId"))
+            .transpose()?;
+        if result_id.is_some() && attempt.is_none() { bail!("resultId requires submissionAttempt"); }
+        let selection = format!("{}{}",
+            attempt.map(|a| format!("&submissionAttempt={a}")).unwrap_or_default(),
+            result_id.map(|id| format!("&resultId={}", encode_uri_component(&id))).unwrap_or_default());
         let output_offset = arguments
             .get("outputOffset")
             .map(|value| required_u64(Some(value), "outputOffset"))
@@ -1236,12 +1249,14 @@ impl TermalDelegationMcpBridge {
             let offset = output_offset.unwrap_or(0);
             let limit = output_limit.unwrap_or(4 * 1024);
             return self.get_json(&format!(
-                "/api/sessions/{}/delegations/{}/result/output?offsetBytes={offset}&limitBytes={limit}",
+                "/api/sessions/{}/delegations/{}/result/output?offsetBytes={offset}&limitBytes={limit}{selection}",
                 self.serving_session_id, delegation_id
             ));
         }
+        let query = if selection.is_empty() { String::new() }
+            else { format!("?{}", selection.trim_start_matches('&')) };
         self.get_json(&format!(
-            "/api/sessions/{}/delegations/{}/result",
+            "/api/sessions/{}/delegations/{}/result{query}",
             self.serving_session_id, delegation_id
         ))
     }
@@ -2553,12 +2568,20 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_get_session_result",
-                "description": "Get the compact result packet for a completed parent-scoped TermAl delegation. Worker results include the host-recorded base/worktree and child-reported handoff/test Notes; command statuses and child claims are not host-recorded verification. For the authoritative untruncated child output, pass outputOffset (start with 0) and outputLimit (256-8192 bytes), then use each nextOffsetBytes value as outputOffset until complete is true.",
+                "description": "Get the current parent-scoped delegation result by default, or an immutable retained reviewer result with submissionAttempt. Worker results include the host-recorded base/worktree and child-reported handoff/test Notes; command statuses and child claims are not host-recorded verification. An actual native root of the original review project can read an exact submissionAttempt plus resultId as itself, without a parent grant or outage detection. This exact read is pure and nonexclusive; children, hidden/removed sessions, proxies and foreign-project roots gain no access. Legacy records without a provable original project return project_basis_missing. For authoritative untruncated child output, use outputOffset/outputLimit (256-8192 bytes), pinning the same submissionAttempt/resultId on every page. Pending, missing, invalid and superseded states stay explicit; original results do not certify later inputs. This grants no child control, submission, gate credit or landing authority. Export each attempt to distinct immutable artifacts before follow-up.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["delegationId"],
                     "properties": {
                         "delegationId": { "type": "string" },
+                        "submissionAttempt": {
+                            "type": "integer", "minimum": 1, "maximum": u32::MAX,
+                            "description": "Explicit retained reviewer submission attempt; omitted selects the current attempt."
+                        },
+                        "resultId": {
+                            "type": "string",
+                            "description": "Pin the immutable result identity returned with submissionAttempt; prevents mixed output pages."
+                        },
                         "outputOffset": {
                             "type": "integer",
                             "minimum": 0,

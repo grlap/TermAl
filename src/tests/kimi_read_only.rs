@@ -397,6 +397,8 @@ fn kimi_reviewer_record(
     agent: Agent,
 ) -> DelegationRecord {
     DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: "delegation-kimi-read-only".to_owned(),
         parent_session_id,
         child_session_id,

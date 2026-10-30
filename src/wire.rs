@@ -2046,6 +2046,12 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationRecord {
+    /// Distinguishes immutable no-project commissioning from a legacy record.
+    #[serde(default)]
+    project_basis_recorded: bool,
+    /// Original host-recorded project at commissioning; never changed by follow-up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    original_project_id: Option<String>,
     id: String,
     parent_session_id: String,
     child_session_id: String,
@@ -2265,8 +2271,16 @@ struct DelegationListResponse {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResultResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_attempt_state: Option<ReviewAttemptReadState>,
     revision: u64,
     result: DelegationResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    submission_attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    result_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_attempt_provenance: Option<ReviewAttemptProvenance>,
     /// Evaluator delegations only: the target and the recorded outcome, so a
     /// completed child that recorded nothing is visible as exactly that.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2281,18 +2295,33 @@ struct DelegationResultResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResultOutputQuery {
+    submission_attempt: Option<u32>,
+    result_id: Option<String>,
     #[serde(default)]
     offset_bytes: usize,
     #[serde(default = "default_delegation_result_output_page_bytes")]
     limit_bytes: usize,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationResultSelection {
+    submission_attempt: Option<u32>,
+    result_id: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResultOutputResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_attempt_state: Option<ReviewAttemptReadState>,
     revision: u64,
     delegation_id: String,
     child_session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    submission_attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    result_id: Option<String>,
     output: String,
     offset_bytes: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]

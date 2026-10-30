@@ -2262,7 +2262,9 @@ impl AppState {
                 return Err(ApiError::conflict(DELEGATION_NO_LONGER_STARTABLE_MESSAGE));
             }
         }
+        let review_recut = self.capture_followup_review_recut(followup)?;
         self.prepare_codex_child_followup(session_id)?;
+        self.refresh_followup_review_custody(review_recut.as_ref())?;
         self.prepare_dedicated_runtime_reset_off_lock(session_id, false)
             .map_err(|error| {
                 ApiError::conflict(format!(
@@ -2420,6 +2422,7 @@ impl AppState {
             // evaluator request cannot create a second active evaluator of the
             // same task in between, nor can this rearm follow one.
             if let Some(previous) = followup {
+                self.validate_followup_review_custody_locked(&inner, previous)?;
                 acceptance_evaluation_followup_admission_locked(&inner, previous)?;
             }
             // Keep the previous result until a prompt is started or queued.

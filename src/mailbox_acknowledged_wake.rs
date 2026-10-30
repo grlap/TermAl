@@ -54,12 +54,12 @@ impl MailboxStore {
              WHERE message.id = ?3
                AND message.mailbox_id = ?2
                AND message.target_session_id = ?1
-               AND COALESCE(message.topic, '') != ?4",
+               AND COALESCE(message.topic, '') NOT GLOB ?4",
             rusqlite::params![
                 session_id,
                 mailbox_id,
                 message_id,
-                DELEGATION_REVIEW_RESULT_TOPIC
+                DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN
             ],
             |row| {
                 Ok(MailboxWakeBoundary {

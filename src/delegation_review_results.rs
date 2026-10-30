@@ -7,6 +7,13 @@ delegation lifecycle terminalization remains in delegations.rs.
 */
 
 const DELEGATION_REVIEW_RESULT_TOPIC: &str = "delegation-review-result/v1";
+const DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN: &str = "delegation-review-*";
+
+fn reserved_delegation_review_message(topic: Option<&str>, key: &str) -> bool {
+    topic.is_some_and(|topic| topic.starts_with("delegation-review-"))
+        || key.starts_with("delegation-review-result-v1-")
+        || key.starts_with("delegation-review-terminal-")
+}
 const DELEGATION_REVIEW_RESULT_KIND: &str = "delegationReviewResult";
 const DELEGATION_REVIEW_RESULT_SCHEMA_VERSION: u32 = 1;
 const MAX_DELEGATION_REVIEW_RESULT_LIST_ITEMS: usize = 200;
@@ -235,55 +242,42 @@ impl AppState {
                 None,
             );
         };
-        let expected_state_stamp = format!("{delegation_id}:{submission_attempt}");
-        let recovery_error = if stored.target_session_id != parent_session_id
-            || stored.topic.as_deref() != Some(DELEGATION_REVIEW_RESULT_TOPIC)
-            || stored.state_stamp.as_deref() != Some(expected_state_stamp.as_str())
-        {
-            Some("envelope metadata does not match its delegation attempt".to_owned())
-        } else {
-            match serde_json::from_str::<DelegationReviewMailboxResult>(&stored.body) {
-                Ok(envelope)
-                    if envelope.schema_version == DELEGATION_REVIEW_RESULT_SCHEMA_VERSION
-                        && envelope.kind == DELEGATION_REVIEW_RESULT_KIND
-                        && envelope.delegation_id == delegation_id
-                        && envelope.child_session_id == child_session_id
-                        && envelope.submission_attempt == submission_attempt
-                        && matches!(
-                            envelope.status,
-                            DelegationStatus::Completed | DelegationStatus::Failed
-                        ) =>
-                {
-                    if let Err(err) = self.record_delegation_review_submission(
-                        &ValidatedDelegationReviewMailboxSubmission {
-                            delegation_id: delegation_id.clone(),
-                            parent_session_id: parent_session_id.clone(),
-                            child_session_id: child_session_id.to_owned(),
-                            submission_attempt,
-                            sender_name: stored.sender_name.clone(),
-                            target_name: stored.target_name.clone(),
-                            envelope,
-                        },
-                    ) {
-                        // A conflict means concurrent lifecycle work made this
-                        // attempt obsolete or already installed terminal truth.
-                        // Internal failures mean the envelope is still
-                        // applicable but could not be persisted; those must
-                        // block fan-in so the next call can retry recovery.
-                        if err.status == StatusCode::CONFLICT {
-                            eprintln!(
-                                "delegation review> durable result for child `{child_session_id}` became obsolete during recovery: {}",
-                                err.message
-                            );
-                        } else {
-                            return Err(err);
-                        }
+        let recovery_error = match validated_review_submission_envelope(
+            &stored,
+            &parent_session_id,
+            child_session_id,
+            &delegation_id,
+            submission_attempt,
+        ) {
+            Ok(envelope) => {
+                if let Err(err) = self.record_delegation_review_submission(
+                    &ValidatedDelegationReviewMailboxSubmission {
+                        delegation_id: delegation_id.clone(),
+                        parent_session_id: parent_session_id.clone(),
+                        child_session_id: child_session_id.to_owned(),
+                        submission_attempt,
+                        sender_name: stored.sender_name.clone(),
+                        target_name: stored.target_name.clone(),
+                        envelope,
+                    },
+                ) {
+                    // A conflict means concurrent lifecycle work made this
+                    // attempt obsolete or already installed terminal truth.
+                    // Internal failures mean the envelope is still
+                    // applicable but could not be persisted; those must
+                    // block fan-in so the next call can retry recovery.
+                    if err.status == StatusCode::CONFLICT {
+                        eprintln!(
+                            "delegation review> durable result for child `{child_session_id}` became obsolete during recovery: {}",
+                            err.message
+                        );
+                    } else {
+                        return Err(err);
                     }
-                    None
                 }
-                Ok(_) => Some("envelope identity is invalid".to_owned()),
-                Err(err) => Some(format!("envelope JSON is invalid: {err}")),
+                None
             }
+            Err(reason) => Some(reason),
         };
         if let Some(reason) = recovery_error {
             eprintln!(
@@ -578,6 +572,38 @@ fn delegation_review_result_idempotency_key(
     submission_attempt: u32,
 ) -> String {
     format!("delegation-review-result-v1-{delegation_id}-{submission_attempt}")
+}
+
+// Shared provenance validation for active recovery and immutable attempt reads.
+// Only the active recovery caller may install a result into the lifecycle.
+fn validated_review_submission_envelope(
+    stored: &MailboxIdempotencyRecord,
+    parent: &str,
+    child: &str,
+    delegation: &str,
+    attempt: u32,
+) -> Result<DelegationReviewMailboxResult, String> {
+    if stored.target_session_id != parent
+        || stored.topic.as_deref() != Some(DELEGATION_REVIEW_RESULT_TOPIC)
+        || stored.state_stamp.as_deref() != Some(format!("{delegation}:{attempt}").as_str())
+    {
+        return Err("envelope metadata does not match its delegation attempt".to_owned());
+    }
+    let envelope: DelegationReviewMailboxResult = serde_json::from_str(&stored.body)
+        .map_err(|err| format!("envelope JSON is invalid: {err}"))?;
+    if envelope.schema_version != DELEGATION_REVIEW_RESULT_SCHEMA_VERSION
+        || envelope.kind != DELEGATION_REVIEW_RESULT_KIND
+        || envelope.delegation_id != delegation
+        || envelope.child_session_id != child
+        || envelope.submission_attempt != attempt
+        || !matches!(
+            envelope.status,
+            DelegationStatus::Completed | DelegationStatus::Failed
+        )
+    {
+        return Err("envelope identity is invalid".to_owned());
+    }
+    Ok(envelope)
 }
 
 fn delegation_result_from_review_envelope(

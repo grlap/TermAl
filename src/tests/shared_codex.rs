@@ -3936,6 +3936,8 @@ fn install_read_only_codex_delegation(state: &AppState, child_session_id: &str) 
         .expect("Codex child session should exist");
     inner.sessions[child_index].session.parent_delegation_id = Some(delegation_id.clone());
     inner.delegations.push(DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: delegation_id,
         parent_session_id,
         child_session_id: child_session_id.to_owned(),

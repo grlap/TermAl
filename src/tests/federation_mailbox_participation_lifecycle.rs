@@ -255,6 +255,8 @@ async fn mailbox_only_binding_cannot_authorize_the_central_executor_mirror() {
 
 fn historical_delegation(index: usize) -> DelegationRecord {
     DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: format!("historical-{index}"), parent_session_id: "parent".into(), child_session_id: format!("child-{index}"),
         mode: DelegationMode::Reviewer, status: DelegationStatus::Completed, title: "Historical".into(),
         prompt: "review".into(), cwd: ".".into(), agent: Agent::Codex, model: None,

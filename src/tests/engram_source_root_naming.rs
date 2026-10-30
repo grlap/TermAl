@@ -3895,6 +3895,8 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
         .expect("state mutex poisoned")
         .delegations
         .push(DelegationRecord {
+            original_project_id: None,
+            project_basis_recorded: false,
             id: "delegation-naming".to_owned(),
             parent_session_id: "session-parent".to_owned(),
             child_session_id: claimed.session_id.clone(),

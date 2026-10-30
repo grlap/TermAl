@@ -501,11 +501,20 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | POST | `/api/sessions/{id}/mcp-elicitation/{message_id}` | Submit an MCP elicitation response |
 | POST | `/api/sessions/{id}/codex/requests/{message_id}` | Reply to a generic Codex app-server request |
 | GET | `/api/sessions/{id}/delegations/{delegation_id}` | Read delegation metadata/status -> `DelegationStatusResponse`. This read also refreshes the target child delegation from its linked session, so it can persist terminal status/result data, publish delegation/card SSE deltas, and consume backend waits that watch that delegation. Unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. |
-| GET | `/api/sessions/{id}/delegations/{delegation_id}/result` | Read a completed delegation result packet -> `DelegationResultResponse`. This read also refreshes the target child delegation from its linked session before deciding whether a result is available, so it can persist terminal status/result data, publish delegation/card SSE deltas, and consume backend waits that watch that delegation. Unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`; unfinished delegations return `409`. |
-| GET | `/api/sessions/{id}/delegations/{delegation_id}/result/output` | Read a bounded UTF-8-safe page of the authoritative final child output. `offsetBytes` defaults to `0`; `limitBytes` defaults to `4096` and is bounded to `256..=8192`. Responses include `nextOffsetBytes`, `totalBytes`, and `complete`, so MCP callers can reconstruct outputs larger than model/tool transport limits without temporary-file side channels. Ownership and terminal-state errors match the compact result endpoint. |
+| GET | `/api/sessions/{id}/delegations/{delegation_id}/result` | Read a completed delegation result packet -> `DelegationResultResponse`. Without selectors, refreshes the linked child and may persist terminal status/result, publish SSE deltas and consume current waits. `submissionAttempt` selects retained reviewer evidence; optional `resultId` pins an immutable version. Selected responses include `submissionAttempt`, `resultId` and `reviewAttemptProvenance`; an attempt-only lookup returns its latest confirmed version. Current-attempt capture can recover and durably retain evidence; pinned historical reads never refresh lifecycle or settle current waits. Unknown ids or unavailable attempts, and wrong-parent ids without eligible same-project exact-read authorization, return `404`; unfinished/default, legacy-zero, unconfirmed, corrupt or mismatched retained identities return `409`; malformed selectors return `400`. |
+| GET | `/api/sessions/{id}/delegations/{delegation_id}/result/output` | Read a bounded UTF-8-safe page of the authoritative final child output. `offsetBytes` defaults to `0`; `limitBytes` defaults to `4096` and is bounded to `256..=8192`. Responses include `nextOffsetBytes`, `totalBytes` and `complete`. `submissionAttempt` and `resultId` use the compact result endpoint's selection/error semantics; pin the returned `resultId` across pages to avoid mixing repaired versions. Selected output returns both identities, refuses summary fallback and returns `404` when raw prose was unavailable at capture. Missing attempts are never reconstructed from a newer transcript. |
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/cancel` | Cancel a running delegation child session -> `DelegationStatusResponse`; unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. Terminal delegations are idempotent and return the current status. |
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/followup` | Re-arm a terminal (Completed/Failed) delegation and dispatch another turn to its existing child session -> `DelegationStatusResponse` with `turn` (`202` when that turn is held). A delegation that is still Running, was canceled, or whose child was removed returns `409`; so does an `evaluator` delegation while another evaluator of the same work ref in the same tracker store is queued or running (the refusal names it; checked again under the lock that rearms); unknown/wrong-parent ids return `404`. Backs the `termal_followup_session` MCP tool. |
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/resume` | Retry a held delegation's retained prompt through a fresh admission -> `DelegationStatusResponse` with `turn` (`202` when the resumed turn is held again). The resume is bound to the exact retained prompt it checked: a successor exposed by a concurrent cancellation is never admitted, and a hold whose prompt changed returns `409`. A delegation that is not held, or whose hold does not offer `resume` (an unknown delivery, a stop, an unconfirmed settlement), returns `409`; unknown/wrong-parent ids return `404`. Backs the `termal_resume_session` MCP tool. |
+
+For the result and output routes with both `submissionAttempt` and `resultId`,
+`{id}` may be an actual native root of the original review project calling as
+itself. This exact read is pure and nonexclusive, without parent consent. Child,
+hidden/removed, proxy and foreign-project readers receive `404`. Missing project
+basis, pending publication and unvalidated submission return `409` with
+`project_basis_missing`, `review_result_pending` and `review_result_unvalidated`
+respectively. Selected responses include live `reviewAttemptState` separately
+from immutable retained content. No child control or execution authority follows.
 
 `GET /api/sessions/{id}` is always a bounded transcript read. It returns the
 newest 20 messages by default; `?tail=N` requires
@@ -1568,6 +1577,8 @@ termal/
 |   |-- coordination_persist.rs # current coordination.sqlite schema init + validation
 |   |-- mailboxes.rs         # durable edge-triggered peer messages + cursors
 |   |-- delegation_review_results.rs # typed review validation, projection + recovery
+|   |-- delegation_review_attempts.rs # retained terminal cuts + explicit immutable result selection
+|   |-- delegation_review_custody.rs # bounded authenticated mailbox slots + publication CAS
 |   |-- coordination_board.rs # level-triggered project facts + CAS/idempotency
 |   |-- board_routes.rs      # authorized board list/get/set HTTP handlers
 |   |-- delegation_mcp.rs    # parent-scoped delegation, mailbox, and board MCP bridge

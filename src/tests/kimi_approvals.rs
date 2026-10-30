@@ -228,6 +228,8 @@ fn the_read_only_gate_wins_over_the_session_policy() {
         let index = inner.find_session_index(&id).unwrap();
         inner.sessions[index].session.parent_delegation_id = Some("delegation-gate".to_owned());
         inner.delegations.push(DelegationRecord {
+            original_project_id: None,
+            project_basis_recorded: false,
             id: "delegation-gate".to_owned(),
             parent_session_id: parent_id,
             child_session_id: id.clone(),

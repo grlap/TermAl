@@ -1866,9 +1866,11 @@ struct StateInner {
     /// The test launcher's runs, mirrored from their run directories by the
     /// rescan in `test_runs.rs`. Memory only: disk stays the record.
     test_runs: TestRunIndex,
-    test_run_registrations: PersistTracked<BTreeMap<String, TestRunRegistration>>,
-    test_run_observations: PersistTracked<BTreeMap<String, TestRunCommandObservation>>,
-    test_run_compacted: PersistTracked<BTreeMap<String, TestRunCompacted>>,
+    // Retained history with maintained candidate indexes
+    // (test_run_history_store.rs); mutations go through their helpers.
+    test_run_registrations: TestRunRegistrationStore,
+    test_run_observations: TestRunObservationStore,
+    test_run_compacted: TestRunCompactedStore,
     /// When this host first ran with test-run cards; runs that started
     /// earlier never get one (`test_run_cards.rs`). Persisted, never derived
     /// from "now" again once stored.
@@ -1981,9 +1983,9 @@ impl StateInner {
             test_engram_source_capture: None,
             engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
-            test_run_registrations: PersistTracked::default(),
-            test_run_observations: PersistTracked::default(),
-            test_run_compacted: PersistTracked::default(),
+            test_run_registrations: TestRunRegistrationStore::default(),
+            test_run_observations: TestRunObservationStore::default(),
+            test_run_compacted: TestRunCompactedStore::default(),
             test_run_cards_epoch: None,
             test_run_cards: PersistTracked::default(),
             test_run_waits: PersistTracked::default(),

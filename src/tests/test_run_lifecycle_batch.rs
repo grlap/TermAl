@@ -3,6 +3,9 @@
 // witnesses; does not measure elapsed lock time or mint verification credit.
 use super::*;
 
+#[path = "test_run_indexed_selection_cost.rs"]
+mod indexed_selection_cost;
+
 fn second_observation(row: &TestRunCommandObservation, suffix: &str) -> TestRunCommandObservation {
     let mut second = row.clone();
     second.execution_id = format!("{}-{suffix}", row.execution_id);
@@ -331,7 +334,7 @@ fn duplicate_check_associations_on_one_live_row_queue_one_final_image_fence() {
         // Both checks resolve to this one execution: same grant, key, command,
         // start and worktree, only their places in the turn differ.
         let check = &checks[0].check;
-        let row = inner.test_run_observations.get_mut(&id).unwrap();
+        let mut row = inner.test_run_observations.get_mut(&id).unwrap();
         row.grant_identity = Some(sha256_hex(check.grant_id.as_bytes()));
         row.tool_identity = sha256_hex(check.key.as_bytes());
         row.command_fingerprint = EngramHost::check_fingerprint(&check.command);

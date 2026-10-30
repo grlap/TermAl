@@ -94,9 +94,18 @@ impl AppState {
             let grant_identity = sha256_hex(check.check.grant_id.as_bytes());
             let tool_identity = sha256_hex(check.check.key.as_bytes());
             let fingerprint = EngramHost::check_fingerprint(&check.check.command);
+            // The owner/grant/tool bucket narrows candidates in key order;
+            // every original predicate still decides, and the multiplicity
+            // test below counts full-predicate matches, not the bucket.
+            let bucket = (Some(session_id.clone()), Some(grant_identity.clone()), tool_identity.clone());
+            #[cfg(test)]
+            TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(count.get()
+                + inner.test_run_observations.index().check(&bucket).count()));
             let candidates: Vec<String> = inner
                 .test_run_observations
-                .values()
+                .index()
+                .check(&bucket)
+                .filter_map(|key| inner.test_run_observations.get(key))
                 .filter(|row| {
                     row.summary.owner_session_id.as_deref() == Some(&session_id)
                         && row.grant_identity.as_deref() == Some(&grant_identity)
@@ -113,41 +122,43 @@ impl AppState {
             if candidates.len() != 1 {
                 continue;
             }
-            let Some(row) = inner.test_run_observations.get_mut(&candidates[0]) else {
+            let Some(row) = inner.test_run_observations.update(&candidates[0], |row| {
+                // The existing declared-artifact adapter owns this verdict. Its
+                // failure may override a native exit 0; the UI must retain both
+                // that actual judged outcome and the original native exit code.
+                if check.check.declared.is_some() {
+                    row.summary.state = match check.outcome {
+                        EngramExecutionOutcome::Succeeded => TestRunState::Passed,
+                        EngramExecutionOutcome::Failed => TestRunState::Failed,
+                        _ => TestRunState::Unknown,
+                    };
+                }
+                if !row.evidence.iter().any(|association| {
+                    association.producer_observation_id == producer_observation_id
+                        && association.store == store
+                        && association.binding == binding
+                        && association.source_basis == check.basis
+                }) {
+                    row.validated_unbound = false;
+                    row.final_unbound_proof = None;
+                    row.evidence.push(TestRunEvidenceAssociation {
+                        store: store.clone(),
+                        binding: binding.clone(),
+                        source_basis: check.basis.clone(),
+                        producer_observation_id,
+                        reported_outcome: check.outcome,
+                        action_fingerprint: fingerprint.clone(),
+                        verification_record_id: None,
+                        checkpoint_id: None,
+                        confirmed_cursor: None,
+                        lifecycle_read: None,
+                    });
+                }
+                row.clone()
+            }) else {
                 continue;
             };
-            // The existing declared-artifact adapter owns this verdict. Its
-            // failure may override a native exit 0; the UI must retain both
-            // that actual judged outcome and the original native exit code.
-            if check.check.declared.is_some() {
-                row.summary.state = match check.outcome {
-                    EngramExecutionOutcome::Succeeded => TestRunState::Passed,
-                    EngramExecutionOutcome::Failed => TestRunState::Failed,
-                    _ => TestRunState::Unknown,
-                };
-            }
-            if !row.evidence.iter().any(|association| {
-                association.producer_observation_id == producer_observation_id
-                    && association.store == store
-                    && association.binding == binding
-                    && association.source_basis == check.basis
-            }) {
-                row.validated_unbound = false;
-                row.final_unbound_proof = None;
-                row.evidence.push(TestRunEvidenceAssociation {
-                    store: store.clone(),
-                    binding: binding.clone(),
-                    source_basis: check.basis.clone(),
-                    producer_observation_id,
-                    reported_outcome: check.outcome,
-                    action_fingerprint: fingerprint.clone(),
-                    verification_record_id: None,
-                    checkpoint_id: None,
-                    confirmed_cursor: None,
-                    lifecycle_read: None,
-                });
-            }
-            updates.insert(row.execution_id.clone(), row.clone());
+            updates.insert(row.execution_id.clone(), row);
         }
         self.persist_test_run_evidence_batch_locked(
             inner,
@@ -235,51 +246,62 @@ impl AppState {
         if settlements.is_empty() {
             return Vec::new();
         }
+        // Only rows carrying one of the receipt's producer observations can
+        // settle: their union, in key order, replaces the full history scan.
+        // Every original predicate below still decides each association.
+        let rows: BTreeSet<String> = settlements
+            .keys()
+            .flat_map(|observation_id| inner.test_run_observations.index().producer(observation_id))
+            .cloned()
+            .collect();
+        #[cfg(test)]
+        TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(count.get() + rows.len()));
         let mut changed = Vec::new();
-        for row in inner.test_run_observations.values_mut() {
-            // Most retained history belongs to another store or binding.
-            let Some(first) = row.evidence.iter().position(|association| {
-                &association.store == store && &association.binding == binding
-            }) else {
-                continue;
-            };
-            let mut updated = false;
-            for association in &mut row.evidence[first..] {
-                if &association.store != store || &association.binding != binding {
-                    continue;
+        for key in &rows {
+            // Settlement fills only association results: no indexed field.
+            let settled = inner.test_run_observations.update_unindexed_fields(key, |row| {
+                let first = row.evidence.iter().position(|association| {
+                    &association.store == store && &association.binding == binding
+                })?;
+                let mut updated = false;
+                for association in &mut row.evidence[first..] {
+                    if &association.store != store || &association.binding != binding {
+                        continue;
+                    }
+                    let Some(candidates) =
+                        settlements.get(association.producer_observation_id.as_str())
+                    else {
+                        continue;
+                    };
+                    for (producer, record_id) in candidates {
+                        if association.action_fingerprint != producer.action_fingerprint
+                            || association.reported_outcome != producer.outcome
+                        {
+                            continue;
+                        }
+                        // A missing source is not a match, even when other
+                        // fields happen to agree with a previous report.
+                        if producer.source_basis.as_ref() != Some(&association.source_basis) {
+                            continue;
+                        }
+                        if association
+                            .verification_record_id
+                            .as_ref()
+                            .is_some_and(|earlier| earlier != *record_id)
+                        {
+                            continue;
+                        }
+                        association.verification_record_id = Some((*record_id).clone());
+                        association.checkpoint_id = Some(checkpoint.clone());
+                        association.confirmed_cursor = Some(receipt._confirmed_cursor);
+                        updated = true;
+                        break;
+                    }
                 }
-                let Some(candidates) =
-                    settlements.get(association.producer_observation_id.as_str())
-                else {
-                    continue;
-                };
-                for (producer, record_id) in candidates {
-                    if association.action_fingerprint != producer.action_fingerprint
-                        || association.reported_outcome != producer.outcome
-                    {
-                        continue;
-                    }
-                    // A missing source is not a match, even when other fields
-                    // happen to agree with a previous report.
-                    if producer.source_basis.as_ref() != Some(&association.source_basis) {
-                        continue;
-                    }
-                    if association
-                        .verification_record_id
-                        .as_ref()
-                        .is_some_and(|earlier| earlier != *record_id)
-                    {
-                        continue;
-                    }
-                    association.verification_record_id = Some((*record_id).clone());
-                    association.checkpoint_id = Some(checkpoint.clone());
-                    association.confirmed_cursor = Some(receipt._confirmed_cursor);
-                    updated = true;
-                    break;
-                }
-            }
-            if updated {
-                changed.push(row.clone());
+                updated.then(|| row.clone())
+            });
+            if let Some(Some(row)) = settled {
+                changed.push(row);
             }
         }
         changed
@@ -297,30 +319,40 @@ impl AppState {
         let generation = read.latest_event.as_ref().map(|event| event.generation);
         let read = Arc::new(read.clone());
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        // The exact lifecycle's bucket, in key order, replaces the full scan;
+        // the original binding and generation predicates still decide.
+        let key = TestRunLifecycleKey::new(
+            store, &binding.root_execution_id, &binding.work_id, &binding.run_id, &binding.claim_id,
+        );
+        let rows: Vec<String> = inner.test_run_observations.index().lifecycle(&key).cloned().collect();
+        #[cfg(test)]
+        TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(count.get() + rows.len()));
         let mut changed = Vec::new();
         let mut validated = Vec::new();
-        for row in inner.test_run_observations.values_mut() {
-            let Some(first) = row.evidence.iter().position(|association| {
-                test_run_lifecycle_binding_matches(association, store, binding)
-            }) else {
-                continue;
-            };
-            let mut updated = false;
-            for association in &mut row.evidence[first..] {
-                if !test_run_lifecycle_binding_matches(association, store, binding)
-                    || generation != association.source_basis.source_root_generation
-                {
-                    continue;
+        for row_key in &rows {
+            // Revalidation fills only lifecycle reads: no indexed field.
+            let revalidated = inner.test_run_observations.update_unindexed_fields(row_key, |row| {
+                let first = row.evidence.iter().position(|association| {
+                    test_run_lifecycle_binding_matches(association, store, binding)
+                })?;
+                let mut updated = false;
+                for association in &mut row.evidence[first..] {
+                    if !test_run_lifecycle_binding_matches(association, store, binding)
+                        || generation != association.source_basis.source_root_generation
+                    {
+                        continue;
+                    }
+                    association.lifecycle_read = Some(Arc::clone(&read));
+                    validated.push((
+                        row.execution_id.clone(),
+                        association.producer_observation_id.clone(),
+                    ));
+                    updated = true;
                 }
-                association.lifecycle_read = Some(Arc::clone(&read));
-                validated.push((
-                    row.execution_id.clone(),
-                    association.producer_observation_id.clone(),
-                ));
-                updated = true;
-            }
-            if updated {
-                changed.push(row.clone());
+                updated.then(|| row.clone())
+            });
+            if let Some(Some(row)) = revalidated {
+                changed.push(row);
             }
         }
         inner.test_runs.lifecycle_revalidated.extend(validated);

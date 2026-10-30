@@ -5,6 +5,9 @@
 //! unrelated history. No live-store inputs, latency thresholds or credit.
 use super::*;
 
+#[path = "test_run_history_index.rs"]
+mod history_index;
+
 // The previous changed-row lookup: first match by execution id, then by the
 // artifact's run id and run directory, over the full public list.
 fn reference_changed_row_summary(inner: &StateInner, id: &str) -> TestRunSummary {
@@ -106,7 +109,7 @@ fn lifecycle_lock_changed_row_lookup_equals_the_full_projection_first_match() {
             }
             // An unmerged observation whose summary run id is not its key.
             6 => {
-                let row = inner.test_run_observations.get_mut("observed-history-0006").unwrap();
+                let mut row = inner.test_run_observations.get_mut("observed-history-0006").unwrap();
                 row.artifact = None;
                 row.summary.run_id = "test-history-0007".to_owned();
             }
@@ -160,7 +163,7 @@ fn associated_history(count: usize, associated: usize) -> (
     };
     let mut inner = fixture.state.inner.lock().unwrap();
     for ordinal in 0..associated {
-        let row = inner.test_run_observations.get_mut(&format!("observed-history-{ordinal:04}")).unwrap();
+        let mut row = inner.test_run_observations.get_mut(&format!("observed-history-{ordinal:04}")).unwrap();
         row.work_binding = Some(binding.clone());
         row.evidence.push(TestRunEvidenceAssociation {
             store: store.clone(),
@@ -193,23 +196,36 @@ fn associated_history(count: usize, associated: usize) -> (
 }
 
 // What one revalidation does under the lock: association matches, full
-// projections, and single-identity lookup candidates examined before
-// filtering. The linear scan of retained associations is not counted.
+// projections, single-identity lookup candidates examined before filtering,
+// the lifecycle index candidates its selection visits, and the index
+// maintenance operations its result-only updates perform.
 struct RevalidationCost {
     visits: usize,
     projections: usize,
     candidates: usize,
+    indexed: usize,
+    maintenance: usize,
 }
 
 fn revalidation_cost(count: usize, associated: usize) -> RevalidationCost {
     let (fixture, store, binding, read, _queued) = associated_history(count, associated);
     TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.set(0));
     TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.set(0));
-    let (_, visits) = measure(&format!("lifecycle_revalidation_{count}_{associated}"), || {
-        fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read)
-    });
+    TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(0));
+    TEST_HISTORY_INDEX_MAINTENANCE.with(|count| count.set(0));
+    // A timing witness measures the production path: the test-only contract
+    // guard of update_unindexed_fields is skipped for this scope only.
+    let (_, visits) = {
+        let _timing = SkipContractGuardForTiming::new();
+        measure(&format!("lifecycle_revalidation_{count}_{associated}"), || {
+            fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read)
+        })
+    };
+    assert!(!contract_guard_skipped(), "the timing scope restores the contract guard");
     let projections = TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.get());
     let candidates = TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.get());
+    let indexed = TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.get());
+    let maintenance = TEST_HISTORY_INDEX_MAINTENANCE.with(|count| count.get());
     let inner = fixture.state.inner.lock().unwrap();
     for ordinal in 0..associated {
         assert!(
@@ -218,11 +234,12 @@ fn revalidation_cost(count: usize, associated: usize) -> RevalidationCost {
             "associated row {ordinal} is revalidated"
         );
     }
-    RevalidationCost { visits, projections, candidates }
+    RevalidationCost { visits, projections, candidates, indexed, maintenance }
 }
 
-/// Unrelated history adds no projection and no association matching to the
-/// revalidating hold; only the linear association scan remains.
+/// Unrelated history adds no projection, no association matching and no
+/// selection candidate to the revalidating hold: the lifecycle bucket is the
+/// only history it visits.
 #[test]
 fn lifecycle_lock_revalidation_builds_no_full_projection_or_unrelated_matching() {
     let small = revalidation_cost(16, 1);
@@ -231,6 +248,9 @@ fn lifecycle_lock_revalidation_builds_no_full_projection_or_unrelated_matching()
         "the revalidating hold builds no full-history summary projection");
     assert_eq!(small.visits, large.visits,
         "unrelated history adds no association matching: 16 rows {}, 256 rows {}", small.visits, large.visits);
+    assert_eq!((small.indexed, large.indexed), (1, 1),
+        "selection visits only the lifecycle bucket: 16 rows {}, 256 rows {}", small.indexed, large.indexed);
+    assert_eq!((small.maintenance, large.maintenance), (0, 0), "revalidation performs no index maintenance");
 }
 
 /// Every retained row changed in one batch: the lookups share one index, so
@@ -244,5 +264,8 @@ fn lifecycle_lock_batch_lookup_stays_linear_when_every_row_changes() {
             "{count} changed rows examined {} lookup candidates, not linear", cost.candidates);
         assert!(cost.visits <= 4 * count,
             "{count} changed rows made {} association matches, not linear", cost.visits);
+        // A hot bucket: every row shares the lifecycle, so the bucket is the history.
+        assert_eq!(cost.indexed, count, "{count} rows in one lifecycle bucket are each visited once");
+        assert_eq!(cost.maintenance, 0, "{count} revalidated rows need no index remove or re-add");
     }
 }

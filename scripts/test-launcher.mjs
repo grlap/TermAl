@@ -52,6 +52,7 @@ const repository = resolve(dirname(script), "..");
 const diagnosticLimit = 2400;
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 export const helperTestFiles = Object.freeze([
+  "scripts/export-review-attempt.test.mjs",
   "scripts/review-freeze-fingerprint.test.mjs",
   "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
@@ -82,6 +83,7 @@ export const helperTestArgs = Object.freeze([
 ]);
 // Also consumed by real-launcher fixtures that copy the runtime helpers.
 export const helperSupportFiles = Object.freeze([
+  "scripts/export-review-attempt.mjs",
   nodeDurationReporterFile,
   "scripts/review-freeze-fingerprint.mjs",
   "scripts/test-categories-plan.mjs",

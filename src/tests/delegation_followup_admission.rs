@@ -11,6 +11,10 @@ use super::engram_host_adapter::{
 use super::mailboxes::mailbox_test_state;
 use super::*;
 
+fn test_followup_reservation_id(state: &AppState, delegation: &str) -> Uuid {
+    state.inner.lock().unwrap().delegation_followup_admissions[delegation].reservation_id
+}
+
 struct LostFollowupAdmissionTransport {
     inner: Arc<ScriptedEngramControlTransport>,
     operation: &'static str,
@@ -114,6 +118,7 @@ fn manual_unarchive_is_not_owned_by_a_later_canceled_or_rejected_followup() {
             };
             let mut admission = DelegationFollowupAdmission {
                 state: state.clone(),
+                reservation_id: test_followup_reservation_id(&state, &previous.id),
                 previous: previous.clone(),
                 restore_candidate: true,
                 released: false,
@@ -471,6 +476,7 @@ fn followup_admission_commit_failure_settles_undelivered_attempt_and_releases_ru
         };
         let mut admission = DelegationFollowupAdmission {
             state: state.clone(),
+            reservation_id: test_followup_reservation_id(&state, &previous.id),
             previous: previous.clone(),
             restore_candidate: false,
             released: false,
@@ -871,7 +877,10 @@ fn followup_admission_uses_allocated_prompt_id_after_queue_prioritization() {
     );
     drop(inner);
     state
-        .release_delegation_followup_reservation(&delegation)
+        .release_delegation_followup_reservation(
+            &delegation,
+            test_followup_reservation_id(&state, &delegation),
+        )
         .unwrap();
 }
 
@@ -1039,7 +1048,7 @@ fn queued_followup_survives_project_reset_polling_and_dispatches_once() {
                 .unwrap();
             let appended = state
                 .mailbox_store
-                .append(&MailboxAppendInput {
+                .append_delegation_review_result(&MailboxAppendInput {
                     sender_session_id: child.clone(),
                     sender_name: submission.sender_name.clone(),
                     target_session_id: parent.clone(),
@@ -1243,6 +1252,7 @@ fn released_followup_guard_cannot_remove_the_next_reservation() {
     };
     let mut guard = DelegationFollowupAdmission {
         state: state.clone(),
+        reservation_id: test_followup_reservation_id(&state, &previous.id),
         previous,
         restore_candidate: false,
         released: false,
@@ -1257,6 +1267,95 @@ fn released_followup_guard_cannot_remove_the_next_reservation() {
     drop(guard);
     assert!(
         state
+            .inner
+            .lock()
+            .unwrap()
+            .delegation_followup_admissions
+            .contains_key(&id)
+    );
+}
+
+#[test]
+fn stale_followup_guard_cannot_fail_or_drop_a_recreated_reservation() {
+    let (state, _, parent) = mailbox_test_state();
+    let (id, child) = install_required_review_delegation(&state, &parent);
+    let (previous, old_nonce, successor_nonce) = {
+        let mut inner = state.inner.lock().unwrap();
+        let previous = inner.delegations[inner.find_delegation_index(&id).unwrap()].clone();
+        let watermark = delegation_last_user_prompt_id_locked(&inner, &child);
+        let old = FollowupAdmissionReservation::new(watermark.clone());
+        let old_nonce = old.reservation_id;
+        inner.delegation_followup_admissions.insert(id.clone(), old);
+        inner.delegation_followup_admissions.remove(&id);
+        let successor = FollowupAdmissionReservation::new(watermark);
+        let successor_nonce = successor.reservation_id;
+        assert_ne!(old_nonce, successor_nonce);
+        inner
+            .delegation_followup_admissions
+            .insert(id.clone(), successor);
+        let prompt_id = inner.next_message_id();
+        let child_index = inner.find_session_index(&child).unwrap();
+        queue_prompt_on_record_with_source(
+            &mut inner.sessions[child_index],
+            PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
+                id: prompt_id.clone(),
+                timestamp: stamp_now(),
+                text: "Successor prompt".to_owned(),
+                expanded_text: None,
+                attachments: vec![],
+                source: None,
+            },
+            vec![],
+            QueuedPromptSource::User,
+        );
+        let index = inner.find_delegation_index(&id).unwrap();
+        inner.delegations[index].queued_followup_prompt_id = Some(prompt_id);
+        (previous, old_nonce, successor_nonce)
+    };
+    let stale = DelegationFollowupAdmission {
+        state: state.clone(),
+        reservation_id: old_nonce,
+        previous: previous.clone(),
+        restore_candidate: false,
+        released: false,
+    };
+    stale.fail_queued_start("Must not fail the successor");
+    assert!(!stale.rollback_before_prompt().unwrap());
+    drop(stale);
+    {
+        let inner = state.inner.lock().unwrap();
+        let successor = &inner.delegation_followup_admissions[&id];
+        assert_eq!(successor.reservation_id, successor_nonce);
+        assert!(successor.failure.is_none());
+        let record = &inner.delegations[inner.find_delegation_index(&id).unwrap()];
+        assert_eq!(record.status, DelegationStatus::Running);
+        assert!(delegation_followup_awaits_first_turn(&inner, record));
+    }
+    let mut owner = DelegationFollowupAdmission {
+        state: state.clone(),
+        reservation_id: successor_nonce,
+        previous,
+        restore_candidate: false,
+        released: false,
+    };
+    owner.fail_queued_start("Successor-owned start failure");
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .delegations
+            .iter()
+            .find(|record| record.id == id)
+            .unwrap()
+            .status,
+        DelegationStatus::Failed
+    );
+    owner.release().unwrap();
+    assert!(
+        !state
             .inner
             .lock()
             .unwrap()
@@ -1519,6 +1618,7 @@ fn followup_admission_publishes_its_card_revision_before_a_later_parent_mutation
     assert!(newer_revision > admission_revision);
     let mut admission = DelegationFollowupAdmission {
         state: state.clone(),
+        reservation_id: test_followup_reservation_id(&state, &previous.id),
         previous,
         restore_candidate: false,
         released: false,
@@ -2219,7 +2319,10 @@ fn followup_wait_commit_failure_retains_idle_parent_wake_for_exactly_once_retry(
         failing.persistence_path = Arc::new(failed_path.clone());
         assert!(
             failing
-                .release_delegation_followup_reservation(&delegation)
+                .release_delegation_followup_reservation(
+                    &delegation,
+                    test_followup_reservation_id(&state, &delegation)
+                )
                 .is_err()
         );
         {

@@ -253,10 +253,10 @@ impl AppState {
                         target_name,created_at,class,topic,state_stamp,body,idempotency_key,
                         unread_depth_at_append,notification_disposition
                  FROM mailbox_messages WHERE mailbox_id=?1 AND sequence>?2
-                 AND NOT(target_session_id=?3 AND COALESCE(topic,'')=?4)
+                 AND NOT(target_session_id=?3 AND COALESCE(topic,'') GLOB ?4)
                  ORDER BY sequence LIMIT ?5")?;
             let mut rows = statement.query(rusqlite::params![mailbox, after, reader,
-                DELEGATION_REVIEW_RESULT_TOPIC, limit + 1])?;
+                DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN, limit + 1])?;
             let mut message_bytes = 0usize;
             while let Some(row) = rows.next()? {
                 if page.messages.len() as u64 == limit { page.has_more = true; break; }
@@ -331,9 +331,9 @@ impl AppState {
             let ids = {
                 let mut statement = transaction.prepare(
                     "SELECT id FROM mailbox_messages WHERE mailbox_id=?1 AND sequence>?2 AND sequence<=?3
-                     AND NOT(target_session_id=?4 AND COALESCE(topic,'')=?5) ORDER BY sequence")?;
+                     AND NOT(target_session_id=?4 AND COALESCE(topic,'') GLOB ?5) ORDER BY sequence")?;
                 let rows = statement.query_map(rusqlite::params![mailbox, page.after_sequence, through,
-                    reader, DELEGATION_REVIEW_RESULT_TOPIC], |row| row.get::<_, String>(0))?;
+                    reader, DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN], |row| row.get::<_, String>(0))?;
                 rows.collect::<std::result::Result<Vec<_>, _>>()?
             };
             if ids != page.messages.iter().map(|message| message.id.clone()).collect::<Vec<_>>() {

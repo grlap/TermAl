@@ -500,6 +500,8 @@ fn acp_permission_does_not_infer_control_plane_identity_from_a_tool_name() {
             Some("delegation-acp-review".to_owned());
         inner.sessions[child_index].session.cursor_mode = Some(CursorMode::Plan);
         inner.delegations.push(DelegationRecord {
+            original_project_id: None,
+            project_basis_recorded: false,
             id: "delegation-acp-review".to_owned(),
             parent_session_id,
             child_session_id: child_session_id.clone(),
@@ -590,6 +592,8 @@ fn acp_reviewer_does_not_auto_approve_an_unscoped_colliding_tool_name() {
             Some("delegation-acp-collision".to_owned());
         inner.sessions[child_index].session.cursor_mode = Some(CursorMode::Plan);
         inner.delegations.push(DelegationRecord {
+            original_project_id: None,
+            project_basis_recorded: false,
             id: "delegation-acp-collision".to_owned(),
             parent_session_id,
             child_session_id: child_session_id.clone(),

@@ -13,6 +13,9 @@ thread_local! {
     // Rows, entries and retained records a single-identity lookup examines,
     // counted before any predicate filters them.
     static TEST_TEST_RUN_IDENTITY_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Candidate rows the lifecycle, receipt and check-association scans take
+    // from the maintained history indexes, before their predicates filter.
+    static TEST_TEST_RUN_INDEXED_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     // Fresh projection builds, entry rows, observation rows.
     static TEST_TEST_RUN_PROJECTION_WORK: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
     // Linear `TestRunIndex::find` lookups made on this thread.
@@ -500,11 +503,7 @@ impl AppState {
             )
         );
         if inner.test_run_observations.contains_key(&execution_id)
-            || inner.test_run_compacted.values().any(|row| {
-                row.observations
-                    .iter()
-                    .any(|observation| observation.execution_id == execution_id)
-            })
+            || inner.test_run_compacted.index().execution(&execution_id).next().is_some()
         {
             return;
         }
@@ -607,53 +606,54 @@ impl AppState {
                 .test_run_observations
                 .get(id)
                 .is_some_and(|row| test_run_can_finalize_unbound(&inner, index, row));
-            let Some(row) = inner.test_run_observations.get_mut(id) else {
-                continue;
-            };
-            if exit == Some(EngramCommandExit::NotFinished) {
-                if row.summary.preset == TestRunPreset::Full {
-                    row.launch_only = true;
-                    test_run_observation_launch_unconfirmed(row);
-                    let row = row.clone();
-                    self.persist_test_command_observation_locked(&mut inner, row);
-                }
-                continue;
-            }
-            if row.launch_only {
-                // The launcher returning (even with exit 0) is not the run's
-                // terminal outcome. Only its exact artifact may supply that.
-                test_run_observation_launch_unconfirmed(row);
-                let row = row.clone();
-                self.persist_test_command_observation_locked(&mut inner, row);
-                continue;
-            }
-            row.summary.ended_at = Some(test_run_timestamp());
-            row.summary.state = if matches.len() != 1 {
-                TestRunState::Unknown
-            } else {
-                match exit {
-                    Some(EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess) => {
-                        TestRunState::Passed
+            // The row to persist, if this exit changes it; the same branches
+            // as before, applied through the indexed store's update.
+            let persist = inner.test_run_observations.update(id, |row| {
+                if exit == Some(EngramCommandExit::NotFinished) {
+                    if row.summary.preset == TestRunPreset::Full {
+                        row.launch_only = true;
+                        test_run_observation_launch_unconfirmed(row);
+                        return Some(row.clone());
                     }
-                    Some(EngramCommandExit::Code(_)) => TestRunState::Failed,
-                    _ => TestRunState::Unknown,
+                    return None;
                 }
-            };
-            row.summary.exit_code = match exit {
-                Some(EngramCommandExit::Code(code)) => Some(code),
-                _ => None,
-            };
-            if matches.len() == 1 && can_finalize {
-                row.final_unbound_proof =
-                    test_run_final_unbound_identity(row).map(|terminal_identity| {
-                        TestRunFinalUnboundProof {
-                            version: 1,
-                            terminal_identity,
+                if row.launch_only {
+                    // The launcher returning (even with exit 0) is not the
+                    // run's terminal outcome. Only its exact artifact may
+                    // supply that.
+                    test_run_observation_launch_unconfirmed(row);
+                    return Some(row.clone());
+                }
+                row.summary.ended_at = Some(test_run_timestamp());
+                row.summary.state = if matches.len() != 1 {
+                    TestRunState::Unknown
+                } else {
+                    match exit {
+                        Some(EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess) => {
+                            TestRunState::Passed
                         }
-                    });
+                        Some(EngramCommandExit::Code(_)) => TestRunState::Failed,
+                        _ => TestRunState::Unknown,
+                    }
+                };
+                row.summary.exit_code = match exit {
+                    Some(EngramCommandExit::Code(code)) => Some(code),
+                    _ => None,
+                };
+                if matches.len() == 1 && can_finalize {
+                    row.final_unbound_proof =
+                        test_run_final_unbound_identity(row).map(|terminal_identity| {
+                            TestRunFinalUnboundProof {
+                                version: 1,
+                                terminal_identity,
+                            }
+                        });
+                }
+                Some(row.clone())
+            });
+            if let Some(Some(observation)) = persist {
+                self.persist_test_command_observation_locked(&mut inner, observation);
             }
-            let observation = row.clone();
-            self.persist_test_command_observation_locked(&mut inner, observation);
         }
     }
 
@@ -922,14 +922,15 @@ impl AppState {
             .map(|row| row.execution_id.clone())
             .collect();
         for id in stale {
-            let Some(row) = inner.test_run_observations.get_mut(&id) else {
+            let Some(row) = inner.test_run_observations.update(&id, |row| {
+                row.summary.state = TestRunState::Unknown;
+                row.summary.interrupted = true;
+                row.monitoring_interrupted_at = Some(test_run_timestamp());
+                row.summary.error = Some("Provider runtime ended or changed before reporting this execution's terminal status.".to_owned());
+                row.clone()
+            }) else {
                 continue;
             };
-            row.summary.state = TestRunState::Unknown;
-            row.summary.interrupted = true;
-            row.monitoring_interrupted_at = Some(test_run_timestamp());
-            row.summary.error = Some("Provider runtime ended or changed before reporting this execution's terminal status.".to_owned());
-            let row = row.clone();
             self.persist_test_command_observation_locked(&mut inner, row);
         }
         // Repair persisted launch acknowledgements from older hosts without
@@ -945,11 +946,12 @@ impl AppState {
             .map(|row| row.execution_id.clone())
             .collect();
         for id in unconfirmed {
-            let Some(row) = inner.test_run_observations.get_mut(&id) else {
+            let Some(row) = inner.test_run_observations.update(&id, |row| {
+                test_run_observation_launch_unconfirmed(row);
+                row.clone()
+            }) else {
                 continue;
             };
-            test_run_observation_launch_unconfirmed(row);
-            let row = row.clone();
             self.persist_test_command_observation_locked(&mut inner, row);
         }
         let pending = inner.test_runs.observation_persistence.clone();
@@ -1290,9 +1292,10 @@ fn test_run_artifact_fallback_from_observations<'a>(
 // identity. Completing one fence must not rebuild every unrelated summary.
 // Candidate filtering is not proof: exact matching and risk are still fresh.
 fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestRunSummary> {
-    let observations = || inner.test_run_observations.values().filter(|row| {
-        row.artifact.as_ref().is_some_and(|artifact| artifact.run_id == run_id)
-    });
+    // Artifact-run index candidates, in map key order; the predicate stays.
+    let observations = || inner.test_run_observations.index().artifact_run(run_id)
+        .map(|key| &inner.test_run_observations[key])
+        .filter(|row| row.artifact.as_ref().is_some_and(|artifact| artifact.run_id == run_id));
     let artifact = if let Some(entry) = inner.test_runs.find(run_id) {
         let mut run = entry.summary.clone();
         run.registration = test_run_registration_view_from_observations(
@@ -1393,63 +1396,67 @@ fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
     runs
 }
 
-// Borrowed candidate selection for one locked batch of changed rows, built in
-// one pass and dropped with that hold. It only narrows which rows each run id
-// visits: every candidate still passes the full projection's own predicates,
-// and each identity's runs are built once per batch however many rows share it.
+// Per-batch candidate selection over the maintained history indexes, dropped
+// with the hold. It builds nothing from whole history: each run id queries its
+// own buckets, in the maps' key order (entries in their vector order). It only
+// narrows which rows each run id visits: every candidate still passes the full
+// projection's own predicates, and each identity's runs are built once per
+// batch however many rows share it.
 struct TestRunIdentityIndex<'a> {
     inner: &'a StateInner,
-    entries: HashMap<&'a str, Vec<&'a TestRunEntry>>,
-    artifact_rows: HashMap<&'a str, Vec<&'a TestRunCommandObservation>>,
-    summary_rows: HashMap<&'a str, Vec<&'a TestRunCommandObservation>>,
-    // Retained fallback keys by the run id their fallback carries.
-    retained_keys: HashMap<&'a str, std::collections::BTreeSet<&'a String>>,
-    compacted: HashMap<&'a str, Vec<&'a TestRunCompacted>>,
     artifact_runs: HashMap<String, (Vec<TestRunSummary>, HashSet<String>)>,
 }
 
 impl<'a> TestRunIdentityIndex<'a> {
     fn new(inner: &'a StateInner) -> Self {
-        #[cfg(test)]
-        TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.set(count.get()
-            + inner.test_runs.entries.len() + inner.test_run_observations.len()
-            + inner.test_run_registrations.len() + inner.test_run_compacted.len()));
-        let mut entries: HashMap<&str, Vec<_>> = HashMap::new();
-        for entry in &inner.test_runs.entries {
-            entries.entry(entry.summary.run_id.as_str()).or_default().push(entry);
-        }
-        let mut artifact_rows: HashMap<&str, Vec<_>> = HashMap::new();
-        let mut summary_rows: HashMap<&str, Vec<_>> = HashMap::new();
-        for row in inner.test_run_observations.values() {
-            if let Some(artifact) = &row.artifact {
-                artifact_rows.entry(artifact.run_id.as_str()).or_default().push(row);
-            }
-            summary_rows.entry(row.summary.run_id.as_str()).or_default().push(row);
-        }
-        // A retained fallback carries its row's own run id, not necessarily
-        // its key; a registration decides a key it shares with a compaction.
-        let mut retained_keys: HashMap<&str, std::collections::BTreeSet<_>> = HashMap::new();
-        for (key, row) in &inner.test_run_registrations {
-            retained_keys.entry(row.run_id.as_str()).or_default().insert(key);
-        }
-        let mut compacted: HashMap<&str, Vec<_>> = HashMap::new();
-        for (key, row) in &inner.test_run_compacted {
-            if !inner.test_run_registrations.contains_key(key) {
-                retained_keys.entry(row.summary.run_id.as_str()).or_default().insert(key);
-            }
-            compacted.entry(row.summary.run_id.as_str()).or_default().push(row);
-        }
-        Self { inner, entries, artifact_rows, summary_rows, retained_keys, compacted,
-            artifact_runs: HashMap::new() }
+        Self { inner, artifact_runs: HashMap::new() }
     }
 
-    fn rows(map: &HashMap<&'a str, Vec<&'a TestRunCommandObservation>>, id: &str)
-        -> Vec<&'a TestRunCommandObservation>
-    {
-        let rows = map.get(id).cloned().unwrap_or_default();
+    fn counted<T>(candidates: Vec<T>) -> Vec<T> {
         #[cfg(test)]
-        TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.set(count.get() + rows.len()));
-        rows
+        TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.set(count.get() + candidates.len()));
+        candidates
+    }
+
+    /// The indexed entries with this run id, in vector order.
+    fn entries(&self, run_id: &str) -> Vec<&'a TestRunEntry> {
+        Self::counted(self.inner.test_runs.entries.with_run_id(run_id).collect())
+    }
+
+    fn has_entry(&self, run_id: &str) -> bool {
+        self.inner.test_runs.entries.with_run_id(run_id).next().is_some()
+    }
+
+    /// Live rows whose artifact carries this run id, in key order.
+    fn artifact_rows(&self, run_id: &str) -> Vec<&'a TestRunCommandObservation> {
+        let rows = &self.inner.test_run_observations;
+        Self::counted(rows.index().artifact_run(run_id).filter_map(|key| rows.get(key)).collect())
+    }
+
+    /// Live rows whose summary carries this run id, in key order.
+    fn summary_rows(&self, run_id: &str) -> Vec<&'a TestRunCommandObservation> {
+        let rows = &self.inner.test_run_observations;
+        Self::counted(rows.index().summary_run(run_id).filter_map(|key| rows.get(key)).collect())
+    }
+
+    /// Retained fallback keys whose fallback carries this run id, in key
+    /// order. A fallback carries its row's own run id, not necessarily its
+    /// key; a registration decides any key it shares with a compaction, even
+    /// one whose registration carries a different run id.
+    fn retained_keys(&self, run_id: &str) -> std::collections::BTreeSet<&'a String> {
+        let registrations = &self.inner.test_run_registrations;
+        let compacted = &self.inner.test_run_compacted;
+        let keys: Vec<_> = registrations.index().run(run_id)
+            .chain(compacted.index().summary_run(run_id)
+                .filter(|key| !registrations.contains_key(key.as_str())))
+            .collect();
+        Self::counted(keys).into_iter().collect()
+    }
+
+    /// Compacted proofs whose summary carries this run id, in key order.
+    fn compacted(&self, run_id: &str) -> Vec<&'a TestRunCompacted> {
+        let compacted = &self.inner.test_run_compacted;
+        Self::counted(compacted.index().summary_run(run_id).filter_map(|key| compacted.get(key)).collect())
     }
 
     // The artifact runs that test_run_full_summaries_locked builds for one run
@@ -1466,8 +1473,8 @@ impl<'a> TestRunIdentityIndex<'a> {
 
     fn build_artifact_runs(&self, run_id: &str) -> (Vec<TestRunSummary>, HashSet<String>) {
         let inner = self.inner;
-        let observations = Self::rows(&self.artifact_rows, run_id);
-        let indexed = self.entries.get(run_id).map(Vec::as_slice).unwrap_or(&[]);
+        let observations = self.artifact_rows(run_id);
+        let indexed = self.entries(run_id);
         let first = indexed.first().copied();
         let mut runs: Vec<_> = first.into_iter().flat_map(|first| {
             indexed.iter().map(|entry| {
@@ -1479,15 +1486,15 @@ impl<'a> TestRunIdentityIndex<'a> {
                 run
             }).collect::<Vec<_>>()
         }).collect();
-        for key in self.retained_keys.get(run_id).into_iter().flatten() {
-            if self.entries.contains_key(key.as_str()) {
+        for key in self.retained_keys(run_id) {
+            if self.has_entry(key) {
                 continue;
             }
             let rows = if key.as_str() == run_id { observations.clone() } else {
-                Self::rows(&self.artifact_rows, key)
+                self.artifact_rows(key)
             };
             if let Some(run) = test_run_artifact_fallback_from_observations(inner, key, rows, |id| {
-                self.entries.contains_key(id)
+                self.has_entry(id)
             }) {
                 if run.run_id == run_id {
                     runs.push(run);
@@ -1509,7 +1516,7 @@ impl<'a> TestRunIdentityIndex<'a> {
     fn identity(&mut self, run_id: &str) -> Vec<TestRunSummary> {
         let inner = self.inner;
         let mut runs = self.artifact_runs(run_id).0.clone();
-        for row in Self::rows(&self.summary_rows, run_id) {
+        for row in self.summary_rows(run_id) {
             let merged = row.artifact.as_ref().is_some_and(|artifact| {
                 self.artifact_runs(&artifact.run_id).1.contains(&row.execution_id)
             });
@@ -1520,7 +1527,7 @@ impl<'a> TestRunIdentityIndex<'a> {
         test_run_sort_by_start(&mut runs);
         // Compacted summaries appear only for identities the full list lacks.
         if runs.is_empty() {
-            runs.extend(self.compacted.get(run_id).into_iter().flatten()
+            runs.extend(self.compacted(run_id).into_iter()
                 .filter(|row| test_run_compact_is_installed(inner, row))
                 .map(|row| test_run_compacted_summary(inner, row))
                 .filter(|run| run.registration.restart_would_void_evidence != Some(false)));

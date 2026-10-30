@@ -49,6 +49,7 @@ fn federation_delivery_version_two_upgrade_preserves_messages_cursors_and_read_r
              DROP TABLE federation_mailbox_dedup;
              DROP TABLE federation_mailbox_intents;
              DROP TABLE federation_mailbox_retired_namespaces;
+             DROP INDEX mailbox_messages_topic_key_sender;
              UPDATE meta SET value='2' WHERE key='coordination_schema_version';",
             )
             .unwrap();
@@ -71,6 +72,19 @@ fn federation_delivery_version_two_upgrade_preserves_messages_cursors_and_read_r
         .unwrap();
     let connection = upgraded.connection().unwrap();
     validate_current_coordination_schema(&connection).unwrap();
+    // The v2 fixture drops the review custody covering index, which no v2
+    // database ever had; the upgrade must build it.
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='mailbox_messages_topic_key_sender'",
+                [],
+                |row| row.get::<_, u64>(0),
+            )
+            .unwrap(),
+        1,
+        "the upgrade builds the review custody covering index"
+    );
     assert_eq!(
         connection
             .query_row(

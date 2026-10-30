@@ -4792,6 +4792,36 @@ context nudges are deadline-bounded, JSON control replies are typed, routing
 tokens stay host-private, and TermAl never opens Engram's SQLite database
 directly.
 
+A valid `{status:"error"}` reply is a request-level answer on a healthy
+connection, so the control worker that sent it is kept. Engram's two terminal
+control-startup codes are the exception. `control_startup_busy` and
+`control_startup_refused` are each one error line answering the first frame,
+followed by a nonzero exit with that frame never dispatched. TermAl matches
+them on the code alone, never the message, and evicts and reaps that worker,
+so the next call starts a new one.
+- Busy is not fatal. It takes the recovery an unavailable control takes: a
+  backoff, then the bounded status/rebind re-admission of the exact retained
+  request and key on the common recovery schedule.
+- Refused fails closed: control is disabled with that code and the retained
+  prompt is held, with nothing sent automatically.
+- Startup may have written, so neither code counts as a process that never
+  started or as certified non-application.
+- A closing or recovery checkpoint answered this way was never judged, so its
+  report is kept rather than dropped as refused. The original-result recovery
+  records either code against the session too, but only while the recovery
+  owner it captured before the call still matches, so a late reply from an
+  old control never touches a replacement.
+- `control_startup_refused`, met by a closing checkpoint, by the recovery's
+  read-only probe or by its send, holds that original from automatic and
+  admission-triggered recovery. Like the fatal disabled reason it mirrors,
+  the hold is process-local, and a TermAl restart releases it. Within the
+  process only a real re-enable releases it: the session seen disabled for
+  that code and later no longer. A hold whose session was never disabled for
+  it (a late reply fenced off from its accounting), or whose row is gone,
+  lasts until restart.
+Every other remote code, a live `storage_error` among them, keeps today's
+meaning.
+
 The proposed split of this adapter by ownership, the contract it keeps with
 Engram, and the order in which its parts move are in
 [Host architecture](./host-architecture.md).

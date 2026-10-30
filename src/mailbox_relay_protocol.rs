@@ -228,7 +228,7 @@ impl MailboxRelayAppend {
                 "invalid native mailbox relay participants",
             ));
         }
-        if self.topic.as_deref() == Some(DELEGATION_REVIEW_RESULT_TOPIC) {
+        if reserved_delegation_review_message(self.topic.as_deref(), &self.idempotency_key) {
             return Err(ApiError::bad_request(
                 "the review-result topic is reserved for internal delegation results, not routine mail",
             ));

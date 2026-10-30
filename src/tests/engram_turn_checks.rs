@@ -4667,6 +4667,307 @@ fn a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence() {
     assert_unknown_checkpoint_custody(&loaded, &turn.session_id, &lost, Some(&original));
 }
 
+/// A terminal control-startup reply to the closing checkpoint is no refusal
+/// of its report: the replacement worker answered the first frame before
+/// dispatching it, so Engram judged nothing. The exact report and its key stay
+/// in durable custody, and ordinary kill authorizes no other close. Busy is
+/// then settled by the original-result recovery, which resends the identical
+/// request; refused fails closed, so that recovery sends nothing.
+#[test]
+fn a_control_startup_reply_to_the_closing_checkpoint_keeps_the_evidence() {
+    for code in ["control_startup_busy", "control_startup_refused"] {
+        let turn = CheckedTurn::start_with(
+            &code.replace('_', "-"),
+            true,
+            None,
+            vec![remote_error_reply(code), checkpoint_reply(CHECK_GRANT)],
+        );
+        turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
+        let first = turn.finish();
+        assert!(
+            first.get("verification_evidence").is_some(),
+            "{code}: {first:#}"
+        );
+        assert!(
+            first["idempotency_key"]
+                .as_str()
+                .expect("an idempotency key")
+                .contains(":evidence:"),
+            "{code}: the evidence-carrying report: {first:#}"
+        );
+        assert!(
+            turn.record(|record| record.engram.active_turn_report.as_ref()
+                .is_some_and(|(_, report)| !report.verification_evidence.is_empty())),
+            "{code}: the cached report keeps its evidence; it was not dropped as refused"
+        );
+        let original = {
+            let inner = turn.state.inner.lock().unwrap();
+            assert_unknown_checkpoint_custody(&inner, &turn.session_id, &first, None)
+        };
+        turn.state
+            .kill_session(&turn.session_id)
+            .expect("removal preserves original debt independently of its row");
+        assert_eq!(checkpoints(&turn), [first.clone()], "{code}: ordinary kill sends no close");
+        let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+        assert!(loaded.find_session_index(&turn.session_id).is_none());
+        assert_unknown_checkpoint_custody(&loaded, &turn.session_id, &first, Some(&original));
+
+        let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+        turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+        let now = chrono::Utc::now();
+        for seconds in [0, 3, 60, 700] {
+            turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(seconds));
+        }
+        if code == ENGRAM_CONTROL_STARTUP_REFUSED_CODE {
+            assert_eq!(checkpoints(&turn), [first.clone()], "{code}: held, nothing sent automatically");
+            assert_original_checkpoint_held_after_reload(&turn.state, &original);
+        } else {
+            assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+            assert_eq!(checkpoints(&turn), [first.clone(), first.clone()],
+                "{code}: the identical request and key are resent once");
+        }
+    }
+}
+
+/// The original-result recovery meets a terminal control-startup reply of its
+/// own: it keeps the original unresolved with its exact report. Busy is
+/// retried on the recovery schedule and then settled by the identical request;
+/// refused holds the original, and no later tick sends it again.
+#[test]
+fn original_result_recovery_handles_a_control_startup_reply() {
+    for code in ["control_startup_busy", "control_startup_refused"] {
+        let turn = CheckedTurn::start_with(
+            &format!("recovery-{}", code.replace('_', "-")),
+            true,
+            None,
+            vec![
+                ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport(
+                    "the reply was lost",
+                ))),
+                remote_error_reply(code),
+                checkpoint_reply(CHECK_GRANT),
+            ],
+        );
+        turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
+        let lost = turn.finish();
+        let original = {
+            let inner = turn.state.inner.lock().unwrap();
+            assert_unknown_checkpoint_custody(&inner, &turn.session_id, &lost, None)
+        };
+        turn.state
+            .kill_session(&turn.session_id)
+            .expect("removal preserves original debt independently of its row");
+        let operation: EngramCheckpointOperation = serde_json::from_value(original.clone()).unwrap();
+        for _ in 0..2 {
+            turn.transport.work_bindings.lock().unwrap().push_back(Ok(operation.original.work_binding.clone()));
+        }
+        let now = chrono::Utc::now();
+        turn.state.engram_abort_retry_tick(now);
+        turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(3));
+        assert_eq!(checkpoints(&turn), [lost.clone(), lost.clone()],
+            "{code}: the recovery sent the identical request once");
+        let held = assert_original_checkpoint_held_after_reload(&turn.state, &original);
+        assert!(
+            matches!(&held.attempts.last().unwrap().result,
+                Some(EngramCheckpointAttemptResult::Unknown { code: Some(found) }) if found == code),
+            "{code}: the recovery attempt stays unresolved under its code"
+        );
+        for seconds in [60, 700, 1400] {
+            turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(seconds));
+        }
+        if code == ENGRAM_CONTROL_STARTUP_REFUSED_CODE {
+            assert_eq!(checkpoints(&turn), [lost.clone(), lost.clone()],
+                "{code}: no later tick sends it again");
+            assert_original_checkpoint_held_after_reload(&turn.state, &original);
+        } else {
+            assert_original_checkpoint_recovered_after_reload(&turn.state, &original);
+            assert_eq!(checkpoints(&turn), [lost.clone(), lost.clone(), lost.clone()],
+                "{code}: retried on the schedule with the identical request");
+        }
+    }
+}
+
+/// A lost closing checkpoint whose session is then removed: the unresolved
+/// original that the original-result recovery owns, and that recovery's
+/// transport. `responses` follow the lost close.
+fn orphaned_lost_checkpoint(label: &str, responses: Vec<ScriptedEngramControlResponse>)
+    -> (CheckedTurn, Value, Value) {
+    let mut scripted = vec![ScriptedEngramControlResponse::Reply(Err(
+        EngramTransportError::transport("the reply was lost"),
+    ))];
+    scripted.extend(responses);
+    let turn = CheckedTurn::start_with(label, true, None, scripted);
+    turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    let lost = turn.finish();
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.session_id, &lost, None)
+    };
+    turn.state
+        .kill_session(&turn.session_id)
+        .expect("removal preserves original debt independently of its row");
+    (turn, lost, original)
+}
+
+/// A control_startup_refused answer to the read-only probe that precedes a
+/// recovery send holds the original as well, though no attempt was allocated
+/// for it: no later tick sends the original, which stays unresolved and
+/// unchanged. The hold is process-local, like the disabled reason it mirrors.
+#[test]
+fn a_startup_refused_probe_holds_the_original_from_recovery() {
+    let (turn, lost, original) =
+        orphaned_lost_checkpoint("probe-startup-refused", vec![checkpoint_reply(CHECK_GRANT)]);
+    turn.transport.observation_policy_errors.lock().unwrap().push_back(
+        EngramTransportError::remote(EngramControlErrorBody {
+            code: ENGRAM_CONTROL_STARTUP_REFUSED_CODE.to_owned(),
+            message: "Engram control startup was refused.".to_owned(),
+        }),
+    );
+    let probes_before =
+        turn.transport.observation_policy_reads.load(std::sync::atomic::Ordering::SeqCst);
+    let now = chrono::Utc::now();
+    for seconds in [0, 3, 60, 700, 1400] {
+        turn.state.engram_abort_retry_tick(now + chrono::Duration::seconds(seconds));
+    }
+    assert!(
+        turn.transport.observation_policy_errors.lock().unwrap().is_empty(),
+        "the recovery's probe met the refusal"
+    );
+    assert_eq!(
+        turn.transport.observation_policy_reads.load(std::sync::atomic::Ordering::SeqCst),
+        probes_before + 1,
+        "no probe after the refused one"
+    );
+    assert_eq!(checkpoints(&turn), [lost.clone()], "held after the refused probe: nothing sent");
+    assert_original_checkpoint_held_after_reload(&turn.state, &original);
+}
+
+/// The refusal hold is released only by a real re-enable: its session seen
+/// disabled for the code, and later no longer. A refusal whose session
+/// accounting was fenced off leaves a row that was never disabled for it,
+/// and that absence is no re-enable.
+#[test]
+fn a_startup_refused_hold_is_released_only_by_a_real_re_enable() {
+    let turn = CheckedTurn::start_with(
+        "startup-hold-release",
+        true,
+        None,
+        vec![ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport(
+            "the reply was lost",
+        )))],
+    );
+    turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    let lost = turn.finish();
+    let original = {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_unknown_checkpoint_custody(&inner, &turn.session_id, &lost, None)
+    };
+    let id = serde_json::from_value::<EngramCheckpointOperation>(original).unwrap().original.id;
+    let held = || {
+        let inner = turn.state.inner.lock().unwrap();
+        turn.state.checkpoint_original_startup_refused_held(&inner, &id)
+    };
+    let set_disabled = |reason: Option<&str>| {
+        let mut inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&turn.session_id).expect("the row is live");
+        inner.sessions[index].engram.disabled_reason = reason.map(str::to_owned);
+    };
+    let publish_hold = || {
+        let inner = turn.state.inner.lock().unwrap();
+        turn.state.hold_checkpoint_original_after_startup_refusal_locked(&inner, &id);
+    };
+    assert!(!held(), "no refusal, no hold");
+    // Owned: the refusal's accounting disabled the session, so the hold is
+    // armed as it is published, and a re-enable before any recovery looked
+    // at it releases it.
+    set_disabled(Some(ENGRAM_CONTROL_STARTUP_REFUSED_CODE));
+    publish_hold();
+    set_disabled(None);
+    assert!(!held(), "a hold armed at publication is released by the re-enable");
+    // Fenced off: the session was never disabled for it.
+    publish_hold();
+    for _ in 0..3 {
+        assert!(held(), "a disabled reason never set is no re-enable");
+    }
+    set_disabled(Some(ENGRAM_CONTROL_STARTUP_REFUSED_CODE));
+    assert!(held(), "disabled for the code: held, and the hold is armed");
+    set_disabled(None);
+    assert!(!held(), "the re-enable releases it");
+    assert!(!held(), "and it stays released");
+}
+
+/// A terminal control-startup failure is accounted against the session only
+/// while the recovery owner captured before the call still matches: a reply
+/// that arrives after the project's control settings or the original's
+/// attempt moved on names an old control and touches no session.
+#[test]
+fn startup_failure_accounting_follows_only_the_captured_owner() {
+    let (turn, _, original) = orphaned_lost_checkpoint("startup-owner-fence", Vec::new());
+    let operation: EngramCheckpointOperation = serde_json::from_value(original).unwrap();
+    let id = operation.original.id.clone();
+    let owner = {
+        let inner = turn.state.inner.lock().unwrap();
+        EngramCheckpointResultOwner::capture(&inner, &id).expect("the recovery owns the original")
+    };
+    {
+        let inner = turn.state.inner.lock().unwrap();
+        assert_eq!(
+            checkpoint_startup_failure_session(&inner, &owner).as_deref(),
+            Some(turn.session_id.as_str()),
+            "an unchanged owner is accounted"
+        );
+    }
+    let mut inner = turn.state.inner.lock().unwrap();
+    // The original's attempt moved on while the old call was pending.
+    let index = inner.engram_session_obligations.checkpoint_operations.iter()
+        .position(|operation| operation.original.id == id).unwrap();
+    let kept_attempt = std::mem::replace(
+        &mut inner.engram_session_obligations.checkpoint_operations[index].attempts.last_mut().unwrap().id,
+        "a-later-attempt".to_owned(),
+    );
+    assert_eq!(checkpoint_startup_failure_session(&inner, &owner), None, "owner drift");
+    inner.engram_session_obligations.checkpoint_operations[index].attempts.last_mut().unwrap().id = kept_attempt;
+    assert!(checkpoint_startup_failure_session(&inner, &owner).is_some(), "restored");
+    // The project's control settings changed while the old call was pending.
+    let kept_key = inner.projects.iter_mut()
+        .find(|project| project.id == operation.protection.project_id).unwrap()
+        .engram.as_mut().unwrap().authority_store_key.take();
+    assert!(kept_key.is_some());
+    assert_eq!(checkpoint_startup_failure_session(&inner, &owner), None, "settings drift");
+    inner.projects.iter_mut()
+        .find(|project| project.id == operation.protection.project_id).unwrap()
+        .engram.as_mut().unwrap().authority_store_key = kept_key.clone();
+    assert!(checkpoint_startup_failure_session(&inner, &owner).is_some(), "restored");
+
+    // End to end: a late refusal for a drifted owner still holds the original
+    // it answered, while touching no session; a late busy holds nothing.
+    let set_key = |key: Option<EngramAuthorityStoreKey>| {
+        turn.state.inner.lock().unwrap().projects.iter_mut()
+            .find(|project| project.id == operation.protection.project_id).unwrap()
+            .engram.as_mut().unwrap().authority_store_key = key;
+    };
+    drop(inner);
+    let startup_error = |code: &str| EngramTransportError::remote(EngramControlErrorBody {
+        code: code.to_owned(),
+        message: "a late startup reply".to_owned(),
+    });
+    set_key(None);
+    turn.state.record_terminal_control_startup_failure(&owner, &startup_error("control_startup_busy"));
+    set_key(kept_key.clone());
+    {
+        let inner = turn.state.inner.lock().unwrap();
+        assert!(!turn.state.checkpoint_original_startup_refused_held(&inner, &id), "busy holds nothing");
+    }
+    set_key(None);
+    turn.state.record_terminal_control_startup_failure(&owner, &startup_error(ENGRAM_CONTROL_STARTUP_REFUSED_CODE));
+    set_key(kept_key);
+    let inner = turn.state.inner.lock().unwrap();
+    assert!(
+        turn.state.checkpoint_original_startup_refused_held(&inner, &id),
+        "a drifted owner's refusal still holds the original it answered"
+    );
+}
+
 /// A linked worktree of the turn's repository at `.worktrees/wt`, made the
 /// turn's named source root as a turn admitted with it would carry it.
 /// Gives the session `session` of `turn`'s state a turn under a grant that

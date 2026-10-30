@@ -1097,6 +1097,7 @@ include!("test_run_exact_query.rs");
 include!("test_run_phase_trace.rs");
 #[cfg(test)]
 include!("test_run_history_probe.rs");
+include!("test_run_history_store.rs");
 include!("test_run_observations.rs");
 include!("test_run_evidence.rs");
 include!("test_run_artifacts.rs");
@@ -1140,6 +1141,8 @@ include!("mailboxes.rs");
 include!("mailbox_acknowledged_wake.rs");
 include!("mailbox_continuation_coverage.rs");
 include!("delegation_review_results.rs");
+include!("delegation_review_attempts.rs");
+include!("delegation_review_custody.rs");
 include!("coordination_board.rs");
 include!("board_routes.rs");
 include!("response_board.rs");

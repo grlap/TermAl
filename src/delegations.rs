@@ -656,6 +656,9 @@ impl AppState {
         if inner.sessions[parent_index].engram.source_observation_delete_requested {
             return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
         }
+        if inner.sessions[parent_index].session.project_id != parent_project_id {
+            return Err(ApiError::conflict("parent project changed during delegation commissioning"));
+        }
         if active_delegation_count_for_parent(&inner, &parent_session_id)
             >= MAX_RUNNING_DELEGATIONS_PER_PARENT
         {
@@ -733,6 +736,8 @@ impl AppState {
             target
         });
         let record = DelegationRecord {
+            original_project_id: parent_project_id.clone(),
+            project_basis_recorded: true,
             id: delegation_id.clone(),
             parent_session_id,
             child_session_id: child_session_id.clone(),
@@ -1012,6 +1017,7 @@ impl AppState {
             revision,
             result,
             acceptance_evaluation,
+            submission_attempt,
             lifecycle_delta,
             detached_child,
             wait_refresh,
@@ -1046,6 +1052,8 @@ impl AppState {
                 .acceptance_evaluation
                 .as_ref()
                 .map(DelegationAcceptanceEvaluation::client_view);
+            let submission_attempt = (record.mode == DelegationMode::Reviewer)
+                .then_some(record.review_result_submission_attempt);
             self.enqueue_delegation_refresh_locked(
                 &inner,
                 revision,
@@ -1057,6 +1065,7 @@ impl AppState {
                 revision,
                 result,
                 acceptance_evaluation,
+                submission_attempt,
                 lifecycle_delta,
                 detached_child,
                 wait_refresh,
@@ -1071,9 +1080,13 @@ impl AppState {
         let result =
             result.ok_or_else(|| ApiError::conflict("delegation result is not available yet"))?;
         Ok(DelegationResultResponse {
+            review_attempt_state: None,
             revision,
             result,
             acceptance_evaluation,
+            submission_attempt,
+            result_id: None,
+            review_attempt_provenance: None,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -1160,9 +1173,12 @@ impl AppState {
         };
 
         Ok(DelegationResultOutputResponse {
+            review_attempt_state: None,
             revision,
             delegation_id: delegation_id.to_owned(),
             child_session_id,
+            submission_attempt: None,
+            result_id: None,
             output: page.output,
             offset_bytes,
             next_offset_bytes: page.next_offset_bytes,
@@ -1474,6 +1490,23 @@ impl AppState {
         // Keep the thread archived until reservation succeeds; dispatch owns
         // restoration so a rejected Phase 1 cannot leak a restored child.
         let previous = self.get_delegation(parent_session_id, delegation_id)?;
+        let review_storage_enabled = self.review_attempt_storage_enabled();
+        let retained_review = if review_storage_enabled
+            && previous.delegation.mode == DelegationMode::Reviewer
+            && matches!(previous.delegation.status, DelegationStatus::Completed | DelegationStatus::Failed)
+        {
+            if previous.delegation.review_result_submission_attempt >= MAX_RETAINED_REVIEW_ATTEMPTS {
+                return Err(ApiError::conflict("review retention capacity is exhausted; use a new delegation before another attempt"));
+            }
+            Some(self.retain_review_attempt(parent_session_id, delegation_id,
+                previous.delegation.review_result_submission_attempt)?.0)
+        } else { None };
+        let review_capture_reservation = retained_review.as_ref()
+            .map(|snapshot| self.reserve_next_review_capture(snapshot)).transpose()?;
+        #[cfg(test)]
+        if let Some(hook) = TEST_REVIEW_BEFORE_FOLLOWUP_RESERVATION.with(|slot| slot.borrow_mut().take()) {
+            hook();
+        }
         if matches!(
             previous.delegation.status,
             DelegationStatus::Completed | DelegationStatus::Failed
@@ -1501,7 +1534,24 @@ impl AppState {
             let child_present = inner.find_session_index(&child_session_id).is_some();
             // Only completed/failed delegations are resumable. Canceled is terminal but a
             // deliberate teardown — re-arming it would silently undo the cancellation.
-            let gate_error = if inner
+            let custody_required = review_storage_enabled
+                && inner.delegations[index].mode == DelegationMode::Reviewer
+                && matches!(status, DelegationStatus::Completed | DelegationStatus::Failed);
+            let gate_error = if custody_required && (retained_review.is_none() || review_capture_reservation.is_none()) {
+                Some(ApiError::conflict("review became terminal before reservation and requires retained custody; retry the unchanged follow-up after retaining its terminal result"))
+            } else if custody_required && inner.delegations[index].review_result_submission_attempt >= MAX_RETAINED_REVIEW_ATTEMPTS {
+                Some(ApiError::conflict("review retention capacity is exhausted; use a new delegation before another attempt"))
+            } else if retained_review.as_ref().is_some_and(|saved| {
+                let current = &inner.delegations[index];
+                current.review_result_submission_attempt != saved.submission_attempt
+                    || current.child_session_id != saved.child_session_id
+                    || current.result.as_ref() != Some(&saved.result)
+                    || inner.find_session_index(&current.child_session_id)
+                        .and_then(|i| delegation_child_authoritative_output(&inner.sessions[i].session, status))
+                        != saved.raw_output.as_deref()
+            }) {
+                Some(ApiError::conflict("review terminal attempt changed after retention; no follow-up was admitted"))
+            } else if inner
                 .delegation_followup_admissions
                 .contains_key(delegation_id)
             {
@@ -1576,7 +1626,11 @@ impl AppState {
                 .find_session_index(&child_session_id)
                 .is_some_and(|index| codex_followup_may_restore_record(&inner.sessions[index]));
             let mut reservation = FollowupAdmissionReservation::new(last_prompt);
+            let reservation_id = reservation.reservation_id;
             reservation.host_acceptance_attempt = host_acceptance_attempt;
+            reservation.review_custody = retained_review.clone();
+            reservation.review_capture_reservation = review_capture_reservation.clone();
+            reservation.review_custody_required = custody_required;
             inner.delegation_followup_admissions.insert(delegation_id.to_owned(), reservation);
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
             let revision = if refresh_delta.is_some()
@@ -1605,6 +1659,7 @@ impl AppState {
             drop(inner);
             let admission = DelegationFollowupAdmission {
                 state: self.clone(),
+                reservation_id,
                 previous,
                 restore_candidate,
                 released: false,
@@ -4938,8 +4993,19 @@ fn delegation_child_authoritative_output(
     session: &Session,
     status: DelegationStatus,
 ) -> Option<&str> {
+    delegation_child_output_before_prompt(session, status, None)
+}
+
+fn delegation_child_output_before_prompt<'a>(
+    session: &'a Session,
+    status: DelegationStatus,
+    admitted_prompt: Option<&str>,
+) -> Option<&'a str> {
     let mut latest_assistant_output = None;
     for message in session.messages.iter().rev() {
+        if admitted_prompt.is_some_and(|id| message.id() == id) && message.user_prompt_text().is_some() {
+            continue;
+        }
         if message.user_prompt_text().is_some() {
             break;
         }

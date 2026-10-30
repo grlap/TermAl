@@ -8,11 +8,47 @@
 // unarchive RPC execution, and ordinary turn lifecycle remain elsewhere.
 
 struct FollowupAdmissionReservation {
+    reservation_id: Uuid,
     host_acceptance_attempt: bool,
     last_user_prompt_id: Option<String>,
     canceled: bool,
     admitted: Option<(u64, DelegationRecord)>,
     failure: Option<DetachedDelegationChildRuntime>,
+    review_custody: Option<ReviewAttemptSnapshot>,
+    review_capture_reservation: Option<String>,
+    review_custody_required: bool,
+}
+
+struct FollowupReviewRecut {
+    reservation_id: Uuid,
+    previous: DelegationRecord,
+    custody: ReviewAttemptSnapshot,
+    capture_reservation: String,
+}
+
+impl FollowupReviewRecut {
+    fn still_owned(&self, inner: &StateInner) -> bool {
+        inner
+            .delegation_followup_admissions
+            .get(&self.previous.id)
+            .is_some_and(|reservation| {
+                reservation.reservation_id == self.reservation_id
+                    && !reservation.canceled
+                    && reservation.admitted.is_none()
+                    && reservation.review_custody_required
+                    && reservation.review_custody.as_ref() == Some(&self.custody)
+                    && reservation.review_capture_reservation.as_ref()
+                        == Some(&self.capture_reservation)
+                    && reservation.last_user_prompt_id
+                        == delegation_last_user_prompt_id_locked(
+                            inner,
+                            &self.previous.child_session_id,
+                        )
+            })
+            && inner
+                .find_delegation_index(&self.previous.id)
+                .is_some_and(|index| inner.delegations[index] == self.previous)
+    }
 }
 
 fn codex_followup_may_restore_record(record: &SessionRecord) -> bool {
@@ -84,16 +120,132 @@ fn annotate_queued_followup_start_failure(
 impl FollowupAdmissionReservation {
     fn new(last_user_prompt_id: Option<String>) -> Self {
         Self {
+            reservation_id: Uuid::new_v4(),
             host_acceptance_attempt: false,
             last_user_prompt_id,
             canceled: false,
             admitted: None,
             failure: None,
+            review_custody: None,
+            review_capture_reservation: None,
+            review_custody_required: false,
         }
     }
 }
 
 impl AppState {
+    fn capture_followup_review_recut(
+        &self,
+        previous: Option<&DelegationRecord>,
+    ) -> Result<Option<FollowupReviewRecut>, ApiError> {
+        let Some(previous) = previous else {
+            return Ok(None);
+        };
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let reservation = inner
+            .delegation_followup_admissions
+            .get(&previous.id)
+            .ok_or_else(|| ApiError::conflict("follow-up reservation changed before restore"))?;
+        if !reservation.review_custody_required {
+            return Ok(None);
+        }
+        let recut = FollowupReviewRecut {
+            reservation_id: reservation.reservation_id,
+            previous: previous.clone(),
+            custody: reservation
+                .review_custody
+                .clone()
+                .ok_or_else(review_attempt_corrupt)?,
+            capture_reservation: reservation
+                .review_capture_reservation
+                .clone()
+                .ok_or_else(review_attempt_corrupt)?,
+        };
+        if !recut.still_owned(&inner) || !review_snapshot_matches_inner(&inner, &recut.custody) {
+            return Err(ApiError::conflict(
+                "review terminal custody changed before restore",
+            ));
+        }
+        Ok(Some(recut))
+    }
+
+    fn refresh_followup_review_custody(
+        &self,
+        recut: Option<&FollowupReviewRecut>,
+    ) -> Result<(), ApiError> {
+        let Some(recut) = recut else {
+            return Ok(());
+        };
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if !recut.still_owned(&inner) {
+                return Err(ApiError::conflict(
+                    "follow-up reservation changed during restore",
+                ));
+            }
+        }
+        // Restore can append a host note. Retain that actual cut without changing
+        // either earlier publications or the protected next-attempt capture slot.
+        let (snapshot, _) = self.retain_review_attempt(
+            &recut.previous.parent_session_id,
+            &recut.previous.id,
+            recut.previous.review_result_submission_attempt,
+        )?;
+        #[cfg(test)]
+        if let Some(hook) = TEST_REVIEW_FOLLOWUP_AFTER_RECUT.with(|slot| slot.borrow_mut().take()) {
+            hook();
+        }
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if !recut.still_owned(&inner)
+            || snapshot.parent_session_id != recut.custody.parent_session_id
+            || snapshot.delegation_id != recut.custody.delegation_id
+            || snapshot.child_session_id != recut.custody.child_session_id
+            || snapshot.submission_attempt != recut.custody.submission_attempt
+            || snapshot.write_policy != recut.custody.write_policy
+            || snapshot.result != recut.custody.result
+            || !review_snapshot_matches_inner(&inner, &snapshot)
+        {
+            return Err(ApiError::conflict(
+                "review terminal cut or caller reservation changed during recapture",
+            ));
+        }
+        inner
+            .delegation_followup_admissions
+            .get_mut(&recut.previous.id)
+            .expect("checked reservation")
+            .review_custody = Some(snapshot);
+        drop(inner);
+        #[cfg(test)]
+        if let Some(hook) =
+            TEST_REVIEW_FOLLOWUP_AFTER_RECUT_ADOPTION.with(|slot| slot.borrow_mut().take())
+        {
+            hook();
+        }
+        Ok(())
+    }
+
+    fn validate_followup_review_custody_locked(
+        &self,
+        inner: &StateInner,
+        previous: &DelegationRecord,
+    ) -> Result<(), ApiError> {
+        if let Some(reservation) = inner.delegation_followup_admissions.get(&previous.id)
+            && reservation.review_custody_required
+            && (reservation.canceled
+                || reservation.admitted.is_some()
+                || reservation.review_capture_reservation.is_none()
+                || !reservation
+                    .review_custody
+                    .as_ref()
+                    .is_some_and(|snapshot| review_snapshot_matches_inner(inner, snapshot)))
+        {
+            return Err(ApiError::conflict(
+                "review terminal custody changed before prompt admission",
+            ));
+        }
+        Ok(())
+    }
+
     fn queued_start_api_error(&self, error: anyhow::Error) -> ApiError {
         let retained = error
             .downcast_ref::<RetainedQueuedPromotionPersistenceUnknown>()
@@ -262,6 +414,26 @@ impl AppState {
         prompt_id: &str,
         full_snapshot: bool,
     ) -> Result<u64> {
+        if let Some(previous) = previous {
+            if previous.mode == DelegationMode::Reviewer {
+                let admission = inner.delegation_followup_admissions.get(&previous.id);
+                if admission.is_some_and(|admission| admission.review_custody_required) {
+                    if !admission
+                        .and_then(|admission| admission.review_custody.as_ref())
+                        .is_some_and(|snapshot| {
+                            review_snapshot_matches_before_prompt(inner, snapshot, Some(prompt_id))
+                        })
+                        || admission
+                            .and_then(|admission| admission.review_capture_reservation.as_ref())
+                            .is_none()
+                    {
+                        bail!(
+                            "review terminal custody or reserved capture changed before final rearm; no attempt was cleared"
+                        );
+                    }
+                }
+            }
+        }
         let parent_before = previous
             .and_then(|previous| inner.find_session_index(&previous.parent_session_id))
             .map(|index| (index, inner.sessions[index].clone()));
@@ -383,9 +555,20 @@ impl AppState {
 
     /// Removing a rejected reservation makes its retained terminal result
     /// eligible for waits again. Dispatch resumes only after releasing the lock.
-    fn release_delegation_followup_reservation(&self, delegation_id: &str) -> Result<()> {
+    fn release_delegation_followup_reservation(
+        &self,
+        delegation_id: &str,
+        reservation_id: Uuid,
+    ) -> Result<()> {
         let (committed, revision, refresh, failure) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if !inner
+                .delegation_followup_admissions
+                .get(delegation_id)
+                .is_some_and(|reservation| reservation.reservation_id == reservation_id)
+            {
+                return Ok(());
+            }
             let Some(reservation) = inner.delegation_followup_admissions.remove(delegation_id)
             else {
                 return Ok(());
@@ -436,6 +619,7 @@ impl AppState {
 /// cleanup must not risk a second panic or admit work through poisoned state.
 struct DelegationFollowupAdmission {
     state: AppState,
+    reservation_id: Uuid,
     previous: DelegationRecord,
     restore_candidate: bool,
     released: bool,
@@ -572,7 +756,8 @@ impl DelegationFollowupAdmission {
         let inner = self.state.inner.lock().expect("state mutex poisoned");
         let (revision, delegation) = inner
             .delegation_followup_admissions
-            .get(&self.previous.id)?
+            .get(&self.previous.id)
+            .filter(|reservation| reservation.reservation_id == self.reservation_id)?
             .admitted
             .as_ref()?;
         Some(DelegationStatusResponse {
@@ -585,6 +770,13 @@ impl DelegationFollowupAdmission {
 
     fn fail_queued_start(&self, detail: &str) {
         let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        if !inner
+            .delegation_followup_admissions
+            .get(&self.previous.id)
+            .is_some_and(|reservation| reservation.reservation_id == self.reservation_id)
+        {
+            return;
+        }
         let Some(index) = inner.find_delegation_index(&self.previous.id) else {
             return;
         };
@@ -602,7 +794,7 @@ impl DelegationFollowupAdmission {
         // has already made the terminal delegation available again.
         self.released = true;
         self.state
-            .release_delegation_followup_reservation(&self.previous.id)
+            .release_delegation_followup_reservation(&self.previous.id, self.reservation_id)
     }
 
     fn rollback_before_prompt(&self) -> Result<bool, ApiError> {
@@ -611,6 +803,9 @@ impl DelegationFollowupAdmission {
         else {
             return Ok(false);
         };
+        if before_prompt.reservation_id != self.reservation_id {
+            return Ok(false);
+        }
         let child_id = &self.previous.child_session_id;
         if before_prompt.last_user_prompt_id
             != delegation_last_user_prompt_id_locked(&inner, child_id)

@@ -414,12 +414,16 @@ fn an_unsafe_alias_preserves_the_original_registration_and_every_association() {
         .clone();
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let row = inner.test_run_observations.get_mut(&alias).unwrap();
+        let mut row = inner.test_run_observations.get_mut(&alias).unwrap();
         row.work_binding = Some(association.binding.clone());
         row.validated_unbound = false;
         row.final_unbound_proof = None;
         row.evidence.push(association.clone());
-        let row = row.clone();
+        let row = {
+            let snapshot = (*row).clone();
+            drop(row);
+            snapshot
+        };
         fixture
             .state
             .persist_test_command_observation_locked(&mut inner, row);

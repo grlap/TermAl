@@ -968,6 +968,8 @@ fn a_deadline_is_terminal_even_if_the_commit_acknowledgement_arrives_late() {
 
 fn delegation(id: &str) -> DelegationRecord {
     DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: id.to_owned(),
         parent_session_id: "parent".to_owned(),
         child_session_id: "child".to_owned(),

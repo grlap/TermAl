@@ -189,6 +189,102 @@ struct TestRunEntry {
     discovered_project_id: Option<String>,
 }
 
+/// The indexed runs in list order, with a maintained run id -> positions
+/// lookup that keeps vector order and multiplicity. Reads see the vector;
+/// every change goes through a method that keeps the lookup equal to it.
+#[derive(Clone, Debug, Default)]
+struct TestRunEntries {
+    entries: Vec<TestRunEntry>,
+    positions: HashMap<String, Vec<usize>>,
+}
+
+impl TestRunEntries {
+    fn reposition(&mut self) {
+        self.positions.clear();
+        for (position, entry) in self.entries.iter().enumerate() {
+            self.positions.entry(entry.summary.run_id.clone()).or_default().push(position);
+        }
+    }
+
+    /// The entries with this run id, in vector order, duplicates included.
+    fn with_run_id(&self, run_id: &str) -> impl Iterator<Item = &TestRunEntry> {
+        self.positions.get(run_id).into_iter().flatten().map(|position| &self.entries[*position])
+    }
+
+    fn push(&mut self, entry: TestRunEntry) {
+        self.positions.entry(entry.summary.run_id.clone()).or_default().push(self.entries.len());
+        self.entries.push(entry);
+    }
+
+    /// Removes like Vec::remove; later positions shift, so the lookup is
+    /// rebuilt, at the same order of cost as the vector's own shift.
+    fn remove(&mut self, position: usize) -> TestRunEntry {
+        let removed = self.entries.remove(position);
+        self.reposition();
+        removed
+    }
+
+    fn retain(&mut self, keep: impl FnMut(&TestRunEntry) -> bool) {
+        self.entries.retain(keep);
+        self.reposition();
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.positions.clear();
+    }
+
+    /// Test-only change of one entry in place; the lookup follows its run id.
+    #[cfg(test)]
+    fn update<R>(&mut self, position: usize, change: impl FnOnce(&mut TestRunEntry) -> R) -> R {
+        let result = change(&mut self.entries[position]);
+        self.reposition();
+        result
+    }
+
+    /// The lookup rebuilt from scratch, for test-only consistency oracles.
+    #[cfg(test)]
+    fn rebuilt_positions(&self) -> HashMap<String, Vec<usize>> {
+        let mut rebuilt = Self { entries: self.entries.clone(), positions: HashMap::new() };
+        rebuilt.reposition();
+        rebuilt.positions
+    }
+
+    #[cfg(test)]
+    fn positions(&self) -> &HashMap<String, Vec<usize>> {
+        &self.positions
+    }
+}
+
+impl From<Vec<TestRunEntry>> for TestRunEntries {
+    fn from(entries: Vec<TestRunEntry>) -> Self {
+        let mut indexed = Self { entries, positions: HashMap::new() };
+        indexed.reposition();
+        indexed
+    }
+}
+
+impl FromIterator<TestRunEntry> for TestRunEntries {
+    fn from_iter<T: IntoIterator<Item = TestRunEntry>>(entries: T) -> Self {
+        entries.into_iter().collect::<Vec<_>>().into()
+    }
+}
+
+impl std::ops::Deref for TestRunEntries {
+    type Target = Vec<TestRunEntry>;
+    fn deref(&self) -> &Vec<TestRunEntry> {
+        &self.entries
+    }
+}
+
+impl<'a> IntoIterator for &'a TestRunEntries {
+    type Item = &'a TestRunEntry;
+    type IntoIter = std::slice::Iter<'a, TestRunEntry>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter()
+    }
+}
+
 /// The runtime-only test-run index kept in `StateInner`, in list order. It
 /// mirrors disk and is never persisted.
 #[derive(Clone, Debug, Default)]
@@ -207,7 +303,7 @@ struct TestRunIndex {
     observation_persistence: TestRunObservationPersistence,
     lifecycle_revalidated: HashSet<(String, String)>,
     unclassified_commands: HashMap<String, TestRunUnclassifiedCommand>,
-    entries: Vec<TestRunEntry>,
+    entries: TestRunEntries,
     /// Every run directory the last rescan parsed, listed or aged out, so a
     /// run whose files did not change is never parsed again. Aged-out runs
     /// outnumber listed ones as run directories accumulate.
@@ -249,9 +345,8 @@ impl TestRunIndex {
     fn find(&self, run_id: &str) -> Option<&TestRunEntry> {
         #[cfg(test)]
         TEST_TEST_RUN_INDEX_FINDS.with(|count| count.set(count.get() + 1));
-        self.entries
-            .iter()
-            .find(|entry| entry.summary.run_id == run_id)
+        // The first entry with this run id, as the linear scan found it.
+        self.entries.with_run_id(run_id).next()
     }
 
     /// Whether the host judges some indexed run `running`. An `unknown` run
@@ -798,18 +893,26 @@ impl AppState {
             let mut compact_metadata_changed = false;
             let compact_updates: HashMap<_, _> = inner.test_runs.compaction_stamps.iter()
                 .map(|(id, (_, _, conflict))| (id.clone(), *conflict)).collect();
-            for (id, compacted) in &mut inner.test_run_compacted {
-                if compacted.compacted && !compacted.summary.run_dir.is_empty()
-                    && compacted.artifact_unavailable != unavailable.contains(id) {
-                    compacted.artifact_unavailable = unavailable.contains(id);
-                    compact_metadata_changed = true;
-                }
-                if let Some(conflict) = compact_updates.get(id) {
-                    if compacted.artifact_conflict != *conflict {
-                        compacted.artifact_conflict = *conflict;
-                        compact_metadata_changed = true;
+            // Only these two flags change here; neither is an index key.
+            let flag_changes: Vec<(String, bool, Option<bool>)> = inner.test_run_compacted.iter()
+                .filter_map(|(id, compacted)| {
+                    let unavailable_now = (compacted.compacted && !compacted.summary.run_dir.is_empty()
+                        && compacted.artifact_unavailable != unavailable.contains(id))
+                        .then(|| unavailable.contains(id));
+                    let conflict_now = compact_updates.get(id)
+                        .filter(|conflict| compacted.artifact_conflict != **conflict).copied();
+                    (unavailable_now.is_some() || conflict_now.is_some())
+                        .then(|| (id.clone(), unavailable_now.unwrap_or(compacted.artifact_unavailable), conflict_now))
+                })
+                .collect();
+            for (id, artifact_unavailable, conflict) in flag_changes {
+                inner.test_run_compacted.update(&id, |compacted| {
+                    compacted.artifact_unavailable = artifact_unavailable;
+                    if let Some(conflict) = conflict {
+                        compacted.artifact_conflict = conflict;
                     }
-                }
+                });
+                compact_metadata_changed = true;
             }
             if compact_metadata_changed {
                 let _ = self.commit_locked_with_persist_dispatch(&mut inner);
@@ -991,7 +1094,7 @@ impl AppState {
         };
         // Cards follow the summaries clients were told about.
         self.sync_test_run_cards_locked(&mut inner, &entries, &published_changed, &failures, publish);
-        inner.test_runs.entries = entries;
+        inner.test_runs.entries = entries.into();
         self.retain_test_command_artifact_terminals_locked(&mut inner);
         // Run waits may settle from here on (`refresh_test_run_waits`).
         inner.test_runs.scanned_once = true;

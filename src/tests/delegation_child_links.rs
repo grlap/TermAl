@@ -6,6 +6,8 @@ fn test_delegation_record(
     child_session_id: &str,
 ) -> DelegationRecord {
     DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: id.to_owned(),
         parent_session_id: parent_session_id.to_owned(),
         child_session_id: child_session_id.to_owned(),

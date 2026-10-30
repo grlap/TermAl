@@ -25,6 +25,8 @@ pub(super) fn install_required_review_delegation(
         .expect("review child should exist");
     inner.sessions[child_index].session.parent_delegation_id = Some(delegation_id.clone());
     inner.delegations.push(DelegationRecord {
+        original_project_id: None,
+        project_basis_recorded: false,
         id: delegation_id.clone(),
         parent_session_id: parent_session_id.to_owned(),
         child_session_id: child_session_id.clone(),

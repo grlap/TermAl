@@ -873,7 +873,8 @@ impl AppState {
 
 /// The refusal code when Engram answered a rebind's recovery checkpoint by
 /// refusing it, as an error or as a refuse result; `None` for acceptance, for
-/// a lost or timed-out call, and for the issued-but-never-begun answer, which
+/// a lost or timed-out call, for a terminal control-startup reply (the frame
+/// was never dispatched), and for the issued-but-never-begun answer, which
 /// a fresh bind settles and which says nothing about the report.
 fn engram_recovery_checkpoint_refusal(
     checkpoint: &std::result::Result<EngramTurnCheckpointResponse, EngramTransportError>,
@@ -882,6 +883,7 @@ fn engram_recovery_checkpoint_refusal(
         Err(error)
             if error.kind == EngramTransportErrorKind::Remote
                 && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
+                && !error.is_terminal_control_startup()
                 && !engram_grant_was_issued_but_not_begun(error) =>
         {
             Some(error.code.as_deref())

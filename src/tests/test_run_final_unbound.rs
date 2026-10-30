@@ -53,10 +53,14 @@ fn final_no_binding_proof_survives_boot_and_historical_monitoring_gaps() {
     );
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let row = inner.test_run_observations.get_mut(&id).unwrap();
-        assert!(test_run_final_unbound_valid(row));
+        let mut row = inner.test_run_observations.get_mut(&id).unwrap();
+        assert!(test_run_final_unbound_valid(&row));
         row.monitoring_interrupted_at = Some(test_run_timestamp());
-        let row = row.clone();
+        let row = {
+            let snapshot = (*row).clone();
+            drop(row);
+            snapshot
+        };
         fixture
             .state
             .persist_test_command_observation_locked(&mut inner, row);
