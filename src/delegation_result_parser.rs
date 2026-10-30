@@ -5,6 +5,10 @@
 // card updates.
 // Split from src/delegations.rs so packet-format tolerance can evolve without
 // growing the delegation coordinator further.
+// Summary diagnostics use a closed whole-sentence POSITIVE/CLEAN/UNRESOLVED
+// classification, never finding authority. Only complete CLEAN templates are
+// silent; unknown attached severities remain visible, highest rank first.
+// Count-clause guards only add visibility; preamble recovery stays unchanged.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DelegationResultSection {
@@ -180,18 +184,13 @@ enum DelegationSummaryReading {
     /// finding word counts. It decides whether preamble findings are recovered,
     /// so their recovery is unchanged.
     AsBefore,
-    /// Clause by clause, step labels excluded: it decides only whether the
-    /// non-actionable inconsistency note is added.
+    /// Closed sentence classification for diagnostics. Original clause counts
+    /// can also add a non-actionable note, with step labels excluded.
     ForNote,
 }
 
-/// Splits a summary into lowercase ASCII-alphanumeric tokens, each tagged with
-/// the clause it belongs to. Read `ForNote`, clauses end at `, ; . ! ?`, so
-/// "Criterion 2: pass. The regression test" puts the 2 and the noun in
-/// different clauses, and "3906 tests passed, 0 failures" keeps the tally
-/// apart from "failures", while "Issues found: 2", "Found 2 (High severity)"
-/// and a summary wrapped across lines keep their count. Read `AsBefore`, the
-/// whole summary is one clause. Any other character only separates tokens.
+/// The original count clauses: punctuation separates tallies, but a colon
+/// still leaves "Issues found: 2" together. Recovery keeps one clause.
 fn delegation_result_summary_tokens(
     summary: &str,
     reading: DelegationSummaryReading,
@@ -203,16 +202,16 @@ fn delegation_result_summary_tokens(
     for character in summary.chars() {
         if character.is_ascii_alphanumeric() {
             current.push(character.to_ascii_lowercase());
-            continue;
-        }
-        if !current.is_empty() {
-            tokens.push(std::mem::take(&mut current));
-            clauses.push(clause);
-        }
-        if reading == DelegationSummaryReading::ForNote
-            && matches!(character, ',' | ';' | '.' | '!' | '?')
-        {
-            clause += 1;
+        } else {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+                clauses.push(clause);
+            }
+            if reading == DelegationSummaryReading::ForNote
+                && matches!(character, ',' | ';' | '.' | '!' | '?')
+            {
+                clause += 1;
+            }
         }
     }
     if !current.is_empty() {
@@ -226,9 +225,14 @@ fn delegation_result_summary_reports_findings(
     summary: &str,
     reading: DelegationSummaryReading,
 ) -> bool {
+    if reading == DelegationSummaryReading::ForNote {
+        return delegation_result_note_summary(summary).0;
+    }
     let (owned_tokens, clauses) = delegation_result_summary_tokens(summary, reading);
     let tokens = owned_tokens.iter().map(String::as_str).collect::<Vec<_>>();
-    if delegation_result_summary_reported_severity(&tokens, &clauses, reading).is_some() {
+    if delegation_result_summary_reported_severity(&tokens, &clauses, reading)
+        .is_some()
+    {
         return true;
     }
 
@@ -301,7 +305,7 @@ fn delegation_result_summary_reported_severity(
     tokens
         .iter()
         .enumerate()
-        .find_map(|(severity_index, token)| {
+        .filter_map(|(severity_index, token)| {
             let severity = delegation_result_token_severity(token)?;
             // A severity word is meaningful only when it is attached to
             // "severity" or a finding noun. This excludes incidental prose such
@@ -384,6 +388,439 @@ fn delegation_result_summary_reported_severity(
             (reports_discovery && (!reports_resolution || reports_unresolved_work))
                 .then_some(severity)
         })
+        .max_by_key(|severity| delegation_result_severity_rank(severity))
+}
+
+fn delegation_result_severity_rank(severity: &str) -> u8 {
+    match severity {
+        "Critical" => 4,
+        "High" => 3,
+        "Medium" => 2,
+        "Low" => 1,
+        _ => 0,
+    }
+}
+
+/// Diagnostic classification only: none of these classes creates a finding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DelegationSummarySentenceClass {
+    Positive,
+    Clean,
+    Unresolved,
+}
+
+/// CLEAN is a closed whole-sentence grammar, checked before POSITIVE:
+/// - own negative/zero items, optionally headed by a reviewer discovery verb
+///   and ending in found/remain(s); every joined item owns its negative;
+/// - reviewer "did/could not <discovery>" or item "was/were not found";
+/// - resolution or discovery-and-resolution head with a complete item list;
+///   only the head distributes over that list;
+/// - an affirmative resolution suffix covering exactly one complete item;
+/// - one item with ", now <resolution>" or ", <resolution> it";
+/// - a complete review/item subject followed by "is/are clean";
+/// - the two maintained passed-tests/suites-without-errors tally forms.
+/// Unknown prefixes, objects, joins and predicates cannot match these forms.
+/// A non-clean sentence names its highest attached severity, INCLUDING words
+/// in a resolved/negative comma clause. Sentence-separated CLEAN controls do
+/// not contribute. This conservative diagnostic behavior is intentional.
+fn delegation_result_note_summary(summary: &str) -> (bool, Option<&'static str>) {
+    let mut visible = false;
+    let mut highest: Option<&'static str> = None;
+    for sentence in delegation_result_note_sentences(summary) {
+        let owned = delegation_result_note_words(sentence);
+        let words = owned.iter().map(String::as_str).collect::<Vec<_>>();
+        if delegation_result_classify_summary_sentence(&words)
+            == DelegationSummarySentenceClass::Clean
+        {
+            continue;
+        }
+        if let Some(severity) = delegation_result_note_sentence_severity(&words) {
+            visible = true;
+            if highest.is_none_or(|previous| {
+                delegation_result_severity_rank(severity) > delegation_result_severity_rank(previous)
+            }) {
+                highest = Some(severity);
+            }
+        } else {
+            // Original count-clause and adjective guards only ADD unlabelled visibility.
+            let (owned, clauses) =
+                delegation_result_summary_tokens(sentence, DelegationSummaryReading::ForNote);
+            let tokens = owned.iter().map(String::as_str).collect::<Vec<_>>();
+            visible |= tokens.iter().enumerate().any(|(anchor, token)| {
+                delegation_result_token_is_finding_noun(token)
+                    && (anchor.saturating_sub(4)..(anchor + 5).min(tokens.len())).any(|position| {
+                        delegation_result_token_counts_findings(
+                            &tokens, &clauses, position, anchor, DelegationSummaryReading::ForNote,
+                        )
+                    })
+                    || (delegation_result_token_is_finding_noun(token)
+                        && tokens[anchor.saturating_sub(4)..anchor].iter().any(|word| {
+                            matches!(*word, "actionable" | "critical" | "high" | "low" | "medium")
+                        }))
+            });
+        }
+    }
+    (visible, highest)
+}
+
+/// Periods inside a version/path are not sentence terminators. In particular,
+/// a dot between digits never turns the fractional zero into an item count.
+fn delegation_result_note_sentences(summary: &str) -> Vec<&str> {
+    let mut sentences = Vec::new();
+    let mut start = 0;
+    let mut characters = summary.char_indices().peekable();
+    while let Some((index, character)) = characters.next() {
+        let boundary = matches!(character, '!' | '?')
+            || (character == '.'
+                && characters.peek().is_none_or(|(_, next)| next.is_whitespace()));
+        if boundary {
+            let sentence = summary[start..index].trim();
+            if !sentence.is_empty() {
+                sentences.push(sentence);
+            }
+            start = index + character.len_utf8();
+        }
+    }
+    let sentence = summary[start..].trim();
+    if !sentence.is_empty() {
+        sentences.push(sentence);
+    }
+    sentences
+}
+
+/// Keep explicit list/clause separators and dots between alphanumeric word
+/// characters. A hyphen inside "High-severity" only separates its two words.
+fn delegation_result_note_words(sentence: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut characters = sentence.chars().peekable();
+    while let Some(character) = characters.next() {
+        let embedded_dot = character == '.'
+            && current.as_bytes().last().is_some_and(|last| last.is_ascii_alphanumeric())
+            && characters.peek().is_some_and(|next| next.is_ascii_alphanumeric());
+        if character.is_ascii_alphanumeric() || embedded_dot {
+            current.push(character.to_ascii_lowercase());
+        } else {
+            let severity_compound = matches!(character, '—' | '–')
+                && delegation_result_token_severity(&current).is_some()
+                && characters.peek().is_some_and(|next| next.is_ascii_alphabetic());
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            if !severity_compound
+                && matches!(character, ',' | ';' | ':' | '/' | '|' | '—' | '–')
+            {
+                words.push(character.to_string());
+            }
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+fn delegation_result_note_sentence_severity(words: &[&str]) -> Option<&'static str> {
+    words.iter().enumerate().filter_map(|(index, word)| {
+        let severity = delegation_result_token_severity(word)?;
+        let neighbours = [
+            index.checked_sub(1).and_then(|i| words.get(i)),
+            words.get(index + 1),
+        ];
+        let attached = neighbours.into_iter().flatten().any(|word| {
+            *word == "severity" || delegation_result_note_is_item_noun(word)
+                || delegation_result_token_is_positive_count(word)
+                || matches!(*word, "0" | "zero")
+        });
+        // Retained punctuation may separate a severity from its label or noun.
+        // Only diagnostic attachment bridges it; CLEAN keeps the original words.
+        let separated = [
+            index.checked_sub(1).filter(|i| {
+                matches!(words[*i], ":" | "—" | "–" | "/" | "|")
+            }).and_then(|_| index.checked_sub(2)).and_then(|i| words.get(i)),
+            words.get(index + 1).filter(|word| {
+                matches!(**word, ":" | "—" | "–" | "/" | "|")
+            }).and_then(|_| words.get(index + 2)),
+        ];
+        let attached_across_separator = separated.into_iter().flatten().any(|word| {
+            *word == "severity" || delegation_result_note_is_item_noun(word)
+        });
+        let counted_declaration = index >= 2
+            && delegation_result_is_discovery_word(words[index - 2])
+            && delegation_result_token_is_positive_count(words[index - 1]);
+        (attached || attached_across_separator || counted_declaration).then_some(severity)
+    }).max_by_key(|severity| delegation_result_severity_rank(severity))
+}
+
+fn delegation_result_classify_summary_sentence(words: &[&str]) -> DelegationSummarySentenceClass {
+    if delegation_result_note_clean_sentence(words) {
+        return DelegationSummarySentenceClass::Clean;
+    }
+    // A resolution in a non-clean sentence leaves the admission uncertain,
+    // including a trailing comma continuation. It never suppresses its note.
+    if words.iter().any(|word| delegation_result_note_resolution_word(word)) {
+        return DelegationSummarySentenceClass::Unresolved;
+    }
+    let positive = words.split(|word| matches!(*word, "," | ";" | ":" | "—" | "–"))
+        .any(|clause| {
+            !clause.iter().any(|word| {
+                matches!(*word, "no" | "none" | "not" | "never" | "without" | "zero" | "0")
+            }) && clause.windows(3).any(|phrase| {
+                delegation_result_is_discovery_word(phrase[0])
+                    && delegation_result_token_is_positive_count(phrase[1])
+                    && delegation_result_token_severity(phrase[2]).is_some()
+            })
+        });
+    if positive {
+        DelegationSummarySentenceClass::Positive
+    } else {
+        DelegationSummarySentenceClass::Unresolved
+    }
+}
+
+fn delegation_result_note_clean_sentence(words: &[&str]) -> bool {
+    if words.is_empty() {
+        return false;
+    }
+    // Known tally controls, not arbitrary prefixes before "without".
+    if matches!(words, ["all", count, "tests", "passed", "without", "failures"]
+        | ["ran", count, "suites", "without", "errors"]
+        if delegation_result_token_is_positive_count(count))
+    {
+        return true;
+    }
+
+    let review = delegation_result_note_review_subject(words);
+    let negative_objects = match review {
+        ["did" | "could", "not", verb, rest @ ..] | ["not", verb, rest @ ..]
+            if delegation_result_is_discovery_word(verb) => Some(rest),
+        _ => None,
+    };
+    if negative_objects.is_some_and(|items| delegation_result_note_item_list(items).is_some()) {
+        return true;
+    }
+    for predicate in [
+        &["was", "not", "found"][..], &["were", "not", "found"][..],
+        &["not", "found"][..],
+    ] {
+        if words.strip_suffix(predicate).is_some_and(|items| {
+            delegation_result_note_item_list(items).is_some()
+        }) {
+            return true;
+        }
+    }
+
+    // A discovery head may introduce own-negative items. A fix, a third-party
+    // object, or "not without" is not an allowed head.
+    let negative_items = if review.first().is_some_and(|word| {
+        delegation_result_is_discovery_word(word)
+    }) {
+        &review[1..]
+    } else {
+        words
+    };
+    let mut negative_items = negative_items;
+    for predicate in [
+        &["were", "found"][..], &["was", "found"][..],
+        &["found"][..], &["remain"][..], &["remains"][..],
+    ] {
+        if let Some(items) = negative_items.strip_suffix(predicate) {
+            negative_items = items;
+            break;
+        }
+    }
+    if !negative_items.is_empty()
+        && negative_items.split(|word| {
+            matches!(*word, "and" | "or" | "," | ":" | "/" | "|" | "—" | "–")
+        }).all(delegation_result_note_negative_item)
+    {
+        return true;
+    }
+
+    // Complete affirmative resolution heads; no search for fix tokens.
+    let resolved_items = match review {
+        [verb, rest @ ..] if delegation_result_note_resolution_word(verb) => Some(rest),
+        [verb, "and", resolution, rest @ ..]
+            if delegation_result_is_discovery_word(verb)
+                && delegation_result_note_resolution_word(resolution) => Some(rest),
+        _ => None,
+    };
+    if let Some(mut items) = resolved_items {
+        for history in [
+            &["found", "earlier"][..],
+            &["found", "during", "the", "earlier", "review"][..],
+            &["from", "earlier", "feedback"][..],
+        ] {
+            if let Some(subject) = items.strip_suffix(history) {
+                items = subject;
+                break;
+            }
+        }
+        if delegation_result_note_item_list(items).is_some() {
+            return true;
+        }
+    }
+    if let Some(subject) = delegation_result_note_resolution_subject(review) {
+        let subject = delegation_result_note_discovery_subject(subject);
+        if delegation_result_note_item(subject, false) {
+            return true;
+        }
+    }
+    // A short comma continuation resolves exactly one complete item.
+    if let Some(comma) = words.iter().position(|word| *word == ",") {
+        let subject = delegation_result_note_discovery_subject(&words[..comma]);
+        let tail = &words[comma + 1..];
+        if delegation_result_note_item(subject, false)
+            && (delegation_result_note_resolution_subject(tail) == Some(&[][..])
+                || matches!(tail, [verb, "it"] if delegation_result_note_resolution_word(verb)))
+        {
+            return true;
+        }
+    }
+    if let Some(subject) = words.strip_suffix(&["is", "clean"])
+        .or_else(|| words.strip_suffix(&["are", "clean"]))
+    {
+        let review_subject = subject.contains(&"review")
+            && subject.iter().all(|word| {
+                matches!(*word, "the" | "a" | "review" | "severity")
+                    || delegation_result_token_severity(word).is_some()
+            });
+        return review_subject || delegation_result_note_item_list(subject).is_some();
+    }
+    false
+}
+
+fn delegation_result_note_negative_item(words: &[&str]) -> bool {
+    let items = match words {
+        ["no" | "zero" | "0", rest @ ..] => {
+            if rest.first().is_some_and(|word| {
+                matches!(*word, "a" | "an" | "the")
+                    || delegation_result_token_is_positive_count(word)
+            }) {
+                return false;
+            }
+            rest
+        }
+        ["without", rest @ ..] => rest,
+        ["none", "of", "the", rest @ ..] => rest,
+        [severity, "0" | "zero", rest @ ..]
+            if delegation_result_token_severity(severity).is_some() => {
+                return rest.is_empty()
+                    || matches!(rest, [noun] if delegation_result_note_is_item_noun(noun));
+            }
+        _ => return false,
+    };
+    // "none of the three High issues" is a negative count of its OWN item.
+    let items = if words.first() == Some(&"none") {
+        items
+    } else if items.first().is_some_and(|word| {
+        delegation_result_token_is_positive_count(word)
+    }) {
+        return false;
+    } else {
+        items
+    };
+    delegation_result_note_item(items, true)
+}
+
+/// An item is a complete optional article/count, severity and item noun.
+/// No foreign object, predicate, history or conjunction is consumed here.
+fn delegation_result_note_item(words: &[&str], bare_severity: bool) -> bool {
+    let mut cursor = 0;
+    if words.get(cursor).is_some_and(|word| matches!(*word, "even")) {
+        cursor += 1;
+    }
+    if words.get(cursor).is_some_and(|word| matches!(*word, "a" | "an" | "the" | "any")) {
+        cursor += 1;
+    }
+    if words.get(cursor).is_some_and(|word| delegation_result_token_is_positive_count(word)) {
+        cursor += 1;
+    }
+    if words.get(cursor) == Some(&"new") {
+        cursor += 1;
+    }
+    let severity = words.get(cursor).is_some_and(|word| {
+        delegation_result_token_severity(word).is_some()
+    });
+    if severity {
+        cursor += 1;
+        if words.get(cursor) == Some(&"severity") {
+            cursor += 1;
+        }
+    }
+    let noun = words.get(cursor).is_some_and(|word| {
+        delegation_result_note_is_item_noun(word)
+    });
+    if noun {
+        let risk = matches!(words[cursor], "risk" | "risks");
+        cursor += 1;
+        if risk && words.get(cursor).is_some_and(|word| matches!(*word, "area" | "areas")) {
+            cursor += 1;
+        }
+    }
+    cursor == words.len() && (noun || (bare_severity && severity))
+}
+
+fn delegation_result_note_item_list(words: &[&str]) -> Option<usize> {
+    if words.is_empty() {
+        return None;
+    }
+    let mut count = 0;
+    for item in words.split(|word| matches!(*word, "and" | "or" | ",")) {
+        if !delegation_result_note_item(item, false) {
+            return None;
+        }
+        count += 1;
+    }
+    Some(count)
+}
+
+fn delegation_result_note_is_item_noun(word: &str) -> bool {
+    delegation_result_token_is_finding_noun(word)
+        || matches!(word, "condition" | "conditions" | "fault" | "faults")
+}
+
+fn delegation_result_note_discovery_subject<'a, 'b>(words: &'a [&'b str]) -> &'a [&'b str] {
+    if words.first().is_some_and(|word| delegation_result_is_discovery_word(word)) {
+        &words[1..]
+    } else {
+        words
+    }
+}
+
+fn delegation_result_note_review_subject<'a, 'b>(words: &'a [&'b str]) -> &'a [&'b str] {
+    match words {
+        ["i" | "we" | "review", rest @ ..] | ["the", "review", rest @ ..] => rest,
+        _ => words,
+    }
+}
+
+fn delegation_result_note_resolution_word(word: &str) -> bool {
+    matches!(word, "addressed" | "closed" | "corrected" | "eliminated"
+        | "fixed" | "removed" | "repaired" | "resolved")
+}
+
+/// At least one affirmative marker, never a bare participle or polarity search.
+fn delegation_result_note_resolution_subject<'a, 'b>(
+    words: &'a [&'b str],
+) -> Option<&'a [&'b str]> {
+    let (last, mut subject) = words.split_last()?;
+    if !delegation_result_note_resolution_word(last) {
+        return None;
+    }
+    let before_markers = subject.len();
+    while subject.last().is_some_and(|word| {
+        matches!(*word, "is" | "are" | "was" | "were" | "has" | "have" | "been" | "now" | "since")
+    }) {
+        subject = &subject[..subject.len() - 1];
+    }
+    (subject.len() < before_markers).then_some(subject)
+}
+
+fn delegation_result_is_discovery_word(token: &str) -> bool {
+    matches!(token, "detect" | "detected" | "discover" | "discovered"
+        | "find" | "found" | "flag" | "flagged" | "identify" | "identified"
+        | "report" | "reported" | "uncover" | "uncovered")
 }
 
 fn delegation_result_token_severity(token: &str) -> Option<&'static str> {
@@ -431,12 +868,10 @@ const DELEGATION_CONTRADICTION_NOTE_SUMMARY_CHARS: usize = 300;
 
 /// The non-actionable note for a packet whose Findings section says None while
 /// its summary appears to report findings. It names any severity the summary
-/// declares and repeats the start of the summary, but records no finding.
+/// declares (the highest qualifying one) and repeats the start of the summary,
+/// but records no finding.
 fn delegation_result_summary_contradiction_note(summary: &str) -> String {
-    let reading = DelegationSummaryReading::ForNote;
-    let (owned_tokens, clauses) = delegation_result_summary_tokens(summary, reading);
-    let tokens = owned_tokens.iter().map(String::as_str).collect::<Vec<_>>();
-    let declared = delegation_result_summary_reported_severity(&tokens, &clauses, reading)
+    let declared = delegation_result_note_summary(summary).1
         .map(|severity| format!(" (declared severity: {severity})"))
         .unwrap_or_default();
     let compact = compact_delegation_result_summary(summary);

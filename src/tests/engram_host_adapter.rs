@@ -45,6 +45,11 @@ mod phase_compat;
 #[path = "engram_unqueued_bind_budget.rs"]
 mod unqueued_bind_budget;
 
+// A non-admission bind's identity across a lost answer, a child module so
+// this file does not grow further.
+#[path = "engram_bind_retention.rs"]
+mod bind_retention;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };
@@ -1468,7 +1473,9 @@ impl EngramControlTransport for GatedEngramControlTransport {
         } else {
             assert!(step.release.is_none());
         }
-        step.reply
+        let mut reply = step.reply;
+        engram_test_bind_answer_names_session(request, &connection.session_id, &mut reply);
+        reply
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -12990,7 +12997,7 @@ impl EngramControlTransport for RestartEngramControlTransport {
             })),
             Some("session_bind") => Ok(json!({
                 "routing_token": format!("rebound-{}", connection.session_id),
-                "status": { "phase": "sync_required" }
+                "status": { "phase": "sync_required", "session_id": connection.session_id }
             })),
             Some("turn_evaluate") => Ok(json!({
                 "decision": "grant",
@@ -13120,7 +13127,7 @@ impl EngramControlTransport for BoundedBootRecoveryTransport {
             Some("session_status") => Ok(json!({ "phase": "ready" })),
             Some("session_bind") => Ok(json!({
                 "routing_token": format!("recovered-{}", connection.session_id),
-                "status": { "phase": "sync_required" }
+                "status": { "phase": "sync_required", "session_id": connection.session_id }
             })),
             Some("turn_evaluate") => Ok(json!({
                 "decision": "grant",
@@ -13240,7 +13247,7 @@ impl EngramControlTransport for BlockingBootRecoveryTransport {
             }
             Some("session_bind") => Ok(json!({
                 "routing_token": format!("recovered-{}", connection.session_id),
-                "status": { "phase": "sync_required" }
+                "status": { "phase": "sync_required", "session_id": connection.session_id }
             })),
             Some("turn_evaluate") => Ok(json!({
                 "decision": "grant",
@@ -14251,7 +14258,7 @@ struct BlockingShutdownEngramTransport {
 impl EngramControlTransport for BlockingShutdownEngramTransport {
     fn request(
         &self,
-        _connection: &EngramConnectionConfig,
+        connection: &EngramConnectionConfig,
         request: &EngramControlRequest,
         _timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError> {
@@ -14266,7 +14273,7 @@ impl EngramControlTransport for BlockingShutdownEngramTransport {
             .expect("bind release should arrive");
         Ok(json!({
             "routing_token": "late-token",
-            "status": { "phase": "ready" }
+            "status": { "phase": "ready", "session_id": connection.session_id }
         }))
     }
 

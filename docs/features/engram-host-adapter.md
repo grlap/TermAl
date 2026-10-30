@@ -3236,6 +3236,68 @@ A head that another hold owns keeps that hold: an interrupted one, a Stop, an
 operator pause, disabled control, or a head whose transcript position is
 unknown. So does an uncertain grant whose id was never learned.
 
+### Lost answers to a bind outside queued admission
+
+A `session_bind` sent outside queued admission keeps its identity while its
+outcome is unknown (`src/engram_bind_retention.rs`). This covers boot
+recovery, a rebind, a delegation's bind, a bind after a settings change and an
+owed batch bind's rebind: every bind that goes through the turn binder without
+a queued admission. Queued admission binds keep their prepared request in the
+queue instead.
+
+- **Retained before it is sent.** Under the session's bind claim, the host
+  keeps the exact request, its idempotency key included, with the connection,
+  project and settings it goes out under.
+- **Settled only by its own answer.** These settle it:
+  - a valid answer: one with a routing token and a phase, whose status names
+    this session. Engram names the session in every status, so an answer
+    that names none, or another, is malformed and fails closed;
+  - evidence that it never left this host;
+  - Engram certifying the call unapplied (`control_store_busy`,
+    `control_request_expired`);
+  - one of the bind refusals that come before Engram's one storage
+    transaction or roll it back: `invalid_request`, `invalid_control_session`,
+    `stale_fence`, `control_session_bind_conflict` or
+    `control_connection_superseded`.
+
+  A lost answer, an invalid one, a deadline, a cancellation or any other
+  error leaves it unresolved. An invalid answer's token is never used. A
+  timeout alone never proves that nothing was written.
+- **Replayed before anything replaces it.** The session's next bind first
+  sends the retained request again, unchanged and under its key, on the same
+  connection and settings. Engram answers a bind under the session's current
+  key with that session's current row and status, without writing again.
+  - If the work focus is unchanged, that answer is the binding and its token
+    is adopted.
+  - If the focus moved, a new bind follows, only once the original is settled
+    and only while the answer's current status holds no turn. A session in a
+    turn is not rebound.
+  - A queued admission recovers the original the same way before its own bind,
+    under the same turn check.
+  - A source-root naming bind is refused while a retained bind is held.
+    Nothing recovers the original before the session's next bind, so naming
+    stays refused until then.
+- **Given up, never relabelled.** In these cases the host gives the original
+  up and does not replay it:
+  - its connection or the project's Engram settings changed, at the next bind
+    or when the settings are saved;
+  - Engram refused the replay itself with one of the refusals above;
+  - the project was removed.
+
+  A refusal of the replay says nothing of the earlier send. In the first two
+  cases the holder is told the earlier bind's key and that whether Engram
+  recorded it is unknown. On a project removal the same line is only logged:
+  the session has no Engram left to tell. The original is never called unsent.
+  A new bind then replaces it. A replay that is lost again keeps it retained,
+  and the next bind replays it again.
+
+The retention is process memory only and is never stored. A host crash or
+restart loses it, and a bind after a connection or settings change, or after
+the original was given up, may replace a session row the original had written.
+None of this is resolved here: restart-safe custody, connection and settings
+changes, an intervening replacement bind and a refused replay all remain open
+gaps.
+
 ### Strict Save and absent control sessions
 
 A strict settings Save still refuses uncertain checkpoint failures. The only

@@ -1903,6 +1903,15 @@ impl AppState {
                     "source-root naming cannot replace an unresolved Engram admission or binding",
                 ));
             }
+            // An earlier bind whose answer was lost is recovered by the
+            // session's next bind before anything replaces it
+            // (`engram_bind_retention.rs`).
+            if record.engram.retained_bind.is_some() {
+                return Err(ApiError::conflict(
+                    "source-root naming cannot replace an earlier Engram bind of this session \
+                     whose answer was lost until that bind is recovered",
+                ));
+            }
             record.engram.source_root_bind_owner = Some(owner);
             record.engram.bind_in_progress = true;
         }

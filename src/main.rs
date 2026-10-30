@@ -973,6 +973,7 @@ include!("engram_control_non_application.rs");
 include!("engram_session_authority.rs");
 include!("engram_causal_failure.rs");
 include!("engram_causal_publication.rs");
+include!("engram_bind_retention.rs");
 #[allow(dead_code)]
 mod engram_recovery_format;
 use engram_recovery_format::*;

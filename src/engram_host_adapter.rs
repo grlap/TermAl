@@ -1289,6 +1289,28 @@ fn scripted_no_root_sighting(
     })
 }
 
+/// Names `session_id` in a test producer's session_bind answer when its
+/// status leaves the session out, as Engram names it in every status: a
+/// scripted answer is the answer to this session's own request. An answer
+/// that already names a session, an error, or one with no status object is
+/// left as written, so a test can still script a malformed or foreign answer.
+#[cfg(test)]
+fn engram_test_bind_answer_names_session(
+    request: &EngramControlRequest,
+    session_id: &str,
+    reply: &mut std::result::Result<Value, EngramTransportError>,
+) {
+    if !matches!(request, EngramControlRequest::SessionBind { .. }) {
+        return;
+    }
+    if let Ok(value) = reply
+        && let Some(status) = value.get_mut("status").and_then(Value::as_object_mut)
+        && !status.contains_key("session_id")
+    {
+        status.insert("session_id".to_owned(), Value::String(session_id.to_owned()));
+    }
+}
+
 #[cfg(test)]
 impl ScriptedEngramControlTransport {
     fn new(responses: impl IntoIterator<Item = ScriptedEngramControlResponse>) -> Arc<Self> {
@@ -1456,6 +1478,7 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
                 )))
             });
         let ScriptedEngramControlResponse::Reply(mut reply) = response;
+        engram_test_bind_answer_names_session(request, &connection.session_id, &mut reply);
         if let (Some(roots), Ok(value)) = (self.named_roots.lock().unwrap().as_mut(), &mut reply) {
             roots.annotate(&connection.session_id, request, value);
             if matches!(request, EngramControlRequest::TurnCheckpoint { .. })
@@ -1739,6 +1762,7 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                 let response = Ok(json!({
                     "routing_token": routing_token,
                     "status": {
+                        "session_id": connection.session_id,
                         "phase": "sync_required",
                         "confirmed_cursor": 0
                     }
@@ -2941,6 +2965,11 @@ struct EngramSessionState {
     /// concurrent checkpoint that it did not start.
     checkpoint_owner_generation: Option<u64>,
     bind_in_progress: bool,
+    /// The last session_bind this process sent outside queued admission
+    /// whose outcome is unresolved, replayed identically before the session
+    /// is bound again (`engram_bind_retention.rs`). Process memory only: it
+    /// is never stored, so a restart loses it.
+    retained_bind: Option<EngramRetainedBind>,
     // Runtime owner of the grant-free naming bind. A settings reset may
     // replace the session state; an old reply must not release a new owner.
     source_root_bind_owner: Option<Uuid>,
@@ -3092,6 +3121,7 @@ impl Default for EngramSessionState {
             checkpoint_status_owner: None,
             checkpoint_owner_generation: None,
             bind_in_progress: false,
+            retained_bind: None,
             source_root_bind_owner: None,
             pending_dispatch: None,
             rebind_required: false,
@@ -8869,10 +8899,19 @@ impl AppState {
         let binding_root_started = clock.now();
         let binding_deadline = target.root_operation_deadline(binding_root_started);
         let mut bound_root_guard = None;
+        // Before any other bind of the session goes out, an original sent
+        // outside queued admission whose answer was lost is sent again as it
+        // was (`engram_bind_retention.rs`).
+        let mut recovered = self.recover_retained_engram_bind(&target, binding_deadline, owner)?;
         let (binding, bound_request) = loop {
             let attempt = usize::from(stale_retry_used) + 1;
             let bind_started_at = clock.now();
             let request = if let Some(started_at) = target.admission_started_at {
+                // The admission's bind replaces a recovered original only
+                // while its current status holds no turn.
+                if let Some(recovery) = recovered.take() {
+                    engram_recovered_bind_may_be_replaced(&recovery)?;
+                }
                 self.queued_engram_bind_request(
                     &target,
                     started_at,
@@ -8922,6 +8961,17 @@ impl AppState {
                 }?;
                 let work_binding =
                     self.engram_work_binding_for_bind(&target.connection.session_id, work_binding);
+                // The recovered original, answered with the session's current
+                // status, is the binding while the focus it was sent with is
+                // still the session's. A moved focus is bound anew, only now
+                // that the original is settled.
+                if let Some(recovery) = recovered.take() {
+                    if engram_retained_work_binding(&recovery.request) == work_binding.as_ref() {
+                        bound_root_guard = recovery.root_guard;
+                        break (recovery.binding, recovery.request);
+                    }
+                    engram_recovered_bind_may_be_replaced(&recovery)?;
+                }
                 EngramControlRequest::SessionBind {
                     external_ref: target.external_ref.clone(),
                     title: target.title.clone(),
@@ -8950,18 +9000,27 @@ impl AppState {
                     binding_deadline,
                 )?;
             }
+            let timeout = target.rpc_timeout_until(binding_deadline)?;
+            // A bind outside queued admission is retained before it is sent,
+            // until its answer settles it (`engram_bind_retention.rs`).
+            let retains = target.admission_started_at.is_none();
+            if retains {
+                self.retain_engram_bind(&target, &request)?;
+            }
             let result = target
                 .adapter
-                .request(
-                    &target.connection,
-                    &request,
-                    target.rpc_timeout_until(binding_deadline)?,
-                )
+                .request(&target.connection, &request, timeout)
                 .and_then(parse_engram_result::<EngramSessionBindingResponse>)
+                .and_then(|binding| {
+                    engram_validated_bind_answer(binding, &target.connection.session_id)
+                })
                 .map_err(|mut error| {
                     error.causal_failure = Some(EngramCausalFailure::request(&error, &request));
                     error
                 });
+            if retains {
+                self.settle_retained_engram_bind(&target.connection.session_id, &request, &result);
+            }
             if let Some(owner) = owner {
                 self.require_queued_engram_owner(
                     &target.connection.session_id,

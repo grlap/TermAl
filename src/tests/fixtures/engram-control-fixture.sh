@@ -369,7 +369,7 @@ while IFS= read -r line; do
       exit 0
       ;;
     fixture-tree-reply)
-      printf '%s\n' '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready"}}}'
+      printf '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready","session_id":"%s"}}}\n' "$session_id"
       ;;
     fixture-malformed)
       printf '%s\n' '{"status":'
@@ -396,7 +396,7 @@ while IFS= read -r line; do
             if [ "$existing_intent" != "$intent" ]; then
               write_error control_session_bind_conflict 'session_bind idempotency key was reused for a different intent'
             else
-              printf '{"status":"ok","result":{"routing_token":"%s","status":{"phase":"sync_required"}}}\n' "$existing_token"
+              printf '{"status":"ok","result":{"routing_token":"%s","status":{"phase":"sync_required","session_id":"%s"}}}\n' "$existing_token" "$session_id"
             fi
             continue
           fi
@@ -409,7 +409,7 @@ while IFS= read -r line; do
           routing_token="fixture-token-$bind_count"
           seen_bind_rows="${seen_bind_rows}
 $key|$intent|$routing_token"
-          printf '{"status":"ok","result":{"routing_token":"%s","status":{"phase":"sync_required"}}}\n' "$routing_token"
+          printf '{"status":"ok","result":{"routing_token":"%s","status":{"phase":"sync_required","session_id":"%s"}}}\n' "$routing_token" "$session_id"
           ;;
         session_status)
           if [ -n "$begun_grant" ]; then
@@ -574,7 +574,7 @@ $key|$intent|checkpointed||$grant"
       case "$line" in
         *'"operation":"session_bind"'*)
           if printf '%s' "$line" | grep -q '"assurance":"turn_gated"'; then
-            printf '%s\n' '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready"}}}'
+            printf '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready","session_id":"%s"}}}\n' "$session_id"
           else
             write_error invalid_assurance 'fixture requires turn_gated assurance'
           fi

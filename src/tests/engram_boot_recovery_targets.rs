@@ -178,7 +178,7 @@ impl EngramControlTransport for RecordingBootRecoveryTransport {
             }
             "session_bind" => Ok(json!({
                 "routing_token": format!("recovered-{}", connection.session_id),
-                "status": { "phase": "sync_required" }
+                "status": { "phase": "sync_required", "session_id": connection.session_id }
             })),
             other => Err(EngramTransportError::protocol(format!(
                 "unexpected boot recovery operation: {other}"

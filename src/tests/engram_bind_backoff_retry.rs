@@ -38,8 +38,18 @@ fn bind_real_settings_reset_case(withdrawal: bool, mailbox_coalescing: Option<bo
         responses.extend([bind_reply("initial-parent"), bind_reply("initial-child"),
             grant_reply("initial-grant"), begin_reply("initial-grant"), checkpoint_reply("initial-grant")]);
     }
+    responses.push(bind_failure());
+    // Only here does the reset's own fresh bind, sent outside queued admission
+    // (the withdrawn dispatch sent none), take that lost answer while a head
+    // survives to be drained: the head's admission first sends the lost bind
+    // again, identically (`engram_bind_retention.rs`), and that replay is
+    // answered before the head's own bind.
+    let replays_lost_bind = withdrawal && mailbox_coalescing == Some(true);
+    if replays_lost_bind {
+        responses.push(bind_reply("replayed-reset-bind"));
+    }
     responses.extend([
-        bind_failure(), bind_reply("reset-bind"), bind_reply("recovered-bind"),
+        bind_reply("reset-bind"), bind_reply("recovered-bind"),
         grant_reply("recovered-grant"), begin_reply("recovered-grant"),
     ]);
     let (mut state, mut session, receiver, transport) = root_fixture(responses);
@@ -225,6 +235,16 @@ fn bind_real_settings_reset_case(withdrawal: bool, mailbox_coalescing: Option<bo
         }
     });
     assert_eq!(transport.requests().iter().filter(|request| request.request["operation"] == "turn_begin").count(), usize::from(delegation_child));
+    if replays_lost_bind {
+        let binds: Vec<_> = transport.requests().into_iter()
+            .filter(|recorded| recorded.connection.session_id == session
+                && recorded.request["operation"] == "session_bind")
+            .collect();
+        assert!(binds.len() >= 3 && binds[0].request == binds[1].request
+            && binds[0].connection == binds[1].connection
+            && binds[2].request["idempotency_key"] != binds[0].request["idempotency_key"],
+            "the reset's lost bind is sent again identically, on the same connection, before the drained head's own bind: {binds:#?}");
+    }
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
     assert!(!record.engram.project_reset_in_progress);

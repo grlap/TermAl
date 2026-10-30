@@ -297,7 +297,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             exit 0
         }
         if ($mode -eq "fixture-tree-reply") {
-            Write-Result @{ routing_token = $routingToken; status = @{ phase = "ready" } }
+            Write-Result @{ routing_token = $routingToken; status = @{ phase = "ready"; session_id = $sessionId } }
             continue
         }
         [void][Console]::In.ReadLine()
@@ -323,7 +323,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             Write-ControlError "invalid_request" "fixture only accepts session_bind"
             continue
         }
-        Write-Result @{ routing_token = $routingToken; status = @{ phase = "ready" } }
+        Write-Result @{ routing_token = $routingToken; status = @{ phase = "ready"; session_id = $sessionId } }
         continue
     }
 
@@ -340,7 +340,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                 if ($seenBindIntents[$key] -ne $intent) {
                     Write-ControlError "control_session_bind_conflict" "session_bind idempotency key was reused for a different intent"
                 } else {
-                    Write-Result @{ routing_token = $seenBindTokens[$key]; status = @{ phase = "sync_required" } }
+                    Write-Result @{ routing_token = $seenBindTokens[$key]; status = @{ phase = "sync_required"; session_id = $sessionId } }
                 }
                 continue
             }
@@ -355,7 +355,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             $routingToken = "fixture-token-$bindCount"
             $seenBindIntents[$key] = $intent
             $seenBindTokens[$key] = $routingToken
-            Write-Result @{ routing_token = $routingToken; status = @{ phase = "sync_required" } }
+            Write-Result @{ routing_token = $routingToken; status = @{ phase = "sync_required"; session_id = $sessionId } }
         }
         "session_status" {
             $status = @{ phase = if ($begunGrant -or $issuedGrant) { "turn_open" } else { "ready" } }

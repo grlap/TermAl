@@ -1790,6 +1790,35 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
     assert!(root_rx.try_recv().is_err(), "never handed off");
 }
 
+/// The session's bind sent outside queued admission whose answer was lost is
+/// sent again as the identical request before anything else binds the
+/// session (`engram_bind_retention.rs`): the same key and intent, on the same
+/// connection, which carries the project's Engram settings. Returns its key.
+fn assert_lost_bind_replayed_identically(
+    transport: &ScriptedEngramControlTransport,
+    session: &str,
+) -> String {
+    let binds: Vec<RecordedEngramControlRequest> = transport
+        .requests()
+        .into_iter()
+        .filter(|recorded| {
+            recorded.connection.session_id == session
+                && recorded.request["operation"] == "session_bind"
+        })
+        .collect();
+    let pair = binds
+        .windows(2)
+        .find(|pair| pair[0].request == pair[1].request)
+        .unwrap_or_else(|| {
+            panic!("a lost bind is sent again as the identical request: {binds:#?}")
+        });
+    assert_eq!(pair[0].connection, pair[1].connection, "on the same connection");
+    pair[0].request["idempotency_key"]
+        .as_str()
+        .expect("a bind names its key")
+        .to_owned()
+}
+
 #[test]
 fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
     for child in [false, true] {
@@ -1806,7 +1835,11 @@ fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
             )));
             if child && lost_bind {
                 // The first child bind is eager setup, before a queue record
-                // exists. Lose the queued retry too so this case owns durable
+                // exists, and its lost answer leaves it unresolved: the queued
+                // admission first sends it again, identically
+                // (`engram_bind_retention.rs`), and that replay is answered.
+                replies.push(bind_reply("replayed-child"));
+                // Lose the queued retry too so this case owns durable
                 // retained bind input rather than only a backoff/wait flag.
                 replies.push(ScriptedEngramControlResponse::Reply(Err(
                     EngramTransportError::deadline("lost queued bind"),
@@ -1864,6 +1897,9 @@ fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
                     serde_json::to_value((&queued.engram_bind, &queued.engram_evaluate)).unwrap(),
                 )
             };
+            if child && lost_bind {
+                assert_lost_bind_replayed_identically(&transport, &session);
+            }
             let requests_before = transport.requests().len();
             assert_eq!(
                 state
@@ -1929,9 +1965,12 @@ const LATE_CHILD_ADMISSION: Duration = Duration::from_millis(1_100);
 /// scheduler before its fixture moved to the scripted clock.
 #[test]
 fn a_late_child_admission_on_real_time_outlives_the_bind_backoff_and_delivers() {
-    let (state, parent, receiver, _transport) = root_fixture_on_real_clock([
+    let (state, parent, receiver, transport) = root_fixture_on_real_clock([
         bind_reply("parent"),
         ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline("lost reply"))),
+        // The lost eager bind is sent again, identically, before the child's
+        // admission binds (`engram_bind_retention.rs`).
+        bind_reply("replayed-child"),
         rebind_reply("child"),
         grant_reply("retry"),
         begin_reply("retry"),
@@ -1970,6 +2009,7 @@ fn a_late_child_admission_on_real_time_outlives_the_bind_backoff_and_delivers() 
         receiver.try_recv().unwrap(),
         CodexRuntimeCommand::Prompt { .. }
     ));
+    assert_lost_bind_replayed_identically(&transport, &child);
 }
 
 #[test]
@@ -1998,6 +2038,14 @@ fn held_child_initial_and_followup_authorization_survive_polling_then_resume() {
                     "lost reply",
                 )))
             });
+            if failure == "bind" && !followup {
+                // The lost answer is the eager bind's, sent outside queued
+                // admission: the admission first sends it again, identically
+                // (`engram_bind_retention.rs`), and that replay is answered.
+                // With a follow-up the lost answer is the queued admission's
+                // own bind, which its queue keeps instead.
+                responses.push(bind_reply("replayed-child"));
+            }
             if failure == "bind" {
                 responses.push(rebind_reply("child"));
             }
@@ -2132,6 +2180,10 @@ fn held_child_initial_and_followup_authorization_survive_polling_then_resume() {
                     .take(2)
                     .collect::<Vec<_>>();
                 assert_eq!(matching[0].request, matching[1].request, "exact replay");
+            }
+            if failure == "bind" && !followup {
+                drop(inner);
+                assert_lost_bind_replayed_identically(&transport, &child);
             }
         }
     }

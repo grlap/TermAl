@@ -3171,10 +3171,19 @@ impl AppState {
                             record.engram.begins_recorded,
                         )
                     });
-                    let carried_lines = EngramHost::carried_checks_reset_lines(
+                    let mut carried_lines = EngramHost::carried_checks_reset_lines(
                         record,
                         "its project's Engram settings changed before it settled",
                     );
+                    // A bind whose answer was lost is not replayed under the
+                    // new settings: it is dropped below, unresolved, and told
+                    // (`engram_bind_retention.rs`).
+                    if let Some(retained) = &record.engram.retained_bind {
+                        carried_lines.push(engram_retained_bind_abandoned_line(
+                            retained,
+                            "the project's Engram settings changed",
+                        ));
+                    }
                     // Configuration reset cannot release deletion recovery or
                     // the live guard that still owns an off-lock capture. The
                     // worktree its workdir resolved to stays, keyed by that
@@ -5112,6 +5121,14 @@ impl AppState {
                         record,
                         "its project was removed before it settled",
                     ) {
+                        eprintln!("engram> session={} {line}", record.session.id);
+                    }
+                    // A bind whose answer was lost is dropped unresolved with
+                    // the rest of the session's Engram state, and logged
+                    // (`engram_bind_retention.rs`).
+                    if let Some(retained) = &record.engram.retained_bind {
+                        let line =
+                            engram_retained_bind_abandoned_line(retained, "its project was removed");
                         eprintln!("engram> session={} {line}", record.session.id);
                     }
                     // The original session still owns recovery and any capture

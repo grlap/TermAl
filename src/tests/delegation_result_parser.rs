@@ -822,7 +822,7 @@ Findings:\n\
 }
 
 #[test]
-fn delegation_result_packet_note_names_the_first_declared_severity() {
+fn delegation_result_packet_note_names_the_highest_in_a_non_clean_sentence() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\n\
 Status: completed\n\n\
@@ -835,7 +835,7 @@ Findings:\n\
 
     assert!(parsed.findings.is_empty());
     assert_eq!(parsed.notes.len(), 1);
-    assert!(parsed.notes[0].contains("declared severity: Low"));
+    assert!(parsed.notes[0].contains("declared severity: High"));
 }
 
 #[test]
