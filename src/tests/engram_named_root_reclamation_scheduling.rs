@@ -8,11 +8,14 @@ struct WarmRequestGate {
     session: String,
     release: Option<std::sync::mpsc::Sender<()>>,
     worker: Option<std::thread::JoinHandle<Option<(u32, bool)>>>,
+    observed_wire: mpsc::Receiver<()>,
 }
 
 impl WarmRequestGate {
     fn install(reader: Arc<ColdStartRootReader>, session: &str) -> Self {
-        let original = reader.process.processes.lock().unwrap()[session].clone();
+        let original = reader.process.processes.lock().unwrap()[session]
+            .clone()
+            .unwrap();
         let (requests, queued) = std::sync::mpsc::channel::<EngramProcessRequest>();
         let proxy = Arc::new(EngramControlProcess {
             config: original.config.clone(),
@@ -20,13 +23,25 @@ impl WarmRequestGate {
             process_tree: original.process_tree.clone(),
             requests,
             worker_finished: original.worker_finished.clone(),
+            retiring: AtomicBool::new(false),
+            cleanup_finished: original.cleanup_finished.clone(),
         });
         let (release, released) = std::sync::mpsc::channel();
         let (ready, waiting) = std::sync::mpsc::channel();
+        let (observed_wire, observed) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             ready.send(()).unwrap();
-            let Ok(request) = queued.recv() else { return None };
-            let observed = (original.process.id(), original.process.try_wait().unwrap().is_none());
+            let Ok(request) = queued.recv() else {
+                return None;
+            };
+            if request.request.is_none() {
+                return None;
+            }
+            let observed = (
+                original.process.id(),
+                original.process.try_wait().unwrap().is_none(),
+            );
+            observed_wire.send(()).unwrap();
             // The caller must return before this queue can advance. There is
             // no sleep or CPU load, and the call retains its original budget.
             released.recv_timeout(DEADLOCK_GUARD).unwrap();
@@ -38,8 +53,14 @@ impl WarmRequestGate {
             session: session.to_owned(),
             release: Some(release),
             worker: Some(worker),
+            observed_wire: observed,
         };
-        gate.reader.process.processes.lock().unwrap().insert(session.to_owned(), proxy);
+        gate.reader
+            .process
+            .processes
+            .lock()
+            .unwrap()
+            .insert(session.to_owned(), Some(proxy));
         waiting.recv_timeout(DEADLOCK_GUARD).unwrap();
         gate
     }
@@ -53,39 +74,107 @@ impl WarmRequestGate {
 
 impl Drop for WarmRequestGate {
     fn drop(&mut self) {
-        if let Some(release) = self.release.take() { let _ = release.send(()); }
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
         self.reader.process.shutdown_session(&self.session);
-        if let Some(worker) = self.worker.take() { let _ = worker.join(); }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
 #[test]
 fn named_root_reclamation_completed_selection_does_not_depend_on_warm_process_scheduling() {
-    let (claimed, entry) = settled_root("reclaim-warm-scheduling", "completed");
-    let home = claimed.state.test_temp_root.as_ref().unwrap().path().to_path_buf();
-    let proof = claimed.transport.named_roots.lock().unwrap().as_ref().unwrap()
-        .root_reads[&entry.claim_id].clone();
-    fs::write(home.join("root-lifecycle-read.json"), serde_json::to_vec(&proof).unwrap()).unwrap();
-    let reader = Arc::new(ColdStartRootReader {
-        process: ProcessEngramControlTransport::with_startup_handshake(
-            home.clone(), "termal-engram-control-fixture-ready", DEADLOCK_GUARD),
-        control: claimed.transport.clone(), home, attempts: Mutex::new(0),
-    });
-    install_control_only_transport(&claimed.state, reader.clone());
-    claimed.state.run_engram_root_reclamation_pass(reclamation_plan(&claimed));
-    assert_root_retained(&claimed, &entry);
-    let gate = WarmRequestGate::install(reader.clone(), &claimed.session_id);
-    claimed.state.engram_budget_clock().advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
-    claimed.state.run_engram_root_reclamation_pass(reclamation_plan(&claimed));
-    let (retained, reason, published) = {
-        let inner = claimed.state.inner.lock().unwrap();
-        let history = &inner.engram_work_naming_history[0];
-        (inner.engram_work_source_roots.contains(&entry), history.recovery_reason.clone(),
-            history.retirements.iter().any(|notice| notice.published))
-    };
-    let intercepted = gate.finish();
-    assert_eq!(*reader.attempts.lock().unwrap(), 2);
-    assert!(!retained, "a completed selection must not depend on a real warm fixture reply: {reason:?}");
-    assert!(published);
-    assert!(intercepted.is_none(), "the warm lifecycle proof must not enter the OS request queue");
+    for inject_wire in [false, true] {
+        let (claimed, entry) = settled_root("reclaim-warm-scheduling", "completed");
+        let home = claimed
+            .state
+            .test_temp_root
+            .as_ref()
+            .unwrap()
+            .path()
+            .to_path_buf();
+        let proof = claimed
+            .transport
+            .named_roots
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .root_reads[&entry.claim_id]
+            .clone();
+        fs::write(
+            home.join("root-lifecycle-read.json"),
+            serde_json::to_vec(&proof).unwrap(),
+        )
+        .unwrap();
+        let reader = Arc::new(ColdStartRootReader {
+            process: ProcessEngramControlTransport::with_startup_handshake(
+                home.clone(),
+                "termal-engram-control-fixture-ready",
+                DEADLOCK_GUARD,
+            ),
+            control: claimed.transport.clone(),
+            home,
+            attempts: Mutex::new(0),
+        });
+        install_control_only_transport(&claimed.state, reader.clone());
+        claimed
+            .state
+            .run_engram_root_reclamation_pass(reclamation_plan(&claimed));
+        assert_root_retained(&claimed, &entry);
+        let gate = WarmRequestGate::install(reader.clone(), &claimed.session_id);
+        claimed
+            .state
+            .engram_budget_clock()
+            .advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
+        claimed
+            .state
+            .run_engram_root_reclamation_pass(reclamation_plan(&claimed));
+        let (retained, reason, published) = {
+            let inner = claimed.state.inner.lock().unwrap();
+            let history = &inner.engram_work_naming_history[0];
+            (
+                inner.engram_work_source_roots.contains(&entry),
+                history.recovery_reason.clone(),
+                history.retirements.iter().any(|notice| notice.published),
+            )
+        };
+        assert_eq!(*reader.attempts.lock().unwrap(), 2);
+        assert!(
+            !retained,
+            "a completed selection must not depend on a real warm fixture reply: {reason:?}"
+        );
+        assert!(published);
+        // Positive control on the same warm process and queue: an actual wire
+        // frame must still be intercepted. The local None shutdown wake above
+        // must not hide Some(frame), even when the real worker cannot advance.
+        if inject_wire {
+            let (reply, _response) = mpsc::channel();
+            reader.process.processes.lock().unwrap()[&claimed.session_id]
+                .as_ref()
+                .unwrap()
+                .requests
+                .send(EngramProcessRequest {
+                    request: Some(br#"{"operation":"named_root_read"}"#.to_vec()),
+                    reply,
+                })
+                .unwrap();
+            gate.observed_wire.recv_timeout(DEADLOCK_GUARD).unwrap();
+        }
+        let intercepted = gate.finish();
+        if inject_wire {
+            let (_, alive) = intercepted.expect("the real wire frame must enter the queue");
+            assert!(
+                alive,
+                "the positive queue witness retains the real warm child"
+            );
+        } else {
+            assert!(
+                intercepted.is_none(),
+                "the warm lifecycle proof must not enter the OS request queue"
+            );
+        }
+    }
 }

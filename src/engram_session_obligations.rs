@@ -784,6 +784,17 @@ fn engram_checkpoint_report_is_inactive(
     entry: &EngramSessionObligation,
     promoted_local_turn: Option<u64>,
 ) -> bool {
+    engram_checkpoint_report_is_inactive_for_save(inner, entry, promoted_local_turn, None)
+}
+
+// Generic callers always pass None above. Only the final same-authority Save
+// supplies already validated evidence for its own inspection reservation.
+fn engram_checkpoint_report_is_inactive_for_save(
+    inner: &StateInner,
+    entry: &EngramSessionObligation,
+    promoted_local_turn: Option<u64>,
+    inspection: Option<&EngramAbsentSessionEvidence>,
+) -> bool {
     let needs_original = match (entry.kind, entry.basis) {
         (EngramSessionObligationKind::ExistingCheckpoint,
             EngramSessionObligationBasis::ExistingCheckpoint) => true,
@@ -822,7 +833,8 @@ fn engram_checkpoint_report_is_inactive(
     }
     inner.find_session_index(&entry.local_session_id).is_none_or(|index| {
         let record = &inner.sessions[index];
-        !record.engram.checkpoint_in_progress
+        (!record.engram.checkpoint_in_progress
+            || inspection.is_some_and(|proof| proof.owns_checkpoint_reservation_for(inner, entry)))
             && record.engram.active_grant_id.as_ref().is_none_or(|grant| {
                 grant == &entry.grant_id
                     && record.engram.routing_token.as_deref() == Some(entry.routing_token.as_str())

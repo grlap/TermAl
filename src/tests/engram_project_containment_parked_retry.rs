@@ -165,7 +165,7 @@ fn project_containment_consumes_exact_parked_retry_and_stale_due_tick_delivers_n
         state.run_engram_retry_attempt(
             EngramDueRetry {
                 session_id: session.clone(),
-                owner,
+                owner: owner.into(),
                 kind,
                 due_at,
             },

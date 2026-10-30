@@ -1657,7 +1657,7 @@ struct EngramProjectResetFences {
     /// When each held fence was claimed, for the waiting reason a fenced
     /// session shows (`engram_project_reset_wait.rs`). In memory only, one
     /// entry per held fence.
-    claimed_at: HashMap<String, chrono::DateTime<chrono::Utc>>,
+    claimed_at: HashMap<String, EngramProjectResetClaim>,
 }
 
 impl EngramProjectResetFences {
@@ -1665,21 +1665,25 @@ impl EngramProjectResetFences {
         self.owners.contains_key(project_id)
     }
 
+    #[cfg(test)]
     fn claim(&mut self, project_id: &str) -> Option<u64> {
+        self.claim_with_clock(project_id, EngramBudgetClock::default(), false)
+    }
+
+    fn claim_with_clock(&mut self, project_id: &str, clock: EngramBudgetClock, bounded: bool) -> Option<u64> {
         if self.contains(project_id) {
             return None;
         }
         self.next_generation = self.next_generation.wrapping_add(1).max(1);
         let generation = self.next_generation;
         self.owners.insert(project_id.to_owned(), generation);
-        self.claimed_at
-            .insert(project_id.to_owned(), chrono::Utc::now());
+        self.claimed_at.insert(project_id.to_owned(), EngramProjectResetClaim::new(generation, clock, bounded));
         Some(generation)
     }
 
     /// When the fence held for `project_id` was claimed, if one is held.
     fn claimed_at(&self, project_id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-        self.claimed_at.get(project_id).copied()
+        self.claimed_at.get(project_id).map(|claim| claim.claimed_at)
     }
 
     fn is_owned_by(&self, project_id: &str, generation: u64) -> bool {
@@ -2276,6 +2280,9 @@ struct SessionRecord {
     /// prevents a stale Stop/revocation completion from releasing a newer
     /// owner's fence after the runtime has been replaced.
     runtime_stop_owner: Option<RuntimeStopOwner>,
+    /// Live pending/in-flight original provider interruption after tier OFF.
+    /// Its persisted containment obligation remains the crash-recovery owner.
+    engram_containment_stop: Option<EngramDeferredStop>,
     runtime_stop_generation: u64,
     /// In memory: advanced by every pause of the queue, from any source, so a
     /// Resume's continuation bound to the pause it crossed is ended by a later
@@ -2308,6 +2315,8 @@ struct SessionRecord {
     /// Suppresses duplicate first-use retry workers after eager boot recovery
     /// exhausts its wall-clock budget. Process-local and never persisted.
     engram_boot_recovery_retry_in_progress: bool,
+    /// Runtime scheduling of the existing queue head; never command custody.
+    engram_queue_schedule: EngramQueueSchedule,
     hidden: bool,
     session: Session,
     /// Monotonic mutation stamp assigned by [`StateInner::next_mutation_stamp`]

@@ -177,19 +177,42 @@ struct EngramAbsentSessionEvidence {
     target: EngramBindingTarget,
     dispatch_generation: u64,
     active_turn_generation: u64,
+    // Present only for the bounded reset's returned canonical invocation.
+    // This is inspection custody, never a checkpoint settlement receipt.
+    checkpoint: Option<EngramCheckpointOperation>,
 }
 
 impl EngramAbsentSessionEvidence {
     // Pure in-memory validation: callers may hold the global state mutex.
     // current.settings equality also fences the persisted authority_store_key.
     fn validate_locked(&self, inner: &StateInner) -> Result<(), ApiError> {
-        let generations = validate_engram_absence_target_locked(inner, &self.target)?;
+        let generations = validate_engram_absence_target_locked(
+            inner, &self.target, self.checkpoint.as_ref(),
+        )?;
         if generations != (self.dispatch_generation, self.active_turn_generation) {
             return Err(ApiError::conflict(
                 "Engram inspection target generation changed",
             ));
         }
+        if let Some(operation) = &self.checkpoint {
+            validate_completed_absence_checkpoint_locked(inner, &self.target, operation, true)?;
+        }
         Ok(())
+    }
+
+    fn owns_checkpoint_reservation_for(
+        &self,
+        inner: &StateInner,
+        entry: &EngramSessionObligation,
+    ) -> bool {
+        self.checkpoint.as_ref().is_some_and(|operation| {
+            entry.kind == EngramSessionObligationKind::ExistingCheckpoint
+                && serde_json::to_value(entry).is_ok_and(|entry| {
+                    serde_json::to_value(&operation.protection)
+                        .is_ok_and(|protection| entry == protection)
+                })
+                && self.validate_locked(inner).is_ok()
+        })
     }
 
     fn validate_store_off_lock(&self) -> Result<(), ApiError> {
@@ -242,6 +265,16 @@ fn validate_engram_absence_store(target: &EngramBindingTarget) -> Result<(), Api
 fn validate_engram_absence_target_locked(
     inner: &StateInner,
     target: &EngramBindingTarget,
+    checkpoint: Option<&EngramCheckpointOperation>,
+) -> Result<(u64, u64), ApiError> {
+    validate_engram_absence_reservation_locked(inner, target, true, checkpoint)
+}
+
+fn validate_engram_absence_reservation_locked(
+    inner: &StateInner,
+    target: &EngramBindingTarget,
+    reserved: bool,
+    checkpoint: Option<&EngramCheckpointOperation>,
 ) -> Result<(u64, u64), ApiError> {
     let refuse = || {
         ApiError::conflict(
@@ -249,14 +282,49 @@ fn validate_engram_absence_target_locked(
         )
     };
     let owner = target.project_reset_owner_generation.ok_or_else(refuse)?;
-    let current = project_engram_binding_target_during_owned_reset_locked(
-        inner,
-        &target.connection.session_id,
-        &target.project_id,
-        owner,
-    )
-    .map_err(|_| refuse())?
-    .ok_or_else(refuse)?;
+    if !inner.engram_project_resets.is_owned_by(&target.project_id, owner) {
+        return Err(refuse());
+    }
+    let current = if let Some(expected) = checkpoint {
+        // An original checkpoint deliberately excludes generic admission.
+        // Inspect only its frozen recovery target; never lend that target to
+        // ordinary binding or erase its exclusion to obtain a fresh target.
+        inner.require_delegation_inventory().map_err(|_| refuse())?;
+        let view = EngramCheckpointRecoveryView::capture(inner, &target.connection.session_id)
+            .ok_or_else(refuse)?;
+        let (actor_id, actor_context) = engram_runtime_actor_identity(
+            &inner.preferences.engram.developer_name, view.record,
+        );
+        let same_checkpoint = matches!(
+            (serde_json::to_value(view.operation), serde_json::to_value(expected)),
+            (Ok(current), Ok(expected)) if current == expected
+        );
+        let competing_exclusion = inner.engram_session_obligations.all_protections().any(|entry| {
+            engram_obligation_requires_exclusion(inner, entry)
+                && engram_obligation_matches_session(inner, entry, &target.connection.session_id)
+                && (entry.kind != EngramSessionObligationKind::ExistingCheckpoint
+                    || entry.id != expected.original.id
+                    || !matches!(
+                        (serde_json::to_value(entry), serde_json::to_value(&expected.protection)),
+                        (Ok(entry), Ok(protection)) if entry == protection
+                    ))
+        });
+        if !same_checkpoint
+            || competing_exclusion
+            || view.project.engram.as_ref() != Some(&target.settings)
+            || view.operation.original.connection.actor_id != actor_id
+            || view.operation.original.connection.actor_context != actor_context
+            || view.operation.protection.external_ref != target.external_ref
+            || view.effects != target.effects
+        {
+            return Err(refuse());
+        }
+        view.transport_target(inner)
+    } else {
+        project_engram_binding_target_during_owned_reset_locked(
+            inner, &target.connection.session_id, &target.project_id, owner,
+        ).map_err(|_| refuse())?.ok_or_else(refuse)?
+    };
     if current.project_id != target.project_id
         || current.connection != target.connection
         || current.settings != target.settings
@@ -274,8 +342,8 @@ fn validate_engram_absence_target_locked(
     if record.session.status != SessionStatus::Error
         || !matches!(record.runtime, SessionRuntime::None)
         || !record.engram.project_reset_in_progress
-        || !record.engram.checkpoint_in_progress
-        || record.engram.checkpoint_owner_generation != Some(owner)
+        || record.engram.checkpoint_in_progress != reserved
+        || record.engram.checkpoint_owner_generation != reserved.then_some(owner)
         || record.engram.bind_in_progress
         || record.engram.pending_dispatch.is_some()
     {
@@ -287,17 +355,112 @@ fn validate_engram_absence_target_locked(
     ))
 }
 
+// Only the exact returned canonical invocation may lend its now-free slot
+// to inspection. An Unknown checkpoint remains Unknown through this transfer.
+fn validate_completed_absence_checkpoint_locked(
+    inner: &StateInner,
+    target: &EngramBindingTarget,
+    expected: &EngramCheckpointOperation,
+    reserved: bool,
+) -> Result<(), ApiError> {
+    let refuse = || {
+        ApiError::conflict(
+            "Engram absence inspection lost its completed checkpoint identity or exclusive reservation",
+        )
+    };
+    let generations = validate_engram_absence_reservation_locked(
+        inner, target, reserved, Some(expected),
+    )?;
+    let record = &inner.sessions[inner
+        .find_session_index(&target.connection.session_id)
+        .ok_or_else(refuse)?];
+    let current = record
+        .engram
+        .checkpoint_operation
+        .as_ref()
+        .and_then(|mirror| selected_checkpoint_operation(&inner.engram_session_obligations, mirror))
+        .ok_or_else(refuse)?;
+    let original = &current.original;
+    let request_matches = matches!(&original.request,
+        EngramControlRequest::TurnCheckpoint { routing_token, grant_id, next_intent: EngramNextIntent::Exit, .. }
+            if Some(routing_token) == target.routing_token.as_ref()
+                && Some(grant_id) == target.active_grant_id.as_ref());
+    let same_checkpoint = matches!((serde_json::to_value(current), serde_json::to_value(expected)),
+        (Ok(current), Ok(expected)) if current == expected);
+    if !same_checkpoint
+        || original.connection != target.connection
+        || original.settings != target.settings
+        || original.authority != engram_abort_authority(target)
+        || original.work_binding != target.work_binding
+        || original.checkpoint_owner_generation != target.project_reset_owner_generation
+        || (
+            original.dispatch_generation,
+            original.active_turn_generation,
+        ) != generations
+        || !request_matches
+        || matches!(
+            current.progress,
+            EngramExistingCheckpointProgress::Accepted { .. }
+        )
+        || current.protection.phase == EngramSessionObligationPhase::Confirmed
+        || current.attempts.last().is_none_or(|attempt| {
+            (attempt.dispatch_generation, attempt.active_turn_generation) != generations
+                || attempt.runtime_episode != format!("{:?}", record.runtime.runtime_token())
+                || !matches!(&attempt.result,
+                    Some(EngramCheckpointAttemptResult::Unknown { code })
+                        if code.as_deref() == Some("control_session_not_bound"))
+        })
+        || inner
+            .engram_pending_checkpoint_receipts
+            .entries
+            .keys()
+            .any(|(id, _)| id == &original.id)
+        || record.engram.checkpoint_status_owner.is_some()
+        || record.engram.source_root_bind_owner.is_some()
+        || record.engram.admission_in_progress.is_some()
+        || record.runtime_stop_in_progress
+    {
+        return Err(refuse());
+    }
+    Ok(())
+}
+
 impl AppState {
     fn inspect_absent_engram_reset_session(
         &self,
         target: &EngramBindingTarget,
         deadline: std::time::Instant,
     ) -> Result<EngramAbsentSessionEvidence, ApiError> {
+        self.inspect_absent_engram_reset_session_with_checkpoint(target, deadline, None)
+    }
+
+    fn inspect_absent_engram_reset_session_with_checkpoint(
+        &self,
+        target: &EngramBindingTarget,
+        deadline: std::time::Instant,
+        checkpoint: Option<&EngramCheckpointOperation>,
+    ) -> Result<EngramAbsentSessionEvidence, ApiError> {
         validate_engram_absence_deadline(deadline)?;
         validate_engram_absence_executable(&target.connection.binary_path)?;
         let (dispatch_generation, active_turn_generation) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            validate_engram_absence_target_locked(&inner, target)?
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(operation) = checkpoint {
+                validate_completed_absence_checkpoint_locked(&inner, target, operation, false)?;
+                let index = inner
+                    .find_session_index(&target.connection.session_id)
+                    .expect("validated absence target");
+                if !inner
+                    .session_mut_by_index(index)
+                    .expect("absence target")
+                    .engram
+                    .begin_checkpoint(target.project_reset_owner_generation)
+                {
+                    return Err(ApiError::conflict(
+                        "Engram absence inspection slot is occupied",
+                    ));
+                }
+            }
+            validate_engram_absence_target_locked(&inner, target, checkpoint)?
         };
         validate_engram_absence_store(target)?;
         let connection = &target.connection;
@@ -350,6 +513,7 @@ impl AppState {
             target: target.clone(),
             dispatch_generation,
             active_turn_generation,
+            checkpoint: checkpoint.cloned(),
         };
         evidence.validate_store_off_lock()?;
         validate_engram_absence_deadline(deadline)?;

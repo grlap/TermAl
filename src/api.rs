@@ -1827,6 +1827,11 @@ async fn update_project_engram_settings(
 ) -> Result<Json<StateResponse>, ApiError> {
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("Engram project settings", rejection))?;
+    if let Some(progress) = state.engram_project_reset_progress(&project_id)? {
+        let mut error = ApiError::conflict("Engram project settings are already being reset");
+        error.project_reset = Some(progress);
+        return Err(error);
+    }
     // Disable skips readiness admission; retained control duties still fence
     // connection changes in the settings transaction.
     let permit = if request.enabled {

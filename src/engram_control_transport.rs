@@ -19,6 +19,24 @@ struct EngramControlProcessEvidence {
     exit_state: String,
 }
 
+fn engram_control_cleanup_pending() -> EngramTransportError {
+    let mut error = EngramTransportError::local_state(
+        "Previous Engram control cleanup is unconfirmed; its exact process remains retained",
+    );
+    error.code = Some("control_cleanup_pending".to_owned());
+    // The old child exists; only this successor request is provably unsent.
+    error.process_never_started = false;
+    error.request_never_sent = true;
+    error
+}
+
+fn engram_control_start_pending() -> EngramTransportError {
+    let mut error = engram_control_cleanup_pending();
+    error.code = Some("control_start_pending".to_owned());
+    error.message = "Engram control startup is already owned by another request".to_owned();
+    error
+}
+
 fn observe_engram_control_process(process: &SharedChild) -> EngramControlProcessEvidence {
     let exit_state = match process.try_wait() {
         Ok(Some(status)) => format!("exited: {status}"),
@@ -32,7 +50,8 @@ fn observe_engram_control_process(process: &SharedChild) -> EngramControlProcess
 }
 
 struct EngramProcessRequest {
-    request: Vec<u8>,
+    /// None is an internal shutdown wake, never a wire frame.
+    request: Option<Vec<u8>>,
     reply: mpsc::Sender<std::result::Result<Value, EngramTransportError>>,
 }
 
@@ -42,9 +61,21 @@ struct EngramControlProcess {
     process_tree: Arc<EngramProcessTree>,
     requests: mpsc::Sender<EngramProcessRequest>,
     worker_finished: Arc<AtomicBool>,
+    retiring: AtomicBool,
+    cleanup_finished: Arc<AtomicBool>,
 }
 
 impl EngramControlProcess {
+    fn request_termination(&self) -> Result<()> {
+        self.retiring.store(true, Ordering::Release);
+        let (reply, _) = mpsc::channel();
+        let _ = self.requests.send(EngramProcessRequest {
+            request: None,
+            reply,
+        });
+        self.process_tree.terminate(&self.process)
+    }
+
     fn terminate(&self) {
         let _ = self.process_tree.terminate(&self.process);
         let _ = self.process.wait();
@@ -53,7 +84,13 @@ impl EngramControlProcess {
 
 impl Drop for EngramControlProcess {
     fn drop(&mut self) {
-        self.terminate();
+        // The control worker already owns this exact child and its reap. Drop
+        // may run on a deadline path; it must not turn that deadline into an
+        // unbounded wait. Registered retiring children keep successor admission
+        // closed until the worker publishes cleanup completion.
+        if !self.cleanup_finished.load(Ordering::Acquire) {
+            let _ = self.request_termination();
+        }
     }
 }
 
@@ -65,9 +102,13 @@ struct EngramControlStartupHandshake {
 
 struct ProcessEngramControlTransport {
     host_workdir: PathBuf,
-    processes: Mutex<HashMap<String, Arc<EngramControlProcess>>>,
+    // An occupied None reserves this session's cold start. Other sessions
+    // remain usable, and no caller spawns a losing, unregistered child.
+    processes: Mutex<HashMap<String, Option<Arc<EngramControlProcess>>>>,
     startup_handshake: Option<EngramControlStartupHandshake>,
     idle_timeout: Duration,
+    #[cfg(test)]
+    start_gate: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
 }
 
 impl ProcessEngramControlTransport {
@@ -77,6 +118,8 @@ impl ProcessEngramControlTransport {
             processes: Mutex::new(HashMap::new()),
             startup_handshake: None,
             idle_timeout: ENGRAM_CONTROL_IDLE_TIMEOUT,
+            #[cfg(test)]
+            start_gate: Mutex::new(None),
         }
     }
 }
@@ -96,6 +139,7 @@ impl ProcessEngramControlTransport {
                 timeout,
             }),
             idle_timeout: ENGRAM_CONTROL_IDLE_TIMEOUT,
+            start_gate: Mutex::new(None),
         }
     }
 
@@ -114,75 +158,116 @@ impl ProcessEngramControlTransport {
                 timeout: startup_timeout,
             }),
             idle_timeout,
+            start_gate: Mutex::new(None),
         }
     }
 
+    #[cfg(test)]
     fn process_for(
         &self,
         connection: &EngramConnectionConfig,
     ) -> std::result::Result<Arc<EngramControlProcess>, EngramTransportError> {
-        let stale = {
+        self.process_for_until(
+            connection,
+            std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT,
+        )
+    }
+
+    fn process_for_until(
+        &self,
+        connection: &EngramConnectionConfig,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<Arc<EngramControlProcess>, EngramTransportError> {
+        loop {
             let mut processes = self
                 .processes
                 .lock()
                 .expect("Engram process registry mutex poisoned");
-            if let Some(existing) = processes.get(&connection.session_id).cloned() {
+            let stale = if let Some(entry) = processes.get(&connection.session_id) {
+                let Some(existing) = entry.clone() else {
+                    drop(processes);
+                    if std::time::Instant::now() >= deadline {
+                        return Err(engram_control_start_pending());
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
                 if existing.config == *connection
                     && !existing.worker_finished.load(Ordering::Acquire)
+                    && !existing.retiring.load(Ordering::Acquire)
                 {
                     return Ok(existing);
                 }
-                processes.remove(&connection.session_id)
+                existing
             } else {
-                None
+                processes.insert(connection.session_id.clone(), None);
+                break;
+            };
+            drop(processes);
+            stale
+                .request_termination()
+                .map_err(|_| engram_control_cleanup_pending())?;
+            while !stale.cleanup_finished.load(Ordering::Acquire) {
+                if std::time::Instant::now() >= deadline {
+                    return Err(engram_control_cleanup_pending());
+                }
+                std::thread::sleep(Duration::from_millis(5));
             }
-        };
-        if let Some(stale) = stale {
-            stale.terminate();
+            let mut processes = self
+                .processes
+                .lock()
+                .expect("Engram process registry mutex poisoned");
+            if processes
+                .get(&connection.session_id)
+                .and_then(Option::as_ref)
+                .is_some_and(|current| Arc::ptr_eq(current, &stale))
+            {
+                processes.remove(&connection.session_id);
+            }
         }
 
-        let process = Arc::new(spawn_engram_control_process(
+        #[cfg(test)]
+        let start_gate = self.start_gate.lock().unwrap().take();
+        #[cfg(test)]
+        if let Some((entered, release)) = start_gate {
+            let _ = entered.send(());
+            let _ = release.recv_timeout(TEST_PHASE_DEADLOCK_GUARD);
+        }
+        // No registry or StateInner guard spans process creation/handshake.
+        let spawned = spawn_engram_control_process(
             connection,
             &self.host_workdir,
             self.startup_handshake,
             self.idle_timeout,
-        )?);
-        let (selected, displaced) = {
-            let mut processes = self
-                .processes
-                .lock()
-                .expect("Engram process registry mutex poisoned");
-            if let Some(existing) = processes.get(&connection.session_id).cloned()
-                && existing.config == *connection
-                && !existing.worker_finished.load(Ordering::Acquire)
-            {
-                (existing, Some(process))
-            } else {
-                let displaced = processes.insert(connection.session_id.clone(), process.clone());
-                (process, displaced)
+        );
+        let mut processes = self.processes.lock().expect("Engram process registry mutex poisoned");
+        match spawned {
+            Ok(process) => {
+                let process = Arc::new(process);
+                processes.insert(connection.session_id.clone(), Some(process.clone()));
+                Ok(process)
             }
-        };
-        if let Some(displaced) = displaced {
-            displaced.terminate();
+            Err(error) => {
+                processes.remove(&connection.session_id);
+                Err(error)
+            }
         }
-        Ok(selected)
     }
 
     fn discard_process(&self, session_id: &str, expected: &Arc<EngramControlProcess>) {
-        let removed = {
-            let mut processes = self
+        let retiring = {
+            let processes = self
                 .processes
                 .lock()
                 .expect("Engram process registry mutex poisoned");
             let should_remove = processes
                 .get(session_id)
+                .and_then(Option::as_ref)
                 .is_some_and(|current| Arc::ptr_eq(current, expected));
-            should_remove
-                .then(|| processes.remove(session_id))
-                .flatten()
+            should_remove.then(|| expected.clone())
         };
-        if let Some(process) = removed {
-            process.terminate();
+        if let Some(process) = retiring {
+            let _ = process.request_termination();
         }
     }
 }
@@ -216,13 +301,15 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         // process; none of them writes this request. A program that could
         // not be resolved at all already says its process never started
         // (`spawn_failed`), which keeps its own meaning.
-        let process = self.process_for(connection).map_err(|error| {
-            if error.process_never_started {
-                error
-            } else {
-                error.request_never_sent()
-            }
-        })?;
+        let process = self
+            .process_for_until(connection, started_at + timeout)
+            .map_err(|error| {
+                if error.process_never_started {
+                    error
+                } else {
+                    error.request_never_sent()
+                }
+            })?;
         if started_at.elapsed() >= timeout {
             // This request sent no frame. Leave the registered process for a
             // later request with a fresh budget; repeated cold starts could
@@ -236,7 +323,7 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         process
             .requests
             .send(EngramProcessRequest {
-                request: encoded,
+                request: Some(encoded),
                 reply: reply_tx,
             })
             .map_err(|err| {
@@ -275,10 +362,10 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let evidence = observe_engram_control_process(&process.process);
                 self.discard_process(&connection.session_id, &process);
-                Err(EngramTransportError::transport(
-                    "Engram control worker exited before replying",
+                Err(
+                    EngramTransportError::transport("Engram control worker exited before replying")
+                        .with_control_process(evidence),
                 )
-                .with_control_process(evidence))
             }
         }
     }
@@ -316,14 +403,69 @@ impl EngramControlTransport for ProcessEngramControlTransport {
     }
 
     fn shutdown_session(&self, session_id: &str) {
-        let process = self
-            .processes
-            .lock()
-            .expect("Engram process registry mutex poisoned")
-            .remove(session_id);
+        // Startup keeps its registry reservation until it publishes a child
+        // or an error. Never remove that reservation and admit another spawn.
+        let process = loop {
+            let mut processes = self.processes.lock()
+                .expect("Engram process registry mutex poisoned");
+            if processes.get(session_id).is_some_and(Option::is_none) {
+                drop(processes);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            break processes.remove(session_id).flatten();
+        };
         if let Some(process) = process {
             process.terminate();
         }
+    }
+
+    fn shutdown_session_until(
+        &self,
+        session_id: &str,
+        clock: &EngramBudgetClock,
+        deadline: std::time::Instant,
+    ) -> Result<(), EngramTransportError> {
+        let process = loop {
+            let entry = self.processes.lock()
+                .expect("Engram process registry mutex poisoned")
+                .get(session_id).cloned();
+            match entry {
+                None => return Ok(()),
+                Some(Some(process)) => break process,
+                Some(None) => {
+                    if clock.now() >= deadline {
+                        return Err(engram_control_start_pending());
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        };
+        process.request_termination().map_err(|_| {
+            EngramTransportError::transport(
+                "Engram control cleanup is unconfirmed; the original process remains retained",
+            )
+        })?;
+        while !process.cleanup_finished.load(Ordering::Acquire) {
+            if clock.now() >= deadline {
+                return Err(EngramTransportError::deadline(
+                    "Engram control cleanup exceeded the shared reset budget; the original process remains retained",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut registry = self
+            .processes
+            .lock()
+            .expect("Engram process registry mutex poisoned");
+        if registry
+            .get(session_id)
+            .and_then(Option::as_ref)
+            .is_some_and(|current| Arc::ptr_eq(current, &process))
+        {
+            registry.remove(session_id);
+        }
+        Ok(())
     }
 }
 
@@ -385,6 +527,8 @@ fn spawn_engram_control_process(
     let worker_process_tree = process_tree.clone();
     let worker_finished = Arc::new(AtomicBool::new(false));
     let worker_finished_signal = worker_finished.clone();
+    let cleanup_finished = Arc::new(AtomicBool::new(false));
+    let worker_cleanup_finished = cleanup_finished.clone();
     let (request_tx, request_rx) = mpsc::channel::<EngramProcessRequest>();
     let (startup_tx, startup_rx) = mpsc::sync_channel(1);
     std::thread::Builder::new()
@@ -397,19 +541,23 @@ fn spawn_engram_control_process(
                 let _ = startup_tx.send(startup_result);
                 if startup_failed {
                     worker_finished_signal.store(true, Ordering::Release);
-                    let _ = worker_process_tree.terminate(&worker_process);
-                    let _ = worker_process.wait();
+                    let terminated = worker_process_tree.terminate(&worker_process).is_ok();
+                    let reaped = worker_process.wait().is_ok();
+                    if terminated && reaped {
+                        worker_cleanup_finished.store(true, Ordering::Release);
+                    }
                     return;
                 }
             }
             loop {
                 match request_rx.recv_timeout(idle_timeout) {
                     Ok(request) => {
-                        let mut result = exchange_engram_control_frame(
-                            &mut stdin,
-                            &mut stdout,
-                            &request.request,
-                        );
+                        let Some(frame) = request.request else {
+                            worker_finished_signal.store(true, Ordering::Release);
+                            break;
+                        };
+                        let mut result =
+                            exchange_engram_control_frame(&mut stdin, &mut stdout, &frame);
                         // Engram's host service continues after request-level
                         // `{status:"error"}` replies. Treat only malformed or
                         // broken exchanges as terminal for this sidecar.
@@ -433,8 +581,11 @@ fn spawn_engram_control_process(
                     }
                 }
             }
-            let _ = worker_process_tree.terminate(&worker_process);
-            let _ = worker_process.wait();
+            let terminated = worker_process_tree.terminate(&worker_process).is_ok();
+            let reaped = worker_process.wait().is_ok();
+            if terminated && reaped {
+                worker_cleanup_finished.store(true, Ordering::Release);
+            }
         })
         .map_err(|err| {
             let _ = process_tree.terminate(&process);
@@ -474,6 +625,8 @@ fn spawn_engram_control_process(
         process_tree,
         requests: request_tx,
         worker_finished,
+        retiring: AtomicBool::new(false),
+        cleanup_finished,
     })
 }
 
@@ -527,7 +680,8 @@ fn exchange_engram_control_frame(
             "Engram response exceeds the maximum control frame",
         ));
     }
-    let envelope: EngramControlResponse = engram_decode_slice(&response, "invalid Engram response")?;
+    let envelope: EngramControlResponse =
+        engram_decode_slice(&response, "invalid Engram response")?;
     match envelope {
         EngramControlResponse::Ok { result } => Ok(result),
         EngramControlResponse::Error { error } => {

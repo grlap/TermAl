@@ -1426,6 +1426,7 @@ impl AppState {
                     None,
                     None,
                     rejected_checkpoint_owner.as_ref(),
+                    None,
                 )
             };
         let cleaned = error_message.trim();

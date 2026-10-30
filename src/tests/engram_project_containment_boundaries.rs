@@ -443,6 +443,464 @@ fn project_containment_excluded_queue_drain_does_not_abort_shared_runtime_exit()
 }
 
 #[test]
+fn project_containment_stop_interrupts_under_its_own_fence_and_defers_foreign_holds() {
+    for hold in ["own", "foreign", "retained_foreign", "session_only"] {
+        let (state, project, session, root, receiver) = fixture();
+        let clock = state.engram_budget_clock();
+        clock.pin_wall();
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (input_tx, _input_rx) = mpsc::channel();
+        let settling = create_test_project_session(&state, Agent::Codex, &project, &root);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
+            record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: format!("prompt-containment-stop-{hold}"),
+                input_tx,
+                process: process.clone(),
+                shared_session: None,
+            });
+            record.session.status = SessionStatus::Active;
+            queue_prompt_on_record(record, PendingPrompt {
+                id: "successor-must-stay-queued".into(), timestamp: stamp_now(),
+                text: "Do not run during containment.".into(), expanded_text: None,
+                source: None, attachments: Vec::new(), engram_interrupted: false,
+                is_engram_retained: false,
+            }, Vec::new());
+            let index = inner.find_session_index(&settling).unwrap();
+            let record = &mut inner.sessions[index];
+            record.runtime = SessionRuntime::None;
+            record.session.status = SessionStatus::Error;
+            record.engram.routing_token = Some("settling-token".into());
+            record.engram.active_grant_id = Some("settling-grant".into());
+            record.engram.begins_recorded = true;
+            state.commit_locked(&mut inner).unwrap();
+        }
+        let (step, settlement) = gated_engram_step("turn_checkpoint", checkpoint_reply("settling-grant"));
+        let transport = GatedEngramControlTransport::new([step]);
+        state.install_control_test_transport(transport.clone());
+        let (ack_tx, ack_rx) = mpsc::channel();
+        let off_state = state.clone();
+        let off_project = project.clone();
+        let before_ack_state = state.clone();
+        let before_ack_session = session.clone();
+        let before_ack_process = process.clone();
+        let off_settings = settings(&state, &project, false);
+        let off = std::thread::spawn(move || {
+            TEST_CONTAINMENT_BEFORE_ACK_RETURN.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || {
+                    before_ack_state.engram_abort_retry_tick(before_ack_state.engram_budget_clock().wall_now());
+                    let inner = before_ack_state.inner.lock().unwrap();
+                    let record = &inner.sessions[inner.find_session_index(&before_ack_session).unwrap()];
+                    ack_tx.send((record.engram_containment_stop.is_none(),
+                        !record.runtime_stop_in_progress,
+                        before_ack_process.try_wait().unwrap().is_none())).unwrap();
+                }));
+            });
+            off_state.update_project_engram_settings(&off_project, off_settings)
+        });
+        let settlement = settlement;
+        assert_eq!(receive(&ack_rx, "initial containment ACK"), (true, true, true),
+            "no Stop is admitted before the initial acknowledgement returns");
+        let request = settlement.wait();
+        assert_eq!(request.connection.session_id, settling);
+        let (owner, due_at) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            let pending = record.engram_containment_stop.as_ref().unwrap();
+            assert!(inner.engram_project_resets.is_owned_by(&project, pending.owner.reset_generation));
+            assert!(record.engram.project_reset_in_progress);
+            (pending.owner.clone(), pending.due_at.clone())
+        };
+        assert!(process.try_wait().unwrap().is_none());
+        let foreign_generation = if hold == "own" {
+            let occupied = (0..ENGRAM_RETRY_MAX_IN_FLIGHT)
+                .map(|_| state.engram_retry_slots.try_acquire().unwrap()).collect::<Vec<_>>();
+            state.engram_abort_retry_tick(clock.wall_now());
+            let age = {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                assert_eq!(record.engram_containment_stop.as_ref().unwrap().attempts, 0);
+                record.engram_queue_schedule.eligibility.clone().unwrap()
+            };
+            state.engram_abort_retry_tick(clock.wall_now());
+            {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                assert_eq!(record.engram_queue_schedule.eligibility.as_ref(), Some(&age));
+                assert_eq!(record.engram_containment_stop.as_ref().unwrap().due_at, due_at);
+            }
+            assert!(process.try_wait().unwrap().is_none());
+            drop(occupied);
+            state.engram_abort_retry_tick(clock.wall_now());
+            assert!(process.try_wait().unwrap().is_some(),
+                "actual provider interruption precedes settlement and PATCH completion");
+            assert!(!off.is_finished(), "settlement is still held");
+            None
+        } else {
+            if hold == "retained_foreign" {
+                {
+                    let mut inner = state.inner.lock().unwrap();
+                    let index = inner.find_session_index(&session).unwrap();
+                    inner.sessions[index].engram_containment_stop.as_mut().unwrap().in_flight = true;
+                }
+                let (_, claim) = state.begin_requested_stop_session_for_owner(
+                    &session, &StopSessionOptions::default(), Some(&owner)).unwrap();
+                let mut inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&session).unwrap();
+                let pending = inner.sessions[index].engram_containment_stop.as_mut().unwrap();
+                pending.claim = Some(claim.expect("an owned fence admits the original Stop"));
+                pending.in_flight = false;
+            }
+            let mut selected = vec![EngramDueRetry {
+                session_id: session.clone(), owner: EngramRetryOwner::Stop(owner.clone()),
+                kind: EngramRetryKind::ContainmentStop, due_at: due_at.clone(),
+            }];
+            state.order_engram_due_retries(&mut selected);
+            let (generation, age) = {
+                let mut inner = state.inner.lock().unwrap();
+                inner.engram_project_resets.release(&project, owner.reset_generation);
+                let generation = (hold != "session_only").then(||
+                    inner.engram_project_resets.claim_with_clock(&project, clock.clone(), true).unwrap());
+                let index = inner.find_session_index(&session).unwrap();
+                let record = &mut inner.sessions[index];
+                // Model a fence change after selection and slot admission.
+                record.engram_containment_stop.as_mut().unwrap().in_flight = true;
+                (generation, record.engram_queue_schedule.eligibility.clone())
+            };
+            let slot = state.engram_retry_slots.try_acquire().unwrap();
+            state.run_engram_retry_attempt(selected.pop().unwrap(), clock.wall_now(), slot);
+            state.engram_abort_retry_tick(clock.wall_now());
+            {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                let pending = record.engram_containment_stop.as_ref().unwrap();
+                assert_eq!(pending.owner, owner);
+                assert_eq!(pending.attempts, 0);
+                assert_eq!(pending.due_at, due_at);
+                assert!(!pending.in_flight);
+                assert_eq!(pending.claim.is_some(), hold == "retained_foreign");
+                assert_eq!(record.engram_queue_schedule.eligibility, age,
+                    "reset deferral does not charge the original service age");
+            }
+            assert!(process.try_wait().unwrap().is_none(), "foreign/unexplained holds refuse interruption");
+            generation
+        };
+        {
+            let inner = state.inner.lock().unwrap();
+            assert!(inner.sessions[inner.find_session_index(&session).unwrap()].engram.project_reset_in_progress);
+            assert!(engram_session_obligation_locked(&inner, &session).is_some());
+            assert_eq!(inner.sessions[inner.find_session_index(&session).unwrap()]
+                .queued_prompts.front().unwrap().pending_prompt.id, "successor-must-stay-queued");
+        }
+        assert!(receiver.try_recv().is_err(), "no successor or Begin follows containment Stop");
+        assert_eq!(state.engram_retry_slots.in_flight(), 0);
+        assert_eq!(transport.requests().len(), 1);
+        settlement.release();
+        let outcome = off.join().unwrap();
+        if hold == "own" {
+            outcome.expect("the owning reset still completes after its Stop");
+        } else {
+            if let Some(generation) = foreign_generation {
+                state.release_engram_project_reset_fence(&project, generation, &[session.clone(), settling.clone()]);
+            } else {
+                let mut inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&session).unwrap();
+                inner.sessions[index].engram.project_reset_in_progress = false;
+            }
+            state.engram_abort_retry_tick(clock.wall_now());
+            assert!(process.try_wait().unwrap().is_some(), "normal no-reset service retains the original Stop");
+        }
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(state.engram_retry_slots.in_flight(), 0);
+    }
+}
+
+#[test]
+fn project_containment_deferred_stops_survive_cap_and_budget_and_serve_each_original_once() {
+    let (state, project, session, _root, _receiver) = fixture();
+    let ids = {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].session.status = SessionStatus::Active;
+        let template = inner.sessions[index].clone();
+        let mut ids = vec![session.clone()];
+        for ordinal in 1..5 {
+            let mut record = template.clone();
+            record.session.id = format!("deferred-stop-{ordinal}");
+            record.engram.routing_token = Some(format!("retained-token-{ordinal}"));
+            record.engram.active_grant_id = Some(format!("retained-grant-{ordinal}"));
+            ids.push(record.session.id.clone());
+            inner.sessions.push(record);
+        }
+        state.commit_locked(&mut inner).unwrap();
+        ids
+    };
+    let transport = ScriptedEngramControlTransport::new([]);
+    state.install_control_test_transport(transport.clone());
+    let mut occupied = (0..ENGRAM_RETRY_MAX_IN_FLIGHT)
+        .map(|_| state.engram_retry_slots.try_acquire().unwrap()).collect::<Vec<_>>();
+    let response = state.update_project_engram_settings(&project, settings(&state, &project, false)).unwrap();
+    for id in &ids {
+        assert!(response.engram_control_recovery.iter().any(|entry|
+            entry.session_id == *id && entry.code == "provider_stop_deferred"
+                && entry.excluded && !entry.settlement_confirmed));
+    }
+    let clock = state.engram_budget_clock();
+    state.engram_abort_retry_tick(clock.wall_now());
+    assert_eq!(state.engram_retry_slots.in_flight(), ENGRAM_RETRY_MAX_IN_FLIGHT);
+    // Service is independent of the already-finished reset's 21s budget.
+    clock.advance(ENGRAM_CONTROL_SETTLE_TIMEOUT + Duration::from_secs(2));
+    drop(occupied.pop());
+    for id in &ids {
+        let stop = install_test_stop_fence_gate(&state, id);
+        std::thread::scope(|scope| {
+            let stop = stop;
+            let tick = scope.spawn(|| state.engram_abort_retry_tick(clock.wall_now()));
+            stop.wait_until_claimed();
+            assert_eq!(state.engram_retry_slots.in_flight(), ENGRAM_RETRY_MAX_IN_FLIGHT,
+                "the existing Stop holds its slot through cleanup");
+            // A simultaneous tick cannot start this same interruption twice.
+            state.engram_abort_retry_tick(clock.wall_now());
+            {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(id).unwrap()];
+                assert_eq!(record.session.status, SessionStatus::Stopping);
+                assert!(record.runtime_stop_in_progress);
+            }
+            stop.release();
+            tick.join().unwrap();
+        });
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(id).unwrap()];
+        assert_eq!(record.session.status, SessionStatus::Idle);
+        assert!(!record.runtime_stop_in_progress);
+        assert!(engram_session_obligation_locked(&inner, id).is_some(),
+            "Stop completion is not grant settlement");
+    }
+    assert!(transport.requests().is_empty());
+    drop(occupied);
+    state.engram_abort_retry_tick(clock.wall_now());
+    assert_eq!(state.engram_retry_slots.in_flight(), 0);
+}
+
+#[test]
+fn project_containment_failed_stop_reclaims_only_the_original_runtime_and_turn() {
+    for replacement in ["none", "runtime", "turn"] {
+        let (state, project, session, _root, receiver) = fixture();
+        let clock = state.engram_budget_clock();
+        clock.pin_wall();
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (input_tx, input_rx) = mpsc::channel();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: "retry-original-stop".to_owned(),
+                input_tx,
+                process: process.clone(),
+                shared_session: None,
+            });
+            inner.sessions[index].session.status = SessionStatus::Active;
+            state.commit_locked(&mut inner).unwrap();
+        }
+        let transport = ScriptedEngramControlTransport::new([]);
+        state.install_control_test_transport(transport.clone());
+        state.update_project_engram_settings(&project, settings(&state, &project, false)).unwrap();
+        let original = {
+            let inner = state.inner.lock().unwrap();
+            inner.sessions[inner.find_session_index(&session).unwrap()]
+                .engram_containment_stop.as_ref().unwrap().owner.clone()
+        };
+        {
+            let _failure = force_test_kill_child_process_failure_once(&process, "Codex");
+            state.engram_abort_retry_tick(clock.wall_now());
+        }
+        assert!(process.try_wait().unwrap().is_none(), "the first real shutdown failed");
+        let (failed_generation, due_at) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert_eq!(record.session.status, SessionStatus::Error);
+            assert!(!record.runtime_stop_in_progress);
+            let pending = record.engram_containment_stop.as_ref().unwrap();
+            assert_eq!(pending.owner, original);
+            assert!(pending.claim.is_none(), "the lifecycle released the failed Stop claim");
+            assert!(!pending.in_flight);
+            assert_eq!(pending.attempts, 1);
+            let entry = engram_session_obligation_locked(&inner, &session).unwrap();
+            assert_eq!(entry.id, original.obligation_id);
+            assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id));
+            (record.runtime_stop_generation, pending.due_at.parse::<chrono::DateTime<chrono::Utc>>().unwrap())
+        };
+        assert_eq!(state.engram_retry_slots.in_flight(), 0);
+        assert!(state.begin_requested_stop_session(&session, &StopSessionOptions::default()).is_err(),
+            "ordinary user Stop admission is unchanged for a live Error runtime");
+
+        let successor = (replacement == "runtime").then(phase_sync::ParkedProcess::spawn);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            if let Some(successor) = successor.as_ref() {
+                let SessionRuntime::Codex(runtime) = &mut inner.sessions[index].runtime else {
+                    panic!("the failed original runtime must remain retained");
+                };
+                runtime.runtime_id = "replacement-after-failed-stop".to_owned();
+                runtime.process = successor.process.clone();
+            } else if replacement == "turn" {
+                inner.sessions[index].active_turn_generation += 1;
+            }
+        }
+        clock.advance((due_at - clock.wall_now()).to_std().unwrap());
+        assert!(clock.wall_now() >= due_at, "the retry must be due before waiting for its Stop claim");
+        if replacement == "none" {
+            let stop = install_test_stop_fence_gate(&state, &session);
+            std::thread::scope(|scope| {
+                let stop = stop;
+                let tick = scope.spawn(|| state.engram_abort_retry_tick(clock.wall_now()));
+                stop.wait_until_claimed();
+                {
+                    let inner = state.inner.lock().unwrap();
+                    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                    let pending = record.engram_containment_stop.as_ref().unwrap();
+                    let claim = pending.claim.as_ref().unwrap();
+                    assert_eq!(pending.owner, original);
+                    assert!(claim.owns_stop(record));
+                    assert!(claim.owner_generation > failed_generation,
+                        "the second real shutdown must use a newly acquired Stop claim");
+                    assert_eq!(state.engram_retry_slots.in_flight(), 1);
+                }
+                stop.release();
+                tick.join().unwrap();
+            });
+            phase_sync::process_exit(&process, "retried original containment Stop");
+        } else {
+            state.engram_abort_retry_tick(clock.wall_now());
+            assert!(process.try_wait().unwrap().is_none());
+            if let Some(successor) = successor.as_ref() {
+                assert!(successor.process.try_wait().unwrap().is_none(), "the successor is not interrupted");
+            }
+        }
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.engram_containment_stop.is_none());
+        assert!(!record.runtime_stop_in_progress);
+        assert_eq!(record.session.status, if replacement == "none" {
+            SessionStatus::Idle
+        } else {
+            SessionStatus::Error
+        });
+        let entry = engram_session_obligation_locked(&inner, &session).unwrap();
+        assert_eq!(entry.id, original.obligation_id);
+        assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id),
+            "neither retry nor replacement settles the original control duty");
+        assert_eq!(state.engram_retry_slots.in_flight(), 0);
+        assert!(transport.requests().is_empty());
+        assert!(input_rx.try_recv().is_err());
+        assert!(receiver.try_recv().is_err());
+    }
+}
+
+#[test]
+fn project_containment_deferred_stop_never_interrupts_a_replaced_runtime_or_turn() {
+    for replace_runtime in [false, true] {
+        let (state, project, session, _root, _receiver) = fixture();
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (runtime, input, _) = test_shared_codex_runtime_with_process("replacement-stop", process.clone());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].session.status = SessionStatus::Active;
+            state.commit_locked(&mut inner).unwrap();
+        }
+        state.install_control_test_transport(ScriptedEngramControlTransport::new([]));
+        state.update_project_engram_settings(&project, settings(&state, &project, false)).unwrap();
+        let original = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let original = inner.sessions[index].engram_containment_stop.as_ref().unwrap().owner.clone();
+            let record = &mut inner.sessions[index];
+            if replace_runtime {
+                record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                    runtime_id: runtime.runtime_id.clone(), input_tx: runtime.input_tx.clone(),
+                    process: process.clone(), shared_session: None,
+                });
+            } else {
+                record.active_turn_generation += 1;
+            }
+            original
+        };
+        state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
+        {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert_eq!(record.session.status, SessionStatus::Active);
+            assert!(!record.runtime_stop_in_progress);
+            assert!(record.engram_containment_stop.is_none());
+            let entry = engram_session_obligation_locked(&inner, &session).unwrap();
+            assert_eq!(entry.id, original.obligation_id);
+            assert_eq!(entry.reason_code, "provider_stop_owner_changed");
+            assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id));
+        }
+        assert!(input.try_recv().is_err());
+        assert!(process.try_wait().unwrap().is_none(), "the successor runtime stays alive");
+    }
+}
+
+#[test]
+fn project_containment_stop_rechecks_original_identity_when_selecting_the_runtime_handle() {
+    for replace_runtime in [false, true] {
+        let (state, project, session, _root, _receiver) = fixture();
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (runtime, input, _) = test_shared_codex_runtime_with_process("claimed-stop-replacement", process.clone());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].session.status = SessionStatus::Active;
+            state.commit_locked(&mut inner).unwrap();
+        }
+        state.install_control_test_transport(ScriptedEngramControlTransport::new([]));
+        state.update_project_engram_settings(&project, settings(&state, &project, false)).unwrap();
+        let owner = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let pending = inner.sessions[index].engram_containment_stop.as_mut().unwrap();
+            pending.in_flight = true;
+            pending.owner.clone()
+        };
+        let (_, claim) = state.begin_requested_stop_session_for_owner(
+            &session, &StopSessionOptions::default(), Some(&owner),
+        ).unwrap();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
+            if replace_runtime {
+                record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                    runtime_id: runtime.runtime_id.clone(), input_tx: runtime.input_tx.clone(),
+                    process: process.clone(), shared_session: None,
+                });
+            } else {
+                record.active_turn_generation += 1;
+            }
+        }
+        let error = state.stop_local_session_with_options(&session, StopSessionOptions::default(), claim)
+            .err().expect("a stored Stop claim cannot authorize a new runtime or turn");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(input.try_recv().is_err());
+        assert!(process.try_wait().unwrap().is_none());
+        let inner = state.inner.lock().unwrap();
+        let entry = engram_session_obligation_locked(&inner, &session).unwrap();
+        assert_eq!(entry.id, owner.obligation_id);
+        assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id));
+    }
+}
+
+#[test]
 fn project_containment_active_and_approval_off_requests_stop_without_claiming_settlement() {
     for status in [SessionStatus::Active, SessionStatus::Approval] {
         let (state, project, session, _root, receiver) = fixture();
@@ -469,32 +927,37 @@ fn project_containment_active_and_approval_off_requests_stop_without_claiming_se
         let response = state
             .update_project_engram_settings(&project, settings(&state, &project, false))
             .unwrap();
-        stop.wait_until_claimed();
-        {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert_eq!(record.session.status, SessionStatus::Stopping);
+        std::thread::scope(|scope| {
+            let stop = stop;
+            let tick = scope.spawn(|| state.engram_abort_retry_tick(state.engram_budget_clock().wall_now()));
+            stop.wait_until_claimed();
+            {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                assert_eq!(record.session.status, SessionStatus::Stopping);
+                assert!(
+                    record.runtime_stop_in_progress,
+                    "OFF must invoke the existing Stop lifecycle"
+                );
+                let entry = engram_session_obligation_locked(&inner, &session).unwrap();
+                assert_eq!(entry.reason_code, "provider_interruption_unconfirmed");
+                assert_ne!(entry.phase, EngramSessionObligationPhase::Confirmed);
+                assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id));
+            }
             assert!(
-                record.runtime_stop_in_progress,
-                "OFF must invoke the existing Stop lifecycle"
+                response
+                    .engram_control_recovery
+                    .iter()
+                    .any(|entry| entry.session_id == session
+                        && entry.excluded
+                        && !entry.settlement_confirmed)
             );
-            let entry = engram_session_obligation_locked(&inner, &session).unwrap();
-            assert_eq!(entry.reason_code, "provider_interruption_unconfirmed");
-            assert_ne!(entry.phase, EngramSessionObligationPhase::Confirmed);
-            assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id));
-        }
-        assert!(
-            response
-                .engram_control_recovery
-                .iter()
-                .any(|entry| entry.session_id == session
-                    && entry.excluded
-                    && !entry.settlement_confirmed)
-        );
-        assert!(transport.requests().is_empty());
-        assert!(input.try_recv().is_err());
-        assert!(receiver.try_recv().is_err());
-        stop.release();
+            assert!(transport.requests().is_empty());
+            assert!(input.try_recv().is_err());
+            assert!(receiver.try_recv().is_err());
+            stop.release();
+            tick.join().unwrap();
+        });
         phase_sync::process_exit(&process, "containment requested provider Stop");
         let guard = phase_sync::PollGuard::new();
         loop {

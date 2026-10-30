@@ -1225,6 +1225,14 @@ impl AppState {
         )?.map(|started| started.dispatch))
     }
 
+    fn dispatch_next_queued_turn_for_activation(&self, session_id: &str,
+        owner: EngramQueuedAdmissionOwner) -> Result<Option<TurnDispatch>> {
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
+        Ok(self.start_next_queued_turn_off_lock_for_owner(
+            session_id, false, false, Some(QueuedDrainOwner::Activation(owner)),
+        )?.map(|started| started.dispatch))
+    }
+
     /// The retried admission of a prompt whose delivery was withheld before
     /// handoff (`engram_abort_retry.rs`): it bypasses the paused queue only
     /// for `owner`, the exact head the retry was due for, and only while its
@@ -1333,6 +1341,19 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
+        if let Some(QueuedDrainOwner::Activation(owner)) = &owner {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.find_session_index(session_id).is_none_or(|index| {
+                let record = &inner.sessions[index];
+                !owner.matches(record) || record.orchestrator_auto_dispatch_blocked
+                    || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+                    || record.engram.project_reset_in_progress || record.runtime_stop_in_progress
+                    || record.engram_boot_recovery_pending
+                    || engram_admission_obligation_locked(&inner, session_id).is_some()
+                    || engram_project_for_session_locked(&inner, session_id)
+                        .is_some_and(|project| inner.engram_project_resets.contains(&project.id))
+            }) { return Ok(None) }
+        }
         // Where the session writes, for the overlap marks its turn start
         // makes under the lock.
         self.engram_host().turn_starting(session_id);
@@ -1424,17 +1445,7 @@ impl AppState {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
-                    // Disabling control does not establish non-delivery of a
-                    // persisted authorization. Surface the retained prompt for
-                    // explicit cancellation, rather than silently stall or send.
-                    record.engram.recovered_admission = false;
-                    if let Some(queued) = record.queued_prompts.front_mut() {
-                        queued.engram_interrupted = true;
-                    }
-                    record.set_auto_dispatch_blocked(true);
-                    record.session.live_activity = None;
-                    record.session.preview = "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing.".to_owned();
-                    sync_pending_prompts(record);
+                    hold_engram_queued_authorization_when_control_off(record);
                     self.commit_locked(&mut inner)?;
                     return Ok(None);
                 }
@@ -1585,6 +1596,20 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
+        // Only an unrestricted ordinary drain can leave ordinary activation.
+        // Specialized owners retain their own restrictions and retry custody.
+        let ordinary_readiness_wake = owner.is_none()
+            && !allow_blocked_dispatch && !orphaned_workflow_only;
+        let activation_owner = match &owner {
+            Some(QueuedDrainOwner::Activation(owner)) => Some(owner.clone()),
+            _ => None,
+        };
+        if let Some(owner) = &activation_owner {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.find_session_index(session_id).is_none_or(|index| !owner.matches(&inner.sessions[index])) {
+                return Ok(None);
+            }
+        }
         let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
         if let Some(
             QueuedDrainOwner::Resume(retry_owner)
@@ -1624,6 +1649,7 @@ impl AppState {
                 | QueuedDrainOwner::BindRetry(owner)
                 | QueuedDrainOwner::AdmissionRetry(owner),
             ) => Some(owner),
+            Some(QueuedDrainOwner::Activation(_)) => None,
             Some(QueuedDrainOwner::FederationWake(_) | QueuedDrainOwner::MailboxRelay(_)) => None,
             None => allow_blocked_dispatch
                 .then(|| {
@@ -1675,6 +1701,9 @@ impl AppState {
             if relay_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
                 return Ok(None);
             }
+            if activation_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+                return Ok(None);
+            }
             if allow_blocked_dispatch
                 && !bypass_owner
                     .as_ref()
@@ -1693,6 +1722,13 @@ impl AppState {
                     !inner.sessions[index].queued_prompts.is_empty()
                 };
                 if should_retry {
+                    if ordinary_readiness_wake {
+                        let record = &mut inner.sessions[index];
+                        if let Some(owner) = EngramQueuedAdmissionOwner::capture(record) {
+                            record.engram_queue_schedule.register_activation(owner,
+                                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+                        }
+                    }
                     inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
                 }
                 drop(inner);
@@ -1888,6 +1924,13 @@ impl AppState {
                         !inner.sessions[index].queued_prompts.is_empty()
                     };
                     if should_retry {
+                        if ordinary_readiness_wake {
+                            let record = &mut inner.sessions[index];
+                            if let Some(owner) = EngramQueuedAdmissionOwner::capture(record) {
+                                record.engram_queue_schedule.register_activation(owner,
+                                    &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+                            }
+                        }
                         inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
                     }
                     drop(inner);
@@ -2000,6 +2043,7 @@ impl AppState {
                 return Ok(None);
             };
             let unchanged = inner.sessions[index].engram.dispatch_generation == snapshot.1
+                && activation_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
                 && live_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
                 && relay_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
                 && (!allow_blocked_dispatch
@@ -2026,7 +2070,8 @@ impl AppState {
                 && !inner.sessions[index].runtime_stop_in_progress
                 && !inner.sessions[index].engram_boot_recovery_pending;
             if !unchanged {
-                let bypass_was_superseded = allow_blocked_dispatch
+                let bypass_was_superseded = activation_owner.as_ref()
+                    .is_some_and(|owner| !owner.matches(&inner.sessions[index])) || allow_blocked_dispatch
                     && !bypass_owner
                         .as_ref()
                         .is_some_and(|owner| owner.matches(&inner.sessions[index]));
@@ -2070,6 +2115,9 @@ impl AppState {
                 && !containment_retained_reconciliation_allowed(&inner, session_id) {
                 return Ok(None);
             }
+            let activation_owned_before_promotion = activation_owner
+                .as_ref()
+                .is_some_and(|owner| owner.matches(&inner.sessions[index]));
             let Some(started) = self.start_next_queued_turn_locked(
                 &mut inner,
                 index,
@@ -2077,6 +2125,30 @@ impl AppState {
                 pending_engram,
             )?
             else {
+                if activation_owned_before_promotion {
+                    let owner = activation_owner.as_ref().expect("checked activation owner");
+                    let activation_due_at = inner
+                        .engram_budget_clock_snapshot()
+                        .wall_now()
+                        .to_rfc3339();
+                    let record = &mut inner.sessions[index];
+                    // Abandoning this evaluation advances its wire generation.
+                    // Carry service only across that owned, locked transition;
+                    // a successor or a reset that raced evaluation never gets here.
+                    if record.engram.dispatch_generation == owner.generation.saturating_add(1)
+                        && record.active_turn_generation == owner.active_turn_generation
+                        && record.queued_prompts.front()
+                            .is_some_and(|head| head.pending_prompt.id == owner.prompt_id)
+                        && record.engram_queue_schedule.activation.is_none()
+                    {
+                        let next_owner = EngramQueuedAdmissionOwner::capture(record)
+                            .expect("checked unchanged head");
+                        record.engram_queue_schedule.activation = Some((
+                            next_owner,
+                            activation_due_at,
+                        ));
+                    }
+                }
                 return Ok(None);
             };
             let revision = match self.commit_persisted_delta_locked(&mut inner) {
@@ -3027,6 +3099,8 @@ impl AppState {
 /// in advance.
 #[derive(Clone)]
 enum QueuedDrainOwner {
+    /// Ordinary service of an exact head; never permission to bypass a pause.
+    Activation(EngramQueuedAdmissionOwner),
     /// A metadata wake can re-drive only its captured boundary, never a successor.
     MailboxRelay(MailboxRelayDrainOwner),
     /// Same-process activation of one durable remote wake; never a pause bypass.

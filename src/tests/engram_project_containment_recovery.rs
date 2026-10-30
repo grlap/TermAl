@@ -478,6 +478,8 @@ fn project_containment_existing_unconfirmed_stop_is_not_reported_settled() {
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
     assert_eq!(record.session.status, SessionStatus::Stopping);
     assert!(record.runtime_stop_in_progress);
+    assert!(record.engram_containment_stop.is_none(),
+        "an existing Stop must not acquire a second deferred interruption");
     assert_eq!(
         record.engram.active_grant_id.as_deref(),
         Some("retained-grant")

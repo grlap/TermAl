@@ -138,6 +138,11 @@ impl EngramControlTransport for ControlOnlyEngramTransport {
         self.control.shutdown_session(session_id);
     }
 
+    fn shutdown_session_until(&self, session_id: &str, clock: &EngramBudgetClock,
+        deadline: std::time::Instant) -> Result<(), EngramTransportError> {
+        self.control.shutdown_session_until(session_id, clock, deadline)
+    }
+
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
@@ -10587,8 +10592,8 @@ fn reenable_with_a_different_home_checkpoints_disabled_recovery_in_the_old_store
                     && request.connection.home == fresh_home
             })
             .count(),
-        2,
-        "parent and child should bind freshly against the new store"
+        0,
+        "Save must not eagerly bind parent or child against the new store"
     );
     let inner = state.inner.lock().expect("state mutex poisoned");
     let child = inner
@@ -10600,8 +10605,28 @@ fn reenable_with_a_different_home_checkpoints_disabled_recovery_in_the_old_store
         child.engram.routing_token.as_deref(),
         Some(original_routing_token.as_str())
     );
-    assert!(child.engram.routing_token.is_some());
+    assert!(child.engram.routing_token.is_none());
     assert!(child.engram.active_grant_id.is_none());
+    drop(inner);
+    // A real ordinary first use binds the committed new authority. The
+    // historical child remains unbound merely because settings were saved.
+    let dispatch = match state.dispatch_turn(&parent_session_id, SendMessageRequest {
+        text: "Use the committed new Engram home.".to_owned(), expanded_text: None,
+        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
+    }).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch) => dispatch,
+        _ => panic!("the idle parent should reach actual first use"),
+    };
+    deliver_turn_dispatch(&state, dispatch).expect("first use must deliver on the new authority");
+    assert!(matches!(receive_synchronous_engram_prompt(&state, &runtime_rx,
+        "first use should reach the provider").unwrap(), CodexRuntimeCommand::Prompt { .. }));
+    let fresh = deadline_transport.requests().into_iter()
+        .skip(requests.len()).collect::<Vec<_>>();
+    assert_eq!(fresh.iter().filter(|r| r.request["operation"] == "session_bind").count(), 1);
+    assert!(fresh.iter().all(|r| r.connection.home == fresh_home
+        && r.connection.session_id == parent_session_id));
+    assert_eq!(fresh.iter().filter(|r| r.request["operation"] == "turn_begin").count(), 1);
+    assert!(runtime_rx.try_recv().is_err(), "exactly one first-use delivery");
 }
 
 #[test]
@@ -10730,7 +10755,7 @@ fn project_reset_persist_failure_restores_old_connection_state_and_releases_fenc
 }
 
 #[test]
-fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds() {
+fn changing_connection_settings_checkpoints_old_grant_then_reaps_without_eager_binds() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-reconfigure");
     state.select_test_scripted_engram_budget_clock();
     let root = state
@@ -10816,7 +10841,7 @@ fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds
                 && request.connection.home == fresh_home
         })
         .count();
-    assert_eq!(fresh_binds, 2, "parent and child must bind fresh");
+    assert_eq!(fresh_binds, 0, "replacement bindings belong to ordinary first use");
     assert!(transport.shutdowns().contains(&parent_session_id));
     assert!(transport.shutdowns().contains(&child_id));
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -10825,10 +10850,7 @@ fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds
         .iter()
         .find(|record| record.session.id == child_id)
         .expect("child should remain");
-    assert!(matches!(
-        child.engram.routing_token.as_deref(),
-        Some("fresh-token-a" | "fresh-token-b")
-    ));
+    assert!(child.engram.routing_token.is_none(), "the new connection is unbound until first use");
     assert!(child.engram.active_grant_id.is_none());
     assert!(
         child.runtime_reset_required,
@@ -10914,6 +10936,8 @@ fn project_reset_fence_keeps_a_new_delegation_off_the_old_connection() {
         .join()
         .expect("settings thread should not panic")
         .expect("project reset should complete");
+    assert!(runtime_rx.try_recv().is_err(), "reset release registers before capped service");
+    state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
     assert!(matches!(
         receive(
             &runtime_rx,
@@ -10934,6 +10958,8 @@ fn project_reset_fence_keeps_a_new_delegation_off_the_old_connection() {
             .contains(&second.delegation.child_session_id),
         "the final sweep must include a child created during the fence"
     );
+    state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
+    assert!(runtime_rx.try_recv().is_err(), "the registered child is served exactly once");
 }
 
 #[test]
@@ -11324,6 +11350,8 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
         .join()
         .expect("reset thread should not panic")
         .expect("reset should complete after both stale grants close");
+    assert!(runtime_rx.try_recv().is_err(), "reset release only registers prompt B");
+    state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
     assert!(matches!(
         recv_within_guard(
             &runtime_rx,
@@ -11344,6 +11372,9 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
         child.session.preview,
         "Prompt B must wait for the reset fence."
     );
+    drop(inner);
+    state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
+    assert!(runtime_rx.try_recv().is_err(), "prompt B is delivered exactly once");
 }
 
 #[test]
@@ -12167,6 +12198,8 @@ fn disabling_during_bind_rejects_the_late_token_and_reaps_the_process() {
         .join()
         .expect("delegation thread should not panic")
         .expect("ordinary dispatch should continue after Engram is disabled");
+    assert!(runtime_rx.try_recv().is_err(), "reset release only registers the queued child");
+    state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
     assert!(matches!(
         recv_within_guard(&runtime_rx, "runtime should receive the ordinary prompt")
             .expect("runtime should receive the ordinary prompt"),
@@ -12197,6 +12230,8 @@ fn disabling_during_bind_rejects_the_late_token_and_reaps_the_process() {
             .all(|request| request.request["operation"] == "session_bind")
     );
     assert!(transport.shutdowns().contains(&parent_session_id));
+    state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
+    assert!(runtime_rx.try_recv().is_err(), "the queued child is delivered exactly once");
 }
 
 #[test]

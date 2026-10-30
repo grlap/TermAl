@@ -415,7 +415,7 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/projects/{id}", delete(delete_project))
         .route(
             "/api/projects/{id}/engram",
-            patch(update_project_engram_settings),
+            get(get_project_engram_reset).patch(update_project_engram_settings),
         )
         .route(
             "/api/projects/{id}/engram/verify",

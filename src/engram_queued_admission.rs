@@ -171,6 +171,29 @@ impl EngramQueuedAdmissionOwner {
     }
 }
 
+/// Preserve the existing control-off presentation without trying admission.
+/// Reset release uses the same hold as an ordinary drain, so deferring that
+/// drain cannot erase the interrupted marker needed by exact Resume recovery.
+fn hold_engram_queued_authorization_when_control_off(record: &mut SessionRecord) -> bool {
+    if !record.engram.recovered_admission
+        && !record
+            .queued_prompts
+            .front()
+            .is_some_and(QueuedPromptRecord::is_engram_retained)
+    {
+        return false;
+    }
+    record.engram.recovered_admission = false;
+    if let Some(queued) = record.queued_prompts.front_mut() {
+        queued.engram_interrupted = true;
+    }
+    record.set_auto_dispatch_blocked(true);
+    record.session.live_activity = None;
+    record.session.preview = "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing.".to_owned();
+    sync_pending_prompts(record);
+    true
+}
+
 fn legacy_queued_engram_operation_generation(
     session_id: &str,
     idempotency_key: &str,

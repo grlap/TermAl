@@ -3,14 +3,324 @@
 // Owns: the preview an idle, unpaused session with queued prompts shows while
 // its project's Engram reset fence holds its queue, with the preview it
 // replaced saved and restored when the fence no longer holds it; and the
-// phase timer that writes each step of a project settings reset to host
-// stderr, so a reset that keeps its fence names the step it is in.
+// phase timer and redacted read-only projection that name each step of a
+// project settings reset while its fence is held.
 // Does not own: the fence itself (`EngramProjectResetFences`, state.rs), the
-// reset transaction (session_crud.rs), the queue drain (turn_dispatch.rs), the
-// order the release drains sessions in, or process teardown.
+// reset transaction (session_crud.rs), ordinary dispatch (turn_dispatch.rs),
+// fair scheduling (engram_retry_schedule.rs), or process teardown.
 // New file; not split out of another.
 
 const ENGRAM_PROJECT_RESET_WAIT_PREFIX: &str = "Waiting: Engram project settings are changing";
+
+// A controlled replay of the removed eager loops uses the same transaction
+// and owned helpers. These measurements are work counts, not incident timings.
+#[cfg(test)]
+thread_local! {
+    static TEST_ENGRAM_RESET_LEGACY_SCALE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TEST_ENGRAM_RESET_SCALED_WORK: std::cell::RefCell<BTreeMap<&'static str, usize>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+#[cfg(test)]
+fn count_engram_reset_scaled_work(phase: &'static str, items: usize) {
+    TEST_ENGRAM_RESET_SCALED_WORK
+        .with(|work| *work.borrow_mut().entry(phase).or_default() += items);
+}
+
+/// One shared budget belongs to the existing fence owner, not to each RPC.
+/// Local traversal assumes responsive storage and OS calls; deadline expiry
+/// never certifies an original operation or a child process as settled.
+#[derive(Clone)]
+struct EngramProjectResetClaim {
+    bounded: bool,
+    generation: u64,
+    claimed_at: chrono::DateTime<chrono::Utc>,
+    clock: EngramBudgetClock,
+    started: std::time::Instant,
+    deadline: std::time::Instant,
+    phase: Arc<Mutex<EngramProjectResetPhaseProgress>>,
+}
+
+struct EngramProjectResetPhaseProgress {
+    sequence: u64,
+    name: &'static str,
+    completed: usize,
+    total: usize,
+    settings_committed: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramProjectResetProgress {
+    bounded: bool,
+    generation: u64,
+    phase: &'static str,
+    elapsed_ms: u64,
+    remaining_ms: Option<u64>,
+    deadline_expired: bool,
+    completed: usize,
+    total: usize,
+    settings_committed: bool,
+    terminal_outcome: &'static str,
+}
+
+impl EngramProjectResetClaim {
+    fn refusal(&self, mut error: ApiError) -> ApiError {
+        if self.bounded {
+            if error.kind.is_none() {
+                error.kind = Some(ApiErrorKind::EngramProjectResetRefused);
+            }
+            error.project_reset = Some(self.progress());
+        }
+        error
+    }
+
+    fn deadline_error(&self) -> ApiError {
+        let mut error = ApiError::conflict(
+            "The shared Engram reset budget expired before settings commit. Settings were not replaced; original operations retain their existing custody and any completed checkpoint remains completed.",
+        ).with_kind(ApiErrorKind::EngramProjectResetDeadline);
+        error.project_reset = Some(self.progress());
+        error
+    }
+
+    fn new(generation: u64, clock: EngramBudgetClock, bounded: bool) -> Self {
+        let started = clock.now();
+        Self {
+            bounded,
+            generation,
+            claimed_at: clock.wall_now(),
+            clock,
+            started,
+            deadline: started + ENGRAM_CONTROL_SETTLE_TIMEOUT,
+            phase: Arc::new(Mutex::new(EngramProjectResetPhaseProgress {
+                sequence: 0,
+                name: "claimed",
+                completed: 0,
+                total: 1,
+                settings_committed: false,
+            })),
+        }
+    }
+
+    fn remaining(&self) -> Duration {
+        self.deadline.saturating_duration_since(self.clock.now())
+    }
+
+    fn progress(&self) -> EngramProjectResetProgress {
+        let remaining = self.remaining();
+        let phase = self
+            .phase
+            .lock()
+            .expect("project reset progress mutex poisoned");
+        EngramProjectResetProgress {
+            bounded: self.bounded,
+            generation: self.generation,
+            phase: phase.name,
+            elapsed_ms: duration_millis(self.clock.elapsed_since(self.started)),
+            remaining_ms: self.bounded.then(|| duration_millis(remaining)),
+            deadline_expired: self.bounded && remaining.is_zero(),
+            completed: phase.completed,
+            total: phase.total,
+            settings_committed: phase.settings_committed,
+            terminal_outcome: if self.bounded {
+                "applied, refused before commit, or applied with retained safety holds"
+            } else {
+                "legacy authority/store lifecycle; no tier-reset deadline guarantee"
+            },
+        }
+    }
+}
+
+impl StateInner {
+    fn release_reset_checkpoint_claim(&mut self, session_id: &str, generation: u64) {
+        let Some(index) = self.find_session_index(session_id) else {
+            return;
+        };
+        let live = self.sessions[index]
+            .engram
+            .checkpoint_operation
+            .as_ref()
+            .and_then(|operation| {
+                self.engram_pending_checkpoint_receipts
+                    .entries
+                    .get(&checkpoint_receipt_key(operation))
+            })
+            .is_some_and(|receipt| receipt.accounting);
+        if !live {
+            self.session_mut_by_index(index)
+                .expect("reset session")
+                .engram
+                .clear_checkpoint_if_owned_by(Some(generation));
+        }
+    }
+
+    fn engram_project_reset_conflict(&self, project_id: &str) -> ApiError {
+        let mut error = ApiError::conflict("Engram project settings are already being reset");
+        error.project_reset = self
+            .engram_project_resets
+            .claimed_at
+            .get(project_id)
+            .map(EngramProjectResetClaim::progress);
+        error
+    }
+
+    fn claim_engram_project_reset(&mut self, project_id: &str, bounded: bool) -> Option<u64> {
+        let clock = if bounded {
+            self.engram_budget_clock_snapshot()
+        } else {
+            EngramBudgetClock::Real
+        };
+        self.engram_project_resets
+            .claim_with_clock(project_id, clock, bounded)
+    }
+
+    fn engram_project_reset_claim(
+        &self,
+        project_id: &str,
+        generation: u64,
+    ) -> Option<EngramProjectResetClaim> {
+        self.engram_project_resets
+            .claimed_at
+            .get(project_id)
+            .filter(|claim| claim.generation == generation)
+            .cloned()
+    }
+}
+
+impl AppState {
+    /// Use ordinary checkpoint custody, including its persisted original
+    /// request, exact receipt reservation and late-result recovery. The reset's
+    /// earlier claim reserved an unsent slot, not a second wire operation.
+    fn checkpoint_engram_project_reset_target(
+        &self,
+        target: &EngramBindingTarget,
+        claim: &EngramProjectResetClaim,
+        completed_absence_checkpoint: &mut Option<EngramCheckpointOperation>,
+    ) -> Result<(), EngramTransportError> {
+        *completed_absence_checkpoint = None;
+        if claim.remaining().is_zero() {
+            return Err(EngramTransportError::deadline(
+                "Project reset budget exhausted before checkpoint",
+            )
+            .request_never_sent());
+        }
+        let generations = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(&target.connection.session_id) else {
+                return Err(EngramTransportError::local_state(
+                    "Project reset checkpoint session disappeared",
+                ));
+            };
+            let record = &mut inner.sessions[index];
+            if record.engram.checkpoint_owner_generation != Some(claim.generation)
+                || record.engram.active_grant_id != target.active_grant_id
+                || record.engram.routing_token != target.routing_token
+            {
+                return Err(EngramTransportError::local_state(
+                    "Project reset checkpoint owner changed",
+                ));
+            }
+            record
+                .engram
+                .clear_checkpoint_if_owned_by(Some(claim.generation));
+            (record.engram.dispatch_generation, record.active_turn_generation)
+        };
+        let mut transport_error = None;
+        let mut published_checkpoint = None;
+        let result = self.checkpoint_engram_turn_with_retry_owner_off_lock(
+            &target.connection.session_id,
+            EngramCheckpointPurpose::Settlement,
+            None,
+            None,
+            EngramNextIntent::Exit,
+            None,
+            Some(claim.generation),
+            Some(claim.remaining()),
+            false,
+            None,
+            Some(claim.deadline),
+            Some(&mut published_checkpoint),
+            None,
+            Some(&mut transport_error),
+        );
+        match result {
+            EngramCheckpointOutcome::Succeeded => Ok(()),
+            EngramCheckpointOutcome::Failed(_) | EngramCheckpointOutcome::Skipped => {
+                let error = transport_error.unwrap_or_else(|| {
+                    EngramTransportError::local_state(
+                        "Project reset checkpoint remains under its original recovery owner",
+                    )
+                });
+                // This records a completed invocation, not a settled duty or
+                // permission to replace its Unknown result. The ordinary
+                // call has returned and released its flight/receipt guards.
+                if engram_checkpoint_can_inspect_absence(&error)
+                    && let Some(key) = published_checkpoint
+                {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    if let Some(operation) = inner.find_session_index(&target.connection.session_id)
+                        .and_then(|index| inner.sessions[index].engram.checkpoint_operation.as_ref())
+                        .and_then(|mirror| selected_checkpoint_operation(
+                            &inner.engram_session_obligations, mirror))
+                        .filter(|operation| checkpoint_receipt_key(operation) == key)
+                        .filter(|operation| operation.attempts.last().is_some_and(|attempt|
+                            (attempt.dispatch_generation, attempt.active_turn_generation) == generations))
+                    {
+                        *completed_absence_checkpoint = Some(operation.clone());
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn engram_project_reset_timer(
+        &self,
+        project_id: &str,
+        generation: u64,
+    ) -> EngramProjectResetTimer {
+        let claim = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_project_reset_claim(project_id, generation)
+            .expect("owned reset claim");
+        EngramProjectResetTimer::new(project_id, generation, claim)
+    }
+
+    fn engram_project_reset_progress(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<EngramProjectResetProgress>, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_project(project_id)
+            .ok_or_else(|| ApiError::not_found("project not found"))?;
+        Ok(inner
+            .engram_project_resets
+            .claimed_at
+            .get(project_id)
+            .map(EngramProjectResetClaim::progress))
+    }
+}
+
+/// Read-only progress comes from the live fence, never from proposed settings.
+async fn get_project_engram_reset(
+    AxumPath(project_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiError> {
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let project = inner
+        .find_project(&project_id)
+        .ok_or_else(|| ApiError::not_found("project not found"))?;
+    Ok(Json(json!({
+        "reset": inner.engram_project_resets.claimed_at.get(&project_id).map(EngramProjectResetClaim::progress),
+        "committed": {
+            "enabled": project.engram.as_ref().is_some_and(|settings| settings.enabled),
+            "turnGatedControl": project.engram.as_ref().is_some_and(|settings| settings.turn_gated_control),
+        },
+    })))
+}
 
 /// The waiting reason, naming when the settings change claimed its fence.
 fn engram_project_reset_wait_preview(since: Option<chrono::DateTime<chrono::Utc>>) -> String {
@@ -19,7 +329,7 @@ fn engram_project_reset_wait_preview(since: Option<chrono::DateTime<chrono::Utc>
         .unwrap_or_default();
     format!(
         "{ENGRAM_PROJECT_RESET_WAIT_PREFIX}{since}; queued prompts start when the change \
-         finishes. If it does not, the host log's lines for this project show how far it got."
+         finishes. The project's Engram settings API reports the current reset phase."
     )
 }
 
@@ -31,6 +341,8 @@ fn engram_project_reset_affected_sessions_locked(
     project_id: &str,
     session_ids: &[String],
 ) -> Vec<String> {
+    #[cfg(test)]
+    count_engram_reset_scaled_work("release membership scan", inner.sessions.len());
     let mut affected = session_ids.to_vec();
     affected.extend(
         inner
@@ -149,6 +461,8 @@ impl AppState {
     ) -> bool {
         let mut changed = false;
         for session_id in session_ids {
+            #[cfg(test)]
+            count_engram_reset_scaled_work("release preview scan", 1);
             if let Some(index) = inner.find_session_index(session_id)
                 && !inner.sessions[index].engram.project_reset_in_progress
                 && clear_engram_project_reset_wait(&mut inner.sessions[index])
@@ -175,41 +489,39 @@ impl AppState {
         }
     }
 
-    /// Drains the queues of `session_ids` once no fence holds them, so what a
-    /// settings change held starts when it ends, however it ends. Only a
-    /// session with a queued prompt is drained: with none there is nothing to
-    /// start, and a drain would still prepare Engram context for nothing.
-    /// Call with the state lock released.
-    fn drain_engram_project_reset_sessions(&self, session_ids: Vec<String>, after: &str) {
-        let session_ids = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            session_ids
-                .into_iter()
-                .filter(|session_id| {
-                    inner
-                        .find_session_index(session_id)
-                        .is_some_and(|index| !inner.sessions[index].queued_prompts.is_empty())
-                })
-                .collect::<Vec<_>>()
-        };
+    /// Registers ordinary service of the heads the settings change held.
+    /// Sessions without a queued prompt need neither activation nor a target.
+    /// Registration and the matching fence release share StateInner; the
+    /// existing retry tick performs ordinary dispatch later under its cap.
+    fn register_engram_project_reset_sessions_locked(
+        &self,
+        inner: &mut StateInner,
+        session_ids: &[String],
+    ) -> bool {
+        let eligible_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut holds_changed = false;
         for session_id in session_ids {
-            match self.dispatch_next_queued_turn(&session_id, false) {
-                Ok(Some(dispatch)) => {
-                    if let Err(error) = deliver_turn_dispatch(self, dispatch)
-                        .into_background_result("session activation queue drain")
-                    {
-                        eprintln!(
-                            "engram> session={session_id} failed delivering queued turn after {after}: {}",
-                            error.message
-                        );
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => eprintln!(
-                    "engram> session={session_id} failed resuming queue after {after}: {error:#}"
-                ),
+            let Some(index) = inner.find_session_index(session_id) else {
+                continue;
+            };
+            #[cfg(test)]
+            count_engram_reset_scaled_work("queue registration", 1);
+            if inner.sessions[index].hidden || !inner.sessions[index].is_local_session() {
+                continue;
             }
+            if !Self::engram_session_requires_dispatch_card_locked(inner, session_id)
+                && hold_engram_queued_authorization_when_control_off(&mut inner.sessions[index])
+            {
+                inner.stamp_session_at_index(index);
+                holds_changed = true;
+            }
+            let record = &mut inner.sessions[index];
+            let Some(owner) = EngramQueuedAdmissionOwner::capture(record) else {
+                continue;
+            };
+            record.engram_queue_schedule.register_activation(owner, &eligible_at);
         }
+        holds_changed
     }
 }
 
@@ -226,19 +538,19 @@ fn engram_project_reset_wait_preview_after_restart(preview: String) -> String {
 /// The phase timer of one project settings reset: from the fence claim to its
 /// release, each step is written to host stderr when it starts and when it
 /// ends, with how long the fence has been held. A step that never ends is the
-/// last one started. Nothing is kept beyond the lines themselves.
+/// last one started. The existing fence also holds a redacted live projection.
 struct EngramProjectResetTimer {
     project_id: String,
     generation: u64,
-    claimed: std::time::Instant,
+    claim: EngramProjectResetClaim,
 }
 
 impl EngramProjectResetTimer {
-    fn new(project_id: &str, generation: u64) -> Self {
+    fn new(project_id: &str, generation: u64, claim: EngramProjectResetClaim) -> Self {
         let timer = Self {
             project_id: project_id.to_owned(),
             generation,
-            claimed: std::time::Instant::now(),
+            claim,
         };
         timer.write("fence claimed".to_owned());
         timer
@@ -247,29 +559,68 @@ impl EngramProjectResetTimer {
     /// Starts the step `name` (for `session`, when it is per session); it is
     /// written as ended when the returned guard drops, early returns included.
     fn phase(&self, name: &'static str, session: Option<&str>) -> EngramProjectResetPhase<'_> {
+        self.phase_work(name, session, 0, 1)
+    }
+
+    fn phase_work(
+        &self,
+        name: &'static str,
+        session: Option<&str>,
+        completed: usize,
+        total: usize,
+    ) -> EngramProjectResetPhase<'_> {
+        let total = total.max(1);
+        let completed = completed.min(total);
+        let sequence = {
+            let mut phase = self
+                .claim
+                .phase
+                .lock()
+                .expect("project reset progress mutex poisoned");
+            phase.sequence = phase.sequence.wrapping_add(1);
+            phase.name = name;
+            phase.completed = completed;
+            phase.total = total;
+            phase.sequence
+        };
         let label = match session {
             Some(session) => format!("{name} session={session}"),
             None => name.to_owned(),
         };
         self.write(format!(
             "phase {label} started (fence held {} ms)",
-            self.claimed.elapsed().as_millis()
+            self.claim
+                .clock
+                .elapsed_since(self.claim.started)
+                .as_millis()
         ));
         EngramProjectResetPhase {
             timer: self,
+            sequence,
+            end_completed: completed.saturating_add(1).min(total),
             label,
-            started: std::time::Instant::now(),
+            started: self.claim.clock.now(),
         }
     }
 
-    /// Writes that the release returned. The release removes the fence first
-    /// and then drains the queues it held, so the fence was held at most this
-    /// long; the drain's own time is in the `release and drain` phase.
+    /// Release registers exact eligible heads; it does not certify admission
+    /// or delivery. Their service belongs to the existing capped scheduler.
     fn released(&self) {
         self.write(format!(
-            "fence released and queues drained (fence held at most {} ms)",
-            self.claimed.elapsed().as_millis()
+            "fence released and eligible queues registered (fence held at most {} ms)",
+            self.claim
+                .clock
+                .elapsed_since(self.claim.started)
+                .as_millis()
         ));
+    }
+
+    fn committed(&self) {
+        self.claim
+            .phase
+            .lock()
+            .expect("project reset progress mutex poisoned")
+            .settings_committed = true;
     }
 
     fn write(&self, event: String) {
@@ -287,7 +638,10 @@ impl Drop for EngramProjectResetTimer {
     fn drop(&mut self) {
         self.write(format!(
             "finished (fence held {} ms)",
-            self.claimed.elapsed().as_millis()
+            self.claim
+                .clock
+                .elapsed_since(self.claim.started)
+                .as_millis()
         ));
     }
 }
@@ -305,17 +659,38 @@ fn engram_project_reset_phase<'a>(
 /// One running step of a project settings reset (`EngramProjectResetTimer`).
 struct EngramProjectResetPhase<'a> {
     timer: &'a EngramProjectResetTimer,
+    sequence: u64,
+    end_completed: usize,
     label: String,
     started: std::time::Instant,
 }
 
 impl Drop for EngramProjectResetPhase<'_> {
     fn drop(&mut self) {
+        {
+            let mut phase = self
+                .timer
+                .claim
+                .phase
+                .lock()
+                .expect("project reset progress mutex poisoned");
+            if phase.sequence == self.sequence {
+                phase.completed = self.end_completed;
+            }
+        }
         self.timer.write(format!(
             "phase {} took {} ms (fence held {} ms)",
             self.label,
-            self.started.elapsed().as_millis(),
-            self.timer.claimed.elapsed().as_millis()
+            self.timer
+                .claim
+                .clock
+                .elapsed_since(self.started)
+                .as_millis(),
+            self.timer
+                .claim
+                .clock
+                .elapsed_since(self.timer.claim.started)
+                .as_millis()
         ));
     }
 }

@@ -731,24 +731,30 @@ fn project_containment_checkpoint_receipt_does_not_settle_independent_runtime_du
         closing.join().unwrap();
         panic!("OFF must retain the checkpoint before requesting Stop: {error:?}");
     }
-    stop.wait_until_claimed();
-    gate.release();
-    let outcome = closing.join().unwrap();
-    assert!(matches!(outcome, EngramCheckpointOutcome::Succeeded));
-    {
-        let inner = state.inner.lock().unwrap();
-        let entry = engram_session_obligation_locked(&inner, &session).unwrap();
-        assert_eq!(entry.phase, EngramSessionObligationPhase::Intended);
-        assert!(contained_checkpoint_progress_matches(entry));
-        assert!(inner.engram_confirmed_containment_ids.is_empty());
-        assert!(
-            inner.sessions[inner.find_session_index(&session).unwrap()]
-                .engram
-                .active_grant_id
-                .is_none()
-        );
-    }
-    stop.release();
+    std::thread::scope(|scope| {
+        let stop = stop;
+        let gate = gate;
+        let tick = scope.spawn(|| state.engram_abort_retry_tick(state.engram_budget_clock().wall_now()));
+        stop.wait_until_claimed();
+        gate.release();
+        let outcome = closing.join().unwrap();
+        assert!(matches!(outcome, EngramCheckpointOutcome::Succeeded));
+        {
+            let inner = state.inner.lock().unwrap();
+            let entry = engram_session_obligation_locked(&inner, &session).unwrap();
+            assert_eq!(entry.phase, EngramSessionObligationPhase::Intended);
+            assert!(contained_checkpoint_progress_matches(entry));
+            assert!(inner.engram_confirmed_containment_ids.is_empty());
+            assert!(
+                inner.sessions[inner.find_session_index(&session).unwrap()]
+                    .engram
+                    .active_grant_id
+                    .is_none()
+            );
+        }
+        stop.release();
+        tick.join().unwrap();
+    });
     let guard = phase_sync::PollGuard::new();
     loop {
         let inner = state.inner.lock().unwrap();

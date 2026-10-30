@@ -10,6 +10,9 @@ deadlines, exact-identity retries, MCP propagation and restart limits.
 
 ## Status and product tiers
 
+See [tier changes and queued work](engram-project-reset.md) for the shared
+reset budget, live phase API, exact recovery holds and fair capped scheduling.
+
 The local Engram integration has two independent tiers:
 
 - **Base** is available to every enabled, repository-declared local project.

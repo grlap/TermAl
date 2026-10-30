@@ -22,7 +22,7 @@ impl EngramControlTransport for ColdStartRootReader {
         if matches!(request, EngramControlRequest::NamedRootRead { .. }) {
             *self.attempts.lock().unwrap() += 1;
             let prepared = self.process.processes.lock().unwrap()
-                .get(&connection.session_id).cloned();
+                .get(&connection.session_id).cloned().flatten();
             if let Some(prepared) = prepared {
                 assert!(prepared.process.try_wait().unwrap().is_none());
                 assert!(!prepared.worker_finished.load(std::sync::atomic::Ordering::Acquire));

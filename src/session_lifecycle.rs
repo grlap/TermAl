@@ -148,6 +148,61 @@ struct RequestedStopClaim {
     admission_owner: Option<EngramQueuedAdmissionOwner>,
 }
 
+impl RequestedStopClaim {
+    fn owns_stop(&self, record: &SessionRecord) -> bool {
+        let owns_stop = match self.runtime_token.as_ref() {
+            Some(token) => record.runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::UserStop, token, self.owner_generation,
+            ),
+            None => record.missing_runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::UserStop, self.owner_generation,
+            ),
+        };
+        owns_stop
+            && record.session.status == SessionStatus::Stopping
+            && record.runtime.runtime_token() == self.runtime_token
+            && record.active_turn_generation == self.active_turn_generation
+    }
+}
+
+/// Original interruption identity captured by containment, before deferral.
+/// The durable obligation keeps crash custody; this is only live scheduling.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramContainmentStopOwner {
+    obligation_id: String,
+    project_id: String,
+    reset_generation: u64,
+    runtime_token: Option<RuntimeToken>,
+    active_turn_generation: u64,
+}
+
+impl EngramContainmentStopOwner {
+    fn matches_runtime(&self, record: &SessionRecord) -> bool {
+        record.runtime.runtime_token() == self.runtime_token
+            && record.active_turn_generation == self.active_turn_generation
+    }
+
+    /// Only the acknowledged containment's own fence permits interruption.
+    /// A remaining session hold without that fence has no proved owner.
+    fn reset_allows_stop(&self, inner: &StateInner, record: &SessionRecord) -> bool {
+        let project = engram_project_for_session_locked(inner, &record.session.id);
+        let held = record.engram.project_reset_in_progress
+            || inner.engram_project_resets.contains(&self.project_id)
+            || project.is_some_and(|project| inner.engram_project_resets.contains(&project.id));
+        !held || (project.is_some_and(|project| project.id == self.project_id)
+            && inner.engram_project_resets.is_owned_by(&self.project_id, self.reset_generation))
+    }
+}
+
+#[derive(Clone)]
+struct EngramDeferredStop {
+    owner: EngramContainmentStopOwner,
+    claim: Option<RequestedStopClaim>,
+    due_at: String,
+    attempts: u32,
+    in_flight: bool,
+}
+
 impl AppState {
     /// Destructively removes a session: tears down its runtime (kill
     /// child process for Claude/ACP, `turn/interrupt` + detach for shared
@@ -189,6 +244,7 @@ impl AppState {
                 None,
                 None,
                 Some(&mut published_checkpoint),
+                None,
                 None,
             );
             if let Some(key) = published_checkpoint {
@@ -767,13 +823,79 @@ impl AppState {
         let Some(claim) = claim else {
             return Ok(response);
         };
+        self.spawn_requested_stop_session(session_id, options, claim, None)?;
+        Ok(response)
+    }
 
+    /// Containment already retained exact original authority. Its Stop enters
+    /// the existing owner directly on the scheduler's worker, with the shared
+    /// slot held until the whole interruption and cleanup complete.
+    /// Returns false when a newer reset defers admission, without an attempt.
+    fn run_project_reset_stop(&self, session_id: &str, owner: &EngramContainmentStopOwner)
+        -> Result<bool, ApiError> {
+        let options = StopSessionOptions::default();
+        let retained_claim = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.find_session_index(session_id).is_some_and(|index|
+                !owner.reset_allows_stop(&inner, &inner.sessions[index])) {
+                return Ok(false);
+            }
+            inner.find_session_index(session_id).and_then(|index| {
+                let record = &inner.sessions[index];
+                record.engram_containment_stop.as_ref()
+                    .filter(|pending| pending.owner == *owner)
+                    .and_then(|pending| pending.claim.as_ref())
+                    .filter(|claim| claim.owns_stop(record))
+                    .cloned()
+            })
+        };
+        let claim = match retained_claim {
+            Some(claim) => claim,
+            None => {
+                let (_, claim) = self.begin_requested_stop_session_for_owner(
+                    session_id, &options, Some(owner),
+                )?;
+                let Some(claim) = claim else { return Ok(false) };
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let index = inner.find_session_index(session_id)
+                    .ok_or_else(|| ApiError::not_found("session not found"))?;
+                let pending = inner.sessions[index].engram_containment_stop.as_mut()
+                    .filter(|pending| pending.owner == *owner)
+                    .ok_or_else(|| ApiError::conflict("original interruption was superseded"))?;
+                pending.claim = Some(claim.clone());
+                if let Some(entry) = inner.engram_session_obligations.entries.iter_mut()
+                    .find(|entry| entry.id == owner.obligation_id)
+                {
+                    entry.reason_code = "provider_interruption_unconfirmed".to_owned();
+                }
+                self.commit_locked(&mut inner).map_err(|_| ApiError::internal(
+                    "original provider Stop claim persistence is unconfirmed",
+                ))?;
+                claim
+            }
+        };
+        // The scheduler owns the slot through this entire existing Stop
+        // lifecycle, including interruption, acknowledgement and cleanup.
+        self.stop_local_session_with_options(session_id, options, Some(claim))?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(index) = inner.find_session_index(session_id)
+            && inner.sessions[index].engram_containment_stop.as_ref()
+                .is_some_and(|pending| pending.owner == *owner)
+        {
+            inner.sessions[index].engram_containment_stop = None;
+        }
+        Ok(true)
+    }
+
+    fn spawn_requested_stop_session(&self, session_id: &str, options: StopSessionOptions,
+        claim: RequestedStopClaim, slot: Option<EngramRetrySlot>) -> Result<(), ApiError> {
         let state = self.clone();
         let worker_session_id = session_id.to_owned();
         let worker_claim = claim.clone();
         if let Err(error) = std::thread::Builder::new()
             .name(format!("termal-stop-{session_id}"))
             .spawn(move || {
+                let _slot = slot;
                 if let Err(error) = state.stop_local_session_with_options(
                     &worker_session_id,
                     options,
@@ -793,7 +915,7 @@ impl AppState {
             return Err(ApiError::internal(detail));
         }
 
-        Ok(response)
+        Ok(())
     }
 
     fn begin_requested_stop_session(
@@ -801,10 +923,30 @@ impl AppState {
         session_id: &str,
         options: &StopSessionOptions,
     ) -> std::result::Result<(StateResponse, Option<RequestedStopClaim>), ApiError> {
+        self.begin_requested_stop_session_for_owner(session_id, options, None)
+    }
+
+    fn begin_requested_stop_session_for_owner(
+        &self,
+        session_id: &str,
+        options: &StopSessionOptions,
+        owner: Option<&EngramContainmentStopOwner>,
+    ) -> std::result::Result<(StateResponse, Option<RequestedStopClaim>), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+
+        if owner.is_some_and(|owner| !owner.reset_allows_stop(&inner, &inner.sessions[index])) {
+            return Ok((self.snapshot_from_inner(&inner), None));
+        }
+        if owner.is_some_and(|owner| {
+            !owner.matches_runtime(&inner.sessions[index])
+                || inner.sessions[index].engram_containment_stop.as_ref()
+                    .is_none_or(|pending| pending.owner != *owner || !pending.in_flight)
+        }) {
+            return Err(ApiError::conflict("original interruption was superseded"));
+        }
 
         if inner.sessions[index].provider_capacity_retry.is_some()
             && !matches!(inner.sessions[index].session.status,
@@ -835,7 +977,10 @@ impl AppState {
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
         ) && !(inner.sessions[index].session.status == SessionStatus::Error
-            && inner.sessions[index].runtime.dedicated_cleanup_failure().is_some()) {
+            && (inner.sessions[index].runtime.dedicated_cleanup_failure().is_some()
+                // Only the exact containment owner checked above may retry
+                // its retained live runtime after Stop released a failed claim.
+                || (owner.is_some() && inner.sessions[index].runtime.runtime_token().is_some()))) {
             return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
         }
 
@@ -972,6 +1117,17 @@ impl AppState {
             let replay = owns_stop.then(|| {
                 let runtime_token = record.runtime.runtime_token();
                 record.clear_runtime_stop();
+                if let Some(pending) = record.engram_containment_stop.as_mut()
+                    && pending.claim.as_ref().is_some_and(|retained| {
+                        retained.owner_generation == claim.owner_generation
+                            && retained.runtime_token == claim.runtime_token
+                            && retained.active_turn_generation == claim.active_turn_generation
+                    })
+                {
+                    // Release only this failed claim. The immutable pending
+                    // identity and durable exclusion still own the retry duty.
+                    pending.claim = None;
+                }
                 let callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
                 (runtime_token, callbacks)
             });
@@ -1068,18 +1224,7 @@ impl AppState {
                 .expect("session index should be valid");
 
             if let Some(claim) = requested_claim.as_ref() {
-                let owns_stop = match claim.runtime_token.as_ref() {
-                    Some(runtime_token) => record.runtime_stop_is_owned_by(
-                        RuntimeStopOwnerKind::UserStop,
-                        runtime_token,
-                        claim.owner_generation,
-                    ),
-                    None => record.missing_runtime_stop_is_owned_by(
-                        RuntimeStopOwnerKind::UserStop,
-                        claim.owner_generation,
-                    ),
-                };
-                if !owns_stop || record.session.status != SessionStatus::Stopping {
+                if !claim.owns_stop(record) {
                     return Err(ApiError::conflict(
                         "background Stop no longer owns the session",
                     ));

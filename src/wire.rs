@@ -87,9 +87,8 @@
 
 /// In-process classifier metadata for `ApiError`.
 ///
-/// This enum is not serialized in HTTP error responses, with one exception:
-/// the local federation settings route (`federation_settings_refusal`) adds
-/// the stable code of its own federation kinds beside `error`. Remote proxy
+/// Most kinds stay local. Federation settings and the project-reset boundary
+/// expose their own stable typed refusal codes beside `error`. Remote proxy
 /// decoding reconstructs an `ApiError` from status plus `{ error }` (any such
 /// code is lost), so any caller that needs typed recovery must attach the kind
 /// locally.
@@ -112,6 +111,9 @@ enum ApiErrorKind {
     /// could not establish whether its transcript promotion was persisted.
     /// Callers must report the error without terminalizing delegated work.
     RetainedQueuedPromotionPersistenceUnknown,
+    EngramProjectResetRuntimeHeld,
+    EngramProjectResetDeadline,
+    EngramProjectResetRefused,
     RemoteConnectionUnavailable,
     /// An owned federation SSH child could not be proven reaped. Never start
     /// another process for that pair until explicit operator reconciliation.
@@ -170,12 +172,12 @@ struct EnqueuedDurabilityDeadline {
 struct ApiError {
     message: String,
     status: StatusCode,
-    // In-process classifier metadata. `IntoResponse` intentionally omits this
-    // field (only the federation settings route maps its own kinds to a
-    // `code`), and remote proxy JSON decoding reconstructs `ApiError` with
+    // In-process classifier metadata. Only explicit typed boundaries expose
+    // selected codes; remote proxy JSON decoding reconstructs `ApiError` with
     // `kind: None`; callers that need typed recovery must tag errors locally.
     kind: Option<ApiErrorKind>,
     durability_deadline: Option<EnqueuedDurabilityDeadline>,
+    project_reset: Option<EngramProjectResetProgress>,
 }
 
 impl ApiError {
@@ -187,6 +189,7 @@ impl ApiError {
             status: StatusCode::BAD_REQUEST,
             kind: None,
             durability_deadline: None,
+            project_reset: None,
         }
     }
 
@@ -196,6 +199,7 @@ impl ApiError {
             status: StatusCode::CONFLICT,
             kind: None,
             durability_deadline: None,
+            project_reset: None,
         }
     }
 
@@ -205,6 +209,7 @@ impl ApiError {
             status: StatusCode::NOT_FOUND,
             kind: None,
             durability_deadline: None,
+            project_reset: None,
         }
     }
 
@@ -218,6 +223,7 @@ impl ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             kind: None,
             durability_deadline: None,
+            project_reset: None,
         }
     }
 
@@ -227,6 +233,7 @@ impl ApiError {
             status: StatusCode::BAD_GATEWAY,
             kind: None,
             durability_deadline: None,
+            project_reset: None,
         }
     }
 
@@ -237,6 +244,7 @@ impl ApiError {
             status,
             kind: None,
             durability_deadline: None,
+            project_reset: None,
         }
     }
 
@@ -278,6 +286,37 @@ impl ApiError {
 impl IntoResponse for ApiError {
     /// Converts the value into response.
     fn into_response(self) -> Response {
+        if self.kind == Some(ApiErrorKind::EngramProjectResetRefused) {
+            return (self.status, Json(json!({
+                "error": self.message,
+                "code": "engram_project_reset_refused",
+                "outcome": "settings_not_applied",
+                "reset": self.project_reset,
+            }))).into_response();
+        }
+        if self.kind == Some(ApiErrorKind::EngramProjectResetDeadline) {
+            return (self.status, Json(json!({
+                "error": self.message,
+                "code": "engram_project_reset_deadline",
+                "outcome": "settings_not_applied",
+                "reset": self.project_reset,
+            }))).into_response();
+        }
+        if self.kind == Some(ApiErrorKind::EngramProjectResetRuntimeHeld) {
+            return (self.status, Json(json!({
+                "error": self.message,
+                "code": "engram_project_reset_runtime_held",
+                "outcome": "settings_not_applied",
+                "existingSettingsRemainCurrent": true,
+            }))).into_response();
+        }
+        if let Some(progress) = self.project_reset {
+            return (self.status, Json(json!({
+                "error": self.message,
+                "code": "engram_project_reset_in_progress",
+                "reset": progress,
+            }))).into_response();
+        }
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation
         {

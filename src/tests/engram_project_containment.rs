@@ -260,8 +260,8 @@ fn project_containment_strict_reset_error_keeps_refusal_code() {
 }
 
 #[test]
-fn project_containment_repeated_refusal_keeps_exact_checkpoint_identity() {
-    let (state, project, session, _root, _receiver) = fixture();
+fn project_containment_tier_restore_keeps_exact_refused_checkpoint_and_exclusion() {
+    let (state, project, session, _root, receiver) = fixture();
     {
         let mut inner = state.inner.lock().unwrap();
         inner
@@ -275,36 +275,67 @@ fn project_containment_repeated_refusal_keeps_exact_checkpoint_identity() {
             .turn_gated_control = false;
         state.commit_locked(&mut inner).unwrap();
     }
-    // The producer's retained refusal is supplied twice. This checks the
-    // host's exact replay identity and diagnostics, not producer persistence.
+    queue_test_engram_prompt(&state, &session, "held behind original checkpoint",
+        QueuedPromptSource::User, None);
     let transport = ScriptedEngramControlTransport::new([
-        checkpoint_refusal_reply("GrantScopeMismatch"),
         checkpoint_refusal_reply("GrantScopeMismatch"),
     ]);
     install_control_only_transport(&state, transport.clone());
-    for _ in 0..2 {
-        let error = state
-            .update_project_engram_settings(&project, settings(&state, &project, true))
-            .err()
-            .expect("the retained refusal must remain a strict reset refusal");
-        assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(error.message.contains("GrantScopeMismatch"));
-        assert!(error.message.contains("turn_checkpoint"));
-        assert!(error.message.contains(&session));
-        assert!(!error.message.contains("retained-token"));
-    }
+    let error = state
+        .update_project_engram_settings(&project, settings(&state, &project, true))
+        .err()
+        .expect("the initial unresolved checkpoint must refuse the reset");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.kind, Some(ApiErrorKind::EngramProjectResetRefused));
+    assert!(error.message.contains("GrantScopeMismatch"));
+    assert!(error.message.contains("turn_checkpoint"));
+    assert!(error.message.contains(&session));
+    assert!(!error.message.contains("retained-token"));
     let requests = transport.requests();
-    let checkpoints = requests
-        .iter()
-        .filter(|r| r.request["operation"] == "turn_checkpoint")
-        .collect::<Vec<_>>();
-    assert_eq!(checkpoints.len(), 2);
-    assert_eq!(checkpoints[0].request, checkpoints[1].request);
-    assert_eq!(checkpoints[0].connection, checkpoints[1].connection);
-    assert_eq!(
-        checkpoints[0].request["idempotency_key"],
-        format!("termal-project-reset-checkpoint:{session}:retained-grant")
-    );
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].request["operation"], "turn_checkpoint");
+    let (original, duty, head, paused) = {
+        let inner = state.inner.lock().unwrap();
+        assert!(!inner.find_project(&project).unwrap().engram.as_ref().unwrap().turn_gated_control);
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        let original = record.engram.checkpoint_operation.clone().unwrap();
+        assert_eq!(requests[0].request, serde_json::to_value(&original.original.request).unwrap());
+        assert_eq!(requests[0].connection, original.original.connection);
+        assert!(matches!(original.attempts.last().unwrap().result,
+            Some(EngramCheckpointAttemptResult::Refused { .. })));
+        let duty = engram_session_obligation_locked(&inner, &session).unwrap().clone();
+        assert_eq!(duty.kind, EngramSessionObligationKind::ExistingCheckpoint);
+        assert_ne!(duty.phase, EngramSessionObligationPhase::Confirmed);
+        (
+            original,
+            duty,
+            record.queued_prompts.front().cloned().unwrap(),
+            (record.orchestrator_auto_dispatch_blocked, record.engram.operator_paused),
+        )
+    };
+    // Restoring the same authority's settings does not settle its original duty.
+    state.update_project_engram_settings(&project, settings(&state, &project, true)).unwrap();
+    let owner = {
+        let inner = state.inner.lock().unwrap();
+        assert!(inner.find_project(&project).unwrap().engram.as_ref().unwrap().turn_gated_control);
+        assert!(!inner.engram_project_resets.contains(&project));
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(!record.engram.project_reset_in_progress);
+        assert_eq!((record.orchestrator_auto_dispatch_blocked, record.engram.operator_paused), paused);
+        assert_eq!(serde_json::to_value(record.queued_prompts.front()).unwrap(), serde_json::to_value(&head).unwrap());
+        assert_eq!(serde_json::to_value(&record.engram.checkpoint_operation).unwrap(), serde_json::to_value(&original).unwrap());
+        assert_eq!(serde_json::to_value(engram_session_obligation_locked(&inner, &session)).unwrap(), serde_json::to_value(&duty).unwrap());
+        assert!(require_no_engram_local_dispatch_obligation(&inner, &session).is_err());
+        EngramQueuedAdmissionOwner::capture(record).unwrap()
+    };
+    assert!(state.dispatch_next_queued_turn_for_activation(&session, owner).unwrap().is_none());
+    assert!(state.dispatch_turn(&session, prompt()).is_err());
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(transport.requests().len(), 1, "restore and refused dispatch add no wire operation");
+    state.shutdown_persist_blocking();
+    let inner = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(inner.find_project(&project).unwrap().engram.as_ref().unwrap().turn_gated_control);
+    assert_eq!(serde_json::to_value(engram_session_obligation_locked(&inner, &session)).unwrap(), serde_json::to_value(&duty).unwrap());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
     assert_eq!(

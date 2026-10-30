@@ -39,6 +39,39 @@ const ENGRAM_RETRY_MAX_IN_FLIGHT: usize = 4;
 const ENGRAM_RETRY_TICK: Duration = Duration::from_secs(2);
 
 impl AppState {
+    /// A cap deferral keeps this exact head's age. Once selected, even a
+    /// failed/no-op attempt rejoins behind already eligible work. Initial
+    /// discovery preserves due order; later arrivals receive a later age.
+    fn order_engram_due_retries(&self, due: &mut Vec<EngramDueRetry>) {
+        due.sort_by(|left, right| left.due_at.cmp(&right.due_at));
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut ordered = Vec::with_capacity(due.len());
+        for retry in due.drain(..) {
+            let Some(index) = inner.find_session_index(&retry.session_id) else {
+                continue;
+            };
+            if !retry.owner.matches(&inner.sessions[index]) {
+                continue;
+            }
+            let schedule = &mut inner.sessions[index].engram_queue_schedule;
+            if schedule
+                .eligibility
+                .as_ref()
+                .is_none_or(|(owner, kind, _)| owner != &retry.owner || *kind != retry.kind)
+            {
+                let age = self
+                    .engram_retry_slots
+                    .next_eligibility
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                schedule.eligibility = Some((retry.owner.clone(), retry.kind, age));
+            }
+            let age = schedule.eligibility.as_ref().expect("eligible head").2;
+            ordered.push((age, retry));
+        }
+        ordered.sort_by_key(|(age, _)| *age);
+        *due = ordered.into_iter().map(|(_, retry)| retry).collect();
+    }
+
     /// Starts the automatic retry tick on a thread of its own, so the
     /// attempts it runs (each bounded by the admission budget) never hold up
     /// carried-gate polling or the test-run index. It stops once shutdown is
@@ -179,15 +212,59 @@ enum EngramRetryKind {
     Bind,
     Admission,
     Abort,
+    Activation,
+    ContainmentStop,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EngramRetryOwner {
+    Queue(EngramQueuedAdmissionOwner),
+    Stop(EngramContainmentStopOwner),
+}
+
+impl From<EngramQueuedAdmissionOwner> for EngramRetryOwner {
+    fn from(owner: EngramQueuedAdmissionOwner) -> Self { Self::Queue(owner) }
+}
+
+impl EngramRetryOwner {
+    fn matches(&self, record: &SessionRecord) -> bool {
+        match self {
+            Self::Queue(owner) => owner.matches(record),
+            Self::Stop(owner) => owner.matches_runtime(record)
+                && record.engram_containment_stop.as_ref()
+                    .is_some_and(|pending| pending.owner == *owner),
+        }
+    }
+}
+
+/// Signals ordinary service of an existing head after a reset. This is not a
+/// second prompt queue or authorization journal. Both fields disappear on load;
+/// durable prompt/recovery ownership remains with the existing owners.
+#[derive(Clone, Default)]
+struct EngramQueueSchedule {
+    activation: Option<(EngramQueuedAdmissionOwner, String)>,
+    eligibility: Option<(EngramRetryOwner, EngramRetryKind, u64)>,
+}
+
+impl EngramQueueSchedule {
+    fn register_activation(&mut self, owner: EngramQueuedAdmissionOwner, eligible_at: &str) {
+        if self.activation.as_ref().is_none_or(|(existing, _)| existing != &owner) {
+            self.activation = Some((owner, eligible_at.to_owned()));
+        }
+    }
 }
 
 fn engram_retry_kind(record: &SessionRecord) -> Option<EngramRetryKind> {
-    if record.engram.bind_retry.is_some() {
+    if record.engram_containment_stop.is_some() {
+        Some(EngramRetryKind::ContainmentStop)
+    } else if record.engram.bind_retry.is_some() {
         Some(EngramRetryKind::Bind)
     } else if record.engram.admission_retry.is_some() {
         Some(EngramRetryKind::Admission)
     } else if record.engram.abort_retry.is_some() {
         Some(EngramRetryKind::Abort)
+    } else if record.engram_queue_schedule.activation.is_some() {
+        Some(EngramRetryKind::Activation)
     } else {
         None
     }
@@ -196,13 +273,28 @@ fn engram_retry_kind(record: &SessionRecord) -> Option<EngramRetryKind> {
 /// The due time of `kind`'s record on `record`, for ordering due attempts.
 fn engram_retry_due_at(record: &SessionRecord, kind: EngramRetryKind) -> String {
     match kind {
-        EngramRetryKind::Bind => record.engram.bind_retry.as_ref().map(|retry| retry.due_at.clone()),
+        EngramRetryKind::Bind => record
+            .engram
+            .bind_retry
+            .as_ref()
+            .map(|retry| retry.due_at.clone()),
         EngramRetryKind::Admission => record
             .engram
             .admission_retry
             .as_ref()
             .map(|retry| retry.due_at.clone()),
-        EngramRetryKind::Abort => record.engram.abort_retry.as_ref().map(|retry| retry.due_at.clone()),
+        EngramRetryKind::Abort => record
+            .engram
+            .abort_retry
+            .as_ref()
+            .map(|retry| retry.due_at.clone()),
+        EngramRetryKind::Activation => record
+            .engram_queue_schedule
+            .activation
+            .as_ref()
+            .map(|(_, at)| at.clone()),
+        EngramRetryKind::ContainmentStop => record.engram_containment_stop.as_ref()
+            .map(|pending| pending.due_at.clone()),
     }
     .unwrap_or_default()
 }
@@ -229,6 +321,7 @@ struct EngramRetrySlots {
     /// fatal disabled reason, and like one released by a restart or by that
     /// session's re-enable (`checkpoint_original_startup_refused_held`).
     checkpoint_startup_refused: Arc<Mutex<HashMap<String, bool>>>,
+    next_eligibility: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// One attempt's place under the cap, released when the attempt completes,
@@ -305,7 +398,7 @@ impl Drop for EngramRetrySlot {
 /// which retry it is and when it was due.
 struct EngramDueRetry {
     session_id: String,
-    owner: EngramQueuedAdmissionOwner,
+    owner: EngramRetryOwner,
     kind: EngramRetryKind,
     due_at: String,
 }
@@ -392,7 +485,72 @@ impl AppState {
                 let fenced = inner.sessions[index].engram.project_reset_in_progress
                     || engram_project_for_session_locked(&inner, &session_id)
                         .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
+                if let Some(pending) = inner.sessions[index].engram_containment_stop.as_ref() {
+                    if !pending.owner.reset_allows_stop(&inner, &inner.sessions[index]) {
+                        continue;
+                    }
+                    if !pending.owner.matches_runtime(&inner.sessions[index])
+                        || matches!(inner.sessions[index].session.status, SessionStatus::Idle)
+                    {
+                        // Natural completion/replacement retires only live
+                        // scheduling, never the original durable obligation.
+                        let obligation_id = pending.owner.obligation_id.clone();
+                        inner.sessions[index].engram_containment_stop = None;
+                        if let Some(entry) = inner.engram_session_obligations.entries.iter_mut()
+                            .find(|entry| entry.id == obligation_id)
+                        {
+                            entry.reason_code = "provider_stop_owner_changed".to_owned();
+                            changed = true;
+                        }
+                        continue;
+                    }
+                    if !pending.in_flight && engram_retry_due_passed(&pending.due_at, now) {
+                        due.push(EngramDueRetry {
+                            session_id, owner: EngramRetryOwner::Stop(pending.owner.clone()),
+                            kind: EngramRetryKind::ContainmentStop, due_at: pending.due_at.clone(),
+                        });
+                    }
+                    continue;
+                }
                 if fenced {
+                    continue;
+                }
+                if engram_retry_kind(&inner.sessions[index]) == Some(EngramRetryKind::Activation) {
+                    let record = &inner.sessions[index];
+                    let Some((owner, due_at)) = record.engram_queue_schedule.activation.as_ref()
+                    else {
+                        continue;
+                    };
+                    if !owner.matches(record) {
+                        inner.sessions[index].engram_queue_schedule =
+                            EngramQueueSchedule::default();
+                        continue;
+                    }
+                    if record.hidden
+                        || !record.is_local_session()
+                        || matches!(
+                            record.session.status,
+                            SessionStatus::Active
+                                | SessionStatus::Approval
+                                | SessionStatus::Stopping
+                        )
+                        || record.orchestrator_auto_dispatch_blocked
+                        || record.engram_boot_recovery_retry_in_progress
+                        || record.runtime_stop_in_progress
+                        || record.dedicated_cleanup_holds_admission()
+                        || engram_retry_attempt_in_flight(record)
+                        || record.engram.bind_in_progress
+                        || record.engram.checkpoint_in_progress
+                        || engram_admission_obligation_locked(&inner, &session_id).is_some()
+                    {
+                        continue;
+                    }
+                    due.push(EngramDueRetry {
+                        session_id,
+                        owner: owner.clone().into(),
+                        kind: EngramRetryKind::Activation,
+                        due_at: due_at.clone(),
+                    });
                     continue;
                 }
                 let authority =
@@ -412,8 +570,8 @@ impl AppState {
                 // A head that had a prepared begin withheld is bounded by its
                 // overall admission budget, whichever retry holds it now
                 // (`engram_begin_preparation_retry.rs`).
-                let step = engram_begin_preparation_lineage_step(record, now).unwrap_or_else(|| {
-                    match kind {
+                let step = engram_begin_preparation_lineage_step(record, now).unwrap_or_else(
+                    || match kind {
                         EngramRetryKind::Bind => {
                             engram_bind_retry_step(record, authority.as_deref(), now, budget_now)
                         }
@@ -426,8 +584,11 @@ impl AppState {
                         EngramRetryKind::Abort => {
                             engram_abort_retry_step(record, authority.as_deref(), now)
                         }
-                    }
-                });
+                        EngramRetryKind::Activation | EngramRetryKind::ContainmentStop => {
+                            unreachable!("activation handled before authority capture")
+                        }
+                    },
+                );
                 // A window an operator's pause or control disabled ended is
                 // saved whatever the retry's own step returned: control
                 // disabled is not saved, so after a restart only the ended
@@ -489,7 +650,7 @@ impl AppState {
                             let due_at = engram_retry_due_at(&inner.sessions[index], kind);
                             due.push(EngramDueRetry {
                                 session_id,
-                                owner,
+                                owner: owner.into(),
                                 kind,
                                 due_at,
                             });
@@ -506,12 +667,32 @@ impl AppState {
         }
         // Earliest due first; RFC 3339 times written by this host in UTC with
         // millisecond precision order as strings.
-        due.sort_by(|left, right| left.due_at.cmp(&right.due_at));
+        self.order_engram_due_retries(&mut due);
         let mut admitted = Vec::new();
         let mut deferred = 0;
         for retry in due {
             match self.engram_retry_slots.try_acquire() {
-                Some(slot) => admitted.push((retry, slot)),
+                Some(slot) => {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if let Some(index) = inner.find_session_index(&retry.session_id)
+                        && retry.owner.matches(&inner.sessions[index])
+                    {
+                        if let EngramRetryOwner::Stop(owner) = &retry.owner {
+                            if !owner.reset_allows_stop(&inner, &inner.sessions[index]) { continue; }
+                        } else {
+                            inner.sessions[index].engram_queue_schedule.eligibility = None;
+                        }
+                        if retry.kind == EngramRetryKind::Activation {
+                            inner.sessions[index].engram_queue_schedule.activation = None;
+                        }
+                        if retry.kind == EngramRetryKind::ContainmentStop {
+                            let pending = inner.sessions[index].engram_containment_stop.as_mut().expect("matched Stop owner");
+                            if pending.in_flight { continue; }
+                            pending.in_flight = true;
+                        }
+                        admitted.push((retry, slot));
+                    }
+                }
                 None => {
                     deferred += 1;
                     eprintln!(
@@ -609,9 +790,76 @@ impl AppState {
         slot: EngramRetrySlot,
     ) {
         let session_id = retry.session_id.clone();
+        let activation = match &retry.owner {
+            EngramRetryOwner::Queue(owner) if retry.kind == EngramRetryKind::Activation =>
+                Some((owner.clone(), retry.due_at.clone())),
+            _ => None,
+        };
+        let stop = match &retry.owner {
+            EngramRetryOwner::Stop(owner) => Some(owner.clone()),
+            _ => None,
+        };
+        let stop_attempt = stop.clone();
+        let stop_session_id = session_id.clone();
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-            self.run_engram_retry_attempt_unguarded(retry, now, slot)
+            if let Some(owner) = stop_attempt {
+                let _slot = slot;
+                match self.run_project_reset_stop(&stop_session_id, &owner) {
+                    Ok(attempted) => attempted,
+                    Err(error) => {
+                        eprintln!("engram> session={stop_session_id} operation=stop outcome=retained code=provider_stop_deferred status={}", error.status.as_u16());
+                        true
+                    }
+                }
+            } else {
+                self.run_engram_retry_attempt_unguarded(retry, now, slot);
+                true
+            }
         }));
+        if let Some((owner, due_at)) = activation {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(&session_id) {
+                let record = &mut inner.sessions[index];
+                if owner.matches(record) && record.engram_queue_schedule.activation.is_none() {
+                    // A pause, debt or concurrent admission may have prevented
+                    // promotion. Keep this head registered, with a new service
+                    // age; never transfer it to a successor exposed meanwhile.
+                    record.engram_queue_schedule.activation = Some((owner, due_at));
+                }
+            }
+        }
+        if let Some(owner) = stop {
+            let deferred = matches!(&outcome, Ok(false));
+            let finished_at = self.engram_budget_clock().wall_now();
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(&session_id)
+                && !deferred
+                && inner.sessions[index].engram_queue_schedule.eligibility.as_ref()
+                    .is_some_and(|(eligible, _, _)| *eligible == EngramRetryOwner::Stop(owner.clone()))
+            {
+                inner.sessions[index].engram_queue_schedule.eligibility = None;
+            }
+            if let Some(index) = inner.find_session_index(&session_id)
+                && let Some(pending) = inner.sessions[index].engram_containment_stop.as_mut()
+                && pending.owner == owner
+            {
+                // Includes failed claim/handoff and panic. Keep the same duty
+                // with bounded backoff; never charge cap-only deferral.
+                pending.in_flight = false;
+                if deferred { return; }
+                pending.attempts = pending.attempts.saturating_add(1);
+                pending.due_at = (finished_at + engram_abort_retry_delay(&session_id, pending.attempts))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                if let Some(entry) = inner.engram_session_obligations.entries.iter_mut()
+                    .find(|entry| entry.id == owner.obligation_id)
+                {
+                    entry.reason_code = "provider_stop_deferred".to_owned();
+                }
+                if let Err(error) = self.commit_locked(&mut inner) {
+                    eprintln!("engram> session={session_id} deferred Stop state persistence failed: {error:#}");
+                }
+            }
+        }
         if outcome.is_err() {
             eprintln!(
                 "engram> session={session_id} automatic retry attempt panicked; its record is kept for a later tick"
@@ -640,8 +888,44 @@ impl AppState {
             kind,
             ..
         } = retry;
+        let owner = match owner {
+            EngramRetryOwner::Queue(owner) => owner,
+            EngramRetryOwner::Stop(_) => unreachable!("containment Stop handled by its attempt owner"),
+        };
         #[cfg(test)]
         engram_retry_test_panic_point(self, &session_id);
+        if kind == EngramRetryKind::Activation {
+            let boot_pending = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.find_session_index(&session_id).is_some_and(|index| {
+                    owner.matches(&inner.sessions[index])
+                        && inner.sessions[index].engram_boot_recovery_pending
+                })
+            };
+            if boot_pending {
+                self.request_engram_boot_recovery_retry_holding(
+                    &session_id, Some(slot), Some(&owner),
+                );
+                return;
+            }
+            match self.dispatch_next_queued_turn_for_activation(&session_id, owner) {
+                Ok(Some(dispatch)) => {
+                    if let Err(error) = deliver_turn_dispatch_holding(self, dispatch, Some(slot))
+                        .into_background_result("project reset queue activation")
+                    {
+                        eprintln!(
+                            "engram> session={session_id} queue activation delivery failed: {}",
+                            error.message
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("engram> session={session_id} queue activation refused: {error:#}")
+                }
+            }
+            return;
+        }
         // A parked admission, a begin-preparation abort retry included, makes
         // its session's boot reconciliation under its own slot.
         if matches!(kind, EngramRetryKind::Admission | EngramRetryKind::Abort) {
@@ -658,7 +942,7 @@ impl AppState {
             };
             if fenced {
                 // The recovery holds this attempt's slot until it finishes.
-                self.request_engram_boot_recovery_retry_holding(&session_id, Some(slot));
+                self.request_engram_boot_recovery_retry_holding(&session_id, Some(slot), None);
                 return;
             }
         }
@@ -692,11 +976,16 @@ impl AppState {
             }
         }
         let dispatch = match kind {
-            EngramRetryKind::Bind => self.dispatch_next_queued_turn_for_bind_retry(&session_id, owner),
+            EngramRetryKind::Bind => {
+                self.dispatch_next_queued_turn_for_bind_retry(&session_id, owner)
+            }
             EngramRetryKind::Admission => {
                 self.dispatch_next_queued_turn_for_admission_retry(&session_id, owner)
             }
-            EngramRetryKind::Abort => self.dispatch_next_queued_turn_for_abort_retry(&session_id, owner),
+            EngramRetryKind::Abort => {
+                self.dispatch_next_queued_turn_for_abort_retry(&session_id, owner)
+            }
+            EngramRetryKind::Activation | EngramRetryKind::ContainmentStop => unreachable!("ordinary activation/Stop handled above"),
         };
         let (started, failed) = match dispatch {
             Ok(Some(dispatch)) => {
@@ -722,7 +1011,9 @@ impl AppState {
         };
         if !started {
             match kind {
-                EngramRetryKind::Bind => self.postpone_engram_bind_retry(&session_id, &retry_owner, now),
+                EngramRetryKind::Bind => {
+                    self.postpone_engram_bind_retry(&session_id, &retry_owner, now)
+                }
                 EngramRetryKind::Admission => {
                     if failed {
                         self.postpone_engram_admission_retry(&session_id, &retry_owner, now);
@@ -731,6 +1022,7 @@ impl AppState {
                 EngramRetryKind::Abort => {
                     self.postpone_engram_abort_retry(&session_id, &retry_owner.prompt_id, now)
                 }
+                EngramRetryKind::Activation | EngramRetryKind::ContainmentStop => unreachable!("ordinary activation/Stop handled above"),
             }
         }
     }

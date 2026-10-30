@@ -924,7 +924,7 @@ fn a_stale_due_snapshot_after_a_newer_pause_neither_charges_nor_begins() {
     state.run_engram_retry_attempt(
         EngramDueRetry {
             session_id: session.clone(),
-            owner,
+            owner: owner.into(),
             kind: EngramRetryKind::Admission,
             due_at: String::new(),
         },

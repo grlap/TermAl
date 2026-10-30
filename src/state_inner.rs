@@ -175,6 +175,7 @@ impl StateInner {
             codex_terminal_identity_unresolved: false,
             runtime_stop_in_progress: false,
             runtime_stop_owner: None,
+            engram_containment_stop: None,
             runtime_stop_generation: 0,
             auto_dispatch_pause_epoch: 0,
             engram_mcp_revocation_pending: false,
@@ -183,6 +184,7 @@ impl StateInner {
             engram_boot_recovery_pending: false,
             engram_boot_recovery_dispatch_pending: false,
             engram_boot_recovery_retry_in_progress: false,
+            engram_queue_schedule: EngramQueueSchedule::default(),
             hidden: false,
             // Freshly created records start unstamped; the call path
             // immediately inserts this record and then the caller routes

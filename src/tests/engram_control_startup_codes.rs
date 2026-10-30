@@ -135,7 +135,7 @@ fn ordinary_remote_errors_keep_their_worker_as_before() {
 }
 
 /// Each startup code evicts the worker it came from: the reply is reported as
-/// that remote code, the registry no longer holds the worker, the worker
+/// that remote code, the registry retains its retiring cleanup owner, the
 /// process has exited and been reaped, and the next call starts a new one.
 #[test]
 fn real_process_startup_code_evicts_and_reaps_the_worker() {
@@ -156,14 +156,18 @@ fn real_process_startup_code_evicts_and_reaps_the_worker() {
             .expect_err("the startup code is an error");
         assert_eq!(error.kind, EngramTransportErrorKind::Remote, "{code}");
         assert_eq!(error.code.as_deref(), Some(code));
+        let retained = transport
+            .processes
+            .lock()
+            .unwrap()
+            .get(&connection.session_id)
+            .and_then(Option::as_ref)
+            .cloned()
+            .expect("the retiring worker keeps registry custody until cleanup");
+        assert!(Arc::ptr_eq(&retained, &worker), "{code}: exact cleanup owner");
         assert!(
-            transport
-                .processes
-                .lock()
-                .unwrap()
-                .get(&connection.session_id)
-                .is_none_or(|kept| !Arc::ptr_eq(kept, &worker)),
-            "{code}: the worker {pid} is no longer registered"
+            worker.retiring.load(std::sync::atomic::Ordering::Acquire),
+            "{code}: the worker {pid} is retired from request service"
         );
         assert!(
             worker.process.wait().is_ok() && worker.process.try_wait().unwrap().is_some(),

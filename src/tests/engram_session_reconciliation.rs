@@ -844,8 +844,6 @@ fn absence_strict_tier_upgrade_recovers_errored_reviewer_and_fresh_binds() {
         grant_reply("retained-grant"),
         begin_reply("retained-grant"),
         remote_error_reply("control_session_not_bound"),
-        bind_reply("fresh-a"),
-        bind_reply("fresh-b"),
     ]);
     install_control_only_transport(&state, transport.clone());
     let child = state
@@ -889,9 +887,61 @@ fn absence_strict_tier_upgrade_recovers_errored_reviewer_and_fresh_binds() {
         next
     };
     write_receipt(&root, &receipt(&root, &child));
-    state
-        .update_project_engram_settings(&project, next)
-        .unwrap();
+    let (dispatch_generation, active_turn_generation) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
+        (record.engram.dispatch_generation, record.active_turn_generation)
+    };
+    let original_checkpoint = Arc::new(Mutex::new(None));
+    let captured_checkpoint = original_checkpoint.clone();
+    let inspected_state = state.clone();
+    let inspected_child = child.clone();
+    TEST_ENGRAM_SETTINGS_MUTATION_BOUNDARY.with(|slot| {
+        *slot.borrow_mut() = Some(("before_commit", Box::new(move || {
+            let inner = inspected_state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&inspected_child).unwrap()];
+            let operation = selected_checkpoint_operation(&inner.engram_session_obligations,
+                record.engram.checkpoint_operation.as_ref().unwrap()).unwrap();
+            assert!(record.engram.checkpoint_in_progress, "inspection keeps its reservation until Save");
+            assert!(!engram_checkpoint_report_is_inactive(&inner, &operation.protection, None),
+                "ordinary callers must still treat a held checkpoint slot as busy");
+            assert!(engram_project_has_administrative_blocker(&inner, &operation.protection.project_id),
+                "inspection is not a global administrative bypass");
+            let owner = operation.original.checkpoint_owner_generation.unwrap();
+            assert!(project_engram_binding_target_during_owned_reset_locked(
+                &inner, &inspected_child, &operation.protection.project_id, owner,
+            ).unwrap().is_none(), "the original checkpoint still excludes generic binding");
+            let retained = EngramCheckpointRecoveryView::capture(&inner, &inspected_child)
+                .unwrap().transport_target(&inner);
+            assert!(validate_completed_absence_checkpoint_locked(
+                &inner, &retained, operation, true,
+            ).is_ok(), "only the exact retained inspection can use its reservation");
+            let mut changed = retained.clone();
+            changed.settings.turn_gated_control = !changed.settings.turn_gated_control;
+            assert!(validate_completed_absence_checkpoint_locked(&inner, &changed, operation, true).is_err());
+            changed = retained.clone();
+            changed.connection.actor_id.push_str("-changed");
+            assert!(validate_completed_absence_checkpoint_locked(&inner, &changed, operation, true).is_err());
+            changed = retained.clone();
+            changed.effects.clear();
+            assert!(validate_completed_absence_checkpoint_locked(&inner, &changed, operation, true).is_err());
+            changed = retained.clone();
+            changed.project_reset_owner_generation = Some(owner + 1);
+            assert!(validate_completed_absence_checkpoint_locked(&inner, &changed, operation, true).is_err(),
+                "the original snapshot does not authorize another reset reservation");
+            assert!(validate_completed_absence_checkpoint_locked(&inner, &retained, operation, false).is_err(),
+                "original custody does not substitute for the current inspection slot");
+            let mut other_checkpoint = operation.clone();
+            other_checkpoint.original.id.push_str("-changed");
+            assert!(validate_completed_absence_checkpoint_locked(
+                &inner, &retained, &other_checkpoint, true,
+            ).is_err(), "another canonical original cannot borrow the inspection");
+            *captured_checkpoint.lock().unwrap() = Some(serde_json::to_value(operation).unwrap());
+        })));
+    });
+    let saved = state.update_project_engram_settings(&project, next);
+    TEST_ENGRAM_SETTINGS_MUTATION_BOUNDARY.with(|slot| slot.borrow_mut().take());
+    saved.unwrap();
     let inner = state.inner.lock().unwrap();
     assert!(
         inner
@@ -907,11 +957,30 @@ fn absence_strict_tier_upgrade_recovers_errored_reviewer_and_fresh_binds() {
         .iter()
         .find(|r| r.session.id == child)
         .unwrap();
-    assert!(record.engram.active_grant_id.is_none());
-    assert!(matches!(
-        record.engram.routing_token.as_deref(),
-        Some("fresh-a" | "fresh-b")
-    ));
+    // The remote error is an Unknown invocation, not a checkpoint receipt.
+    // Strict settings Save may use exact absence evidence, but the original
+    // checkpoint and its exclusion must survive instead of enabling a bind.
+    assert_eq!(record.engram.active_grant_id.as_deref(), Some("retained-grant"));
+    assert_eq!(record.engram.routing_token.as_deref(), Some("child-token"));
+    assert_eq!(record.engram.dispatch_generation, dispatch_generation + 1,
+        "the reset fence advances dispatch once; inspection and Save do not advance it again");
+    assert_eq!(record.active_turn_generation, active_turn_generation);
+    assert!(!record.engram.checkpoint_in_progress);
+    assert!(!record.engram.project_reset_in_progress);
+    assert!(record.engram.rebind_required);
+    let operation = selected_checkpoint_operation(&inner.engram_session_obligations,
+        record.engram.checkpoint_operation.as_ref().unwrap()).unwrap();
+    assert!(matches!(&operation.attempts.last().unwrap().result,
+        Some(EngramCheckpointAttemptResult::Unknown { code })
+            if code.as_deref() == Some("control_session_not_bound")));
+    assert!(!matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
+    assert!(require_no_engram_admission_obligation(&inner, &child).is_err());
+    let saved_operation = serde_json::to_value(operation).unwrap();
+    assert_eq!(Some(&saved_operation), original_checkpoint.lock().unwrap().as_ref(),
+        "Save keeps the exact canonical original, attempt, Unknown result and protection");
+    let checkpoint_request = transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
+    assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), checkpoint_request);
     assert_eq!(
         transport
             .requests()
@@ -920,4 +989,18 @@ fn absence_strict_tier_upgrade_recovers_errored_reviewer_and_fresh_binds() {
             .count(),
         1
     );
+    assert_eq!(transport.requests().iter()
+        .filter(|r| r.request["operation"] == "session_bind").count(), 2,
+        "Save neither eagerly binds nor bypasses original checkpoint debt");
+    assert!(runtime_rx.try_recv().is_err());
+    drop(inner);
+    state.shutdown_persist_blocking();
+    let reloaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &reloaded.sessions[reloaded.find_session_index(&child).unwrap()];
+    assert_eq!(record.engram.active_grant_id.as_deref(), Some("retained-grant"));
+    assert_eq!(record.engram.routing_token.as_deref(), Some("child-token"));
+    assert_eq!(serde_json::to_value(selected_checkpoint_operation(
+        &reloaded.engram_session_obligations,
+        record.engram.checkpoint_operation.as_ref().unwrap()).unwrap()).unwrap(), saved_operation);
+    assert!(require_no_engram_admission_obligation(&reloaded, &child).is_err());
 }

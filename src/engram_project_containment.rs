@@ -42,6 +42,7 @@ struct EngramContainmentAttempt {
     checkpoint_owned: bool,
     read_only_terminal: bool,
     runtime_running: bool,
+    stop_owner: Option<EngramContainmentStopOwner>,
 }
 
 struct EngramContainmentResetGuard {
@@ -111,9 +112,7 @@ impl AppState {
                 ));
             }
             if inner.engram_project_resets.contains(project_id) {
-                return Err(ApiError::conflict(
-                    "Engram project settings are already being reset",
-                ));
+                return Err(inner.engram_project_reset_conflict(project_id));
             }
             let session_ids = project_engram_session_ids_locked(&inner, project_id);
             let mut ledger = inner.engram_session_obligations.clone();
@@ -134,8 +133,7 @@ impl AppState {
             }
             // Capacity/shape checks precede all remote effects and the setting.
             let generation = inner
-                .engram_project_resets
-                .claim(project_id)
+                .claim_engram_project_reset(project_id, true)
                 .ok_or_else(|| ApiError::conflict("Engram project reset ownership changed"))?;
             let previous_ledger = inner.engram_session_obligations.clone();
             let previous_sessions = session_ids
@@ -181,6 +179,13 @@ impl AppState {
                 target.project_reset_owner_generation = Some(generation);
                 let checkpoint_owned =
                     can_checkpoint && record.engram.begin_checkpoint(Some(generation));
+                let stop_owner = runtime_running.then(|| EngramContainmentStopOwner {
+                    obligation_id: obligation.id.clone(),
+                    project_id: project_id.clone(),
+                    reset_generation: generation,
+                    runtime_token: record.runtime.runtime_token(),
+                    active_turn_generation: record.active_turn_generation,
+                });
                 attempts.push(EngramContainmentAttempt {
                     obligation_id: obligation.id,
                     local_session_id: obligation.local_session_id,
@@ -189,6 +194,7 @@ impl AppState {
                     checkpoint_owned,
                     read_only_terminal,
                     runtime_running,
+                    stop_owner,
                 });
             }
             inner.engram_session_obligations = ledger;
@@ -257,30 +263,75 @@ impl AppState {
             generation,
             session_ids: session_ids.clone(),
         };
+        let reset_timer = self.engram_project_reset_timer(project_id, generation);
+        reset_timer.committed();
         // Before any RPC/interrupt, settings, exclusions and original identity
         // must have committed in the same primary-state transaction.
-        if let Err(error) = self.confirm_engram_containment(initial_image) {
+        let acknowledgement = reset_timer.phase("containment acknowledgement", None);
+        if let Err(error) = self.confirm_engram_containment_until(initial_image, reset_timer.claim.deadline) {
             self.release_engram_project_reset_fence(project_id, generation, &session_ids);
             return Err(error);
         }
-        let settlement_deadline = std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT;
-        for attempt in &attempts {
-            if attempt.runtime_running {
-                // Stop owns interruption and its uncertainty. A successful
-                // request is not evidence that the provider has stopped.
-                if let Err(error) = self.request_stop_session(&attempt.local_session_id) {
-                    eprintln!(
-                        "engram> session={} operation=stop outcome=unresolved code=provider_stop_refused status={}",
-                        attempt.local_session_id,
-                        error.status.as_u16()
-                    );
+        drop(acknowledgement);
+        // Register the whole interruption batch before budget/cap deferral.
+        // This is live scheduling only; the acknowledged original obligations
+        // above retain crash custody and remain excluded until settled.
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let due_at = reset_timer.claim.clock.wall_now()
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let mut changed = false;
+            for attempt in attempts.iter().filter(|attempt| attempt.stop_owner.is_some()) {
+                let owner = attempt.stop_owner.as_ref().expect("filtered Stop owner");
+                let Some(index) = inner.find_session_index(&attempt.local_session_id)
+                else { continue };
+                if inner.sessions[index].runtime_stop_in_progress
+                    || inner.sessions[index].session.status == SessionStatus::Stopping
+                {
+                    // The existing Stop keeps interruption custody. It is
+                    // already requested, rather than waiting for a retry slot.
+                    continue;
                 }
+                if owner.matches_runtime(&inner.sessions[index]) {
+                    if inner.sessions[index].engram_containment_stop.as_ref()
+                        .is_none_or(|pending| !pending.owner.matches_runtime(&inner.sessions[index]))
+                    {
+                        inner.sessions[index].engram_containment_stop = Some(EngramDeferredStop {
+                            owner: owner.clone(), claim: None, due_at: due_at.clone(),
+                            attempts: 0, in_flight: false,
+                        });
+                    }
+                    if let Some(entry) = inner.engram_session_obligations.entries.iter_mut()
+                        .find(|entry| entry.id == owner.obligation_id)
+                    {
+                        entry.reason_code = "provider_stop_deferred".to_owned();
+                        changed = true;
+                    }
+                } else if let Some(entry) = inner.engram_session_obligations.entries.iter_mut()
+                    .find(|entry| entry.id == owner.obligation_id)
+                {
+                    entry.reason_code = "provider_stop_owner_changed".to_owned();
+                    changed = true;
+                }
+            }
+            if changed {
+                self.commit_locked(&mut inner).map_err(|_| ApiError::internal(
+                    "containment is applied; original provider interruption remains held for recovery",
+                ))?;
+            }
+        }
+        let settlement_deadline = reset_timer.claim.deadline;
+        for (ordinal, attempt) in attempts.iter().enumerate() {
+            let _phase = reset_timer.phase_work("containment settlement", None, ordinal, attempts.len());
+            if attempt.runtime_running {
+                // The same capped scheduler owns deferred and in-flight Stop.
+                // Registration is neither interruption nor settlement proof.
                 continue;
             }
             if !attempt.checkpoint_owned && !attempt.read_only_terminal {
                 continue;
             }
-            let started = std::time::Instant::now();
+            let started = reset_timer.claim.clock.now();
             let mut target = attempt.target.clone();
             let remaining = settlement_deadline.saturating_duration_since(started);
             target.settings.deadline_ms =
@@ -331,12 +382,12 @@ impl AppState {
             }
             let evidence = match &result {
                 Ok(receipt) => Some(json!({"operation": "turn_checkpoint", "response": receipt})),
-                Err(_) if std::time::Instant::now() < settlement_deadline => {
+                Err(_) if reset_timer.claim.clock.now() < settlement_deadline => {
                     target.settings.deadline_ms = Some(
                         duration_millis(
                             target.settings.call_timeout().min(
                                 settlement_deadline
-                                    .saturating_duration_since(std::time::Instant::now()),
+                                    .saturating_duration_since(reset_timer.claim.clock.now()),
                             ),
                         )
                         .max(1),
@@ -352,7 +403,7 @@ impl AppState {
                 self.record_engram_project_reset_checkpoint_failure(
                     &attempt.target,
                     error,
-                    started.elapsed(),
+                    reset_timer.claim.clock.elapsed_since(started),
                 );
             }
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -441,7 +492,8 @@ impl AppState {
                 |_| ApiError::conflict("containment ownership changed during settlement"),
             )?
         };
-        if let Err(error) = self.confirm_engram_containment(final_image) {
+        let _acknowledgement = reset_timer.phase("containment acknowledgement", None);
+        if let Err(error) = self.confirm_engram_containment_until(final_image, settlement_deadline) {
             self.release_engram_project_reset_fence(project_id, generation, &session_ids);
             return Err(error);
         }
@@ -469,6 +521,7 @@ impl AppState {
             })?;
         }
         self.release_engram_project_reset_fence(project_id, generation, &session_ids);
+        reset_timer.released();
         Ok(self.snapshot())
     }
 }
