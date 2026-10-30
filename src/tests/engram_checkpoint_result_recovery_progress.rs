@@ -230,7 +230,7 @@ fn load_canonical(turn: &CheckedTurn, original: &EngramCheckpointOperation) -> (
 }
 
 /// Condition: healthy authority and no owner drift. Engram answers each
-/// recovery's work-binding read with the original claim, and nothing changes
+/// recovery's read-only policy probe, and nothing changes
 /// the root, its project or the duty while the schedule runs. Then the first
 /// automatic recovery falls due one jittered first retry delay after the tick
 /// that first sees the held Unknown, runs on the first production tick at or
@@ -551,15 +551,6 @@ fn two_held_originals_share_the_tick_one_call_at_a_time_in_due_order() {
     } else {
         (&second, &first)
     };
-    {
-        // Each probe reads the work binding in the order the duties are served.
-        let mut reads = turn.transport.work_bindings.lock().unwrap();
-        reads.clear();
-        reads.extend([
-            Err(EngramTransportError::transport("earlier due binding probe lost")),
-            Ok(later.original.work_binding.clone()),
-        ]);
-    }
     tick_at(&turn, &clock, start);
     let both_due = first_due.max(second_due);
     let held = (0..ENGRAM_RETRY_MAX_IN_FLIGHT)
@@ -569,7 +560,11 @@ fn two_held_originals_share_the_tick_one_call_at_a_time_in_due_order() {
     assert_eq!(checkpoints(&turn).len(), 2, "with every shared slot taken the due calls wait");
     drop(held);
     let grant = |operation: &EngramCheckpointOperation| operation.protection.grant_id.clone();
+    // The earlier due pass's read-only policy probe fails; the probe answers
+    // again before the other duty's pass.
+    let roots = turn.transport.named_roots.lock().unwrap().take();
     tick_at(&turn, &clock, both_due);
+    *turn.transport.named_roots.lock().unwrap() = roots;
     let sent = checkpoints(&turn);
     assert_eq!(sent.len(), 2, "the earlier due pass fails before allocating or sending");
     assert_eq!(turn.state.engram_retry_slots.checkpoint_due.lock().unwrap()
@@ -580,7 +575,6 @@ fn two_held_originals_share_the_tick_one_call_at_a_time_in_due_order() {
     assert_eq!(sent[2]["grant_id"].as_str(), Some(grant(later).as_str()));
     tick_at(&turn, &clock, both_due);
     assert_eq!(checkpoints(&turn).len(), 3, "both are rescheduled; no busy loop");
-    turn.transport.work_bindings.lock().unwrap().push_back(Ok(earlier.original.work_binding.clone()));
     let retry_at = turn.state.engram_retry_slots.checkpoint_due.lock().unwrap()
         .get(&earlier.original.id).unwrap().next_at;
     tick_at(&turn, &clock, retry_at);
@@ -597,26 +591,19 @@ fn two_held_originals_share_the_tick_one_call_at_a_time_in_due_order() {
 #[test]
 fn read_only_probe_failures_consume_no_send_attempt() {
     let (turn, original) = lost_checkpoint("cadence-probe", vec![checkpoint_reply(CHECK_GRANT)]);
-    {
-        let mut reads = turn.transport.work_bindings.lock().unwrap();
-        for failure in (0..ENGRAM_CHECKPOINT_FAST_ATTEMPT_LIMIT).rev() {
-            // Alternate a failed binding probe with two successful probes
-            // that return changed authority. Neither reaches allocation.
-            reads.push_front(if failure % 2 == 0 {
-                Err(EngramTransportError::transport("work-binding read lost"))
-            } else { Ok(None) });
-        }
-    }
+    // The read-only policy probe fails on every pass until the roots are
+    // restored. A failed probe never reaches allocation.
+    let roots = turn.transport.named_roots.lock().unwrap().take();
     let clock = pinned_clock(&turn);
     let mut at = clock.wall_now();
     tick_at(&turn, &clock, at);
     for probe in 1..=ENGRAM_CHECKPOINT_FAST_ATTEMPT_LIMIT {
         let due = turn.state.engram_retry_slots.checkpoint_due.lock().unwrap()
             .get(&original.original.id).unwrap().next_at;
-        let reads_before = turn.transport.refused_at_reads.lock().unwrap().len();
         tick_at(&turn, &clock, due - chrono::Duration::milliseconds(1));
         assert!(turn.state.recover_original_checkpoint_before_admission(&turn.session_id, None).is_err());
-        assert_eq!(turn.transport.refused_at_reads.lock().unwrap().len(), reads_before,
+        assert_eq!(turn.state.engram_retry_slots.checkpoint_due.lock().unwrap()
+            .get(&original.original.id).unwrap().preallocation_failures, probe - 1,
             "automatic/pre-admission triggers cannot bypass the due time");
         tick_at(&turn, &clock, due);
         assert_eq!(checkpoints(&turn).len(), 1, "probe failure {probe} sends nothing");
@@ -646,6 +633,7 @@ fn read_only_probe_failures_consume_no_send_attempt() {
         let index = inner.find_session_index(&turn.session_id).unwrap();
         inner.sessions[index].hidden = false;
     }
+    *turn.transport.named_roots.lock().unwrap() = roots;
     send_when_due(&turn, &clock, at + retry_delay(&original, ENGRAM_CHECKPOINT_FAST_ATTEMPT_LIMIT), 1);
     assert!(settled(&turn, &original));
     assert!(!turn.state.engram_retry_slots.checkpoint_due.lock().unwrap().contains_key(&original.original.id));
@@ -673,7 +661,7 @@ fn policy_failures_back_off_and_a_new_host_gets_only_local_fast_grace() {
     assert_eq!(checkpoints(&turn).len(), 1);
     assert_eq!(turn.state.engram_retry_slots.in_flight(), 0);
     assert!(turn.transport.work_bindings.lock().unwrap().len() >= 8,
-        "policy failures never reached the binding probe");
+        "original result recovery never reads the current work binding");
     *turn.transport.named_roots.lock().unwrap() = roots;
     turn.state.shutdown_persist_blocking();
     let (fresh, transport) = super::effects::fresh_host_at_cut(&turn.state,

@@ -402,18 +402,15 @@ impl AppState {
                 }
                 bail!("Original checkpoint attempt capacity exhausted; original custody and exclusion retained")
             }
-            // Failed read-only probes do not allocate or abandon a send attempt.
+            // A failed read-only probe does not allocate or abandon a send
+            // attempt. The session's current claim is not read: the producer
+            // settles the original against its stored control-session
+            // binding, so a claim since released, re-fenced or replaced never
+            // withholds the exact original request.
             adapter.read_observation_policy(&candidate.operation.original.connection,
                 &candidate.operation.protection.authority,
                 deadline.saturating_duration_since(clock.now()))
                 .map_err(|error| anyhow!("{error}"))?;
-            let binding = adapter.read_work_binding(&candidate.operation.original.connection,
-                EngramBindingPreference { current: candidate.operation.original.work_binding.as_ref(), refused: &[] },
-                deadline.saturating_duration_since(clock.now()))
-                .map_err(|error| anyhow!("{error}"))?;
-            if binding != candidate.operation.original.work_binding {
-                bail!("Original checkpoint work authority changed; recovery withheld")
-            }
         }
         let (mut owner, reservation) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");

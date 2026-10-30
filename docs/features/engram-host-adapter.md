@@ -4605,8 +4605,9 @@ invocation counts as attempt one. With one through seven allocated attempts,
 the delays before the next attempt are respectively 2, 5, 10, 20, 30, 60 and
 60 seconds, plus deterministic positive jitter of at most 20%. At eight or
 more allocated attempts the delay is ten minutes plus the same bounded jitter;
-there is no lifetime eight-attempt stop. Read-only policy and binding probes
-precede allocation, so failed probes consume no attempt. The existing local
+there is no lifetime eight-attempt stop. A read-only policy probe precedes
+allocation, so a failed probe consumes no attempt. Original result recovery
+never requires reacquiring or rebinding a current claim. The existing local
 schedule counts consecutive passes that fail before allocation, saturating at
 eight, and uses the greater of this count and the durable attempt count to
 choose the delay. Early probe success does not reset this history if a later

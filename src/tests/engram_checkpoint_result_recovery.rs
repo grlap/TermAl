@@ -6,6 +6,9 @@ mod effects;
 #[path = "engram_checkpoint_result_recovery_progress.rs"]
 mod recovery_progress;
 
+#[path = "engram_checkpoint_moved_authority.rs"]
+mod moved_authority;
+
 fn lost_checkpoint(label: &str, replies: Vec<ScriptedEngramControlResponse>) -> (CheckedTurn, EngramCheckpointOperation) {
     let turn = CheckedTurn::start_with(label, true, None,
         [ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport("reply lost")))]

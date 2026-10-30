@@ -18,7 +18,7 @@ struct ReplayHookTransport {
     inner: Arc<ScriptedEngramControlTransport>,
     before: Mutex<Option<ReplayHook>>,
     after: Mutex<Option<ReplayHook>>,
-    after_binding: Mutex<Option<ReplayHook>>,
+    after_probe: Mutex<Option<ReplayHook>>,
 }
 
 impl EngramControlTransport for ReplayHookTransport {
@@ -35,17 +35,19 @@ impl EngramControlTransport for ReplayHookTransport {
         reply
     }
 
+    // Recovery's one read-only preflight probe: `after_probe` runs once it
+    // has answered and before recovery revalidates its owner.
     fn read_observation_policy(&self, connection: &EngramConnectionConfig, store: &EngramAuthorityStoreKey,
         timeout: Duration, host_workdir: &FsPath) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.inner.read_observation_policy(connection, store, timeout, host_workdir)
+        let policy = self.inner.read_observation_policy(connection, store, timeout, host_workdir);
+        let hook = self.after_probe.lock().unwrap().take();
+        if let Some(hook) = hook { hook(); }
+        policy
     }
 
     fn read_work_binding(&self, connection: &EngramConnectionConfig, preference: EngramBindingPreference<'_>,
         timeout: Duration) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        let binding = self.inner.read_work_binding(connection, preference, timeout);
-        let hook = self.after_binding.lock().unwrap().take();
-        if let Some(hook) = hook { hook(); }
-        binding
+        self.inner.read_work_binding(connection, preference, timeout)
     }
 
     fn read_work_binding_for_boot(&self, connection: &EngramConnectionConfig, preference: EngramBindingPreference<'_>,
@@ -68,14 +70,14 @@ fn install_replay_hooks(turn: &CheckedTurn, before: Option<ReplayHook>, after: O
         inner: turn.transport.clone(),
         before: Mutex::new(before),
         after: Mutex::new(after),
-        after_binding: Mutex::new(None),
+        after_probe: Mutex::new(None),
     }));
 }
 
-fn install_binding_hook(turn: &CheckedTurn, hook: ReplayHook) {
+fn install_probe_hook(turn: &CheckedTurn, hook: ReplayHook) {
     install_control_only_transport(&turn.state, Arc::new(ReplayHookTransport {
         inner: turn.transport.clone(), before: Mutex::new(None), after: Mutex::new(None),
-        after_binding: Mutex::new(Some(hook)),
+        after_probe: Mutex::new(Some(hook)),
     }));
 }
 
@@ -88,7 +90,7 @@ fn successful_probes_then_owner_drift_accumulate_unsent_backoff() {
     turn.state.engram_checkpoint_result_retry_tick(at);
     for failed in 1..=3 {
         let (state, session) = (turn.state.clone(), turn.session_id.clone());
-        install_binding_hook(&turn, Box::new(move || {
+        install_probe_hook(&turn, Box::new(move || {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
             inner.sessions[index].engram.dispatch_generation += 1;
@@ -119,11 +121,11 @@ fn successful_probes_then_owner_drift_accumulate_unsent_backoff() {
 #[test]
 fn delayed_preflight_failure_cannot_overwrite_a_concurrent_accepted_result() {
     let (turn, original) = lost_checkpoint("preflight-concurrent-accepted", vec![checkpoint_reply(CHECK_GRANT)]);
-    // The outer pass receives changed authority, but pauses before validating
-    // it. The nested pass reads the current binding and settles the original.
-    turn.transport.work_bindings.lock().unwrap().push_front(Ok(None));
+    // The outer pass pauses after its preflight probe, before revalidating
+    // its owner. The nested pass settles the original meanwhile, so the outer
+    // pass's late owner check fails without sending or rescheduling.
     let (state, id) = (turn.state.clone(), original.original.id.clone());
-    install_binding_hook(&turn, Box::new(move || {
+    install_probe_hook(&turn, Box::new(move || {
         assert!(state.recover_original_checkpoint_result(&id).unwrap());
     }));
     assert!(turn.state.recover_original_checkpoint_result(&original.original.id).is_err());
