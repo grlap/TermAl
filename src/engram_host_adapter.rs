@@ -2799,6 +2799,11 @@ struct EngramSessionState {
     /// for test-routing notices. They never receive this grant's evidence.
     active_turn_other_source_roots: Vec<EngramWorkSourceRoot>,
     named_root: Option<EngramNamedRootState>,
+    /// The new names this session gave during its current turn, one per
+    /// claim, each with that turn's grant (`engram_source_roots.rs`): while
+    /// the grant is still active and its turn did not open in the root, no
+    /// turn has (`acceptance_named_root_sighting.rs`). In memory only.
+    roots_named_in_turn: Vec<EngramRootNamedInTurn>,
     /// Host lines put before the agent's prompt about where its turns on
     /// claimed work are measured (`engram_source_root_line`), one per line,
     /// until the runtime accepts a prompt that carried them: a dispatch
@@ -3006,6 +3011,7 @@ impl Default for EngramSessionState {
             active_turn_source_root: None,
             active_turn_other_source_roots: Vec::new(),
             named_root: None,
+            roots_named_in_turn: Vec::new(),
             pending_source_root_line: None,
             #[cfg(test)]
             test_source_root_lines: None,

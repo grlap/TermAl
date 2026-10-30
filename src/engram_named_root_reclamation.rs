@@ -616,6 +616,7 @@ impl AppState {
         Ok(EngramSourceRootResponse {
             work_ref: root.short_ref.clone(), work_id: root.work_id.clone(), root: None,
             source_revision: None, unmeasured: None, generation: 0, sealed: None,
+            evaluation_notice: None,
             notice: format!("`{}`: obsolete retained name retired with canonical authority; no producer event was created.", root.short_ref),
         })
     }

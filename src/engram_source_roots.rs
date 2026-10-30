@@ -1752,7 +1752,38 @@ struct EngramSourceRootResponse {
     /// turn took it.
     #[serde(skip_serializing_if = "Option::is_none")]
     sealed: Option<EngramSealedSourceRoot>,
+    /// A known limitation of ordinary turns producing an evaluation sighting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evaluation_notice: Option<EngramSourceRootEvaluationNotice>,
     notice: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EngramSourceRootEvaluationNotice {
+    TurnGatedControlOff,
+}
+
+impl EngramSourceRootEvaluationNotice {
+    fn message(self) -> &'static str {
+        "Turn-gated control is off for the naming session's project. Another ordinary turn \
+         does not produce a mediated named-root sighting. An existing matching sighting may \
+         still satisfy acceptance; otherwise ask the project coordinator for a supported \
+         capture path. A focus-only checkpoint is not a guaranteed remedy \
+         (named_root_sighting_unavailable)."
+    }
+}
+
+/// Describes the existing project setting; it neither changes control mode
+/// nor decides whether Engram already holds a matching sighting.
+fn engram_source_root_evaluation_notice_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> Option<EngramSourceRootEvaluationNotice> {
+    engram_project_for_session_locked(inner, session_id)
+        .and_then(|project| project.engram.as_ref())
+        .filter(|settings| !settings.turn_gated_control)
+        .map(|_| EngramSourceRootEvaluationNotice::TurnGatedControlOff)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1765,6 +1796,20 @@ struct EngramSealedSourceRoot {
 
 const ENGRAM_SOURCE_ROOT_TAKES_EFFECT_NOTICE: &str = "The source root takes effect at your next \
      turn; this turn keeps the root it began with.";
+
+const ENGRAM_NAMED_ROOT_SIGHTING_PRECONDITION: &str = "A named root needs an acknowledged capture: \
+     an eligible measured execution observation on the claim's run feed at or before the \
+     evaluated cut, with source_basis.workspace_id equal to the named root, \
+     source_root_generation equal to its generation, and source_root_state = named. A quiet \
+     admitted observation with no source change counts; a tracker checkpoint, verification or \
+     environment record alone does not.";
+
+/// Added when a root is named: Engram sights a named root only when a turn
+/// opens in it, so an evaluation requested in the naming turn is refused
+/// (`acceptance_named_root_sighting.rs`).
+const ENGRAM_SOURCE_ROOT_EVALUATION_NOTICE: &str = "Acceptance evaluation of this work needs a \
+     later turn that opens in the named root: request it from such a turn, not from the turn the \
+     root was named in.";
 
 /// Names, or clears, the source root of a work the session in the path holds
 /// a live claim on (`AppState::name_engram_source_root`).
@@ -2719,6 +2764,7 @@ impl AppState {
                 engram.pending_source_root_line.clone(),
                 engram.source_root_line_delivery.clone(),
                 engram.active_turn_source_root.clone(),
+                engram.roots_named_in_turn.clone(),
             )
         };
         let line = engram_source_root_line(
@@ -2751,6 +2797,22 @@ impl AppState {
                 inner.engram_work_source_roots = previous.into();
             }
             return Err(ApiError::conflict(error));
+        }
+        // A new name given during a turn takes effect at the session's next
+        // one (`acceptance_named_root_sighting.rs`). Marked with the turn
+        // running as the selection is installed, in this same lock hold and
+        // before any later step that may fail or release the lock (authority
+        // learning, persistence, publication): a selection that stays
+        // installed always carries its mark, so a retry that keeps the name,
+        // and so sends no transition, still finds it. A failed persistence
+        // below restores the marks with the selection. A turn admitted later
+        // is not taken for the naming turn; one admitted earlier may still
+        // capture the new root, and the evaluation check then sees that
+        // turn's root and defers to Engram. A kept name changes nothing.
+        if let Some((event, _)) = &transition {
+            let engram = &mut inner.sessions[index].engram;
+            let naming_grant = engram.active_grant_id.clone();
+            record_engram_root_named_in_turn(engram, &store, event, naming_grant);
         }
         let previous_journal = inner.engram_named_root_journal.clone();
         for journal in &mut inner.engram_named_root_journal {
@@ -2841,6 +2903,7 @@ impl AppState {
                 engram.pending_source_root_line,
                 engram.source_root_line_delivery,
                 engram.active_turn_source_root,
+                engram.roots_named_in_turn,
             ) = previous_record;
             return Err(ApiError::internal(format!(
                 "failed to persist the source root: {error:#}"
@@ -2952,9 +3015,17 @@ impl AppState {
             ),
             (None, _) => (None, None, None),
         };
+        let evaluation_notice = root.as_ref().and_then(|_| {
+            engram_source_root_evaluation_notice_locked(&inner, session_id)
+        });
+        let evaluation_message = evaluation_notice.map_or(
+            ENGRAM_SOURCE_ROOT_EVALUATION_NOTICE,
+            EngramSourceRootEvaluationNotice::message,
+        );
         let notice = match &root {
             Some(root) => format!(
-                "`{}` now names {root} as its source root. {ENGRAM_SOURCE_ROOT_TAKES_EFFECT_NOTICE}",
+                "`{}` now names {root} as its source root. {ENGRAM_SOURCE_ROOT_TAKES_EFFECT_NOTICE} \
+                 {ENGRAM_NAMED_ROOT_SIGHTING_PRECONDITION} {evaluation_message}",
                 claim.short_ref
             ),
             None => format!(
@@ -2971,6 +3042,7 @@ impl AppState {
             unmeasured,
             generation,
             sealed,
+            evaluation_notice,
             notice,
         })
     }

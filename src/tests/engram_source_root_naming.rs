@@ -4089,6 +4089,14 @@ fn source_root_base_mcp_names_and_clears_without_turn_gated_control_or_a_grant()
     assert!(named.root.is_some());
     assert!(named.generation > 0);
     assert!(named.sealed.is_none());
+    assert_eq!(named.evaluation_notice, Some(EngramSourceRootEvaluationNotice::TurnGatedControlOff));
+    assert_eq!(serde_json::to_value(&named).unwrap()["evaluationNotice"], "turn_gated_control_off");
+    assert!(named.notice.contains("Another ordinary turn does not produce")
+        && named.notice.contains("existing matching sighting")
+        && named.notice.contains("eligible measured execution observation")
+        && named.notice.contains("(named_root_sighting_unavailable)")
+        && !named.notice.contains(ENGRAM_SOURCE_ROOT_EVALUATION_NOTICE),
+        "OFF naming must not promise a sighting from another ordinary turn: {}", named.notice);
     let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
     assert_eq!(saved.engram_work_source_roots.len(), 1);
     assert_eq!(saved.engram_work_source_roots[0].generation, named.generation);
@@ -4107,6 +4115,7 @@ fn source_root_base_mcp_names_and_clears_without_turn_gated_control_or_a_grant()
     assert!(cleared.root.is_none());
     assert_eq!(cleared.generation, 0);
     assert!(cleared.sealed.is_none());
+    assert_eq!(cleared.evaluation_notice, None);
     let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
     assert!(saved.engram_work_source_roots.is_empty());
     claimed.record(|record| {
@@ -6398,5 +6407,68 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
     assert_eq!(
         checkpoint.request["observations"][0]["source_basis"]["workspace_id"].as_str(),
         fs::canonicalize(&second).unwrap().to_str()
+    );
+}
+
+#[test]
+fn source_root_naming_says_the_root_takes_effect_next_turn_and_evaluation_needs_a_turn_in_it() {
+    let label = "naming-notice-next-turn";
+    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
+    let worktree = add_claimed_root_worktree(&claimed.root);
+    let named = name_root(
+        &claimed,
+        label,
+        Some(&worktree),
+        vec![claimed_root_held(label)],
+    )
+    .unwrap();
+    assert_eq!(named.evaluation_notice, None);
+    assert!(serde_json::to_value(&named).unwrap().get("evaluationNotice").is_none());
+    assert!(
+        named.notice.contains("takes effect at your next turn")
+            && named.notice.contains(
+                "Acceptance evaluation of this work needs a later turn that opens in the named root"
+            ),
+        "the naming response says when the root applies and when evaluation can run: {}",
+        named.notice
+    );
+}
+
+#[test]
+fn a_root_named_during_a_turn_is_remembered_with_that_turns_grant_and_not_between_turns() {
+    // Through the real dispatch and naming paths: a name given during a turn
+    // is remembered with that turn's grant, which is how an evaluation
+    // requested in that same turn is told no turn has opened in the root yet.
+    let label = "naming-in-turn-grant";
+    let (claimed, _worktree, runtime_token) = named_root_turn(label, false);
+    let (named, grant) = claimed.record(|record| {
+        (
+            record.engram.roots_named_in_turn.clone(),
+            record.engram.active_grant_id.clone(),
+        )
+    });
+    let [named] = named.as_slice() else {
+        panic!("a name given during a turn is remembered once: {named:?}");
+    };
+    let named = named.clone();
+    assert_eq!(Some(&named.grant_id), grant.as_ref(), "with the grant of its turn");
+    let entry = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
+    assert_eq!(
+        (named.claim_id.as_str(), named.generation),
+        (entry.claim_id.as_str(), entry.generation),
+        "for the name the work now has"
+    );
+    let _ = finish_claimed_turn(&claimed, &runtime_token);
+    assert_ne!(
+        claimed.record(|record| record.engram.active_grant_id.clone()),
+        Some(named.grant_id),
+        "once the naming turn ends, its grant is no longer the session's"
+    );
+
+    // A name given before any turn began has no turn to wait for.
+    let (between, _, _) = named_root_turn("naming-between-turns-grant", true);
+    assert!(
+        between.record(|record| record.engram.roots_named_in_turn.is_empty()),
+        "a name given between turns is left to Engram's sighting"
     );
 }

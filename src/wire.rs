@@ -121,6 +121,13 @@ enum ApiErrorKind {
     /// A fresh evaluator's first brief was not acknowledged as durable, so its
     /// delegation was retired before any turn and the request may be repeated.
     AcceptanceEvaluationFirstBriefUnacknowledged,
+    /// An evaluation was requested before any turn opened in its newly named
+    /// source root: the root takes effect at the naming session's next turn,
+    /// whose opening Engram sights, so a later turn may request it again.
+    AcceptanceEvaluationNamedRootTurnPending,
+    /// The normal sighting read was absent and ordinary turns in the naming
+    /// session's project do not produce mediated sightings with control off.
+    AcceptanceEvaluationNamedRootSightingUnavailable,
     /// Federation operator settings refusals. The settings route alone puts
     /// their stable code beside `error` (`federation_operator_code`).
     FederationExpectedVersionRequired,

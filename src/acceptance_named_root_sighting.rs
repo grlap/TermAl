@@ -151,6 +151,7 @@ fn acceptance_sighting_unknown(query: &AcceptanceSightingQuery<'_>, why: &str) -
 fn acceptance_sighting_decision(
     read: &EngramNamedRootSightingRead,
     query: &AcceptanceSightingQuery<'_>,
+    evaluation_notice: Option<EngramSourceRootEvaluationNotice>,
 ) -> Result<(), ApiError> {
     if read.binding_changed {
         return Err(ApiError::conflict(format!(
@@ -206,20 +207,145 @@ fn acceptance_sighting_decision(
     }
     match sighting {
         EngramRootSighting::Present { .. } => Ok(()),
-        EngramRootSighting::Absent => Err(ApiError::conflict(format!(
-            "Engram has no sighting of `{}`'s named source root {root} (generation {}) at the \
-             task's evidence basis (run {}, cut {}), so an evaluation recorded there would be \
-             refused; no evaluator was started. That root needs an acknowledged capture under \
-             `{}`'s claim first: a checkpointed turn of the claim's session with `{}` as its \
-             focus. Then request a new evaluation.",
-            query.work_ref,
-            local.generation,
-            query.run_id,
-            query.cut,
-            query.work_ref,
-            query.work_ref
-        ))),
+        EngramRootSighting::Absent => {
+            let remedy = evaluation_notice.map_or_else(
+                || format!(
+                    "That root needs an acknowledged capture under `{}`'s claim first: a \
+                     mediated turn of the claim's session that opens in the named root after \
+                     its naming, with `{}` as its focus, acknowledged by Engram. The turn the \
+                     root was named in does not capture it. Then request a new evaluation \
+                     from a later turn.",
+                    query.work_ref, query.work_ref,
+                ),
+                |notice| notice.message().to_owned(),
+            );
+            let error = ApiError::conflict(format!(
+                "Engram has no sighting of `{}`'s named source root {root} (generation {}) at the \
+                 task's evidence basis (run {}, cut {}), so an evaluation recorded there would be \
+                 refused; no evaluator was started. {ENGRAM_NAMED_ROOT_SIGHTING_PRECONDITION} {remedy}",
+                query.work_ref,
+                local.generation,
+                query.run_id,
+                query.cut,
+            ));
+            Err(if evaluation_notice.is_some() {
+                error.with_kind(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable)
+            } else {
+                error
+            })
+        }
     }
+}
+
+/// A name its session gave during a turn: the name, and the grant of the turn
+/// it was given in (`engram_source_roots.rs`). In memory only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramRootNamedInTurn {
+    store: EngramAuthorityStoreKey,
+    claim_id: String,
+    generation: u64,
+    grant_id: String,
+}
+
+/// Records a named-root transition of the naming session on its marks. Each
+/// claim keeps its own mark, replaced or removed by that claim's next
+/// transition, so naming or clearing another claim's root leaves it; marks of
+/// a turn that has ended are dropped. A Bound transition is marked with
+/// `naming_grant`, and only while that turn still runs. The naming path passes
+/// the grant active as it installs the selection, under the same lock, so the
+/// check against the active grant guards other callers only.
+fn record_engram_root_named_in_turn(
+    engram: &mut EngramSessionState,
+    store: &EngramAuthorityStoreKey,
+    event: &EngramNamedRootEvent,
+    naming_grant: Option<String>,
+) {
+    let active = engram.active_grant_id.clone();
+    engram.roots_named_in_turn.retain(|named| {
+        active.as_ref() == Some(&named.grant_id)
+            && !(named.store == *store && named.claim_id == event.root.claim_id)
+    });
+    if event.kind != EngramNamedRootKind::Bound {
+        return;
+    }
+    if let Some(grant_id) = naming_grant.filter(|grant| active.as_ref() == Some(grant)) {
+        engram.roots_named_in_turn.push(EngramRootNamedInTurn {
+            store: store.clone(),
+            claim_id: event.root.claim_id.clone(),
+            generation: event.root.generation,
+            grant_id,
+        });
+    }
+}
+
+/// Whether no turn has opened in `root` since it was named: it was named
+/// during its naming session's turn that is still that session's turn, and
+/// that turn did not open in it. A named root takes effect at the session's
+/// next turn (`engram_turn_observations.rs`), and Engram's sighting of it is
+/// the capture taken when such a turn opens. Told by turn identity, the grant
+/// the naming turn held when the name was committed, never by clock order, and
+/// only for a turn-gated session. A turn whose capture took the new root after
+/// its begin opened in it, so it is left to Engram, as is every other case: a
+/// name given between turns, any later turn whatever its focus, and a name the
+/// host no longer remembers after a restart. Only the naming session's turns
+/// open in its claim's root: a turn selects the root by the claim it is bound
+/// to, and a claim is bound by the one session that holds it.
+fn acceptance_named_root_turn_pending_locked(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    root: &AcceptanceEvaluationSourceRoot,
+) -> bool {
+    let Some(entry) = engram_work_source_root_for_claim(
+        &inner.engram_work_source_roots,
+        store,
+        &root.work_id,
+        &root.claim_id,
+    )
+    .filter(|entry| entry.generation == root.generation && entry.root == root.root) else {
+        return false;
+    };
+    let gated = engram_project_for_session_locked(inner, &entry.named_by_session)
+        .and_then(|project| project.engram.as_ref())
+        .is_some_and(EngramProjectSettings::is_control_enabled);
+    let Some(index) = inner.find_session_index(&entry.named_by_session) else {
+        return false;
+    };
+    if !gated {
+        return false;
+    }
+    let engram = &inner.sessions[index].engram;
+    let opened_in_root = engram.active_turn_source_root.as_ref().is_some_and(|turn| {
+        turn.root == entry.root
+            && turn.claim_id == entry.claim_id
+            && turn.generation == entry.generation
+    });
+    !opened_in_root
+        && engram.roots_named_in_turn.iter().any(|named| {
+            named.store == *store
+                && named.claim_id == entry.claim_id
+                && named.generation == entry.generation
+                && engram.active_grant_id.as_ref() == Some(&named.grant_id)
+        })
+}
+
+/// The stable reason code a caller reads in the refusal's text, since an
+/// `ApiErrorKind` stays in-process (`wire.rs`).
+const ACCEPTANCE_NAMED_ROOT_TURN_PENDING_CODE: &str = "named_root_turn_pending";
+
+/// The refusal for an evaluation requested before any turn opened in the
+/// newly named root. Its kind types it for in-process callers and tests; its
+/// text carries a stable reason code for remote ones.
+fn acceptance_named_root_turn_pending(query: &AcceptanceSightingQuery<'_>) -> ApiError {
+    ApiError::conflict(format!(
+        "`{}`'s {} was named during a turn of the naming session, and no turn has opened in \
+         it since, so Engram has not sighted it; no evaluator was started \
+         ({ACCEPTANCE_NAMED_ROOT_TURN_PENDING_CODE}). A named root takes effect at that \
+         session's next turn, and Engram sights it when that turn opens in it. Request the \
+         evaluation from that next turn or a later one, not from the turn the root was named in.",
+        query.work_ref,
+        query.local_root(),
+    ))
+    .with_kind(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending)
 }
 
 impl AppState {
@@ -275,6 +401,11 @@ impl AppState {
             if current.store != *store || current.connection != *reader {
                 return Err(ApiError::conflict(ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR));
             }
+            // Known locally, before the read: a root named during the naming
+            // session's current turn has no opening Engram could have sighted.
+            if root.is_some_and(|root| acceptance_named_root_turn_pending_locked(&inner, store, root)) {
+                return Err(acceptance_named_root_turn_pending(&query));
+            }
             inner.engram_host_adapter.clone()
         };
         let budget = deadline
@@ -301,18 +432,29 @@ impl AppState {
         if let Some(why) = read.incoherence(&query) {
             return Err(acceptance_sighting_unknown(&query, &why));
         }
-        acceptance_sighting_decision(&read, &query)?;
-        let Some(root) = root else {
-            return Ok(());
-        };
         let inner = self.inner.lock().expect("state mutex poisoned");
-        if !root.still_named(&inner.engram_work_source_roots, store) {
-            return Err(ApiError::conflict(format!(
-                "`{}`'s named source root changed while its sighting was read; no evaluator was \
-                 started. Request a new evaluation.",
-                task.work_ref
-            )));
+        if let Some(root) = root {
+            if !root.still_named(&inner.engram_work_source_roots, store) {
+                return Err(ApiError::conflict(format!(
+                    "`{}`'s named source root changed while its sighting was read; no evaluator was \
+                     started. Request a new evaluation.",
+                    task.work_ref
+                )));
+            }
         }
+        // The notice is advice about the naming session's current project,
+        // not a local substitute for Engram's sighting. Refresh it after the
+        // read; in particular, an existing sighting still passes under OFF.
+        let evaluation_notice = root.and_then(|root| {
+            engram_work_source_root_for_claim(
+                &inner.engram_work_source_roots, store, &root.work_id, &root.claim_id,
+            )
+            .filter(|entry| entry.generation == root.generation && entry.root == root.root)
+            .and_then(|entry| {
+                engram_source_root_evaluation_notice_locked(&inner, &entry.named_by_session)
+            })
+        });
+        acceptance_sighting_decision(&read, &query, evaluation_notice)?;
         Ok(())
     }
 }
