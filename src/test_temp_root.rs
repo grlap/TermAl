@@ -17,6 +17,35 @@ thread_local! {
     static TEST_TEMP_ROOT_DIRECTORY: std::cell::RefCell<Option<PathBuf>> = const {
         std::cell::RefCell::new(None)
     };
+    /// The guarded root that an AppState constructed on this thread holds
+    /// from construction (see `boot_on_test_temp_root`).
+    static TEST_BOOT_TEMP_ROOT: std::cell::RefCell<Option<Arc<TestTempRoot>>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+/// Runs `boot` so that every AppState it constructs on this thread holds
+/// `root` from construction, before boot can clone that state into a worker
+/// (an Engram recovery worker, the broadcast worker). Every clone then shares
+/// the root, so it is removed only after the last of them drops. The previous
+/// slot comes back afterwards, also when `boot` unwinds.
+fn boot_on_test_temp_root<T>(root: &Arc<TestTempRoot>, boot: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<TestTempRoot>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            TEST_BOOT_TEMP_ROOT.with(|slot| {
+                slot.replace(previous);
+            });
+        }
+    }
+    let _restore = Restore(TEST_BOOT_TEMP_ROOT.with(|slot| slot.replace(Some(root.clone()))));
+    boot()
+}
+
+/// The root a state constructed now must hold, if a test boot named one.
+fn test_boot_temp_root() -> Option<Arc<TestTempRoot>> {
+    TEST_BOOT_TEMP_ROOT.with(|slot| slot.borrow().clone())
 }
 
 /// Test-thread-only placement for repository-owned fixtures. It does not

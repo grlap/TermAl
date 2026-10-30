@@ -135,8 +135,10 @@ pub(super) fn test_app_state_with_drained_delegation_codex_runtime(runtime_id: &
     state
 }
 
-pub(super) fn temp_delegation_state_paths() -> (TestTempRoot, PathBuf, PathBuf, PathBuf) {
-    let temp_root = TestTempRoot::create("termal-delegation");
+/// A guarded root holding a project and a state store, for tests that boot
+/// real states on it. Boot each one through [`boot_on_delegation_root`].
+pub(super) fn temp_delegation_state_paths() -> (Arc<TestTempRoot>, PathBuf, PathBuf, PathBuf) {
+    let temp_root = Arc::new(TestTempRoot::create("termal-delegation"));
     let project_root = temp_root.path().join("project");
     let state_root = temp_root.path().join("state");
     fs::create_dir_all(&project_root).expect("project root should exist");
@@ -147,6 +149,27 @@ pub(super) fn temp_delegation_state_paths() -> (TestTempRoot, PathBuf, PathBuf, 
         state_root.join("termal.sqlite"),
         state_root.join("orchestrators.json"),
     )
+}
+
+/// Boots a state on a [`temp_delegation_state_paths`] root that holds that
+/// root from construction, so every clone of it, including the ones its own
+/// boot hands to workers, shares the root. The root is then removed only
+/// after the last of them drops, and no late commit can recreate the store
+/// under a removed root. A root kept alive that way outlives its test, and
+/// the wrapper's leftover report names the test that created it.
+pub(super) fn boot_on_delegation_root(
+    root: &Arc<TestTempRoot>,
+    boot: impl FnOnce() -> AppState,
+) -> AppState {
+    let state = boot_on_test_temp_root(root, boot);
+    assert!(
+        state
+            .test_temp_root
+            .as_ref()
+            .is_some_and(|held| Arc::ptr_eq(held, root)),
+        "a state booted on a delegation root must hold that root"
+    );
+    state
 }
 pub(super) fn install_delegation_codex_runtime(state: &AppState, runtime_id: &str) {
     let (runtime, input_rx, _process) = test_shared_codex_runtime(runtime_id);

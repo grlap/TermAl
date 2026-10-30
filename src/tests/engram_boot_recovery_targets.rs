@@ -14,7 +14,7 @@
 //! instead of growing it.
 
 use super::super::delegation_support::{
-    install_delegation_codex_runtime, temp_delegation_state_paths,
+    boot_on_delegation_root, install_delegation_codex_runtime, temp_delegation_state_paths,
 };
 use super::*;
 
@@ -213,21 +213,22 @@ fn sorted(ids: impl IntoIterator<Item = String>) -> Vec<String> {
 
 #[test]
 fn boot_recovery_skips_finished_delegation_children_without_a_mirrored_grant() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let root = project_root.join("engram-finished-child-boot-recovery-project");
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready")
         .expect("Engram project marker should exist");
     let home = root.join("engram-home");
     fs::create_dir_all(&home).expect("Engram home should exist");
-    let state = AppState::new_with_paths_and_clock_for_test(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-        EngramBudgetClock::scripted(),
-    )
-    .expect("state should boot");
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths_and_clock_for_test(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .expect("state should boot")
+    );
     install_delegation_codex_runtime(&state, "engram-finished-child-boot-recovery");
     let project_id = create_test_project(&state, &root, "Engram finished-child boot recovery");
     // A parent runs only a bounded number of delegations at once, so the
@@ -474,14 +475,16 @@ fn boot_recovery_skips_finished_delegation_children_without_a_mirrored_grant() {
     // whose grants the first boot settled, keeps all their tokens, and
     // recovers only the roots and the running child.
     let second_boot = RecordingBootRecoveryTransport::new();
-    let reloaded = AppState::new_with_paths_engram_transport_and_clock_for_test(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-        second_boot.clone(),
-        EngramBudgetClock::scripted(),
-    )
-    .expect("state should boot again");
+    let reloaded = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths_engram_transport_and_clock_for_test(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+            second_boot.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .expect("state should boot again")
+    );
     let skipped_after_reload = [
         (&completed, format!("stale-{completed}")),
         (
@@ -555,21 +558,22 @@ fn a_record_written_before_begins_were_recorded_keeps_recovering_until_a_bind_se
     // hide one, so it keeps its eager recovery, after the live sessions,
     // until one accepted bind settles it. Each bounded boot settles as many
     // such records as it can; the settled ones are skipped from then on.
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let root = project_root.join("engram-boot-settlement-project");
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready")
         .expect("Engram project marker should exist");
     let home = root.join("engram-home");
     fs::create_dir_all(&home).expect("Engram home should exist");
-    let state = AppState::new_with_paths_and_clock_for_test(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-        EngramBudgetClock::scripted(),
-    )
-    .expect("state should boot");
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths_and_clock_for_test(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .expect("state should boot")
+    );
     install_delegation_codex_runtime(&state, "engram-boot-settlement");
     let project_id = create_test_project(&state, &root, "Engram boot settlement");
     let parent = create_test_project_session(&state, Agent::Codex, &project_id, &root);
@@ -721,14 +725,16 @@ fn a_record_written_before_begins_were_recorded_keeps_recovering_until_a_bind_se
     // again and now settles; the completed child stays skipped; the root is
     // recovered as always.
     let second_boot = RecordingBootRecoveryTransport::new();
-    let reloaded = AppState::new_with_paths_engram_transport_and_clock_for_test(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-        second_boot.clone(),
-        EngramBudgetClock::scripted(),
-    )
-    .expect("state should boot again");
+    let reloaded = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths_engram_transport_and_clock_for_test(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+            second_boot.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .expect("state should boot again")
+    );
     assert_eq!(
         second_boot.operations_for(&failed),
         Vec::<String>::new(),
@@ -795,21 +801,22 @@ fn a_persisted_uncertain_grant_survives_a_reload_and_keeps_the_finished_child_a_
     // come back from the store as written, make the finished child a target
     // of the next boot's recovery, stay when that boot cannot settle it, and
     // be settled by the boot that can.
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let root = project_root.join("engram-uncertain-reload-project");
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready")
         .expect("Engram project marker should exist");
     let home = root.join("engram-home");
     fs::create_dir_all(&home).expect("Engram home should exist");
-    let state = AppState::new_with_paths_and_clock_for_test(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-        EngramBudgetClock::scripted(),
-    )
-    .expect("state should boot");
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths_and_clock_for_test(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .expect("state should boot")
+    );
     install_delegation_codex_runtime(&state, "engram-uncertain-reload");
     let project_id = create_test_project(&state, &root, "Engram uncertain reload");
     let parent = create_test_project_session(&state, Agent::Codex, &project_id, &root);
@@ -881,14 +888,16 @@ fn a_persisted_uncertain_grant_survives_a_reload_and_keeps_the_finished_child_a_
     // the canceled child a recovery target, and stays when recovery fails.
     let second_boot = RecordingBootRecoveryTransport::new();
     second_boot.fail_session(&child, true);
-    let reloaded = AppState::new_with_paths_engram_transport_and_clock_for_test(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-        second_boot.clone(),
-        EngramBudgetClock::scripted(),
-    )
-    .expect("state should boot again");
+    let reloaded = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths_engram_transport_and_clock_for_test(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+            second_boot.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .expect("state should boot again")
+    );
     assert_eq!(
         second_boot.operations_for(&child),
         ["session_status"],
@@ -915,14 +924,16 @@ fn a_persisted_uncertain_grant_survives_a_reload_and_keeps_the_finished_child_a_
 
     // Boot 3 recovers it again, and a clean status settles it.
     let third_boot = RecordingBootRecoveryTransport::new();
-    let settled = AppState::new_with_paths_engram_transport_and_clock_for_test(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-        third_boot.clone(),
-        EngramBudgetClock::scripted(),
-    )
-    .expect("state should boot a third time");
+    let settled = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths_engram_transport_and_clock_for_test(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+            third_boot.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .expect("state should boot a third time")
+    );
     assert_eq!(
         third_boot.operations_for(&child),
         ["session_status", "session_bind"],

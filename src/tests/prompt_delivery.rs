@@ -718,20 +718,20 @@ struct DurableHost {
 
 impl DurableHost {
     fn new() -> Self {
-        let (temp_root, project_root, persistence_path, templates_path) =
+        let (root, project_root, persistence_path, templates_path) =
             super::delegation_support::temp_delegation_state_paths();
-        Self { project_root, persistence_path, templates_path, root: Arc::new(temp_root) }
+        Self { project_root, persistence_path, templates_path, root }
     }
 
     fn boot(&self) -> AppState {
-        let mut state = AppState::new_with_paths(
-            self.project_root.to_string_lossy().into_owned(),
-            self.persistence_path.clone(),
-            self.templates_path.clone(),
+        super::delegation_support::boot_on_delegation_root(&self.root, ||
+            AppState::new_with_paths(
+                self.project_root.to_string_lossy().into_owned(),
+                self.persistence_path.clone(),
+                self.templates_path.clone(),
+            )
+            .expect("state should boot")
         )
-        .expect("state should boot");
-        state.test_temp_root = Some(self.root.clone());
-        state
     }
 
     /// Ends the test only once every thread that cloned a booted state (a

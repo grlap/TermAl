@@ -891,8 +891,10 @@ impl AppState {
             stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
             stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
             inner: inner_arc,
+            // A test boot's guarded root is held from construction, so every
+            // clone that boot hands to a worker below shares it.
             #[cfg(test)]
-            test_temp_root: None,
+            test_temp_root: test_boot_temp_root(),
         };
         state.warm_state_projection_cache();
         state.state_broadcast_worker = Some(Arc::new(StateBroadcastWorker::start(state.clone())));

@@ -27,17 +27,19 @@ struct Fixture {
     primary_prompts: mpsc::Receiver<ClaudeRuntimeCommand>,
     recovery_prompts: mpsc::Receiver<ClaudeRuntimeCommand>,
     paths: (PathBuf, PathBuf, PathBuf),
-    _temp: TestTempRoot,
+    root: Arc<TestTempRoot>,
     _roots: (TestTempRoot, TestTempRoot),
 }
 
-fn boot(paths: &(PathBuf, PathBuf, PathBuf)) -> AppState {
-    AppState::new_with_paths(
-        paths.0.to_string_lossy().into_owned(),
-        paths.1.clone(),
-        paths.2.clone(),
+fn boot(paths: &(PathBuf, PathBuf, PathBuf), root: &Arc<TestTempRoot>) -> AppState {
+    super::delegation_support::boot_on_delegation_root(root, ||
+        AppState::new_with_paths(
+            paths.0.to_string_lossy().into_owned(),
+            paths.1.clone(),
+            paths.2.clone(),
+        )
+        .expect("state should boot")
     )
-    .expect("state should boot")
 }
 
 fn idle_session(
@@ -68,7 +70,7 @@ impl Fixture {
         let (temp, project_root, persistence_path, templates_path) =
             super::delegation_support::temp_delegation_state_paths();
         let paths = (project_root, persistence_path, templates_path);
-        let state = boot(&paths);
+        let state = boot(&paths, &temp);
         let primary_root = TestTempRoot::create(&format!("handoff-{label}-primary"));
         let recovery_root = TestTempRoot::create(&format!("handoff-{label}-recovery"));
         let (primary, primary_prompts) = idle_session(&state, "primary", &primary_root);
@@ -80,7 +82,7 @@ impl Fixture {
             primary_prompts,
             recovery_prompts,
             paths,
-            _temp: temp,
+            root: temp,
             _roots: (primary_root, recovery_root),
         }
     }
@@ -329,7 +331,7 @@ fn a_registered_handoff_survives_a_restart_and_is_offered_after_it() {
     fixture.state.shutdown_persist_blocking();
     drop(fixture.state);
 
-    let restarted = boot(&paths);
+    let restarted = boot(&paths, &fixture.root);
     let listed = restarted
         .list_handoffs_at(at(0))
         .expect("the list reads after the restart");
@@ -395,7 +397,7 @@ fn a_completed_handoff_keeps_its_evidence_and_history_across_a_restart() {
     let paths = fixture.paths.clone();
     fixture.state.shutdown_persist_blocking();
     drop(fixture.state);
-    let restarted = boot(&paths);
+    let restarted = boot(&paths, &fixture.root);
     let after = restarted
         .list_handoffs_at(at(600))
         .expect("the list reads after the restart")
@@ -589,7 +591,7 @@ fn a_pass_without_credit_never_readies_a_credited_step_and_a_changed_claim_route
     let paths = fixture.paths.clone();
     fixture.state.shutdown_persist_blocking();
     drop(fixture.state);
-    let restarted = boot(&paths);
+    let restarted = boot(&paths, &fixture.root);
     let (runtime, prompts) = test_claude_runtime_handle("handoff-credit-restarted");
     {
         let mut inner = restarted.inner.lock().unwrap();

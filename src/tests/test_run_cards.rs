@@ -611,16 +611,18 @@ fn after_a_restart_the_transcript_decides_whether_a_card_is_terminal() {
     // still holds the running snapshot (a row deferred to a later persist
     // tick, then a crash). The first scan after the restart trusts the
     // transcript: the run is gone, so the card reads notIndexed.
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
     run_git_test_command(&project_root, &["init", "--quiet"]);
     let boot = || {
-        AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
+        super::delegation_support::boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
         )
-        .expect("state should boot")
     };
     let run_dir = project_root.join(".git").join("review-runs").join("test-crash");
     let owner = {
@@ -798,16 +800,18 @@ fn a_hidden_or_remote_proxy_owner_gets_no_card() {
 
 #[test]
 fn cards_are_reconciled_by_the_first_scan_after_a_restart() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
     run_git_test_command(&project_root, &["init", "--quiet"]);
     let boot = || {
-        AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
+        super::delegation_support::boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
         )
-        .expect("state should boot")
     };
     let runs_dir = project_root.join(".git").join("review-runs");
     let write = |run_id: &str, owner: &str, results: Value| {

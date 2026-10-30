@@ -11,9 +11,9 @@
 use super::abort_retry::{ScriptedPersister, await_settlement_acknowledgement, prompts_received};
 use super::*;
 use crate::tests::delegation_support::{
-    finish_delegation_child_with_assistant_text, install_delegation_codex_runtime,
-    mark_delegation_as_unstructured_explorer, temp_delegation_state_paths,
-    test_app_state_with_drained_delegation_codex_runtime,
+    boot_on_delegation_root, finish_delegation_child_with_assistant_text,
+    install_delegation_codex_runtime, mark_delegation_as_unstructured_explorer,
+    temp_delegation_state_paths, test_app_state_with_drained_delegation_codex_runtime,
 };
 
 fn explorer_request(prompt: &str, title: &str) -> CreateDelegationRequest {
@@ -661,15 +661,16 @@ fn a_paused_parent_keeps_the_attention_notification_queued() {
 /// the hold that was saved.
 #[test]
 fn a_hold_and_its_wait_survive_a_restart_and_wake_once() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let boot = || {
-        AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
+        boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
         )
-        .expect("state should boot")
     };
     let (parent, delegation, wait_id) = {
         let state = boot();

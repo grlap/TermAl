@@ -8,6 +8,7 @@
 // as before. Does not own the persist fence's other targets (persist_fence.rs
 // tests) or any producer of held prompts. New module beside
 // src/queued_prompt_durability.rs.
+use super::delegation_support::boot_on_delegation_root;
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -365,29 +366,33 @@ fn a_prompt_without_a_hold_dispatches_exactly_as_before() {
 
 #[test]
 fn a_held_entry_read_back_after_a_restart_is_eligible() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
     let session;
     let held;
     {
-        let state = AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
-        )
-        .expect("state should boot");
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         let fixture = Fixture::new(state, "restart");
         held = fixture.enqueue_held("held across a restart");
         session = fixture.session.clone();
         // Durable, never acknowledged in this process.
         fixture.state.shutdown_persist_blocking();
     }
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path,
-        templates_path,
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path,
+            templates_path,
+        )
+        .expect("state should reload")
+    );
     let prompts = {
         let mut inner = restarted.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -420,14 +425,16 @@ fn a_held_entry_read_back_after_a_restart_is_eligible() {
 /// exact held entry back from the durable session row.
 #[test]
 fn the_production_writer_acknowledges_the_exact_held_entry_from_the_durable_row() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
-    let state = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path,
-        templates_path,
-    )
-    .expect("state should boot");
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path,
+            templates_path,
+        )
+        .expect("state should boot")
+    );
     let fixture = Fixture::new(state, "production");
     let held = fixture.enqueue_held("released by the real writer");
     assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
@@ -446,14 +453,16 @@ fn the_production_writer_acknowledges_the_exact_held_entry_from_the_durable_row(
 /// exact entry: another nonce, other content or another prompt never match.
 #[test]
 fn the_durable_row_read_back_matches_only_the_exact_hold_and_entry() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
-    let state = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path,
-    )
-    .expect("state should boot");
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path,
+        )
+        .expect("state should boot")
+    );
     let fixture = Fixture::new(state, "read-back");
     let held = fixture.enqueue_held("only this exact entry");
     let hold = fixture.hold(&held).unwrap();

@@ -1,7 +1,7 @@
 use super::delegation_support::{
-    finish_delegation_child_with_assistant_text, install_delegation_codex_runtime,
-    mark_delegation_as_unstructured_explorer, temp_delegation_state_paths,
-    test_app_state_with_delegation_codex_runtime,
+    boot_on_delegation_root, finish_delegation_child_with_assistant_text,
+    install_delegation_codex_runtime, mark_delegation_as_unstructured_explorer,
+    temp_delegation_state_paths, test_app_state_with_delegation_codex_runtime,
     test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::*;
@@ -1060,19 +1060,51 @@ fn canceling_delegation_preserves_pending_child_interaction_reason() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+/// Boot clones the state it is building into workers before the constructor
+/// returns, so a state booted on a delegation root must hold that root from
+/// construction, not only once boot has finished: every clone boot hands
+/// out then shares the root.
 #[test]
-fn delegation_records_persist_and_reload_with_child_link() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
-    let delegation_id;
-    let child_session_id;
-    {
-        let state = AppState::new_with_paths(
+fn a_state_booted_on_a_delegation_root_holds_it_before_its_boot_runs() {
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let held_before_boot = std::cell::Cell::new(false);
+    let state = boot_on_delegation_root(&temp_root, || {
+        let state = AppState::new_before_listen_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path.clone(),
         )
-        .expect("state should boot");
+        .expect("state should construct");
+        held_before_boot.set(
+            state
+                .test_temp_root
+                .as_ref()
+                .is_some_and(|held| Arc::ptr_eq(held, &temp_root)),
+        );
+        state.run_post_listen_boot().expect("state should boot");
+        state
+    });
+    assert!(
+        held_before_boot.get(),
+        "the state holds its delegation root before its post-listen boot clones it"
+    );
+    state.shutdown_persist_blocking();
+}
+
+#[test]
+fn delegation_records_persist_and_reload_with_child_link() {
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let delegation_id;
+    let child_session_id;
+    {
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         install_delegation_codex_runtime(&state, "delegation-persist-runtime");
         let parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1111,12 +1143,14 @@ fn delegation_records_persist_and_reload_with_child_link() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should reload")
+    );
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     let delegation = inner
         .delegations
@@ -1144,20 +1178,13 @@ fn delegation_records_persist_and_reload_with_child_link() {
     );
     drop(inner);
     restarted.shutdown_persist_blocking();
+    // The guarded root removes the project and the store with its last owner.
     drop(restarted);
-
-    let state_root = persistence_path
-        .parent()
-        .expect("persistence path should have a parent")
-        .to_path_buf();
-    remove_test_directory(project_root);
-    remove_test_directory(state_root);
 }
 
 #[test]
 fn delegation_full_output_pages_survive_restart_via_child_transcript() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let parent_session_id;
     let delegation_id;
     let output = format!(
@@ -1165,12 +1192,14 @@ fn delegation_full_output_pages_survive_restart_via_child_transcript() {
         "durable-result-🙂".repeat(900)
     );
     {
-        let state = AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
-        )
-        .expect("state should boot");
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         install_delegation_codex_runtime(&state, "delegation-output-persist-runtime");
         parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1199,12 +1228,14 @@ fn delegation_full_output_pages_survive_restart_via_child_transcript() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should reload")
+    );
     let mut reconstructed = String::new();
     let mut offset = 0;
     loop {
@@ -1224,29 +1255,24 @@ fn delegation_full_output_pages_survive_restart_via_child_transcript() {
     }
     assert_eq!(reconstructed, output);
     restarted.shutdown_persist_blocking();
+    // The guarded root removes the project and the store with its last owner.
     drop(restarted);
-
-    let state_root = persistence_path
-        .parent()
-        .expect("persistence path should have a parent")
-        .to_path_buf();
-    remove_test_directory(project_root);
-    remove_test_directory(state_root);
 }
 
 #[test]
 fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let delegation_id;
     let child_session_id;
     {
-        let state = AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
-        )
-        .expect("state should boot");
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         install_delegation_codex_runtime(&state, "delegation-persist-runtime");
         let parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1277,12 +1303,14 @@ fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should reload")
+    );
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     let child = inner
         .sessions
@@ -1295,14 +1323,8 @@ fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
     );
     drop(inner);
     restarted.shutdown_persist_blocking();
+    // The guarded root removes the project and the store with its last owner.
     drop(restarted);
-
-    let state_root = persistence_path
-        .parent()
-        .expect("persistence path should have a parent")
-        .to_path_buf();
-    remove_test_directory(project_root);
-    remove_test_directory(state_root);
 }
 
 #[tokio::test]
