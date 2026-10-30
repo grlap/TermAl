@@ -53,6 +53,9 @@ mod unchanged_binding;
 #[path = "acceptance_evaluation_first_frontier.rs"]
 mod first_frontier;
 
+#[path = "acceptance_evaluation_maintenance_pass.rs"]
+mod maintenance_pass;
+
 #[path = "acceptance_evaluation_refresh.rs"]
 mod refresh;
 

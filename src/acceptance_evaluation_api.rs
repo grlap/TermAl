@@ -910,6 +910,61 @@ impl AppState {
         self.prepare_acceptance_evaluation_attempt_until(parent_session_id, request, read, deadline, now, false)
     }
 
+    // Candidate recovery is old-operation settlement, before an evidence cut.
+    // Its preliminary identity read selects one work only; none of that read
+    // is reused as the opening of the definitive canonical bracket below.
+    fn recover_acceptance_request_candidate_until(
+        &self,
+        parent_session_id: &str,
+        work_ref: &str,
+        read: &impl Fn(&EngramConnectionConfig, &[String], Duration) -> std::result::Result<Value, EngramTransportError>,
+        deadline: std::time::Instant,
+        now: &impl Fn() -> std::time::Instant,
+    ) -> Result<(), ApiError> {
+        let target = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_visible_session_index(parent_session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let target = acceptance_evaluation_host_target_locked(&inner, parent_session_id)?;
+            if !inner.engram_work_naming_history.iter().any(|history| {
+                history.store == target.store && history.transition.as_ref()
+                    .is_some_and(|transition| transition.phase == EngramAuthorityPhase::Candidate)
+            }) {
+                return Ok(());
+            }
+            target
+        };
+        validate_work_read_target(&target)?;
+        let connection = &target.connection;
+        let mut args = vec!["work".to_owned(), "--actor-id".to_owned(), connection.actor_id.clone(),
+            "--session-id".to_owned(), connection.session_id.clone()];
+        if let Some(context) = &connection.actor_context {
+            args.extend(["--actor-context".to_owned(), context.clone()]);
+        }
+        args.extend(["core", "inspect", work_ref, "--json"].map(str::to_owned));
+        let preliminary = read(connection, &args,
+            acceptance_criterion_evidence_read_timeout(deadline, now)?)
+            .map_err(|error| acceptance_evaluation_transport_error("engram work core inspect before candidate recovery", error))?;
+        let identity = acceptance_core_identity(&preliminary)?.ok_or_else(||
+            ApiError::conflict("canonical work identity is unavailable before candidate recovery"))?;
+        if identity.work_ref != work_ref {
+            return Err(ApiError::conflict("core inspect resolved another work before candidate recovery"));
+        }
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if acceptance_evaluation_host_target_locked(&inner, parent_session_id)? != target {
+                return Err(ApiError::conflict("the acceptance reader changed before candidate recovery"));
+            }
+        }
+        self.recover_engram_authority_candidate_until(&target.store, &identity.work_id, deadline)?;
+        acceptance_criterion_evidence_read_timeout(deadline, now)?;
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        if acceptance_evaluation_host_target_locked(&inner, parent_session_id)? != target {
+            return Err(ApiError::conflict("the acceptance reader changed during candidate recovery"));
+        }
+        Ok(())
+    }
+
     fn prepare_acceptance_evaluation_attempt_until(
         &self,
         parent_session_id: &str,
@@ -944,6 +999,14 @@ impl AppState {
                 "An evaluator model override requires an explicit agent (Claude or Codex)",
             ));
         }
+        // One allowance covers preliminary recovery as well as all definitive
+        // reads. Recover at most the requested work's existing Candidate, never
+        // prepare a replacement or refresh every history.
+        let canonical_deadline =
+            Some((now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
+        self.recover_acceptance_request_candidate_until(
+            parent_session_id, &work_ref, &read, canonical_deadline.expect("identity budget"), &now,
+        )?;
         let (
             target,
             parent_workdir,
@@ -985,6 +1048,12 @@ impl AppState {
                                 &history.store,
                                 &history.work_id,
                             ),
+                            inner.engram_work_source_roots.iter()
+                                .filter(|root| root.store == history.store && root.work_id == history.work_id)
+                                .filter_map(|root| EngramWorkNamingBound::of_entry(root, history))
+                                .filter(|bound| engram_work_authority_transition_in_flight(
+                                    &inner, &history.store, &history.work_id, Some(bound)))
+                                .collect::<Vec<_>>(),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -1016,8 +1085,6 @@ impl AppState {
             self.acceptance_evidence_discovery_target(parent_session_id, &target.store)?;
         // Start the canonical bracket before the anonymous agent window. One
         // absolute allowance covers both core reads and all intervening reads.
-        let canonical_deadline =
-            Some((now() + ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET).min(deadline));
         let discovery_deadline =
             canonical_deadline.map(|limit| limit - ACCEPTANCE_EVIDENCE_CLOSING_RESERVE);
         // The slowest tracker read seen so far in this request: how long the
@@ -1278,7 +1345,7 @@ impl AppState {
         // receipts; agent-facing projections alone do not establish it.
         let canonical_work = task.canonical_work_id().ok_or_else(||
             ApiError::conflict("the requested work's canonical identity is unavailable; request a fresh acceptance evaluation"))?;
-        let captured_history = naming_snapshot.iter().find(|(history, _)| {
+        let captured_history = naming_snapshot.iter().find(|(history, _, _)| {
             history.store == target.store && history.work_id == canonical_work
         });
         // Each refusal names its cause and what can change it.
@@ -1290,21 +1357,34 @@ impl AppState {
                      (termal_name_source_root), then request the evaluation",
                 ));
             }
-            Some((_, true)) => {
+            Some((_, true, in_flight_bindings)) => {
+                if requested_claim.as_ref().is_some_and(|claim| {
+                    in_flight_bindings.iter().any(|bound| {
+                        bound.claim_id == claim.claim_id && task.canonical_identity.as_ref().is_some_and(|identity| {
+                            identity.active_run_id.as_deref() == Some(bound.run_id.as_str())
+                                && identity.run_generation == Some(bound.run_generation)
+                        })
+                    })
+                }) {
+                    return Err(acceptance_evaluation_naming_refusal(
+                        "the requested work's same-binding authority transition is unpublished",
+                        EngramWorkNamingChange::InFlight,
+                    ));
+                }
                 return Err(ApiError::conflict(
                     "the requested work has no acknowledged canonical naming history yet: a \
                      naming of it is still being settled. Request a fresh acceptance evaluation \
                      once it settles",
                 ));
             }
-            Some((history, false)) if history.epoch != ENGRAM_NAMING_HISTORY_EPOCH => {
+            Some((history, false, _)) if history.epoch != ENGRAM_NAMING_HISTORY_EPOCH => {
                 return Err(ApiError::conflict(
                     "the requested work has no acknowledged canonical naming history: its \
                      naming origin predates canonical history and needs recovery. Request a \
                      fresh acceptance evaluation after it is recovered",
                 ));
             }
-            Some((history, false)) => history,
+            Some((history, false, _)) => history,
         };
         // A canonical read after the requested claim's naming (the
         // evaluator's own turn admission, typically) may learn that very
