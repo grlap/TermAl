@@ -115,6 +115,7 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
+            if !test_run_producing_runtime_is_current(&inner.sessions[index], provenance) { return; }
             let runtime_identity = test_run_runtime_identity(&inner.sessions[index], provenance);
             let mut rows = inner.test_run_observations.values().filter(|row| {
                 row.summary.owner_session_id.as_deref() == Some(session_id)
@@ -239,6 +240,8 @@ impl AppState {
             terminal_digest: None,
         };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else { return; };
+        if !test_run_producing_runtime_is_current(&inner.sessions[index], provenance) { return; }
         if inner.test_run_observations.get(&row.execution_id) != Some(&row) {
             return;
         }

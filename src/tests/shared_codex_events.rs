@@ -4571,7 +4571,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
                         "search".to_owned(),
-                        "command-message".to_owned(),
+                        "command-message".to_owned().into(),
                     )]),
                     parallel_agents_messages: HashMap::from([(
                         "parallel".to_owned(),
@@ -4692,7 +4692,7 @@ fn shared_codex_retryable_error_preserves_turn_state_and_accepts_recovered_outpu
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
                         "running-command".to_owned(),
-                        "command-message".to_owned(),
+                        "command-message".to_owned().into(),
                     )]),
                     parallel_agents_messages: HashMap::from([(
                         "running-agent".to_owned(),
@@ -4759,7 +4759,7 @@ fn shared_codex_retryable_error_preserves_turn_state_and_accepts_recovered_outpu
                 .recorder
                 .command_messages
                 .get("running-command")
-                .map(String::as_str),
+                .map(|entry| entry.message_id.as_str()),
             Some("command-message")
         );
         assert_eq!(
@@ -4896,7 +4896,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
                         "search".to_owned(),
-                        "command-message".to_owned(),
+                        "command-message".to_owned().into(),
                     )]),
                     parallel_agents_messages: HashMap::from([(
                         "parallel".to_owned(),

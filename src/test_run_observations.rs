@@ -214,6 +214,9 @@ struct TestRunObservationPersistence(
 
 #[derive(Clone, Debug)]
 struct TestRunCommandOrigin {
+    /// False for progress/terminal frames with no proven creation boundary.
+    /// Process-local admission information, never a persisted authority bit.
+    observed_creation: bool,
     session_id: String,
     project_id: Option<String>,
     runtime_identity: Option<String>,
@@ -265,6 +268,7 @@ impl TestRunCommandOrigin {
             .then(|| record.engram.work_binding.clone())
             .flatten();
         Self {
+            observed_creation: !matches!(provenance, EngramObservationProvenance::Unproven),
             session_id: record.session.id.clone(),
             project_id: record.session.project_id.clone(),
             runtime_identity: test_run_runtime_identity(record, provenance),
@@ -276,6 +280,8 @@ impl TestRunCommandOrigin {
                     ClaudeWorkOrigin::Unattributed => record.active_turn_generation,
                 },
                 EngramObservationProvenance::Ambient => record.active_turn_generation,
+                EngramObservationProvenance::Producer { turn_generation, .. } => turn_generation.unwrap_or(record.active_turn_generation),
+                EngramObservationProvenance::Unproven => record.active_turn_generation,
             },
             grant_identity: owns_current
                 .then(|| {
@@ -325,10 +331,28 @@ fn test_run_runtime_identity(
     let runtime = match provenance {
         EngramObservationProvenance::Ambient => record.runtime.runtime_token(),
         EngramObservationProvenance::Claude(origin) => Some(origin.token.clone()),
+        EngramObservationProvenance::Producer { runtime, .. } => Some(runtime.clone()),
+        EngramObservationProvenance::Unproven => None,
     }?;
     // Runtime tokens and provider tool keys remain host-private. Only opaque
     // hashes participate in the durable identity and no token reaches the UI.
     Some(sha256_hex(format!("{runtime:?}").as_bytes()))
+}
+
+fn test_run_producing_runtime_is_current(record: &SessionRecord, provenance: &EngramObservationProvenance) -> bool {
+    match provenance {
+        EngramObservationProvenance::Producer { runtime, .. } => record.runtime.matches_runtime_token(runtime),
+        EngramObservationProvenance::Claude(origin) => record.runtime.matches_runtime_token(&origin.token),
+        EngramObservationProvenance::Ambient => true,
+        EngramObservationProvenance::Unproven => false,
+    }
+}
+
+fn test_run_origin_runtime_is_current(inner: &StateInner, origin: &TestRunCommandOrigin) -> bool {
+    origin.runtime_identity.is_none() || inner.sessions.iter().any(|record| {
+        record.session.id == origin.session_id
+            && test_run_runtime_identity(record, &EngramObservationProvenance::Ambient) == origin.runtime_identity
+    })
 }
 
 impl AppState {
@@ -339,12 +363,12 @@ impl AppState {
         started_at: String,
         directories: Option<Vec<Option<String>>>,
     ) {
-        if origin.runtime_identity.is_none() {
+        if !origin.observed_creation || origin.runtime_identity.is_none() {
             return;
         }
-        self.inner
-            .lock()
-            .expect("state mutex poisoned")
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if !test_run_origin_runtime_is_current(&inner, &origin) { return; }
+        inner
             .test_runs
             .unclassified_commands
             .entry(origin.execution_id())
@@ -372,6 +396,7 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return false;
             };
+            if !test_run_producing_runtime_is_current(&inner.sessions[index], provenance) { return false; }
             let runtime = test_run_runtime_identity(&inner.sessions[index], provenance);
             let tool = sha256_hex(key.as_bytes());
             let mut candidates = inner
@@ -391,6 +416,8 @@ impl AppState {
                                 ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => false,
                             },
                             EngramObservationProvenance::Ambient => true,
+                            EngramObservationProvenance::Producer { turn_generation, .. } => *turn_generation == Some(pending.origin.turn_generation),
+                            EngramObservationProvenance::Unproven => false,
                         }
                 });
             let Some(pending) = candidates.next().cloned() else {
@@ -410,6 +437,8 @@ impl AppState {
                                 ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => false,
                             },
                             EngramObservationProvenance::Ambient => true,
+                            EngramObservationProvenance::Producer { turn_generation, .. } => *turn_generation == Some(row.turn_generation),
+                            EngramObservationProvenance::Unproven => false,
                         }
                 });
             };
@@ -477,11 +506,13 @@ impl AppState {
         started_at: &str,
         declared: Option<&EngramDeclaredBinding>,
     ) {
-        if command.kind != EngramVerificationKind::Test {
+        if !origin.observed_creation || command.kind != EngramVerificationKind::Test {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if !test_run_origin_runtime_is_current(&inner, &origin) { return; }
         let TestRunCommandOrigin {
+            observed_creation: _,
             session_id,
             project_id,
             runtime_identity,
@@ -574,6 +605,7 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
+        if !test_run_producing_runtime_is_current(&inner.sessions[index], provenance) { return; }
         let runtime_identity = test_run_runtime_identity(&inner.sessions[index], provenance);
         let tool_identity = sha256_hex(key.as_bytes());
         if exit != Some(EngramCommandExit::NotFinished) {
@@ -589,6 +621,8 @@ impl AppState {
                 ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => None,
             },
             EngramObservationProvenance::Ambient => None,
+            EngramObservationProvenance::Producer { turn_generation, .. } => *turn_generation,
+            EngramObservationProvenance::Unproven => return,
         };
         let matches: Vec<String> = inner
             .test_run_observations

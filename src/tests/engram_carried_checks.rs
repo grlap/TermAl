@@ -5409,6 +5409,7 @@ fn retained_work_no_transition_applied_reaches_a_report_at_its_publication_cut()
         inner.sessions[index]
             .claude_outstanding
             .register(ClaudeOutstandingEntry {
+                invocation_key: None,
                 token: RuntimeToken::Claude("publication-cut-gone".to_owned()),
                 key: "orphaned".to_owned(),
                 origin: ClaudeWorkOrigin::Unattributed,

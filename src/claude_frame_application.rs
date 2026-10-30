@@ -438,6 +438,13 @@ fn apply_claude_frame_plan(
     context
         .state
         .settle_claude_frame(&context.session_id, &context.token, &work);
+    for key in &work.ended {
+        if let Some(reference) = recorder.command_lookup(Some(key), key) {
+            if let Err(err) = recorder.command_invocation(&reference, CommandInvocationEvent::Release) {
+                return context.fail(&format!("failed to retire Claude command identity: {err:#}"));
+            }
+        }
+    }
     // The cards of the subagents' calls still pending survive the root
     // turn's next reset, so their late results update them.
     recorder.keep_command_messages(frames.nested.pending_tools.keys());

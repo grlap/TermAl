@@ -1643,6 +1643,23 @@ fn handle_acp_notification(
                     state.record_kimi_current_mode(session_id, runtime_token, mode)?;
                 }
             }
+            // Identity adoption cannot bypass the read-only enforcement above,
+            // including when a malformed frame names no current native session.
+            if matches!(update.get("sessionUpdate").and_then(Value::as_str), Some("tool_call" | "tool_call_update")) {
+                let current_native = runtime_state.lock().expect("ACP runtime state mutex poisoned").current_session_id.clone();
+                let reported_native = message.pointer("/params/sessionId").and_then(Value::as_str);
+                if current_native.is_none() || current_native.as_deref() != reported_native
+                    || !state.session_matches_runtime_token(session_id, runtime_token)
+                {
+                    state.engram_host().command_identity_unavailable(session_id,
+                        "ACP command frame does not belong to the current producing runtime/native session; its reference and authority are not adopted");
+                    return Ok(());
+                }
+                recorder.command_scope(CommandProducerScope {
+                    producer: CommandProducer::Acp, runtime: runtime_token.clone(),
+                    session: current_native.unwrap_or_default(), turn: None,
+                });
+            }
             if agent == AcpAgent::Kimi
                 && update
                     .get("sessionUpdate")
@@ -1741,14 +1758,12 @@ fn handle_acp_session_update(
             // snapshot (`named_late` in the turn's checks).
             let starts_call = agent != AcpAgent::Kimi
                 || update.get("status").and_then(Value::as_str) != Some("pending");
-            if starts_call {
-                if let Some((key, command)) = acp_tool_identity(update) {
-                    recorder.command_started_in(
-                        &key,
-                        &command,
-                        acp_tool_command(update),
-                        acp_tool_cwd(update),
-                    )?;
+            if let Some((key, command)) = acp_tool_identity(update) {
+                let invocation = recorder.command_created(Some(&key), &key);
+                if starts_call {
+                    recorder.command_invocation(&invocation, CommandInvocationEvent::Dispatch {
+                        command: &command, ran: acp_tool_command(update), cwd: acp_tool_cwd(update),
+                    })?;
                 }
             }
         }
@@ -1756,31 +1771,33 @@ fn handle_acp_session_update(
             finish_acp_thinking(recorder, turn_state, agent)?;
             if let Some((key, command)) = acp_tool_identity(update) {
                 let (ran, cwd) = (acp_tool_command(update), acp_tool_cwd(update));
+                let invocation = recorder.command_lookup(Some(&key), &key).unwrap_or_else(|| {
+                    recorder.command_unproven(Some(&key), &key,
+                        matches!(update.get("status").and_then(Value::as_str), Some("completed" | "failed" | "error")),
+                        "ACP update has no retained tool_call creation; it cannot begin a qualifying invocation")
+                });
                 match update.get("status").and_then(Value::as_str) {
                     Some("pending") | Some("in_progress") => {
                         // Kimi streams the call's arguments as content-only
                         // updates before dispatch; one carrying the call's
                         // input is its start (or re-states it).
                         if agent != AcpAgent::Kimi || update.get("rawInput").is_some() {
-                            recorder.command_started_in(&key, &command, ran, cwd)?;
+                            recorder.command_invocation(&invocation, CommandInvocationEvent::Dispatch { command: &command, ran, cwd })?;
                         }
                     }
                     Some("completed") | Some("failed") | Some("error") => {
                         // What the call ran, or where, may be told only as
                         // it ends.
-                        recorder.command_described(&key, ran, cwd)?;
-                        recorder.command_completed_with_reported_command(
-                            &key,
-                            &command,
-                            ran,
-                            &summarize_acp_tool_output(update, agent),
-                            acp_tool_status(update),
-                            EngramHost::acp_command_exit(agent, update),
-                        )?;
+                        recorder.command_invocation(&invocation, CommandInvocationEvent::Describe { ran, cwd })?;
+                        recorder.command_invocation(&invocation, CommandInvocationEvent::Finish {
+                            command: &command, reported_command: ran,
+                            output: &summarize_acp_tool_output(update, agent), status: acp_tool_status(update),
+                            exit: EngramHost::acp_command_exit(agent, update), runtime_output_cut: false,
+                        })?;
                     }
                     // An update without a status may still say what the call
                     // runs, or where.
-                    _ => recorder.command_described(&key, ran, cwd)?,
+                    _ => recorder.command_invocation(&invocation, CommandInvocationEvent::Describe { ran, cwd })?,
                 }
             }
         }

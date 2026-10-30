@@ -29,7 +29,7 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
     }
     let mut turn_state = AcpTurnState::default();
     let mut recorder = SessionRecorder::new(fixture.state.clone(), session.clone());
-    handle_acp_session_update(
+    test_acp_session_update(
         &json!({
             "sessionUpdate": "tool_call", "toolCallId": "repeated-tool",
             "status": "pending", "title": "Run check",
@@ -65,7 +65,7 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
         record.engram.active_grant_id = None;
     }
     for status in ["pending", "in_progress", "pending"] {
-        handle_acp_session_update(
+        test_acp_session_update(
             &json!({
                 "sessionUpdate": "tool_call_update", "toolCallId": "repeated-tool",
                 "status": status, "rawInput": { "command": "cargo test" }
@@ -101,7 +101,7 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
             "late command text cannot create a retroactive check under the successor"
         );
     }
-    handle_acp_session_update(
+    test_acp_session_update(
         &json!({
             "sessionUpdate": "tool_call_update", "toolCallId": "repeated-tool",
             "status": "completed", "rawInput": { "command": "cargo test" },

@@ -381,7 +381,7 @@ fn a_kimi_acp_shell_check_ends_with_the_exit_its_completion_states() {
             "rawOutput": "running 1 test\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4040 filtered out\n"
         }),
     ] {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,
@@ -434,7 +434,7 @@ fn a_captured_kimi_test_run_is_recorded_as_passed_with_its_result_line() {
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
     for update in &frames {
-        handle_acp_session_update(
+        test_acp_session_update(
             update,
             &turn.state,
             &turn.session_id,
@@ -501,7 +501,7 @@ fn a_kimi_acp_shell_check_failure_ends_with_the_suffix_exit_code() {
             "rawOutput": "running 1 test\ntest result: FAILED. 0 passed; 1 failed\n\nCommand failed with exit code: 101."
         }),
     ] {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,
@@ -553,7 +553,7 @@ fn a_check_named_late_stays_overlapped_for_other_acp_agents() {
             "rawOutput": {"exitCode": 0, "stdout": "running 1 test\ntest result: ok. 1 passed"}
         }),
     ] {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,

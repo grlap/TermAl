@@ -125,7 +125,8 @@ fn unadmitted_review_denied_test_is_not_an_observed_run_but_unknown_end_is() {
     }]}}));
     let trace = fixture.turn.record(|record| record.engram.unadmitted_active_turn.clone().unwrap());
     assert_eq!(trace.commands.len(), 1, "proved denial must not be counted as a run");
-    let expected_id = trace.commands.iter().find(|entry| entry.tool_key == "unknown-end").unwrap().check.host_check_id.clone();
+    let unknown_key = test_private_command_key(&fixture.reader.recorder, "unknown-end");
+    let expected_id = trace.commands.iter().find(|entry| entry.tool_key == unknown_key).unwrap().check.host_check_id.clone();
     fixture.finish();
     let sent = fixture.observation();
     let checks = occurrence(&sent)["observed_checks"].as_array().unwrap();

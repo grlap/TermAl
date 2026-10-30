@@ -1646,7 +1646,8 @@ impl AppState {
         // readers supply Ambient provenance, which establishes no dialect.
         let dialect = match provenance {
             EngramObservationProvenance::Claude(_) => EngramShellDialect::Bash,
-            EngramObservationProvenance::Ambient => EngramShellDialect::Unknown,
+            EngramObservationProvenance::Ambient | EngramObservationProvenance::Producer { .. }
+            | EngramObservationProvenance::Unproven => EngramShellDialect::Unknown,
         };
         let recognised = ran.and_then(|ran| engram_check_command_in(ran, dialect));
         let unsupported_focused = recognised

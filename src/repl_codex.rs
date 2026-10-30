@@ -103,6 +103,23 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.reset_turn_state()
     }
 
+    fn command_scope(&mut self, scope: CommandProducerScope) { self.inner.command_scope(scope); }
+    fn command_carried_end(&mut self, reference: &CommandInvocation, command: &str, reported_command: Option<&str>, output: &str, exit: EngramCommandExit) -> bool {
+        self.inner.command_carried_end(reference, command, reported_command, output, exit)
+    }
+    fn command_created(&mut self, native_id: Option<&str>, display_key: &str) -> CommandInvocation {
+        self.inner.command_created(native_id, display_key)
+    }
+    fn command_lookup(&mut self, native_id: Option<&str>, display_key: &str) -> Option<CommandInvocation> {
+        self.inner.command_lookup(native_id, display_key)
+    }
+    fn command_unproven(&mut self, native_id: Option<&str>, display_key: &str, terminal: bool, reason: &str) -> CommandInvocation {
+        self.inner.command_unproven(native_id, display_key, terminal, reason)
+    }
+    fn command_invocation(&mut self, reference: &CommandInvocation, event: CommandInvocationEvent<'_>) -> Result<()> {
+        self.inner.command_invocation(reference, event)
+    }
+
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         self.inner.command_started(key, command)
     }

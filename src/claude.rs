@@ -37,6 +37,7 @@ struct ClaudeTurnState {
 
 /// Represents Claude tool use.
 struct ClaudeToolUse {
+    invocation: Option<CommandInvocation>,
     command: Option<String>,
     description: Option<String>,
     file_path: Option<String>,
@@ -2226,9 +2227,18 @@ fn register_claude_tool_use(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
+    if let Some(existing) = state.pending_tools.get(tool_id) {
+        if let Some(invocation) = &existing.invocation {
+            recorder.command_invocation(invocation, CommandInvocationEvent::Describe { ran: command.as_deref(), cwd: None })?;
+        }
+        return Ok(());
+    }
+    let invocation = (name == "Bash").then(|| recorder.command_created(Some(tool_id), tool_id));
+
     state.pending_tools.insert(
         tool_id.to_owned(),
         ClaudeToolUse {
+            invocation: invocation.clone(),
             command: command.clone(),
             description: description.clone(),
             file_path,
@@ -2246,7 +2256,11 @@ fn register_claude_tool_use(
                 .unwrap_or("Bash");
             // Only the command line itself says what runs; the description
             // shown in its place is prose.
-            recorder.command_started_in(tool_id, command_label, command.as_deref(), None)?;
+            if let Some(invocation) = invocation.as_ref() {
+                recorder.command_invocation(invocation, CommandInvocationEvent::Dispatch {
+                    command: command_label, ran: command.as_deref(), cwd: None,
+                })?;
+            }
         }
         "Task" => {
             if state.parallel_agent_group_key.is_none() {
@@ -2476,9 +2490,13 @@ fn handle_claude_bash_result(
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
+    let invocation = tool_use.invocation.clone().unwrap_or_else(|| recorder.command_unproven(
+        Some(tool_use_id), tool_use_id,
+        !tool_use.run_in_background && tool_use_result.and_then(|value| value.get("backgroundTaskId")).is_none(),
+        "Claude result has no retained producer creation; no start or verification authority is inferred"));
     if is_error && is_permission_denial(detail) {
         state.permission_denied_this_turn = true;
-        recorder.command_abandoned(tool_use_id)?;
+        recorder.command_invocation(&invocation, CommandInvocationEvent::Abandon)?;
         record_claude_approval(
             state,
             recorder,
@@ -2546,14 +2564,10 @@ fn handle_claude_bash_result(
                 .and_then(Value::as_u64)
                 .is_some_and(|size| size > output.len() as u64)
     });
-    recorder.command_completed_with_capture(
-        tool_use_id,
-        command,
-        output.trim_end(),
-        status,
-        exit,
-        runtime_output_cut,
-    )
+    recorder.command_invocation(&invocation, CommandInvocationEvent::Finish {
+        command, reported_command: tool_use.command.as_deref(), output: output.trim_end(),
+        status, exit, runtime_output_cut,
+    })
 }
 
 /// Handles Claude file result.

@@ -43,9 +43,36 @@
 // `run_turn_blocking` / `run_codex_turn` / `run_acp_turn` dispatch and
 // shared helpers.
 
+include!("command_invocations.rs");
+
 /// Shared recorder surface that every agent runtime parser drives.
 /// Each method persists one event into the session transcript.
 trait TurnRecorder {
+    /// Native frame scope, supplied by its producing reader before flattening.
+    fn command_scope(&mut self, _scope: CommandProducerScope) {}
+    /// Reserves only a producer creation. Progress/end paths use lookup instead.
+    fn command_created(&mut self, native_id: Option<&str>, display_key: &str) -> CommandInvocation {
+        CommandInvocation::presentation(native_id.unwrap_or(display_key))
+    }
+    fn command_lookup(&mut self, native_id: Option<&str>, display_key: &str) -> Option<CommandInvocation> {
+        Some(CommandInvocation::presentation(native_id.unwrap_or(display_key)))
+    }
+    fn command_unproven(&mut self, _native_id: Option<&str>, display_key: &str, _terminal: bool, _reason: &str) -> CommandInvocation {
+        CommandInvocation::presentation(display_key)
+    }
+    /// Forward the original reference, including on delayed results/denials.
+    fn command_invocation(&mut self, reference: &CommandInvocation, event: CommandInvocationEvent<'_>) -> Result<()> {
+        match event {
+            CommandInvocationEvent::Dispatch { command, ran, cwd } => self.command_started_in(&reference.key, command, ran, cwd),
+            CommandInvocationEvent::Describe { ran, cwd } => self.command_described(&reference.key, ran, cwd),
+            CommandInvocationEvent::Finish { command, output, status, exit, runtime_output_cut, .. } => {
+                self.command_completed_with_capture(&reference.key, command, output, status, exit, runtime_output_cut)
+            }
+            CommandInvocationEvent::Abandon => self.command_abandoned(&reference.key),
+            CommandInvocationEvent::Release => Ok(()),
+        }
+    }
+    fn command_carried_end(&mut self, _reference: &CommandInvocation, _command: &str, _reported_command: Option<&str>, _output: &str, _exit: EngramCommandExit) -> bool { false }
     /// Records the agent-native session/thread id discovered mid-turn so it can
     /// be associated with this termal session (for later reconnect / resume).
     fn note_external_session(&mut self, session_id: &str) -> Result<()>;
@@ -251,22 +278,6 @@ struct SessionRecorder {
 }
 
 impl SessionRecorder {
-    /// ACP may end a tool call with only a display title. Keep the actual
-    /// command's presence separate so a title is never execution identity.
-    fn command_completed_with_reported_command(
-        &mut self,
-        key: &str,
-        command: &str,
-        reported_command: Option<&str>,
-        output: &str,
-        status: CommandStatus,
-        exit: EngramCommandExit,
-    ) -> Result<()> {
-        recorder_command_completed_reported(
-            self, key, command, reported_command, output, status, Some(exit), false,
-        )
-    }
-
     /// Creates a new instance.
     fn new(state: AppState, session_id: String) -> Self {
         Self {
@@ -318,6 +329,18 @@ impl SessionRecorder {
     /// Sets who produced what this recorder observes from now on: the
     /// Claude frame it is about to apply (`claude_outstanding_work.rs`).
     fn set_observation_provenance(&mut self, provenance: EngramObservationProvenance) {
+        if let EngramObservationProvenance::Claude(origin) = &provenance {
+            let native_session = self.state.inner.lock().expect("state mutex poisoned")
+                .sessions.iter().find(|record| record.session.id == self.session_id)
+                .and_then(|record| record.external_session_id.clone())
+                .unwrap_or_else(|| self.session_id.clone());
+            self.command_scope(CommandProducerScope {
+                producer: CommandProducer::Claude,
+                runtime: origin.token.clone(),
+                session: native_session,
+                turn: None,
+            });
+        }
         self.recorder_state.observation_provenance = provenance;
     }
 
@@ -894,8 +917,8 @@ fn recorder_command_started<R: SessionRecorderAccess>(
         .recorder_state_mut()
         .command_messages
         .entry(key.to_owned())
-        .or_insert_with(|| state_for_entry.allocate_message_id())
-        .clone();
+        .or_insert_with(|| state_for_entry.allocate_message_id().into())
+        .message_id.clone();
 
     state.upsert_command_message(
         &session_id,
@@ -944,8 +967,8 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
         .recorder_state_mut()
         .command_messages
         .entry(key.to_owned())
-        .or_insert_with(|| state_for_entry.allocate_message_id())
-        .clone();
+        .or_insert_with(|| state_for_entry.allocate_message_id().into())
+        .message_id.clone();
 
     state.upsert_command_message(&session_id, &message_id, command, output, status)?;
     // A completion that still reports the command running is not its end.
@@ -1177,6 +1200,22 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
 // Wires `SessionRecorder` to the shared `TurnRecorder` surface by
 // delegating every method to the corresponding `recorder_*` free function.
 impl TurnRecorder for SessionRecorder {
+    fn command_carried_end(&mut self, reference: &CommandInvocation, command: &str, reported_command: Option<&str>, output: &str, exit: EngramCommandExit) -> bool {
+        recorder_invocation_carried_end(self, reference, command, reported_command, output, exit)
+    }
+    fn command_scope(&mut self, scope: CommandProducerScope) { recorder_command_scope(self, scope); }
+    fn command_created(&mut self, native_id: Option<&str>, display_key: &str) -> CommandInvocation {
+        recorder_invocation_create(self, native_id, display_key)
+    }
+    fn command_lookup(&mut self, native_id: Option<&str>, display_key: &str) -> Option<CommandInvocation> {
+        recorder_invocation_find(self, native_id, display_key)
+    }
+    fn command_unproven(&mut self, native_id: Option<&str>, display_key: &str, terminal: bool, reason: &str) -> CommandInvocation {
+        recorder_invocation_missing(self, native_id, display_key, terminal, reason)
+    }
+    fn command_invocation(&mut self, reference: &CommandInvocation, event: CommandInvocationEvent<'_>) -> Result<()> {
+        recorder_invocation_event(self, reference, event)
+    }
     /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         recorder_note_external_session(self, session_id)
@@ -1318,6 +1357,22 @@ impl TurnRecorder for SessionRecorder {
 // Wires `BorrowedSessionRecorder` to the shared `TurnRecorder` surface —
 // same delegation pattern as the `SessionRecorder` impl above.
 impl TurnRecorder for BorrowedSessionRecorder<'_> {
+    fn command_carried_end(&mut self, reference: &CommandInvocation, command: &str, reported_command: Option<&str>, output: &str, exit: EngramCommandExit) -> bool {
+        recorder_invocation_carried_end(self, reference, command, reported_command, output, exit)
+    }
+    fn command_scope(&mut self, scope: CommandProducerScope) { recorder_command_scope(self, scope); }
+    fn command_created(&mut self, native_id: Option<&str>, display_key: &str) -> CommandInvocation {
+        recorder_invocation_create(self, native_id, display_key)
+    }
+    fn command_lookup(&mut self, native_id: Option<&str>, display_key: &str) -> Option<CommandInvocation> {
+        recorder_invocation_find(self, native_id, display_key)
+    }
+    fn command_unproven(&mut self, native_id: Option<&str>, display_key: &str, terminal: bool, reason: &str) -> CommandInvocation {
+        recorder_invocation_missing(self, native_id, display_key, terminal, reason)
+    }
+    fn command_invocation(&mut self, reference: &CommandInvocation, event: CommandInvocationEvent<'_>) -> Result<()> {
+        recorder_invocation_event(self, reference, event)
+    }
     /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         recorder_note_external_session(self, session_id)

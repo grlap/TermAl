@@ -36,6 +36,8 @@ const NEXT_GRANT: &str = "turn-check-grant-next";
 /// What a passing size test prints.
 const PASSING: &str = "running 3 tests\ntest result: ok. 3 passed";
 
+fn native_thread(turn: &CheckedTurn) -> String { format!("{THREAD}-{}", turn.session_id) }
+
 /// A claimed Codex turn measured in its named worktree, with Engram answering
 /// a second turn too.
 fn two_turns(label: &str) -> (CheckedTurn, PathBuf) {
@@ -67,10 +69,35 @@ fn cwd(worktree: &FsPath) -> String {
 /// Starts the size test under the Codex item `key` in `worktree`, as Codex's
 /// `item/started` does, and waits for its opening snapshot.
 fn start_test(turn: &CheckedTurn, worktree: &FsPath, key: &str) {
-    turn.recorder()
-        .command_started_in(key, SIZE_TEST, Some(SIZE_TEST), Some(&cwd(worktree)))
-        .expect("the start should record");
+    start_command(turn, worktree, key, SIZE_TEST);
+}
+
+fn start_command(turn: &CheckedTurn, worktree: &FsPath, key: &str, command: &str) {
+    let runtime = shared_runtime(turn);
+    let native_turn = {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        let session = sessions.get_mut(&turn.session_id).unwrap();
+        if !session.turn_started || session.turn_id.is_none() {
+            session.turn_id = Some(format!("fixture-provider-turn-{}", Uuid::new_v4()));
+        }
+        session.turn_started = true;
+        session.turn_id.clone().unwrap()
+    };
+    let mut item = json!({"type":"commandExecution", "command":command,
+        "cwd":cwd(worktree), "status":"inProgress"});
+    if key != command { item["id"] = json!(key); }
+    handle_shared_codex_app_server_message(&json!({"method":"item/started", "params":{
+        "threadId":native_thread(turn), "turnId":native_turn, "item":item}}), &turn.state, &runtime.runtime_id,
+        &Arc::new(Mutex::new(HashMap::new())), &runtime.sessions, &runtime.thread_sessions, &runtime.input_tx).unwrap();
     turn.wait_for_snapshots();
+}
+
+fn private_item_key(turn: &CheckedTurn, native: &str) -> String {
+    let runtime = shared_runtime(turn);
+    let sessions = runtime.sessions.lock().unwrap();
+    sessions.get(&turn.session_id).unwrap().recorder.command_messages.values()
+        .filter_map(|entry| entry.invocation.as_ref())
+        .find(|entry| entry.native_id.as_deref() == Some(native)).unwrap().reference.key.clone()
 }
 
 /// The shared Codex runtime the session runs on, with the session known by
@@ -91,12 +118,12 @@ fn shared_runtime(turn: &CheckedTurn) -> SharedCodexRuntime {
         .expect("shared Codex session mutex poisoned")
         .entry(turn.session_id.clone())
         .or_default()
-        .thread_id = Some(THREAD.to_owned());
+        .thread_id = Some(native_thread(turn));
     runtime
         .thread_sessions
         .lock()
         .expect("shared Codex thread mutex poisoned")
-        .insert(THREAD.to_owned(), turn.session_id.clone());
+        .insert(native_thread(turn), turn.session_id.clone());
     runtime
 }
 
@@ -117,12 +144,18 @@ fn report_late_end_on(
     command: &str,
     exit: i64,
 ) {
+    let actual_thread = if thread == THREAD { native_thread(turn) } else { thread.to_owned() };
+    let native_turn = runtime.sessions.lock().unwrap().get(&turn.session_id)
+        .and_then(|session| session.recorder.command_messages.values()
+            .filter_map(|entry| entry.invocation.as_ref())
+            .find(|entry| entry.native_id.as_deref() == Some(key)))
+        .and_then(|entry| entry.scope.turn.clone()).unwrap_or_else(|| "unmatched-native-turn".to_owned());
     handle_shared_codex_app_server_message(
         &json!({
             "method": "item/completed",
             "params": {
-                "threadId": thread,
-                "turnId": "turn-gone",
+                "threadId": actual_thread,
+                "turnId": native_turn,
                 "item": {
                     "type": "commandExecution",
                     "id": key,
@@ -184,6 +217,7 @@ fn holder_line(turn: &CheckedTurn) -> String {
 /// The first turn's close carries the test it left running, records nothing
 /// for it, and tells the holder.
 fn assert_carried_at_close(turn: &CheckedTurn) {
+    let item_key = private_item_key(turn, ITEM);
     let first = turn.finish();
     assert!(first.get("verification_evidence").is_none(), "{first:#}");
     turn.record(|record| {
@@ -193,7 +227,7 @@ fn assert_carried_at_close(turn: &CheckedTurn) {
             "the running test is carried"
         );
         assert!(record.engram.carried_checks[0].check.end.is_none());
-        assert_eq!(record.engram.carried_checks[0].check.key, ITEM);
+        assert_eq!(record.engram.carried_checks[0].check.key, item_key);
     });
     let line = holder_line(turn);
     assert!(
@@ -248,15 +282,7 @@ fn a_codex_test_that_outlives_its_turn_is_recorded_from_its_late_end() {
 fn a_codex_test_ending_within_its_turn_is_recorded_once() {
     let (turn, worktree) = two_turns("reported-end-within-turn");
     start_test(&turn, &worktree, ITEM);
-    turn.recorder()
-        .command_completed_with_exit(
-            ITEM,
-            SIZE_TEST,
-            PASSING,
-            CommandStatus::Success,
-            EngramCommandExit::Code(0),
-        )
-        .expect("the end should record");
+    report_late_end(&turn, THREAD, ITEM, 0);
     turn.wait_for_snapshots();
     let checkpoint = turn.finish();
 
@@ -435,9 +461,8 @@ fn a_runtime_exit_before_the_late_end_closes_the_carried_test_unknown() {
 #[test]
 fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
     let (turn, worktree) = two_turns("reported-end-watched-gate");
-    turn.recorder()
-        .command_started_in(ITEM, GATE, Some(GATE), Some(&cwd(&worktree)))
-        .expect("the gate starts");
+    start_command(&turn, &worktree, ITEM, GATE);
+    let item_key = private_item_key(&turn, ITEM);
     turn.wait_for_snapshots();
     turn.state
         .note_engram_workspace_file_changes(&[WorkspaceFileChangeEvent {
@@ -460,7 +485,7 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
             .engram
             .active_turn_checks
             .iter()
-            .find(|check| check.key == ITEM)
+            .find(|check| check.key == item_key)
             .expect("the running check owns the refusal");
         engram_check_fingerprint(&check.command)
     });
@@ -506,7 +531,7 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
             .engram
             .running_codex_tests
             .iter()
-            .any(|running| running.key == ITEM)),
+            .any(|running| running.key == item_key)),
         "still running after its evidence was refused"
     );
 
@@ -663,6 +688,7 @@ fn a_stop_closes_a_carried_test_whose_end_cannot_arrive() {
 fn a_test_carried_under_a_replaced_runtime_is_closed_at_the_next_checkpoint() {
     let (turn, worktree) = two_turns("reported-end-replaced-runtime");
     start_test(&turn, &worktree, ITEM);
+    let item_key = private_item_key(&turn, ITEM);
     assert_carried_at_close(&turn);
     // The same test as carried by an earlier runtime of the session: the
     // fixture keeps one runtime, so the replaced one is named by its token.
@@ -678,7 +704,7 @@ fn a_test_carried_under_a_replaced_runtime_is_closed_at_the_next_checkpoint() {
     assert!(next.get("verification_evidence").is_none(), "{next:#}");
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
-        assert_eq!(record.engram.carried_checks[0].check.key, ITEM);
+        assert_eq!(record.engram.carried_checks[0].check.key, item_key);
         assert!(record.engram.carried_checks[0].check.end.is_none());
     });
     let line = holder_line(&turn);
@@ -701,12 +727,36 @@ fn a_test_carried_under_a_replaced_runtime_is_closed_at_the_next_checkpoint() {
 /// checkpoint on the claim.
 #[test]
 fn a_late_end_routed_to_the_running_turn_settles_the_carried_test() {
-    for (label, tagged) in [
-        ("reported-end-turnless-in-next-turn", None),
-        ("reported-end-tagged-next-turn", Some("turn-next")),
+    for prior_completed_turn in [false, true] {
+    for (label, tagged, legacy) in [
+        ("reported-end-turnless-in-next-turn", None, false),
+        ("reported-end-tagged-next-turn", Some("turn-next"), false),
+        ("reported-end-legacy-turnless-in-next-turn", None, true),
+        ("reported-end-legacy-tagged-next-turn", Some("turn-next"), true),
     ] {
-        let (turn, worktree) = two_turns(label);
+        let (turn, worktree) = if prior_completed_turn {
+            later_turns(&format!("{label}-after-retirement"), &["carry-command-grant", "settle-command-grant"])
+        } else { two_turns(label) };
+        if prior_completed_turn {
+            start_command(&turn, &worktree, "unrelated-earlier-item", "echo earlier");
+            let runtime = shared_runtime(&turn);
+            report_late_end_on(&turn, &runtime, THREAD, "unrelated-earlier-item", "echo earlier", 0);
+            let earlier = turn.finish();
+            assert!(earlier.get("verification_evidence").is_none());
+            dispatch_next_turn(&turn);
+            let mut sessions = runtime.sessions.lock().unwrap();
+            let shared = sessions.get_mut(&turn.session_id).unwrap();
+            // This is the producer's real next native turn after its prior
+            // command completed. The reset retires the old terminal proof.
+            clear_shared_codex_turn_recorder_state(&mut shared.recorder);
+            shared.turn_id = None;
+            shared.turn_started = false;
+        }
         start_test(&turn, &worktree, ITEM);
+        let original = turn.record(|record| {
+            let check = &record.engram.active_turn_checks[0];
+            (check.key.clone(), check.grant_id.clone(), check.sequence)
+        });
         assert_carried_at_close(&turn);
         dispatch_next_turn(&turn);
         let runtime = shared_runtime(&turn);
@@ -723,7 +773,7 @@ fn a_late_end_routed_to_the_running_turn_settles_the_carried_test() {
             shared.completed_turn_id = None;
         }
         let mut params = json!({
-            "threadId": THREAD,
+            "threadId": native_thread(&turn),
             "item": {
                 "type": "commandExecution",
                 "id": ITEM,
@@ -736,8 +786,15 @@ fn a_late_end_routed_to_the_running_turn_settles_the_carried_test() {
         if let Some(tagged) = tagged {
             params["turnId"] = json!(tagged);
         }
+        let message = if legacy {
+            let mut item = params["item"].clone();
+            item["type"] = json!("CommandExecution");
+            let mut msg = json!({"thread_id":native_thread(&turn), "item":item});
+            if let Some(tagged) = tagged { msg["turn_id"] = json!(tagged); }
+            json!({"method":"codex/event/item_completed", "params":{"msg":msg}})
+        } else { json!({ "method": "item/completed", "params": params }) };
         handle_shared_codex_app_server_message(
-            &json!({ "method": "item/completed", "params": params }),
+            &message,
             &turn.state,
             &runtime.runtime_id,
             &Arc::new(Mutex::new(HashMap::new())),
@@ -751,6 +808,12 @@ fn a_late_end_routed_to_the_running_turn_settles_the_carried_test() {
                 record.engram.carried_checks[0].check.end.is_some(),
                 "{label}: the end is taken by the carried test"
             )
+        });
+        turn.record(|record| {
+            let check = &record.engram.carried_checks[0].check;
+            assert_eq!((check.key.clone(), check.grant_id.clone(), check.sequence), original);
+            assert!(record.engram.running_codex_tests.is_empty());
+            assert!(!record.engram.pending_source_root_line.as_deref().unwrap_or("").contains("invocation tracking unavailable"));
         });
         wait_for_carried_snapshots(&turn);
         let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
@@ -772,6 +835,7 @@ fn a_late_end_routed_to_the_running_turn_settles_the_carried_test() {
         );
         assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
     }
+    }
 }
 
 /// Runs, in the session's next turn, a second size test in `worktree` under the
@@ -786,16 +850,18 @@ fn second_test_checkpoint(turn: &CheckedTurn, worktree: &FsPath) -> Value {
 /// checkpoint.
 fn passing_test_checkpoint(turn: &CheckedTurn, worktree: &FsPath, key: &str) -> Value {
     dispatch_next_turn(turn);
+    // A real next provider turn gets a new native turn id. Directly closing
+    // the host fixture above did not deliver Codex's native turn terminal.
+    let runtime = shared_runtime(turn);
+    {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        let shared = sessions.get_mut(&turn.session_id).unwrap();
+        clear_shared_codex_turn_recorder_state(&mut shared.recorder);
+        shared.turn_id = None;
+        shared.turn_started = false;
+    }
     start_test(turn, worktree, key);
-    turn.recorder()
-        .command_completed_with_exit(
-            key,
-            SIZE_TEST,
-            PASSING,
-            CommandStatus::Success,
-            EngramCommandExit::Code(0),
-        )
-        .expect("the second test's end should record");
+    report_late_end(turn, THREAD, key, 0);
     turn.wait_for_snapshots();
     let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
     turn.state
@@ -818,6 +884,7 @@ fn passing_test_checkpoint(turn: &CheckedTurn, worktree: &FsPath, key: &str) -> 
 fn a_check_started_while_a_carried_test_still_runs_is_overlapped_by_it() {
     let (turn, worktree) = two_turns("reported-end-overlaps-next-check");
     start_test(&turn, &worktree, ITEM);
+    let item_key = private_item_key(&turn, ITEM);
     assert_carried_at_close(&turn);
 
     let checkpoint = second_test_checkpoint(&turn, &worktree);
@@ -827,7 +894,7 @@ fn a_check_started_while_a_carried_test_still_runs_is_overlapped_by_it() {
         "the second test is not credited: {checkpoint:#}"
     );
     let line = holder_line(&turn);
-    let carried = &sha256_hex(ITEM.as_bytes())[..12];
+    let carried = &sha256_hex(item_key.as_bytes())[..12];
     assert!(
         line.contains(&format!(
             "reached its worktree while it ran (another command of this session (key \
@@ -920,6 +987,7 @@ fn another_checking_session(owner: &CheckedTurn, worktree: &FsPath) -> CheckedTu
 fn another_sessions_carried_codex_test_overlaps_until_its_reported_end() {
     let (owner, worktree) = two_turns("reported-end-other-session");
     start_test(&owner, &worktree, ITEM);
+    let item_key = private_item_key(&owner, ITEM);
     assert_carried_at_close(&owner);
     assert_eq!(
         owner.record(|record| record.session.status),
@@ -928,16 +996,7 @@ fn another_sessions_carried_codex_test_overlaps_until_its_reported_end() {
     let other = another_checking_session(&owner, &worktree);
 
     start_test(&other, &worktree, ITEM);
-    other
-        .recorder()
-        .command_completed_with_exit(
-            ITEM,
-            SIZE_TEST,
-            PASSING,
-            CommandStatus::Success,
-            EngramCommandExit::Code(0),
-        )
-        .expect("S2's passing check ends");
+    report_late_end(&other, THREAD, ITEM, 0);
     other.wait_for_snapshots();
     let checkpoint = other.finish();
     assert!(
@@ -948,7 +1007,7 @@ fn another_sessions_carried_codex_test_overlaps_until_its_reported_end() {
     assert!(
         line.contains(&owner.session_id)
             && line.contains("another session's still-running test")
-            && line.contains(&sha256_hex(ITEM.as_bytes())[..12]),
+            && line.contains(&sha256_hex(item_key.as_bytes())[..12]),
         "the original owner and test are identified: {line}"
     );
     assert!(owner.record(|record| !record.engram.running_codex_tests.is_empty()));
@@ -1077,8 +1136,9 @@ fn a_refused_carried_test_still_overlaps_later_checks_until_its_end() {
         ],
     );
     start_test(&turn, &worktree, ITEM);
+    let item_key = private_item_key(&turn, ITEM);
     assert_carried_at_close(&turn);
-    let running = &sha256_hex(ITEM.as_bytes())[..12];
+    let running = &sha256_hex(item_key.as_bytes())[..12];
     let overlapped_by_it = format!(
         "reached its worktree while it ran (another command of this session (key {running}) \
          was still running)"
@@ -1143,6 +1203,7 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
         &["turn-check-grant-expiry", "turn-check-grant-after-expiry"],
     );
     start_test(&turn, &worktree, ITEM);
+    let item_key = private_item_key(&turn, ITEM);
     assert_carried_at_close(&turn);
     turn.record_mut(|record| {
         record.engram.carried_checks[0].check.started_at =
@@ -1164,7 +1225,7 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
 
     let checkpoint = passing_test_checkpoint(&turn, &worktree, "exec-after-expiry");
     assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}");
-    let running = &sha256_hex(ITEM.as_bytes())[..12];
+    let running = &sha256_hex(item_key.as_bytes())[..12];
     let line = holder_line(&turn);
     assert!(
         line.contains(&format!(
@@ -1201,6 +1262,7 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
     );
     let worktree = turn.root.join(".worktrees").join("wt");
     start_test(&turn, &worktree, ITEM);
+    let item_key = private_item_key(&turn, ITEM);
     let carried = holder_line_after_carry(&turn);
     assert!(
         carried.contains("Until then it is still running")
@@ -1215,7 +1277,7 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
     let still_carried = |why: &str| {
         turn.record(|record| {
             assert_eq!(record.engram.carried_checks.len(), 1, "{why}");
-            assert_eq!(record.engram.carried_checks[0].check.key, ITEM, "{why}");
+            assert_eq!(record.engram.carried_checks[0].check.key, item_key, "{why}");
             assert!(record.engram.carried_checks[0].check.end.is_none(), "{why}");
         })
     };
@@ -1234,7 +1296,7 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
         "a check beside it earns no credit: {checkpoint:#}"
     );
     let line = holder_line(&turn);
-    let named = &sha256_hex(ITEM.as_bytes())[..12];
+    let named = &sha256_hex(item_key.as_bytes())[..12];
     assert!(
         line.contains(&format!(
             "another command of this session (key {named}) was still running"
@@ -1250,6 +1312,7 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
 fn a_replaced_runtime_clears_only_its_own_running_tests() {
     let (turn, worktree) = two_turns("reported-end-replaced-running");
     start_test(&turn, &worktree, ITEM);
+    let item_key = private_item_key(&turn, ITEM);
     assert_carried_at_close(&turn);
     let root_key = turn.record(|record| record.engram.running_codex_tests[0].root_key.clone());
     turn.record_mut(|record| {
@@ -1266,7 +1329,7 @@ fn a_replaced_runtime_clears_only_its_own_running_tests() {
     turn.record(|record| {
         assert_eq!(
             engram_carried_running_key(&record.engram, current.as_ref(), &root_key, "exec-new"),
-            Some(ITEM.to_owned()),
+            Some(item_key.clone()),
             "only the current runtime's test overlaps a new check"
         );
     });
@@ -1281,7 +1344,7 @@ fn a_replaced_runtime_clears_only_its_own_running_tests() {
             .iter()
             .map(|running| running.key.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(keys, [ITEM], "the replaced runtime's test is gone, the current one stays");
+        assert_eq!(keys, [item_key.as_str()], "the replaced runtime's test is gone, the current one stays");
         assert_eq!(record.engram.carried_checks.len(), 1, "its carry stays too");
     });
 }
@@ -1292,10 +1355,11 @@ fn a_replaced_runtime_clears_only_its_own_running_tests() {
 fn a_runtime_exit_ends_a_still_running_tests_overlap() {
     let (turn, worktree) = two_turns("reported-end-exit-ends-running");
     start_test(&turn, &worktree, ITEM);
+    let item_key = private_item_key(&turn, ITEM);
     assert_carried_at_close(&turn);
     turn.record(|record| {
         assert_eq!(record.engram.running_codex_tests.len(), 1);
-        assert_eq!(record.engram.running_codex_tests[0].key, ITEM);
+        assert_eq!(record.engram.running_codex_tests[0].key, item_key);
     });
     let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
 

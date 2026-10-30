@@ -294,15 +294,47 @@ fn a_rerun_that_starts_a_check_retires_the_closure() {
         ],
         2,
     );
+    // This witness models ACP's Unknown-at-turn-close boundary, not a Codex
+    // command that remains physically running and fences a later check.
+    let (runtime, _acp_rx) = test_acp_runtime_handle(AcpAgent::Cursor, "late-end-rerun-acp-reader");
+    turn.record_mut(|record| {
+        record.session.agent = Agent::Cursor;
+        record.runtime = SessionRuntime::Acp(runtime);
+    });
     let mut recorder = turn.recorder();
-    close_a_check_with_no_end(&turn, &mut recorder, "reused");
+    test_command_scope(&mut recorder, CommandProducer::Acp);
+    let old = recorder.command_created(Some("first-native-call"), "reused");
+    recorder.command_invocation(&old, CommandInvocationEvent::Dispatch {
+        command: SIZE_TEST, ran: Some(SIZE_TEST), cwd: None,
+    }).unwrap();
+    turn.wait_for_snapshots();
+    turn.finish();
+    assert!(take_line(&turn).contains("no end was reported"));
     begin_check_outcome_turn(&turn);
-    turn.run("reused", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    let fresh = recorder.command_created(Some("second-native-call"), "reused");
+    assert_ne!(old.key, fresh.key, "the legacy key is not invocation identity");
+    recorder.command_invocation(&fresh, CommandInvocationEvent::Dispatch {
+        command: SIZE_TEST, ran: Some(SIZE_TEST), cwd: None,
+    }).unwrap();
+    turn.wait_for_snapshots();
+    let complete = || CommandInvocationEvent::Finish {
+        command: SIZE_TEST, reported_command: Some(SIZE_TEST), output: "running 3 tests\ntest result: ok. 3 passed",
+        status: CommandStatus::Success, exit: EngramCommandExit::Code(0), runtime_output_cut: false,
+    };
+    // A real old-handle callback cannot finish or overlap the newer check.
+    recorder.command_invocation(&old, complete()).unwrap();
+    turn.record(|record| {
+        let current = record.engram.active_turn_checks.iter().find(|check| check.key == fresh.key).unwrap();
+        assert!(current.end.is_none() && !current.overlapped);
+    });
+    take_line(&turn);
+    recorder.command_invocation(&fresh, complete()).unwrap();
+    turn.wait_for_snapshots();
     assert!(
         !take_line(&turn).contains(TOLD),
         "the rerun check's own end is no late end"
     );
-    end(&mut recorder, "reused", SIZE_TEST, 0);
+    recorder.command_invocation(&fresh, complete()).unwrap();
     assert!(
         !take_line(&turn).contains(TOLD),
         "nor is its end reported again"

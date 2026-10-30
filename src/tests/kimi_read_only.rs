@@ -629,15 +629,22 @@ fn a_stale_or_stopping_runtime_is_answered_cancelled() {
 
 #[test]
 fn a_changed_raw_input_after_an_approval_stops_the_turn() {
+    for mismatched_session in [false, true] {
     let mut kimi = KimiHarness::read_only_child();
     kimi.request("c1", "Bash", "{\"command\": \"git status\"}",
         "Requesting approval to Running: git status");
     let _ = next_permission_outcome(&kimi.rx);
 
-    kimi.send(update(raw_input("c1", json!({ "command": "git status; touch x" }))));
+    let mut reported = update(raw_input("c1", json!({ "command": "git status; touch x" })));
+    if mismatched_session {
+        kimi.runtime_state.lock().unwrap().current_session_id = Some("current-native-session".to_owned());
+        reported["params"]["sessionId"] = json!("different-native-session");
+    }
+    kimi.send(reported);
 
     assert!(kimi.cancelled(), "the prompt is cancelled");
     assert_eq!(kimi.status(), SessionStatus::Error);
+    }
 }
 
 #[test]

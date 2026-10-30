@@ -1252,6 +1252,7 @@ fn a_previous_turns_nested_check_never_acquires_the_next_adopted_turn_identity()
             .host_turn_ref
             .clone()
     });
+    let current_key = test_private_command_key(&fixture.reader.recorder, "current-root-test");
     fixture.finish();
     let current = fixture.observation();
     assert_ne!(
@@ -1266,7 +1267,7 @@ fn a_previous_turns_nested_check_never_acquires_the_next_adopted_turn_identity()
     );
     assert_eq!(
         checks[0]["host_check_id"],
-        unadmitted_host_check_id(&current_ref, "current-root-test")
+        unadmitted_host_check_id(&current_ref, &current_key)
     );
     assert_eq!(
         current.receipt["observed_checks"][0]["credit"],

@@ -304,7 +304,8 @@ fn engram_record_check_end(
 /// whose item has no id: such a key names no one run, so a later end under it
 /// cannot be taken as this check's.
 fn engram_check_key_is_its_line(check: &EngramTurnCheck) -> bool {
-    check.keyed_by_line || engram_check_command_like(&check.key, &check.command).as_ref() == Some(&check.command)
+    check.keyed_by_line || check.key.starts_with("invocation-foreground-")
+        || engram_check_command_like(&check.key, &check.command).as_ref() == Some(&check.command)
 }
 
 /// At the close of a Codex session's turn, carries each of its checks whose
@@ -719,6 +720,7 @@ impl AppState {
     /// longer counts as running; the test is then settled at a later
     /// checkpoint on its claim. Returns whether it ended one; any other late
     /// end is left as it was, dropped.
+    #[cfg(test)]
     fn note_engram_reported_end(
         &self,
         session_id: &str,
@@ -727,12 +729,27 @@ impl AppState {
         output: &str,
         exit: EngramCommandExit,
     ) -> bool {
-        self.observe_test_command_end(session_id, &EngramObservationProvenance::Ambient, key, Some(exit));
+        self.note_engram_reported_end_owned(session_id, &EngramObservationProvenance::Ambient, key, command, Some(command), output, exit)
+    }
+
+    fn note_engram_reported_end_owned(&self, session_id: &str, owner: &EngramObservationProvenance,
+        key: &str, _command: &str, reported_command: Option<&str>, output: &str, exit: EngramCommandExit) -> bool {
+        let owns_runtime = |record: &SessionRecord| match owner {
+            EngramObservationProvenance::Producer { runtime, .. } => record.runtime.matches_runtime_token(runtime),
+            EngramObservationProvenance::Ambient => true,
+            _ => false,
+        };
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else { return false; };
+            if !owns_runtime(&inner.sessions[index]) { return false; }
+        }
+        self.observe_test_command_end(session_id, owner, key, Some(exit));
         self.observe_test_command_artifact(
             session_id,
-            &EngramObservationProvenance::Ambient,
+            owner,
             key,
-            command,
+            reported_command.unwrap_or(""),
             output,
             false,
         );
@@ -742,6 +759,7 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return false;
             };
+            if !owns_runtime(&inner.sessions[index]) { return false; }
             // Its process ended, whether or not its evidence is still carried.
             engram_forget_running_codex_test(&mut inner.sessions[index].engram, key);
             inner.sessions[index]
@@ -755,11 +773,12 @@ impl AppState {
             return false;
         };
         let reading =
-            engram_read_check_end(Some(&started), session_id, Some(command), output, Some(exit));
+            engram_read_check_end(Some(&started), session_id, reported_command, output, Some(exit));
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return false;
         };
+        if !owns_runtime(&inner.sessions[index]) { return false; }
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");

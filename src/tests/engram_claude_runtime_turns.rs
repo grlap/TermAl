@@ -1237,6 +1237,7 @@ fn a_background_subagents_late_work_is_never_credited_to_the_next_prompts_grant(
     // starts and ends, and a file is written, all during B.
     reader.feed(nested_bash_result("started-under-a", "toolu-background"));
     reader.feed(nested_bash("late-under-b", "toolu-background"));
+    let late_key = test_private_command_key(&reader.recorder, "late-under-b");
     reader.feed(nested_bash_result("late-under-b", "toolu-background"));
     reader.feed(
         json!({"type": "assistant", "parent_tool_use_id": "toolu-background",
@@ -1264,7 +1265,7 @@ fn a_background_subagents_late_work_is_never_credited_to_the_next_prompts_grant(
             record
                 .unassigned_claude_observations
                 .iter()
-                .any(|kept| kept.what.contains("late-under-b") && kept.what.contains("started")),
+                .any(|kept| kept.what.contains(&late_key) && kept.what.contains("started")),
             "the foreign work is kept as unassigned"
         );
         assert!(

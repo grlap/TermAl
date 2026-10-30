@@ -162,7 +162,7 @@ fn kimi_config_update_without_runtime_identity_is_refused() {
     let state = test_app_state();
     let id = test_session_id(&state, Agent::Kimi);
     let (tx, _rx) = mpsc::channel();
-    let result = handle_acp_session_update(
+    let result = test_acp_session_update(
         &json!({"sessionUpdate":"config_option_update"}),
         &state,
         &id,
@@ -2195,7 +2195,7 @@ fn kimi_test_session_update(
     agent: AcpAgent,
 ) -> Result<()> {
     if agent != AcpAgent::Kimi {
-        return handle_acp_session_update(
+        return test_acp_session_update(
             update, state, session_id, input_tx, turn, recorder, agent,
         );
     }
@@ -2210,13 +2210,15 @@ fn kimi_test_session_update(
         }
         inner.sessions[index].runtime.runtime_token().unwrap()
     };
+    let fixture_runtime = kimi_test_runtime();
+    fixture_runtime.lock().unwrap().current_session_id = Some("fixture-kimi-session".to_owned());
     let result = handle_acp_notification(
         "session/update",
-        &json!({"params":{"update":update}}),
+        &json!({"params":{"sessionId":"fixture-kimi-session", "update":update}}),
         state,
         session_id,
         &token,
-        &kimi_test_runtime(),
+        &fixture_runtime,
         input_tx,
         turn,
         recorder,

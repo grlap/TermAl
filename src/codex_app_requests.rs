@@ -341,11 +341,12 @@ fn handle_codex_app_server_item_started(
             recorder.finish_streaming_text()?;
         }
         Some("commandExecution") => {
-            if let Some(command) = item.get("command").and_then(Value::as_str) {
-                let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
-                let cwd = item.get("cwd").and_then(Value::as_str);
-                recorder.command_started_in(key, command, Some(command), cwd)?;
-            }
+            let ran = item.get("command").and_then(Value::as_str);
+            let command = ran.unwrap_or("Command");
+            let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
+            let cwd = item.get("cwd").and_then(Value::as_str);
+            let invocation = recorder.command_created(item.get("id").and_then(Value::as_str), key);
+            recorder.command_invocation(&invocation, CommandInvocationEvent::Dispatch { command, ran, cwd })?;
         }
         Some("webSearch") => {
             let key = item
@@ -528,7 +529,8 @@ fn handle_codex_app_server_item_completed(
             }
         }
         Some("commandExecution") => {
-            if let Some(command) = item.get("command").and_then(Value::as_str) {
+                let reported_command = item.get("command").and_then(Value::as_str);
+                let command = reported_command.unwrap_or("Command");
                 let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
                 let output = item
                     .get("aggregatedOutput")
@@ -544,19 +546,18 @@ fn handle_codex_app_server_item_completed(
                     Some("failed") | Some("declined") => CommandStatus::Error,
                     _ => CommandStatus::Running,
                 };
+                let invocation = recorder.command_lookup(item.get("id").and_then(Value::as_str), key)
+                    .unwrap_or_else(|| recorder.command_unproven(item.get("id").and_then(Value::as_str), key, status != CommandStatus::Running,
+                        "Codex completion has no unambiguous retained producer creation; no start or verification authority is inferred"));
                 if item.get("status").and_then(Value::as_str) == Some("declined") {
                     // A declined command never ran: a test check it started
                     // is dropped rather than reported as unknown.
-                    recorder.command_abandoned(key)?;
+                    recorder.command_invocation(&invocation, CommandInvocationEvent::Abandon)?;
                 }
-                recorder.command_completed_with_exit(
-                    key,
-                    command,
-                    output,
-                    status,
-                    EngramHost::codex_command_exit(item),
-                )?;
-            }
+                recorder.command_invocation(&invocation, CommandInvocationEvent::Finish {
+                    command, reported_command, output, status,
+                    exit: EngramHost::codex_command_exit(item), runtime_output_cut: false,
+                })?;
         }
         Some("fileChange") => {
             if item.get("status").and_then(Value::as_str) != Some("completed") {

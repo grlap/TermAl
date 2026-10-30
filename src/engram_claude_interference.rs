@@ -104,11 +104,11 @@ fn engram_hazards_of_work(
     let mut hazards: Vec<EngramClaudeHazard> = work
         .entries
         .iter()
-        .filter(|entry| keys.is_none_or(|keys| keys.contains(&entry.key)))
+        .filter(|entry| keys.is_none_or(|keys| keys.iter().any(|key| entry.matches_key(key))))
         .filter(|entry| entry.is_hazard(current, turn_generation))
         .map(|entry| EngramClaudeHazard {
             owner: owner.clone(),
-            key: Some(entry.key.clone()),
+            key: Some(entry.invocation_key.as_ref().unwrap_or(&entry.key).clone()),
             self_gate: entry.self_gate,
             nested: entry.nested,
             owner_writes,

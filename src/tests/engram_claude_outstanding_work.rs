@@ -128,6 +128,7 @@ fn a_subagent_command_running_across_the_prompt_boundary_excludes_the_next_grant
             "tool_use_id": "long-under-a", "content": "done"}]},
         "tool_use_result": {"stdout": "done", "stderr": "", "interrupted": false}}),
     );
+    let long_key = test_private_command_key(&reader.recorder, "long-under-a");
     turn.record(|record| {
         assert_eq!(
             command_cards(record, LONG_COMMAND),
@@ -139,7 +140,7 @@ fn a_subagent_command_running_across_the_prompt_boundary_excludes_the_next_grant
             record
                 .unassigned_claude_observations
                 .iter()
-                .any(|kept| kept.what.contains("long-under-a") && kept.what.contains("finished")),
+                .any(|kept| kept.what.contains(&long_key) && kept.what.contains("finished")),
             "its end is kept for no grant"
         );
     });
@@ -412,6 +413,7 @@ fn a_grant_turnover_after_routing_leaves_old_work_foreign_on_the_same_runtime() 
         &plan,
     );
     turn.wait_for_snapshots();
+    let racing_key = test_private_command_key(&reader.recorder, "racing-test");
     turn.record(|record| {
         assert!(
             record.engram.active_turn_checks.is_empty(),
@@ -426,7 +428,7 @@ fn a_grant_turnover_after_routing_leaves_old_work_foreign_on_the_same_runtime() 
             record
                 .unassigned_claude_observations
                 .iter()
-                .any(|kept| kept.what.contains("racing-test") && kept.what.contains("started")),
+                .any(|kept| kept.what.contains(&racing_key) && kept.what.contains("started")),
             "it is kept for no grant"
         );
     });
@@ -491,12 +493,13 @@ fn a_background_launch_acknowledgement_retires_nothing_and_its_terminal_notice_d
     turn.record(|record| assert!(!record.claude_outstanding.any()));
     reader.feed(root_bash("clean-test", SIZE_TEST, false));
     turn.wait_for_snapshots();
+    let clean_key = test_private_command_key(&reader.recorder, "clean-test");
     turn.record(|record| {
         let clean = record
             .engram
             .active_turn_checks
             .iter()
-            .find(|check| check.key == "clean-test")
+            .find(|check| check.key == clean_key)
             .expect("the later test starts a check");
         assert!(!clean.overlapped, "nothing foreign may still run");
         assert_eq!(
@@ -774,6 +777,7 @@ fn another_sessions_outstanding_work_fences_checks_only_in_the_worktree_it_may_w
             let record = &mut inner.sessions[index];
             record.session.status = SessionStatus::Idle;
             record.claude_outstanding.register(ClaudeOutstandingEntry {
+                invocation_key: None,
                 token: other_token,
                 key: "orphaned".to_owned(),
                 origin: ClaudeWorkOrigin::Unattributed,
@@ -945,6 +949,7 @@ fn deleting_or_collecting_a_session_keeps_its_work_fencing_the_workspace() {
             inner.sessions[index]
                 .claude_outstanding
                 .register(ClaudeOutstandingEntry {
+                    invocation_key: None,
                     token: RuntimeToken::Claude(format!("{label}-runtime")),
                     key: "left-behind".to_owned(),
                     origin: ClaudeWorkOrigin::Unattributed,
@@ -1023,6 +1028,7 @@ fn may_write_in(work: &ClaudeOutstandingWork, root: &str) -> bool {
 fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
     let token = RuntimeToken::Claude("locations".to_owned());
     let entry = |key: &str, locations: Vec<Option<String>>| ClaudeOutstandingEntry {
+        invocation_key: None,
         token: token.clone(),
         key: key.to_owned(),
         origin: ClaudeWorkOrigin::Unattributed,

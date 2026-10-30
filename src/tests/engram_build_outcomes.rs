@@ -52,7 +52,7 @@ fn typed_item(
 }
 
 fn complete_typed(turn: &CheckedTurn, recorder: &mut SessionRecorder, item: &Value) {
-    handle_codex_app_server_item_completed(
+    test_codex_item_completed(
         item,
         &turn.state,
         &turn.session_id,
@@ -69,7 +69,7 @@ fn engram_build_outcome_typed_native_pass_and_failure_reach_the_checkpoint() {
         let turn = CheckedTurn::start(&format!("build-outcome-typed-{code}"), true);
         let revision = turn.revision();
         let mut recorder = turn.recorder();
-        handle_codex_app_server_item_started(
+        test_codex_item_started(
             &typed_item(&turn, "owned", "cargo build", "inProgress", None),
             &mut recorder,
         )
@@ -95,7 +95,7 @@ fn engram_build_outcome_typed_yield_and_foreign_key_do_not_end_the_owned_attempt
     let turn = CheckedTurn::start("build-outcome-yield", true);
     let revision = turn.revision();
     let mut recorder = turn.recorder();
-    handle_codex_app_server_item_started(
+    test_codex_item_started(
         &typed_item(&turn, "owned", "cargo build", "inProgress", None),
         &mut recorder,
     )

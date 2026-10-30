@@ -2580,7 +2580,7 @@ fn an_acp_tool_call_ends_its_check_with_the_exit_code_it_reported() {
             "rawOutput": {"exitCode": 0, "stdout": "running 3 tests\ntest result: ok. 3 passed"}
         }),
     ] {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,
@@ -2605,7 +2605,7 @@ fn an_acp_tool_call_ends_its_check_with_the_exit_code_it_reported() {
     turn.wait_for_snapshots();
     // A tool call that says it runs in another repository is no check here.
     let elsewhere = sibling_worktree(&turn, "acp-elsewhere");
-    handle_acp_session_update(
+    test_acp_session_update(
         &json!({
             "sessionUpdate": "tool_call", "toolCallId": "acp-elsewhere",
             "title": "Run tests",
@@ -3409,7 +3409,7 @@ fn repeated_acp_starts_keep_a_check_only_while_it_names_the_same_test_in_the_sam
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
     let mut update = |update: Value| {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,
@@ -3425,7 +3425,7 @@ fn repeated_acp_starts_keep_a_check_only_while_it_names_the_same_test_in_the_sam
                 .engram
                 .active_turn_checks
                 .iter()
-                .map(|check| check.key.clone())
+                .map(|check| test_native_command_key(&recorder, &check.key))
                 .collect::<Vec<_>>()
         })
     };
@@ -3507,7 +3507,7 @@ fn an_acp_update_without_a_start_still_moves_a_check_out_of_its_worktree() {
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
     let mut update = |update: Value| {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,
@@ -3523,7 +3523,7 @@ fn an_acp_update_without_a_start_still_moves_a_check_out_of_its_worktree() {
                 .engram
                 .active_turn_checks
                 .iter()
-                .map(|check| (check.key.clone(), check.end.is_some()))
+                .map(|check| (test_native_command_key(&recorder, &check.key), check.end.is_some()))
                 .collect::<Vec<_>>()
         })
     };
@@ -3597,7 +3597,7 @@ fn an_acp_check_a_later_start_invalidates_stays_withheld_until_its_call_ends() {
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
     let mut update = |update: Value| {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,
@@ -3613,7 +3613,7 @@ fn an_acp_check_a_later_start_invalidates_stays_withheld_until_its_call_ends() {
                 .engram
                 .active_turn_checks
                 .iter()
-                .map(|check| (check.key.clone(), check.overlapped))
+                .map(|check| (test_native_command_key(&recorder, &check.key), check.overlapped))
                 .collect::<Vec<_>>()
         })
     };
@@ -3650,13 +3650,13 @@ fn an_acp_check_a_later_start_invalidates_stays_withheld_until_its_call_ends() {
         "sessionUpdate": "tool_call_update", "toolCallId": "corrected",
         "status": "completed", "rawOutput": {"exitCode": 0}
     }));
-    // Once the call has ended, a new call with the key checks again.
+    // A second actual ACP call has a new protocol-unique toolCallId.
     assert_eq!(
         update(json!({
-            "sessionUpdate": "tool_call", "toolCallId": "corrected",
+            "sessionUpdate": "tool_call", "toolCallId": "corrected-next",
             "rawInput": {"command": SIZE_TEST}
         })),
-        [("corrected".to_owned(), false)]
+        [("corrected-next".to_owned(), false)]
     );
 
     // A test a call names only after it started began before its first
@@ -3685,7 +3685,7 @@ fn an_acp_call_moves_its_shell_as_its_command_line_says() {
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
     let mut update = |update: Value| {
-        handle_acp_session_update(
+        test_acp_session_update(
             &update,
             &turn.state,
             &turn.session_id,
@@ -3701,13 +3701,14 @@ fn an_acp_call_moves_its_shell_as_its_command_line_says() {
                 .engram
                 .active_turn_checks
                 .iter()
-                .map(|check| (check.key.clone(), check.target.directory.clone()))
+                .map(|check| (test_native_command_key(&recorder, &check.key), check.target.directory.clone()))
                 .collect::<Vec<_>>()
         })
     };
 
     // Each report of one relative `cd` is the same move, from where the
     // shell was before it.
+    update(json!({"sessionUpdate":"tool_call", "toolCallId":"move-ui", "title":"Change directory"}));
     for status in ["pending", "in_progress", "completed"] {
         update(json!({
             "sessionUpdate": "tool_call_update", "toolCallId": "move-ui",
@@ -4877,6 +4878,9 @@ mod declared_checks;
 // file does not grow further.
 #[path = "engram_unended_closures.rs"]
 mod unended_closures;
+
+#[path = "engram_command_invocations.rs"]
+mod command_invocation_checks;
 
 #[path = "engram_checkpoint_non_application.rs"]
 mod checkpoint_non_application;

@@ -35,7 +35,7 @@ fn complete(turn: &CheckedTurn, recorder: &mut SessionRecorder, item: &Value) {
     ended["status"] = json!("completed");
     ended["exitCode"] = json!(0);
     ended["aggregatedOutput"] = json!("PASS synthetic exit=0\nfocused: passed\n");
-    handle_codex_app_server_item_completed(
+    test_codex_item_completed(
         &ended,
         &turn.state,
         &turn.session_id,
@@ -58,7 +58,7 @@ fn acp_update(
     update: &Value,
 ) {
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
-    handle_acp_session_update(
+    test_acp_session_update(
         update,
         &turn.state,
         &turn.session_id,
@@ -181,15 +181,16 @@ fn refused_admission_acp_invalidation_before_refusal_does_not_consume_the_notice
         let (turn, root) = named_turn("acp-invalidated-before-refusal");
         let mut recorder = turn.recorder();
         let mut turn_state = AcpTurnState::default();
-        for _ in 0..2 {
-            // The second iteration reuses an ended call's key. Its first
-            // refusal must not inherit the previous call's delivery marker.
+        for call in 0..2 {
+            // Two actual ACP creations have protocol-unique toolCallIds.
+            // The second call retains its own first refusal and admission.
+            let call_id = format!("invalidated-{call}");
             let command = format!("{LAUNCHER} --test-name-pattern \"^MCP\" fixture.test.mjs");
             acp_update(
                 &turn,
                 &mut recorder,
                 &mut turn_state,
-                &json!({"sessionUpdate":"tool_call", "toolCallId":"invalidated",
+                &json!({"sessionUpdate":"tool_call", "toolCallId":call_id,
                     "kind":"execute", "status":"in_progress",
                     "rawInput":{"command":command, "cwd":root}}),
             );
@@ -203,7 +204,7 @@ fn refused_admission_acp_invalidation_before_refusal_does_not_consume_the_notice
                 &turn,
                 &mut recorder,
                 &mut turn_state,
-                &json!({"sessionUpdate":"tool_call_update", "toolCallId":"invalidated",
+                &json!({"sessionUpdate":"tool_call_update", "toolCallId":call_id,
                     "rawInput":{"command":changed, "cwd":root}}),
             );
             assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
@@ -213,7 +214,7 @@ fn refused_admission_acp_invalidation_before_refusal_does_not_consume_the_notice
                 "the changed valid command was not refused"
             );
             let refused = format!("{LAUNCHER} --test-name-pattern ^MCP.close fixture.test.mjs");
-            let mut update = json!({"sessionUpdate":"tool_call_update", "toolCallId":"invalidated",
+            let mut update = json!({"sessionUpdate":"tool_call_update", "toolCallId":call_id,
                 "rawInput":{"command":refused, "cwd":root}, "rawOutput":{"exitCode":0}});
             if let Some(status) = status {
                 update["status"] = json!(status);
@@ -297,7 +298,7 @@ fn refused_admission_codex_caret_and_arguments_have_one_actionable_outcome() {
             );
             let item = command_item(&command, &root);
             let mut recorder = turn.recorder();
-            handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+            test_codex_item_started(&item, &mut recorder).unwrap();
             let notice = take_notice(&turn).expect("a refused check must tell its caller why");
             assert!(
                 notice.contains(reason) && notice.contains(remedy),
@@ -306,7 +307,7 @@ fn refused_admission_codex_caret_and_arguments_have_one_actionable_outcome() {
             assert!(notice.contains("no Test record will follow"), "{notice}");
             assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
 
-            handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+            test_codex_item_started(&item, &mut recorder).unwrap();
             recorder
                 .command_described("focused", Some(&command), Some(&root))
                 .unwrap();
@@ -348,7 +349,7 @@ fn refused_admission_quoted_caret_codex_control_still_records() {
     let command = format!("{LAUNCHER} --test-name-pattern \"^MCP\" fixture.test.mjs");
     let item = command_item(&command, &root);
     let mut recorder = turn.recorder();
-    handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+    test_codex_item_started(&item, &mut recorder).unwrap();
     turn.wait_for_snapshots();
     assert!(turn.record(|record| record.engram.active_turn_checks.len() == 1));
     assert_eq!(take_notice(&turn), None);
@@ -366,7 +367,7 @@ fn refused_admission_external_root_codex_control_stays_refused() {
     let command = format!("{LAUNCHER} --test-name-pattern \"^MCP\" fixture.test.mjs");
     let item = command_item(&command, &turn.root.to_string_lossy());
     let mut recorder = turn.recorder();
-    handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+    test_codex_item_started(&item, &mut recorder).unwrap();
     let notice = take_notice(&turn).expect("outside-root placement remains refused");
     assert!(
         notice.contains("outside") && notice.contains("run the tests in that root"),
@@ -400,8 +401,8 @@ fn refused_admission_accumulated_test_and_build_notices_preserve_root_guidance()
             };
             let mut item = command_item(&command, &root);
             item["id"] = json!(format!("refusal-{index}"));
-            handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
-            handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+            test_codex_item_started(&item, &mut recorder).unwrap();
+            test_codex_item_started(&item, &mut recorder).unwrap();
             let pending = turn
                 .record(|record| record.engram.pending_source_root_line.clone())
                 .unwrap();
@@ -436,11 +437,11 @@ fn refused_admission_placement_feedback_does_not_block_later_same_key_admission(
     let command = format!("{LAUNCHER} --test-name-pattern \"^MCP\" fixture.test.mjs");
     let mut item = command_item(&command, &turn.root.to_string_lossy());
     let mut recorder = turn.recorder();
-    handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+    test_codex_item_started(&item, &mut recorder).unwrap();
     assert!(take_notice(&turn).unwrap().contains("outside"));
     assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
     item["cwd"] = json!(root);
-    handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+    test_codex_item_started(&item, &mut recorder).unwrap();
     turn.wait_for_snapshots();
     assert!(turn.record(|record| record.engram.active_turn_checks.len() == 1));
     assert!(turn.record(
@@ -463,7 +464,7 @@ fn refused_admission_quoted_expansion_characters_get_an_accurate_remedy() {
         let mut item = command_item(&command, &root);
         item["id"] = json!(format!("literal-{index}"));
         let mut recorder = turn.recorder();
-        handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+        test_codex_item_started(&item, &mut recorder).unwrap();
         let notice = take_notice(&turn).expect("quoted expansion characters stay refused");
         assert!(
             notice.contains("unsupported expansion syntax") && notice.contains("even if quoted"),
@@ -495,7 +496,7 @@ fn refused_admission_shared_root_notice_keeps_the_primary_check_admitted() {
     let command = format!("{LAUNCHER} --test-name-pattern \"^MCP\" fixture.test.mjs");
     let item = command_item(&command, &root);
     let mut recorder = turn.recorder();
-    handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
+    test_codex_item_started(&item, &mut recorder).unwrap();
     turn.wait_for_snapshots();
     let notice = take_notice(&turn).expect("the other held item receives routing guidance");
     assert!(

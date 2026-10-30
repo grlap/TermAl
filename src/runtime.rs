@@ -843,7 +843,12 @@ struct CodexTurnState {
 /// Tracks session recorder state.
 #[derive(Default)]
 struct SessionRecorderState {
-    command_messages: HashMap<String, String>,
+    command_messages: HashMap<String, RecordedCommand>,
+    /// Same owner as the command card; no durable or reconstructed identity.
+    command_scope: Option<CommandProducerScope>,
+    /// An overflow creation could not retain its original reference. Until
+    /// a new producing runtime/session, another frame cannot rebind it.
+    command_creation_coverage_lost: bool,
     parallel_agents_messages: HashMap<String, String>,
     streaming_text_message_id: Option<String>,
     /// Who produced what the recorder observes now (a Claude frame's runtime
@@ -858,9 +863,24 @@ struct SessionRecorderState {
 
 fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
     let kept = &recorder_state.kept_command_keys;
-    recorder_state
-        .command_messages
-        .retain(|key, _| kept.contains(key));
+    let retired: Vec<_> = recorder_state.command_messages.iter()
+        .filter(|(key, _)| !kept.contains(*key))
+        .filter_map(|(_, entry)| entry.invocation.as_ref().filter(|entry| entry.terminal).cloned())
+        .collect();
+    recorder_state.command_messages.retain(|key, entry| {
+        if let Some(invocation) = entry.invocation.as_ref() {
+            if !invocation.terminal { return true; }
+        }
+        kept.contains(key)
+    });
+    // Forgetting terminal proof affects only retained references to that
+    // native id. Unrelated later creations keep their own correlation, while
+    // ambiguity on a retained reference never clears when its rival retires.
+    for invocation in recorder_state.command_messages.values_mut().filter_map(|entry| entry.invocation.as_mut()) {
+        if retired.iter().any(|retired| invocation.shares_native_identity(retired)) {
+            invocation.turnless_safe = false;
+        }
+    }
     recorder_state.parallel_agents_messages.clear();
     recorder_state.streaming_text_message_id = None;
 }

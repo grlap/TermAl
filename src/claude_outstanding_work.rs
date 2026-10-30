@@ -65,6 +65,17 @@ enum EngramObservationProvenance {
     #[default]
     Ambient,
     Claude(ClaudeObservationProvenance),
+    /// A live producer creation captured before asynchronous dispatch work.
+    Producer {
+        runtime: RuntimeToken,
+        turn_generation: Option<u64>,
+        qualifying: bool,
+        binding: Option<EngramControlWorkBinding>,
+        grant: Option<String>,
+        source_generation: Option<u64>,
+    },
+    /// Presentation/writer activity without a proven producer start.
+    Unproven,
 }
 
 /// What the sink does with one observation, decided under the state lock in
@@ -94,6 +105,21 @@ fn claude_observation_disposition(
     provenance: &EngramObservationProvenance,
 ) -> ClaudeObservationDisposition {
     let provenance = match provenance {
+        EngramObservationProvenance::Unproven => return ClaudeObservationDisposition::Foreign,
+        EngramObservationProvenance::Producer { runtime, turn_generation, qualifying, binding, grant, source_generation } => {
+            return if !record.runtime.matches_runtime_token(runtime) {
+                ClaudeObservationDisposition::Replaced
+            } else if !qualifying || *turn_generation != Some(record.active_turn_generation)
+                || binding != &record.engram.work_binding || grant != &record.engram.active_grant_id
+                || *source_generation != record.engram.active_turn_source_root.as_ref().map(|root| root.generation)
+            {
+                ClaudeObservationDisposition::Foreign
+            } else if unmediated_claude_turn_hides_observations(record) {
+                ClaudeObservationDisposition::Unowned
+            } else {
+                ClaudeObservationDisposition::Current
+            };
+        }
         EngramObservationProvenance::Ambient => {
             return if unmediated_claude_turn_hides_observations(record) {
                 ClaudeObservationDisposition::Unowned
@@ -305,6 +331,15 @@ fn claude_exclude_observation(
             );
         }
         ClaudeObservationDisposition::Foreign => {
+            // A delayed producer result or an end without creation proof is
+            // not new activity of the current grant. It cannot qualify its
+            // own check, nor taint an independently owned invocation's result.
+            // Existing writer intervals and carries keep their own owners.
+            if matches!(provenance, EngramObservationProvenance::Producer { .. }
+                | EngramObservationProvenance::Unproven)
+                && matches!(observation, EngramRecorderObservation::CommandFinished { .. }
+                    | EngramRecorderObservation::CommandAbandoned { .. })
+            { return; }
             push_unassigned_claude_observation(
                 record,
                 unassigned_claude_observation_text(observation),
@@ -337,6 +372,8 @@ fn claude_merge_locations(locations: &mut Vec<Option<String>>, more: &[Option<St
 /// may still run and write, until a correlated end from that runtime arrives.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ClaudeOutstandingEntry {
+    /// The recorder's private reference, bound only to this producer start.
+    invocation_key: Option<String>,
     /// The runtime that started it.
     token: RuntimeToken,
     /// Its tool-use id.
@@ -366,6 +403,9 @@ struct ClaudeOutstandingEntry {
 }
 
 impl ClaudeOutstandingEntry {
+    fn matches_key(&self, key: &str) -> bool {
+        self.key == key || self.invocation_key.as_deref() == Some(key)
+    }
     /// Whether it restricts the session: background or subagent work, or
     /// work of another runtime or another turn. A root foreground command of
     /// the session's current runtime and turn is not: it is that turn's own,
@@ -431,7 +471,7 @@ impl ClaudeOutstandingWork {
     /// The command `key` was placed in `worktrees`: they join where its
     /// entry may write, if it is still outstanding.
     fn place(&mut self, key: &str, worktrees: &[Option<String>]) {
-        for entry in self.entries.iter_mut().filter(|entry| entry.key == key) {
+        for entry in self.entries.iter_mut().filter(|entry| entry.matches_key(key)) {
             claude_merge_locations(&mut entry.locations, worktrees);
         }
     }
@@ -463,7 +503,7 @@ impl ClaudeOutstandingWork {
     }
 
     fn holds(&self, key: &str) -> bool {
-        self.entries.iter().any(|entry| entry.key == key)
+        self.entries.iter().any(|entry| entry.matches_key(key))
     }
 
     /// Whether any work may still be running, known or unknown. A grant
@@ -707,6 +747,7 @@ impl AppState {
             let locations = EngramHost::session_write_locations(record);
             for (key, background, self_gate) in &work.started {
                 let entry = ClaudeOutstandingEntry {
+                    invocation_key: None,
                     token: provenance.token.clone(),
                     key: key.clone(),
                     origin: provenance.origin.clone(),

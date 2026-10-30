@@ -19,6 +19,14 @@ fn persisted(stdout: &str) -> Value {
 fn start(turn: &CheckedTurn, background: bool) -> (ClaudeTurnState, SessionRecorder) {
     let mut parser = ClaudeTurnState::default();
     let mut recorder = turn.recorder();
+    let (token, turn_generation) = turn.record(|record| (
+        record.runtime.runtime_token().unwrap(), record.active_turn_generation,
+    ));
+    // The production frame application sets this before parsing tool frames;
+    // this direct-parser fixture supplies the same owning turn explicitly.
+    recorder.set_observation_provenance(EngramObservationProvenance::Claude(
+        ClaudeObservationProvenance { token, origin: ClaudeWorkOrigin::Attempt { turn_generation } },
+    ));
     let mut external = None;
     handle_claude_event(
         &json!({"type": "assistant", "message": {"content": [{

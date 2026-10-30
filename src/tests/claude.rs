@@ -2242,6 +2242,7 @@ fn clear_claude_turn_state_resets_all_fields() {
         pending_tools: HashMap::from([(
             "tool-1".to_owned(),
             ClaudeToolUse {
+                invocation: None,
                 command: Some("echo hi".to_owned()),
                 description: Some("Shell".to_owned()),
                 file_path: Some("README.md".to_owned()),
@@ -2296,6 +2297,7 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
         pending_tools: HashMap::from([(
             "tool-1".to_owned(),
             ClaudeToolUse {
+                invocation: None,
                 command: Some("echo hi".to_owned()),
                 description: Some("Shell".to_owned()),
                 file_path: Some("README.md".to_owned()),
@@ -2676,6 +2678,7 @@ fn claude_task_tool_result_resets_existing_non_tool_progress_source() {
         pending_tools: HashMap::from([(
             "task-1".to_owned(),
             ClaudeToolUse {
+                invocation: None,
                 command: None,
                 description: Some("Rust code review".to_owned()),
                 file_path: None,

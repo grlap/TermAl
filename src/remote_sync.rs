@@ -623,6 +623,7 @@ fn push_remote_proxy_session_record(
     session: Session,
 ) {
     let mut record = SessionRecord {
+        command_creation_loss: None,
         federation_mailbox_binding: None,
         federation_automatic_mailbox_binding: None,
         federation_retired_automatic_mailbox_bindings: Vec::new(),

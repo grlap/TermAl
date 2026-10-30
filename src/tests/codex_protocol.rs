@@ -993,8 +993,8 @@ fn codex_app_server_web_search_item_records_command_lifecycle() {
         }
     });
 
-    handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
-    handle_codex_app_server_item_completed(
+    test_codex_item_started(&item, &mut recorder).unwrap();
+    test_codex_item_completed(
         &item,
         &state,
         &session_id,
@@ -1049,8 +1049,8 @@ fn codex_command_items_report_their_exit_status_on_every_path() {
     let mut started = item("typed", 0);
     started["status"] = json!("inProgress");
     started["cwd"] = json!("/repo/ui");
-    handle_codex_app_server_item_started(&started, &mut recorder).unwrap();
-    handle_codex_app_server_item_completed(
+    test_codex_item_started(&started, &mut recorder).unwrap();
+    test_codex_item_completed(
         &item("typed", 0),
         &state,
         &session_id,
@@ -1066,7 +1066,7 @@ fn codex_command_items_report_their_exit_status_on_every_path() {
         .as_object_mut()
         .expect("an item")
         .remove("exitCode");
-    handle_codex_app_server_item_completed(
+    test_codex_item_completed(
         &declined,
         &state,
         &session_id,
@@ -1172,7 +1172,7 @@ fn codex_app_server_file_change_item_records_create_and_edit_diffs() {
         ]
     });
 
-    handle_codex_app_server_item_completed(
+    test_codex_item_completed(
         &item,
         &state,
         &session_id,

@@ -49,10 +49,17 @@ fn acp_update(
     cwd: &str,
 ) {
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
-    handle_acp_session_update(&json!({
+    test_acp_session_update(&json!({
         "sessionUpdate":"tool_call_update", "toolCallId":key, "status":status,
         "rawInput":{"command":command, "cwd":cwd}, "rawOutput":"STARTED",
     }), &turn.state, &turn.session_id, &input_tx, state, recorder, AcpAgent::Kimi).unwrap();
+}
+
+fn acp_create(turn: &CheckedTurn, recorder: &mut SessionRecorder, state: &mut AcpTurnState, key: &str) {
+    let (input_tx, _input_rx) = std::sync::mpsc::channel();
+    test_acp_session_update(&json!({"sessionUpdate":"tool_call", "toolCallId":key,
+        "status":"pending", "title":"Bash"}), &turn.state, &turn.session_id,
+        &input_tx, state, recorder, AcpAgent::Kimi).unwrap();
 }
 
 fn running_run(runs: &FsPath, root: &FsPath, started: &str) -> PathBuf {
@@ -85,6 +92,7 @@ fn retired_launch_cannot_lend_run(repeated_start: bool, changed_place: bool) {
     let command = format!("{DETACHED_GATE} --notify session-original");
     let mut recorder = turn.recorder();
     let mut acp = AcpTurnState::default();
+    acp_create(&turn, &mut recorder, &mut acp, "old");
     let first = chrono::Utc::now();
     let original_at = first.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let replacement_at = (first + chrono::Duration::seconds(1))
@@ -128,7 +136,7 @@ fn retired_launch_cannot_lend_run(repeated_start: bool, changed_place: bool) {
     let retained = turn.record(|record| {
         assert!(record.engram.active_turn_checks.is_empty());
         assert!(record.engram.carried_checks.is_empty());
-        assert!(!record.engram.running_command_keys.contains_key("old"));
+        assert!(!record.engram.running_command_keys.contains_key(&original.key));
         record.engram.carried_unmatched_launches.contains(&expected)
     });
 
@@ -196,6 +204,7 @@ fn unchanged_launch_still_credits(repeated_start: bool) {
     let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
     let mut recorder = turn.recorder();
     let mut acp = AcpTurnState::default();
+    acp_create(&turn, &mut recorder, &mut acp, "gate");
     acp_update(&turn, &mut recorder, &mut acp, "gate", "in_progress", DETACHED_GATE, &cwd);
     turn.wait_for_snapshots();
     let identity = turn.record(|record| {

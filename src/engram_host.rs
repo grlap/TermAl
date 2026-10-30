@@ -71,6 +71,51 @@ pub(crate) enum EngramRecorderObservation<'a> {
 }
 
 impl EngramHost<'_> {
+    pub(crate) fn command_scope_has_creation_loss(&self, session_id: &str, scope: &CommandProducerScope) -> bool {
+        let inner = self.state.inner.lock().expect("state mutex poisoned");
+        inner.sessions.iter().find(|record| record.session.id == session_id)
+            .is_some_and(|record| record.command_creation_loss.as_ref() == Some(&scope.loss_identity()))
+    }
+
+    pub(crate) fn command_creation_coverage_lost(&self, session_id: &str, scope: &CommandProducerScope) {
+        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else { return; };
+        let record = &mut inner.sessions[index];
+        if record.runtime.matches_runtime_token(&scope.runtime) {
+            // Replacing this fact requires an actual different producer scope,
+            // not a new wrapper/runtime for the same native session. Only the
+            // current producer owner is kept; there is no scope-history map.
+            record.command_creation_loss = Some(scope.loss_identity());
+        }
+    }
+    /// Binds the command reference to the already registered Claude work.
+    /// Native ids remain its result router's keys; interference compares the
+    /// exact private invocation so a new check cannot inherit a self exception.
+    pub(crate) fn bind_claude_command_invocation(&self, session_id: &str, native_key: &str, reference: &CommandInvocation) {
+        let EngramObservationProvenance::Claude(origin) = &reference.provenance else { return; };
+        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else { return; };
+        for entry in &mut inner.sessions[index].claude_outstanding.entries {
+            if entry.key == native_key && entry.token == origin.token && entry.origin == origin.origin
+                && entry.invocation_key.is_none()
+            {
+                entry.invocation_key = Some(reference.key.clone());
+            }
+        }
+    }
+    /// A bounded producer owner could not retain or resolve creation proof.
+    /// This reports uncertainty without manufacturing launch or credit facts.
+    pub(crate) fn command_identity_unavailable(&self, session_id: &str, reason: &str) {
+        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        let enabled = AppState::engram_session_is_enabled_locked(&inner, session_id);
+        let Some(index) = inner.find_session_index(session_id) else { return; };
+        let line = format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} command invocation tracking unavailable: {reason}.");
+        if enabled {
+            engram_publish_check_notice(session_id, &mut inner.sessions[index].engram, line, &mut std::io::stderr());
+        } else {
+            eprintln!("engram> session={session_id} {line}");
+        }
+    }
     /// Reports what a recorder saw in `session_id`, produced as `provenance`
     /// says. Every handler reaches the observation, because where a command
     /// runs and what it may write fences carried gates and other sessions'
@@ -383,16 +428,10 @@ impl EngramHost<'_> {
     /// session carried since its turn closed under exactly that item key
     /// (`note_engram_reported_end`); the transcript is not touched. Returns
     /// whether it was taken.
-    pub(crate) fn codex_reported_end(
-        &self,
-        session_id: &str,
-        key: &str,
-        command: &str,
-        output: &str,
-        exit: EngramCommandExit,
-    ) -> bool {
-        self.state
-            .note_engram_reported_end(session_id, key, command, output, exit)
+    pub(crate) fn codex_invocation_reported_end(&self, session_id: &str, reference: &CommandInvocation,
+        command: &str, reported_command: Option<&str>, output: &str, exit: EngramCommandExit) -> bool {
+        self.state.note_engram_reported_end_owned(session_id, &reference.provenance,
+            &reference.key, command, reported_command, output, exit)
     }
 
     /// The exit a Claude Bash tool result states.

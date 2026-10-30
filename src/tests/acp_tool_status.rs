@@ -82,7 +82,7 @@ fn acp_completed_tool_updates_preserve_status_in_cursor_transcript() {
                 "status": status, "rawOutput": raw_output
             }),
         ] {
-            handle_acp_session_update(
+            test_acp_session_update(
                 &update,
                 &state,
                 &session_id,

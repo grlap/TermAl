@@ -2153,6 +2153,9 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
 /// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
+    /// Process-local actual overflow in the current producer's native scope.
+    /// Reader replacement preserves it; persistence never reconstructs it.
+    command_creation_loss: Option<CommandCreationLoss>,
     /// Explicit domain participation; never inferred from a name or local id.
     federation_mailbox_binding: Option<FederationMailboxBinding>,
     /// Routing only. Older receivers ignore this field and retain no grant.

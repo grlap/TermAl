@@ -740,6 +740,12 @@ fn handle_shared_codex_app_server_notification(
     recorder: &mut impl TurnRecorder,
     terminal_effect: &mut Option<SharedCodexTerminalOutcome>,
 ) -> Result<()> {
+    recorder.command_scope(CommandProducerScope {
+        producer: CommandProducer::Codex,
+        runtime: runtime_token.clone(),
+        session: session_thread_id.clone().unwrap_or_default(),
+        turn: shared_codex_event_turn_id(message).map(str::to_owned),
+    });
     match method {
         "thread/started" => {
             if let Some(thread_id) = message.pointer("/params/thread/id").and_then(Value::as_str) {
@@ -1050,6 +1056,7 @@ fn handle_shared_codex_app_server_notification(
                 session_thread_id.as_deref(),
                 message,
                 item,
+                recorder,
             ) {
                 trace_shared_codex_event(
                     "drop",
@@ -1216,6 +1223,11 @@ fn handle_shared_codex_app_server_notification(
             }
         }
         "codex/event/item_completed" => {
+            if let Some(item) = message.pointer("/params/msg/item") {
+                if take_shared_codex_late_command_end(state, session_id, session_thread_id.as_deref(), message, item, recorder) {
+                    return Ok(());
+                }
+            }
             handle_shared_codex_event_item_completed(
                 message,
                 state,
@@ -1379,20 +1391,19 @@ fn take_shared_codex_late_command_end(
     session_thread_id: Option<&str>,
     message: &Value,
     item: &Value,
+    recorder: &mut impl TurnRecorder,
 ) -> bool {
-    if item.get("type").and_then(Value::as_str) != Some("commandExecution") {
+    if !matches!(item.get("type").and_then(Value::as_str), Some("commandExecution" | "CommandExecution")) {
         return false;
     }
-    let thread = codex_message_thread_id(message);
+    let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+    let thread = shared_codex_session_thread_id(method, message);
     if thread.is_none() || thread != session_thread_id {
         return false;
     }
-    let (Some(key), Some(command)) = (
-        item.get("id").and_then(Value::as_str),
-        item.get("command").and_then(Value::as_str),
-    ) else {
-        return false;
-    };
+    let reported_command = item.get("command").and_then(Value::as_str);
+    let command = reported_command.unwrap_or("Command");
+    let key = item.get("id").and_then(Value::as_str);
     let exit = EngramHost::codex_command_exit(item);
     if exit == EngramCommandExit::NotFinished {
         return false;
@@ -1401,9 +1412,14 @@ fn take_shared_codex_late_command_end(
         .get("aggregatedOutput")
         .and_then(Value::as_str)
         .unwrap_or("");
-    state
-        .engram_host()
-        .codex_reported_end(session_id, key, command, output, exit)
+    let Some(reference) = recorder.command_lookup(key, key.unwrap_or(command)) else {
+        let unavailable = recorder.command_unproven(key, key.unwrap_or(command), true,
+            "Codex terminal invocation has no unambiguous retained creation coverage; no start, authority or verification result is inferred");
+        let _ = recorder.command_invocation(&unavailable, CommandInvocationEvent::Release);
+        return false;
+    };
+    let _ = (state, session_id); // Presentation-only recorders cannot settle a carry.
+    recorder.command_carried_end(&reference, command, reported_command, output, exit)
 }
 
 /// Extracts the turn id from a Codex event by probing the several
@@ -1653,35 +1669,9 @@ fn handle_shared_codex_event_item_completed(
         // race typed deltas or replace their in-flight text.
         Some("AgentMessage") => {}
         Some("CommandExecution") => {
-            if let Some(command) = item.get("command").and_then(Value::as_str) {
-                let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
-                let output = item
-                    .get("aggregatedOutput")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                let status = match item.get("status").and_then(Value::as_str) {
-                    Some("completed")
-                        if item.get("exitCode").and_then(Value::as_i64) == Some(0) =>
-                    {
-                        CommandStatus::Success
-                    }
-                    Some("completed") => CommandStatus::Error,
-                    Some("failed") | Some("declined") => CommandStatus::Error,
-                    _ => CommandStatus::Running,
-                };
-                if item.get("status").and_then(Value::as_str) == Some("declined") {
-                    // A declined command never ran: a test check it started
-                    // is dropped rather than reported as unknown.
-                    recorder.command_abandoned(key)?;
-                }
-                recorder.command_completed_with_exit(
-                    key,
-                    command,
-                    output,
-                    status,
-                    EngramHost::codex_command_exit(item),
-                )?;
-            }
+            let mut typed = item.clone();
+            typed["type"] = Value::String("commandExecution".to_owned());
+            handle_codex_app_server_item_completed(&typed, _state, _session_id, _turn_state, recorder)?;
         }
         _ => {}
     }

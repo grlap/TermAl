@@ -122,6 +122,7 @@ impl StateInner {
             .then(|| session_model.clone());
 
         let record = SessionRecord {
+            command_creation_loss: None,
             federation_mailbox_binding: None,
             federation_automatic_mailbox_binding: None,
             federation_retired_automatic_mailbox_bindings: Vec::new(),

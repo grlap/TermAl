@@ -995,7 +995,7 @@ fn acp_structured_permission_requests_queue_and_resolve_in_arrival_order() {
     .unwrap();
 
     let mut turn_state = AcpTurnState::default();
-    handle_acp_session_update(
+    test_acp_session_update(
         &json!({
             "sessionUpdate": "tool_call_update",
             "toolCallId": "tool-1",
@@ -1357,7 +1357,7 @@ fn syncs_cursor_mode_from_acp_config_updates() {
     let mut turn_state = AcpTurnState::default();
     let (input_tx, _input_rx) = mpsc::channel();
 
-    handle_acp_session_update(
+    test_acp_session_update(
         &json!({
             "sessionUpdate": "config_update",
             "configOptions": [
@@ -1425,7 +1425,7 @@ fn syncs_cursor_mode_from_mode_updates() {
     let mut turn_state = AcpTurnState::default();
     let (input_tx, _input_rx) = mpsc::channel();
 
-    handle_acp_session_update(
+    test_acp_session_update(
         &json!({
             "sessionUpdate": "mode_update",
             "mode": "plan"

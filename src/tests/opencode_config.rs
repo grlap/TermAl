@@ -951,7 +951,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
         ]
     });
 
-    handle_acp_session_update(
+    test_acp_session_update(
         &config_result,
         &state,
         &created.session_id,

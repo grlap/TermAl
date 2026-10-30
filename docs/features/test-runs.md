@@ -22,6 +22,46 @@ start time and work ownership; that late description creates no retroactive
 verification check. Visibility is independent of the owner's active or open
 session. Unknown PIDs, stages and locations remain unknown.
 
+### Command invocation boundaries
+
+The recorder retains a private invocation reference separately from a reusable
+command/card key. A reference identifies a producer creation; it grants no work
+authority and supplies no successful result. Original binding, grant, source,
+writer exclusions, result qualification and checkpoint receipts still decide
+verification independently. Terminal run artifacts, checkpoint Unknown and host
+turn changes do not establish another invocation.
+
+| Producer | Creation and matching lifecycle | Limits |
+| --- | --- | --- |
+| ACP v1 | `tool_call` reserves the session/toolCallId reference; updates describe or finish that same reference. Kimi's input-bearing dispatch activates its reserved pending call once. | Update-only starts cannot qualify. Loading/history frames are excluded. Repeated creations of a retained native identity cannot borrow a later grant. |
+| Claude | The actual pending `tool_use` object retains its reference through its matching result or denial. Background work keeps its existing outstanding owner. | Duplicate pending IDs do not overwrite original launch facts. Nested/root provenance and producing runtime remain separate. |
+| Codex | Native thread, event turn and item ID reach the recorder before flattening; typed and legacy ends resolve the same retained reference before visibility filtering. | A turnless end needs explicit item ID and unambiguous retained coverage. An id-less call with an explicit native turn supports one isolated foreground creation; indistinguishable later creations cannot qualify separately. With neither identity nor native turn, display/writer tracking continues without verification eligibility. |
+
+Identity proof is bounded and process-local in the recorder's command entries
+and producer pending objects. Actual matching terminal events release lifecycle
+slots; NotFinished/background acknowledgement, artifact settlement, turn reset
+and policy Unknown do not. Completed proof can retire, so historical throughput
+does not accumulate toward a lifetime admission cap. Retiring terminal proof
+preserves ambiguity on retained references sharing its native identity; it
+does not disable correlation for unrelated invocations. That ambiguity stays
+unavailable rather than being reconstructed from persisted run rows.
+Existing properly owned current/carried checks retain their original references
+and receipt rules. Public diagnostics expose static reasons and opaque IDs,
+never raw provider identities.
+
+The supported live-stream assumption is that a producer creation denotes a new invocation unless it matches identity proof still retained by the existing owners. Loading/history frames and callbacks identified as belonging to a prior invocation do not create a new start. Once a completed invocation has released its slot and all facts distinguishing its identity have been lost, an unmarked replay of its creation and completion may be admitted as a new invocation and may receive NEW verification credit if the current start independently satisfies binding, grant, claim, source and result rules. The host does not guarantee detection of that case. It must not recover the old invocation's authority, change its recorded result, or settle any still-owned old check through the newly admitted reference. Known replay/proof loss is not permission to rebind an existing old reference. This limitation creates neither a permanent admission cutoff nor a new identity-history store.
+
+When the existing producer correlation owner and its distinguishing state are irrecoverably lost, resume/load does not by itself prohibit NEW creation admission. The host cannot determine whether a previously observed invocation completed, remained unresolved, or was refused during capacity overflow. An unmarked replay may therefore be admitted under current start/authority/source/result rules and receive NEW verification credit in any of those cases; this residual risk is accepted. A surviving owner retains its known overflow latch and original references across wrapper or reader recreation; a freed slot, host turn or new grant never clears that surviving latch. Loss of the owner is not proof of a genuinely fresh native scope. History/known-old callbacks and end-only events still create no start; no old authority or result is recovered or modified, and a new reference cannot settle a still-owned old check.
+
+At 256 concurrent unresolved references, a further creation loses coverage for
+that producer's native scope. Its visible saturation reason names the recovery
+boundary: a genuinely new native session. While the owner survives, freeing a
+slot, replacing a reader/runtime while resuming the same native session, a host
+turn or a new grant does not clear this scoped latch. Existing references keep
+their own descriptions, terminal events and current/carried settlement. There
+is no automatic session rotation or restart. Completed entries retire first;
+ordinary sequential invocations do not accumulate capacity debt.
+
 The flask icon shows the active-run count after the first state snapshot, with
 the same count in its accessible label and tooltip. Zero active runs means no
 badge. Clicking the icon opens all projects. Per-run status and restart evidence

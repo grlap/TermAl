@@ -1140,6 +1140,7 @@ impl PersistedSessionRecord {
             })
             .collect();
         let mut record = SessionRecord {
+            command_creation_loss: None,
             federation_mailbox_binding: self.federation_mailbox_binding,
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding,
             federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings,

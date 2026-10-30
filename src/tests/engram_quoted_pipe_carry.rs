@@ -96,9 +96,9 @@ fn acp_full_completion(label: &str, title: Option<&str>, ran: Option<&str>, cred
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
     let mut state = AcpTurnState::default();
     let mut recorder = turn.recorder();
-    let begin = json!({"sessionUpdate":"tool_call_update", "toolCallId":"gate",
+    let begin = json!({"sessionUpdate":"tool_call", "toolCallId":"gate",
         "status":"in_progress", "rawInput":{"command":started, "cwd":cwd}});
-    handle_acp_session_update(&begin, &turn.state, &turn.session_id, &input_tx,
+    test_acp_session_update(&begin, &turn.state, &turn.session_id, &input_tx,
         &mut state, &mut recorder, AcpAgent::Kimi).unwrap();
     turn.wait_for_snapshots();
     turn.record(|record| {
@@ -114,7 +114,7 @@ fn acp_full_completion(label: &str, title: Option<&str>, ran: Option<&str>, cred
     if let Some(ran) = ran {
         end["rawInput"] = json!({"command":ran, "cwd":cwd});
     }
-    handle_acp_session_update(&end, &turn.state, &turn.session_id, &input_tx,
+    test_acp_session_update(&end, &turn.state, &turn.session_id, &input_tx,
         &mut state, &mut recorder, AcpAgent::Kimi).unwrap();
     turn.wait_for_snapshots();
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
@@ -181,18 +181,20 @@ fn a_qualified_full_is_dropped_even_with_an_acp_titleless_completion() {
     });
     let mut recorder = turn.recorder();
     recorder.set_observation_provenance(provenance);
-    recorder.command_started_in("gate", &command, Some(&command), Some(&cwd)).unwrap();
+    let invocation = recorder.command_created(Some("gate"), "gate");
+    recorder.command_invocation(&invocation, CommandInvocationEvent::Dispatch {
+        command: &command, ran: Some(&command), cwd: Some(&cwd),
+    }).unwrap();
     turn.wait_for_snapshots();
     assert!(turn.record(|record| record.engram.active_turn_checks[0].command.literal_pipe));
     // This combines a retained known-Bash start with the actual ACP absent-
     // command completion shape as a boundary control. ACP itself never
     // supplies the known-Bash provenance needed to qualify that start.
     recorder.set_observation_provenance(EngramObservationProvenance::Ambient);
-    let (input_tx, _input_rx) = std::sync::mpsc::channel();
-    handle_acp_session_update(&json!({"sessionUpdate":"tool_call_update",
-        "toolCallId":"gate", "status":"completed", "rawOutput":"STARTED"}),
-        &turn.state, &turn.session_id, &input_tx, &mut AcpTurnState::default(),
-        &mut recorder, AcpAgent::Kimi).unwrap();
+    recorder.command_invocation(&invocation, CommandInvocationEvent::Finish {
+        command: "Bash", reported_command: None, output: "STARTED", status: CommandStatus::Success,
+        exit: EngramCommandExit::ReportedSuccess, runtime_output_cut: false,
+    }).unwrap();
     finish_run(&worktree, "passed", &"f".repeat(64));
     let checkpoint = turn.finish();
     assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}");

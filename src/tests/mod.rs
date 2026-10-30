@@ -33,6 +33,8 @@ mod claude_permission_boundary;
 mod claude_turn_ownership;
 mod cli;
 mod codex_bin;
+mod command_invocations;
+use command_invocations::{test_acp_session_update, test_codex_item_started, test_codex_item_completed, test_command_scope, test_native_command_key, test_private_command_key};
 mod codex_delegation_release;
 mod codex_discovery;
 mod codex_home;
@@ -664,7 +666,7 @@ fn shared_codex_app_server_event_matches_active_turn_covers_turn_id_and_turnless
 #[test]
 fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
     let mut recorder_state = SessionRecorderState {
-        command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
+        command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned().into())]),
         parallel_agents_messages: HashMap::from([("parallel-1".to_owned(), "Working".to_owned())]),
         streaming_text_message_id: Some("message-1".to_owned()),
         ..SessionRecorderState::default()
@@ -710,7 +712,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
         retired_turn_ids: VecDeque::new(),
         active_turn_generation: None,
         recorder: SessionRecorderState {
-            command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
+            command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned().into())]),
             parallel_agents_messages: HashMap::from([(
                 "parallel-1".to_owned(),
                 "Working".to_owned(),
