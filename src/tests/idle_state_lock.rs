@@ -91,9 +91,11 @@ fn registered_history(count: usize) -> RunFixture {
                 detached: disk.detached,
                 stage_names: Vec::new(),
                 work_binding: None,
+                named_root: None,
                 authority_store: None,
                 validated_unbound: true,
                 monitoring_interrupted_at: None,
+                verification_record: None,
             }
         });
         let mut row = inner.test_run_observations.get_mut(&execution).unwrap();

@@ -480,6 +480,7 @@ impl AppState {
                 inner.engram_host_adapter = Arc::new(EngramHostAdapter {
                     host_workdir: host_workdir.clone(),
                     transport,
+                    capabilities: Arc::default(),
                 });
             }
         });

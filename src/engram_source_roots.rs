@@ -1451,14 +1451,27 @@ fn engram_lookup_says_missing(kind: std::io::ErrorKind) -> bool {
     )
 }
 
-/// The source basis at `place`.
+/// The source basis at `place`, under the committed-input switch as it stands
+/// ([`ORDINARY_COMMIT_INPUT_DEFAULT`]).
 fn engram_place_source_basis(place: &EngramBasisPlace) -> Option<EngramExecutionSourceBasis> {
+    engram_place_source_basis_with(place, ORDINARY_COMMIT_INPUT_DEFAULT)
+}
+
+/// The source basis at `place` with the committed-input switch given
+/// ([`source_revision`]). A root that is not clean while the switch is on has
+/// no basis, logged with its paths, as any basis that cannot be taken.
+fn engram_place_source_basis_with(
+    place: &EngramBasisPlace,
+    ordinary_commit_input: bool,
+) -> Option<EngramExecutionSourceBasis> {
     match place {
-        EngramBasisPlace::Workdir(workdir) => engram_execution_source_basis(FsPath::new(workdir)),
+        EngramBasisPlace::Workdir(workdir) => {
+            engram_execution_source_basis_with(FsPath::new(workdir), ordinary_commit_input)
+        }
         EngramBasisPlace::Named {
             root,
             common_dir_key,
-        } => engram_named_root_source_basis(root, common_dir_key),
+        } => engram_named_root_source_basis_with(root, common_dir_key, ordinary_commit_input),
     }
 }
 
@@ -1474,6 +1487,16 @@ fn engram_place_source_basis(place: &EngramBasisPlace) -> Option<EngramExecution
 fn engram_named_root_source_basis(
     root: &str,
     common_dir_key: &str,
+) -> Option<EngramExecutionSourceBasis> {
+    engram_named_root_source_basis_with(root, common_dir_key, ORDINARY_COMMIT_INPUT_DEFAULT)
+}
+
+/// [`engram_named_root_source_basis`] with the committed-input switch given
+/// ([`source_revision`]): on, a root that is not clean has no basis.
+fn engram_named_root_source_basis_with(
+    root: &str,
+    common_dir_key: &str,
+    ordinary_commit_input: bool,
 ) -> Option<EngramExecutionSourceBasis> {
     let path = FsPath::new(root);
     let resolves_to_itself =
@@ -1506,14 +1529,24 @@ fn engram_named_root_source_basis(
         );
         return None;
     }
-    match content_revision(path) {
-        Ok((canonical, source_revision)) if resolves_to_itself(&canonical) => {
-            engram_bounded_source_basis(path, &canonical, source_revision)
+    match source_revision(path, ordinary_commit_input) {
+        Ok(SourceRevision::Taken {
+            root: canonical,
+            revision,
+        }) if resolves_to_itself(&canonical) => {
+            engram_bounded_source_basis(path, &canonical, revision)
         }
-        Ok((canonical, _)) => {
+        Ok(SourceRevision::Taken { root: canonical, .. }) => {
             eprintln!(
                 "engram> no source basis for the named root {root}: it was measured as {}",
                 canonical.display()
+            );
+            None
+        }
+        Ok(SourceRevision::NotClean { dirty_paths }) => {
+            eprintln!(
+                "engram> no source basis for the named root {root}: {}",
+                source_revision_not_clean_reason(&dirty_paths)
             );
             None
         }

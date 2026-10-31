@@ -141,6 +141,7 @@ mod opencode_approvals;
 mod opencode_config;
 mod orchestrator;
 mod ordered_publication;
+mod ordinary_commit_input;
 mod phase_sync;
 mod read_only_orientation;
 mod review_freeze;

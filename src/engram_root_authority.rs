@@ -44,6 +44,20 @@ fn engram_same_recovery_run(
         && left.root_execution_id == right.root_execution_id
 }
 
+/// The canonical proofs the naming history of `work_id` in `store` holds:
+/// one per recovery run (`engram_same_recovery_run`), none without a history.
+fn engram_work_naming_proofs<'a>(
+    histories: &'a [EngramWorkNamingHistory],
+    store: &'a EngramAuthorityStoreKey,
+    work_id: &'a str,
+) -> impl Iterator<Item = &'a EngramAuthorityProof> + 'a {
+    histories
+        .iter()
+        .find(|history| &history.store == store && history.work_id == work_id)
+        .into_iter()
+        .flat_map(|history| history.proofs.iter())
+}
+
 fn engram_retain_recovery_run(
     runs: &mut Vec<EngramControlWorkBinding>,
     binding: &EngramControlWorkBinding,

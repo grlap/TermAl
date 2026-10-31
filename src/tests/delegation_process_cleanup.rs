@@ -29,6 +29,7 @@ fn process_cleanup_launch_directory_preserves_immutable_engram_authority() {
     let adapter = EngramHostAdapter {
         host_workdir: temp.path().to_path_buf(),
         transport: Arc::new(AuthorityEcho),
+        capabilities: Arc::default(),
     };
     let launch_record = adapter
         .request(
@@ -142,6 +143,7 @@ done
     let adapter = EngramHostAdapter {
         host_workdir: temp.path().to_path_buf(),
         transport,
+        capabilities: Arc::default(),
     };
     // Replay acquires current launch policy without adding it to durable authority.
     let replay: EngramConnectionConfig =

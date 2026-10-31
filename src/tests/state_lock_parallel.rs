@@ -151,9 +151,11 @@ fn seed_model(root: &FsPath) -> (PathBuf, Vec<String>) {
                 detached: Some(false),
                 stage_names: vec!["focused".into()],
                 work_binding: None,
+                named_root: None,
                 authority_store: None,
                 validated_unbound: true,
                 monitoring_interrupted_at: None,
+                verification_record: None,
             },
         );
     }

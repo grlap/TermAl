@@ -752,6 +752,20 @@ enum EngramControlRequest {
         measurement: EngramBindMeasurement,
         targets: Vec<EngramVerificationBindTarget>,
     },
+    /// Host-private: one registered committed-input launcher run's
+    /// verification record (`engram_verification_record.rs`), sent on the
+    /// initiating session's bound connection with its current routing token.
+    /// `record` is the body exactly as first built and persisted beside the
+    /// run, so a retry sends the same bytes under the same operation key; the
+    /// token is outside both and may differ between sends.
+    VerificationRecord {
+        routing_token: String,
+        /// Engram's fixed operation key, `termal-run:<run id>`: outside it
+        /// are the transport credentials (`routing_token`).
+        operation_key: String,
+        #[serde(flatten)]
+        record: Value,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -1240,6 +1254,15 @@ trait EngramControlTransport: Send + Sync {
     }
 
     fn shutdown_session(&self, session_id: &str);
+
+    /// Which child currently serves `session_id`'s connection: a number that
+    /// changes on every spawn or respawn, or none while no live child does.
+    /// A capability read under one generation says nothing about another
+    /// (`engram_capabilities.rs`). A transport with no child lifecycle has
+    /// one connection for its whole life.
+    fn connection_generation(&self, _session_id: &str) -> Option<u64> {
+        Some(0)
+    }
 
     /// The reset's shared budget does not certify process cleanup. Production
     /// retains the exact retiring child in its existing registry on timeout.
@@ -1781,6 +1804,10 @@ impl EngramControlTransport for StatefulEngramControlTransport {
             EngramControlRequest::VerificationBind { .. } => Err(Self::remote_error(
                 "unsupported_test_operation",
                 "this grant-lifecycle fixture does not model verification binds",
+            )),
+            EngramControlRequest::VerificationRecord { .. } => Err(Self::remote_error(
+                "unsupported_test_operation",
+                "this grant-lifecycle fixture does not model verification records",
             )),
             EngramControlRequest::SessionBind {
                 idempotency_key, ..
@@ -2458,6 +2485,9 @@ fn join_engram_cli_output(
 struct EngramHostAdapter {
     host_workdir: PathBuf,
     transport: Arc<dyn EngramControlTransport>,
+    /// What each connection's last bind or status answer said it supports
+    /// (`engram_capabilities.rs`).
+    capabilities: Arc<EngramConnectionCapabilities>,
 }
 
 impl Default for EngramHostAdapter {
@@ -2471,6 +2501,7 @@ impl EngramHostAdapter {
         Self {
             transport: Arc::new(ProcessEngramControlTransport::new(host_workdir.clone())),
             host_workdir,
+            capabilities: Arc::default(),
         }
     }
 }
@@ -2492,7 +2523,23 @@ impl EngramHostAdapter {
         request: &EngramControlRequest,
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError> {
-        self.transport.request(connection, request, timeout).map_err(|mut error| {
+        // Every bind or status answer re-reads what this connection supports,
+        // under the child that answered it: the child serving before the call
+        // and after it must be the same one. A respawn under the call (or a
+        // first start, which no earlier reading names) leaves the answer
+        // unattributed, so the connection is read afresh.
+        let before = self.transport.connection_generation(&connection.session_id);
+        let reply = self.transport.request(connection, request, timeout);
+        let after = self.transport.connection_generation(&connection.session_id);
+        if before.is_some() && before == after {
+            self.capabilities.note_reply(connection, after, request, &reply);
+        } else if matches!(
+            request,
+            EngramControlRequest::SessionBind { .. } | EngramControlRequest::SessionStatus { .. }
+        ) {
+            self.capabilities.forget(&connection.session_id);
+        }
+        reply.map_err(|mut error| {
             error.causal_failure = Some(EngramCausalFailure::request(&error, request));
             error
         })
@@ -2526,11 +2573,37 @@ impl EngramHostAdapter {
         self.transport.read_held_claims(connection, timeout)
     }
 
+    /// Whether `connection`, bound under `routing_token`, supports
+    /// `verification_record`, by its own last bind or status answer under the
+    /// child serving it now.
+    fn verification_record_support(
+        &self,
+        connection: &EngramConnectionConfig,
+        routing_token: &str,
+    ) -> EngramVerificationRecordSupport {
+        self.capabilities.verification_record(
+            connection,
+            self.transport.connection_generation(&connection.session_id),
+            routing_token,
+        )
+    }
+
+    /// The routing token `connection`'s last bind or status answer under the
+    /// child serving it now was given or used, if any.
+    fn current_routing_token(&self, connection: &EngramConnectionConfig) -> Option<String> {
+        self.capabilities.routing_token(
+            connection,
+            self.transport.connection_generation(&connection.session_id),
+        )
+    }
+
     fn shutdown_session(&self, session_id: &str) {
+        self.capabilities.forget(session_id);
         self.transport.shutdown_session(session_id);
     }
 
     fn shutdown_session_until(&self, session_id: &str, claim: &EngramProjectResetClaim) -> Result<(), EngramTransportError> {
+        self.capabilities.forget(session_id);
         self.transport.shutdown_session_until(session_id, &claim.clock, claim.deadline)
     }
 }
@@ -2543,6 +2616,7 @@ impl AppState {
             host_workdir: engram_host_workdir(self.persistence_path.as_ref())
                 .expect("fixture persistence directory"),
             transport,
+            capabilities: Arc::default(),
         });
     }
 

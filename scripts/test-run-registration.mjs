@@ -22,6 +22,11 @@ function ordered(value) {
 
 function requestIdentity(request) {
   const immutable = Object.fromEntries(immutableFields.map((name) => [name, request[name] ?? null]));
+  // The input kind decides where the host takes the run's binding from, so
+  // it is immutable too. It is hashed only when the request names one: a
+  // request without it keeps exactly the identity it always had. This must
+  // match the host's test_run_registration_identity.
+  if (request.input !== undefined) immutable.input = request.input;
   return createHash("sha256").update(JSON.stringify(ordered(immutable))).digest("hex");
 }
 

@@ -152,6 +152,8 @@ struct TestRunDetail {
     before: Option<String>,
     after: Option<String>,
     limitations: Option<String>,
+    /// Only what results.json's `input` records (src/test_run_committed_input.rs).
+    committed_input: Option<TestRunCommittedInput>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

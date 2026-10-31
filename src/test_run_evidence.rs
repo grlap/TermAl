@@ -42,6 +42,18 @@ mod test_run_shared_lifecycle_read {
     }
 }
 
+/// Where a settled verification record came from: a turn checkpoint's
+/// receipt, with its checkpoint and confirmed cursor, or a launcher run's own
+/// verification record receipt, which names neither.
+#[derive(Clone, Copy, Debug)]
+enum TestRunRecordSettlement<'a> {
+    Checkpoint {
+        checkpoint: &'a String,
+        confirmed_cursor: i64,
+    },
+    VerificationRecord,
+}
+
 fn test_run_lifecycle_binding_matches(
     association: &TestRunEvidenceAssociation,
     store: &EngramAuthorityStoreKey,
@@ -245,6 +257,29 @@ impl AppState {
                 .or_default()
                 .push((*producer, record_id));
         }
+        Self::settle_test_run_producer_records_locked(
+            inner,
+            settlements,
+            TestRunRecordSettlement::Checkpoint {
+                checkpoint,
+                confirmed_cursor: receipt._confirmed_cursor,
+            },
+            store,
+            binding,
+        )
+    }
+
+    // The association writes both settlement sources share: a turn
+    // checkpoint's receipt (above) and a launcher run's verification record
+    // receipt (`engram_verification_record.rs`). `settlements` maps each
+    // producer observation id to its producers and the record each received.
+    fn settle_test_run_producer_records_locked(
+        inner: &mut StateInner,
+        settlements: HashMap<&str, Vec<(&EngramExecutionObservationInput, &String)>>,
+        settled_by: TestRunRecordSettlement<'_>,
+        store: &EngramAuthorityStoreKey,
+        binding: &EngramControlWorkBinding,
+    ) -> Vec<TestRunCommandObservation> {
         if settlements.is_empty() {
             return Vec::new();
         }
@@ -294,8 +329,13 @@ impl AppState {
                             continue;
                         }
                         association.verification_record_id = Some((*record_id).clone());
-                        association.checkpoint_id = Some(checkpoint.clone());
-                        association.confirmed_cursor = Some(receipt._confirmed_cursor);
+                        // A record sent outside any checkpoint names none: its
+                        // association keeps no checkpoint or cursor, so the
+                        // restart-risk projection stays conservative for it.
+                        if let TestRunRecordSettlement::Checkpoint { checkpoint, confirmed_cursor } = settled_by {
+                            association.checkpoint_id = Some(checkpoint.clone());
+                            association.confirmed_cursor = Some(confirmed_cursor);
+                        }
                         updated = true;
                         break;
                     }

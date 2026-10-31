@@ -21,6 +21,7 @@ import fs, {
 import nodePath, { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  captureCommitInputStatus,
   captureFingerprint,
   fingerprintComponentNames,
   isolatedGitEnvironment,
@@ -64,6 +65,10 @@ const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
 const diagnosticLimit = 2400;
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+// The ordinary committed-input flow becomes the default once candidate commits
+// on worker branches are allowed; until then it is an explicit selection
+// (`--input commit`). Flipping this one value makes it the default.
+export const ORDINARY_COMMIT_INPUT_DEFAULT = false;
 export const helperTestFiles = Object.freeze([
   "scripts/export-review-attempt.test.mjs",
   "scripts/review-freeze-fingerprint.test.mjs",
@@ -75,6 +80,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-launcher-source.test.mjs",
   "scripts/test-ui-bootstrap.test.mjs",
   "scripts/test-launcher-git-path.test.mjs",
+  "scripts/test-launcher-commit-input.test.mjs",
   "scripts/test-temp-root.test.mjs",
   "scripts/vitest-resource-preflight.test.mjs",
 ]);
@@ -522,8 +528,15 @@ export async function createRun({
   full = false,
   scope,
   detached = false,
+  input: runInput,
   onRunCreated,
+  // The committed-input status reader; tests replace it to act between the
+  // reads.
+  commitInputStatus = captureCommitInputStatus,
 }, env = process.env) {
+  if (runInput !== undefined && runInput !== "commit") {
+    throw new Error(`unsupported run input: ${runInput}`);
+  }
   const normalizedRoot = resolve(root);
   const gitEnv = isolatedGitEnvironment(env);
   let notification;
@@ -554,6 +567,9 @@ export async function createRun({
     full,
     // A partial check says so in every artifact; only `full` is the gate.
     ...(scope ? { scope } : {}),
+    // The ordinary committed-input flow (docs/test.md); absent is the
+    // staged/freeze lane.
+    ...(runInput ? { input: runInput } : {}),
     // Read by TermAl's run index (docs/features/test-runs.md): whether the
     // stages run in a detached worker, and the process that stands for the
     // run until a worker records its own pid in results.json.
@@ -599,7 +615,55 @@ export async function createRun({
     throw failure;
   }
   try {
+    let commitInput;
+    // Refuses the run as not clean before it: no stage runs.
+    const refuseNotClean = (status, when) => {
+      const result = readJson(join(runDir, "results.json"));
+      const skipped = status.skipped ?? [];
+      const filters = status.filters ?? [];
+      const gitlinks = status.gitlinks ?? [];
+      Object.assign(result, {
+        state: "failed",
+        exitCode: 1,
+        ended: new Date().toISOString(),
+        input: {
+          kind: "commit",
+          cleanBefore: false,
+          dirtyPaths: status.entries,
+          ...(skipped.length ? { skippedPaths: skipped } : {}),
+          ...(filters.length ? { filters } : {}),
+          ...(gitlinks.length ? { gitlinks } : {}),
+        },
+        error: `committed-input run refused: the checkout is not clean before the run${when} (${commitInputNotCleanReason(status)}); no stage ran`,
+      });
+      attachFailureInvestigation(result, runDir);
+      save(join(runDir, "results.json"), result);
+      return runDir;
+    };
+    if (request.input === "commit") {
+      commitInput = await commitInputStatus(normalizedRoot, gitEnv);
+      if (!commitInputStatusClean(commitInput)) return refuseNotClean(commitInput, "");
+      const result = readJson(join(runDir, "results.json"));
+      result.input = { kind: "commit", commit: commitInput.commit, cleanBefore: true };
+      save(join(runDir, "results.json"), result);
+    }
     const input = await captureFingerprint(normalizedRoot, gitEnv);
+    if (commitInput && input.headCommit !== commitInput.commit) {
+      throw new Error("committed-input run refused: HEAD moved while the input was captured; no stage ran");
+    }
+    if (commitInput) {
+      // An edit made between the first status and the fingerprint would be
+      // frozen into the fingerprint and could be reverted after the stages,
+      // reading as clean before and after. The checkout must still be clean,
+      // at the same HEAD, once the fingerprint is taken.
+      const again = await commitInputStatus(normalizedRoot, gitEnv);
+      if (again.commit !== commitInput.commit) {
+        throw new Error("committed-input run refused: HEAD moved while the input was captured; no stage ran");
+      }
+      if (!commitInputStatusClean(again)) {
+        return refuseNotClean(again, " (it changed while the input was captured)");
+      }
+    }
     save(join(runDir, "input.json"), input);
     request.expectedFingerprint = input.fingerprint;
     save(join(runDir, "request.json"), request);
@@ -967,7 +1031,78 @@ function validateInitialRequest(runDir, request, env) {
     }
     names.add(stage.name);
   }
+  if (request.input !== undefined && request.input !== "commit") {
+    throw new Error("worker request names an unsupported input");
+  }
   if (request.notifyTo !== undefined) validateNotification(request, env);
+}
+
+// Whether a committed-input status (captureCommitInputStatus) is clean: no
+// status entry, no tracked path the index tells Git to skip, and no
+// configured Git filter or submodule gitlink (either refuses the status
+// unread).
+export function commitInputStatusClean(status) {
+  return status.entries.length === 0
+    && (status.skipped ?? []).length === 0
+    && (status.filters ?? []).length === 0
+    && (status.gitlinks ?? []).length === 0;
+}
+
+// Why a committed-input status is not clean, for a refusal message.
+function commitInputNotCleanReason(status) {
+  const skipped = status.skipped ?? [];
+  const filters = status.filters ?? [];
+  const gitlinks = status.gitlinks ?? [];
+  return [
+    ...(status.entries.length ? [`${status.entries.length} path(s) reported by git status`] : []),
+    ...(skipped.length
+      ? [`${skipped.length} tracked path(s) Git is told to skip (assume-unchanged or skip-worktree)`]
+      : []),
+    ...(filters.length
+      ? [`${filters.length} configured Git filter(s) (${filters.join(", ")}), which the committed-input status does not run`]
+      : []),
+    ...(gitlinks.length
+      ? [`${gitlinks.length} submodule gitlink(s) (${gitlinks.join(", ")}), which the committed-input status does not inspect`]
+      : []),
+  ].join("; ");
+}
+
+// Classifies the checkout after a committed-input run whose checkout was clean
+// before it: any untracked path Git reports afterwards is new. A tracked path
+// the index now tells Git to skip hides its worktree copy, and a Git filter
+// configured since stops the status being read, so either is a change.
+export function commitInputOutcome(beforeCommit, after) {
+  if (after.commit !== beforeCommit) return "input_changed";
+  if ((after.skipped ?? []).length) return "input_changed";
+  if ((after.filters ?? []).length) return "input_changed";
+  if ((after.gitlinks ?? []).length) return "input_changed";
+  if (after.entries.some((entry) => entry.status !== "??")) return "input_changed";
+  return after.entries.length ? "debris_pending_disposition" : "clean";
+}
+
+// One summary line for the committed-input flow; none for the staged lane.
+export function commitInputSummaryLine(result) {
+  const input = result?.input;
+  if (input?.kind !== "commit") return undefined;
+  if (input.cleanBefore === false) {
+    const skipped = input.skippedPaths?.length
+      ? `; ${input.skippedPaths.length} skipped tracked path(s)`
+      : "";
+    const filters = input.filters?.length ? `; ${input.filters.length} configured Git filter(s)` : "";
+    const gitlinks = input.gitlinks?.length ? `; ${input.gitlinks.length} submodule gitlink(s)` : "";
+    return `input: refused, not clean before the run: ${input.dirtyPaths?.length ?? 0} path(s)${skipped}${filters}${gitlinks}`;
+  }
+  const eligibility = input.eligible === true ? "eligible" : "not eligible";
+  switch (input.outcome) {
+    case "clean":
+      return `input: commit ${input.commit} clean; ${eligibility}`;
+    case "debris_pending_disposition":
+      return `input: commit ${input.commit} debris (pending disposition): ${input.after?.paths?.length ?? 0} new untracked path(s); ${eligibility}`;
+    case "input_changed":
+      return `input: commit ${input.commit} input changed; ${eligibility}`;
+    default:
+      return `input: commit ${input.commit} clean before the run; no post-run input recorded; ${eligibility}`;
+  }
 }
 
 function validateInitialResult(request, result) {
@@ -1301,6 +1436,10 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     if (before.fingerprint !== request.expectedFingerprint) {
       throw new Error(driftError("input drift before execution; no stages run", expectedInput, before));
     }
+    if (request.input === "commit" && (result.input?.kind !== "commit" ||
+        result.input.cleanBefore !== true || result.input.commit !== before.headCommit)) {
+      throw new Error("committed-input run has no recorded clean commit matching HEAD; no stages run");
+    }
     result.expectedFingerprint = request.expectedFingerprint;
     result.before = before.fingerprint;
     if (process.platform === "win32") {
@@ -1405,7 +1544,23 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     }
     const after = await captureFingerprint(request.root, childEnv);
     result.after = after.fingerprint;
-    if (result.after !== result.expectedFingerprint) {
+    if (request.input === "commit") {
+      // The committed-input flow classifies a changed checkout instead of
+      // throwing: the stage results and the run's own state stay as they are.
+      const status = await captureCommitInputStatus(request.root, childEnv);
+      result.input.after = {
+        commit: status.commit,
+        clean: commitInputStatusClean(status),
+        paths: status.entries,
+        ...(status.skipped.length ? { skippedPaths: status.skipped } : {}),
+        // A filter configured during the run stops the status being read:
+        // it is recorded, as the change it is.
+        ...((status.filters ?? []).length ? { filters: status.filters } : {}),
+        ...((status.gitlinks ?? []).length ? { gitlinks: status.gitlinks } : {}),
+      };
+      result.input.outcome = commitInputOutcome(result.input.commit, status);
+      if (result.input.outcome === "debris_pending_disposition") result.input.disposition = null;
+    } else if (result.after !== result.expectedFingerprint) {
       throw new Error(driftError("input drift: results do not validate the current source", expectedInput, after));
     }
     result.state = result.stages.every((stage) => stage.state === "passed") ? "passed" : "failed";
@@ -1417,10 +1572,14 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     // A stage failed by its accounting exited 0 itself; the run still fails.
     const failedStage = result.stages.find((stage) => stage.state === "failed");
     result.exitCode = failedStage ? failedStage.code || 1 : result.state === "passed" ? 0 : 1;
+    if (result.input?.kind === "commit") {
+      result.input.eligible = result.input.outcome === "clean" && result.state === "passed";
+    }
   } catch (error) {
     result.state = "failed";
     result.exitCode = 1;
     result.error = error.message;
+    if (result.input?.kind === "commit") result.input.eligible = false;
     if (signal?.aborted || error.interrupted) {
       result.interrupted = true;
       result.error = `interrupted: ${String(signal?.reason ?? error.message)}`;
@@ -1448,6 +1607,8 @@ export async function summarize(runDir) {
   if (result.scope?.kind === "category") {
     lines.push(`scope: category ${result.scope.category} (Vitest project ${result.scope.project}): ${result.scope.label ?? partialCheckLabel}`);
   }
+  const inputLine = commitInputSummaryLine(result);
+  if (inputLine) lines.push(inputLine);
   const liveTests = result.stages?.find((stage) => stage.liveTests?.length)?.liveTests;
   if (liveTests) lines.push(`live tests: ${liveTests.join(" ")}`);
   const investigation = result.failureInvestigation ??
@@ -1880,10 +2041,12 @@ function parseCommon(args) {
   let detach = false;
   let liveBinary;
   let liveSha256;
+  let input;
   const requiredBinaryEnv = [];
   while (args.length && args[0] !== "--") {
     const flag = args.shift();
     if (flag === "--detach") detach = true;
+    else if (flag === "--input" && args[0] === "commit") input = args.shift();
     else if (flag === "--notify" && args.length) notifyTo = args.shift();
     else if (flag === "--require-binary-env" && /^[A-Z][A-Z0-9_]*$/u.test(args[0] ?? "")) {
       requiredBinaryEnv.push(args.shift());
@@ -1892,7 +2055,7 @@ function parseCommon(args) {
     else throw new Error(`invalid option: ${flag}`);
   }
   if (args[0] === "--") args.shift();
-  return { notifyTo, detach, liveBinary, liveSha256, requiredBinaryEnv, rest: args };
+  return { notifyTo, detach, liveBinary, liveSha256, input, requiredBinaryEnv, rest: args };
 }
 
 async function main(args) {
@@ -1925,7 +2088,7 @@ async function main(args) {
     return;
   }
   if (!["full", "focused", "live", "category"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
   }
   // A category is resolved, or refused, before any run directory exists.
   let category;
@@ -1939,7 +2102,7 @@ async function main(args) {
   const options = parseCommon(args);
   if (mode === "category" && (options.rest.length || options.liveBinary || options.liveSha256 ||
       options.requiredBinaryEnv.length)) {
-    throw new Error("category takes only NAME, --notify and --detach");
+    throw new Error("category takes only NAME, --notify and --detach, plus --input commit");
   }
   if (mode === "full" && options.rest.length) throw new Error("full takes no command");
   if (mode === "focused" && !options.rest.length) throw new Error("focused requires -- COMMAND ARGS");
@@ -1984,6 +2147,7 @@ async function main(args) {
       : undefined,
     full: mode === "full",
     detached: Boolean(options.detach),
+    ...(options.input === "commit" || ORDINARY_COMMIT_INPUT_DEFAULT ? { input: "commit" } : {}),
     onRunCreated: (directory) => console.log(`RUN ${directory}`),
   });
   if (!options.detach) {

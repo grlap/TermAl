@@ -368,10 +368,31 @@ fn engram_turn_report_observes_turn(report: &EngramTurnReport, session_id: &str,
 /// time; the contract keeps the basis optional, at the price of an obligation
 /// that can only be waived.
 fn engram_execution_source_basis(workdir: &FsPath) -> Option<EngramExecutionSourceBasis> {
+    engram_execution_source_basis_with(workdir, ORDINARY_COMMIT_INPUT_DEFAULT)
+}
+
+/// [`engram_execution_source_basis`] with the committed-input switch given
+/// ([`source_revision`]). Off, the basis is the content revision. On, a clean
+/// worktree's is its HEAD commit, and one that is not clean has none, logged
+/// with the paths Git reported, exactly as a revision that cannot be taken.
+fn engram_execution_source_basis_with(
+    workdir: &FsPath,
+    ordinary_commit_input: bool,
+) -> Option<EngramExecutionSourceBasis> {
     // A session may work in a subdirectory: its source identity is its
     // worktree's, which the fingerprint takes from the worktree root.
-    match content_revision(&engram_worktree_root_path(workdir)) {
-        Ok((root, source_revision)) => engram_bounded_source_basis(workdir, &root, source_revision),
+    match source_revision(&engram_worktree_root_path(workdir), ordinary_commit_input) {
+        Ok(SourceRevision::Taken { root, revision }) => {
+            engram_bounded_source_basis(workdir, &root, revision)
+        }
+        Ok(SourceRevision::NotClean { dirty_paths }) => {
+            eprintln!(
+                "engram> no source basis for workspace {}: {}",
+                workdir.display(),
+                source_revision_not_clean_reason(&dirty_paths)
+            );
+            None
+        }
         Err(error) => {
             eprintln!(
                 "engram> no source basis for workspace {}: {error:#}",
@@ -628,11 +649,10 @@ impl AppState {
                 record.engram.active_turn_observation_root_basis.clone()
             } else {
                 naming_identity.as_ref().and_then(|(store, work_id)| {
-                    inner.engram_work_naming_history.iter()
-                        .find(|history| &history.store == store && &history.work_id == work_id)
-                        .and_then(|history| history.proofs.iter().find(|proof|
+                    engram_work_naming_proofs(&inner.engram_work_naming_history, store, work_id)
+                        .find(|proof|
                             source_binding.as_ref().is_some_and(|binding|
-                                engram_same_recovery_run(&proof.binding, binding))))
+                                engram_same_recovery_run(&proof.binding, binding)))
                         .map(|proof| json!({ "capture_run_cut": proof.read.read_cut.position,
                             "latest_event": proof.read.latest_event.as_ref().map(|event| &event.event),
                             "state": proof.read.named_root }))

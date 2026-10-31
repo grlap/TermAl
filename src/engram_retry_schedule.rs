@@ -108,6 +108,30 @@ impl AppState {
         if let Err(err) = spawned {
             eprintln!("engram> failed to start the owed batch binds tick: {err}");
         }
+        // Registered committed-input runs' verification records
+        // (`engram_verification_record.rs`) have a thread of their own too,
+        // each pass bounded by its own budget and stopped between runs once
+        // shutdown is signalled, so neither delays the owed binds.
+        let state = self.clone();
+        let shutdown = self.subscribe_shutdown_signal();
+        let spawned = std::thread::Builder::new()
+            .name("termal-engram-verification-records".to_owned())
+            .spawn(move || {
+                // Each pass goes on after the run the last one looked at
+                // last, so no run's spent budget starves the runs after it.
+                let mut cursor = EngramVerificationRecordCursor::default();
+                while !*shutdown.borrow() {
+                    state.engram_verification_records_tick_from(
+                        ENGRAM_VERIFICATION_RECORD_TICK_BUDGET,
+                        &|| *shutdown.borrow(),
+                        &mut cursor,
+                    );
+                    std::thread::sleep(ENGRAM_RETRY_TICK);
+                }
+            });
+        if let Err(err) = spawned {
+            eprintln!("engram> failed to start the verification records tick: {err}");
+        }
     }
 }
 

@@ -47,7 +47,9 @@ export function isolatedGitEnvironment(source = process.env) {
   return env;
 }
 
-function runGit(args, cwd, onStdout, env) {
+// `allowAbsent` accepts exit status 1 as an empty answer, as `git config
+// --get-regexp` reports no match.
+function runGit(args, cwd, onStdout, env, allowAbsent = false) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd,
@@ -85,7 +87,7 @@ function runGit(args, cwd, onStdout, env) {
         reject(handlerError);
         return;
       }
-      if (status !== 0) {
+      if (status !== 0 && !(allowAbsent && status === 1)) {
         const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
         const outcome = signal ? `signal ${signal}` : `exit ${status}`;
         reject(
@@ -100,7 +102,7 @@ function runGit(args, cwd, onStdout, env) {
   });
 }
 
-async function captureGit(args, cwd, env) {
+async function captureGit(args, cwd, env, allowAbsent = false) {
   const chunks = [];
   let totalBytes = 0;
   await runGit(args, cwd, (chunk) => {
@@ -111,7 +113,7 @@ async function captureGit(args, cwd, env) {
       );
     }
     chunks.push(chunk);
-  }, env);
+  }, env, allowAbsent);
   return Buffer.concat(chunks);
 }
 
@@ -323,6 +325,111 @@ export async function captureFingerprint(requestedRoot = process.cwd(), sourceEn
   };
   const fingerprint = compositeFingerprint(fields);
   return { ...fields, fingerprint };
+}
+
+// The committed-input view of a checkout, under the one cleanliness rule the
+// host shares (`committed_source_status` in src/ordinary_commit_input.rs):
+// HEAD, and every entry `git status --porcelain=v1 --untracked-files=all
+// --ignore-submodules=none -z` reports: only the repository-scoped standard
+// excludes apply (.gitignore and .git/info/exclude), since every call here
+// points core.excludesFile and core.attributesFile at the null device as the
+// host's pinned runner does (which also keeps the XDG default ignore and
+// attributes files out; the repository's own .gitattributes still apply), and a submodule's
+// own `ignore` setting hides nothing. A rename or copy entry carries its origin
+// path as `origin`. `skipped` lists the tracked paths the index tells Git to
+// skip (`git ls-files -v`: a lowercase tag is assume-unchanged, `S` is
+// skip-worktree), as `{ tag, path }`: Git does not read their worktree copies,
+// so an edit there would look clean, and a checkout with any is not clean.
+// `filters` lists the configured clean, smudge or process filter keys
+// (`filter.<driver>.clean|smudge|process`): as `ReviewFreezeGit` in
+// src/review_freeze.rs, a repository with any is refused before status runs,
+// since status can run them; its status is returned with no entries and is
+// not clean. `gitlinks` lists the index's submodule paths (mode 160000, read
+// from `git ls-files --stage`, which runs no filter): as the freeze verifier
+// (`capture_review_freeze` in src/review_freeze.rs), a repository with any is
+// refused the same way, since status can run a submodule's own configured
+// filters. HEAD is read again last; a move between the reads throws. It
+// uses the same environment variables as captureFingerprint
+// (isolatedGitEnvironment) and the Git binary PATH resolves.
+export async function captureCommitInputStatus(requestedRoot = process.cwd(), sourceEnv = process.env) {
+  const env = isolatedGitEnvironment(sourceEnv);
+  const git = commitInputGitArgs;
+  const root = (await captureGit(git(["rev-parse", "--show-toplevel"]), requestedRoot, env))
+    .toString("utf8")
+    .trim();
+  const head = async () => (
+    await captureGit(git(["rev-parse", "--verify", "HEAD^{commit}"]), root, env)
+  )
+    .toString("utf8")
+    .trim();
+  const filters = (await captureGit(
+    git(["config", "--null", "--get-regexp", "^filter\\..*\\.(clean|smudge|process)$"]),
+    root,
+    env,
+    true,
+  ))
+    .toString("utf8")
+    .split("\0")
+    .filter((entry) => entry.length > 0)
+    .map((entry) => entry.split("\n", 1)[0]);
+  // Index metadata only: ls-files runs no filter and reads no submodule.
+  const gitlinks = [];
+  for (const record of await nulSeparatedGitValues(git(["ls-files", "--stage", "-z"]), root, env)) {
+    if (record.subarray(0, 7).toString("utf8") === "160000 ") {
+      gitlinks.push(record.subarray(record.indexOf(9) + 1).toString("utf8"));
+    }
+  }
+  const commit = await head();
+  if (filters.length || gitlinks.length) {
+    return { root, commit, entries: [], skipped: [], filters, gitlinks };
+  }
+  const skipped = [];
+  for (const record of await nulSeparatedGitValues(git(["ls-files", "-z", "-v"]), root, env)) {
+    const tag = String.fromCharCode(record[0]);
+    if (/^[a-z]$/u.test(tag) || tag === "S") {
+      skipped.push({ tag, path: record.subarray(2).toString("utf8") });
+    }
+  }
+  const records = await nulSeparatedGitValues(
+    git(["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none", "-z"]),
+    root,
+    env,
+  );
+  const entries = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index].toString("utf8");
+    if (record.length < 4 || record[2] !== " ") {
+      throw new Error("git status returned a malformed porcelain entry");
+    }
+    const entry = { status: record.slice(0, 2), path: record.slice(3) };
+    if (/[RC]/u.test(entry.status)) {
+      index += 1;
+      if (index >= records.length) {
+        throw new Error("git status returned a rename or copy without its origin path");
+      }
+      entry.origin = records[index].toString("utf8");
+    }
+    entries.push(entry);
+  }
+  if (await head() !== commit) {
+    throw new Error("HEAD moved while the committed-input status was captured");
+  }
+  return { root, commit, entries, skipped, filters, gitlinks };
+}
+
+// The arguments of every committed-input Git call, as `ReviewFreezeGit::command`
+// in src/review_freeze.rs pins them: no fsmonitor hook or daemon is consulted
+// (it could report a changed path as unchanged), and both the excludes and the
+// attributes file at the null device (NUL on Windows, /dev/null elsewhere), so
+// neither XDG default changes what is clean.
+export function commitInputGitArgs(args) {
+  const nullDevice = process.platform === "win32" ? "NUL" : devNull;
+  return [
+    "-c", "core.fsmonitor=false",
+    "-c", `core.excludesFile=${nullDevice}`,
+    "-c", `core.attributesFile=${nullDevice}`,
+    ...args,
+  ];
 }
 
 export async function main() {

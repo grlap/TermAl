@@ -485,23 +485,37 @@ fn registration_trace_survives_cancellation_of_the_actual_http_reply() {
     );
 }
 
-#[test]
-fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
+/// Registers a run whose request.json `change` rewrites while its durability
+/// fence waits: `input` is the request's input kind when it names one.
+/// Returns the fixture, the state, the run id and the registration's result.
+fn register_with_request_changed_at_fence(
+    label: &str,
+    input: Option<&str>,
+    change: impl FnOnce(&mut Value),
+) -> (
+    FenceFixture,
+    AppState,
+    String,
+    Result<RegisterTestRunResponse, ApiError>,
+) {
     let mut fixture = FenceFixture::new();
     let mut state = fixture.app_state();
-    let root = fixture.root.path().join("changed-registration");
+    let root = fixture.root.path().join(label);
     fs::create_dir_all(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
     let project = create_test_project(&state, &root, "Changed request");
     let session = create_test_project_session(&state, Agent::Codex, &project, &root);
-    let run_id = "test-changed-registration";
-    let directory = root.join(".git/review-runs").join(run_id);
+    let run_id = format!("test-{label}");
+    let directory = root.join(".git/review-runs").join(&run_id);
     fs::create_dir_all(&directory).unwrap();
     let mut request = json!({
         "runId":run_id,"root":test_run_display_path(&root),"owner":session,
         "full":true,"stages":[{"name":"rust-tests"}],
         "started":engram_command_started_at(),"creatorPid":std::process::id()
     });
+    if let Some(input) = input {
+        request["input"] = json!(input);
+    }
     fs::write(directory.join("request.json"), request.to_string()).unwrap();
     state.persist_tx = fixture.tx.clone();
     fixture.inner = state.inner.clone();
@@ -510,6 +524,7 @@ fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
         let state = state.clone();
         let session = session.clone();
         let directory = directory.clone();
+        let run_id = run_id.clone();
         std::thread::spawn(move || {
             TEST_TEST_RUN_REGISTRATION_FENCE_SENT.with(|slot| {
                 *slot.borrow_mut() = Some(Box::new(move || queued_tx.send(()).unwrap()));
@@ -517,7 +532,7 @@ fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
             state.register_test_run(
                 &session,
                 RegisterTestRunRequest {
-                    run_id: run_id.to_owned(),
+                    run_id,
                     run_directory: test_run_display_path(&directory),
                 },
             )
@@ -528,7 +543,7 @@ fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
         fixture.receive(false);
         assert!(!fixture.batch.drain(&fixture.rx, false));
         let delta = fixture.collect();
-        request["creatorPid"] = json!(std::process::id() + 1);
+        change(&mut request);
         fs::write(directory.join("request.json"), request.to_string()).unwrap();
         fixture.write(&delta).unwrap();
     }));
@@ -536,6 +551,16 @@ fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
     if let Err(panic) = written {
         std::panic::resume_unwind(panic);
     }
+    (fixture, state, run_id, result)
+}
+
+/// The refusal a request changed at the fence must get: no durable ACK, no
+/// registered run, while the earlier real commit of its registration stays.
+fn assert_refused_at_recheck(
+    state: &AppState,
+    run_id: &str,
+    result: Result<RegisterTestRunResponse, ApiError>,
+) {
     let Err(error) = result else {
         panic!("changed request must not receive a durable ACK");
     };
@@ -562,4 +587,35 @@ fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
             .contains_key(run_id),
         "the rejected ACK does not undo its earlier real commit"
     );
+}
+
+#[test]
+fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
+    let (_fixture, state, run_id, result) = register_with_request_changed_at_fence(
+        "changed-registration",
+        None,
+        |request| request["creatorPid"] = json!(std::process::id() + 1),
+    );
+    assert_refused_at_recheck(&state, &run_id, result);
+}
+
+#[test]
+fn registration_refuses_a_request_whose_input_kind_flipped_while_its_fence_waited() {
+    for (label, input) in [("input-added", None), ("input-removed", Some("commit"))] {
+        let (_fixture, state, run_id, result) =
+            register_with_request_changed_at_fence(label, input, |request| {
+                let object = request.as_object_mut().unwrap();
+                if object.remove("input").is_none() {
+                    object.insert("input".to_owned(), json!("commit"));
+                }
+            });
+        assert_refused_at_recheck(&state, &run_id, result);
+        let inner = state.inner.lock().unwrap();
+        let registration = inner
+            .test_run_registrations
+            .get(&run_id)
+            .expect("the earlier commit is kept");
+        assert_eq!(registration.work_binding, None, "{label}: binds nothing");
+        assert_eq!(registration.named_root, None, "{label}: pins nothing");
+    }
 }

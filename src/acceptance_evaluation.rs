@@ -702,6 +702,10 @@ struct AcceptanceEvaluationTask {
     active_run_id: Option<String>,
     /// Core identity is bracketed independently of the agent's safe projection.
     canonical_identity: Option<AcceptanceEvidenceIdentity>,
+    /// The work's claim as the requester's live held-claims read showed it
+    /// (`AcceptanceCurrentClaim`); `None` when the requester holds no claim
+    /// on it.
+    current_claim: Option<AcceptanceCurrentClaim>,
     /// The first assessment page of each exact verification record read, by
     /// locator, until the assessments are read whole.
     assessment_first_pages: Vec<(String, Value)>,
@@ -835,6 +839,7 @@ fn parse_acceptance_evaluation_task(
         indexed_evidence: Vec::new(),
         active_run_id,
         canonical_identity: None,
+        current_claim: None,
         assessment_first_pages: Vec::new(),
         obligation_assessments: Vec::new(),
         // Set by the request once the host has measured the source.

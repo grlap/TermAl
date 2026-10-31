@@ -105,6 +105,10 @@ struct ProcessEngramControlTransport {
     // An occupied None reserves this session's cold start. Other sessions
     // remain usable, and no caller spawns a losing, unregistered child.
     processes: Mutex<HashMap<String, Option<Arc<EngramControlProcess>>>>,
+    // How many children each session has had: a spawn or respawn starts a
+    // new connection, whose capabilities are read afresh
+    // (`connection_generation`, src/engram_capabilities.rs).
+    generations: Mutex<HashMap<String, u64>>,
     startup_handshake: Option<EngramControlStartupHandshake>,
     idle_timeout: Duration,
     #[cfg(test)]
@@ -116,6 +120,7 @@ impl ProcessEngramControlTransport {
         Self {
             host_workdir,
             processes: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
             startup_handshake: None,
             idle_timeout: ENGRAM_CONTROL_IDLE_TIMEOUT,
             #[cfg(test)]
@@ -134,6 +139,7 @@ impl ProcessEngramControlTransport {
         Self {
             host_workdir,
             processes: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
             startup_handshake: Some(EngramControlStartupHandshake {
                 expected_line,
                 timeout,
@@ -153,6 +159,7 @@ impl ProcessEngramControlTransport {
         Self {
             host_workdir,
             processes: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
             startup_handshake: Some(EngramControlStartupHandshake {
                 expected_line,
                 timeout: startup_timeout,
@@ -244,6 +251,14 @@ impl ProcessEngramControlTransport {
         match spawned {
             Ok(process) => {
                 let process = Arc::new(process);
+                // A new child is a new connection: bumped before it is
+                // published, so no reader sees it under the old generation.
+                *self
+                    .generations
+                    .lock()
+                    .expect("Engram connection generations mutex poisoned")
+                    .entry(connection.session_id.clone())
+                    .or_insert(0) += 1;
                 processes.insert(connection.session_id.clone(), Some(process.clone()));
                 Ok(process)
             }
@@ -273,6 +288,29 @@ impl ProcessEngramControlTransport {
 }
 
 impl EngramControlTransport for ProcessEngramControlTransport {
+    fn connection_generation(&self, session_id: &str) -> Option<u64> {
+        // Only a live, published child is a connection; a reserved start, a
+        // finished or retiring child, or none at all reads as none.
+        let live = self
+            .processes
+            .lock()
+            .expect("Engram process registry mutex poisoned")
+            .get(session_id)
+            .and_then(Option::as_ref)
+            .is_some_and(|process| {
+                !process.worker_finished.load(Ordering::Acquire)
+                    && !process.retiring.load(Ordering::Acquire)
+            });
+        if !live {
+            return None;
+        }
+        self.generations
+            .lock()
+            .expect("Engram connection generations mutex poisoned")
+            .get(session_id)
+            .copied()
+    }
+
     fn request(
         &self,
         connection: &EngramConnectionConfig,

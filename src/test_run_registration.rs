@@ -36,13 +36,27 @@ struct TestRunRegistration {
     preset: TestRunPreset,
     detached: Option<bool>,
     stage_names: Vec<String>,
-    // Captured by the host, never accepted from the launcher's payload.
+    // Captured by the host, never accepted from the launcher's payload. For
+    // an ordinary committed-input run: the claim of the one root the
+    // launching session named for this worktree (src/test_run_named_root.rs),
+    // never the session's current binding; for any other run: the session's
+    // binding at registration, as before.
     work_binding: Option<EngramControlWorkBinding>,
+    // The named root `work_binding` came from; none when unbound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    named_root: Option<TestRunNamedRoot>,
     #[serde(default)]
     authority_store: Option<EngramAuthorityStoreKey>,
     validated_unbound: bool,
     #[serde(default)]
     monitoring_interrupted_at: Option<String>,
+    // What the host itself observed of the run's Engram verification record
+    // (src/engram_verification_record.rs): the receipt it received and
+    // checked, its settlement once durable, or a refusal. Written only by the
+    // host under the state lock; the state file beside the run is an
+    // informational mirror and never stands in for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verification_record: Option<TestRunVerificationAck>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -380,10 +394,18 @@ fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
         "needsCargo",
         "liveEngram",
     ];
-    let immutable: BTreeMap<_, _> = fields
+    let mut immutable: BTreeMap<_, _> = fields
         .into_iter()
         .map(|name| (name, request.get(name).cloned().unwrap_or(Value::Null)))
         .collect();
+    // The input kind decides where a registration's binding comes from
+    // (src/test_run_named_root.rs), so it is immutable too. It is hashed as
+    // its own key only when the request names one: a request without it
+    // hashes to exactly the bytes it always did, and no such object holds
+    // an `input` key, so the two cannot collide.
+    if let Some(input) = request.get("input") {
+        immutable.insert("input", input.clone());
+    }
     let bytes = serde_json::to_vec(&immutable)
         .map_err(|_| ApiError::bad_request("invalid test run registration request"))?;
     Ok(sha256_hex(&bytes))
@@ -521,6 +543,13 @@ impl AppState {
         if request_common != fs::canonicalize(&common).ok() {
             return Err(ApiError::bad_request("test run worktree is outside the configured project"));
         }
+        // Only an ordinary committed-input run (`input: "commit"`) is bound
+        // from the named root its worktree is; every other run keeps the
+        // session's binding as before. The root is read off the lock.
+        let committed_input = test_run_request_is_committed_input(&value);
+        let worktree_keys = committed_input
+            .then(|| test_run_worktree_keys(FsPath::new(&disk.worktree)))
+            .flatten();
         if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }
         let requested = std::time::Instant::now();
         diagnostics.fence_deadline = Some(requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
@@ -548,6 +577,20 @@ impl AppState {
                 .ok_or_else(|| {
                     ApiError::conflict("test run project changed during registration")
                 })?;
+            let authority_store = project
+                .engram
+                .as_ref()
+                .and_then(|settings| settings.authority_store_key.clone());
+            let (work_binding, named_root) = if committed_input {
+                test_run_registration_named_binding(
+                    &inner,
+                    session_id,
+                    authority_store.as_ref(),
+                    worktree_keys.as_ref(),
+                )
+            } else {
+                (inner.sessions[index].engram.work_binding.clone(), None)
+            };
             let registration = TestRunRegistration {
                 run_id: request.run_id.clone(),
                 project_id: Some(project.id.clone()),
@@ -572,13 +615,12 @@ impl AppState {
                     .filter(|name| test_run_valid_stage_name(name))
                     .map(str::to_owned)
                     .collect(),
-                work_binding: inner.sessions[index].engram.work_binding.clone(),
-                authority_store: project
-                    .engram
-                    .as_ref()
-                    .and_then(|settings| settings.authority_store_key.clone()),
+                work_binding,
+                named_root,
+                authority_store,
                 validated_unbound: project.engram.is_none(),
                 monitoring_interrupted_at: None,
+                verification_record: None,
             };
             if let Some(compacted) = inner.test_run_compacted.get(&request.run_id) {
                 if compacted

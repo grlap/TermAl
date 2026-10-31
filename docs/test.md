@@ -233,6 +233,80 @@ never evidence by itself: a process that can make such swaps can equally write
 here grants credit or imports a remote result. A remote import never relies on
 these bytes; it uses the producing host's own retained copy.
 
+### Ordinary committed-input runs (`--input commit`)
+
+By default the launcher tests the staged/freeze input: whatever the checkout
+holds, tracked changes and untracked files included, identified by the review
+freeze fingerprint before and after the stages, and any drift fails the run.
+`full`, `focused`, `live` and `category` also accept `--input commit`, the
+ordinary committed-input flow, which tests a commit instead:
+
+```bash
+node scripts/test-launcher.mjs full --input commit
+```
+
+The request records `input: "commit"`. Before any stage, the launcher reads
+the checkout under the one cleanliness rule the host's committed source
+revision and acceptance admission share (src/ordinary_commit_input.rs):
+`git status --porcelain=v1 --untracked-files=all --ignore-submodules=none -z`
+with repository-scoped standard excludes (.gitignore and .git/info/exclude).
+What it shares with the host's pinned Git runner (`ReviewFreezeGit` in
+src/review_freeze.rs) is exactly this: the fingerprint's environment
+variables (every inherited `GIT_*` variable removed; global and system
+config, system attributes, optional locks and terminal prompts off), the
+`-c core.fsmonitor=false`, `-c core.excludesFile=NUL` and
+`-c core.attributesFile=NUL` arguments on every call (`/dev/null` off
+Windows, which also keeps the XDG default ignore and attributes files out),
+and the refusal of a repository with a configured Git filter
+(`filter.<driver>.clean`, `smudge` or `process`), which status could run. The
+launcher resolves `git` through `PATH` as it always has; the host's own runner
+pins a Git binary outside the reviewed tree and further `-c` settings. A
+submodule's `ignore` setting hides nothing. A repository whose index holds a
+submodule gitlink (mode 160000, read with `git ls-files --stage`, which runs
+no filter) is refused before status runs, as the freeze verifier refuses it,
+since status could run a filter the submodule's own config names. A tracked
+path the index tells Git to skip (`git ls-files -v`: a lowercase tag for
+assume-unchanged, `S` for skip-worktree) is never clean either, since Git does
+not read its worktree copy. If any entry, skipped path, configured filter or
+gitlink is found, the run is refused with no stage run: `results.json` is
+`failed` with
+`input: { kind: "commit", cleanBefore: false, dirtyPaths: [{ status, path }] }`,
+plus `skippedPaths: [{ tag, path }]`, `filters: [key]` or `gitlinks: [path]`
+when there are any, and the launcher exits non-zero; a filter or gitlink is
+named in the refusal's error as its own reason. Otherwise it records the full HEAD commit as
+`input: { kind: "commit", commit, cleanBefore: true }`, takes the fingerprint,
+and reads the status again: a change in that window refuses the run the same
+way, and a moved HEAD fails it, so an edit frozen into the fingerprint and
+reverted after the stages cannot read as clean before and after. The existing
+before-execution fingerprint check still applies.
+
+After the stages it reads status and HEAD again into `input.after`
+(`{ commit, clean, paths }`, plus `skippedPaths` when there are any) and sets
+`input.outcome`:
+
+- `clean`: HEAD is unchanged and Git reports no entry.
+- `debris_pending_disposition`: HEAD is unchanged and every entry is a new
+  untracked, non-ignored path (`??`). `input.disposition` is `null` until
+  another component records what happens to that debris.
+- `input_changed`: HEAD moved, a tracked path was modified, added, deleted
+  or renamed, the index now tells Git to skip a tracked path, or a Git
+  filter is now configured.
+
+In this flow a changed fingerprint after the stages does not fail the run:
+the stage results, the run's own `state` and `after` are kept as recorded.
+`input.eligible` is true only when the outcome is `clean` and the run passed.
+Only an eligible run of this flow counts as committed-input evidence; debris is
+not eligible until a disposition is recorded, and `input_changed` never is. The
+printed summary, and `summary RUN_DIRECTORY`, shows one `input:` line, for
+example `input: commit <sha> clean; eligible`,
+`input: commit <sha> debris (pending disposition): 1 new untracked path(s); not eligible`,
+`input: commit <sha> input changed; not eligible` or
+`input: refused, not clean before the run: 2 path(s)`.
+
+The flow is an explicit selection until candidate commits on worker branches
+are allowed. It then becomes the default by flipping the one constant
+`ORDINARY_COMMIT_INPUT_DEFAULT` in `scripts/test-launcher.mjs`.
+
 ### Disk space and worktree build-output retention
 
 After registration, before Cargo bootstrap or any stage, the launcher checks

@@ -875,6 +875,7 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
         before: test_run_str(&results, "before"),
         after: test_run_str(&results, "after"),
         limitations: test_run_str(&results, "limitations"),
+        committed_input: TestRunCommittedInput::read(&results),
     })
 }
 

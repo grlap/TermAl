@@ -23,6 +23,12 @@ mod idle_state_lock;
 #[path = "test_run_scan_projection.rs"]
 mod scan_projection;
 
+#[path = "test_run_committed_input.rs"]
+mod committed_input;
+
+#[path = "engram_verification_record.rs"]
+mod engram_verification_record;
+
 struct RunFixture {
     state: AppState,
     root: PathBuf,

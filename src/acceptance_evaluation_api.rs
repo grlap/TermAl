@@ -1299,6 +1299,7 @@ impl AppState {
         // unheld. A missing canonical id must not hide a matching short ref
         // and silently choose the requester's workdir.
         let mut requested_claim = None;
+        let mut current_claim = None;
         for claim in &held.items {
             if claim.work_id.trim().is_empty() || claim.claim_id.trim().is_empty() {
                 return Err(ApiError::bad_gateway(
@@ -1329,6 +1330,7 @@ impl AppState {
                 claim_id: claim.claim_id.clone(),
                 named_generation_at_request: None,
             });
+            current_claim = Some(AcceptanceCurrentClaim::of_held(claim));
         }
         if requested_claim.is_none() && held.omitted > 0 {
             return Err(ApiError::conflict(
@@ -1349,6 +1351,7 @@ impl AppState {
         }
         let mut task = parse_acceptance_evaluation_task(show, full)?;
         task.canonical_identity = discovery.identity.clone();
+        task.current_claim = current_claim;
         // Preserve the acknowledged naming version captured before any tracker
         // reads. Canonical identity can come from core inspect on sparse show
         // receipts; agent-facing projections alone do not establish it.
@@ -1628,8 +1631,13 @@ impl AppState {
         // root is named here: Engram refuses to record an evaluation of a
         // named root it has not sighted at the task's evidence basis, and a
         // root bound on only one side is a conflict
-        // (`acceptance_named_root_sighting.rs`).
-        self.require_acceptance_named_root_sighting(
+        // (`acceptance_named_root_sighting.rs`). A task whose claim has a
+        // registered committed-input run is in the committed flow instead,
+        // whatever the launcher's committed-input default: admitted on
+        // a clean root, an eligible run at its HEAD and an acknowledged
+        // verification record, refused otherwise, and never sighted
+        // (`acceptance_committed_input.rs`).
+        let committed_admission = self.require_acceptance_source_preflight(
             parent_session_id,
             &target.connection,
             &target.store,
@@ -1638,6 +1646,19 @@ impl AppState {
             deadline,
             &now,
         )?;
+        // Admitted in the committed flow, the evaluation judges and declares
+        // the admitted commit in the named root, as the run's verification
+        // record names its source, whatever the committed-input default; the
+        // legacy flow measures the source as before.
+        let committed_source = committed_admission
+            .as_ref()
+            .zip(source_root.as_ref())
+            .map(|(admission, root)| {
+                (
+                    Some(acceptance_committed_judged_revision(&admission.commit)),
+                    acceptance_source_workspace(&root.root),
+                )
+            });
         let place = source_root.as_ref().map_or_else(
             || EngramBasisPlace::Workdir(parent_workdir.clone()),
             AcceptanceEvaluationSourceRoot::place,
@@ -1678,8 +1699,8 @@ impl AppState {
                         .flatten()
                         .map(|model| model.trim().to_owned())
                 });
-                let (source_fingerprint, judged_workspace) =
-                    self.acceptance_evaluation_judged_source(&place);
+                let (source_fingerprint, judged_workspace) = committed_source
+                    .unwrap_or_else(|| self.acceptance_evaluation_judged_source(&place));
                 // The brief marks records of any other source context only.
                 task.judged_revision = source_fingerprint.clone();
                 task.judged_workspace = judged_workspace;
@@ -1807,8 +1828,8 @@ impl AppState {
                         carried.evaluation,
                     )));
                 }
-                let (source_fingerprint, judged_workspace) =
-                    self.acceptance_evaluation_judged_source(&place);
+                let (source_fingerprint, judged_workspace) = committed_source
+                    .unwrap_or_else(|| self.acceptance_evaluation_judged_source(&place));
                 // The brief marks records of any other source context only.
                 task.judged_revision = source_fingerprint.clone();
                 task.judged_workspace = judged_workspace;
@@ -2015,6 +2036,33 @@ impl AppState {
         let Some(requested) = target.source_fingerprint.as_deref() else {
             return Ok(declared);
         };
+        // Admitted on a committed-input run, the evaluation declared the
+        // admitted commit (`acceptance_committed_input.rs`): its named root is
+        // judged again by the committed-input rule, clean at exactly that
+        // commit, never by a content revision. Off the lock, within the
+        // budget.
+        if let (Some(source_root), Some(commit)) = (
+            target.source_root.as_ref(),
+            acceptance_committed_revision_commit(requested),
+        ) {
+            let current = acceptance_judged_commit(
+                FsPath::new(&source_root.root),
+                std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
+            );
+            if current.as_deref() == Some(commit) {
+                return Ok(declared);
+            }
+            let now_holds = current.map_or_else(
+                || "is not clean at a commit".to_owned(),
+                |current| format!("holds {}", acceptance_committed_judged_revision(&current)),
+            );
+            return Err(ApiError::conflict(format!(
+                "the worktree changed while it was evaluated: the evaluation was requested \
+                 at {requested} and the worktree now {now_holds}, so these verdicts may not \
+                 describe it. This is final for this evaluator: do not submit again. Finish \
+                 and report this; the parent must request a new evaluation"
+            )));
+        }
         // Off the lock and within the budget: the capture reads the whole
         // worktree.
         let current = place.and_then(|place| self.acceptance_evaluation_source_revision(&place));

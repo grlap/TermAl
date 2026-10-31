@@ -1696,3 +1696,48 @@ fn real_process_fixture_transport(host_workdir: &FsPath) -> ProcessEngramControl
         DEADLOCK_GUARD,
     )
 }
+
+/// Every spawn or respawn of a session's control child starts a new
+/// connection generation, and no live child reads as none: capabilities read
+/// under one child never stand for another (src/engram_capabilities.rs).
+#[test]
+fn real_process_respawn_starts_a_new_connection_generation() {
+    let temp_root = TestTempRoot::create("engram-control-generation");
+    let project_file = temp_root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-ok\n").expect("fixture mode should write");
+    let connection = EngramConnectionConfig {
+        binary_path: real_engram_control_fixture_path(),
+        project_file,
+        home: temp_root.path().to_path_buf(),
+        project_root: temp_root.path().to_path_buf(),
+        actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
+        session_id: "engram-generation-session".to_owned(),
+    };
+    let request = EngramControlRequest::SessionBind {
+        external_ref: "termal:fixture".to_owned(),
+        title: "Fixture".to_owned(),
+        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
+        mediated_effects: vec![EngramEffect::Observe],
+        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
+        work_binding: None,
+        idempotency_key: "fixture-bind".to_owned(),
+    };
+    let transport = real_process_fixture_transport(temp_root.path());
+    assert_eq!(transport.connection_generation(&connection.session_id), None);
+
+    transport
+        .request(&connection, &request, DEADLOCK_GUARD)
+        .expect("fixture process should spawn and reply");
+    let first = transport.connection_generation(&connection.session_id);
+    assert!(first.is_some(), "a live child is a connection");
+    transport.shutdown_session(&connection.session_id);
+    assert_eq!(transport.connection_generation(&connection.session_id), None);
+
+    transport
+        .request(&connection, &request, DEADLOCK_GUARD)
+        .expect("fixture process should respawn and reply");
+    let second = transport.connection_generation(&connection.session_id);
+    assert!(second.is_some() && second != first, "a respawn is a new connection");
+    transport.shutdown_session(&connection.session_id);
+}
