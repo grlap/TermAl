@@ -10,7 +10,7 @@
 // other sections, which stay in `test-launcher.mjs`; nor the Node event
 // encoding, which `node-test-duration-reporter.mjs` writes.
 import { readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import nodePath, { isAbsolute, relative, sep } from "node:path";
 
 export const durationBudgetMs = 2000;
 // A file is listed by its own, larger threshold: its test time adds up many
@@ -41,21 +41,28 @@ const portable = (path) => path.split(sep).join("/");
 
 // The extra arguments and artifact for one stage, or undefined when the stage
 // asks for no report. `unavailable` adds no arguments and names why.
-export function durationReportPlan(stage, runDir) {
+// `path` and `reporterUrl` default to this host's; a reader comparing another
+// host's recorded commands passes that host's path rules (`node:path`'s
+// `posix` or `win32`) and its recorded reporter URL.
+export function durationReportPlan(stage, runDir, {
+  path = nodePath,
+  reporterUrl = nodeDurationReporterUrl,
+} = {}) {
+  const forward = (value) => value.split(path.sep).join("/");
   switch (stage.durationReport) {
     case undefined:
       return undefined;
     case "vitest-json": {
-      const artifact = join(runDir, `${stage.name}-durations.json`);
+      const artifact = path.join(runDir, `${stage.name}-durations.json`);
       return {
         kind: stage.durationReport,
         artifact,
         prefix: [],
-        suffix: ["--reporter=default", "--reporter=json", `--outputFile.json=${portable(artifact)}`],
+        suffix: ["--reporter=default", "--reporter=json", `--outputFile.json=${forward(artifact)}`],
       };
     }
     case "node-test-events": {
-      const artifact = join(runDir, `${stage.name}-durations.jsonl`);
+      const artifact = path.join(runDir, `${stage.name}-durations.jsonl`);
       return {
         kind: stage.durationReport,
         artifact,
@@ -63,7 +70,7 @@ export function durationReportPlan(stage, runDir) {
         prefix: [
           "--test-reporter=spec",
           "--test-reporter-destination=stdout",
-          `--test-reporter=${nodeDurationReporterUrl}`,
+          `--test-reporter=${reporterUrl}`,
           `--test-reporter-destination=${artifact}`,
         ],
         suffix: [],

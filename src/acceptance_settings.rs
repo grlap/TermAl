@@ -367,10 +367,18 @@ impl AppState {
         let target = self.acceptance_policy_target(project_id, Some(&request.reader_key))?;
         let args = request.args(&target.connection.actor_id)?;
         self.validate_work_read_still_current(project_id, &target)?;
-        // One send only. A transport failure can follow the committed policy change.
-        let output = run(&target.connection, &args)
-            .map_err(|error| ApiError::from_status(StatusCode::BAD_GATEWAY,
-                format!("Policy write outcome unknown; retry the identical change/key or refresh policy: {error}")))?;
+        // One send only. A transport failure can follow the committed policy
+        // change, unless no Engram process ever ran (`engram_cli_command_never_ran`).
+        let output = run(&target.connection, &args).map_err(|error| {
+            ApiError::from_status(
+                StatusCode::BAD_GATEWAY,
+                if engram_cli_command_never_ran(&error) {
+                    format!("Policy command was not sent (no Engram process ran); retrying the identical change/key is safe: {error}")
+                } else {
+                    format!("Policy write outcome unknown; retry the identical change/key or refresh policy: {error}")
+                },
+            )
+        })?;
         if !output.success {
             let detail = output.failure_detail();
             if output.exit.code() == Some(2)

@@ -810,14 +810,16 @@ impl AppState {
     /// refused, is replaced by an empty one, so every later checkpoint of the
     /// grant, the turn's own retries and a rebind's recovery alike, goes
     /// without it, as every checkpoint did before turns reported
-    /// observations. Any refusal counts, not only one about the payload: a
-    /// refused report resent forever would hold the grant open, and the
-    /// session's queued prompts with it, until a restart, while dropping it
-    /// costs at most this turn's evidence, and nothing when the refusal is
-    /// about the grant's state after an earlier attempt was accepted. A lost
-    /// or timed-out call is not an answer; its report is kept for the retry.
-    /// A certified no-change reply also keeps it: admission or allowance
-    /// expiry did not reject the payload, which the same request must replay.
+    /// observations. Any definitive refusal counts, not only one about the
+    /// payload (`engram_checkpoint_refuses_report`): a refused report resent
+    /// forever would hold the grant open, and the session's queued prompts
+    /// with it, until a restart, while dropping it costs at most this turn's
+    /// evidence, and nothing when the refusal is about the grant's state after
+    /// an earlier attempt was accepted. A lost or timed-out call, or any other
+    /// error that leaves the outcome unresolved, is not a refusal; its report
+    /// is kept for the retry. A certified no-change reply also keeps it:
+    /// admission or allowance expiry did not reject the payload, which the
+    /// same request must replay.
     fn forget_refused_engram_turn_report(
         &self,
         session_id: &str,
@@ -871,19 +873,77 @@ impl AppState {
     }
 }
 
+/// Engram's turn_checkpoint refusals that refuse the request itself, so the
+/// report it carried will not be accepted as sent. Engram raises each before
+/// or inside the checkpoint's one storage transaction, which then rolls back:
+/// an undecodable request, invalid session or control-projection input, a
+/// work claim or observation scope the grant does not cover, refused source
+/// text, a refused named-root basis, and environment or verification evidence
+/// it cannot tie to the checkpoint. Any other Remote answer, a storage error
+/// (which also carries a redaction refusal) or a code this build does not
+/// know, leaves the outcome unresolved: the report is kept.
+const ENGRAM_CHECKPOINT_REPORT_REFUSALS: [&str; 11] = [
+    "invalid_request",
+    "invalid_control_session",
+    "control_projection_invalid",
+    "work_claim_mismatch",
+    "observation_scope_mismatch",
+    "source_basis_text_refused",
+    "named_root_binding_refused",
+    "environment_basis_mismatch",
+    "environment_fingerprint_mismatch",
+    "environment_evidence_not_found",
+    "verification_producer_not_found",
+];
+
+/// Whether `error`, answering a checkpoint, definitively refuses the report it
+/// carried: an explicit refusal answer, or one of Engram's refusals of the
+/// request (`ENGRAM_CHECKPOINT_REPORT_REFUSALS`). Every other error leaves
+/// the outcome unresolved. A terminal control-startup reply never refuses
+/// the report, whatever cause it carries: it answered the frame before
+/// dispatching it, so Engram judged no report.
+fn engram_checkpoint_refuses_report(error: &EngramTransportError) -> bool {
+    error.kind == EngramTransportErrorKind::Remote
+        && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
+        && !error.is_terminal_control_startup()
+        && (error.causal_failure.as_ref().is_some_and(|cause| {
+            cause.failure_class == EngramCausalFailureClass::ProducerRefusal
+        }) || error
+            .code
+            .as_deref()
+            .is_some_and(|code| ENGRAM_CHECKPOINT_REPORT_REFUSALS.contains(&code)))
+}
+
+/// Whether `error` is an Engram answer to a checkpoint carrying a report that
+/// neither refuses the report (`engram_checkpoint_refuses_report`) nor
+/// certifies the call changed nothing: whether the report was applied is
+/// unresolved, so it is kept for the same request's replay.
+fn engram_checkpoint_leaves_report_unresolved(error: &EngramTransportError) -> bool {
+    error.kind == EngramTransportErrorKind::Remote
+        && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
+        && !engram_checkpoint_refuses_report(error)
+}
+
+fn log_unresolved_engram_turn_report(session_id: &str, error: &EngramTransportError) {
+    eprintln!(
+        "engram> session={session_id} Engram's answer to the checkpoint carrying the turn's \
+         report ({}) is unresolved; the report is kept for the same request's replay",
+        error.code.as_deref().unwrap_or("unknown")
+    );
+}
+
 /// The refusal code when Engram answered a rebind's recovery checkpoint by
-/// refusing it, as an error or as a refuse result; `None` for acceptance, for
-/// a lost or timed-out call, for a terminal control-startup reply (the frame
-/// was never dispatched), and for the issued-but-never-begun answer, which
-/// a fresh bind settles and which says nothing about the report.
+/// definitively refusing it (`engram_checkpoint_refuses_report`), as an error
+/// or as a refuse result; `None` for acceptance, for a lost, timed-out or
+/// otherwise unresolved call, for a terminal control-startup reply (the frame
+/// was never dispatched), and for the issued-but-never-begun answer, which a
+/// fresh bind settles and which says nothing about the report.
 fn engram_recovery_checkpoint_refusal(
     checkpoint: &std::result::Result<EngramTurnCheckpointResponse, EngramTransportError>,
 ) -> Option<Option<&str>> {
     match checkpoint {
         Err(error)
-            if error.kind == EngramTransportErrorKind::Remote
-                && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
-                && !error.is_terminal_control_startup()
+            if engram_checkpoint_refuses_report(error)
                 && !engram_grant_was_issued_but_not_begun(error) =>
         {
             Some(error.code.as_deref())

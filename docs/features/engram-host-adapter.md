@@ -590,14 +590,29 @@ the report and the record keeps it for that grant; a retried checkpoint
 repeats it verbatim, and the observation is folded into the idempotency key.
 A closing checkpoint that failed before Engram accepted it leaves the grant
 open, and the same-process rebind that follows closes it with the report the
-record still holds, while restart recovery, which has none, closes it bare.
-A report Engram refuses (an answer, not a lost or timed-out call), whether on
-the turn's own close or on a rebind's recovery checkpoint, is not resent: it
-is dropped and logged, and the grant's next closing attempt goes bare, as
-every checkpoint did before turns reported observations. Any refusal counts,
-not only one about the payload, because a refused report resent forever
-would hold the grant, and the session's queued prompts, until a restart;
-dropping it costs at most that turn's evidence. A closer that finds another
+record still holds, while restart recovery, which has no cached report,
+closes it bare.
+A report Engram definitively refuses, whether on the turn's own close or on a
+rebind's recovery checkpoint, is not resent: it is dropped and logged, and the
+grant's next closing attempt goes bare, as every checkpoint did before turns
+reported observations. A definitive refusal is an explicit refuse answer, or
+one of the error codes Engram's `turn_checkpoint` raises to refuse the request
+itself before its storage transaction commits (`invalid_request`,
+`invalid_control_session`, `control_projection_invalid`,
+`work_claim_mismatch`, `observation_scope_mismatch`,
+`source_basis_text_refused`, `named_root_binding_refused`,
+`environment_basis_mismatch`, `environment_fingerprint_mismatch`,
+`environment_evidence_not_found` and `verification_producer_not_found`;
+`engram_turn_observations.rs` keeps the list). Any such refusal counts, not
+only one about the payload, because a refused report resent forever would hold
+the grant, and the session's queued prompts, until a restart; dropping it costs
+at most that turn's evidence. Every other answer from Engram, its generic
+`storage_error` or a code this build does not know, leaves it unresolved
+whether the report was applied: the report is kept and logged as unresolved,
+never dropped on a guess. The session's persisted checkpoint operation keeps
+that closing request, key and report, so after a restart original-checkpoint
+result recovery replays it exactly
+(`engram_checkpoint_result_recovery.rs`). A closer that finds another
 checkpoint of the session already in progress skips at once, without taking
 a capture it could never report.
 Only a session bound to claimed work reports it: Engram admits host evidence
@@ -2208,13 +2223,14 @@ reports.
   fit, every one is left out and `inventory omitted: N lines over the
   summary budget` says so, since a partial list would misstate which paths
   the check covered. Raw output is left out: it can carry secrets and paths,
-  and a summary Engram's redactor refuses drops the whole report. The
+  and Engram's redactor refuses a report whole. The
   references are `command:<normalised line>`, left out when longer than
   1024 bytes, and, when known, `exit:<code>`. The command line itself is
   sent as the agent ran it, in the summary's first line and that reference:
-  an argument carrying a secret (`--token=…`) goes with it, and a report
-  Engram's redactor refuses falls back to the turn's own observation, as
-  below.
+  an argument carrying a secret (`--token=…`) goes with it. Engram answers a
+  redaction refusal with its generic `storage_error`, which TermAl cannot
+  tell from a failed write, so that report is kept for its exact replay
+  rather than falling back (below).
 - **Bounds.** At most 16 checks per turn, the latest kept, and 4 environment
   records; a check past them is reported without one, which an unpinned
   requirement allows. A source basis over 512 bytes is not sent.
@@ -2476,10 +2492,10 @@ own observation. The refusals the evidence itself adds are
 give), `environment_evidence_not_found` (a reference to no environment
 record) and `environment_basis_mismatch` (an environment recorded under
 another capability-map revision, or cited from another run or source
-revision). TermAl keeps no list of them: the fallback is decided by the
-kind of error alone, an answer from Engram as against a lost call, and
-never by the message text, so these three take it like any other refusal
-and a lost call naming one keeps the evidence for the retry. The stable
+revision). They are among the definitive refusals listed under the premium
+turn lifecycle above; the fallback is decided by the answer's code, never by
+its message text, so a lost call naming one keeps the evidence for the
+retry, and so does an answer whose code is not on that list. The stable
 code is shown on the checkpoint's control card.
 
 Refuse, defer, protocol/transport degradation, missing binding, begin refusal,
@@ -4360,6 +4376,13 @@ A first-attempt 409 reloads policy for a new explicit decision, never retries
 against the new head automatically. Once an earlier attempt is uncertain, a
 later 409 (including reset, reader or policy conflicts) cannot establish its
 outcome: the exact payload/key remains retained for original-store recovery.
+A failed send answers 502 and says whether the command reached Engram. When no
+Engram process ran, because the launch was refused while the command was built
+or at the spawn, it says the command was not sent and that retrying the
+identical change/key is safe. Any later failure, from attaching the process
+tree onwards, keeps "outcome unknown", because on Unix the child is already
+running by then. The status stays 502 either way, so the form keeps the payload
+and key for the identical retry.
 A successful command returns `writeApplied: true`, even when a following read
 fails or the project settings change; an unavailable snapshot explains that the
 change applied to the selected store and disables further editing until refresh.
@@ -4474,6 +4497,17 @@ connection is containment. Settings, original recovery identities and session
 exclusions commit together, with a writer acknowledgement before settlement
 requests. A refused or unavailable checkpoint leaves that session excluded;
 the applied project flag remains false and unaffected sessions may proceed.
+A failed project-reset checkpoint says where it left the request, read from
+where it failed rather than from the error's kind:
+- "not sent": the request was never built (no routing token or grant), the
+  budget ran out before the send, or the control transport proved it unsent;
+- "not applied": a certified no-change answer;
+- "refused": Engram refused it;
+- "outcome unknown": it was dispatched without a valid reply.
+Its log line (`outcome=not_sent|not_applied|refused|unresolved`), its failure
+text and the Degraded checkpoint card's cause all carry this classification.
+The request uses a fixed key over a fixed exit request, so the next reset
+replays it identically (`src/engram_project_containment.rs`).
 The response and state snapshots list unresolved sessions separately in
 `engramControlRecovery`, with project/session identity, operation, code,
 `excluded`, `settlementConfirmed`, and supported next actions. Inspect the
@@ -4822,8 +4856,8 @@ so the next call starts a new one.
   that code and later no longer. A hold whose session was never disabled for
   it (a late reply fenced off from its accounting), or whose row is gone,
   lasts until restart.
-Every other remote code, a live `storage_error` among them, keeps today's
-meaning.
+Every other remote code, a live `storage_error` among them, keeps its worker;
+whether it drops a carried report follows the definitive-refusal rule above.
 
 The proposed split of this adapter by ownership, the contract it keeps with
 Engram, and the order in which its parts move are in

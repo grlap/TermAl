@@ -13,6 +13,9 @@ mod test_run_registration;
 #[path = "durability_pending_registration.rs"]
 mod durability_pending_registration;
 
+#[path = "persist_fence_checkpoint_race.rs"]
+mod checkpoint_race;
+
 struct FenceFixture {
     cache: SqlitePersistConnectionCache,
     root: TestTempRoot,

@@ -210,3 +210,6 @@ fn original_checkpoint_refusal_retains_only_the_validated_code() {
 
 #[path = "engram_checkpoint_result_recovery_boundaries.rs"]
 mod recovery_boundaries;
+
+#[path = "engram_unresolved_checkpoint_report.rs"]
+mod unresolved_report;

@@ -125,6 +125,114 @@ node -e "const r=require('node:child_process').spawnSync('git',['--version'],{st
 node -e "const r=require('node:child_process').spawnSync('git',['rev-parse','--absolute-git-dir'],{stdio:'inherit'}); if(r.error) console.error(r.error.message); process.exit(r.status ?? 1)"
 ```
 
+### Source metadata, host bindings and raw results
+
+Every run's `results.json` carries a `source` block
+(`scripts/test-launcher-source.mjs`). Git runs from `PATH` under the
+launcher's isolated configuration (no system or global Git config). The block
+is measured right after the input fingerprint (`input.json`) and kept only
+when it describes the same `HEAD` and the same clean or dirty `git status` as
+that fingerprint, which every stage is checked against; otherwise it records
+`source_changed_during_measure`. Until then it records `not_yet_measured`.
+It is never changed afterwards:
+
+- `sourceSchema` (1), `commit` and `tree` (`HEAD` and its tree), and `clean`:
+  true only when `git status` lists nothing, untracked files included.
+- `platform`: `{ os, arch }`, with `os` one of `windows`, `macos` or `linux`.
+- `launcherVersion`: the blob of `scripts/test-launcher.mjs` at `HEAD`.
+- `measuredAt`, and `toolchain`: `null` until a run that needs Cargo reaches
+  its preflight.
+- When Git cannot describe the checkout, the identity fields are `null`,
+  `clean` is `null` (never true) and `unknownReason` names why, for example
+  `git_unavailable`.
+- Because system Git config is not read, a Windows checkout that relies on
+  Git for Windows' system `core.autocrlf` can show racily-clean files as
+  modified, so `clean` is `false` for it. That fails safe: such a run never
+  claims a clean start it did not prove.
+
+A run that needs Cargo records the toolchain from its own probes in the run
+root: `cargoVersion` and `rustcVersion` (each `--version` output),
+`cargoExecutable`, `source` (`PATH` or `TERMAL_TEST_CARGO`), and rustup's
+resolution of the active toolchain (`resolvedToolchain`, `rustupReason`:
+`default`, `env`, `directory override` or `toolchain file`; `rustupOverride`:
+`present` for a directory or file override, else `absent`). Until Cargo's own
+preflight succeeds the record says `unknownReason: "preflight_failed"` and
+claims no version.
+
+The compiler probed is the one Cargo uses: `RUSTC` or `CARGO_BUILD_RUSTC` when
+set (when both are set to different compilers, which one Cargo runs is not
+settled here and the version is unknown, `rustc_resolution_ambiguous`);
+otherwise the default `rustc`, probed only when it is unambiguous: the
+`rustc` beside the chosen Cargo and the one on `PATH` are the same file, or
+only one of them exists. When they differ (`rustc_resolution_ambiguous`), the
+version is left unknown. It is also left unknown (`rustc_selection_unsupported`),
+even when `RUSTC` names the compiler, when the environment sets a compiler
+wrapper (`RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER` or their `CARGO_BUILD_`
+forms), or when any Cargo configuration Cargo reads (the root's and each
+ancestor's `.cargo/config.toml` and `.cargo/config`, and Cargo's home) holds
+anything beyond a short toolchain-neutral allowlist: the tables `alias`,
+`cargo-new`, `http`, `net`, `profile`, `registries`, `registry`, `source`,
+`term` and `target`, and the `[build]` keys `jobs`, `target`, `target-dir`,
+`incremental`, `rustflags` and `rustdocflags`. An allowlist, not a list of
+known routes, so `build.rustc`, a configured wrapper, `[env]`, `include` and
+any setting not yet known all count. The launcher's own tests set
+`TERMAL_TEST_CARGO_CONFIG_CEILING` to an absolute fixture directory, where the
+ancestor walk stops, so a host's own configuration above the fixture never
+decides a test; real runs leave it unset. `RUSTC`, `CARGO_BUILD_RUSTC` and
+`RUSTUP_TOOLCHAIN` in the environment are not refused: the probe runs exactly
+that compiler, under that same environment. Version lines are read by shape
+(`cargo 1.x …`, `rustc 1.x …`, `NAME (REASON)`), so rustup's own messages in
+the same log are never taken for them. rustup is asked only when it sits beside the chosen Cargo
+(a rustup proxy); a Cargo named directly records `rustup_not_beside_cargo`.
+The rustc and rustup probes are provenance only and are recorded under
+`toolchainProbes`, not `preflight`, so no failure reader takes them for the
+run's failure: a missing or failing one leaves its part unknown
+(`rustc_unavailable`, `rustup_failed`, ...) and never fails a gate. A worker
+that fails at startup keeps the measured `source`; when it cannot be read
+back, the record says `source_unrecoverable`.
+
+`hostBindings` records what ties the stage commands to this host: the absolute
+executable each stage's command resolved to (`executables`, by stage name) and
+the duration reporter URL. With the request's stages they rebuild every
+recorded stage command exactly (`expectedStageEntries`).
+`node scripts/test-launcher.mjs plan INPUT_JSON` prints the full gate's stages
+and expected entries for the host an input describes (`platform`, `node`,
+`gitBash` on Windows, `root`, `runDir`, `reporterUrl`, `executables`), using
+that host's path rules, so another platform's run compares exactly. `node` and
+`gitBash` are the commands the run's own `request.json` stages name (its
+`typescript` and, on Windows, `rust-tests` stages); a reader compares the
+plan's `stages` with those request stages and its `entries` with the recorded
+stage entries, so an input inconsistent with the run fails one comparison or
+the other. It reads and runs nothing; its values are comparison data.
+
+`GET /api/test-runs/{run_id}/results` returns an indexed run's `results.json`
+bytes unchanged, with their SHA-256 in `x-termal-results-sha256` and their size
+as the content length. A run the index does not know, or one with no
+`results.json`, is refused `404` with code `test_run_results_unknown`; a link,
+FIFO or other entry that is not a regular file is refused `422`
+(`test_run_results_not_a_file`) without being opened; a file above 1 MiB is
+refused `413` (`test_run_results_too_large`); a file that changes while it is
+read is refused `409` (`test_run_results_changed`); any other I/O failure,
+such as a permission error, is `500` (`test_run_results_unreadable`) and is not
+worth retrying. A run directory, or its `review-runs` parent, that is no
+longer a plain directory (a link or junction put in place after indexing) is
+refused `422` (`test_run_results_redirected`), checked before and after the
+read; directories above `review-runs` are Git's own administrative ones and are
+not inspected. On Windows an ordinary file is opened without following a
+reparse point. The response is sent `Content-Encoding: identity`, never
+compressed, so the digest and length describe the bytes on the wire. The
+route never rescans the index or writes a file (see also
+[test runs](features/test-runs.md)).
+
+These link and race refusals are best effort, not containment: the checks are
+path inspections around one read, so a writer that swaps the run directory or
+an existing Windows reparse file and restores it between them is not stopped.
+That is within the route's contract because the route is a diagnostic read,
+never evidence by itself: a process that can make such swaps can equally write
+`results.json`, these fields are what a run reports about itself, and no record
+here grants credit or imports a remote result. A remote import never relies on
+these bytes; it uses the producing host's own retained copy.
+
 ### Disk space and worktree build-output retention
 
 After registration, before Cargo bootstrap or any stage, the launcher checks

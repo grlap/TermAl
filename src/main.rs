@@ -459,6 +459,7 @@ fn app_router_with_acceptance_policy_limiter(
             post(register_session_test_run),
         )
         .route("/api/test-runs/{run_id}", get(get_test_run))
+        .route("/api/test-runs/{run_id}/results", get(get_test_run_results))
         .route(
             "/api/test-runs/{run_id}/stages/{stage}/log",
             get(get_test_run_stage_log),

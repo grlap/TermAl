@@ -518,6 +518,11 @@ or log content.
   list order. Without `projectId`, it returns all indexed runs.
 - `GET /api/test-runs/{runId}` returns
   `{ run: TestRunSummary, detail: TestRunDetail }`.
+- `GET /api/test-runs/{runId}/results` returns the indexed run's
+  `results.json` bytes unchanged, with their SHA-256 in
+  `x-termal-results-sha256`. It is a diagnostic read that grants no credit;
+  its refusals and the source metadata the launcher writes there are in
+  [docs/test.md](../test.md#source-metadata-host-bindings-and-raw-results).
 - `GET /api/test-runs/{runId}/stages/{name}/log?tail=BYTES` returns
   `{ text: string, truncated: boolean, size: number }` as JSON.
   - `size` is the log's size in bytes.
@@ -931,8 +936,8 @@ of the reviewed `/review-changes` contract.
   its turn to wait would read as finished to its parent, then start a new
   turn when resumed. A child runs its gates in the foreground instead.
 - **`runIds`.** One to 16 distinct ids (a repeated id is kept once), each
-  indexed and in the caller's project. A caller without a project cannot
-  wait on runs.
+  indexed or durably registered on this host, and in the caller's project.
+  A caller without a project cannot wait on runs.
   - The caller need not be the owner: a coordinator may wait on a run it did
     not start.
   - Each new wait pins the request identity and a digest of the canonical native
@@ -944,7 +949,26 @@ of the reviewed `/review-changes` contract.
     because the original identity is no longer indexed. A matching completed
     run can be consumed through a new wait even if completion mail went to
     another session. Project isolation still applies.
-  - If an id is not in the index, the tool first forces one rescan, waited on
+  - A durable registration admits the wait before the artifact index catches up,
+    using its request and native-locator identity. Index lag alone stays pending;
+    the existing background refresh delivers the matching indexed result, with
+    no polling or replacement wait. Before indexing, an unreadable directory,
+    request or previously observed published results settles
+    `UNKNOWN (registered artifacts unreadable)` after one refresh of grace for
+    a transient read failure. A removed directory or an oversized artifact is
+    deterministic and needs no grace. The wait retains publication history and
+    hands off permanently to the existing indexed verdict rules after a healthy
+    matching index entry arrives; later indexed read uncertainty stays pending.
+    Before that handoff, retirement settles `UNKNOWN (registration retired)` and replacement settles
+    `UNKNOWN (registered identity changed)`. Unpublished results alone are pending.
+    A known registration lacking confirmed durable project/request/locator identity
+    is refused with HTTP 409 and the `error` prefix
+    `test_run_wait_registration_unavailable`, distinct
+    from an unknown run id. It creates no wait.
+    An indexed entry that conflicts with its durable registration is refused
+    with HTTP 400; the original run must be retained and the conflict reported.
+  - If an id is absent from both the index and registration, the tool first
+    forces one rescan, waited on
     for at most 1 s; a longer one finishes in the background and the call
     proceeds with the index as it is. Only then does an unknown id (404) or a
     foreign one (400) reject the whole call. So an agent that registers right
@@ -1062,8 +1086,8 @@ type TestRunWaitRecord = {
   mode: TestRunWaitMode;
   createdAt: string;
   title?: string | null;
-  runs: TestRunWaitRunLabel[];  // same order as runIds; captured at
-                                // registration, never updated
+  runs: TestRunWaitRunLabel[];  // same order as runIds; fixed identities plus
+                                // wait-owned settlement progress
 };
 
 type TestRunWaitRunLabel = {
@@ -1078,6 +1102,12 @@ type TestRunWaitRunLabel = {
   expectedFingerprint?: string;// frozen input if published before the wait
   locatorIdentity?: string;     // SHA-256 of canonical native path bytes,
                                 // never display text
+  registrationBacked?: boolean; // admitted before indexing; legacy default false
+  registrationProgress?: {      // mutable, persisted with this pending wait
+    indexed: boolean;           // healthy matching index handoff completed
+    resultsSeen: boolean;       // publication observed before handoff
+    unreadableReads: number;    // consecutive failed refreshes, capped at 2
+  };                           // legacy default: false, false, 0
 };
 
 type TestRunWaitConsumedReason =
@@ -1104,8 +1134,9 @@ type TestRunWaitResumeDispatchFailedEvent = {
 ```
 
 `StateResponse.testRunWaits?: TestRunWaitRecord[]` lists pending waits only,
-and is omitted when empty. There is no "changed" event: a wait's fields never
-change after creation.
+and is omitted when empty. Captured identities never change. Settlement progress
+is internal bookkeeping, included in state snapshots without a separate changed
+event; it cannot create a run verdict or verification credit.
 
 ### Resume prompt
 

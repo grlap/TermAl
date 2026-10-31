@@ -173,11 +173,16 @@ fn validate_sqlite_checkpoint_write_cut(
             .map_err(reject_invalid_persisted_state_metadata_shape)?;
         if operation.protection.local_session_id != owner
             || serde_json::to_value(&operation)? != *mirror
-            || index.get(&operation.original.id) != Some(&(
-                owner, sha256_hex(&serde_json::to_vec(mirror)?),
-            ))
         {
             bail!("existing checkpoint mirror lacks its exact metadata protection");
+        }
+        // Owner-correct and canonical, yet not what this cut's ledger selects:
+        // a relational race the next coherent collection repairs, typed so
+        // its fences wait for that retry (`PersistCheckpointMirrorLedgerMismatch`).
+        if index.get(&operation.original.id) != Some(&(
+            owner, sha256_hex(&serde_json::to_vec(mirror)?),
+        )) {
+            return Err(PersistCheckpointMirrorLedgerMismatch.into());
         }
     }
     Ok(())

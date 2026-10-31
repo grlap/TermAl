@@ -12,6 +12,7 @@ use super::*;
 
 mod run_wait_evidence;
 mod heartbeat_evidence;
+mod registration;
 
 struct WaitFixture {
     state: AppState,
@@ -748,6 +749,8 @@ fn wait_on(summaries: &[TestRunSummary]) -> TestRunWaitRecord {
                 request_identity: None,
                 expected_fingerprint: None,
                 locator_identity: None,
+                registration_backed: false,
+                registration_progress: TestRunWaitRegistrationProgress::default(),
             })
             .collect(),
     }
@@ -862,9 +865,17 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
             request_identity: None,
             expected_fingerprint: None,
             locator_identity: None,
+            registration_backed: false,
+            registration_progress: TestRunWaitRegistrationProgress::default(),
         }],
     };
     let value = serde_json::to_value(&wait).unwrap();
+    let mut legacy = value.clone();
+    legacy["runs"][0].as_object_mut().unwrap().remove("registrationBacked");
+    legacy["runs"][0].as_object_mut().unwrap().remove("registrationProgress");
+    let restored: TestRunWaitRecord = serde_json::from_value(legacy).unwrap();
+    assert!(!restored.runs[0].registration_backed);
+    assert_eq!(restored.runs[0].registration_progress, TestRunWaitRegistrationProgress::default());
     for key in ["id", "sessionId", "runIds", "mode", "createdAt", "runs"] {
         assert!(value.get(key).is_some(), "{key}: {value}");
     }

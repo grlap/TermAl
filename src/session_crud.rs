@@ -3677,7 +3677,9 @@ impl AppState {
             grant_id,
             EngramControlCardDecision::Degraded,
             EngramControlCard {
-                causal_failure: None,
+                // Says whether the checkpoint was ever sent
+                // (`engram_project_checkpoint_outcome`).
+                causal_failure: error.causal_failure.clone(),
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                 stage: EngramControlStage::Checkpoint,
                 assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),

@@ -1077,9 +1077,10 @@ fn a_turn_without_a_begin_basis_withholds_comparison_without_inventing_a_change(
 }
 
 #[test]
-fn a_report_engram_rejects_is_dropped_so_the_grant_can_close_bare() {
-    // A remote projection error does not prove the checkpoint was unapplied.
-    // Removal cannot replace its complete report with a bare Exit request.
+fn a_report_engram_rejects_still_replays_its_original_checkpoint_after_removal() {
+    // A remote projection error refuses the report, so the cached copy is
+    // dropped, but it does not prove the checkpoint was unapplied. Removal
+    // cannot replace the original complete report with a bare Exit request.
     let turn = start_mediated_turn_with_script(
         "rejected",
         ChildWorkspace::IsolatedWorktree,

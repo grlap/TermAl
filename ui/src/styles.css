@@ -5879,6 +5879,45 @@ textarea {
   border-style: dashed;
 }
 
+/* A collapsed routine Engram control card: one row, its meta row carrying the
+   stage and title. Keep aligned with the virtualization estimate for it
+   (ESTIMATED_COLLAPSED_ENGRAM_CONTROL_HEIGHT_PX). */
+.engram-control-card.engram-control-compact {
+  padding-block: 0.4rem;
+}
+
+.engram-control-compact .message-meta {
+  margin-bottom: 0;
+}
+
+.engram-control-compact .message-meta-end {
+  flex-wrap: nowrap;
+}
+
+.engram-control-compact-summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.engram-control-compact-label {
+  font-family: var(--code-font);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--signal-red);
+}
+
+.engram-control-compact-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+
 .utility-card,
 .approval-card,
 .markdown-card {

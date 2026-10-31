@@ -219,6 +219,193 @@ fn project_containment_lost_checkpoint_reply_preserves_authority() {
     assert!(receiver.try_recv().is_err());
 }
 
+/// The cause on the session's Degraded checkpoint card.
+fn degraded_checkpoint_cause(state: &AppState, session: &str) -> EngramCausalFailure {
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(session).unwrap()];
+    record
+        .session
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            Message::EngramControl { card, .. }
+                if card.stage == EngramControlStage::Checkpoint
+                    && card.decision == EngramControlCardDecision::Degraded =>
+            {
+                card.causal_failure.clone()
+            }
+            _ => None,
+        })
+        .expect("a Degraded checkpoint card naming its cause")
+}
+
+/// Turns the project's gating off first, so the next Save to gating on is
+/// the strict reset whose refusal text names the checkpoint's failure.
+fn ungated(state: &AppState, project: &str) {
+    let mut inner = state.inner.lock().unwrap();
+    inner
+        .projects
+        .iter_mut()
+        .find(|p| p.id == project)
+        .unwrap()
+        .engram
+        .as_mut()
+        .unwrap()
+        .turn_gated_control = false;
+    state.commit_locked(&mut inner).unwrap();
+}
+
+#[test]
+fn project_reset_checkpoint_the_transport_proved_unsent_is_disclosed_as_not_sent() {
+    let unsent = || {
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport(
+            "the control worker closed before the request frame",
+        )
+        .request_never_sent()))
+    };
+    // Containment: the Degraded card's cause says the request never reached Engram.
+    let (state, project, session, _root, _receiver) = fixture();
+    install_control_only_transport(&state, ScriptedEngramControlTransport::new([unsent()]));
+    state
+        .update_project_engram_settings(&project, settings(&state, &project, false))
+        .expect("an unsent checkpoint must not veto containment");
+    let cause = degraded_checkpoint_cause(&state, &session);
+    assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+    assert!(cause.transport_unsent, "{cause:?}");
+    // Strict reset: the refusal text says it was not sent.
+    let (state, project, session, _root, _receiver) = fixture();
+    ungated(&state, &project);
+    install_control_only_transport(&state, ScriptedEngramControlTransport::new([unsent()]));
+    let error = state
+        .update_project_engram_settings(&project, settings(&state, &project, true))
+        .err()
+        .expect("an unsettled strict reset must be refused");
+    assert!(error.message.contains(&session), "{}", error.message);
+    assert!(error.message.contains("(not sent)"), "{}", error.message);
+    assert!(!error.message.contains("outcome unknown"), "{}", error.message);
+}
+
+#[test]
+fn project_reset_checkpoint_without_a_valid_reply_survives_gating_restore() {
+    let lost = || {
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport(
+            "the reply was lost after the request was written",
+        )))
+    };
+    // Containment: the Degraded card's cause leaves the outcome unknown.
+    let (state, project, session, _root, _receiver) = fixture();
+    install_control_only_transport(&state, ScriptedEngramControlTransport::new([lost()]));
+    state
+        .update_project_engram_settings(&project, settings(&state, &project, false))
+        .expect("a lost reply must not veto containment");
+    let cause = degraded_checkpoint_cause(&state, &session);
+    assert_eq!(cause.remote_application, EngramRemoteApplication::Unknown);
+    assert!(!cause.transport_unsent, "{cause:?}");
+    // The first strict reset refuses. Restoring the same authority's gating
+    // afterward saves settings without replaying or settling the original duty.
+    let (state, project, session, _root, receiver) = fixture();
+    ungated(&state, &project);
+    queue_test_engram_prompt(&state, &session, "held behind original checkpoint",
+        QueuedPromptSource::User, None);
+    let transport = ScriptedEngramControlTransport::new([lost()]);
+    install_control_only_transport(&state, transport.clone());
+    let error = state
+        .update_project_engram_settings(&project, settings(&state, &project, true))
+        .err()
+        .expect("the first unsettled strict reset must be refused");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.kind, Some(ApiErrorKind::EngramProjectResetRefused));
+    assert!(error.message.contains(&session), "{}", error.message);
+    assert!(error.message.contains(
+        "outcome unknown; the original checkpoint remains unresolved; recovery must retain its identical request"
+    ), "{}", error.message);
+    assert!(!error.message.contains("retained-token"));
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].request["operation"], "turn_checkpoint");
+    let (original, duty, head, paused) = {
+        let inner = state.inner.lock().unwrap();
+        assert!(!inner.find_project(&project).unwrap().engram.as_ref().unwrap().turn_gated_control);
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        let original = record.engram.checkpoint_operation.clone().unwrap();
+        assert_eq!(requests[0].request, serde_json::to_value(&original.original.request).unwrap());
+        assert_eq!(requests[0].connection, original.original.connection);
+        assert_eq!(requests[0].request["idempotency_key"],
+            format!("termal-checkpoint:{session}:retained-grant:exit"));
+        assert!(matches!(original.attempts.last().unwrap().result,
+            Some(EngramCheckpointAttemptResult::Unknown { .. })));
+        let duty = engram_session_obligation_locked(&inner, &session).unwrap().clone();
+        assert_eq!(duty.kind, EngramSessionObligationKind::ExistingCheckpoint);
+        assert_ne!(duty.phase, EngramSessionObligationPhase::Confirmed);
+        (
+            original,
+            duty,
+            record.queued_prompts.front().cloned().unwrap(),
+            (record.orchestrator_auto_dispatch_blocked, record.engram.operator_paused),
+        )
+    };
+    state.update_project_engram_settings(&project, settings(&state, &project, true))
+        .expect("same-authority gating restore must retain the Unknown duty");
+    let owner = {
+        let inner = state.inner.lock().unwrap();
+        assert!(inner.find_project(&project).unwrap().engram.as_ref().unwrap().turn_gated_control);
+        assert!(!inner.engram_project_resets.contains(&project));
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(!record.engram.project_reset_in_progress);
+        assert_eq!((record.orchestrator_auto_dispatch_blocked, record.engram.operator_paused), paused);
+        assert_eq!(serde_json::to_value(record.queued_prompts.front()).unwrap(), serde_json::to_value(&head).unwrap());
+        assert_eq!(serde_json::to_value(&record.engram.checkpoint_operation).unwrap(), serde_json::to_value(&original).unwrap());
+        assert_eq!(serde_json::to_value(engram_session_obligation_locked(&inner, &session)).unwrap(), serde_json::to_value(&duty).unwrap());
+        assert!(require_no_engram_local_dispatch_obligation(&inner, &session).is_err());
+        EngramQueuedAdmissionOwner::capture(record).unwrap()
+    };
+    assert!(state.dispatch_next_queued_turn_for_activation(&session, owner).unwrap().is_none());
+    assert!(state.dispatch_turn(&session, prompt()).is_err());
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(transport.requests().len(), 1, "restore and refused dispatch add no checkpoint or bind");
+    state.shutdown_persist_blocking();
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(loaded.find_project(&project).unwrap().engram.as_ref().unwrap().turn_gated_control);
+    let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
+    assert_eq!(record.engram.active_grant_id.as_deref(), Some("retained-grant"));
+    assert_eq!(record.engram.routing_token.as_deref(), Some("retained-token"));
+    let canonical = selected_checkpoint_operation(&loaded.engram_session_obligations,
+        record.engram.checkpoint_operation.as_ref().unwrap()).unwrap();
+    assert_eq!(serde_json::to_value(canonical).unwrap(), serde_json::to_value(&original).unwrap());
+    assert_eq!(serde_json::to_value(engram_session_obligation_locked(&loaded, &session)).unwrap(), serde_json::to_value(&duty).unwrap());
+    assert!(require_no_engram_local_dispatch_obligation(&loaded, &session).is_err());
+}
+
+#[test]
+fn project_reset_checkpoint_outcome_reads_the_failure_origin_not_its_kind() {
+    // A host-local refusal before any request was built is not sent.
+    let mut local = EngramTransportError::local_state(
+        "Engram project reset cannot checkpoint without an active grant",
+    );
+    local.causal_failure = Some(EngramCausalFailure::local(
+        &local,
+        "turn_checkpoint",
+        "TermAl host project reset",
+    ));
+    let failure = engram_project_checkpoint_failure("p", "s", &local);
+    assert!(failure.ends_with("(not sent)"), "{failure}");
+    // The same kind without a recorded origin is not taken as proof.
+    let bare = EngramTransportError::local_state("a local write after the reply failed");
+    let failure = engram_project_checkpoint_failure("p", "s", &bare);
+    assert!(
+        failure.ends_with("(outcome unknown; the original checkpoint remains unresolved; recovery must retain its identical request)"),
+        "{failure}"
+    );
+    // A known no-change outcome must not be described as unknown or promise
+    // that merely saving settings triggers another checkpoint.
+    local.causal_failure.as_mut().unwrap().remote_application = EngramRemoteApplication::NotApplied;
+    let failure = engram_project_checkpoint_failure("p", "s", &local);
+    assert!(failure.ends_with("(not applied; recovery must retain the original checkpoint request)"), "{failure}");
+    assert!(!failure.contains("outcome unknown"), "{failure}");
+    assert!(!failure.contains("next reset"), "{failure}");
+}
+
 #[test]
 fn project_containment_strict_reset_error_keeps_refusal_code() {
     for code in [

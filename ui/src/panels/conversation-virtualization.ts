@@ -79,9 +79,10 @@ const MAX_ESTIMATED_TEXT_MESSAGE_HEIGHT = 4800;
 // plus `.command-success-summary`; status and command/output length do not
 // affect the collapsed presentation.
 const ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX = 120;
-// A routine Engram control card renders collapsed (meta row, stage label and
-// title) until the reader expands it; its measurement replaces this estimate.
-const ESTIMATED_COLLAPSED_ENGRAM_CONTROL_HEIGHT_PX = 120;
+// A routine Engram control card renders collapsed as one row (its meta row
+// carrying stage and title, `.engram-control-compact`) until the reader
+// expands it; its measurement replaces this estimate.
+const ESTIMATED_COLLAPSED_ENGRAM_CONTROL_HEIGHT_PX = 48;
 // Production CSS measured 127.39 px in headless Chrome at default density,
 // Avenir Next, and the 34rem user-bubble width. Round up by ~13% so an unseen
 // card is slightly more likely to shrink than grow when its real measurement

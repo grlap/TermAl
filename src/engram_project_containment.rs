@@ -12,16 +12,31 @@ fn engram_containment_error_code<'a>(code: Option<&'a str>, fallback: &'a str) -
     .unwrap_or(fallback)
 }
 
+/// Where a project-reset checkpoint failure leaves the request, read from the
+/// causal origin attached where it failed, never from the error kind: "not
+/// sent" when it was never built or the transport proved it unsent, "not
+/// applied" for a certified no-change answer, "refused" for an explicit
+/// refusal, and otherwise "unresolved" (dispatched without a valid reply).
+fn engram_project_checkpoint_outcome(error: &EngramTransportError) -> &'static str {
+    match error.causal_failure.as_ref().map(|cause| &cause.remote_application) {
+        Some(EngramRemoteApplication::NotStarted) => "not_sent",
+        Some(EngramRemoteApplication::NotApplied) => "not_applied",
+        Some(EngramRemoteApplication::Refused) => "refused",
+        Some(EngramRemoteApplication::Unknown) | None => "unresolved",
+    }
+}
+
 fn engram_project_checkpoint_failure(
     project_id: &str,
     session_id: &str,
     error: &EngramTransportError,
 ) -> String {
     let code = engram_containment_error_code(error.code.as_deref(), "checkpoint_failed");
+    let outcome = engram_project_checkpoint_outcome(error);
     // Log only the operation identity and typed code, not a routing token,
     // frozen request, or transport message that could contain private output.
     eprintln!(
-        "engram> project={project_id} session={session_id} operation=turn_checkpoint outcome=unresolved code={code}"
+        "engram> project={project_id} session={session_id} operation=turn_checkpoint outcome={outcome} code={code}"
     );
     let summary = match error.kind {
         EngramTransportErrorKind::LocalState => "Engram checkpoint local ownership was unavailable",
@@ -31,7 +46,13 @@ fn engram_project_checkpoint_failure(
         EngramTransportErrorKind::Protocol => "Engram checkpoint response was invalid",
         EngramTransportErrorKind::Backoff => "Engram checkpoint transport is in backoff",
     };
-    format!("session {session_id}: operation=turn_checkpoint code={code}: {summary}")
+    let disclosure = match outcome {
+        "not_sent" => "not sent",
+        "unresolved" => "outcome unknown; the original checkpoint remains unresolved; recovery must retain its identical request",
+        "not_applied" => "not applied; recovery must retain the original checkpoint request",
+        _ => "refused",
+    };
+    format!("session {session_id}: operation=turn_checkpoint code={code}: {summary} ({disclosure})")
 }
 
 struct EngramContainmentAttempt {
@@ -348,9 +369,16 @@ impl AppState {
                 None
             };
             let mut result = if remaining.is_zero() {
-                Err(EngramTransportError::deadline(
+                // Exhausted before any send: the checkpoint was never dispatched.
+                let mut error = EngramTransportError::deadline(
                     "project containment settlement budget exhausted",
-                ))
+                );
+                error.causal_failure = Some(EngramCausalFailure::local(
+                    &error,
+                    "turn_checkpoint",
+                    "TermAl host project containment",
+                ));
+                Err(error)
             } else if attempt.checkpoint_owned {
                 target.project_reset_checkpoint_receipt_off_lock()
             } else {

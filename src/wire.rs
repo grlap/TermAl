@@ -107,6 +107,8 @@ enum ApiErrorKind {
     GitDocumentTooLarge,
     /// A local session lookup or remote-session-target resolution missed.
     LocalSessionMissing,
+    /// A known launch lacks durable identity needed to admit a run wait.
+    TestRunWaitRegistrationUnavailable,
     /// A queued Engram operation is still durably anchored, but the host
     /// could not establish whether its transcript promotion was persisted.
     /// Callers must report the error without terminalizing delegated work.

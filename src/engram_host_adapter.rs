@@ -2227,6 +2227,17 @@ fn run_engram_json_command(
     engram_decode_slice(&output.stdout, &format!("invalid Engram {label} response"))
 }
 
+/// Whether `run_engram_cli_command` failed before any Engram process ran, so
+/// its command provably never reached Engram: the launch was refused while
+/// the command was built (a `local_state` launch-path refusal or a
+/// `spawn_failed` program resolution in `engram_host_launch.rs`) or at the
+/// spawn itself (`spawn_failed`). Every later failure, from attaching the
+/// process tree to reading its output, is a transport or deadline error with
+/// an unknown outcome: on Unix the child already runs before the attach.
+fn engram_cli_command_never_ran(error: &EngramTransportError) -> bool {
+    error.process_never_started || error.kind == EngramTransportErrorKind::LocalState
+}
+
 fn run_engram_cli_command(
     connection: &EngramConnectionConfig,
     args: &[&str],
@@ -3771,13 +3782,14 @@ impl EngramBindingTarget {
 
     fn project_reset_checkpoint_request(&self,
     ) -> Result<EngramControlRequest, EngramTransportError> {
+        // Nothing has been sent: these are host-local refusals.
         let routing_token = self.routing_token.as_ref().ok_or_else(|| {
-            EngramTransportError::transport(
+            EngramTransportError::local_state(
                 "Engram project reset cannot checkpoint without a routing token",
             )
         })?;
         let grant_id = self.active_grant_id.as_ref().ok_or_else(|| {
-            EngramTransportError::transport(
+            EngramTransportError::local_state(
                 "Engram project reset cannot checkpoint without an active grant",
             )
         })?;
@@ -3802,29 +3814,48 @@ impl EngramBindingTarget {
         self.project_reset_checkpoint_receipt_off_lock().map(|_| ())
     }
 
+    /// Every failure carries its causal origin (`engram_project_checkpoint_outcome`):
+    /// a request never built or a transport that proved it unsent is "not
+    /// started"; a dispatched call without a valid reply is "unknown", and the
+    /// original request stays available for identical replay by its recovery owner.
     fn project_reset_checkpoint_receipt_off_lock(&self) -> Result<Value, EngramTransportError> {
-        let request = self.project_reset_checkpoint_request()?;
+        let request = self.project_reset_checkpoint_request().map_err(|mut error| {
+            error.causal_failure = Some(EngramCausalFailure::local(
+                &error,
+                "turn_checkpoint",
+                "TermAl host project reset",
+            ));
+            error
+        })?;
+        let with_cause = |mut error: EngramTransportError| {
+            error.causal_failure = Some(EngramCausalFailure::request(&error, &request));
+            error
+        };
         let grant_id = self.active_grant_id.as_ref().expect("validated checkpoint grant");
-        let response = self.adapter.request(
-            &self.connection,
-            &request,
-            self.settings.call_timeout())?;
-        match parse_engram_result::<EngramTurnCheckpointResponse>(response.clone())? {
+        let response = self
+            .adapter
+            .request(&self.connection, &request, self.settings.call_timeout())
+            .map_err(with_cause)?;
+        match parse_engram_result::<EngramTurnCheckpointResponse>(response.clone())
+            .map_err(with_cause)?
+        {
             EngramTurnCheckpointResponse::Checkpointed { receipt }
                 if receipt.grant_id == *grant_id =>
             {
                 Ok(response)
             }
-            EngramTurnCheckpointResponse::Checkpointed { .. } => {
-                Err(EngramTransportError::protocol(
+            EngramTurnCheckpointResponse::Checkpointed { .. } => Err(with_cause(
+                EngramTransportError::protocol(
                     "Engram project-reset checkpoint receipt grant id does not match",
-                ))
-            }
+                ),
+            )),
             EngramTurnCheckpointResponse::Refuse { code } => {
-                Err(EngramTransportError::remote(EngramControlErrorBody {
-                    code,
+                let mut error = EngramTransportError::remote(EngramControlErrorBody {
+                    code: code.clone(),
                     message: "Engram refused the project-reset checkpoint".to_owned(),
-                }))
+                });
+                error.causal_failure = Some(EngramCausalFailure::request_refusal(&request, &code));
+                Err(error)
             }
         }
     }
@@ -5635,9 +5666,11 @@ impl AppState {
                 cause.turn_generation = Some(owner.active_turn_generation);
             }
         }
-        // Retain the complete operation while the same binding/grant still
-        // owns it. A subsequent unknown failure keeps its request for status
-        // reconciliation, but cannot authorize another automatic replay.
+        // Retain the complete operation in memory while the same
+        // binding/grant still owns it. The durable record of this send is the
+        // session's checkpoint operation, whose original request, key and
+        // report original-checkpoint result recovery replays exactly, after a
+        // restart too (`engram_checkpoint_result_recovery.rs`).
         if let (Some(target), Some(request), Err(error)) = (&target, &checkpoint_request, &outcome)
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -5681,17 +5714,21 @@ impl AppState {
             }
             Err(error) => self.record_engram_transport_failure(session_id, error),
         }
-        // A terminal control-startup reply answered the frame before
-        // dispatching it, so Engram judged no report: it is kept for the
-        // next close, as after a lost call.
+        // Only a definitive refusal drops the report; any other Remote answer
+        // leaves its application unresolved, and the report stays with the
+        // retained request for an exact replay. A terminal control-startup
+        // reply answered the frame before dispatching it, so Engram judged no
+        // report: it is never a refusal (`engram_checkpoint_refuses_report`),
+        // and the report is kept for the next close, as after a lost call.
         if let Err(error) = &outcome
-            && error.kind == EngramTransportErrorKind::Remote
-            && error.invocation_application() != EngramInvocationApplication::CertifiedNotApplied
-            && !error.is_terminal_control_startup()
             && !engram_status_error_requires_fresh_bind(error)
             && !report.is_empty()
         {
-            self.forget_refused_engram_turn_report(session_id, &grant_id, error.code.as_deref(), false);
+            if engram_checkpoint_refuses_report(error) {
+                self.forget_refused_engram_turn_report(session_id, &grant_id, error.code.as_deref(), false);
+            } else if engram_checkpoint_leaves_report_unresolved(error) {
+                log_unresolved_engram_turn_report(session_id, error);
+            }
         }
         let failure_detail = outcome.as_ref().err().map(|error| format!("{error:#}"));
         let attempt_result = match &outcome {
@@ -8726,15 +8763,25 @@ impl AppState {
                         // A refused report is dropped before anything else can
                         // end this attempt, a lost queue owner included, so
                         // no later recovery resends it.
-                        if !report.is_empty()
-                            && let Some(code) = engram_recovery_checkpoint_refusal(&checkpoint)
-                        {
-                            self.forget_refused_engram_turn_report(
-                                &target.connection.session_id,
-                                grant_id,
-                                code,
-                                true,
-                            );
+                        // Any other Remote answer leaves the report's
+                        // application unresolved, so it is kept.
+                        if !report.is_empty() {
+                            if let Some(code) = engram_recovery_checkpoint_refusal(&checkpoint) {
+                                self.forget_refused_engram_turn_report(
+                                    &target.connection.session_id,
+                                    grant_id,
+                                    code,
+                                    true,
+                                );
+                            } else if let Err(error) = &checkpoint
+                                && engram_checkpoint_leaves_report_unresolved(error)
+                                && !engram_grant_was_issued_but_not_begun(error)
+                            {
+                                log_unresolved_engram_turn_report(
+                                    &target.connection.session_id,
+                                    error,
+                                );
+                            }
                         }
                         if let Some(owner) = owner {
                             self.require_queued_engram_owner(

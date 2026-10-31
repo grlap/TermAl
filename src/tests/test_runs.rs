@@ -111,6 +111,346 @@ fn passed_results() -> Value {
     })
 }
 
+async fn raw_results_refusal(app: &Router, run_id: &str) -> (StatusCode, Value) {
+    let response = request_response(
+        app,
+        Request::builder()
+            .uri(format!("/api/test-runs/{run_id}/results"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let status = response.status();
+    assert_eq!(response.headers()["content-type"], "application/json");
+    assert!(!response.headers().contains_key("x-termal-results-sha256"));
+    let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+    let body = serde_json::from_slice(&bytes).expect("named refusal is small JSON, not file bytes");
+    (status, body)
+}
+
+// The transport response is evidence: preserve its original bytes rather
+// than reserializing the parsed TestRunDetail or a retained summary.
+#[tokio::test]
+async fn raw_results_route_preserves_bytes_digest_size_and_read_only_state() {
+    let fixture = RunFixture::new("raw-results-bytes");
+    let run_id = "test-raw-results-bytes";
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    let original = format!(
+        "{{\r\n  \"runId\":\"{run_id}\", \"state\":\"passed\", \"exitCode\":0,\r\n  \"note\":\"zażółć\", \"duplicate\":1, \"duplicate\":2\r\n}}\r\n"
+    )
+    .into_bytes();
+    fs::write(run_dir.join("results.json"), &original).unwrap();
+    fixture.refresh(&[]);
+    let before = serde_json::to_value(fixture.summaries()).unwrap();
+    let before_request = fs::read(run_dir.join("request.json")).unwrap();
+    let mut deltas = fixture.state.subscribe_delta_events();
+    let app = app_router(fixture.state.clone());
+
+    let response = request_response(
+        &app,
+        Request::builder()
+            .uri(format!("/api/test-runs/{run_id}/results"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    assert_eq!(
+        response.headers()["content-length"].to_str().unwrap(),
+        original.len().to_string()
+    );
+    assert_eq!(
+        response.headers()["x-termal-results-sha256"].to_str().unwrap(),
+        sha256_hex(&original)
+    );
+    let body = to_bytes(response.into_body(), 1024 * 1024 + 1).await.unwrap();
+    assert_eq!(body.as_ref(), original.as_slice(), "no JSON reserialization");
+    assert_eq!(fs::read(run_dir.join("results.json")).unwrap(), original);
+    assert_eq!(fs::read(run_dir.join("request.json")).unwrap(), before_request);
+    assert_eq!(serde_json::to_value(fixture.summaries()).unwrap(), before);
+    assert!(drain_test_run_deltas(&mut deltas).is_empty(), "GET must not publish a mutation");
+    assert_eq!(fs::read_dir(&run_dir).unwrap().count(), 2, "GET creates no artifacts");
+}
+
+#[tokio::test]
+async fn raw_results_route_unknown_run_has_a_named_not_found_error() {
+    let fixture = RunFixture::new("raw-results-unknown");
+    let app = app_router(fixture.state.clone());
+    let (status, body) = raw_results_refusal(&app, "test-no-such-run").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "test_run_results_unknown", "{body}");
+    assert!(!fixture.runs_dir().exists(), "unknown lookup must not allocate a run");
+}
+
+#[tokio::test]
+async fn raw_results_route_accepts_exactly_one_mib_without_truncating() {
+    let fixture = RunFixture::new("raw-results-boundary");
+    let run_id = "test-raw-results-boundary";
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    let mut original = fs::read(run_dir.join("results.json")).unwrap();
+    original.resize(1024 * 1024, b' ');
+    fs::write(run_dir.join("results.json"), &original).unwrap();
+    fixture.refresh(&[]);
+    let response = request_response(
+        &app_router(fixture.state.clone()),
+        Request::builder()
+            .uri(format!("/api/test-runs/{run_id}/results"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-length"], "1048576");
+    assert_eq!(
+        response.headers()["x-termal-results-sha256"].to_str().unwrap(),
+        sha256_hex(&original)
+    );
+    assert_eq!(
+        to_bytes(response.into_body(), 1024 * 1024 + 1).await.unwrap().as_ref(),
+        original.as_slice()
+    );
+}
+
+#[tokio::test]
+async fn raw_results_route_missing_file_is_named_unknown_without_creating_it() {
+    let fixture = RunFixture::new("raw-results-missing");
+    let run_id = "test-raw-results-missing";
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        None,
+    );
+    fixture.refresh(&[]);
+    assert!(fixture.state.test_run_entry(run_id).is_some());
+    let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), run_id).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "test_run_results_unknown", "{body}");
+    assert!(!run_dir.join("results.json").exists());
+}
+
+#[tokio::test]
+async fn raw_results_route_does_not_rescan_or_serve_an_unindexed_unregistered_directory() {
+    let fixture = RunFixture::new("raw-results-unindexed");
+    let run_id = "test-raw-results-unindexed";
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    assert!(fixture.summaries().is_empty());
+    let before = fs::read(run_dir.join("results.json")).unwrap();
+    let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), run_id).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "test_run_results_unknown", "{body}");
+    assert!(fixture.summaries().is_empty(), "raw lookup must not rescan the index");
+    assert_eq!(fs::read(run_dir.join("results.json")).unwrap(), before);
+}
+
+// The digest and size describe the bytes on the wire even for a client that
+// accepts gzip: the router's compression layer must not encode them.
+#[tokio::test]
+async fn raw_results_route_is_never_compressed_for_a_gzip_client() {
+    let fixture = RunFixture::new("raw-results-gzip");
+    let run_id = "test-raw-results-gzip";
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    // Large and repetitive enough that the compression predicate would act.
+    let original = format!("{{\"runId\":\"{run_id}\",\"pad\":\"{}\"}}", "x".repeat(64 * 1024)).into_bytes();
+    fs::write(run_dir.join("results.json"), &original).unwrap();
+    fixture.refresh(&[]);
+    let response = request_response(
+        &app_router(fixture.state.clone()),
+        Request::builder()
+            .uri(format!("/api/test-runs/{run_id}/results"))
+            .header("accept-encoding", "gzip, deflate, br")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-encoding"], "identity");
+    assert_eq!(response.headers()["content-length"], original.len().to_string().as_str());
+    assert_eq!(
+        response.headers()["x-termal-results-sha256"].to_str().unwrap(),
+        sha256_hex(&original)
+    );
+    let body = to_bytes(response.into_body(), 1024 * 1024 + 1).await.unwrap();
+    assert_eq!(body.as_ref(), original.as_slice());
+}
+
+// The route serves a regular file only: a directory, link or FIFO in its place
+// is refused by name before anything is opened, never followed or waited on.
+async fn raw_results_route_refuses_entry(label: &str, replace: impl FnOnce(&FsPath)) {
+    let fixture = RunFixture::new(label);
+    let run_id = format!("test-{label}");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        &run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    fixture.refresh(&[]);
+    let results = run_dir.join("results.json");
+    fs::remove_file(&results).unwrap();
+    replace(&results);
+    let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), &run_id).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "test_run_results_not_a_file", "{body}");
+}
+
+#[tokio::test]
+async fn raw_results_route_refuses_a_directory_in_place_of_results() {
+    raw_results_route_refuses_entry("raw-results-directory", |path| fs::create_dir(path).unwrap()).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn raw_results_route_refuses_a_link_to_a_file_outside_the_run() {
+    raw_results_route_refuses_entry("raw-results-link", |path| {
+        let outside = path.parent().unwrap().parent().unwrap().join("outside-secret.json");
+        fs::write(&outside, b"{\"secret\":true}").unwrap();
+        std::os::unix::fs::symlink(&outside, path).unwrap();
+    })
+    .await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn raw_results_route_refuses_a_fifo_without_blocking() {
+    raw_results_route_refuses_entry("raw-results-fifo", |path| {
+        let status = Command::new("mkfifo").arg(path).status().unwrap();
+        assert!(status.success());
+    })
+    .await;
+}
+
+// A racing writer that swaps in a FIFO or a link after the entry was inspected
+// is refused as a changed file; the open neither waits for a FIFO writer nor
+// follows the link.
+#[cfg(unix)]
+async fn raw_results_route_refuses_swap_at_open(label: &str, swap: fn(&FsPath)) {
+    let fixture = RunFixture::new(label);
+    let run_id = format!("test-{label}");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        &run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    fixture.refresh(&[]);
+    let results = run_dir.join("results.json");
+    install_test_review_freeze_before_open(
+        PathBuf::from(&run_id).join("results.json"),
+        move || {
+            fs::remove_file(&results).unwrap();
+            swap(&results);
+        },
+    );
+    let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), &run_id).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "test_run_results_changed", "{body}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn raw_results_route_refuses_a_fifo_swapped_in_at_open_without_blocking() {
+    raw_results_route_refuses_swap_at_open("raw-results-fifo-race", |path| {
+        let status = Command::new("mkfifo").arg(path).status().unwrap();
+        assert!(status.success());
+    })
+    .await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn raw_results_route_refuses_a_link_swapped_in_at_open() {
+    raw_results_route_refuses_swap_at_open("raw-results-link-race", |path| {
+        let outside = path.parent().unwrap().parent().unwrap().join("outside-race.json");
+        fs::write(&outside, b"{\"secret\":true}").unwrap();
+        std::os::unix::fs::symlink(&outside, path).unwrap();
+    })
+    .await;
+}
+
+// A run directory redirected after indexing (moved aside and replaced by a
+// link or junction to another directory holding a results.json) is refused,
+// never followed.
+#[tokio::test]
+async fn raw_results_route_refuses_a_run_directory_redirected_after_indexing() {
+    let fixture = RunFixture::new("raw-results-redirected");
+    let run_id = "test-raw-results-redirected";
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    fixture.refresh(&[]);
+    let elsewhere = fixture.runs_dir().with_file_name("raw-results-elsewhere");
+    fs::rename(&run_dir, &elsewhere).unwrap();
+    fs::write(elsewhere.join("results.json"), b"{\"elsewhere\":true}").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&elsewhere, &run_dir).unwrap();
+    #[cfg(windows)]
+    {
+        // A junction needs no symlink privilege. The crate's guarded Command
+        // creates the process, as every host process must.
+        let output = Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&run_dir)
+            .arg(&elsewhere)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "the junction should be created: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), run_id).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "test_run_results_redirected", "{body}");
+}
+
+#[tokio::test]
+async fn raw_results_route_refuses_above_one_mib_with_named_413() {
+    let fixture = RunFixture::new("raw-results-oversize");
+    let run_id = "test-raw-results-oversize";
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        run_id,
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    let mut original = fs::read(run_dir.join("results.json")).unwrap();
+    original.resize(1024 * 1024 + 1, b' ');
+    fs::write(run_dir.join("results.json"), &original).unwrap();
+    fixture.refresh(&[]);
+    let before = serde_json::to_value(fixture.summaries()).unwrap();
+    let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), run_id).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+    assert_eq!(body["code"], "test_run_results_too_large", "{body}");
+    assert_eq!(fs::read(run_dir.join("results.json")).unwrap(), original);
+    assert_eq!(serde_json::to_value(fixture.summaries()).unwrap(), before);
+}
+
 fn running_results(pid: Option<u32>) -> Value {
     let mut results = json!({
         "state": "running",

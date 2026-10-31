@@ -161,7 +161,9 @@ fn checkpoint_collection_cut_survives_deferral(keep_earlier_row: bool, cold_cach
     writer.batch.accept(PersistRequest::Fence(Box::new(fence)));
     let write = persist_delta_with_fences(&mut writer.cache, &writer.path, &delta, &mut writer.batch);
     assert!(write.as_ref().unwrap_err().to_string().contains("incoherent checkpoint persistence cut"));
-    assert!(matches!(waiter.wait(), Err(PersistFenceError::WriteFailed(_))));
+    // The refused cut is a collection race the next tick repairs, so the
+    // fence stays pending for that retry instead of failing with it.
+    assert!(waiter.completion.poll_at(waiter.now()).is_none(), "the refused cut keeps its fence pending");
     assert_eq!(checkpoint_sql_cut(&writer.path), before, "units, rows and generation roll back together");
     assert_eq!(delta.metadata.metadata_capture.applied.load(std::sync::atomic::Ordering::Acquire), 0);
     assert_eq!(delta.metadata.metadata_capture.known.load(std::sync::atomic::Ordering::Acquire),
@@ -174,6 +176,7 @@ fn checkpoint_collection_cut_survives_deferral(keep_earlier_row: bool, cold_cach
     // Retry through the existing collector with the old watermark, not the
     // rejected immutable cut. The next image must contain the accepted reply.
     writer.write();
+    assert!(matches!(waiter.wait(), Ok(())), "the coherent retry resolves the retained fence");
     assert_checkpoint_row_matches_ledger(&state, &session);
     let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
     let operation = loaded.sessions[loaded.find_session_index(&session).unwrap()]

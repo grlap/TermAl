@@ -1957,6 +1957,8 @@ fn test_run_wait_record(id: &str, session_id: &str) -> TestRunWaitRecord {
             request_identity: None,
             expected_fingerprint: None,
             locator_identity: None,
+            registration_backed: false,
+            registration_progress: TestRunWaitRegistrationProgress::default(),
         }],
     }
 }

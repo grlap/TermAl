@@ -240,14 +240,56 @@ fn control_non_application_recovery_checkpoint_keeps_report_admission_distinct()
             "{code}: a recovery closer must keep the report for its exact retry"
         );
     }
-    let refusal: std::result::Result<EngramTurnCheckpointResponse, EngramTransportError> =
-        Err(EngramTransportError::remote(EngramControlErrorBody {
-            code: "summary_redacted".to_owned(),
-            message: "report payload refused".to_owned(),
-        }));
+    for code in ENGRAM_CHECKPOINT_REPORT_REFUSALS {
+        let refusal: std::result::Result<EngramTurnCheckpointResponse, EngramTransportError> =
+            Err(EngramTransportError::remote(EngramControlErrorBody {
+                code: code.to_owned(),
+                message: "checkpoint request refused".to_owned(),
+            }));
+        assert_eq!(
+            engram_recovery_checkpoint_refusal(&refusal),
+            Some(Some(code)),
+            "{code}: a definitive refusal retains its existing fallback policy"
+        );
+    }
+    for code in ["storage_error", "summary_redacted", "a_code_this_build_does_not_know"] {
+        let unresolved: std::result::Result<EngramTurnCheckpointResponse, EngramTransportError> =
+            Err(EngramTransportError::remote(EngramControlErrorBody {
+                code: code.to_owned(),
+                message: "outcome not determined".to_owned(),
+            }));
+        assert_eq!(
+            engram_recovery_checkpoint_refusal(&unresolved),
+            None,
+            "{code}: an unlisted Remote answer leaves the report unresolved, so it is kept"
+        );
+        let Err(error) = &unresolved else { unreachable!() };
+        assert!(engram_checkpoint_leaves_report_unresolved(error), "{code}");
+    }
+    let refuse: std::result::Result<EngramTurnCheckpointResponse, EngramTransportError> =
+        Ok(EngramTurnCheckpointResponse::Refuse { code: "summary_redacted".to_owned() });
     assert_eq!(
-        engram_recovery_checkpoint_refusal(&refusal),
+        engram_recovery_checkpoint_refusal(&refuse),
         Some(Some("summary_redacted")),
-        "an actual report refusal retains its existing fallback policy"
+        "an explicit refuse answer is definitive whatever its code"
     );
+    let mut explicit = EngramTransportError::remote(EngramControlErrorBody {
+        code: "a_code_this_build_does_not_know".to_owned(),
+        message: "Engram refused the turn checkpoint".to_owned(),
+    });
+    explicit.causal_failure = Some(EngramCausalFailure::request_refusal(
+        &EngramControlRequest::TurnCheckpoint {
+            routing_token: "token".to_owned(),
+            grant_id: "grant".to_owned(),
+            next_intent: EngramNextIntent::Wait,
+            report: EngramTurnReport::default(),
+            idempotency_key: "key".to_owned(),
+        },
+        "a_code_this_build_does_not_know",
+    ));
+    assert!(
+        engram_checkpoint_refuses_report(&explicit),
+        "the closing path's explicit refuse answer, carried as an error, is definitive"
+    );
+    assert!(!engram_checkpoint_leaves_report_unresolved(&explicit));
 }

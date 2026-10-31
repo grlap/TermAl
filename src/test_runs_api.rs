@@ -1,6 +1,7 @@
 // HTTP routes for test runs (docs/features/test-runs.md): the read-only run
-// list, one run's detail and a bounded stage-log tail (slice 1), and
-// registering a run wait (slice 2). Owns request parsing and the index
+// list, one run's detail and a bounded stage-log tail (slice 1), registering
+// a run wait (slice 2), and an indexed run's raw results.json bytes with
+// their digest (a diagnostic read, never credit). Owns request parsing and the index
 // lookups. Does not own reading run directories (`test_runs_disk.rs`), the
 // index itself (`test_runs.rs`) or run waits (`test_run_waits.rs`), and never
 // starts, cancels or reruns a run.
@@ -238,6 +239,177 @@ fn get_test_run_observed(
         limitations: Some("The durable registration is retained; current launcher artifacts are unavailable.".to_owned()),
         ..TestRunDetail::default()
     } }))
+}
+
+/// The largest results.json the raw results route serves.
+const TEST_RUN_RAW_RESULTS_MAX_BYTES: u64 = 1024 * 1024;
+
+/// A refusal from the raw results route: a small JSON body with a named code,
+/// never file bytes, and no digest header.
+fn test_run_raw_results_refusal(status: StatusCode, code: &str, message: &str) -> Response {
+    (status, Json(json!({ "error": message, "code": code }))).into_response()
+}
+
+/// Serves an indexed run's results.json exactly as stored, with its SHA-256
+/// in `x-termal-results-sha256` and its size as the content length. It is a
+/// diagnostic read: it never parses, rewrites or creates a file, never rescans
+/// the index, and grants no credit. A run the index does not know, or one with
+/// no results.json, is `test_run_results_unknown` (404); a link, FIFO or other
+/// non-regular entry is `test_run_results_not_a_file` (422); a file above
+/// 1 MiB is `test_run_results_too_large` (413, as the route's acceptance
+/// criterion names it); a file that changes while it is read is
+/// `test_run_results_changed` (409).
+async fn get_test_run_results(
+    State(state): State<AppState>,
+    AxumPath(run_id): AxumPath<String>,
+) -> Response {
+    // Only the indexed run's directory: no summary projection under the lock.
+    let run_dir = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.test_runs.find(&run_id).map(|entry| entry.disk.run_dir.clone())
+    };
+    let Some(run_dir) = run_dir else {
+        return test_run_raw_results_refusal(
+            StatusCode::NOT_FOUND,
+            "test_run_results_unknown",
+            "unknown test run",
+        );
+    };
+    let read = tokio::task::spawn_blocking(move || {
+        // The run directory and its review-runs parent must still be plain
+        // directories, before and after the read: a run redirected through a
+        // link or junction after it was indexed is refused, never followed.
+        test_run_raw_results_directories(&run_dir)?;
+        let bytes = test_run_raw_results(&run_dir.join("results.json"))?;
+        test_run_raw_results_directories(&run_dir)?;
+        Ok(bytes)
+    })
+    .await;
+    match read {
+        Ok(Ok(bytes)) => {
+            let digest = sha256_hex(&bytes);
+            // The digest and the size describe these exact bytes on the wire.
+            // `Content-Encoding: identity` keeps the router's compression
+            // layer, which never recompresses an encoded response, from
+            // gzipping them or dropping the length.
+            (
+                StatusCode::OK,
+                [
+                    (axum::http::header::CONTENT_TYPE, "application/json".to_owned()),
+                    (axum::http::header::CONTENT_ENCODING, "identity".to_owned()),
+                    (axum::http::header::CONTENT_LENGTH, bytes.len().to_string()),
+                    (
+                        axum::http::HeaderName::from_static("x-termal-results-sha256"),
+                        digest,
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Ok(Err(refusal)) => refusal,
+        Err(error) => test_run_raw_results_refusal(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "test_run_results_unreadable",
+            &format!("results read failed: {error}"),
+        ),
+    }
+}
+
+/// The indexed run directory and its parent (`review-runs`), inspected
+/// without following: each must be a directory and not a link, symlink or
+/// Windows junction. Path inspections around one read are best effort, not
+/// containment: a swap restored between them is not caught, which the
+/// route's diagnostic-only contract allows (docs/test.md).
+fn test_run_raw_results_directories(run_dir: &FsPath) -> Result<(), Response> {
+    for directory in [Some(run_dir), run_dir.parent()].into_iter().flatten() {
+        let metadata = match fs::symlink_metadata(directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(test_run_raw_results_refusal(
+                    StatusCode::NOT_FOUND,
+                    "test_run_results_unknown",
+                    "the run directory is gone",
+                ));
+            }
+            Err(error) => {
+                return Err(test_run_raw_results_refusal(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "test_run_results_unreadable",
+                    &format!("cannot inspect the run directory: {error}"),
+                ));
+            }
+        };
+        if !metadata.is_dir() || review_freeze_is_link(&metadata) {
+            return Err(test_run_raw_results_refusal(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "test_run_results_redirected",
+                "the run directory is no longer a plain directory",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Serves only a regular file, never through a link and never a FIFO or
+/// device, and only the version it opened: the same checked, bounded read the
+/// index uses (`review_freeze_file_versioned`). The entry is inspected without
+/// following links before anything is opened.
+fn test_run_raw_results(path: &FsPath) -> Result<Vec<u8>, Response> {
+    let entry = match fs::symlink_metadata(path) {
+        Ok(entry) => entry,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(test_run_raw_results_refusal(
+                StatusCode::NOT_FOUND,
+                "test_run_results_unknown",
+                "the run has no results.json",
+            ));
+        }
+        Err(error) => {
+            return Err(test_run_raw_results_refusal(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "test_run_results_unreadable",
+                &format!("cannot inspect results.json: {error}"),
+            ));
+        }
+    };
+    if !entry.is_file() || entry.file_type().is_symlink() {
+        return Err(test_run_raw_results_refusal(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "test_run_results_not_a_file",
+            "results.json is not a regular file",
+        ));
+    }
+    if entry.len() > TEST_RUN_RAW_RESULTS_MAX_BYTES {
+        return Err(test_run_raw_results_refusal(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "test_run_results_too_large",
+            "results.json is larger than 1 MiB",
+        ));
+    }
+    review_freeze_file_versioned(path, TEST_RUN_RAW_RESULTS_MAX_BYTES as usize)
+        .map(|(bytes, _)| bytes)
+        .map_err(|error| match error.downcast_ref::<std::io::Error>() {
+            // Deleted between the inspection and the open.
+            Some(io) if io.kind() == std::io::ErrorKind::NotFound => test_run_raw_results_refusal(
+                StatusCode::NOT_FOUND,
+                "test_run_results_unknown",
+                "the run has no results.json",
+            ),
+            // Permission and other I/O failures do not go away on retry.
+            Some(io) => test_run_raw_results_refusal(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "test_run_results_unreadable",
+                &format!("cannot read results.json: {io}"),
+            ),
+            // The versioned read's own refusals: the entry changed (or grew
+            // past the limit) between inspection and the end of the read.
+            None => test_run_raw_results_refusal(
+                StatusCode::CONFLICT,
+                "test_run_results_changed",
+                &format!("results.json changed while it was read: {error}"),
+            ),
+        })
 }
 
 async fn get_test_run_stage_log(

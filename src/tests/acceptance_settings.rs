@@ -425,6 +425,51 @@ fn acceptance_settings_write_does_not_retry_unknown_outcomes_and_detects_cas_con
     assert_eq!(error.status, StatusCode::CONFLICT);
 }
 
+#[test]
+fn acceptance_settings_write_reports_a_command_that_never_ran_as_not_sent() {
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let reader = state
+        .acceptance_policy_target(&project, None)
+        .unwrap()
+        .reader_key;
+    let attempt = |error: EngramTransportError| {
+        let calls = std::cell::Cell::new(0);
+        let failure = state
+            .update_acceptance_policy_with_runner(
+                &project,
+                change(reader.clone()),
+                |_, _| {
+                    calls.set(calls.get() + 1);
+                    Err(error.clone())
+                },
+                |_, _, _| panic!("must not read after a failed write"),
+            )
+            .unwrap_err();
+        assert_eq!(calls.get(), 1, "one send only");
+        assert_eq!(failure.status, StatusCode::BAD_GATEWAY);
+        failure.message
+    };
+    // The launch was refused while the command was built, or at the spawn:
+    // no Engram process ran, so the command was not sent.
+    for error in [
+        EngramTransportError::spawn_failed(
+            "failed spawning Engram operator acceptance policy: program not found",
+        ),
+        EngramTransportError::local_state("Engram project file and home must be absolute"),
+    ] {
+        let message = attempt(error);
+        assert!(message.contains("was not sent"), "{message}");
+        assert!(!message.contains("outcome unknown"), "{message}");
+    }
+    // A failure after the spawn, such as preparing the process tree, is not
+    // proof: the child may already be running, so the outcome stays unknown.
+    let message = attempt(EngramTransportError::transport(
+        "failed preparing Engram operator acceptance policy process tree: denied",
+    ));
+    assert!(message.contains("outcome unknown"), "{message}");
+}
+
 #[tokio::test]
 async fn acceptance_settings_policy_write_requires_operator_browser_intent() {
     let app = app_router(test_app_state());

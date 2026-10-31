@@ -4491,7 +4491,10 @@ fn a_check_after_a_later_change_cites_a_fresh_environment() {
 }
 
 #[test]
-fn a_refused_report_with_evidence_is_retried_as_the_turns_own_observation() {
+fn an_unlisted_remote_answer_keeps_the_report_with_evidence_for_its_exact_replay() {
+    // `summary_redacted` is not one of Engram's documented refusals of the
+    // checkpoint request, so its answer leaves the outcome unresolved: the
+    // cached report keeps its evidence rather than falling back.
     let turn = CheckedTurn::start_with(
         "refused-evidence",
         true,
@@ -4509,6 +4512,15 @@ fn a_refused_report_with_evidence_is_retried_as_the_turns_own_observation() {
     );
     let original = {
         let inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&turn.session_id).unwrap();
+        assert!(
+            inner.sessions[index]
+                .engram
+                .active_turn_report
+                .as_ref()
+                .is_some_and(|(_, report)| !report.verification_evidence.is_empty()),
+            "an unresolved answer keeps the cached report and its evidence"
+        );
         assert_unknown_checkpoint_custody(&inner, &turn.session_id, &refused, None)
     };
     turn.state

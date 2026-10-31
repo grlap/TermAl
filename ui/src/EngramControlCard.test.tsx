@@ -307,24 +307,39 @@ describe("EngramControlCard default collapse", () => {
   it.each([
     ["dispatch", routineDispatch, "Turn admitted"],
     ["checkpoint", routineCheckpoint, "Turn checkpointed"],
-  ])("collapses a routine %s card behind a visible title", async (_stage, message, title) => {
-    renderEngramCard(message);
-    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
-    expect(screen.getByText(`Engram · ${message.stage}`)).toBeInTheDocument();
+  ])("collapses a routine %s card to one row carrying its title", async (_stage, message, title) => {
+    const { container } = renderEngramCard(message);
+    // One row: the meta row holds author, stage, title, toggle and time, and
+    // nothing else is rendered.
+    const card = container.querySelector(".engram-control-card")!;
+    expect(card).toHaveClass("engram-control-compact");
+    expect(Array.from(card.children).map((child) => child.className)).toEqual(["message-meta"]);
+    const row = card.querySelector(".message-meta")!;
+    expect(row).toHaveTextContent("Agent");
+    expect(row).toHaveTextContent(`Engram · ${message.stage}`);
+    expect(row).toHaveTextContent(title);
+    expect(row).toHaveTextContent(message.timestamp);
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(card.querySelector(".card-label")).toBeNull();
     expect(screen.queryByText(/Grant: grant-routine/)).not.toBeInTheDocument();
     const button = screen.getByRole("button", { name: "Show Engram details" });
+    expect(row).toContainElement(button);
     expect(button).toHaveAttribute("aria-expanded", "false");
 
     await userEvent.click(button);
     const expanded = screen.getByRole("button", { name: "Hide Engram details" });
     expect(expanded).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector(".engram-control-compact")).toBeNull();
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText(`Engram · ${message.stage}`)).toHaveClass("card-label");
     const region = document.getElementById(expanded.getAttribute("aria-controls")!);
     expect(region).toHaveTextContent("Grant: grant-routine");
     expect(region).toHaveTextContent("Dispatch: sent on grant");
 
-    await userEvent.click(expanded);
+    await userEvent.click(screen.getByRole("button", { name: "Hide Engram details" }));
     expect(screen.queryByText(/Grant: grant-routine/)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(container.querySelector(".engram-control-compact .message-meta")).toHaveTextContent(title);
   });
 
   it("expands and collapses from the keyboard", async () => {
@@ -376,9 +391,13 @@ describe("EngramControlCard default collapse", () => {
     ["an unknown fail mode", { failMode: "future" as unknown as EngramControlMessage["failMode"] }, /Dispatch: sent on grant/],
     ["an unknown next intent", { nextIntent: "future" as unknown as EngramControlMessage["nextIntent"] }, /Next intent: future/],
   ])("keeps a card with %s expanded", (_signal, change, detail) => {
-    renderEngramCard({ ...routineDispatch, ...change });
+    const { container } = renderEngramCard({ ...routineDispatch, ...change });
     expect(toggle()).not.toBeInTheDocument();
     expect(screen.getByText(detail)).toBeInTheDocument();
+    // The full, prominent card: its own label and heading, never the row.
+    expect(container.querySelector(".engram-control-compact")).toBeNull();
+    expect(container.querySelector(".engram-control-card .card-label")).not.toBeNull();
+    expect(screen.getByRole("heading")).toBeInTheDocument();
   });
 
   it("keeps an actionable update visible when the same card stops being routine", () => {

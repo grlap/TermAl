@@ -295,6 +295,13 @@ impl EngramControlTransport for CausalTransport {
     }
 }
 
+/// Prefixes a refused tick the writer classified, by type and before
+/// formatting, as the relational checkpoint race
+/// (`PersistCheckpointMirrorLedgerMismatch`), which keeps its fences for the
+/// retry tick. It is the only refusal a publication join may pass; text alone,
+/// without the type, never earns it.
+const TYPED_CHECKPOINT_RACE: &str = "typed checkpoint mirror race: ";
+
 struct CausalRoot {
     state: AppState,
     session: String,
@@ -303,6 +310,13 @@ struct CausalRoot {
     committed: mpsc::Receiver<std::result::Result<u64, String>>,
     writer_gate: Arc<Mutex<Option<CausalWriterGate>>>,
     fail_writes: Arc<std::sync::atomic::AtomicBool>,
+    // Once set, the next tick that carries a causal card and has already
+    // accepted that card's fence leaves the card's session out, as the bounded
+    // collector does when the session changes between plan and snapshot in
+    // both of its passes.
+    defer_cause_once: Arc<std::sync::atomic::AtomicBool>,
+    // Ticks refused as the typed race that still held a causal card's fence.
+    typed_refusals_retaining_cause: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 struct CausalWriterGate {
@@ -331,20 +345,63 @@ impl CausalRoot {
         let worker_gate = Arc::clone(&writer_gate);
         let fail_writes = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_fail = Arc::clone(&fail_writes);
+        let defer_cause_once = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_defer = Arc::clone(&defer_cause_once);
+        let typed_refusals_retaining_cause = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let worker_typed_refusals = Arc::clone(&typed_refusals_retaining_cause);
+        let holds_cause_fence = |fences: &PersistFenceBatch| {
+            fences.pending.iter().any(|fence| {
+                matches!(fence.target, PersistFenceTarget::EngramCausalCard { .. })
+            })
+        };
         let worker = std::thread::spawn(move || {
             let mut cache = SqlitePersistConnectionCache::new();
             let mut fences = PersistFenceBatch::default();
-            // Blocking event-driven writer: no polling, fake ACK or sleep.
-            while let Ok(request) = persist_rx.recv() {
-                let shutdown = matches!(fences.accept(request), PersistWorkerWaitOutcome::Shutdown);
-                let shutdown = fences.drain(&persist_rx, shutdown);
-                let delta = collect_persist_delta_from_shared_state(&inner, 0);
-                let has_cause = delta.changed_sessions.iter().any(|record| {
+            // Event-driven writer with the production worker's wait: no
+            // polling, fake ACK or sleep, but while a fence stays pending
+            // after a successful tick (its content was deferred), the next
+            // tick comes on the fence-retry delay, as in app_boot.rs.
+            let mut retry = PersistWorkerRetryState::default();
+            loop {
+                let outcome = retry.wait_for_next_tick(&persist_rx, &mut fences);
+                if outcome == PersistWorkerWaitOutcome::Exit {
+                    break;
+                }
+                let mut shutdown =
+                    fences.drain(&persist_rx, outcome == PersistWorkerWaitOutcome::Shutdown);
+                let mut delta = collect_persist_delta_from_shared_state(&inner, 0);
+                let carries_cause = |record: &PersistedSessionRecord| {
                     record.session.messages.iter().any(|message| {
                         matches!(message, Message::EngramControl { card, .. }
                             if card.causal_failure.is_some())
                     })
-                });
+                };
+                let has_cause = delta.changed_sessions.iter().any(carries_cause);
+                // The card's fence is sent right after its commit, under the
+                // same state lock. Take it into this tick before deferring, so
+                // the first tick carrying the card is the refused one and that
+                // fence is the one it must keep.
+                if has_cause && worker_defer.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                    while !holds_cause_fence(&fences) {
+                        let request = persist_rx
+                            .recv_timeout(DEADLOCK_GUARD)
+                            .expect("the causal card's fence follows its commit");
+                        shutdown |= matches!(
+                            fences.accept(request),
+                            PersistWorkerWaitOutcome::Shutdown
+                        );
+                    }
+                    let deferred: Vec<String> = delta
+                        .changed_sessions
+                        .iter()
+                        .filter(|record| carries_cause(record))
+                        .map(|record| record.session.id.clone())
+                        .collect();
+                    delta
+                        .changed_sessions
+                        .retain(|record| !deferred.contains(&record.session.id));
+                    delta.deferred_session_ids.extend(deferred);
+                }
                 let gate = {
                     let mut gate = worker_gate.lock().unwrap();
                     if gate.as_ref().is_some_and(|gate| has_cause || gate.any_tick) {
@@ -364,8 +421,30 @@ impl CausalRoot {
                         .execute_batch("PRAGMA query_only = ON").unwrap();
                 }
                 let result = persist_delta_with_fences(&mut cache, &path, &delta, &mut fences)
-                    .map(|_| delta.watermark)
-                    .map_err(|error| format!("{error:#}"));
+                    .map(|_| delta.watermark);
+                // Classified by type before the error becomes text.
+                let typed_race = result
+                    .as_ref()
+                    .err()
+                    .is_some_and(|error| error.is::<PersistCheckpointMirrorLedgerMismatch>());
+                if typed_race && holds_cause_fence(&fences) {
+                    worker_typed_refusals.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                }
+                // The production contract: a failed write and a still-pending
+                // fence each bring a later tick. Shutdown below still exits,
+                // so a test's teardown never waits on a failing writer.
+                retry.finish_fenced_tick(
+                    &result.as_ref().map(|_| ()).map_err(|error| anyhow!("{error:#}")),
+                    false,
+                    &mut fences,
+                );
+                let result = result.map_err(|error| {
+                    if typed_race {
+                        format!("{TYPED_CHECKPOINT_RACE}{error:#}")
+                    } else {
+                        format!("{error:#}")
+                    }
+                });
                 let _ = committed_tx.send(result);
                 if shutdown {
                     fences.fail(PersistFenceError::WorkerStopped);
@@ -382,6 +461,8 @@ impl CausalRoot {
             committed,
             writer_gate,
             fail_writes,
+            defer_cause_once,
+            typed_refusals_retaining_cause,
         }
     }
 
@@ -422,7 +503,10 @@ impl CausalRoot {
     /// Deterministic join on causal publication, without sleeps. Each pending
     /// cause's fence was sent with its commit, and this writer publishes it
     /// inside the tick that resolves the fence, before reporting that tick.
-    /// Use only when every write succeeds; a failed ACK stays pending.
+    /// The only refused tick allowed on the way is one the writer classified
+    /// by type as the relational checkpoint race (`TYPED_CHECKPOINT_RACE`),
+    /// which keeps its fences for the retry tick. Use only when every other
+    /// write succeeds; a failed ACK stays pending.
     fn await_causal_publication(&self) {
         loop {
             let pending = {
@@ -440,8 +524,9 @@ impl CausalRoot {
             }
             let tick = self.committed.recv_timeout(DEADLOCK_GUARD);
             assert!(
-                matches!(tick, Ok(Ok(_))),
-                "the writer must report the tick that publishes a pending cause"
+                matches!(&tick, Ok(Ok(_)))
+                    || matches!(&tick, Ok(Err(error)) if error.starts_with(TYPED_CHECKPOINT_RACE)),
+                "the writer must report the tick that publishes a pending cause: {tick:?}"
             );
         }
     }
@@ -651,6 +736,41 @@ fn root_causal_begin_reply_loss_survives_card_and_writer() {
 #[test]
 fn root_causal_closing_reply_loss_survives_card_and_writer() {
     assert_root_causal_failure("turn_checkpoint", 1);
+}
+
+#[test]
+fn root_causal_publication_survives_an_incoherent_cut_from_a_deferred_snapshot() {
+    // Simulates the bounded collector's double-Changed outcome: when the
+    // session changes between plan and snapshot in both of its passes, the
+    // tick that carries the pending cause leaves that session out
+    // ("persist snapshot still deferred after bounded retry"). Its closing
+    // checkpoint's ledger entry is still in that delta, so the write refuses
+    // the incoherent cut. That refusal must keep the cause's fence for the
+    // retry tick, whose coherent cut publishes the cause; no later persist
+    // request is sent.
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
+    fixture
+        .defer_cause_once
+        .store(true, std::sync::atomic::Ordering::Release);
+    let (token, _, _) = fixture.start_and_queue();
+    fixture
+        .state
+        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
+    fixture.await_causal_publication();
+    assert!(
+        !fixture
+            .defer_cause_once
+            .load(std::sync::atomic::Ordering::Acquire),
+        "the tick holding the cause's fence was deferred"
+    );
+    assert!(
+        fixture
+            .typed_refusals_retaining_cause
+            .load(std::sync::atomic::Ordering::Acquire)
+            >= 1,
+        "that tick was refused as the typed race and kept the cause's fence for the retry"
+    );
 }
 
 #[test]

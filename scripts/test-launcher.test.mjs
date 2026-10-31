@@ -1,12 +1,13 @@
 // Exercises the shared test-launcher contract without running product gates.
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import childProcess, { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs, {
   chmodSync,
   closeSync,
   copyFileSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -18,7 +19,8 @@ import fs, {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:path";
+import { syncBuiltinESMExports } from "node:module";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -30,6 +32,7 @@ import {
   DISK_SPACE_WARNING_BYTES,
   ensureCargoTargetDirectory,
   executeRun,
+  expectedStageEntries,
   FULL_GATE_DISK_FLOOR_BYTES,
   HELPER_TEST_HANG_GUARD_MS,
   helperTestArgs,
@@ -57,6 +60,7 @@ import { testTempDirectory } from "./test-temp-root.mjs";
 import { registerLauncherRegistrationTests, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
 import { registerLauncherLifecycleTests } from "./test-launcher-lifecycle-tests.mjs";
 import { writeUiBootstrapFixture } from "./test-ui-bootstrap-fixtures.mjs";
+import * as launcherSourceMetadata from "./test-launcher.mjs";
 
 const fixtureEnv = {
   ...process.env,
@@ -65,12 +69,27 @@ const fixtureEnv = {
   TERMAL_SESSION_ID: "fixture-owner",
   TERMAL_CLI: process.execPath,
 };
+// Writes a fixture-owned stand-in for a toolchain executable that runs this
+// Node. Windows gets a copy of node.exe, which is self-contained. Elsewhere a
+// copied binary may not start: Homebrew's macOS node loads libnode through an
+// @rpath relative to its own location, which a copy elsewhere cannot find. A
+// one-line exec script stays fixture-owned and never links or modifies the
+// installed Node binary.
+function writeNodeStandIn(path) {
+  if (process.platform === "win32") {
+    copyFileSync(process.execPath, path);
+    return;
+  }
+  writeFileSync(path, `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' "$@"\n`);
+  chmodSync(path, 0o755);
+}
 const launcherScript = fileURLToPath(new URL("./test-launcher.mjs", import.meta.url));
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 // Both private launcher copies must include its complete runtime dependency
 // closure, including the native helpers selected only when a stage executes.
 const copiedLauncherFiles = Object.freeze([
-  "test-launcher.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs", "review-freeze-fingerprint.mjs",
+  "test-launcher.mjs", "test-launcher-source.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
+  "review-freeze-fingerprint.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
   "test-categories-plan.mjs", "test-counts.mjs", "test-process-owner.mjs",
   "test-command-progress.mjs", "test-process-owner-posix.mjs",
@@ -176,6 +195,452 @@ async function repository(t, callback, sourceEnv = fixtureEnv, directory = testT
   env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --import=${writeDiskCapacityFixture(root)}`.trim();
   await withHostedRegistrationFixture(root, env, (hostedEnv) => callback(root, hostedEnv));
 }
+
+async function sourceMetadataRepository(t, callback) {
+  await repository(t, async (root, env) => {
+    mkdirSync(join(root, "scripts"));
+    copyFileSync(launcherScript, join(root, "scripts", "test-launcher.mjs"));
+    for (const args of [["add", "scripts/test-launcher.mjs"],
+      ["commit", "--quiet", "--no-gpg-sign", "-m", "launcher source fixture"]]) {
+      execFileSync("git", args, { cwd: root, env, windowsHide: true });
+    }
+    await callback(root, env);
+  });
+}
+
+const sourceMetadataPlatform = {
+  os: { win32: "windows", darwin: "macos", linux: "linux" }[process.platform],
+  arch: { x64: "x86_64", arm64: "aarch64", ia32: "x86" }[process.arch] ?? process.arch,
+};
+
+// Source identity is asserted from real, disposable Git repositories. A linked
+// worktree's .git is a file; its source must still be the checked-out HEAD tree.
+for (const linked of [false, true]) {
+  test(`launcher source metadata: exact clean ${linked ? "linked" : "main"} worktree`, async (t) => {
+    await sourceMetadataRepository(t, async (main, env) => {
+      const root = linked ? join(dirname(main), `${basename(main)}-linked`) : main;
+      if (linked) {
+        execFileSync("git", ["worktree", "add", "--quiet", "--detach", root, "HEAD"],
+          { cwd: main, env, windowsHide: true });
+        removeFixtureOnPass(t, root);
+        assert.equal(statSync(join(root, ".git")).isFile(), true);
+      }
+      const git = (args) => execFileSync("git", args,
+        { cwd: root, env, encoding: "utf8", windowsHide: true }).trim();
+      const expected = { commit: git(["rev-parse", "HEAD"]), tree: git(["rev-parse", "HEAD^{tree}"]),
+        launcherVersion: git(["rev-parse", "HEAD:scripts/test-launcher.mjs"]) };
+      const runDir = await createRun({ root, stages: [stage("source-witness")] }, env);
+      const source = json(join(runDir, "results.json")).source;
+      assert.ok(source, "initial persisted results must identify their clean-start source");
+      assert.equal(source.commit, expected.commit);
+      assert.equal(source.tree, expected.tree);
+      assert.equal(source.clean, true);
+      assert.equal(source.sourceSchema, 1);
+      assert.deepEqual(source.platform, sourceMetadataPlatform);
+      assert.equal(source.launcherVersion, expected.launcherVersion);
+      assert.match(source.launcherVersion, /^[a-f0-9]{40}$/u);
+      assert.match(source.measuredAt, /^\d{4}-\d\d-\d\dT.*Z$/u);
+      assert.ok(Number.isFinite(Date.parse(source.measuredAt)));
+      assert.equal(source.toolchain, null, "this run reached no Rust preflight");
+      assert.equal(source.unknownReason ?? null, null);
+      const result = await executeRun(runDir, env);
+      assert.equal(result.state, "passed", result.error);
+      assert.deepEqual(result.source, source, "execution must retain the start identity");
+    });
+  });
+}
+
+test("launcher source metadata: dirty start cannot assert a clean checkout", async (t) => {
+  await sourceMetadataRepository(t, async (root, env) => {
+    const commit = execFileSync("git", ["rev-parse", "HEAD"],
+      { cwd: root, env, encoding: "utf8" }).trim();
+    const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"],
+      { cwd: root, env, encoding: "utf8" }).trim();
+    writeFileSync(join(root, "tracked.txt"), "dirty tracked input\n");
+    writeFileSync(join(root, "untracked-source.txt"), "untracked input\n");
+    const runDir = await createRun({ root, stages: [stage("source-witness")] }, env);
+    const source = json(join(runDir, "results.json")).source;
+    assert.ok(source, "a dirty run still needs explicit source metadata");
+    assert.deepEqual({ commit: source.commit, tree: source.tree, clean: source.clean },
+      { commit, tree, clean: false });
+    assert.deepEqual(source.platform, sourceMetadataPlatform);
+  });
+});
+
+test("launcher source metadata: unavailable Git is explicitly unknown, never clean", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const env = { ...originalEnv };
+    for (const key of Object.keys(env)) if (key.toLowerCase() === "path") delete env[key];
+    env.PATH = join(root, ".git", "empty-bin");
+    mkdirSync(env.PATH);
+    // Allocation still refuses without Git. Exercise only the read-only source
+    // capture seam here, so the test cannot manufacture an unregistered run.
+    assert.equal(typeof launcherSourceMetadata.captureSourceMetadata, "function",
+      "source capture must represent unavailable Git without inventing a checkout identity");
+    const source = await launcherSourceMetadata.captureSourceMetadata(root, env);
+    assert.equal(source.commit, null);
+    assert.equal(source.tree, null);
+    assert.equal(source.clean, null);
+    assert.equal(source.unknownReason, "git_unavailable");
+    assert.equal(source.sourceSchema, 1);
+    assert.deepEqual(source.platform, sourceMetadataPlatform);
+    assert.equal(source.launcherVersion, null);
+    assert.equal(source.toolchain, null);
+    assert.ok(Number.isFinite(Date.parse(source.measuredAt)));
+    await assert.rejects(createRun({ root, stages: [stage("must-not-run")] }, env),
+      /cannot locate Git run directory/u);
+    assert.equal(existsSync(join(root, ".git", "review-runs")), false);
+  });
+});
+
+for (const explicit of [false, true]) {
+  for (const [reason, rustupOverride] of [
+    ["default", "absent"],
+    ["env", "absent"],
+    ["directory override", "present"],
+    ["toolchain file", "present"],
+  ]) {
+    test(`launcher source metadata: own preflight ${explicit ? "explicit Cargo" : "PATH Cargo"}, rustup ${reason}`, async (t) => {
+      await sourceMetadataRepository(t, async (root, originalEnv) => {
+        const bin = join(root, ".git", "source-toolchain-bin");
+        mkdirSync(bin);
+        const suffix = process.platform === "win32" ? ".exe" : "";
+        const cargo = join(bin, `cargo${suffix}`);
+        const rustc = join(bin, `rustc${suffix}`);
+        const rustup = join(bin, `rustup${suffix}`);
+        // Real isolated children fake only toolchain preflight output. They
+        // never invoke Rust or write the caller's rustup settings.
+        writeNodeStandIn(cargo);
+        // Link only the fixture-owned copy, never the installed Node binary.
+        linkSync(cargo, rustc);
+        linkSync(cargo, rustup);
+        const active = {
+          default: "fixture-x86_64-pc-windows-msvc (default)",
+          env: "fixture-x86_64-pc-windows-msvc (overridden by environment variable RUSTUP_TOOLCHAIN)",
+          "directory override": `fixture-x86_64-pc-windows-msvc (directory override for '${root}')`,
+          "toolchain file": `fixture-x86_64-pc-windows-msvc (overridden by '${join(root, "rust-toolchain.toml")}')`,
+        }[reason];
+        const spawnPreflight = childProcess.spawn;
+        t.mock.method(childProcess, "spawn", (command, args, options) => {
+          const tool = basename(command).replace(/\.exe$/iu, "");
+          const output = tool === "rustup" && args.join(" ") === "show active-toolchain" ? active
+            : args.includes("--version") && (tool === "rustc" || tool === "cargo" && args[0] === "rustc")
+              ? "rustc 1.98.1 (fixture)"
+              : tool === "cargo" && args.includes("--version") ? "cargo 1.98.1 (fixture)" : undefined;
+          // Only the fixture's preflight process is substituted; its stdout
+          // still crosses the real child pipe and is saved by runCommand.
+          return output === undefined ? spawnPreflight(command, args, options)
+            : spawnPreflight(process.execPath, ["-e", `console.log(${JSON.stringify(output)})`], options);
+        });
+        syncBuiltinESMExports();
+        t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+        const env = { ...originalEnv };
+        const callerPath = Object.entries(env).find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";
+        for (const key of Object.keys(env)) if (key.toLowerCase() === "path") delete env[key];
+        env.PATH = `${bin}${process.platform === "win32" ? ";" : ":"}${callerPath}`;
+        delete env.TERMAL_TEST_CARGO;
+        delete env.RUSTUP_TOOLCHAIN;
+        delete env.RUSTC;
+        delete env.CARGO_BUILD_RUSTC;
+        for (const name of ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER",
+          "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"]) delete env[name];
+        // No Cargo home configuration of this host may select the compiler.
+        env.CARGO_HOME = join(root, ".git", "fixture-cargo-home");
+        // Nor any ancestor of the fixture, such as a user profile's config.
+        env.TERMAL_TEST_CARGO_CONFIG_CEILING = root;
+        if (explicit) env.TERMAL_TEST_CARGO = cargo;
+        if (reason === "env") env.RUSTUP_TOOLCHAIN = "fixture-x86_64-pc-windows-msvc";
+        const runDir = await createRun({ root, needsCargo: true,
+          stages: [{ name: "cargo-check", command: "cargo", args: ["-e", "process.exit(0)"] }],
+        }, env);
+        const result = await executeRun(runDir, env);
+        assert.equal(result.state, "passed", result.error);
+        assert.ok(result.source?.toolchain, "persist the toolchain from the actual preflight");
+        assert.deepEqual(result.source.toolchain, {
+          cargoVersion: "cargo 1.98.1 (fixture)",
+          rustcVersion: "rustc 1.98.1 (fixture)",
+          cargoExecutable: result.source.toolchain.cargoExecutable,
+          source: explicit ? "TERMAL_TEST_CARGO" : "PATH",
+          rustupOverride,
+          resolvedToolchain: "fixture-x86_64-pc-windows-msvc",
+          rustupReason: reason,
+        });
+        assert.ok(isAbsolute(result.source.toolchain.cargoExecutable));
+        assert.equal(realpathSync.native(result.source.toolchain.cargoExecutable), realpathSync.native(cargo));
+        assert.ok(result.source.toolchain.cargoExecutable.length <= 4096);
+        // Cargo's own probe gates the run; rustc and rustup are provenance
+        // only, recorded apart where no failure reader takes them for the
+        // run's failure.
+        assert.deepEqual(result.preflight.map(({ name }) => name), ["cargo"]);
+        for (const [name, probes] of [["cargo", result.preflight], ["rustc", result.toolchainProbes]]) {
+          const probe = probes.find((entry) => entry.name === name);
+          assert.ok(probe, `${name} provenance needs a recorded preflight`);
+          assert.equal(probe.code, 0);
+          assert.equal(readFileSync(probe.log, "utf8").trim(), `${name} 1.98.1 (fixture)`);
+          assert.ok(probe.command.includes("--version"));
+        }
+        const rustupProbe = result.toolchainProbes.find((entry) => entry.name === "rustup");
+        assert.ok(rustupProbe, "resolved override evidence comes from this run root's preflight");
+        assert.equal(rustupProbe.cwd, root);
+        assert.equal(rustupProbe.code, 0);
+        assert.deepEqual(rustupProbe.command.slice(1), ["show", "active-toolchain"]);
+        assert.equal(readFileSync(rustupProbe.log, "utf8").trim(), active);
+        assert.deepEqual(json(join(runDir, "results.json")).source, result.source);
+      });
+    });
+  }
+}
+
+test("launcher source metadata: failed Rust preflight cannot claim a known toolchain", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const env = { ...originalEnv, TERMAL_TEST_CARGO: process.execPath,
+      NODE_OPTIONS: `${originalEnv.NODE_OPTIONS ?? ""} --not-a-source-preflight-option` };
+    const runDir = await createRun({ root, needsCargo: true,
+      stages: [{ name: "cargo-check", command: "cargo", args: ["-e", "process.exit(0)"] }],
+    }, env);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "failed");
+    assert.deepEqual(result.stages.map((entry) => entry.state), ["unrun"]);
+    assert.ok(result.source?.toolchain, "failed preflight needs explicit provenance failure");
+    assert.equal(result.source.toolchain.unknownReason, "preflight_failed");
+    assert.equal(result.source.toolchain.source, "TERMAL_TEST_CARGO");
+    assert.equal(result.source.toolchain.cargoVersion, null);
+    assert.equal(result.source.toolchain.rustcVersion, null);
+    assert.equal(realpathSync.native(result.source.toolchain.cargoExecutable), realpathSync.native(process.execPath));
+  });
+});
+
+// The compiler named in the record is the one Cargo uses. RUSTC selects it;
+// a Cargo configuration's build.rustc is not resolved, and neither is a
+// default rustc beside Cargo that differs from the one on PATH: the version
+// stays unknown. A Cargo with no rustup beside it is not described by
+// whatever rustup is elsewhere. Every tool is a fixture-owned copy in a
+// fixture directory, and only the probes' output is substituted.
+// `failing` names tools whose provenance probe exits nonzero.
+async function compilerSelectionFixture(t, root, originalEnv, { failing = [] } = {}) {
+  const bin = join(root, ".git", "compiler-fixture-bin");
+  const other = join(root, ".git", "compiler-fixture-other");
+  mkdirSync(bin);
+  mkdirSync(other);
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const cargo = join(bin, `cargo${suffix}`);
+  writeNodeStandIn(cargo);
+  const sibling = join(bin, `rustc${suffix}`);
+  const override = join(other, `rustc-override${suffix}`);
+  const onPath = join(other, `rustc${suffix}`);
+  const spawnProbe = childProcess.spawn;
+  t.mock.method(childProcess, "spawn", (command, args, options) => {
+    const tool = basename(command).replace(/\.exe$/iu, "");
+    const probe = args.includes("--version") || args.join(" ") === "show active-toolchain";
+    if (probe && failing.includes(tool)) {
+      return spawnProbe(process.execPath, ["-e", "process.exit(3)"], options);
+    }
+    const output = args.includes("--version") ? {
+      cargo: "cargo 1.98.1 (fixture)",
+      rustc: `rustc 1.98.1 (${dirname(command) === bin ? "sibling" : "path"})`,
+      "rustc-override": "rustc 1.97.0 (override)",
+    }[tool] : undefined;
+    return output === undefined ? spawnProbe(command, args, options)
+      : spawnProbe(process.execPath, ["-e", `console.log(${JSON.stringify(output)})`], options);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const env = { ...originalEnv, TERMAL_TEST_CARGO: cargo,
+    CARGO_HOME: join(root, ".git", "fixture-cargo-home"),
+    // No ancestor of the fixture, such as a user profile's config, may count.
+    TERMAL_TEST_CARGO_CONFIG_CEILING: root };
+  delete env.RUSTC;
+  delete env.CARGO_BUILD_RUSTC;
+  // A host's compiler wrapper would leave every compiler unknown.
+  for (const name of ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"]) delete env[name];
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  return { env, pathKey, bin, other, cargo, sibling, override, onPath };
+}
+
+async function runCompilerSelection(root, env) {
+  const runDir = await createRun({ root, needsCargo: true,
+    stages: [{ name: "cargo-check", command: "cargo", args: ["-e", "process.exit(0)"] }],
+  }, env);
+  const result = await executeRun(runDir, env);
+  assert.equal(result.state, "passed", result.error);
+  assert.deepEqual(result.preflight.map(({ name }) => name), ["cargo"]);
+  const { toolchain } = result.source;
+  assert.equal(toolchain.cargoVersion, "cargo 1.98.1 (fixture)");
+  assert.equal(toolchain.rustupReason, "rustup_not_beside_cargo");
+  assert.equal(toolchain.rustupOverride, "unknown");
+  assert.equal(toolchain.resolvedToolchain, null);
+  return result;
+}
+
+test("launcher source metadata: RUSTC names the compiler probed", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const fixture = await compilerSelectionFixture(t, root, originalEnv);
+    linkSync(fixture.cargo, fixture.override);
+    linkSync(fixture.cargo, fixture.sibling);
+    const result = await runCompilerSelection(root, { ...fixture.env, RUSTC: fixture.override });
+    assert.equal(result.source.toolchain.rustcVersion, "rustc 1.97.0 (override)");
+    assert.equal(result.source.toolchain.unknownReason ?? null, null);
+    const rustc = result.toolchainProbes.find(({ name }) => name === "rustc");
+    assert.equal(realpathSync.native(rustc.command[0]), realpathSync.native(fixture.override));
+  });
+});
+
+test("launcher source metadata: a Cargo configuration's build.rustc leaves the compiler unknown", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const fixture = await compilerSelectionFixture(t, root, originalEnv);
+    linkSync(fixture.cargo, fixture.sibling);
+    mkdirSync(join(root, ".cargo"));
+    writeFileSync(join(root, ".cargo", "config.toml"), "[build]\nrustc = \"fixture-rustc\"\n");
+    const result = await runCompilerSelection(root, fixture.env);
+    assert.equal(result.source.toolchain.rustcVersion, null);
+    assert.equal(result.source.toolchain.unknownReason, "rustc_selection_unsupported");
+    assert.equal(result.toolchainProbes.some(({ name }) => name === "rustc"), false);
+  });
+});
+
+test("launcher source metadata: RUSTC and CARGO_BUILD_RUSTC naming different compilers leave it unknown", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const fixture = await compilerSelectionFixture(t, root, originalEnv);
+    linkSync(fixture.cargo, fixture.override);
+    linkSync(fixture.cargo, fixture.onPath);
+    const conflicting = await runCompilerSelection(root,
+      { ...fixture.env, RUSTC: fixture.override, CARGO_BUILD_RUSTC: fixture.onPath });
+    assert.equal(conflicting.source.toolchain.rustcVersion, null);
+    assert.equal(conflicting.source.toolchain.unknownReason, "rustc_resolution_ambiguous");
+    assert.equal(conflicting.toolchainProbes.some(({ name }) => name === "rustc"), false);
+    // Both naming the same compiler is no conflict.
+    const agreeing = await runCompilerSelection(root,
+      { ...fixture.env, RUSTC: fixture.override, CARGO_BUILD_RUSTC: fixture.override });
+    assert.equal(agreeing.source.toolchain.rustcVersion, "rustc 1.97.0 (override)");
+  });
+});
+
+test("launcher source metadata: a compiler wrapper leaves even RUSTC's compiler unknown", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const fixture = await compilerSelectionFixture(t, root, originalEnv);
+    linkSync(fixture.cargo, fixture.override);
+    const result = await runCompilerSelection(root,
+      { ...fixture.env, RUSTC: fixture.override, RUSTC_WRAPPER: "fixture-wrapper" });
+    assert.equal(result.source.toolchain.rustcVersion, null);
+    assert.equal(result.source.toolchain.unknownReason, "rustc_selection_unsupported");
+    assert.equal(result.toolchainProbes.some(({ name }) => name === "rustc"), false);
+  });
+});
+
+test("launcher source metadata: failing rustc and rustup probes leave provenance unknown and the gate passing", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const fixture = await compilerSelectionFixture(t, root, originalEnv, { failing: ["rustc", "rustup"] });
+    const suffix = process.platform === "win32" ? ".exe" : "";
+    linkSync(fixture.cargo, fixture.sibling);
+    linkSync(fixture.cargo, join(fixture.bin, `rustup${suffix}`));
+    const env = { ...fixture.env };
+    env[fixture.pathKey] = `${fixture.bin}${delimiter}${env[fixture.pathKey] ?? ""}`;
+    const runDir = await createRun({ root, needsCargo: true,
+      stages: [{ name: "cargo-check", command: "cargo", args: ["-e", "process.exit(0)"] }],
+    }, env);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "passed", result.error);
+    // Only Cargo's own probe gates the run; the failed provenance probes are
+    // recorded apart, never as the run's failure.
+    assert.deepEqual(result.preflight.map(({ name, code }) => ({ name, code })), [{ name: "cargo", code: 0 }]);
+    assert.deepEqual(result.toolchainProbes.map(({ name, code }) => ({ name, code })),
+      [{ name: "rustc", code: 3 }, { name: "rustup", code: 3 }]);
+    const { toolchain } = result.source;
+    assert.equal(toolchain.cargoVersion, "cargo 1.98.1 (fixture)");
+    assert.equal(toolchain.rustcVersion, null);
+    assert.equal(toolchain.unknownReason, "rustc_failed");
+    assert.equal(toolchain.rustupReason, "rustup_failed");
+    assert.equal(toolchain.rustupOverride, "unknown");
+    assert.equal(toolchain.resolvedToolchain, null);
+  });
+});
+
+test("launcher source metadata: a sibling rustc that differs from PATH's is never attributed", async (t) => {
+  await sourceMetadataRepository(t, async (root, originalEnv) => {
+    const fixture = await compilerSelectionFixture(t, root, originalEnv);
+    linkSync(fixture.cargo, fixture.sibling);
+    writeNodeStandIn(fixture.onPath);
+    const env = { ...fixture.env };
+    env[fixture.pathKey] = `${fixture.other}${delimiter}${env[fixture.pathKey] ?? ""}`;
+    const ambiguous = await runCompilerSelection(root, env);
+    assert.equal(ambiguous.source.toolchain.rustcVersion, null);
+    assert.equal(ambiguous.source.toolchain.unknownReason, "rustc_resolution_ambiguous");
+    // The same file beside Cargo and first on PATH is unambiguous.
+    env[fixture.pathKey] = `${fixture.bin}${delimiter}${fixture.env[fixture.pathKey] ?? ""}`;
+    const resolved = await runCompilerSelection(root, env);
+    assert.equal(resolved.source.toolchain.rustcVersion, "rustc 1.98.1 (sibling)");
+  });
+});
+
+test("launcher source metadata: a worker startup failure keeps the measured source", async (t) => {
+  await sourceMetadataRepository(t, async (root, env) => {
+    const runDir = await createRun({ root, stages: [stage("source-witness")] }, env);
+    const measured = json(join(runDir, "results.json")).source;
+    // An invalid request fails the worker before it reads results itself.
+    const request = json(join(runDir, "request.json"));
+    writeFileSync(join(runDir, "request.json"), JSON.stringify({ ...request, stages: [] }));
+    const failed = await executeRun(runDir, env);
+    assert.equal(failed.state, "failed");
+    assert.match(failed.error, /worker startup failed/u);
+    assert.deepEqual(failed.source, measured);
+    assert.deepEqual(json(join(runDir, "results.json")).source, measured);
+  });
+});
+
+test("launcher source metadata: an unreadable startup record says the source is unrecoverable", async (t) => {
+  await sourceMetadataRepository(t, async (root, env) => {
+    const runDir = await createRun({ root, stages: [stage("source-witness")] }, env);
+    const request = json(join(runDir, "request.json"));
+    writeFileSync(join(runDir, "request.json"), JSON.stringify({ ...request, stages: [] }));
+    writeFileSync(join(runDir, "results.json"), "not json");
+    const failed = await executeRun(runDir, env);
+    assert.equal(failed.state, "failed");
+    assert.equal(failed.source.unknownReason, "source_unrecoverable");
+    assert.equal(failed.source.clean, null);
+    assert.equal(failed.source.commit, null);
+  });
+});
+
+// A reader rebuilds every recorded stage command from the request's stages
+// and the run's recorded host bindings alone (scripts/test-launcher-plan.test.mjs
+// covers the full gate's plan on other platforms).
+test("recorded stage entries equal those rebuilt from the run's host bindings", async (t) => {
+  await repository(t, async (root, env) => {
+    mkdirSync(join(root, "ui"), { recursive: true });
+    const stages = [
+      // The reporter flags the launcher appends follow `--`, so Node passes
+      // them to the script instead of reading them as its own options.
+      { name: "reported", command: process.execPath, args: ["-e", "process.exit(0)", "--"],
+        durationReport: "vitest-json", cwd: "ui" },
+      stage("plain", "process.exit(0)"),
+      // Every accepted stage name is its own binding, `__proto__` included.
+      stage("__proto__", "process.exit(0)"),
+    ];
+    const runDir = await createRun({ root, stages }, env);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "passed", result.error);
+    const request = json(join(runDir, "request.json"));
+    const bound = { reported: process.execPath, plain: process.execPath };
+    Object.defineProperty(bound, "__proto__", { value: process.execPath, enumerable: true });
+    assert.deepEqual({ ...json(join(runDir, "results.json")).hostBindings.executables }, bound);
+    assert.equal(Object.hasOwn(result.hostBindings.executables, "__proto__"), true);
+    const expected = expectedStageEntries(request.stages, {
+      platform: process.platform,
+      root: request.root,
+      runDir,
+      reporterUrl: result.hostBindings.durationReporterUrl,
+      executables: result.hostBindings.executables,
+    });
+    assert.deepEqual(result.stages.map(({ name, command, cwd }) => ({ name, command, cwd })), expected);
+    // One changed argument is a different gate.
+    const altered = structuredClone(request.stages);
+    altered[1].args[1] = "process.exit(1)";
+    assert.notDeepEqual(result.stages.map(({ name, command, cwd }) => ({ name, command, cwd })),
+      expectedStageEntries(altered, { platform: process.platform, root: request.root, runDir,
+        reporterUrl: result.hostBindings.durationReporterUrl, executables: result.hostBindings.executables }));
+  });
+});
 
 async function isolatedDetachedRepository(t, callback) {
   await repository(t, async (root, env) => {

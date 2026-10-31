@@ -242,7 +242,7 @@ pub(super) fn fresh_host_at_cut(state: &AppState, path: PathBuf, workdir: PathBu
     (host, transport)
 }
 
-fn fresh_host_with_transport(state: &AppState, path: PathBuf, workdir: PathBuf,
+pub(super) fn fresh_host_with_transport(state: &AppState, path: PathBuf, workdir: PathBuf,
     transport: Arc<ScriptedEngramControlTransport>) -> AppState {
     fs::copy(state.persistence_path.as_path(), &path).unwrap();
     // Match the mediated fixture's scripted budget from construction, as

@@ -1031,6 +1031,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
         ),
         Some(
             ApiErrorKind::LocalSessionMissing
+            | ApiErrorKind::TestRunWaitRegistrationUnavailable
             | ApiErrorKind::FederationMailboxUpgradeRequired
             | ApiErrorKind::FederationMailboxWriterAdmission
             | ApiErrorKind::FederationMailboxDirectoryFence

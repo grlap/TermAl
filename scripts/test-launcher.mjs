@@ -18,7 +18,7 @@ import fs, {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import nodePath, { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   captureFingerprint,
@@ -32,6 +32,7 @@ import {
   durationReportPlan,
   durationSummaryLines,
   nodeDurationReporterFile,
+  nodeDurationReporterUrl,
   readDurationReport,
 } from "./test-durations.mjs";
 import {
@@ -46,6 +47,18 @@ import { focusedCountSummaryLines, focusedTestCounts } from "./test-counts.mjs";
 import { runOwnedCommand } from "./test-process-owner.mjs";
 import { watchCommandProgress } from "./test-command-progress.mjs";
 import { bootstrapUiDependencies } from "./test-ui-bootstrap.mjs";
+import {
+  bindSourceToInput,
+  captureSourceMetadata,
+  cargoConfigSelectsRustc,
+  compilerWrapperInEnvironment,
+  parseRustupActiveToolchain,
+  pendingToolchain,
+  preflightVersion,
+  unknownSource,
+} from "./test-launcher-source.mjs";
+
+export { captureSourceMetadata };
 
 const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
@@ -58,6 +71,8 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
   "scripts/test-launcher-panic-journal.test.mjs",
+  "scripts/test-launcher-plan.test.mjs",
+  "scripts/test-launcher-source.test.mjs",
   "scripts/test-ui-bootstrap.test.mjs",
   "scripts/test-launcher-git-path.test.mjs",
   "scripts/test-temp-root.test.mjs",
@@ -91,6 +106,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-durations.mjs",
   "scripts/test-fixture-cleanup.mjs",
   "scripts/test-launcher.mjs",
+  "scripts/test-launcher-source.mjs",
   "scripts/test-launcher-registration-fixtures.mjs",
   "scripts/test-launcher-lifecycle-tests.mjs",
   "scripts/test-process-owner.mjs",
@@ -192,7 +208,10 @@ function windowsGitBash(env) {
   return join(env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe");
 }
 
-export function requiredStages(platform = process.platform, env = process.env) {
+// `node` is the Node executable the stages run under; it defaults to this
+// process's own, and a reader rebuilding another host's plan passes that
+// host's recorded one.
+export function requiredStages(platform = process.platform, env = process.env, node = process.execPath) {
   const rustCommand = platform === "win32" ? windowsGitBash(env) : "sh";
   const rustArgs = platform === "win32"
     ? ["-c", "exec scripts/test-rust.sh"]
@@ -201,13 +220,13 @@ export function requiredStages(platform = process.platform, env = process.env) {
     { name: "cargo-check", command: "cargo", args: ["check"] },
     {
       name: "typescript",
-      command: process.execPath,
+      command: node,
       args: ["node_modules/typescript/bin/tsc", "--noEmit"],
       cwd: "ui",
     },
     {
       name: "fingerprint-tests",
-      command: process.execPath,
+      command: node,
       args: [...helperTestArgs],
       durationReport: "node-test-events",
     },
@@ -219,7 +238,7 @@ export function requiredStages(platform = process.platform, env = process.env) {
     },
     {
       name: "vitest",
-      command: process.execPath,
+      command: node,
       args: ["node_modules/vitest/vitest.mjs", "run"],
       cwd: "ui",
       durationReport: "vitest-json",
@@ -227,6 +246,51 @@ export function requiredStages(platform = process.platform, env = process.env) {
       uiProjects: "all",
     },
   ];
+}
+
+// The command and directory a run records for each of `stages`, rebuilt from
+// the values that tie them to one host: its path rules (`platform`), its
+// repository root, run directory and duration reporter URL, and the absolute
+// executable each stage's command resolved to there (`executables`, by stage
+// name, as the run records it). It launches nothing. A reader compares a
+// run's recorded stage entries with these exactly; any difference is a
+// different gate.
+export function expectedStageEntries(stages, { platform, root, runDir, reporterUrl, executables }) {
+  const path = platform === "win32" ? nodePath.win32 : nodePath.posix;
+  return stages.map((stage) => {
+    const resolved = Object.hasOwn(executables ?? {}, stage.name) ? executables[stage.name] : undefined;
+    if (typeof resolved !== "string") {
+      throw new Error(`no recorded executable for stage ${stage.name}: ${stage.command}`);
+    }
+    const report = durationReportPlan(stage, runDir, { path, reporterUrl });
+    const args = report ? [...report.prefix, ...stage.args, ...report.suffix] : stage.args;
+    return { name: stage.name, command: [resolved, ...args], cwd: path.resolve(root, stage.cwd ?? ".") };
+  });
+}
+
+const planPlatforms = ["win32", "darwin", "linux"];
+
+// The full gate's stages and the exact stage entries a run of them on the
+// described host records (`expectedStageEntries`). Every host-bound value is
+// an input, never this host's: `platform`, `node` (the stages' Node),
+// `gitBash` (Windows only), `root`, `runDir`, `reporterUrl` and
+// `executables`, as the compared run recorded them. It reads and runs
+// nothing.
+export function fullGatePlan(input) {
+  if (!input || typeof input !== "object" || !planPlatforms.includes(input.platform)) {
+    throw new Error(`plan platform must be one of ${planPlatforms.join(", ")}`);
+  }
+  for (const key of ["node", "root", "runDir", "reporterUrl"]) {
+    if (typeof input[key] !== "string" || !input[key]) throw new Error(`plan ${key} must be a nonempty string`);
+  }
+  if (input.platform === "win32" && (typeof input.gitBash !== "string" || !input.gitBash)) {
+    throw new Error("a Windows plan needs the run's gitBash");
+  }
+  if (!input.executables || typeof input.executables !== "object") {
+    throw new Error("plan executables must map stage names to executables");
+  }
+  const stages = requiredStages(input.platform, { TERMAL_TEST_GIT_BASH: input.gitBash }, input.node);
+  return { planSchema: 1, stages, entries: expectedStageEntries(stages, input) };
 }
 
 // One UI category run: that Vitest project alone, under the same
@@ -503,6 +567,9 @@ export async function createRun({
     runId,
     state: "running",
     started: request.started,
+    // Measured with the input fingerprint below; until then it identifies
+    // nothing.
+    source: unknownSource("not_yet_measured"),
     preflight: [],
     ...(scope ? { scope } : {}),
     stages: (stages ?? []).map(({ name, liveTests }) => ({
@@ -536,6 +603,14 @@ export async function createRun({
     save(join(runDir, "input.json"), input);
     request.expectedFingerprint = input.fingerprint;
     save(join(runDir, "request.json"), request);
+    // What the run started from, bound to the fingerprint every stage is
+    // checked against: measured right after it, and kept only when it
+    // describes the same HEAD and the same clean or dirty status. It is then
+    // never changed.
+    const measured = await captureSourceMetadata(normalizedRoot, env);
+    const initial = readJson(join(runDir, "results.json"));
+    initial.source = bindSourceToInput(measured, input);
+    save(join(runDir, "results.json"), initial);
   } catch (error) {
     const result = readJson(join(runDir, "results.json"));
     Object.assign(result, {
@@ -913,12 +988,24 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
       .filter((stage) => stage && typeof stage.name === "string")
       .map(({ name }) => ({ name, state: "unrun" }))
     : [];
+  // The source the run measured at creation survives a startup failure; when
+  // it cannot be read back, the record says so instead of dropping it.
+  let source = result?.source;
+  if (source === undefined) {
+    try {
+      source = readJson(join(runDir, "results.json")).source;
+    } catch {
+      source = undefined;
+    }
+  }
+  if (!source || typeof source !== "object") source = unknownSource("source_unrecoverable");
   const failed = {
     runId: basename(runDir),
     state: "failed",
     started: typeof result?.started === "string"
       ? result.started
       : typeof request?.started === "string" ? request.started : new Date().toISOString(),
+    source,
     stages,
     preflight: [],
     exitCode: 1,
@@ -980,14 +1067,17 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
   const childEnv = runEnvironment(env, runDir);
   result.panicJournal = childEnv[PANIC_JOURNAL_ENV];
   save(resultPath, result);
-  const probe = async (name, command, args) => {
+  // `entries` is where the probe is recorded: `result.preflight` for a probe
+  // that gates the run, `result.toolchainProbes` for provenance only, which
+  // no failure reader treats as the run's failure.
+  const probe = async (name, command, args, entries = result.preflight) => {
     const log = join(runDir, `preflight-${name}.log`);
     const outcome = await runCommand(command, args, {
       cwd: request.root,
       env: childEnv,
       log,
     });
-    result.preflight.push({
+    entries.push({
       name,
       command: [command, ...args],
       cwd: request.root,
@@ -999,6 +1089,92 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     if (outcome.code !== 0 || outcome.error) {
       throw new Error(`${name} preflight failed (${outcome.error ?? outcome.code}); see ${log}`);
     }
+  };
+  // The toolchain this gate ran under, from its own probes in this root. The
+  // compiler is the one Cargo uses: RUSTC or CARGO_BUILD_RUSTC when set, else
+  // the default rustc, which is probed only when it is unambiguous: the rustc
+  // beside the chosen Cargo and the one on PATH are the same file, or only one
+  // of them exists. When they differ, when a compiler wrapper is set, or when a
+  // Cargo configuration is not known to be toolchain-neutral
+  // (cargoConfigSelectsRustc), the selection is not resolved here and the
+  // version is left unknown rather than attributed to a compiler Cargo may
+  // not use. rustup's resolution is recorded only for a Cargo that sits
+  // beside rustup (a rustup proxy); a Cargo named directly is not described
+  // by whatever rustup is on PATH. These probes are provenance only
+  // (`result.toolchainProbes`): a missing or failing one leaves its part of
+  // the record unknown and never fails a gate that Cargo's own preflight
+  // admitted.
+  const recordToolchain = async (cargo) => {
+    result.toolchainProbes = [];
+    const output = (name) => preflightVersion(readFileSync(join(runDir, `preflight-${name}.log`), "utf8"), name);
+    const beside = (name) => {
+      const candidate = join(dirname(cargo), process.platform === "win32" ? `${name}.exe` : name);
+      return existsSync(candidate) ? candidate : undefined;
+    };
+    const found = (name) => {
+      try {
+        return executable(name, request.root, childEnv);
+      } catch {
+        return undefined;
+      }
+    };
+    const optionalProbe = async (name, command, args) => {
+      if (!command) return "unavailable";
+      try {
+        await probe(name, command, args, result.toolchainProbes);
+        return "ran";
+      } catch {
+        return "failed";
+      }
+    };
+    // RUSTC and CARGO_BUILD_RUSTC both name the compiler. When both are set
+    // to different values, which one Cargo runs is not settled here, so the
+    // compiler is left unknown rather than attributed to either.
+    const overrides = [...new Set(["RUSTC", "CARGO_BUILD_RUSTC"]
+      .map((name) => cargoOutputEnvironment(childEnv, name))
+      .filter((value) => typeof value === "string" && value.trim())
+      .map((value) => value.trim()))];
+    const compilerOverride = overrides.length === 1 ? overrides[0] : undefined;
+    // Fail closed: a compiler wrapper, or a Cargo configuration that is not
+    // known to be toolchain-neutral, can change the compiler or its toolchain
+    // even when RUSTC names it, so the version is left unknown.
+    const configured = compilerWrapperInEnvironment(childEnv) ||
+      cargoConfigSelectsRustc(request.root, childEnv);
+    const sameFile = (left, right) => {
+      try {
+        return realpathSync.native(left) === realpathSync.native(right);
+      } catch {
+        return false;
+      }
+    };
+    const defaultRustc = () => {
+      const sibling = beside("rustc");
+      const onPath = found("rustc");
+      if (sibling && onPath && !sameFile(sibling, onPath)) return { ambiguous: true };
+      return { command: sibling ?? onPath };
+    };
+    const selected = overrides.length > 1 ? { ambiguous: true }
+      : compilerOverride ? { command: found(compilerOverride) } : defaultRustc();
+    const rustc = configured ? "selection_unsupported"
+      : selected.ambiguous ? "resolution_ambiguous"
+        : await optionalProbe("rustc", selected.command, ["--version"]);
+    const rustupProxy = beside("rustup");
+    const rustup = rustupProxy ? await optionalProbe("rustup", rustupProxy, ["show", "active-toolchain"])
+      : "not_beside_cargo";
+    if (!result.source) return;
+    const toolchain = {
+      cargoVersion: output("cargo"),
+      rustcVersion: rustc === "ran" ? output("rustc") : null,
+      cargoExecutable: cargo,
+      source: result.cargo.source,
+      ...(rustup === "ran"
+        ? parseRustupActiveToolchain(readFileSync(join(runDir, "preflight-rustup.log"), "utf8"))
+        : { resolvedToolchain: null, rustupReason: `rustup_${rustup}`, rustupOverride: "unknown" }),
+    };
+    if (rustc !== "ran") toolchain.unknownReason = `rustc_${rustc}`;
+    else if (!toolchain.cargoVersion || !toolchain.rustcVersion) toolchain.unknownReason = "version_unreadable";
+    result.source.toolchain = toolchain;
+    save(resultPath, result);
   };
   try {
     result.pid = process.pid;
@@ -1050,10 +1226,19 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         path: cargo,
         source: explicitCargo ? "TERMAL_TEST_CARGO" : "PATH",
       };
+      // No version is claimed until this run's own preflight reports one.
+      if (result.source) result.source.toolchain = pendingToolchain(cargo, result.cargo.source);
       save(resultPath, result);
       ensureCargoTargetDirectory(request.root, childEnv);
     }
     const names = new Set();
+    // What each stage command resolved to on this host, and the duration
+    // reporter the stages load: with the request's stages, the values a
+    // reader needs to rebuild every recorded stage command
+    // (`expectedStageEntries`).
+    // No prototype, so every accepted stage name, `__proto__` included, is an
+    // own entry that is saved and found again.
+    const executables = Object.create(null);
     for (const stage of request.stages) {
       if (!/^[a-zA-Z0-9_-]+$/u.test(stage.name) || names.has(stage.name)) {
         throw new Error("stage names must be unique safe filenames");
@@ -1067,7 +1252,10 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       stage.command = request.needsCargo && stage.name === "cargo-check"
         ? cargo
         : executable(stage.command, stage.cwd, childEnv);
+      executables[stage.name] = stage.command;
     }
+    result.hostBindings = { executables, durationReporterUrl: nodeDurationReporterUrl };
+    save(resultPath, result);
     if (request.notifyTo) validateNotification(request, env);
     for (const name of request.requiredBinaryEnv ?? []) {
       if (!/^[A-Z][A-Z0-9_]*$/u.test(name)) {
@@ -1086,6 +1274,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     }
     if (request.needsCargo) {
       await probe("cargo", cargo, ["--version"]);
+      await recordToolchain(cargo);
       const shell = request.stages.find((stage) => ["rust-tests", "engram-live"].includes(stage.name));
       if (shell && shell.command !== cargo) {
         await probe("test-shell", shell.command, ["-c", "exit 0"]);
@@ -1708,6 +1897,12 @@ function parseCommon(args) {
 
 async function main(args) {
   const mode = args.shift();
+  if (mode === "plan") {
+    // Comparison data only: prints the plan for the host the input describes.
+    if (args.length !== 1) throw new Error("plan requires one input JSON file");
+    process.stdout.write(`${JSON.stringify(fullGatePlan(readJson(resolve(args[0]))), null, 2)}\n`);
+    return;
+  }
   if (["summary", "notify", "recover", "_run"].includes(mode)) {
     if (args.length !== 1) throw new Error(`${mode} requires one run directory`);
     const runDir = resolve(args[0]);
@@ -1730,7 +1925,7 @@ async function main(args) {
     return;
   }
   if (!["full", "focused", "live", "category"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] | summary|notify|recover RUN_DIR");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
   }
   // A category is resolved, or refused, before any run directory exists.
   let category;

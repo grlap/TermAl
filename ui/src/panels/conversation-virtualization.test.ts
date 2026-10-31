@@ -334,8 +334,8 @@ describe("estimateConversationMessageHeight for Engram control cards", () => {
     dispatch: "sent_on_grant", latencyMs: { total: 3 }, failMode: "enforced",
   };
 
-  it("estimates a routine card from its collapsed height", () => {
-    expect(estimateConversationMessageHeight(routine)).toBe(120);
+  it("estimates a routine card from its one-row collapsed height", () => {
+    expect(estimateConversationMessageHeight(routine)).toBe(48);
   });
 
   it("keeps the expanded estimate for a card that stays expanded", () => {

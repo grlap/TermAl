@@ -41,7 +41,9 @@ fn engram_admission_code_retries(code: &str) -> bool {
 }
 
 /// A live closing operation, not just its report. Memory-only: after a host
-/// restart the existing status reconciliation owns the leftover grant.
+/// restart the session's persisted checkpoint operation keeps the same
+/// request, key and report, and original-checkpoint result recovery replays
+/// it exactly (`engram_checkpoint_result_recovery.rs`).
 #[derive(Clone, Debug)]
 struct EngramRetainedCheckpoint {
     authority: String,

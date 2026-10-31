@@ -1710,6 +1710,27 @@ impl std::fmt::Display for PersistTranscriptPredecessorChanged {
 
 impl std::error::Error for PersistTranscriptPredecessorChanged {}
 
+/// A well-formed checkpoint mirror on its own owner's row disagrees with the
+/// ledger entry the same cut selects. In the delta writer this is the bounded
+/// collector deferring that owner row while the cut still carried its changed
+/// ledger entry: nothing is committed, the watermark stays where it was, and a
+/// later collection is coherent, so, like a changed transcript predecessor,
+/// the write is retried without resolving its content fences
+/// (`persist_fence.rs`). The full-snapshot writer shares the validator and so
+/// reports the same type, but it holds no fences and treats it as any other
+/// refusal. Malformed, noncanonical or misowned mirrors, and every other
+/// validation failure, stay ordinary errors.
+#[derive(Debug)]
+struct PersistCheckpointMirrorLedgerMismatch;
+
+impl std::fmt::Display for PersistCheckpointMirrorLedgerMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("existing checkpoint mirror disagrees with its selected ledger entry")
+    }
+}
+
+impl std::error::Error for PersistCheckpointMirrorLedgerMismatch {}
+
 fn persist_delta_via_cache_inner(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,

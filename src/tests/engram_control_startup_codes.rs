@@ -97,8 +97,8 @@ fn control_startup_codes_are_terminal_remote_errors_classified_by_code() {
 }
 
 /// A recovery checkpoint answered by a startup code was never dispatched, so
-/// it is no refusal of the report it carries; an ordinary remote refusal
-/// still is.
+/// it is no refusal of the report it carries; a definitive refusal (a code
+/// Engram uses to refuse the report) still is.
 #[test]
 fn a_recovery_checkpoint_startup_reply_is_not_a_report_refusal() {
     for code in STARTUP_CODES {
@@ -107,11 +107,11 @@ fn a_recovery_checkpoint_startup_reply_is_not_a_report_refusal() {
         assert_eq!(engram_recovery_checkpoint_refusal(&reply), None, "{code}");
     }
     let refusal: std::result::Result<EngramTurnCheckpointResponse, EngramTransportError> =
-        Err(remote_error("summary_redacted", "report payload refused"));
+        Err(remote_error("control_projection_invalid", "report payload refused"));
     assert_eq!(
         engram_recovery_checkpoint_refusal(&refusal),
-        Some(Some("summary_redacted")),
-        "an actual refusal keeps its meaning"
+        Some(Some("control_projection_invalid")),
+        "a definitive refusal keeps its meaning"
     );
 }
 
