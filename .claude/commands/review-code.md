@@ -1,13 +1,14 @@
 ---
 name: review-code
-description: Inspect staged, unstaged, and untracked changes using multiple specialized reviewer lenses.
+description: Inspect working-tree changes or a recorded commit against its base using specialized reviewer lenses.
 metadata:
   termal:
     title:
       strategy: default
 ---
 
-Inspect staged, unstaged, and untracked changes using multiple specialized reviewer lenses.
+Inspect staged, unstaged and untracked changes, or a supplied committed input
+against its recorded base, using multiple specialized reviewer lenses.
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Do not run mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) as part of this command.**
 
@@ -17,12 +18,49 @@ Inspect staged, unstaged, and untracked changes using multiple specialized revie
 
 ## Step 1: Get the changes
 
-Run `git status --short`, `git diff`, `git diff --cached`, and `git ls-files --others --exclude-standard` to get all staged, unstaged, and untracked changes.
-If there are no staged, unstaged, or untracked changes, tell the user and stop.
+For a supplied committed input, require the parent's recorded full base
+commit (`BASE`), candidate commit (`COMMIT`) and candidate tree id (`TREE`).
+Missing or invalid identities in committed-input mode are unavailable
+coverage; report them and stop rather than fall back to working-tree changes
+or infer a base from `HEAD^`.
 
-Also run `git diff --name-only` and `git diff --cached --name-only` to get the list of changed tracked files.
-For untracked files, include the `git ls-files --others --exclude-standard` list in the reviewer prompt because untracked files do not appear in `git diff`.
-Do NOT read full file contents upfront — reviewers will read files on-demand as needed. For untracked files, reviewers must inspect file contents directly on demand.
+For this mode, at both the start and end of the review, run separately:
+
+```bash
+git rev-parse HEAD
+git show -s --format=%T COMMIT
+git status --porcelain --untracked-files=all
+```
+
+Require zero exit statuses, `HEAD` equal to the recorded `COMMIT`, the tree
+equal to `TREE`, and an empty status listing. Verify that `BASE` and `COMMIT`
+are the recorded commit objects. Report the three ids and both boundary
+results. A dirty checkout or identity mismatch is unavailable coverage, not
+a clean review. A known intervening source or index edit invalidates the
+affected result even if the final checks match.
+
+For a supplied committed input, read its complete change against the supplied
+base, including added and deleted files, even though the checkout is clean:
+
+```bash
+git diff --name-only BASE COMMIT --
+git diff BASE COMMIT --
+```
+
+Require both inspection commands to succeed; report a refused or unreadable
+diff as a coverage gap, never as an empty change.
+Read relevant file content from `COMMIT`, or from `BASE` for a deleted file.
+Untracked files are absent in this mode. If the supplied range is empty,
+report that there is nothing to review and stop. These read-only target
+checks grant no Git mutation or gate authority.
+
+Without a supplied committed input, run `git status --short`, `git diff`,
+`git diff --cached`, and `git ls-files --others --exclude-standard` to get all
+staged, unstaged and untracked changes. If there are none, report that and stop.
+Also run `git diff --name-only` and `git diff --cached --name-only` to list
+changed tracked files. Include the untracked list because those files do not
+appear in `git diff`; inspect their contents directly on demand.
+Do NOT read full file contents upfront — read files on demand in either mode.
 
 On Windows, a read-only Codex reviewer reads source this way (TermAl also appends it to such a delegated child's prompt):
 
@@ -63,13 +101,13 @@ review the code.
 [CONTENT OF THE REVIEWER .md FILE]
 
 ## Changes to Review
-[THE GIT DIFF]
+[The complete BASE-to-COMMIT diff for a committed input; otherwise the working-tree diffs]
 
 ## Changed Files
-[LIST OF CHANGED FILE PATHS — read files on-demand as needed for context, don't rely on diff alone]
+[The selected target's changed paths, including additions and deletions — read files on demand for context]
 
 ## Untracked Files
-[LIST OF UNTRACKED FILE PATHS FROM git ls-files --others --exclude-standard — read files on-demand as needed because they do not appear in the diff]
+[None for a clean committed input; otherwise the untracked list, with contents read on demand]
 
 ## Project Context
 This is TermAl — a WhatsApp-style control room for managing AI coding agents locally.
@@ -116,6 +154,9 @@ If no issues found, say "No issues found."
 ## Step 4: Consolidate
 
 After all reviewers complete, merge their findings into a single review note:
+
+For a committed input, include the recorded `BASE`, `COMMIT` and `TREE` and
+the independent start/end identity results with the reported coverage.
 
 ```markdown
 # Code Review — [date]

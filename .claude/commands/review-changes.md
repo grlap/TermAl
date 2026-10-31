@@ -1,13 +1,13 @@
 ---
 name: review-changes
-description: Review current changes by running /review-code in two TermAl reviewer delegations of different vendors, Codex and Claude, or Kimi for an unavailable Codex or Claude.
+description: Review working-tree changes or a recorded commit against its base with two independent TermAl reviewers.
 metadata:
   termal:
     title:
       strategy: default
 ---
 
-Review current staged and unstaged changes by delegating `/review-code` to two reviewers of different vendors — Codex and Claude, Kimi standing in for an unavailable Codex or Claude, never for both — through TermAl delegation sessions.
+Review staged, unstaged and untracked changes, or an explicitly supplied committed input against its recorded base, by delegating `/review-code` to two reviewers of different vendors — Codex and Claude, Kimi standing in for an unavailable Codex or Claude, never for both — through TermAl delegation sessions.
 
 **IMPORTANT: Run `/review-changes` directly in the existing active, writable parent session. Never delegate or spawn `/review-changes` itself. The coordinator must be able to create normal build/test artifacts; only the `/review-code` children are delegated with `writePolicy: readOnly`.**
 
@@ -39,9 +39,33 @@ Required MCP tools:
 
 ## Step 1: Confirm review target
 
-Run `git status --short`, `git diff --name-only`, `git diff --cached --name-only`, and `git ls-files --others --exclude-standard`.
+For a supplied candidate commit, the target is that commit's change against
+its recorded base, and the checkout is clean. Require explicit `BASE` and
+`COMMIT`, resolve both to commit object ids, and record those full ids and
+the candidate's tree id (`TREE`) on the item and in the review brief before
+validation. Missing or
+invalid committed-input identity is an unavailable target, not a request to
+fall back to working-tree changes. Do not infer the base from `HEAD^`.
 
-If there are no staged, unstaged, or untracked changes, tell the user there is nothing to review and stop.
+Confirm that `git rev-parse HEAD` equals `COMMIT`, obtain `TREE` with
+`git show -s --format=%T COMMIT`, and require
+`git status --porcelain --untracked-files=all` to print nothing. List the
+change with `git diff --name-only BASE COMMIT --`. If the range is empty,
+report that there is nothing to review and stop; a clean checkout alone is
+not an empty change. A dirty checkout or identity mismatch stops this mode
+with an explicit unavailable-target report. All target inspection commands
+must succeed; missing output from a failed command is not a clean checkout
+or an empty change.
+
+This mode selects an already existing commit; it grants no permission to
+create or push one. The "Commit and push" sections of CLAUDE.md and AGENTS.md
+remain authoritative, including their existing test-ref exception. This
+review target adds no Git, integration, review-reuse or test-ref authority.
+
+Without a supplied committed input, run `git status --short`,
+`git diff --name-only`, `git diff --cached --name-only`, and
+`git ls-files --others --exclude-standard`. If there are no staged,
+unstaged or untracked changes, report that there is nothing to review and stop.
 
 ## Step 2: Parent quality gates
 
@@ -50,6 +74,12 @@ The parent owns gate execution. Use the maintained CLI once from the repository 
 ```bash
 node scripts/test-launcher.mjs full
 ```
+
+For a committed input, run this gate once on the clean checkout of the
+recorded `COMMIT` from Step 1. No separate working-tree pre-gate is required
+for that target. Keep that commit, source and index unchanged through the
+gate and review; a changed input still needs its own validation. The
+existing working-tree path and failed-gate investigation below are unchanged.
 
 The script owns the stage order, working directories, native tool resolution,
 fingerprint, fail-fast execution, logs and diagnostic summary. Do not run the
@@ -113,19 +143,29 @@ Using `termal_spawn_session`, create two child delegation sessions from the curr
 
 1. Codex reviewer
    - Agent: `Codex`
-   - Prompt: `/review-code`
+   - Prompt: the multiline `/review-code` brief below
    - Mode: `reviewer`
    - Write policy: `readOnly`.
    - Title: `Codex /review-code`
 
 2. Claude reviewer
    - Agent: `Claude`
-   - Prompt: `/review-code`
+   - Prompt: the multiline `/review-code` brief below
    - Mode: `reviewer`
    - Write policy: `readOnly`.
    - Title: `Claude /review-code`
 
-When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt `/review-code`, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`. The stand-in replaces the unavailable reviewer, whether its spawn was refused or its result was lost to that reviewer's usage limit or outage, so a round never has more than two reviews that count. Never two reviewers of one vendor. Kimi never stands in for both reviewers of the same round: when Codex and Claude are both unavailable, only one stand-in is spawned, the other reviewer is reported as unavailable, and the round does not satisfy the commit rule's review pair. A round is one pass of Steps 3–5 over one gated input; the same freeze means the reviewed files unchanged since that gate, as Step 4 requires. A Kimi reviewer's read-only gate is weaker than Claude's or Codex's (docs/features/kimi-cli-integration.md, Read-only delegation children); the stand-in is accepted only for an unavailable Codex or Claude.
+Give each reviewer a multiline prompt whose first line tells it to read
+`.claude/commands/review-code.md` and follow it. Include the working directory,
+target mode and changed paths. For a committed input, include the same
+recorded full `BASE`, `COMMIT` and `TREE` ids and the required start/end
+HEAD, tree and clean-status checks. The change to inspect is
+`git diff BASE COMMIT --`, including added and deleted files, even though
+the checkout is clean. Do not pass this context as arguments after a
+one-line `/review-code`: TermAl's one-line command expansion has no
+arguments slot.
+
+When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt: the same multiline `/review-code` brief as the reviewer it replaces, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`. The stand-in replaces the unavailable reviewer, whether its spawn was refused or its result was lost to that reviewer's usage limit or outage, so a round never has more than two reviews that count. Never two reviewers of one vendor. Kimi never stands in for both reviewers of the same round: when Codex and Claude are both unavailable, only one stand-in is spawned, the other reviewer is reported as unavailable, and the round does not satisfy the commit rule's review pair. A round is one pass of Steps 3–5 over one gated input; the same freeze means the reviewed files unchanged since that gate, as Step 4 requires. A Kimi reviewer's read-only gate is weaker than Claude's or Codex's (docs/features/kimi-cli-integration.md, Read-only delegation children); the stand-in is accepted only for an unavailable Codex or Claude.
 
 Use read-only delegation sessions here so reviewers see the exact current worktree, including untracked files. Do not request `isolatedWorktree` for this command until the known "isolated delegation worktree snapshots omit untracked files" limitation is fixed by mirroring or explicitly rejecting untracked dirty state.
 
@@ -139,9 +179,19 @@ Call `termal_resume_after_delegations` with the outstanding delegation ids (both
 
 While the reviewers run, keep the reviewed files unchanged: reviewers read the live working tree, so an edit during the review makes it cover a moving target. Make independent edits in another worktree. A deliberate edit to the reviewed files needs a new gate and a new review; do not read the earlier result as covering it.
 
+For a committed input, keep `HEAD` at the recorded `COMMIT` and retain the
+clean checkout through both reviews. A known intervening source or index
+edit invalidates the affected result even if later boundary checks match.
+
 Never use `termal_wait_delegations`, PowerShell, shell, raw HTTP polling, or session-log polling for `/review-changes` review fan-in. `termal_wait_delegations` is reserved for short smoke tests and diagnostics outside this command. A backend resume wait queues its result as the next parent prompt; keeping the parent turn active prevents that queued fan-in prompt from running and can make the review appear stuck.
 
 ## Step 5: Consolidate results
+
+For a committed input, first repeat Step 1's HEAD, tree and clean-status
+checks against the recorded identities. Require both reviewers to report
+the same `BASE`, `COMMIT` and `TREE` and their independent start/end checks.
+A mismatch or missing identity evidence is unavailable coverage, not a clean
+review. The Git tree id is separate from the launcher's own fingerprint.
 
 After both reviewers finish, fetch each delegation result packet and present a concise fan-in:
 
@@ -169,8 +219,10 @@ establish a passing check.
 Deduplicate findings. If both reviewers report the same issue, merge it and note that both caught it.
 Also merge their proposed tracker follow-ups into the consolidated action list.
 Do not create, update, comment on, or close tracker items until this
-consolidation is complete. The one exception besides the Step 2 gate-failure
-record is recording an unavailable Codex's or Claude's refusal text (Steps 3 and 5): a
+consolidation is complete. The Step 1 record of only the resolved BASE,
+COMMIT and TREE ids is an explicit exception. The other exceptions are the
+Step 2 gate-failure record and recording an unavailable Codex's or Claude's
+refusal text (Steps 3 and 5): a
 note on the Engram item the change lands under — the held item, or, when none
 is held, the item the change belongs to — made when the refusal is met and
 limited to that refusal.

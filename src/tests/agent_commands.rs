@@ -2905,7 +2905,7 @@ fn review_changes_pins_two_review_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
-        "When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt `/review-code`, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`.",
+        "When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt: the same multiline `/review-code` brief as the reviewer it replaces, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`.",
         "/review-changes must define an unavailable Codex and spawn the stand-in as a read-only reviewer",
     );
     assert_command_contains(
