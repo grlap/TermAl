@@ -178,13 +178,17 @@ fn engram_named_root_reclamation_text(
             _ => "planned: eligible for the automatic pass".to_owned(),
         }
     };
-    match inner
+    let status = match inner
         .engram_work_naming_history
         .iter()
         .find(|history| history.store == root.store && history.work_id == root.work_id)
         .and_then(|history| history.recovery_reason.as_deref())
     {
         Some(reason) => format!("{status}; last outcome: {reason}"),
+        None => status,
+    };
+    match engram_root_pass_attempt_text(inner, root, now) {
+        Some(attempt) => format!("{status}; {attempt}"),
         None => status,
     }
 }

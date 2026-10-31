@@ -30,6 +30,11 @@ mod retry {
     include!("engram_named_root_reclamation_retry.rs");
 }
 
+mod deferral {
+    use super::*;
+    include!("engram_named_root_reclamation_deferral.rs");
+}
+
 mod release {
     include!("engram_named_root_release.rs");
 }

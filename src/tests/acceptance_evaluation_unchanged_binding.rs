@@ -580,7 +580,7 @@ fn the_in_flight_retry_hint_is_derived_from_the_passs_read_budget() {
     assert_eq!(ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER, Duration::from_secs(3));
     assert_eq!(ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES, 3);
     // The request side answers a transition in flight the same way.
-    let error = acceptance_evaluation_naming_refusal("lead", EngramWorkNamingChange::InFlight);
+    let error = acceptance_evaluation_naming_refusal("lead", EngramWorkNamingChange::InFlight, None);
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE, "{}", error.message);
     assert!(
         error.message.starts_with(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT)
@@ -608,6 +608,32 @@ fn a_submit_during_a_pass_is_retryable_and_the_same_attempt_writes_once_it_publi
     // a second write.
     let again = submit(&paused, runner_must_not_run).expect_err("one attempt records once");
     assert_eq!(again.message, ACCEPTANCE_EVALUATION_ALREADY_RECORDED_ERROR);
+}
+
+#[test]
+fn a_submit_in_flight_names_the_roots_last_pass_attempt_with_its_wait_unchanged() {
+    let paused = paused_evaluation(true);
+    put_transition_in_flight(&paused.state);
+    let plain = submit(&paused, runner_must_not_run).expect_err("the pass has not published");
+    let named = paused.named.clone().expect("a named-root evaluation");
+    let status = {
+        let mut inner = paused.state.inner.lock().unwrap();
+        let now = inner.engram_budget_clock_snapshot().now();
+        engram_record_root_pass_attempt_locked(&mut inner, &named, now,
+            &Err(ApiError::conflict("fixture pass refusal")));
+        inner.engram_root_reclamation.cooldowns.push((named.clone(), now + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
+        engram_named_root_reclamation_text(&inner, &named, now)
+    };
+    assert!(status.contains("refused: fixture pass refusal (HTTP 409)"), "{status}");
+    let error = submit(&paused, runner_must_not_run).expect_err("still in flight");
+    assert_retryable_in_flight(&error);
+    let (lead, rest) = plain.message.split_once(" Nothing was recorded").expect("the plain refusal's shape");
+    assert_eq!(error.message, format!("{lead} Its named root's reclamation status now: {status}. Nothing was recorded{rest}"),
+        "the same refusal with the root's status added; the wait and the retry contract unchanged");
+    assert_attempt_open(&paused);
+    // Without a recorded attempt the text is the plain one again.
+    paused.state.inner.lock().unwrap().engram_root_reclamation.attempts.clear();
+    assert_eq!(submit(&paused, runner_must_not_run).expect_err("still in flight").message, plain.message);
 }
 
 #[test]

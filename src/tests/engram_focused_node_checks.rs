@@ -28,6 +28,89 @@ fn engram_node_focused_recognition_preserves_quoted_filter_and_test_kind() {
 }
 
 #[test]
+fn engram_focused_outer_options_preserve_node_and_other_test_recognition() {
+    for options in [
+        "--notify session-recipient",
+        "--item fixture-work",
+        "--notify session-recipient --item fixture-work",
+        "--next-owner session-recipient --next-action \"inspect terminal result\"",
+        "--require-binary-env FIXTURE_BINARY",
+        "--require-binary-env FIRST_BINARY --notify session-recipient --require-binary-env SECOND_BINARY --item \"fixture work\"",
+    ] {
+        let command = format!("node scripts/test-launcher.mjs focused {options} -- node --test --test-name-pattern \"selected case\" fixture.test.mjs");
+        let check = engram_check_command(&command).expect("supported launcher options retain test recognition");
+        assert_eq!(check.kind, EngramVerificationKind::Test, "{command}");
+        assert_eq!(engram_focused_node_words(&check.program, &check.argv[1..]).unwrap(),
+            ["node", "--test", "--test-name-pattern", "selected case", "fixture.test.mjs"]);
+        for inner in ["cargo test", "npx vitest run"] {
+            let command = format!("node scripts/test-launcher.mjs focused {options} -- {inner}");
+            assert_eq!(engram_check_command(&command).unwrap().kind,
+                EngramVerificationKind::Test, "{command}");
+        }
+        let command = format!("node scripts/test-launcher.mjs focused {options} -- cargo +stable build --release");
+        let check = engram_check_command(&command).unwrap();
+        assert_eq!(check.kind, EngramVerificationKind::Build, "{command}");
+        assert_eq!(engram_focused_build_words(&check.program, &check.argv[1..]).unwrap(),
+            ["cargo", "+stable", "build", "--release"]);
+    }
+}
+
+#[test]
+fn engram_focused_outer_options_unknown_or_malformed_have_named_refusals() {
+    for (options, named) in [
+        ("--future-option value", "--future-option"),
+        ("--notify", "--notify"),
+        ("--require-binary-env invalid-name", "--require-binary-env"),
+        ("--next-owner session-recipient", "--next-action"),
+        ("--next-action inspect", "--next-owner"),
+        ("--notify --item fixture-work", "--notify"),
+        ("--notify ''", "--notify"),
+        ("--notify session-one --notify session-two", "--notify"),
+        ("--item fixture-one --item fixture-two", "--item"),
+        ("--item ''", "--item"),
+        ("--next-owner '-recipient' --next-action inspect", "--next-owner"),
+        ("--require-binary-env FIXTURE_BINARY --require-binary-env FIXTURE_BINARY", "--require-binary-env"),
+        ("--engram-binary C:/fixture/engram.exe", "--engram-binary"),
+        ("--engram-sha256 aabb", "--engram-sha256"),
+        ("--detach --notify session-recipient", "--detach"),
+    ] {
+        for inner in ["node --test fixture.test.mjs", "cargo test", "cargo build", "npx vitest run"] {
+            let command = format!("node scripts/test-launcher.mjs focused {options} -- {inner}");
+            assert!(engram_check_command(&command).is_none(), "{command}");
+            let refusal = engram_unsupported_focused_line(&command)
+                .expect("unsupported outer options must not fail silently");
+            assert!(refusal.contains(named), "{command}: {refusal}");
+        }
+    }
+    for command in [
+        "node scripts/test-launcher.mjs focused --notify session-recipient",
+        "node scripts/test-launcher.mjs focused --notify session-recipient --",
+    ] {
+        assert!(engram_check_command(command).is_none(), "{command}");
+        assert!(engram_unsupported_focused_line(command).unwrap().contains("requires"));
+    }
+    // Outer metadata does not change the existing inner runner exclusions.
+    for inner in ["node --test --watch", "node --test --test-reporter=json", "cargo test --no-run", "node fixture.mjs"] {
+        let command = format!("node scripts/test-launcher.mjs focused --notify session-recipient -- {inner}");
+        assert!(engram_check_command(&command).is_none(), "{command}");
+        assert!(engram_unsupported_focused_line(&command).is_some(), "{command}");
+    }
+}
+
+#[test]
+fn engram_focused_outer_options_keep_owner_and_one_checkpoint_test() {
+    let command = "node scripts/test-launcher.mjs focused --notify session-recipient --item fixture-work -- node --test fixture.test.mjs";
+    let mut fixture = FocusedNodeFixture::with_test(
+        "node-outer-options", 0, false, command, &["--test", "fixture.test.mjs"],
+    );
+    fixture.request["notifyTo"] = json!("session-recipient");
+    assert_eq!(fixture.request["owner"], fixture.turn.session_id);
+    assert_ne!(fixture.request["owner"], fixture.request["notifyTo"]);
+    fixture.assert_started();
+    one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "succeeded");
+}
+
+#[test]
 fn engram_node_focused_other_commands_do_not_become_tests() {
     for command in [
         "node --test fixture.test.mjs",

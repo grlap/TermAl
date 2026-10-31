@@ -2,19 +2,10 @@
 // launcher validation and the lifecycle's source/grant fences own admission.
 
 fn engram_focused_node_words(program: &str, args: &[String]) -> Option<Vec<String>> {
-    let [script, mode, separator, node, rest @ ..] = args else {
+    let [node, rest @ ..] = engram_focused_launcher_words(program, args)?.ok()? else {
         return None;
     };
-    if program != "node"
-        || !matches!(
-            script.replace('\\', "/").as_str(),
-            "scripts/test-launcher.mjs" | "./scripts/test-launcher.mjs"
-        )
-        || mode != "focused"
-        || separator != "--"
-        || engram_program_name(node) != "node"
-        || rest.first()?.as_str() != "--test"
-    {
+    if engram_program_name(node) != "node" || rest.first()?.as_str() != "--test" {
         return None;
     }
     let mut index = 1;
@@ -197,20 +188,19 @@ fn engram_unsupported_focused_line(command: &str) -> Option<String> {
         return None;
     }
     let words = engram_shell_words(&line)?;
-    let [node, script, mode, separator, inner, inner_args @ ..] = words.as_slice() else {
+    let envelope = engram_focused_launcher_words(&engram_program_name(&words[0]), &words[1..])?;
+    let inner = match envelope {
+        Ok(inner) => inner,
+        Err(reason) => {
+            return Some(format!(
+                "[TermAl] Unsupported focused launcher form {line:?}: {reason}; \
+                 no Test or Build record will follow; use supported foreground launcher options."
+            ));
+        }
+    };
+    let [inner, inner_args @ ..] = inner else {
         return None;
     };
-    if !(engram_program_name(node) == "node"
-        && matches!(
-            script.replace('\\', "/").as_str(),
-            "scripts/test-launcher.mjs" | "./scripts/test-launcher.mjs"
-        )
-        && mode == "focused"
-        && separator == "--"
-        && !inner.is_empty())
-    {
-        return None;
-    }
     let inner_program = engram_program_name(inner);
     // Native Node --test may express test intent while falling outside the
     // bounded foreground grammar. --no-run and lint/script commands do not

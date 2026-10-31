@@ -20,8 +20,12 @@ export const MESSAGE_STACK_NAVIGATION_START_EVENT =
 
 // Revoke asynchronous seeks before a new owner admits history or writes scroll.
 // This is authority invalidation, not a geometry change or a FOLLOW decision.
-export function notifyMessageStackNavigationStart(node: HTMLElement) {
-  node.dispatchEvent(new Event(MESSAGE_STACK_NAVIGATION_START_EVENT));
+// Origin identity lets an initiator ignore its own signal without masking
+// nested reader input or another navigation on the same node.
+export function notifyMessageStackNavigationStart(node: HTMLElement, origin?: object) {
+  node.dispatchEvent(new CustomEvent(MESSAGE_STACK_NAVIGATION_START_EVENT, {
+    detail: { origin },
+  }));
 }
 
 export const MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS = 1200;

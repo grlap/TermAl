@@ -196,9 +196,8 @@ fn engram_pipe_argv_keeps_native_boundary(words: &[String]) -> bool {
                 script.replace('\\', "/").ends_with("test-launcher.mjs")
             }) && words.get(2).is_some_and(|mode| mode == "focused") =>
         {
-            words.iter()
-                .position(|word| word == "--")
-                .and_then(|separator| words.get(separator + 1..))
+            engram_focused_launcher_words("node", &words[1..])
+                .and_then(Result::ok)
                 .is_some_and(engram_pipe_argv_keeps_native_boundary)
         }
         _ => true,
@@ -553,6 +552,93 @@ fn engram_wrapper_sets_directory(line: &str) -> bool {
         )
 }
 
+/// The foreground focused envelope shared by Test, Build and refusal feedback.
+/// Options come from the TermAl and Engram launchers; metadata never selects an
+/// evidence owner. Return the inner argv unchanged, or name the refused option.
+/// Artifact validation and the lifecycle's source/grant guards still own credit.
+fn engram_focused_launcher_words<'a>(
+    program: &str,
+    args: &'a [String],
+) -> Option<Result<&'a [String], String>> {
+    let [script, mode, outer @ ..] = args else {
+        return None;
+    };
+    if program != "node"
+        || !matches!(
+            script.replace('\\', "/").as_str(),
+            "scripts/test-launcher.mjs" | "./scripts/test-launcher.mjs"
+        )
+        || mode != "focused"
+    {
+        return None;
+    }
+    Some((|| {
+        let mut index = 0;
+        let mut metadata = Vec::new();
+        let mut binary_envs = Vec::new();
+        while let Some(flag) = outer.get(index) {
+            if flag == "--" {
+                break;
+            }
+            if flag == "--detach" {
+                return Err("--detach is not a foreground focused check".to_owned());
+            }
+            if !matches!(
+                flag.as_str(),
+                "--notify" | "--item" | "--next-owner" | "--next-action" | "--require-binary-env"
+            ) {
+                return Err(format!("unsupported focused launcher option {flag:?}"));
+            }
+            let value = outer
+                .get(index + 1)
+                .filter(|value| !value.trim().is_empty() && !value.starts_with("--"))
+                .ok_or_else(|| format!("{flag} requires a value before --"))?;
+            if flag == "--require-binary-env" {
+                let mut bytes = value.bytes();
+                if !bytes.next().is_some_and(|byte| byte.is_ascii_uppercase())
+                    || !bytes.all(|byte| {
+                        byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                    })
+                    || binary_envs.contains(&value.as_str())
+                {
+                    return Err(format!("{flag} requires a distinct uppercase variable name"));
+                }
+                binary_envs.push(value.as_str());
+            } else {
+                if metadata.contains(&flag.as_str()) {
+                    return Err(format!("{flag} may be supplied only once"));
+                }
+                let max_bytes = if flag == "--next-action" { 2000 } else { 256 };
+                let valid = match flag.as_str() {
+                    "--notify" => !value.trim().starts_with('-'),
+                    _ => {
+                        !value.contains(['\r', '\n'])
+                            && value.len() <= max_bytes
+                            && (flag != "--next-owner"
+                                || (value == value.trim() && !value.starts_with('-')))
+                    }
+                };
+                if !valid {
+                    return Err(format!("{flag} has an invalid launcher metadata value"));
+                }
+                metadata.push(flag.as_str());
+            }
+            index += 2;
+        }
+        if metadata.contains(&"--next-owner") != metadata.contains(&"--next-action") {
+            return Err("--next-owner and --next-action must be supplied together".to_owned());
+        }
+        if outer.get(index).is_none_or(|word| word != "--") {
+            return Err("focused launcher requires -- before its command".to_owned());
+        }
+        let inner = &outer[index + 1..];
+        if inner.first().is_none_or(String::is_empty) {
+            return Err("focused launcher requires a command after --".to_owned());
+        }
+        Ok(inner)
+    })())
+}
+
 /// Whether `program` with `args` runs a test suite, as far as TermAl can say
 /// with confidence. Flags that make a runner list or build tests without
 /// running them (`--no-run`, `--list`, `--collect-only` and pytest's `--co`)
@@ -600,16 +686,16 @@ fn engram_is_test_command(program: &str, args: &[String]) -> bool {
                 .is_some_and(|script| script.replace('\\', "/").ends_with("test-launcher.mjs"));
             // A detached run is a launch, carried until it settles
             // (`engram_carried_checks.rs`); only a full gate is carried.
-            if !launcher || (args.iter().any(|word| word == "--detach") && arg(1) != Some("full")) {
+            if !launcher
+                || (args.iter().any(|word| word == "--detach")
+                    && !matches!(arg(1), Some("full" | "focused")))
+            {
                 return false;
             }
             match arg(1) {
                 Some("full" | "live") => true,
-                Some("focused") => args
-                    .iter()
-                    .position(|word| word == "--")
-                    .and_then(|separator| args.get(separator + 1..))
-                    .filter(|focused| !focused.is_empty())
+                Some("focused") => engram_focused_launcher_words(program, args)
+                    .and_then(Result::ok)
                     .is_some_and(|focused| {
                         engram_focused_node_words(program, args).is_some()
                             || engram_is_test_command(&engram_program_name(&focused[0]), &focused[1..])

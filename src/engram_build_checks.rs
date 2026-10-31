@@ -30,22 +30,12 @@ fn engram_cargo_build_args(args: &[String]) -> bool {
         })
 }
 
-/// The bounded foreground wrapper; no detach, notification, arbitrary script
-/// suffix or custom stage file can stand for a Build command.
+/// The shared foreground wrapper; metadata cannot stand for a Build command.
 fn engram_focused_build_words(program: &str, args: &[String]) -> Option<Vec<String>> {
-    let [script, mode, separator, cargo, rest @ ..] = args else {
+    let [cargo, rest @ ..] = engram_focused_launcher_words(program, args)?.ok()? else {
         return None;
     };
-    (program == "node"
-        && matches!(
-            script.replace('\\', "/").as_str(),
-            "scripts/test-launcher.mjs" | "./scripts/test-launcher.mjs"
-        )
-        && mode == "focused"
-        && separator == "--"
-        && engram_program_name(cargo) == "cargo"
-        && engram_cargo_build_args(rest))
-    .then(|| {
+    (engram_program_name(cargo) == "cargo" && engram_cargo_build_args(rest)).then(|| {
         std::iter::once(cargo.clone())
             .chain(rest.iter().cloned())
             .collect()

@@ -11,7 +11,7 @@ Review staged, unstaged and untracked changes, or an explicitly supplied committ
 
 **IMPORTANT: Run `/review-changes` directly in the existing active, writable parent session. Never delegate or spawn `/review-changes` itself. The coordinator must be able to create normal build/test artifacts; only the `/review-code` children are delegated with `writePolicy: readOnly`.**
 
-**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) may only be used when the current session write policy allows workspace mutation.**
+**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. That is Greg's word or, for commit, push and install only, the standing rule in the Commit and push section of CLAUDE.md and AGENTS.md, or, for a candidate commit only, its candidate-commits bullet. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) may only be used when the current session write policy allows workspace mutation.**
 
 **IMPORTANT: This command must use TermAl MCP delegation tools to obtain the review pair — at most two reviews that count, one Codex and one Claude, with at most one Kimi stand-in replacing an unavailable Codex or Claude reviewer as Step 3 describes — so a round makes at most three spawns and counts no more than two reviews. A round that ends with fewer than two reviews reports the missing reviewer as unavailable, spawns no further reviewer, and does not satisfy the commit rule's review pair. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-code` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-changes` requires the TermAl delegation MCP bridge.**
 
@@ -28,7 +28,7 @@ repository's `/review-code` command does not need to contain the submission
 schema or an opt-in marker.
 
 When the reviewed change touches authority text, Step 7's final-diff audit
-follows the review pair, and the change is neither committed nor pushed
+follows the review pair, and the change is neither landed nor pushed
 before that audit is recorded on the item as passed.
 
 Required MCP tools:
@@ -66,6 +66,29 @@ Without a supplied committed input, run `git status --short`,
 `git diff --name-only`, `git diff --cached --name-only`, and
 `git ls-files --others --exclude-standard`. If there are no staged,
 unstaged or untracked changes, report that there is nothing to review and stop.
+
+A candidate commit, under the candidate-commits rule in the Commit and push
+section of CLAUDE.md and AGENTS.md, is such a committed input. The parent
+commits its change on its own feature branch or detached worktree, never on
+master and never pushed, and follows the commit-message rule in the Commit and
+push section of CLAUDE.md and AGENTS.md, because a fast-forward keeps that
+commit in master's history. Its freeze identity is the commit plus an empty
+`git status --porcelain --untracked-files=all`, which respects `.gitignore`.
+Record the base commit, the candidate commit and its tree id on the item and
+in the brief before validation starts. Focused checks and reviews may run on
+such a commit. The final full gate runs on a clean checkout of a single
+candidate commit whose parent is the current master, and the landing is
+exactly that commit.
+
+The integration owner lands a candidate only by fast-forwarding master to
+exactly that gated commit, when the standing rule's three conditions hold, and
+pushing it without force. If master has moved, the change is committed afresh
+as a new candidate whose parent is the current master, which is frozen, gated
+and reviewed as its own input. A candidate that fails is superseded by a new candidate commit, never
+amended, rebased or force-pushed. Each new candidate is committed on a new
+branch or a detached HEAD at the current master, and the earlier candidate is
+left as it is. Review of staged, unstaged and untracked changes, as above,
+remains available.
 
 ## Step 2: Parent quality gates
 
@@ -281,7 +304,7 @@ sends the final frozen change (the diff of its tracked files and the
 content of each untracked file), the input fingerprint that the gate's run
 recorded for it, and the list of recorded messages that word each changed
 passage of authority text to the auditing coordinator by TermAl mailbox.
-The change is neither committed nor pushed before the audit of that input
+The change is neither landed nor pushed before the audit of that input
 is recorded on the item as passed.
 
 The auditing coordinator is the project's task coordinator; where the task

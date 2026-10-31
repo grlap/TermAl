@@ -1020,16 +1020,16 @@ export function VirtualizedConversationMessageList({
     }),
     [],
   );
-  const advanceUserScrollGeneration = useCallback(() => {
+  const advanceUserScrollGeneration = useCallback((origin?: object) => {
     userScrollGenerationRef.current += 1;
     const node = scrollContainerRef.current;
     if (node) {
-      notifyMessageStackNavigationStart(node);
+      notifyMessageStackNavigationStart(node, origin);
       clearMessageStackVirtualizerPositionCorrection(node);
     }
   }, [scrollContainerRef]);
-  const beginUserScrollNavigation = useCallback(() => {
-    advanceUserScrollGeneration();
+  const beginUserScrollNavigation = useCallback((origin?: object) => {
+    advanceUserScrollGeneration(origin);
     pendingProgrammaticNavigationUntilRef.current =
       performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
     return userScrollGenerationRef.current;

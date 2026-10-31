@@ -12,7 +12,7 @@ Fix a bug tracked in Engram by its work reference (e.g., `w-1a2b3c4d5e6f`). A mi
 
 Arguments: $ARGUMENTS (required work reference). If omitted, use the `engram` `next` or `ls` tools and ask the user which bug to fix.
 
-**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. All other git commands (diff, status, stash, add, etc.) may be executed freely.**
+**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. That is Greg's word or, for commit, push and install only, the standing rule in the Commit and push section of CLAUDE.md and AGENTS.md, or, for a candidate commit only, its candidate-commits bullet. All other git commands (diff, status, stash, add, etc.) may be executed freely.**
 
 ## Step 1: Parse the bug
 

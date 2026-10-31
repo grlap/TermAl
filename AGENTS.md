@@ -104,8 +104,10 @@ in Engram::Advisor's session, recorded verbatim):
 >
 > to robimy commit
 
-- A changeset may be committed without a further permission round trip only
-  when all three hold for the exact tree committed:
+- A changeset may be landed (committed on master, or master fast-forwarded
+  to a candidate commit) without a further permission round trip only when
+  all three hold for the exact commit being landed (for the staged-tree
+  lane, the exact tree being committed):
   1. The review pair (`/review-changes`: two independent read-only
      `/review-code` children of different vendors, one Codex and one
      Claude, `writePolicy: readOnly`; while Codex or Claude is unavailable —
@@ -136,7 +138,7 @@ in Engram::Advisor's session, recorded verbatim):
      to an unavailable Codex, and Greg's word of 2026-10-15 above widened
      it to an unavailable Codex or Claude.
   2. The full gate is green on exactly that input, compiled from it, before
-     every commit whether or not a commit prompt is shown.
+     every landing whether or not a commit prompt is shown.
   3. The tasks carry the evidence needed to close them. A criterion that
      only the landing itself can satisfy, namely that the change is
      committed, pushed, on master or installed, counts as carried when
@@ -151,6 +153,21 @@ in Engram::Advisor's session, recorded verbatim):
   Termal::Opus: "git commit means also push and dolt push". A commit under
   this rule is a landing: `git push origin master` follows it, subject to
   the integration and migration restrictions below.
+- Candidate commits (Greg, 2026-10-31: 'zatwierdzam opcje B', 'idzmy na
+  prostsa opcja B / zatwierdzam'). So that focused checks, reviews and the
+  full gate run on a clean commit, a writable session may commit its change
+  on its own feature branch or detached worktree, never on master and never
+  pushed. A candidate commit is not a landing and grants no push, install or
+  restart. The final full gate runs on a clean checkout of a single
+  candidate commit whose parent is the current master. The integration
+  owner lands it only by fast-forwarding master to exactly that gated
+  commit, when the standing rule's three conditions above hold. If master has
+  moved, the change is committed afresh as a new candidate whose parent is
+  the current master, and gated again. A candidate that fails is superseded
+  by a new candidate commit, never amended, rebased or force-pushed. Each
+  new candidate is committed on a new branch or a detached HEAD at the
+  current master, and the earlier candidate is left as it is. The
+  staged-tree lane remains available.
 - A commit in a feature branch or detached worktree is not yet on `master`.
   Hand its hash and exact-input gate, review and task evidence to the
   integration owner; do not run `git push origin master` from that worktree.
@@ -190,10 +207,11 @@ in Engram::Advisor's session, recorded verbatim):
   widening, verbatim with its source, by any route; recording his words,
   narrowing, or clarifying needs only (a), (b) and (c). No other approval
   is asked.
-- Outside the standing rule's three conditions above, a commit or push
-  needs Greg's own word in the acting session. Outside this standing rule,
-  a word relayed by another session never carries a commit or push. This
-  rule grants no restart, deploy or global-configuration authority; those
+- Outside the standing rule's three conditions above and the
+  candidate-commits bullet, a commit or push needs Greg's own word in the
+  acting session. Outside this standing rule and the candidate-commits
+  bullet, a word relayed by another session never carries a commit or push.
+  This rule grants no restart, deploy or global-configuration authority; those
   acts are Greg's and need his explicit word. The moment of a TermAl
   restart is the agents' decision (Greg, 2026-10-02: 'Wolę aby agenci
   zdecydowali na moment restaru Termal. Wtedy kiedy potrzebuja poprawek. To

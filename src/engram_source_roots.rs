@@ -711,6 +711,27 @@ enum AcceptanceEvaluationRootChange {
     NoNamingToken,
 }
 
+/// The submission's refusal of `change` for `target`, with the in-flight
+/// context of the evaluated root's claim when the change is in flight.
+fn acceptance_evaluation_submission_root_refusal_locked(
+    inner: &StateInner,
+    target: &DelegationAcceptanceEvaluation,
+    change: AcceptanceEvaluationRootChange,
+) -> ApiError {
+    let context = (change == AcceptanceEvaluationRootChange::Naming(EngramWorkNamingChange::InFlight))
+        .then(|| {
+            let store = target.store.as_ref()?;
+            let (work_id, claim_id) = match (&target.source_root, &target.source_claim) {
+                (Some(root), _) => (&root.work_id, &root.claim_id),
+                (None, Some(claim)) => (&claim.work_id, &claim.claim_id),
+                (None, None) => return None,
+            };
+            acceptance_evaluation_in_flight_context_locked(inner, store, work_id, claim_id)
+        })
+        .flatten();
+    acceptance_evaluation_source_root_changed_error(target.source_root.as_ref(), change, context.as_ref())
+}
+
 /// Whether the root the evaluation `target` was requested on is no longer
 /// the one its work is measured in: a recorded root the work no longer names
 /// under its claim and generation, or, with none recorded, a root named since
@@ -777,9 +798,69 @@ fn acceptance_evaluation_root_changed_locked(
     acceptance_evaluation_root_change_locked(inner, target).is_some()
 }
 
+/// What an in-flight refusal adds once the automatic pass has attempted the
+/// same-binding root (engram_named_root_reclamation.rs). Diagnostic only:
+/// it changes no classification, status code, retry count, wait or deadline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcceptanceEvaluationInFlightContext {
+    /// The root's reclamation status, as the named-root status view shows it.
+    status: String,
+    /// The root's cooldown left when this was captured.
+    cooldown: Duration,
+}
+
+impl AcceptanceEvaluationInFlightContext {
+    /// A suggested delay for a new request: the cooldown left at capture,
+    /// rounded up, then the usual hint. Never a promise that it settles.
+    fn suggested_retry_after_secs(&self) -> u64 {
+        let cooldown = self.cooldown.as_secs() + u64::from(self.cooldown.subsec_nanos() > 0);
+        cooldown + ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER.as_secs()
+    }
+}
+
+/// The context of an in-flight refusal for the exact root `claim_id` names
+/// for `work_id` in `store`, captured now: only when the automatic pass
+/// has a recorded attempt on that root. Reads held state only.
+fn acceptance_evaluation_in_flight_context_locked(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    work_id: &str,
+    claim_id: &str,
+) -> Option<AcceptanceEvaluationInFlightContext> {
+    let root = engram_work_source_root_for_claim(&inner.engram_work_source_roots, store, work_id, claim_id)?;
+    let now = inner.engram_budget_clock_snapshot().now();
+    engram_root_pass_attempt_text(inner, root, now)?;
+    let cooldown = inner
+        .engram_root_reclamation
+        .cooldowns
+        .iter()
+        .filter(|(selection, _)| selection == root)
+        .map(|(_, until)| until.saturating_duration_since(now))
+        .max()
+        .unwrap_or_default();
+    Some(AcceptanceEvaluationInFlightContext {
+        status: engram_named_root_reclamation_text(inner, root, now),
+        cooldown,
+    })
+}
+
+/// The in-flight context of a naming token's own binding.
+fn acceptance_evaluation_token_in_flight_context_locked(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    token: &EngramWorkNamingToken,
+) -> Option<AcceptanceEvaluationInFlightContext> {
+    let bound = token.named_binding.as_ref()?;
+    acceptance_evaluation_in_flight_context_locked(inner, store, &token.work_id, &bound.claim_id)
+}
+
 /// The refusal of an evaluation request whose naming token no longer fences
-/// the work's tree, naming why.
-fn acceptance_evaluation_naming_refusal(lead: &str, change: EngramWorkNamingChange) -> ApiError {
+/// the work's tree, naming why. `context` is used only for `InFlight`.
+fn acceptance_evaluation_naming_refusal(
+    lead: &str,
+    change: EngramWorkNamingChange,
+    context: Option<&AcceptanceEvaluationInFlightContext>,
+) -> ApiError {
     let cause = match change {
         EngramWorkNamingChange::Moved => {
             "the work's naming history has since moved in a way not proved to describe the \
@@ -790,15 +871,24 @@ fn acceptance_evaluation_naming_refusal(lead: &str, change: EngramWorkNamingChan
              awaiting recovery, or a binding awaiting reconciliation)"
         }
         EngramWorkNamingChange::InFlight => {
-            return ApiError::from_status(
-                StatusCode::SERVICE_UNAVAILABLE,
-                format!(
+            let message = match context {
+                None => format!(
                     "{ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT}: {lead}: the work's authority \
                      is between a maintenance pass's preparation and its publication; request \
                      the evaluation again in {} seconds",
                     ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER.as_secs()
                 ),
-            );
+                Some(context) => format!(
+                    "{ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT}: {lead}: the work's authority \
+                     is between a maintenance pass's preparation and its publication; its named \
+                     root's reclamation status when this request captured it: {}. As a \
+                     suggested delay, not a promise that the transition settles: request the \
+                     evaluation again in {} seconds",
+                    context.status,
+                    context.suggested_retry_after_secs()
+                ),
+            };
+            return ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE, message);
         }
     };
     ApiError::conflict(format!("{lead}: {cause}; request a fresh acceptance evaluation"))
@@ -810,8 +900,10 @@ fn acceptance_evaluation_naming_refusal(lead: &str, change: EngramWorkNamingChan
 /// the sum of its stages' own deadlines, so a wait would widen it. The
 /// caller, which holds the attempt, retries instead.
 const ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT: &str = "authority transition in flight";
-/// How long a caller waits before trying again: a maintenance pass publishes
-/// once its one canonical read, bounded by its own budget, has answered.
+/// How long a caller waits before trying again: a pass's whole budget and a
+/// second. A suggested delay, not a promise: a pass shares that budget among
+/// its planned roots, and a root it keeps waits out its cooldown, which the
+/// request's refusal then names (`AcceptanceEvaluationInFlightContext`).
 const ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER: Duration =
     ENGRAM_ROOT_RECLAMATION_BUDGET.saturating_add(Duration::from_secs(1));
 /// How many times an evaluator submits the same verdicts again after an
@@ -871,6 +963,7 @@ fn acceptance_evaluation_claim_named_since(
 fn acceptance_evaluation_source_root_changed_error(
     source_root: Option<&AcceptanceEvaluationSourceRoot>,
     change: AcceptanceEvaluationRootChange,
+    context: Option<&AcceptanceEvaluationInFlightContext>,
 ) -> ApiError {
     let requested_on = match source_root {
         Some(source_root) => format!(
@@ -881,12 +974,16 @@ fn acceptance_evaluation_source_root_changed_error(
     };
     if change == AcceptanceEvaluationRootChange::Naming(EngramWorkNamingChange::InFlight) {
         // Retryable: the pass publishes the same binding or a retirement, and
-        // the next submission is judged on whichever it published.
+        // the next submission is judged on whichever it published. The
+        // context adds what the last pass attempt did; the wait stays.
+        let status = context.map_or_else(String::new, |context| {
+            format!(" Its named root's reclamation status now: {}.", context.status)
+        });
         return ApiError::from_status(
             StatusCode::SERVICE_UNAVAILABLE,
             format!(
                 "{ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT}: {requested_on}, and the work's \
-                 authority is between a maintenance pass's preparation and its publication. \
+                 authority is between a maintenance pass's preparation and its publication.{status} \
                  Nothing was recorded and this attempt is still open: wait {} seconds, then \
                  submit exactly the same verdicts again",
                 ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER.as_secs()

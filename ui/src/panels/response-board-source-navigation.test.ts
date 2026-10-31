@@ -2,6 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { requestResponseBoardSourceNavigation } from "../response-board-navigation";
+import {
+  MESSAGE_STACK_NAVIGATION_START_EVENT,
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+  notifyMessageStackNavigationStart,
+} from "../message-stack-scroll-sync";
 import { useResponseBoardSourceNavigation } from "./response-board-source-navigation";
 import type {
   VirtualizedConversationMessageListHandle,
@@ -18,11 +23,14 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-function makeVirtualizerHandle() {
+function makeVirtualizerHandle(onBegin?: (node: HTMLElement) => void) {
   let userScrollGeneration = 0;
+  const node = document.createElement("section");
   const handle: VirtualizedConversationMessageListHandle = {
-    beginUserScrollNavigation: vi.fn(() => {
+    beginUserScrollNavigation: vi.fn((origin?: object) => {
       userScrollGeneration += 1;
+      notifyMessageStackNavigationStart(node, origin);
+      onBegin?.(node);
       return userScrollGeneration;
     }),
     getLayoutSnapshot: vi.fn(),
@@ -38,6 +46,7 @@ function makeVirtualizerHandle() {
       userScrollGeneration += 1;
     },
     ref: { current: handle } satisfies VirtualizedConversationMessageListHandleRef,
+    scrollContainerRef: { current: node },
   };
 }
 
@@ -69,6 +78,97 @@ describe("useResponseBoardSourceNavigation", () => {
     vi.restoreAllMocks();
   });
 
+  for (const phase of ["initial handle", "fresh handle"] as const) {
+    it.each([
+      ["wheel", (node: HTMLElement) => node.dispatchEvent(new WheelEvent("wheel"))],
+      ["keyboard", (node: HTMLElement) => node.dispatchEvent(new Event(MESSAGE_STACK_USER_SCROLL_INTENT_EVENT))],
+      ["navigation", (node: HTMLElement) => notifyMessageStackNavigationStart(node)],
+      ["another origin", (node: HTMLElement) => notifyMessageStackNavigationStart(node, {})],
+    ])(`keeps newer %s authoritative during its own begin on the ${phase}`, async (_kind, input) => {
+      const frame = installAnimationFrameHarness();
+      const historyRequest = deferred<boolean>();
+      const jumpToMessageId = vi.fn();
+      const virtualizer = makeVirtualizerHandle(input);
+      const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+        current: phase === "initial handle" ? virtualizer.handle : null,
+      };
+      renderHook(() =>
+        useResponseBoardSourceNavigation({
+          jumpToMessageId,
+          requestHistoryAround: () => historyRequest.promise,
+          scrollContainerRef: virtualizer.scrollContainerRef,
+          sessionId: "session-nested-input",
+          subscriberKey: {},
+          virtualizerHandleRef,
+        }),
+      );
+      act(() => {
+        requestResponseBoardSourceNavigation({
+          messageId: "message-abandoned",
+          messagePosition: 3,
+          sessionId: "session-nested-input",
+        });
+      });
+      virtualizerHandleRef.current = virtualizer.handle;
+      await act(async () => {
+        historyRequest.resolve(true);
+        await historyRequest.promise;
+      });
+      act(() => frame.flush());
+
+      expect(virtualizer.handle.beginUserScrollNavigation).toHaveBeenCalledOnce();
+      expect(jumpToMessageId).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const phase of ["history pending", "jump frame queued"] as const) {
+    it.each([
+      ["wheel", () => new WheelEvent("wheel", { deltaY: -80 })],
+      ["touch", () => new Event("touchstart")],
+      ["keyboard intent", () => new Event(MESSAGE_STACK_USER_SCROLL_INTENT_EVENT)],
+      ["scrollbar navigation", () => new Event(MESSAGE_STACK_NAVIGATION_START_EVENT)],
+    ])(`cancels a null-handle jump after newer %s while ${phase}`, async (_kind, input) => {
+      const frame = installAnimationFrameHarness();
+      const historyRequest = deferred<boolean>();
+      const jumpToMessageId = vi.fn();
+      const node = document.createElement("section");
+      const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+        current: null,
+      };
+      renderHook(() =>
+        useResponseBoardSourceNavigation({
+          jumpToMessageId,
+          requestHistoryAround: () => historyRequest.promise,
+          scrollContainerRef: { current: node },
+          sessionId: "session-null-input",
+          subscriberKey: {},
+          virtualizerHandleRef,
+        }),
+      );
+      act(() => {
+        requestResponseBoardSourceNavigation({
+          messageId: "message-abandoned",
+          messagePosition: 3,
+          sessionId: "session-null-input",
+        });
+      });
+      if (phase === "history pending") {
+        act(() => node.dispatchEvent(input()));
+      }
+      await act(async () => {
+        historyRequest.resolve(true);
+        await historyRequest.promise;
+      });
+      if (phase === "jump frame queued") {
+        act(() => node.dispatchEvent(input()));
+      }
+      act(() => frame.flush());
+
+      expect(virtualizerHandleRef.current).toBeNull();
+      expect(jumpToMessageId).not.toHaveBeenCalled();
+    });
+  }
+
   it("jumps after the accepted history window is adopted", async () => {
     const frame = installAnimationFrameHarness();
     const historyRequest = deferred<boolean>();
@@ -79,6 +179,7 @@ describe("useResponseBoardSourceNavigation", () => {
       useResponseBoardSourceNavigation({
         jumpToMessageId,
         requestHistoryAround,
+        scrollContainerRef: virtualizer.scrollContainerRef,
         sessionId: "session-success",
         subscriberKey: {},
         virtualizerHandleRef: virtualizer.ref,
@@ -119,6 +220,7 @@ describe("useResponseBoardSourceNavigation", () => {
       useResponseBoardSourceNavigation({
         jumpToMessageId,
         requestHistoryAround,
+        scrollContainerRef: { current: document.createElement("section") },
         sessionId: "session-short",
         subscriberKey: {},
         virtualizerHandleRef,
@@ -156,6 +258,7 @@ describe("useResponseBoardSourceNavigation", () => {
       useResponseBoardSourceNavigation({
         jumpToMessageId,
         requestHistoryAround: () => historyRequest.promise,
+        scrollContainerRef: virtualizer.scrollContainerRef,
         sessionId: "session-growing",
         subscriberKey: {},
         virtualizerHandleRef,
@@ -193,6 +296,7 @@ describe("useResponseBoardSourceNavigation", () => {
       useResponseBoardSourceNavigation({
         jumpToMessageId,
         requestHistoryAround: () => historyRequest.promise,
+        scrollContainerRef: virtualizer.scrollContainerRef,
         sessionId: "session-mounted",
         subscriberKey: {},
         virtualizerHandleRef,
@@ -228,6 +332,7 @@ describe("useResponseBoardSourceNavigation", () => {
       useResponseBoardSourceNavigation({
         jumpToMessageId,
         requestHistoryAround: () => historyRequest.promise,
+        scrollContainerRef: virtualizer.scrollContainerRef,
         sessionId: "session-error",
         subscriberKey: {},
         virtualizerHandleRef: virtualizer.ref,
@@ -267,6 +372,7 @@ describe("useResponseBoardSourceNavigation", () => {
       useResponseBoardSourceNavigation({
         jumpToMessageId,
         requestHistoryAround: () => historyRequest.promise,
+        scrollContainerRef: virtualizer.scrollContainerRef,
         sessionId: "session-scroll",
         subscriberKey: {},
         virtualizerHandleRef: virtualizer.ref,
@@ -301,6 +407,7 @@ describe("useResponseBoardSourceNavigation", () => {
         useResponseBoardSourceNavigation({
           jumpToMessageId,
           requestHistoryAround: () => historyRequest.promise,
+          scrollContainerRef: virtualizer.scrollContainerRef,
           sessionId,
           subscriberKey,
           virtualizerHandleRef: virtualizer.ref,

@@ -96,7 +96,7 @@ export function useVirtualizedConversationHandle({
   visiblePageRange,
   writeScrollTopAndSyncViewport,
 }: {
-  beginUserScrollNavigation: () => number;
+  beginUserScrollNavigation: VirtualizedConversationMessageListHandle["beginUserScrollNavigation"];
   applyMountedPageRange: (nextRange: VirtualizedRange, options?: { flush?: boolean }) => void;
   buildWorkingMountedRangeForScrollTop: (
     scrollTop: number,

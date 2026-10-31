@@ -1652,7 +1652,21 @@ happens elsewhere. The agent therefore names the item's worktree once with
   `POST /api/engram/named-roots/release`](../architecture.md)). The status rows,
   which a full table's refusal also lists, give each entry's naming session (or
   `gone`), its claim binding, its canonical association, its reclamation state
-  and its item lifecycle. A release names the exact selection and a required
+  and its item lifecycle. The reclamation state includes the automatic pass's
+  last attempt on that entry, with its age: either completed with the entry
+  kept by canonical authority, or refused, with the refusal's HTTP status and
+  its text, cleaned and cut to a fixed length. The record is runtime-only, so
+  it may be missing after a restart. It is a diagnostic: it decides no
+  eligibility, classification or admission. While the work's same-binding
+  authority transition is in flight, an acceptance request or an evaluator's
+  submission is refused as retryable (503). When an attempt is recorded, that
+  refusal also gives the entry's reclamation state, and the request's
+  suggested delay waits out the entry's cooldown; the submission keeps its
+  wait. A pass shares its 2-second budget among its planned entries: it starts
+  an entry only while that entry's share (a quarter of a second) is left. It
+  defers the first entry it reaches below that, untouched and with no
+  cooldown, and the next plan starts with it while it stays eligible. A
+  release names the exact selection and a required
   reason. An entry with a canonical association is released only on the same
   canonical proof the automatic pass uses. An entry without one is released
   only when no session holds its claim, no naming event is pending, and its

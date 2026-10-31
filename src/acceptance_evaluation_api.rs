@@ -605,6 +605,8 @@ fn acceptance_evaluation_target_admission_locked(
                 return Err(acceptance_evaluation_naming_refusal(
                     "the work's naming history changed or is unavailable",
                     change,
+                    acceptance_evaluation_token_in_flight_context_locked(inner, &seed.store, token)
+                        .as_ref(),
                 ));
             }
         }
@@ -1048,11 +1050,18 @@ impl AppState {
                                 &history.store,
                                 &history.work_id,
                             ),
+                            // Each in-flight binding with what the last
+                            // automatic pass attempt on its root did, if any.
                             inner.engram_work_source_roots.iter()
                                 .filter(|root| root.store == history.store && root.work_id == history.work_id)
                                 .filter_map(|root| EngramWorkNamingBound::of_entry(root, history))
                                 .filter(|bound| engram_work_authority_transition_in_flight(
                                     &inner, &history.store, &history.work_id, Some(bound)))
+                                .map(|bound| {
+                                    let context = acceptance_evaluation_in_flight_context_locked(
+                                        &inner, &history.store, &history.work_id, &bound.claim_id);
+                                    (bound, context)
+                                })
                                 .collect::<Vec<_>>(),
                         )
                     })
@@ -1358,17 +1367,19 @@ impl AppState {
                 ));
             }
             Some((_, true, in_flight_bindings)) => {
-                if requested_claim.as_ref().is_some_and(|claim| {
-                    in_flight_bindings.iter().any(|bound| {
+                let in_flight = requested_claim.as_ref().and_then(|claim| {
+                    in_flight_bindings.iter().find(|(bound, _)| {
                         bound.claim_id == claim.claim_id && task.canonical_identity.as_ref().is_some_and(|identity| {
                             identity.active_run_id.as_deref() == Some(bound.run_id.as_str())
                                 && identity.run_generation == Some(bound.run_generation)
                         })
                     })
-                }) {
+                });
+                if let Some((_, context)) = in_flight {
                     return Err(acceptance_evaluation_naming_refusal(
                         "the requested work's same-binding authority transition is unpublished",
                         EngramWorkNamingChange::InFlight,
+                        context.as_ref(),
                     ));
                 }
                 return Err(ApiError::conflict(
@@ -1580,6 +1591,10 @@ impl AppState {
                 return Err(acceptance_evaluation_naming_refusal(
                     "the work's naming history changed or is unconfirmed",
                     change,
+                    acceptance_evaluation_token_in_flight_context_locked(
+                        &inner, &target.store, &naming_history,
+                    )
+                    .as_ref(),
                 ));
             }
             if acceptance_evaluation_claim_unconfirmed_locked(
@@ -1805,6 +1820,10 @@ impl AppState {
                         return Err(acceptance_evaluation_naming_refusal(
                             "the work's naming history changed or is unconfirmed",
                             change,
+                            acceptance_evaluation_token_in_flight_context_locked(
+                                &inner, &target.store, &naming_history,
+                            )
+                            .as_ref(),
                         ));
                     }
                     if source_root.as_ref().is_some_and(|root| {
@@ -1983,10 +2002,7 @@ impl AppState {
         let place = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(change) = acceptance_evaluation_root_change_locked(&inner, target) {
-                return Err(acceptance_evaluation_source_root_changed_error(
-                    target.source_root.as_ref(),
-                    change,
-                ));
+                return Err(acceptance_evaluation_submission_root_refusal_locked(&inner, target, change));
             }
             match &target.source_root {
                 Some(source_root) => Some(source_root.place()),
@@ -2320,10 +2336,7 @@ impl AppState {
                         .map(|change| (target, change))
                 })
             {
-                return Err(acceptance_evaluation_source_root_changed_error(
-                    target.source_root.as_ref(),
-                    change,
-                ));
+                return Err(acceptance_evaluation_submission_root_refusal_locked(&inner, target, change));
             }
             let Some(target) = inner.delegations[index].acceptance_evaluation.as_mut() else {
                 return Err(ApiError::conflict(

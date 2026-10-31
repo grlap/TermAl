@@ -1,20 +1,26 @@
 // Owns cancellation of delayed response-board source jumps after history adoption.
 // Does not own board request retention, history fetching, or virtualizer scrolling.
 // Split from: ui/src/panels/AgentSessionPanel.tsx.
-import { useEffect } from "react";
+import { useEffect, type RefObject } from "react";
 
 import { subscribeResponseBoardSourceNavigation } from "../response-board-navigation";
+import {
+  MESSAGE_STACK_NAVIGATION_START_EVENT,
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+} from "../message-stack-scroll-sync";
 import type { VirtualizedConversationMessageListHandleRef } from "./virtualized-conversation-types";
 
 export function useResponseBoardSourceNavigation({
   jumpToMessageId,
   requestHistoryAround,
+  scrollContainerRef,
   sessionId,
   subscriberKey,
   virtualizerHandleRef,
 }: {
   jumpToMessageId: (messageId: string) => void;
   requestHistoryAround: (position: number) => Promise<boolean>;
+  scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
   subscriberKey: object;
   virtualizerHandleRef: VirtualizedConversationMessageListHandleRef;
@@ -23,6 +29,7 @@ export function useResponseBoardSourceNavigation({
     let activeRequestToken = 0;
     let disposed = false;
     let retryFrame: number | null = null;
+    const navigationOrigin = {};
 
     const cancelRetryFrame = () => {
       if (retryFrame !== null) {
@@ -30,6 +37,26 @@ export function useResponseBoardSourceNavigation({
         retryFrame = null;
       }
     };
+
+    const cancelForNewerNavigation = (event: Event) => {
+      if (
+        event.type === MESSAGE_STACK_NAVIGATION_START_EVENT &&
+        event instanceof CustomEvent &&
+        event.detail?.origin === navigationOrigin
+      ) {
+        return;
+      }
+      // This pane's request generation must survive a null virtualizer handle.
+      // Keyboard and scrollbar navigation already publish normalized pane
+      // signals; history adoption/layout scroll events are not reader input.
+      activeRequestToken += 1;
+      cancelRetryFrame();
+    };
+    const node = scrollContainerRef.current;
+    node?.addEventListener("wheel", cancelForNewerNavigation, { passive: true });
+    node?.addEventListener("touchstart", cancelForNewerNavigation, { passive: true });
+    node?.addEventListener(MESSAGE_STACK_USER_SCROLL_INTENT_EVENT, cancelForNewerNavigation);
+    node?.addEventListener(MESSAGE_STACK_NAVIGATION_START_EVENT, cancelForNewerNavigation);
 
     const unsubscribe = subscribeResponseBoardSourceNavigation(
       sessionId,
@@ -43,7 +70,7 @@ export function useResponseBoardSourceNavigation({
           return;
         }
         let userScrollGeneration =
-          virtualizerHandle?.beginUserScrollNavigation() ?? null;
+          virtualizerHandle?.beginUserScrollNavigation(navigationOrigin) ?? null;
         const tryJoinFreshVirtualizer = () => {
           const currentVirtualizerHandle = virtualizerHandleRef.current;
           if (virtualizerHandle === null && currentVirtualizerHandle !== null) {
@@ -55,7 +82,7 @@ export function useResponseBoardSourceNavigation({
             }
             virtualizerHandle = currentVirtualizerHandle;
             userScrollGeneration =
-              currentVirtualizerHandle.beginUserScrollNavigation();
+              currentVirtualizerHandle.beginUserScrollNavigation(navigationOrigin);
           }
           return true;
         };
@@ -111,11 +138,16 @@ export function useResponseBoardSourceNavigation({
       disposed = true;
       activeRequestToken += 1;
       cancelRetryFrame();
+      node?.removeEventListener("wheel", cancelForNewerNavigation);
+      node?.removeEventListener("touchstart", cancelForNewerNavigation);
+      node?.removeEventListener(MESSAGE_STACK_USER_SCROLL_INTENT_EVENT, cancelForNewerNavigation);
+      node?.removeEventListener(MESSAGE_STACK_NAVIGATION_START_EVENT, cancelForNewerNavigation);
       unsubscribe();
     };
   }, [
     jumpToMessageId,
     requestHistoryAround,
+    scrollContainerRef,
     sessionId,
     subscriberKey,
     virtualizerHandleRef,

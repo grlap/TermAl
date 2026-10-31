@@ -5,6 +5,14 @@
 const ENGRAM_ROOT_RECLAMATION_READ_LIMIT: usize = 8;
 const ENGRAM_ROOT_RECLAMATION_BUDGET: Duration = Duration::from_secs(2);
 const ENGRAM_ROOT_RECLAMATION_COOLDOWN: Duration = Duration::from_secs(30);
+/// The least of a pass's shared budget a planned root's recovery starts
+/// with: its per-root share. A scheduling floor only, not a budget that
+/// suffices for a publication: a slow task can still overrun it.
+const ENGRAM_ROOT_RECLAMATION_TASK_FLOOR: Duration = Duration::from_millis(
+    ENGRAM_ROOT_RECLAMATION_BUDGET.as_millis() as u64 / ENGRAM_ROOT_RECLAMATION_READ_LIMIT as u64,
+);
+/// The longest refusal text a recorded pass attempt keeps, in characters.
+const ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS: usize = 160;
 
 /// Runtime scheduling only. Durable publication obligations stay in the
 /// existing work history; restarting cannot lose a pending retirement.
@@ -14,6 +22,12 @@ struct EngramRootReclamationSchedule {
     last_store: Option<EngramAuthorityStoreKey>,
     next_due: Option<std::time::Instant>,
     cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
+    /// The one exact selection the last pass reached below its floor and
+    /// left untouched: the next plan puts it first while it stays eligible.
+    deferred: Option<EngramWorkSourceRoot>,
+    /// The last automatic pass attempt on each retained selection, at most
+    /// one each and never more than the named-root capacity: diagnostic only.
+    attempts: Vec<EngramRootPassAttempt>,
     /// Claims whose canonical read Engram refused as no longer their run's
     /// claim (engram_named_root_capacity.rs): runtime only, so a restart
     /// reads them again before any disposition.
@@ -34,6 +48,98 @@ enum EngramRootReclamationRoute {
 struct EngramRootReclamationTask {
     root: EngramWorkSourceRoot,
     route: EngramRootReclamationRoute,
+}
+
+/// The last automatic pass attempt on one exact retained selection. Never
+/// authority: it decides no eligibility, classification or admission. It
+/// is runtime state, so it may be absent after a restart, and its absence
+/// is no evidence that a pass is running.
+#[derive(Clone, Debug)]
+struct EngramRootPassAttempt {
+    root: EngramWorkSourceRoot,
+    at: std::time::Instant,
+    /// `None`: the attempt completed and canonical authority kept the root.
+    /// `Some`: it was refused, with its HTTP status and bounded, clean text.
+    refusal: Option<(u16, String)>,
+}
+
+/// Whether `root` is still retained: named, or awaiting its retirement's
+/// publication.
+fn engram_root_reclamation_still_retained(inner: &StateInner, root: &EngramWorkSourceRoot) -> bool {
+    inner.engram_work_source_roots.contains(root)
+        || inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+            .any(|notice| notice.selection == *root && !notice.published)
+}
+
+/// A refusal's text as an attempt keeps it: control characters and runs of
+/// whitespace become one space, and it is cut to a fixed length.
+fn engram_root_pass_attempt_detail(message: &str) -> String {
+    let cleaned = message
+        .chars()
+        .map(|character| if character.is_control() { ' ' } else { character })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if cleaned.chars().count() <= ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS {
+        return cleaned;
+    }
+    let mut cut = cleaned.chars().take(ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS - 1).collect::<String>();
+    cut.push('…');
+    cut
+}
+
+/// Drop every attempt whose selection is no longer retained.
+fn engram_prune_root_pass_attempts_locked(inner: &mut StateInner) {
+    let attempts = std::mem::take(&mut inner.engram_root_reclamation.attempts);
+    inner.engram_root_reclamation.attempts = attempts
+        .into_iter()
+        .filter(|attempt| engram_root_reclamation_still_retained(inner, &attempt.root))
+        .collect();
+}
+
+/// Record a pass's attempt on `root`, replacing its earlier one. A retired
+/// root keeps none.
+fn engram_record_root_pass_attempt_locked(
+    inner: &mut StateInner,
+    root: &EngramWorkSourceRoot,
+    at: std::time::Instant,
+    outcome: &Result<bool, ApiError>,
+) {
+    engram_prune_root_pass_attempts_locked(inner);
+    inner.engram_root_reclamation.attempts.retain(|attempt| attempt.root != *root);
+    if matches!(outcome, Ok(true)) || !engram_root_reclamation_still_retained(inner, root) {
+        return;
+    }
+    let refusal = outcome.as_ref().err().map(|error| {
+        (error.status.as_u16(), engram_root_pass_attempt_detail(&error.message))
+    });
+    let attempts = &mut inner.engram_root_reclamation.attempts;
+    attempts.push(EngramRootPassAttempt { root: root.clone(), at, refusal });
+    let excess = attempts.len().saturating_sub(ENGRAM_WORK_SOURCE_ROOT_LIMIT);
+    attempts.drain(..excess);
+}
+
+/// The last automatic pass attempt on a retained `root`, as the named-root
+/// status view shows it: a past attempt, not the state of any transition.
+fn engram_root_pass_attempt_text(
+    inner: &StateInner,
+    root: &EngramWorkSourceRoot,
+    now: std::time::Instant,
+) -> Option<String> {
+    if !engram_root_reclamation_still_retained(inner, root) {
+        return None;
+    }
+    let attempt = inner.engram_root_reclamation.attempts.iter().find(|attempt| attempt.root == *root)?;
+    let age = now.saturating_duration_since(attempt.at).as_secs();
+    Some(match &attempt.refusal {
+        None => format!(
+            "last automatic pass attempt {age} s ago: completed, and canonical authority kept the root"
+        ),
+        Some((status, detail)) => {
+            format!("last automatic pass attempt {age} s ago: refused: {detail} (HTTP {status})")
+        }
+    })
 }
 
 include!("engram_root_reclamation_snapshot.rs");
@@ -159,6 +265,25 @@ fn engram_work_has_open_evaluation_locked(
     })
 }
 
+/// The start of a plan: the last pass's deferred selection, taken out of its
+/// store's queue of eligible roots, when it is there. Only an eligible,
+/// exactly equal selection is found, so a replaced, retired, cooling-down or
+/// otherwise ineligible one gets no priority. It goes before the read-limit
+/// cutoff; the other roots keep their order and store rotation.
+fn engram_root_reclamation_deferred_first(
+    stores: &mut BTreeMap<EngramAuthorityStoreKey, std::collections::VecDeque<EngramRootReclamationTask>>,
+    deferred: Option<&EngramWorkSourceRoot>,
+) -> Vec<EngramRootReclamationTask> {
+    deferred
+        .and_then(|deferred| {
+            let queue = stores.get_mut(&deferred.store)?;
+            let position = queue.iter().position(|task| task.root == *deferred)?;
+            queue.remove(position)
+        })
+        .into_iter()
+        .collect()
+}
+
 // Retain the former locked planner as a differential test oracle. Production
 // scheduling uses the narrow owned snapshot, never this state-wide scan.
 #[cfg(test)]
@@ -204,7 +329,7 @@ fn engram_root_reclamation_plan_locked(
         let start = order.partition_point(|store| store <= last) % order.len();
         order.rotate_left(start);
     }
-    let mut plan = Vec::new();
+    let mut plan = engram_root_reclamation_deferred_first(&mut stores, inner.engram_root_reclamation.deferred.as_ref());
     while plan.len() < ENGRAM_ROOT_RECLAMATION_READ_LIMIT {
         let mut advanced = false;
         for store in &order {
@@ -418,6 +543,9 @@ impl AppState {
                 return "the recurring pass is not due yet";
             }
             let snapshot = EngramRootReclamationSnapshot::capture(&inner);
+            // A deferral gives priority to exactly this next plan: whether it
+            // plans the root or nothing at all, it is not carried further.
+            inner.engram_root_reclamation.deferred = None;
             let id = Uuid::new_v4().to_string();
             inner.engram_root_reclamation.flight = Some(id.clone());
             inner.engram_root_reclamation.next_due = Some(now + ENGRAM_ROOT_RECLAMATION_BUDGET);
@@ -460,22 +588,43 @@ impl AppState {
         let started = clock.now();
         let deadline = started + ENGRAM_ROOT_RECLAMATION_BUDGET;
         let mut attempted = 0;
+        {
+            // The plan already put the last deferral first, if it stayed
+            // eligible; a selection it left out carries no priority further.
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            inner.engram_root_reclamation.deferred = None;
+            engram_prune_root_pass_attempts_locked(&mut inner);
+        }
         for task in plan.into_iter().take(ENGRAM_ROOT_RECLAMATION_READ_LIMIT) {
-            if clock.now() >= deadline { break; }
+            // Below the floor, starting a recovery would knowingly leave it
+            // too little of the shared budget: defer this one root untouched,
+            // with no recovery and no cooldown, and end the pass. Its next
+            // pass is the ordinary recurring one, never an earlier one.
+            if deadline.saturating_duration_since(clock.now()) < ENGRAM_ROOT_RECLAMATION_TASK_FLOOR {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                if engram_root_reclamation_still_retained(&inner, &task.root) {
+                    inner.engram_root_reclamation.deferred = Some(task.root.clone());
+                }
+                drop(inner);
+                engram_root_reclamation_emit(self, &format!(
+                    "engram> named-root reclamation store={} work={} generation={} route={:?} outcome=deferred: less than {} ms of the pass budget left",
+                    task.root.store.project_id, task.root.work_id, task.root.generation, task.route,
+                    ENGRAM_ROOT_RECLAMATION_TASK_FLOOR.as_millis()));
+                break;
+            }
             self.inner.lock().expect("state mutex poisoned").engram_root_reclamation.last_store = Some(task.root.store.clone());
             attempted += 1;
             // Current bindings go to the existing canonical recovery owner,
             // never a second directory-probe or provider turn.
             let outcome = self.recover_one_engram_root_until(&task.root, &task.route, deadline);
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let still_retained = inner.engram_work_source_roots.contains(&task.root)
-                || inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-                    .any(|notice| notice.selection == task.root && !notice.published);
+            let still_retained = engram_root_reclamation_still_retained(&inner, &task.root);
             inner.engram_root_reclamation.cooldowns.retain(|(root, until)|
                 root != &task.root && *until > clock.now());
             if still_retained {
                 inner.engram_root_reclamation.cooldowns.push((task.root.clone(), clock.now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
             }
+            engram_record_root_pass_attempt_locked(&mut inner, &task.root, clock.now(), &outcome);
             drop(inner);
             // Formatted and written after the guard is released.
             engram_root_reclamation_emit(self, &format!(

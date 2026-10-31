@@ -212,6 +212,45 @@ fn superseded_or_deadline_exhausted_candidate_recovery_never_admits() {
     }
 }
 
+/// What an attempted automatic pass that keeps this fixture's root reports:
+/// the fixture has no eligible reader, and that check comes first.
+const KEPT_ROOT_OUTCOME: &str = "state unknown: no eligible reader in the original store; entry retained";
+
+#[test]
+fn a_kept_roots_pass_outcome_and_cooldown_are_named_in_the_in_flight_refusal() {
+    let fixture = Maintenance::new();
+    fixture.prepare();
+    let root = fixture.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
+    fixture.state.run_engram_root_reclamation_pass(vec![EngramRootReclamationTask {
+        root: root.clone(), route: EngramRootReclamationRoute::Unfocused,
+    }]);
+    let now = fixture.state.engram_budget_clock().now();
+    let (status, reclamation) = {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert!(inner.engram_work_source_roots.contains(&root), "the pass kept the root");
+        assert!(inner.engram_root_reclamation.cooldowns.iter().any(|(selection, _)| selection == &root));
+        (engram_named_root_status_locked(&inner, now).iter()
+            .map(engram_named_root_status_line).collect::<Vec<_>>().join(" | "),
+            engram_named_root_reclamation_text(&inner, &root, now))
+    };
+    assert!(status.contains("last automatic pass attempt 0 s ago"), "a dated last attempt: {status}");
+    let outcome = KEPT_ROOT_OUTCOME;
+    assert!(status.contains(&format!("refused: {outcome} (HTTP 409)")),
+        "the status view names the kept root's last attempt: {status}");
+    let error = fixture.request().err().expect("Prepared is not force-published");
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE, "{}", error.message);
+    assert!(error.message.starts_with(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT), "{}", error.message);
+    assert!(error.message.contains(outcome), "the refusal names the same outcome: {}", error.message);
+    assert!(error.message.contains(&reclamation),
+        "and the root's reclamation status as the status view gives it ({reclamation}): {}", error.message);
+    let hint = ENGRAM_ROOT_RECLAMATION_COOLDOWN + ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER;
+    assert!(error.message.contains(&format!("again in {} seconds", hint.as_secs())),
+        "the hint waits out the cooldown, never only the pass budget: {}", error.message);
+    let inner = fixture.state.inner.lock().unwrap();
+    assert!(inner.delegations.is_empty());
+    assert_eq!(inner.engram_work_naming_history[0].transition.as_ref().unwrap().phase, EngramAuthorityPhase::Prepared);
+}
+
 #[test]
 fn a_foreign_prepared_owner_remains_a_final_conflict() {
     let fixture = Maintenance::new();

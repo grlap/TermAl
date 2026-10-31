@@ -40,6 +40,7 @@ import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
+  MESSAGE_STACK_NAVIGATION_START_EVENT,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   claimMessageStackNativeScrollOwnership,
@@ -1380,15 +1381,23 @@ describe("VirtualizedConversationMessageList foundation", () => {
         ),
       ).toBe(true);
 
-      const navigationGeneration = handle.beginUserScrollNavigation();
+      const origins: unknown[] = [];
+      harness.scrollNode.addEventListener(MESSAGE_STACK_NAVIGATION_START_EVENT, (event) => {
+        origins.push(event instanceof CustomEvent ? event.detail?.origin : null);
+      });
+      const origin = {};
+      const navigationGeneration = handle.beginUserScrollNavigation(origin);
 
       expect(navigationGeneration).toBe(handle.getUserScrollGeneration());
+      expect(origins).toEqual([origin]);
       expect(
         mountedPrependRestoreIsCurrent(
           capturedRestore,
           handle.getUserScrollGeneration(),
         ),
       ).toBe(false);
+      handle.beginUserScrollNavigation();
+      expect(origins).toEqual([origin, undefined]);
     } finally {
       harness.unmount();
       harness.restore();

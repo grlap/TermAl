@@ -13,6 +13,7 @@ struct EngramRootReclamationSnapshot {
     quarantined: BTreeSet<String>,
     last_store: Option<EngramAuthorityStoreKey>,
     cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
+    deferred: Option<EngramWorkSourceRoot>,
     refused_claims: Vec<(EngramAuthorityStoreKey, String)>,
     disposition_cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
 }
@@ -232,6 +233,7 @@ impl EngramRootReclamationSnapshot {
             quarantined: inner.quarantined_persisted_session_ids.clone(),
             last_store: schedule.last_store.clone(),
             cooldowns: schedule.cooldowns.clone(),
+            deferred: schedule.deferred.clone(),
             refused_claims: schedule.refused_claims.clone(),
             disposition_cooldowns: schedule.disposition_cooldowns.clone(),
         }
@@ -320,7 +322,7 @@ impl EngramRootReclamationSnapshot {
             let start = order.partition_point(|store| store <= last) % order.len();
             order.rotate_left(start);
         }
-        let mut plan = Vec::new();
+        let mut plan = engram_root_reclamation_deferred_first(&mut stores, self.deferred.as_ref());
         while plan.len() < ENGRAM_ROOT_RECLAMATION_READ_LIMIT {
             let mut advanced = false;
             for store in &order {

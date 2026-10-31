@@ -3056,7 +3056,7 @@ fn review_changes_pins_final_diff_audit() {
 
     assert_command_contains(
         review_changes,
-        "## Step 7: Audit the final diff before a landing of authority text Authority text is the text whose change conditions (a), (b) and (c) of the Commit and push section of AGENTS.md and CLAUDE.md cover. When the reviewed change touches it, the session that holds the final frozen input, the parent or, where integration changed the input, the integration owner, sends the final frozen change (the diff of its tracked files and the content of each untracked file), the input fingerprint that the gate's run recorded for it, and the list of recorded messages that word each changed passage of authority text to the auditing coordinator by TermAl mailbox. The change is neither committed nor pushed before the audit of that input is recorded on the item as passed.",
+        "## Step 7: Audit the final diff before a landing of authority text Authority text is the text whose change conditions (a), (b) and (c) of the Commit and push section of AGENTS.md and CLAUDE.md cover. When the reviewed change touches it, the session that holds the final frozen input, the parent or, where integration changed the input, the integration owner, sends the final frozen change (the diff of its tracked files and the content of each untracked file), the input fingerprint that the gate's run recorded for it, and the list of recorded messages that word each changed passage of authority text to the auditing coordinator by TermAl mailbox. The change is neither landed nor pushed before the audit of that input is recorded on the item as passed.",
         "/review-changes must define authority text by the commit rule's conditions and have the holder of the final input send all of it to the auditor before any commit or push",
     );
     assert_command_contains(
@@ -3071,7 +3071,7 @@ fn review_changes_pins_final_diff_audit() {
     );
     assert_command_contains(
         review_changes,
-        "When the reviewed change touches authority text, Step 7's final-diff audit follows the review pair, and the change is neither committed nor pushed before that audit is recorded on the item as passed.",
+        "When the reviewed change touches authority text, Step 7's final-diff audit follows the review pair, and the change is neither landed nor pushed before that audit is recorded on the item as passed.",
         "/review-changes must announce the final-diff audit in its header",
     );
 }
@@ -3114,7 +3114,7 @@ fn commit_rule_pins_the_final_diff_audit_in_both_instruction_files() {
         );
         assert_command_contains(
             instructions,
-            "Outside the standing rule's three conditions above, a commit or push needs Greg's own word in the acting session.",
+            "Outside the standing rule's three conditions above and the candidate-commits bullet, a commit or push needs Greg's own word in the acting session.",
             &format!("{name} must name the standing rule's conditions, not the authority-text rule's"),
         );
     }

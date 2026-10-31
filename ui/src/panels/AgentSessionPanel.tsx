@@ -840,6 +840,7 @@ const SessionConversationPage = memo(
     useResponseBoardSourceNavigation({
       jumpToMessageId,
       requestHistoryAround: requestMarkerHistoryWindow,
+      scrollContainerRef,
       sessionId: session.id,
       subscriberKey: conversationPageRef,
       virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
