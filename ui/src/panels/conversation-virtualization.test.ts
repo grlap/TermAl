@@ -336,10 +336,12 @@ describe("estimateConversationMessageHeight for Engram control cards", () => {
 
   it("estimates a routine card from its one-row collapsed height", () => {
     expect(estimateConversationMessageHeight(routine)).toBe(48);
+    expect(estimateConversationMessageHeight({ ...routine, nextIntent: "wait" })).toBe(48);
+    expect(estimateConversationMessageHeight({ ...routine, stage: "restart", nextIntent: "wait" })).toBe(48);
   });
 
   it("keeps the expanded estimate for a card that stays expanded", () => {
-    expect(estimateConversationMessageHeight({ ...routine, nextIntent: "wait" })).toBe(176);
+    expect(estimateConversationMessageHeight({ ...routine, nextIntent: "wait", decision: "degraded" })).toBe(176);
     expect(
       estimateConversationMessageHeight({
         ...routine,

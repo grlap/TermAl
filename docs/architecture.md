@@ -424,7 +424,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | POST | `/api/telegram/test` | Validate a supplied or saved Telegram bot token through `getMe` -> `TelegramTestResponse`. Local test throttling returns `429` with `Retry-After`; Telegram auth/validation failures return `422`, and upstream/network failures return `502`. |
 | POST | `/api/sessions` | Create session |
 | GET | `/api/sessions/{id}` | Fetch one bounded recent suffix -> `SessionResponse { revision, serverInstanceId, session }`. The default is 20 messages; `?tail=N` accepts `1..=64`. There is no unbounded transcript response or summary fallback. Remote-proxy sessions forward the same bounded tail request to the owner. |
-| GET | `/api/sessions/{id}/history` | Fetch one ascending transcript page by exclusive `before`/`after` cursor, true start, centered global `around` position, or latest tail -> `SessionHistoryResponse`. `limit` defaults to and is capped at 64. |
+| GET | `/api/sessions/{id}/history` | Fetch one ascending transcript page by exclusive `before`/`after` cursor, true start, centered global `around` position, or latest tail -> `SessionHistoryResponse`. `limit` defaults to and is capped at 64. Capture shares immutable resident message bodies; only the selected page is materialized, with the existing pinned SQLite prefix and cursor consistency. |
 | GET | `/api/sessions/{id}/overview` | Fetch one whole-conversation position map -> `SessionOverviewResponse`. `buckets` defaults to 200 and accepts `1..=512`; repeated bucket JSON is gzip-compressed on the wire. |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |

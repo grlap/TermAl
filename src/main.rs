@@ -154,9 +154,11 @@ async fn run_server() -> Result<()> {
     // and held until the process exits, after every background writer.
     let state = AppState::new_server(cwd.clone())?;
     let shutdown_state = state.clone();
-    let app = app_router(state.clone()).fallback_service(
-        ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
-    );
+    let app = app_router(state.clone())
+        .fallback_service(
+            ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
+        )
+        .layer(axum::middleware::from_fn(output_size_http_observer));
 
     let listener = TcpListener::bind(address)
         .await
@@ -698,6 +700,7 @@ fn app_router_with_acceptance_policy_limiter(
         ))))
         // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
         .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
+        .layer(axum::middleware::from_fn(output_size_http_observer))
         // The bounded conversation overview intentionally favors a stable,
         // explicit JSON contract. HTTP compression keeps its 512 repeated
         // bucket objects well below the rail's 8 KiB network budget.
@@ -1235,6 +1238,7 @@ include!("api_files.rs");
 include!("api_sse.rs");
 include!("api_review.rs");
 include!("wire.rs");
+include!("output_size.rs");
 include!("wire_git.rs");
 include!("wire_terminal.rs");
 include!("wire_review.rs");

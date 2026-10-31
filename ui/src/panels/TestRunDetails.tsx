@@ -1,6 +1,6 @@
 // Read-only details and bounded log tails. Requests are cancelled on selection
 // change; a stale response cannot overwrite another run or a newer delta.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { copyTextToClipboard } from "../clipboard";
 import { readTestRun, readTestRunLog } from "../test-runs-api";
 import { testRunStageLabel, type TestRunSummary } from "../test-runs";
@@ -11,29 +11,38 @@ export function TestRunDuration({ start, end, running = false }: { start: string
   return <>{Number.isFinite(ms) && ms >= 0 ? `${Math.floor(ms / 1000)}s${end ? "" : " elapsed at update"}` : "duration unknown"}</>;
 }
 
-export function TestRunDetails({ run }: { run: TestRunSummary }) {
+export function TestRunDetails(props: { run: TestRunSummary } | { runId: string; fallback?: ReactNode }) {
+  const requestedId = "run" in props ? props.run.runId : props.runId;
+  const liveRun = "run" in props ? props.run : undefined;
   const [reload, setReload] = useState(0);
-  const [result, setResult] = useState<{ source: TestRunSummary; reload: number; data?: Awaited<ReturnType<typeof readTestRun>>; error?: string } | null>(null);
+  const [result, setResult] = useState<{ requestedId: string; source: TestRunSummary | undefined; reload: number; data?: Awaited<ReturnType<typeof readTestRun>>; error?: string } | null>(null);
   const [stageName, setStageName] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    void readTestRun(run.runId, controller.signal).then(data => {
-      if (!controller.signal.aborted) setResult({ source: run, reload, data });
+    void readTestRun(requestedId, controller.signal).then(data => {
+      if (!controller.signal.aborted) setResult({ requestedId, source: liveRun, reload, data });
     }, error => {
       if (!controller.signal.aborted) setResult(previous => ({
-        source: run, reload,
+        requestedId, source: liveRun, reload,
         // A failed refresh is not evidence that the previously loaded detail
         // disappeared. Keep it visible, explicitly stale, for this run only.
-        data: previous?.source.runId === run.runId ? previous.data : undefined,
+        data: previous?.requestedId === requestedId ? previous.data : undefined,
         error: String(error instanceof Error ? error.message : error),
       }));
     });
     return () => controller.abort();
-  }, [run, reload]);
-  const current = result?.source === run && result.reload === reload ? result : null;
-  const detail = result?.source.runId === run.runId ? result.data?.detail : undefined;
+  }, [requestedId, liveRun, reload]);
+  const current = result?.requestedId === requestedId && result.source === liveRun && result.reload === reload ? result : null;
+  const loaded = result?.requestedId === requestedId ? result.data : undefined;
+  const run = liveRun ?? loaded?.run;
+  const detail = loaded?.detail;
   const firstFailure = detail?.stages.find(stage => stage.state === "failed");
+  if (!run) return <>{"runId" in props ? props.fallback : null}<section className="test-run-details" aria-label={`Run details ${requestedId}`}>
+    <h3>{requestedId}</h3>
+    {current?.error ? <p role="alert">{current.error}</p> : <p role="status">Loading details…</p>}
+    <button type="button" onClick={() => setReload(value => value + 1)}>Refresh details</button>
+  </section></>;
   return <section className="test-run-details" aria-label={`Run details ${run.runId}`}>
     <h3>{run.runId}</h3>
     <p>State: {run.state}{run.interrupted ? " (interrupted)" : ""} · Exit: {run.exitCode ?? "not recorded"}</p>

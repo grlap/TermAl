@@ -55,7 +55,7 @@ impl SessionHistorySelector<'_> {
 }
 
 struct LocalSessionHistorySnapshot {
-    messages: Vec<Message>,
+    messages: MessageSequence,
     start_index: usize,
     cursor_position: Option<usize>,
     message_count: usize,
@@ -151,7 +151,7 @@ impl AppState {
                 }
             }
             return Ok(LocalSessionHistorySnapshot {
-                messages: record.session.messages.iter().cloned().collect(),
+                messages: record.session.messages.clone(),
                 start_index: record.message_start_index,
                 cursor_position,
                 message_count,
@@ -193,11 +193,15 @@ impl LocalSessionHistorySnapshot {
         };
         let (start_index, end_index) = selector.range(cursor_position, self.message_count)?;
         let mut page = vec![None; end_index.saturating_sub(start_index)];
-        for (local_index, message) in self.messages.into_iter().enumerate() {
-            let global_index = self.start_index.saturating_add(local_index);
-            if global_index >= start_index && global_index < end_index {
-                page[global_index - start_index] = Some(message);
-            }
+        let resident_start = start_index
+            .saturating_sub(self.start_index)
+            .min(self.messages.len());
+        let resident_end = end_index
+            .saturating_sub(self.start_index)
+            .min(self.messages.len());
+        for (offset, message) in self.messages.window(resident_start..resident_end).into_iter().enumerate() {
+            let global_index = self.start_index + resident_start + offset;
+            page[global_index - start_index] = Some(message);
         }
         if page.iter().any(Option::is_none) {
             let persisted = load_persisted_message_range_with_connection(

@@ -632,10 +632,18 @@ function EngramControlCard({
         trailing={
           <>
             {detailsExpanded ? null : (
-              <span className="engram-control-compact-summary">
-                <span className="engram-control-compact-label">Engram · {message.stage}</span>
-                <span className="engram-control-compact-title">{title}</span>
-              </span>
+              <>
+                <span className="engram-control-compact-summary">
+                  <span className="engram-control-compact-label">Engram · {message.stage}</span>
+                  <span className="engram-control-compact-title">{title}</span>
+                </span>
+                {message.stage === "restart" ? (
+                  <span className="message-meta-tag engram-control-status">Restart</span>
+                ) : null}
+                {message.nextIntent === "wait" ? (
+                  <span className="message-meta-tag engram-control-status">Waiting</span>
+                ) : null}
+              </>
             )}
             {detailsToggle}
           </>

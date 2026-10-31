@@ -1,7 +1,7 @@
 // Host lifecycle journal beside persist_observer.rs. New file.
 // Owns one bounded JSON-lines file in the TermAl state directory: a boot
 // record per start, a flushed heartbeat each minute with numeric counters
-// only, a panic record from the process panic hook and a shutdown record on a
+// only, coalesced numeric output-size observations, a panic record from the process panic hook and a shutdown record on a
 // graceful or fatal exit. At boot it classifies how the previous instance
 // ended. It owns no persistence, scheduling or session data: no message
 // bodies, prompts, store contents or absolute paths are written, formatted
@@ -40,6 +40,7 @@ struct HostHeartbeatCounters {
 enum HostLifecycleRecord {
     Boot { at: String, instance_id: String, pid: u32, binary_sha256: Option<String> },
     Heartbeat { at: String, instance_id: String, counters: HostHeartbeatCounters },
+    OutputSize { at: String, instance_id: String, report: OutputSizeReport },
     Panic { at: String, instance_id: String, thread: String, location: Option<String>, message: String },
     Shutdown { at: String, instance_id: String, outcome: HostShutdownOutcome },
 }
@@ -49,6 +50,7 @@ impl HostLifecycleRecord {
         match self {
             Self::Boot { instance_id, .. }
             | Self::Heartbeat { instance_id, .. }
+            | Self::OutputSize { instance_id, .. }
             | Self::Panic { instance_id, .. }
             | Self::Shutdown { instance_id, .. } => instance_id,
         }
@@ -103,7 +105,7 @@ fn host_lifecycle_classify(records: &[HostLifecycleRecord]) -> HostPreviousEnd {
                 last_heartbeat = Some(at.clone());
                 ran_on = true;
             }
-            HostLifecycleRecord::Boot { .. } => {}
+            HostLifecycleRecord::Boot { .. } | HostLifecycleRecord::OutputSize { .. } => {}
         }
     }
     match last_panic {
@@ -419,11 +421,22 @@ impl HostLifecycle {
     }
 
     fn record_shutdown(&self, outcome: HostShutdownOutcome) {
+        self.record_output_sizes();
         if let Err(error) = self.journal.append(&HostLifecycleRecord::Shutdown { at: host_lifecycle_now(),
             instance_id: self.instance_id.clone(), outcome })
         {
             eprintln!("host lifecycle> shutdown record not written: {}", error.kind());
         }
+    }
+
+    // Only this existing journal thread performs telemetry I/O. Its failures
+    // are deliberately discarded and cannot affect any observed response.
+    fn record_output_sizes(&self) {
+        drain_output_size_reports(|report| {
+            let _ = self.journal.append(&HostLifecycleRecord::OutputSize {
+                at: host_lifecycle_now(), instance_id: self.instance_id.clone(), report,
+            });
+        });
     }
 
     /// Heartbeats each minute until a stop is requested, then records it.
@@ -448,6 +461,7 @@ impl HostLifecycle {
             if let Err(error) = self.record_heartbeat(state) {
                 eprintln!("host lifecycle> heartbeat not written: {}", error.kind());
             }
+            self.record_output_sizes();
             requested = stop.requested.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }

@@ -1,7 +1,8 @@
 // Classifies an Engram control card as routine, for the transcript's default
 // collapse. Owns only the conservative whitelist: a card is routine when every
 // classification field proves an ordinary enforced, turn-gated grant that was
-// sent on that grant, at dispatch or checkpoint, with nothing to act on.
+// sent on that grant, at dispatch, checkpoint or restart, with no failure or
+// required action. The renderer flags waiting and restart status in the row.
 // Does not own rendering, the disclosure state or the change marker
 // (message-cards.tsx, app-utils.ts). New file, not split from another.
 import type { EngramControlMessage } from "./types";
@@ -17,7 +18,7 @@ const TURN_GATED_ASSURANCE = "turn_gated";
 export function isRoutineEngramControl(message: EngramControlMessage): boolean {
   return (
     message.schemaVersion === 1 &&
-    (message.stage === "dispatch" || message.stage === "checkpoint") &&
+    (message.stage === "dispatch" || message.stage === "checkpoint" || message.stage === "restart") &&
     message.assurance === TURN_GATED_ASSURANCE &&
     message.decision === "grant" &&
     message.dispatch === "sent_on_grant" &&
@@ -29,6 +30,7 @@ export function isRoutineEngramControl(message: EngramControlMessage): boolean {
     (message.directives == null || message.directives.length === 0) &&
     (message.nextIntent == null ||
       message.nextIntent === "continue" ||
+      message.nextIntent === "wait" ||
       message.nextIntent === "exit")
   );
 }

@@ -879,13 +879,15 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 /// serializes after release, all inside `spawn_blocking`. The async worker
 /// hands the resulting bytes to hyper without doing that synchronous work.
 async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> {
-    let body = run_blocking_api(move || {
+    let (body, revision) = run_blocking_api(move || {
         let snapshot = state.summary_snapshot();
         serde_json::to_vec(&snapshot)
+            .map(|body| (body, snapshot.revision))
             .map_err(|err| ApiError::internal(format!("failed to serialize state: {err}")))
     })
     .await?;
     Ok((
+        axum::Extension(OutputSizeRevision(revision)),
         [(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),

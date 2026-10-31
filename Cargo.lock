@@ -2087,6 +2087,7 @@ dependencies = [
  "getrandom 0.4.2",
  "hkdf",
  "hmac",
+ "http-body",
  "keyring-core",
  "libc",
  "notify",

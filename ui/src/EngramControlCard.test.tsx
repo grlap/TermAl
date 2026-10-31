@@ -222,7 +222,7 @@ describe("EngramControlCard", () => {
     );
   });
 
-  it("names the source root a bound turn was measured in", () => {
+  it("names the source root a bound turn was measured in", async () => {
     renderEngramCard({
       id: "engram-checkpoint-named",
       type: "engramControl",
@@ -240,6 +240,7 @@ describe("EngramControlCard", () => {
       sourceRoot: { root: "C:\\repo\\.worktrees\\wt", workRef: "w-abc" },
     });
 
+    await userEvent.click(screen.getByRole("button", { name: "Show Engram details" }));
     expect(screen.getByText(/Grant: grant-1/)).toHaveTextContent(
       "Source basis: C:\\repo\\.worktrees\\wt (named for w-abc)",
     );
@@ -358,12 +359,68 @@ describe("EngramControlCard default collapse", () => {
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
   });
 
+  it.each([
+    ["checkpoint", "Turn checkpointed", ["Waiting"]],
+    ["restart", "Session synchronized", ["Restart", "Waiting"]],
+  ] as const)("keeps a successful waiting %s compact with visible status", async (stage, title, flags) => {
+    const { container } = renderEngramCard({
+      ...routineCheckpoint, stage, nextIntent: "wait",
+      sourceRoot: { root: "C:\\repo\\worktree" },
+    });
+    const card = container.querySelector(".engram-control-card")!;
+    expect(card).toHaveClass("engram-control-compact");
+    expect(Array.from(card.children).map(child => child.className)).toEqual(["message-meta"]);
+    const row = card.querySelector(".message-meta")!;
+    expect(row).toHaveTextContent(title);
+    for (const flag of flags) expect(row).toContainElement(screen.getByText(flag));
+    expect(screen.queryByText(/Grant: grant-routine/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show Engram details" }));
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText(/Grant: grant-routine/)).toHaveTextContent("Next intent: wait");
+    expect(screen.getByText(/Grant: grant-routine/)).toHaveTextContent("Source basis: C:\\repo\\worktree");
+    await userEvent.click(screen.getByRole("button", { name: "Hide Engram details" }));
+    for (const flag of flags) expect(card.querySelector(".message-meta")).toContainElement(screen.getByText(flag));
+  });
+
   const causalFailure: NonNullable<EngramControlMessage["causalFailure"]> = {
     operation: "turn_checkpoint", failureClass: "transport", message: "checkpoint failed",
     boundary: "TermAl host → Engram control", remoteApplication: "unknown",
     continuationReason: "Admission held after this unsettled checkpoint.",
   };
   const directive = { directiveId: "d-1", kind: "operator_action", audience: "operator", satisfaction: "satisfied" };
+
+  it.each(["checkpoint", "restart"] as const)("keeps attention visible on a waiting %s", (stage) => {
+    const base: EngramControlMessage = { ...routineCheckpoint, stage, nextIntent: "wait" };
+    const { rerender, container } = renderEngramCard(base);
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    const signals: Partial<EngramControlMessage>[] = [
+      { causalFailure },
+      { decision: "degraded" },
+      { decision: "refuse" },
+      { decision: "defer" },
+      { dispatch: "queued" },
+      { dispatch: "withheld" },
+      { dispatch: "sent_without_grant" },
+      { failMode: "shadow" },
+      { failMode: "degraded" },
+      { refusalCode: "lifecycle_hold" },
+      { deferCode: "lease_busy" },
+      { repairArmed: true },
+      { directives: [directive] },
+    ];
+    for (const signal of signals) {
+      rerender(<MessageCard message={{ ...base, ...signal }} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+      expect(container.querySelector(".engram-control-compact")).toBeNull();
+      expect(screen.getByRole("heading")).toBeInTheDocument();
+      expect(screen.getByText(/Grant: grant-routine/)).toHaveTextContent("Next intent: wait");
+      expect(toggle()).not.toBeInTheDocument();
+      if (signal.causalFailure) expect(screen.getByText("checkpoint failed")).toBeInTheDocument();
+      if (signal.directives) expect(screen.getByText(/operator_action/)).toBeInTheDocument();
+    }
+    rerender(<MessageCard message={base} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+  });
 
   // Each signal alone, on an otherwise routine grant, keeps the card expanded
   // with no collapse affordance, and its detail visible.
@@ -379,10 +436,8 @@ describe("EngramControlCard default collapse", () => {
     ["a queued dispatch", { dispatch: "queued" }, /Dispatch: queued/],
     ["a withheld dispatch", { dispatch: "withheld" }, /Dispatch: withheld/],
     ["a dispatch sent without a grant", { dispatch: "sent_without_grant" }, /Dispatch: sent without grant/],
-    ["a waiting next intent", { stage: "checkpoint", nextIntent: "wait" }, /Next intent: wait/],
     ["an armed repair", { repairArmed: true }, /Repair: armed/],
     ["a required action", { directives: [directive] }, /operator_action · operator · satisfied/],
-    ["a restart", { stage: "restart" }, /Dispatch: sent on grant/],
     ["an unknown schema", { schemaVersion: 2 }, /Dispatch: sent on grant/],
     ["an advisory assurance", { assurance: "advisory" }, /Dispatch: sent on grant/],
     ["an unsupported assurance", { assurance: "verified" }, /Dispatch: sent on grant/],
@@ -405,7 +460,6 @@ describe("EngramControlCard default collapse", () => {
     expect(screen.queryByText(/Grant: grant-routine/)).not.toBeInTheDocument();
     for (const change of [
       { causalFailure },
-      { nextIntent: "wait" as const },
       { dispatch: "withheld" as const },
       { failMode: "shadow" as const },
       { repairArmed: true },
@@ -464,13 +518,14 @@ describe("EngramControlCard default collapse with search and markers", () => {
     dispatch: "sent_on_grant", grantId: "grant-searchable", latencyMs: { total: 4 }, failMode: "enforced",
   };
 
-  it("opens a routine card while a transcript search is active", () => {
+  it.each(["dispatch", "checkpoint", "restart"] as const)("opens a routine %s card while a transcript search is active", (stage) => {
+    const message: EngramControlMessage = { ...routine, stage, nextIntent: "wait" };
     const { rerender } = render(
-      <MessageCard message={routine} searchQuery="grant-searchable" onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />,
+      <MessageCard message={message} searchQuery="grant-searchable" onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />,
     );
     expect(screen.getByText(/Grant: grant-searchable/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Engram details/ })).not.toBeInTheDocument();
-    rerender(<MessageCard message={routine} searchQuery="" onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    rerender(<MessageCard message={message} searchQuery="" onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
     expect(screen.queryByText(/Grant: grant-searchable/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show Engram details" })).toBeInTheDocument();
   });

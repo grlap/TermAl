@@ -32,6 +32,20 @@ skipped, and the lines around it still count.
     as a source `file:line`. Null when none reached it.
   - `workingSetBytes` and `committedBytes`: the process's memory from one OS
     query. Linux and macOS report no commit.
+- `outputSize`: coalesced observations of existing HTTP body bytes and each
+  finalized Axum SSE frame, before compression. The 16 MiB and 64 MiB bands
+  (and the reusable 1 GiB diagnostic band) report size; they impose no limit.
+  Fixed producer families distinguish state, history, session, mailbox, board,
+  federation, terminal, static/fallback and other routes. No URL, session id or
+  payload text is retained. `complete` distinguishes a finished body/frame from
+  an observed prefix at a band crossing, error or early drop;
+  `counterSaturated` marks a count that is a lower bound rather than exact.
+  `observationsSinceDrain` counts observations since the last drain, while
+  `maxBytesObserved` and optional `maxRevisionObserved` are independent lifetime
+  maxima for the fixed producer/stage/completeness/band slot. They need not
+  describe the same response. A revision is included only when the producer
+  supplied it; none is inferred from payloads. `nativePreWrite` is reserved for
+  the native writer's observation through this same diagnostic owner.
 - `panic`: written by the process panic hook before the default one runs. It
   holds the thread name, which for some threads includes a session id, the
   source location and the message. A panic message written as a literal
@@ -51,6 +65,17 @@ over-threshold report path, so ordinary lock use pays nothing. No message
 bodies, prompts, store contents or absolute paths are written: a source
 location keeps this crate's relative `src/...` path, and any other location,
 such as a dependency's or the standard library's, keeps only its file name.
+
+Output observers only update fixed saturating atomic counters. The existing
+journal thread drains at most 162 slots on each heartbeat and at shutdown;
+logging failure discards diagnostics without affecting delivery. The HTTP
+adapter forwards the original frames, trailers, errors and size hints, without
+collecting a stream, copying a body, serializing again or reserving a buffer.
+Axum emits one finalized SSE event per body data frame, including keepalives,
+so that frame length includes event/data prefixes, UTF-8 and line delimiters.
+These measurements describe bytes yielded by the body, not socket receipt or
+successful delivery to a client. A crash before the next drain can lose them.
+Size records do not change previous-instance panic/shutdown classification.
 
 ## Previous instance
 

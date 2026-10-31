@@ -70,6 +70,30 @@ fn assert_version(page: &SessionHistoryResponse, version: &str) {
 }
 
 #[test]
+fn history_capture_shares_resident_bodies_and_clones_only_the_selected_page() {
+    let (state, id) = fixture();
+    let query = selector(90, 3);
+    let (captured, capture_clones) = MessageSequence::observe_shared_body_clones(||
+        state.capture_local_session_history(&id, query).unwrap());
+    assert_eq!(capture_clones, 0);
+    let expected;
+    {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
+        assert!(captured.messages.shares_body(0, &record.session.messages, 0));
+        assert!(captured.messages.shares_body(63, &record.session.messages, 63));
+        expected = record.session.messages.iter().skip(24).take(3).cloned().collect::<Vec<_>>();
+    }
+    let (page, cloned_bodies) = MessageSequence::observe_shared_body_clones(||
+        captured.page(&id, query, state.server_instance_id.clone()).unwrap());
+    assert_eq!(cloned_bodies, 3);
+    assert_eq!(page.message_start_index, 90);
+    assert_eq!(page.messages.len(), 3);
+    assert_eq!(serde_json::to_value(&page.messages).unwrap(), serde_json::to_value(expected).unwrap());
+    assert_version(&page, "old");
+}
+
+#[test]
 fn history_snapshot_survives_rollback_and_persist_between_capture_and_page_load() {
     let (state, id) = fixture();
     let query = selector(50, 40); // Both the SQLite prefix and resident tail.

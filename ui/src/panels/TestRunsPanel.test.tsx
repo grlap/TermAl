@@ -8,9 +8,11 @@ import { makeTestRun, makeTestRunDetail } from "../test-runs-fixtures";
 import type { TestRunSummary } from "../test-runs";
 import { TestRunsPanel } from "./TestRunsPanel";
 
-vi.mock("../test-runs-api", () => ({ readTestRun: vi.fn(), readTestRunLog: vi.fn() }));
+vi.mock("../test-runs-api", () => ({ readTestRuns: vi.fn(), readTestRun: vi.fn(), readTestRunLog: vi.fn() }));
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 beforeEach(() => {
+  vi.mocked(api.readTestRuns).mockReset();
+  vi.mocked(api.readTestRuns).mockResolvedValue({ runs: [], limit: 100, nextCursor: null });
   vi.mocked(api.readTestRun).mockReset();
   vi.mocked(api.readTestRunLog).mockReset();
   vi.mocked(api.readTestRun).mockImplementation(async runId => ({ run: makeTestRun({ runId }), detail: makeTestRunDetail() }));

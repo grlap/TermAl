@@ -1,5 +1,5 @@
-// Read-only test-run list, filters and selection. Live summaries come from the
-// app's existing revision-gated stream; details/logs are bounded explicit reads.
+// Read-only paged history, filters and selection. The app's revision-gated
+// stream supplies live overlays; details/logs remain bounded explicit reads.
 import { useContext, useMemo, useState } from "react";
 import type { Project, Session } from "../types";
 import { TestRunsContext } from "../test-runs-context";
@@ -7,17 +7,20 @@ import { sortTestRuns, testRunMatchesSession, type TestRunState } from "../test-
 import { TestRunDetails, TestRunDuration } from "./TestRunDetails";
 import "./test-runs-panel.css";
 import type { TestRunCardTarget } from "../test-run-card";
+import { useTestRunHistory } from "./use-test-run-history";
 
 export function TestRunsPanel({ projects, sessions, initialProjectId = null, initialSessionId = null, initialRun = null }: {
   projects: readonly Project[]; sessions: readonly Session[];
   initialProjectId?: string | null; initialSessionId?: string | null;
   initialRun?: TestRunCardTarget | null;
 }) {
-  const { runs, snapshotReady } = useContext(TestRunsContext);
+  const { runs: liveRuns, snapshotReady } = useContext(TestRunsContext);
   const [projectId, setProjectId] = useState(initialSessionId ? "" : initialProjectId ?? "");
   const [sessionId, setSessionId] = useState(initialSessionId ?? "");
   const [state, setState] = useState<TestRunState | "">("");
   const [selectedId, setSelectedId] = useState<string | null>(initialRun?.runId ?? null);
+  const history = useTestRunHistory(projectId, liveRuns);
+  const runs = history.runs;
   const names = useMemo(() => new Map(sessions.map(session => [session.id, session.name])), [sessions]);
   const sessionIds = [...new Set([...sessions.map(session => session.id), ...runs.flatMap(run =>
     [run.ownerSessionId, run.notifySessionId].filter((id): id is string => id !== null)), ...(sessionId ? [sessionId] : [])])];
@@ -26,7 +29,7 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
   const selected = visible.find(run => run.runId === selectedId);
   return <section className="test-runs-panel" aria-label="Test Runs">
     <header><h2>Test Runs</h2><p>Registered launches and host-observed tests. Execution results and verification settlement are shown separately.</p>
-      <p>Detailed history normally keeps the newest 50 resolved runs per project. Unresolved runs remain visible; older resolved identities and proof are retained.</p></header>
+      <p>Live status updates appear alongside paged history. Use Load older to continue.</p></header>
     <div className="test-runs-filters">
       <label>Project <select value={projectId} onChange={event => setProjectId(event.target.value)}>
         <option value="">All projects</option>
@@ -42,9 +45,12 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
         {sessionIds.map(id => <option key={id} value={id}>{names.get(id) ?? id}</option>)}
       </select></label>
     </div>
+    {history.error ? <p role="alert">{history.error} <button type="button" disabled={history.busy} onClick={history.retry}>Retry history</button></p> : null}
+    {history.busy ? <p role="status">Loading test-run history…</p> : null}
+    {history.hasMore ? <p>Filters apply to loaded history. <button type="button" disabled={history.busy} onClick={history.more}>Load older</button></p> : null}
     <div className="test-runs-layout">
       <div className="test-runs-list" aria-label="Discovered runs">
-        {!visible.length ? <p>{snapshotReady ? "No test runs match these filters." : "Waiting for the test-run index…"}</p> : visible.map(run => <button
+        {!visible.length ? <p>{snapshotReady || history.loaded ? "No test runs match these filters." : "Waiting for the test-run index…"}</p> : visible.map(run => <button
           key={run.runId} type="button" className="test-run-row" aria-pressed={selectedId === run.runId}
           onClick={() => setSelectedId(run.runId)}>
           <span className={`test-run-state is-${run.state}`}>{run.state}{run.interrupted ? " · interrupted" : ""}</span>
@@ -63,13 +69,15 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
         </button>)}
       </div>
       {selected ? <TestRunDetails key={selected.runId} run={selected} /> : initialRun && selectedId === initialRun.runId && !runs.some(run => run.runId === initialRun.runId) ?
-        <section aria-label="Recorded run evidence"><h3>{snapshotReady ? "Run not currently indexed" : "Waiting for the test-run index…"}</h3>
-          <p>{initialRun.runId}</p><p>Run directory (literal path): <code>{initialRun.runDir}</code></p>
-          <pre>node scripts/test-launcher.mjs summary RUN_DIRECTORY</pre>
-          <p>RUN_DIRECTORY is a placeholder. Pass the literal path above as one argument using your shell’s quoting rules.</p>
-          <p>{snapshotReady ? "Discovery may still be in progress; absence from this snapshot does not prove the run was removed." : "The first state snapshot has not arrived yet."}</p>
-          <p>The transcript card retains its recorded evidence. No new run has been started.</p>
-        </section> : <p>Select a run to inspect stages and logs.</p>}
+        <TestRunDetails key={initialRun.runId} runId={initialRun.runId} fallback={
+          <section aria-label="Recorded run evidence"><h3>{snapshotReady ? "Run not currently indexed" : "Waiting for the test-run index…"}</h3>
+            <p>{initialRun.runId}</p><p>Run directory (literal path): <code>{initialRun.runDir}</code></p>
+            <pre>node scripts/test-launcher.mjs summary RUN_DIRECTORY</pre>
+            <p>RUN_DIRECTORY is a placeholder. Pass the literal path above as one argument using your shell’s quoting rules.</p>
+            <p>{snapshotReady ? "Discovery may still be in progress; absence from this snapshot does not prove the run was removed." : "The first state snapshot has not arrived yet."}</p>
+            <p>The transcript card retains its recorded evidence. No new run has been started.</p>
+          </section>
+        } /> : <p>Select a run to inspect stages and logs.</p>}
     </div>
   </section>;
 }
