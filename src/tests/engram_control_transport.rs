@@ -61,7 +61,7 @@ fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
     let prepared = transport.processes.lock().unwrap()
         .get(&connection.session_id).cloned().flatten()
         .expect("an unsent request must leave the prepared process available to a later pass");
-    assert!(prepared.process.try_wait().unwrap().is_none());
+    assert_control_deadline_child_state(&transport, &connection, &error, &prepared);
     // A changed intent under the same key would conflict if the expired
     // request had reached Engram. A fresh budget sends only this later intent.
     let (token, _) = process_fixture_bind(&transport, &connection, "startup-budget-bind");
@@ -285,6 +285,38 @@ fn a_failure_after_the_request_frame_is_handed_to_the_worker_stays_possibly_sent
     transport.shutdown_session(&connection.session_id);
 }
 
+fn assert_control_deadline_child_state(
+    transport: &ProcessEngramControlTransport,
+    connection: &EngramConnectionConfig,
+    error: &EngramTransportError,
+    child: &Arc<EngramControlProcess>,
+) {
+    assert_eq!(error.kind, EngramTransportErrorKind::Deadline, "{error:?}");
+    if error.request_never_sent {
+        assert!(
+            error.message.contains("budget exhausted during process startup"),
+            "unsent deadline must identify admission exhaustion: {error:?}"
+        );
+        assert!(!child.retiring.load(Ordering::Acquire), "{error:?}");
+        assert!(!child.cleanup_finished.load(Ordering::Acquire), "{error:?}");
+        assert!(child.process.try_wait().unwrap().is_none(), "{error:?}");
+        let registered = transport.processes.lock().unwrap()
+            .get(&connection.session_id).cloned().flatten()
+            .expect("unsent deadline must retain the ready child");
+        assert!(Arc::ptr_eq(child, &registered), "{error:?}");
+    } else {
+        assert!(
+            child.retiring.load(Ordering::Acquire),
+            "sent deadline must request termination: {error:?}"
+        );
+        assert_eq!(
+            error.control_process.as_ref().map(|process| process.pid),
+            Some(child.process.id()),
+            "sent deadline must name the exact retiring child: {error:?}"
+        );
+    }
+}
+
 #[test]
 fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
     let temp_root = TestTempRoot::create("engram-control-fixture");
@@ -336,24 +368,44 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
         .process_for(&connection)
         .expect("hang phase should be ready");
     let hung_pid = hung_process.process.id();
+    let deadline_started = std::time::Instant::now();
     let timeout = transport
         .request(&connection, &request, Duration::from_millis(100))
         .expect_err("fixture hang should hit the deadline");
-    assert_eq!(timeout.kind, EngramTransportErrorKind::Deadline);
-    assert!(
-        hung_process
-            .process
-            .try_wait()
-            .expect("hung child status should be readable")
-            .is_some(),
-        "deadline must reap the ready child {hung_pid}"
+    let retiring_at_deadline = hung_process.retiring.load(Ordering::Acquire);
+    let cleanup_at_deadline = hung_process.cleanup_finished.load(Ordering::Acquire);
+    let child_status_at_deadline = hung_process.process.try_wait();
+    eprintln!(
+        "control lifecycle deadline: elapsed={:?}, pid={hung_pid}, error={timeout:?}, retiring={retiring_at_deadline}, cleanup_finished={cleanup_at_deadline}, child_status={child_status_at_deadline:?}",
+        deadline_started.elapsed()
     );
+    assert_control_deadline_child_state(&transport, &connection, &timeout, &hung_process);
+    if timeout.request_never_sent {
+        // Scheduling can exhaust even a ready child's admission budget. That
+        // is a retained-child outcome, not a timeout-induced termination.
+        // Explicitly retire it to keep the cleanup/respawn proof in this case.
+        hung_process.request_termination().expect("retained child should retire");
+    }
 
     fs::write(&project_file, "fixture-ok\n").expect("ok mode should write");
     let respawned = transport
         .request(&connection, &request, DEADLOCK_GUARD)
-        .expect("timeout must kill the old process and allow a clean respawn");
+        .expect("retiring the old process must allow a clean respawn");
     assert_eq!(respawned["routing_token"], "fixture-token");
+    // Retirement only requests termination. Successor admission waits for the
+    // existing worker to reap the exact old child and confirm cleanup.
+    assert!(
+        hung_process.cleanup_finished.load(Ordering::Acquire),
+        "successor must wait for cleanup of child {hung_pid}"
+    );
+    assert!(
+        hung_process
+            .process
+            .try_wait()
+            .expect("old child status should be readable after successor admission")
+            .is_some(),
+        "successor admission must follow reap of child {hung_pid}: error={timeout:?}, cleanup_at_deadline={cleanup_at_deadline}"
+    );
     assert_ne!(
         transport.process_for(&connection).unwrap().process.id(),
         hung_pid,
