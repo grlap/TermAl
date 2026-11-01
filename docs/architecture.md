@@ -22,6 +22,14 @@ provenance. Bounded coding subwork still uses parent-integrated delegations.
 
 ## Delegation follow-up admission
 
+Child-driven delegation refresh uses the existing catalog's child lookup and
+refreshes waits watching that delegation. Its locked transaction allocates the
+revision, finishes the affected sessions' body sequences and dispatches the
+existing persisted delta before enqueueing lifecycle, transcript and wait
+events. It does not capture a global state snapshot. Runtime release and parent
+resume dispatch remain outside the lock; broad wait/deletion housekeeping stays
+with the existing global maintenance paths.
+
 Startup restores the full delegation inventory on the existing post-listen boot
 worker. A runtime completeness witness fences inventory-dependent operations
 until atomic publication; independent routes can already serve. See

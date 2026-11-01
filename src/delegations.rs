@@ -360,6 +360,16 @@ impl StateInner {
             .iter()
             .position(|record| record.child_session_id == child_session_id)
     }
+
+    fn indexed_delegation_for_child(&self, child_session_id: &str) -> Option<usize> {
+        self.delegation_catalog_children.lock().expect("catalog child index poisoned")
+            .delegation_for_child(&self.delegations, child_session_id)
+    }
+
+    fn indexed_delegation(&self, delegation_id: &str) -> Option<usize> {
+        self.delegation_catalog_children.lock().expect("catalog child index poisoned")
+            .delegation_by_id(&self.delegations, delegation_id)
+    }
 }
 
 #[cfg(test)]
@@ -1776,7 +1786,7 @@ impl AppState {
             .map_err(|err| anyhow!(err.message))?;
         let (revision, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_delegation_index_by_child_session_id(child_session_id)
+            let Some(index) = inner.indexed_delegation_for_child(child_session_id)
             else {
                 return Ok(());
             };
@@ -1785,8 +1795,15 @@ impl AppState {
                 return Ok(());
             };
             let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
-            let wait_refresh = refresh_delegation_waits_locked(&mut inner);
-            let revision = self.commit_locked(&mut inner)?;
+            let delegation_id = inner.delegations[index].id.clone();
+            let mut affected_sessions = BTreeSet::from([
+                child_session_id.to_owned(),
+                inner.delegations[index].parent_session_id.clone(),
+            ]);
+            let wait_refresh = refresh_delegation_waits_for_delegation_locked(&mut inner, &delegation_id);
+            affected_sessions.extend(wait_refresh.consumed_waits.iter()
+                .map(|consumed| consumed.wait.parent_session_id.clone()));
+            let revision = self.commit_delegation_refresh_locked(&mut inner, &affected_sessions)?;
             self.enqueue_delegation_refresh_locked(
                 &inner,
                 revision,
@@ -2878,6 +2895,10 @@ fn refresh_delegation_waits_for_delegation_locked(
     inner: &mut StateInner,
     delegation_id: &str,
 ) -> DelegationWaitRefresh {
+    if !inner.delegation_waits.iter()
+        .any(|wait| wait.delegation_ids.iter().any(|id| id == delegation_id)) {
+        return DelegationWaitRefresh::default();
+    }
     // A wait is eligible if it watches the delegation being actively polled.
     // For `Any` waits, other sibling statuses stay cached until their own
     // status/result is refreshed or the global wait refresher runs.
@@ -2980,12 +3001,7 @@ fn delegation_wait_resume_prompt_locked(
     let records = wait
         .delegation_ids
         .iter()
-        .filter_map(|id| {
-            inner
-                .delegations
-                .iter()
-                .find(|delegation| delegation.id == *id)
-        })
+        .filter_map(|id| inner.indexed_delegation(id).map(|index| &inner.delegations[index]))
         .collect::<Vec<_>>();
     if records.len() != wait.delegation_ids.len() {
         return Some((limit_delegation_wait_resume_prompt(format!(
@@ -3434,7 +3450,7 @@ fn refresh_delegation_from_child_locked(
     inner: &mut StateInner,
     delegation_index: usize,
 ) -> Option<DelegationLifecycleDelta> {
-    let delegation = inner.delegations.get(delegation_index)?.clone();
+    let delegation = inner.delegations.get(delegation_index)?;
     if delegation_is_terminal(delegation.status) {
         return None;
     }
@@ -3443,7 +3459,7 @@ fn refresh_delegation_from_child_locked(
     // has not started has no provider outcome yet: report the attempt state and
     // read nothing else. An admitting child can read idle with no result (a
     // queued head admits before its promotion), which is not a finished turn.
-    let followup_awaits_first_turn = delegation_followup_awaits_first_turn(inner, &delegation);
+    let followup_awaits_first_turn = delegation_followup_awaits_first_turn(inner, delegation);
     let attempt_change =
         sync_delegation_attempt_state_locked(inner, delegation_index, followup_awaits_first_turn);
     let attempt = &inner.delegations[delegation_index].attempt;

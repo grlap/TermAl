@@ -58,6 +58,7 @@ mod delegation_lifecycle;
 mod delegation_metadata;
 mod delegation_outcome_recovery;
 mod delegation_persistence;
+mod delegation_refresh_cut;
 #[cfg(windows)]
 mod delegation_process_cleanup;
 mod delegation_read_only;

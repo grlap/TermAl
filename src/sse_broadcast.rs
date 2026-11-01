@@ -187,6 +187,32 @@ impl AppState {
     ) -> Result<(u64, PersistDispatchOutcome)> {
         inner.retain_hidden_source_observation_sessions();
         let (revision, outcome) = self.bump_revision_and_persist_locked_with_outcome(inner)?;
+        self.finish_persist_dispatch_locked(inner, &outcome);
+        Ok((revision, outcome))
+    }
+
+    /// A child refresh finishes only its affected body certificates. It shares
+    /// the existing revision/persistence owner while global retention and
+    /// snapshot publication remain with their ordinary maintenance callers.
+    fn commit_delegation_refresh_locked(
+        &self,
+        inner: &mut StateInner,
+        affected_sessions: &BTreeSet<String>,
+    ) -> Result<u64> {
+        for session_id in affected_sessions {
+            if let Some(index) = inner.find_session_index(session_id) {
+                let record = &mut inner.sessions[index];
+                if record.is_local_session() {
+                    record.body_sequence.finish_commit();
+                }
+            }
+        }
+        let (revision, outcome) = self.persist_committed_revision_locked(inner)?;
+        self.finish_persist_dispatch_locked(inner, &outcome);
+        Ok(revision)
+    }
+
+    fn finish_persist_dispatch_locked(&self, inner: &mut StateInner, outcome: &PersistDispatchOutcome) {
         // Dirty settings markers arise only when the disconnected-channel
         // synchronous fallback failed. If any later commit reaches the same
         // synchronous persistence path successfully, the full preferences
@@ -202,7 +228,6 @@ impl AppState {
             // existing retry owner. Sibling metadata success cannot clear it.
             inner.remote_delta_persist_dirty = outcome.rejected_remote_session(inner).is_some();
         }
-        Ok((revision, outcome))
     }
 
     /// Commits a newly visible session and wakes the background persist
@@ -529,6 +554,15 @@ impl AppState {
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatchOutcome)> {
         inner.finish_body_sequence_commits();
+        self.persist_committed_revision_locked(inner)
+    }
+
+    /// Callers finish the body certificates belonging to their mutation first.
+    /// Allocation and dispatch stay inside the same StateInner transaction.
+    fn persist_committed_revision_locked(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<(u64, PersistDispatchOutcome)> {
         inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
         let outcome = self.persist_internal_locked_with_outcome(inner)?;
         Ok((inner.revision, outcome))

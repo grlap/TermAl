@@ -118,7 +118,7 @@ impl AppState {
     ) -> std::result::Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(delegation_index) =
-            inner.find_delegation_index_by_child_session_id(child_session_id)
+            inner.indexed_delegation_for_child(child_session_id)
         else {
             return Ok(());
         };
@@ -183,7 +183,7 @@ impl AppState {
         let recovery = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(delegation_index) =
-                inner.find_delegation_index_by_child_session_id(child_session_id)
+                inner.indexed_delegation_for_child(child_session_id)
             else {
                 return Ok(());
             };
@@ -219,7 +219,7 @@ impl AppState {
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(delegation_index) =
-                inner.find_delegation_index_by_child_session_id(child_session_id)
+                inner.indexed_delegation_for_child(child_session_id)
             else {
                 return Ok(());
             };
@@ -454,7 +454,7 @@ impl AppState {
         let (revision, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let delegation_index = inner
-                .find_delegation_index_by_child_session_id(&submission.child_session_id)
+                .indexed_delegation_for_child(&submission.child_session_id)
                 .ok_or_else(|| {
                     ApiError::conflict("delegation disappeared during result submission")
                 })?;
