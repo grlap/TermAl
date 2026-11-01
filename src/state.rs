@@ -1780,6 +1780,10 @@ struct StateInner {
     /// so recreating the same Engram store cannot reuse a retired credential.
     engram_retired_work_authority_grants: PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
     engram_session_obligations: EngramSessionObligationLedger,
+    // Lazily activated import-reconciliation journal: NotActivated until the
+    // first enrollment or hold intent (persist_import_reconciliation.rs).
+    // Tracked so an unchanged journal is omitted from delta captures.
+    engram_import_reconciliation: PersistTracked<EngramImportReconciliationState>,
     // Runtime receipts only. Boot reconstructs matching committed confirmations.
     engram_confirmed_containment_ids: BTreeSet<String>,
     // Volatile custody; deliberately absent from PersistedState.
@@ -1965,6 +1969,7 @@ impl StateInner {
             engram_named_root_release_audit: PersistTracked::default(),
             engram_source_sightings: PersistTracked::default(),
             engram_session_obligations: EngramSessionObligationLedger::empty(),
+            engram_import_reconciliation: PersistTracked::default(),
             engram_confirmed_containment_ids: BTreeSet::new(),
             engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts::default(),
             engram_root_read_cursor: BTreeMap::new(),

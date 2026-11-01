@@ -109,6 +109,14 @@ fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUn
     field!("workspaceLayouts", &metadata.workspace_layouts);
     field!("sessions", &metadata.sessions);
     field!("codex", &metadata.codex);
+    // Only an activated journal is projected, and only when the capture
+    // carries it: an unchanged journal is omitted and serializes nothing.
+    // The writer applies the store's floor (engram_import_reconciliation_writer_floor).
+    if let EngramImportReconciliationState::Activated(journal) = &*metadata.engram_import_reconciliation
+        && !metadata.metadata_collection_is_omitted(ENGRAM_IMPORT_RECONCILIATION_FIELD)
+    {
+        units.extend(engram_import_reconciliation_units(journal)?);
+    }
     Ok(units)
 }
 
@@ -159,7 +167,7 @@ fn read_metadata_units(connection: &rusqlite::Connection) -> Result<PersistMetad
     if units.is_empty() && metadata_units_are_uninitialized(connection)? {
         return Ok(units);
     }
-    validate_metadata_unit_inventory(&units)?;
+    validate_metadata_unit_inventory_for_store(connection, &units)?;
     metadata_units_to_value(&units)?;
     Ok(units)
 }
@@ -330,7 +338,8 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
             version
             @ ("2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION
                 | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_OBSERVATION_SCHEMA_VERSION
-                | SQLITE_CHECKPOINT_RESULT_PREDECESSOR | SQLITE_SCHEMA_VERSION),
+                | SQLITE_CHECKPOINT_RESULT_PREDECESSOR | SQLITE_SCHEMA_VERSION
+                | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION),
         ) => Ok(version.to_owned()),
         Some(version) => Err(reject_unsupported_state_schema(format!(
             "unsupported metadata storage version `{version}`"
@@ -365,7 +374,8 @@ fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Opt
             .optional()
             .map_err(Into::into);
     }
-    let units = if matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR) {
+    let units = if matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+        | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
         read_metadata_units(connection)?
     } else {
         let units = read_metadata_units_unchecked(connection)?;
@@ -388,7 +398,7 @@ fn read_persisted_metadata_field(
     field: &str,
 ) -> Result<Option<Value>> {
     let version = persisted_metadata_storage_version(connection)?;
-    if version != SQLITE_SCHEMA_VERSION {
+    if !matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
         return read_persisted_metadata_json(connection)?
             .map(|encoded| -> Result<Option<Value>> {
                 let mut value: Value = serde_json::from_str(&encoded)?;
@@ -411,7 +421,7 @@ fn read_persisted_metadata_field(
     if inventory.is_empty() && metadata_units_are_uninitialized(connection)? {
         return Ok(None);
     }
-    validate_metadata_unit_inventory(&inventory)?;
+    validate_metadata_unit_inventory_for_store(connection, &inventory)?;
     let mut statement = connection.prepare(
         "SELECT item_key,kind,value_json FROM state_metadata_units WHERE field_name=?1 ORDER BY item_key")?;
     let rows = statement.query_map([field], |row| {

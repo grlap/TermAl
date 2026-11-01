@@ -178,11 +178,12 @@ fn write_metadata_units(
             ));
         }
         if capture.is_some() && (!loaded.is_empty() || generation != 0) {
-            validate_metadata_unit_inventory(&loaded)?;
+            validate_metadata_unit_inventory_for_store(connection, &loaded)?;
             metadata_units_to_value(&loaded)?;
         }
         &loaded
     };
+    engram_import_reconciliation_writer_floor(connection, previous, &mut desired)?;
     if let Some(collections) = capture.and_then(|capture| capture.collections.as_ref()) {
         let omitted = collections
             .omitted

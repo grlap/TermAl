@@ -1047,6 +1047,8 @@ include!("engram_checkpoint_result_recovery.rs");
 include!("engram_checkpoint_receipts.rs");
 include!("engram_containment_receipts.rs");
 include!("engram_session_obligations.rs");
+include!("engram_import_reconciliation.rs");
+include!("persist_import_reconciliation.rs");
 include!("engram_containment_admission.rs");
 include!("engram_containment_admission_image.rs");
 include!("engram_containment_admission_progress.rs");

@@ -363,7 +363,8 @@ fn validate_no_legacy_embedded_state(
              `{table_name}` contains rows"
         )));
     } else if matches!(required_state_meta_value(connection, "schema_version")?.as_str(),
-        SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR) {
+        SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+            | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
         return Err(reject_unsupported_state_schema(
             "missing mandatory Engram session obligation metadata".to_owned(),
         ));
@@ -420,7 +421,16 @@ fn sqlite_state_schema_header(
 }
 
 fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
-    validate_sqlite_state_schema_for_version(connection, SQLITE_SCHEMA_VERSION)
+    // The import-reconciliation successor keeps every table of the current
+    // floor; only its metadata inventory differs. It is never reached by
+    // migration here, only by an explicit activation.
+    let (_, stored_schema_version) = sqlite_state_schema_header(connection)?;
+    let expected = if stored_schema_version == SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION {
+        SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+    } else {
+        SQLITE_SCHEMA_VERSION
+    };
+    validate_sqlite_state_schema_for_version(connection, expected)
 }
 
 fn validate_sqlite_state_schema_for_version(

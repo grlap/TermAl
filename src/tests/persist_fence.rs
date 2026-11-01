@@ -16,6 +16,9 @@ mod durability_pending_registration;
 #[path = "persist_fence_checkpoint_race.rs"]
 mod checkpoint_race;
 
+#[path = "engram_import_reconciliation_persist.rs"]
+mod import_reconciliation;
+
 struct FenceFixture {
     cache: SqlitePersistConnectionCache,
     root: TestTempRoot,

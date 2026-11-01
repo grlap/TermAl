@@ -47,6 +47,11 @@ struct PersistedState {
     engram_retired_work_authority_grants: PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
     // Mandatory at the joint reader floor; absent is not an empty ledger.
     engram_session_obligations: EngramSessionObligationLedger,
+    // Present exactly at the import-reconciliation successor floor (the
+    // per-floor inventory enforces it) and decoded strictly; absent means
+    // NotActivated. Projected by project_metadata_units, never by serde.
+    #[serde(default, skip_serializing, deserialize_with = "deserialize_engram_import_reconciliation")]
+    engram_import_reconciliation: PersistTracked<EngramImportReconciliationState>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -136,6 +141,7 @@ impl PersistedState {
             "engramWorkNamingHistory" => self.engram_work_naming_history.stamp(),
             "engramNamedRootReleaseAudit" => self.engram_named_root_release_audit.stamp(),
             "engramSourceSightings" => self.engram_source_sightings.stamp(),
+            "engramImportReconciliation" => self.engram_import_reconciliation.stamp(),
             "pendingCoordinationScopeDeletions" => {
                 self.pending_coordination_scope_deletions.stamp()
             }
@@ -240,6 +246,12 @@ impl PersistedState {
             engram_session_obligations: clone_persist_metadata_field(
                 "engramSessionObligations", &inner.engram_session_obligations,
             ),
+            // A reference count, never a journal copy, under the state lock;
+            // an unchanged journal is omitted from a delta capture.
+            engram_import_reconciliation: collection!(
+                "engramImportReconciliation",
+                &inner.engram_import_reconciliation,
+            ),
             engram_source_root_generation: inner.engram_source_root_generation,
             pending_coordination_scope_deletions: collection!(
                 "pendingCoordinationScopeDeletions",
@@ -340,6 +352,7 @@ impl PersistedState {
             engram_named_root_release_audit: self.engram_named_root_release_audit.snapshot_clone(),
             engram_source_sightings: self.engram_source_sightings.snapshot_clone(),
             engram_session_obligations: self.engram_session_obligations.clone(),
+            engram_import_reconciliation: self.engram_import_reconciliation.snapshot_clone(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self
                 .pending_coordination_scope_deletions
@@ -510,6 +523,7 @@ impl PersistedState {
             engram_named_root_release_audit: engram_named_root_release_audit.into(),
             engram_source_sightings: self.engram_source_sightings.into(),
             engram_session_obligations: self.engram_session_obligations,
+            engram_import_reconciliation: self.engram_import_reconciliation.into(),
             engram_confirmed_containment_ids: BTreeSet::new(),
             engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts::default(),
             engram_root_read_cursor: BTreeMap::new(),
