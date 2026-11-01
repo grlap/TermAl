@@ -110,6 +110,15 @@ thread_local! {
     /// between that read and the call's commit.
     static TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
+    /// Run once on this test thread right after a naming bind's answer
+    /// arrives and before it is adopted, so a test can replace the session's
+    /// binding meanwhile.
+    static TEST_ENGRAM_AFTER_NAMING_BIND_REPLY: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+    /// While set on this test thread, saving an adopted naming bind fails
+    /// without writing.
+    static TEST_ENGRAM_NAMING_BIND_SAVE_FAILS: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
 }
 
 /// At most this many host lines about source roots wait for the agent's
@@ -2023,21 +2032,40 @@ impl AppState {
 
     /// A fresh Base-only session needs a routing binding for the naming RPCs,
     /// but must not enter the turn-admission/recovery binder to obtain it.
+    /// Under turn-gated control OFF, a token that a reload restored flagged
+    /// for rebinding is not yet a binding: naming re-establishes it with the
+    /// same naming bind, its own Base path. A valid token is used as it is,
+    /// and a session under turn-gated control is left to its own binders.
     fn bind_fresh_engram_source_root_until(
         &self,
         target: EngramBindingTarget,
         association: &EngramRootIntentAssociation,
         deadline: std::time::Instant,
     ) -> Result<EngramBindingTarget, ApiError> {
-        if target.routing_token.is_some() || target.settings.turn_gated_control {
+        if target.settings.turn_gated_control
+            || (target.routing_token.is_some() && !target.rebind_required)
+        {
             return Ok(target);
         }
         let session_id = &target.connection.session_id;
         let owner = Uuid::new_v4();
-        let idle = |record: &SessionRecord| {
+        // The binding as this call found it: none, or the flagged token. Each
+        // step checks the session still holds exactly that, so a binding
+        // another owner set meanwhile is never overwritten.
+        let flagged_token = target.routing_token.clone();
+        let unbound = |state: &EngramSessionState, prior_work: &Option<EngramControlWorkBinding>| {
+            match &flagged_token {
+                None => state.routing_token.is_none() && state.work_binding.is_none(),
+                Some(token) => {
+                    state.rebind_required
+                        && state.routing_token.as_ref() == Some(token)
+                        && &state.work_binding == prior_work
+                }
+            }
+        };
+        let idle = |record: &SessionRecord, prior_work: &Option<EngramControlWorkBinding>| {
             let state = &record.engram;
-            state.routing_token.is_none()
-                && state.work_binding.is_none()
+            unbound(state, prior_work)
                 && state.active_grant_id.is_none()
                 && state.uncertain_grant_id.is_none()
                 && state.begins_recorded
@@ -2066,14 +2094,15 @@ impl AppState {
                         &inner.sessions[index], &target.runtime_snapshot)
                 })
         };
-        {
+        let prior_work = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if !current(&inner) {
                 return Err(ApiError::conflict("Engram naming binding changed before session bind"));
             }
             let index = inner.find_session_index(session_id).expect("current session");
             let record = &mut inner.sessions[index];
-            if !idle(record) || record.engram.bind_in_progress {
+            let prior_work = record.engram.work_binding.clone();
+            if !idle(record, &prior_work) || record.engram.bind_in_progress {
                 return Err(ApiError::conflict(
                     "source-root naming cannot replace an unresolved Engram admission or binding",
                 ));
@@ -2089,7 +2118,8 @@ impl AppState {
             }
             record.engram.source_root_bind_owner = Some(owner);
             record.engram.bind_in_progress = true;
-        }
+            prior_work
+        };
         let result = (|| {
             self.guard_engram_root_read_classified_until(
                 &target, Some(&association.binding), deadline,
@@ -2110,8 +2140,22 @@ impl AppState {
             // A lost bind reply can be replayed without inventing another
             // intent. Include the connection, store and entire request so a
             // changed identity or claim never reuses the old request's key.
-            let intent = serde_json::to_vec(&(&target.connection, &association.store, &request))
-                .map_err(|error| ApiError::internal(format!("encoding naming bind: {error}")))?;
+            // A re-bind of a flagged token also includes that token: Engram
+            // answers a key it has seen with the answer it recorded, and the
+            // token it gave this session's first naming may since have been
+            // replaced by another binder or refused, so the re-bind must not
+            // reuse that key. While the flagged token stays the same, a lost
+            // re-bind reply still replays under the same key.
+            let intent = match &flagged_token {
+                None => serde_json::to_vec(&(&target.connection, &association.store, &request)),
+                Some(flagged) => serde_json::to_vec(&(
+                    &target.connection,
+                    &association.store,
+                    &request,
+                    flagged,
+                )),
+            }
+            .map_err(|error| ApiError::internal(format!("encoding naming bind: {error}")))?;
             if let EngramControlRequest::SessionBind { idempotency_key, .. } = &mut request {
                 *idempotency_key = format!("termal-source-root-bind:{}", sha256_hex(&intent));
             }
@@ -2119,7 +2163,7 @@ impl AppState {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 if !current(&inner) || !inner.find_session_index(session_id).is_some_and(|index| {
                     let record = &inner.sessions[index];
-                    record.engram.source_root_bind_owner == Some(owner) && idle(record)
+                    record.engram.source_root_bind_owner == Some(owner) && idle(record, &prior_work)
                 }) {
                     return Err(ApiError::conflict("Engram naming binding changed before transmission"));
                 }
@@ -2131,6 +2175,12 @@ impl AppState {
                     .map_err(|error| ApiError::bad_gateway(error.to_string()))?,
             ).and_then(parse_engram_result::<EngramSessionBindingResponse>)
                 .map_err(|error| ApiError::bad_gateway(format!("binding source-root naming: {error}")))?;
+            #[cfg(test)]
+            if let Some(meanwhile) =
+                TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| hook.borrow_mut().take())
+            {
+                meanwhile();
+            }
             if binding.routing_token.trim().is_empty()
                 || !engram_phase_holds_no_turn(&binding.status.phase)
                 || binding.status.open_grant_id.is_some()
@@ -2146,17 +2196,26 @@ impl AppState {
             }
             let index = inner.find_session_index(session_id).expect("current session");
             let record = &mut inner.sessions[index];
-            if record.engram.source_root_bind_owner != Some(owner) || !idle(record) {
+            if record.engram.source_root_bind_owner != Some(owner) || !idle(record, &prior_work) {
                 return Err(ApiError::conflict("Engram naming bind no longer owns the session"));
             }
             let was_rebind = record.engram.rebind_required;
             record.engram.routing_token = Some(binding.routing_token);
             record.engram.work_binding = Some(association.binding.clone());
             record.engram.rebind_required = false;
-            if let Err(error) = self.persist_internal_locked(&inner) {
+            #[cfg(test)]
+            let save_fails = TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(std::cell::Cell::get);
+            #[cfg(not(test))]
+            let save_fails = false;
+            let saved = if save_fails {
+                Err(anyhow!("the naming bind's save failed"))
+            } else {
+                self.persist_internal_locked(&inner)
+            };
+            if let Err(error) = saved {
                 let state = &mut inner.sessions[index].engram;
-                state.routing_token = None;
-                state.work_binding = None;
+                state.routing_token = flagged_token.clone();
+                state.work_binding = prior_work.clone();
                 state.rebind_required = was_rebind;
                 return Err(ApiError::internal(format!("persisting naming binding: {error:#}")));
             }

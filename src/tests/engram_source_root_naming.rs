@@ -26,6 +26,9 @@ mod confirmation;
 #[path = "engram_source_root_unknown_fields.rs"]
 mod unknown_fields;
 
+#[path = "engram_source_root_off_rebind.rs"]
+mod off_rebind;
+
 impl ClaimedRoot {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.
