@@ -442,6 +442,32 @@ fn coordination_cli_help_is_not_a_usage_error() {
 }
 
 #[test]
+fn coordination_cli_literal_help_message_remains_data() {
+    for message in ["--message=help", "--message"] {
+        // The separate-value form consumes help as data, not as a command.
+        let mut args = cli_args(&[
+            "mailbox",
+            "send",
+            "--as-session=session-root",
+            "--to=session-peer",
+            "--idempotency-key=literal-help",
+            message,
+        ]);
+        if message == "--message" {
+            args.push("help".into());
+        }
+        let invocation = parse_coordination_cli_args(args).unwrap();
+        assert!(matches!(
+            invocation.command,
+            CoordinationCliCommand::MailboxSend {
+                message: CoordinationCliMessageSource::Inline(ref text),
+                ..
+            } if text == "help"
+        ));
+    }
+}
+
+#[test]
 fn coordination_cli_message_file_strips_bom_and_rejects_empty_bodies() {
     let root = TestTempRoot::create("termal-coordination-cli-message-file");
     let path = root.path().join("message.txt");

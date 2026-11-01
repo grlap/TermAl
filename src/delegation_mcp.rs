@@ -153,26 +153,29 @@ fn delegation_control_plane_capability_for_codex_elicitation(
 
 fn parse_delegation_mcp_mode_args(
     args: impl Iterator<Item = String>,
-) -> Result<(String, Option<String>)> {
+) -> Result<Mode> {
     let mut parent_session_id: Option<String> = None;
     let mut base_url: Option<String> = None;
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--parent-session-id" => {
+            "--parent-session-id" | "--base-url" => {
                 let value = args
                     .next()
-                    .context("delegation-mcp requires a value after --parent-session-id")?;
-                parent_session_id = Some(value);
+                    .with_context(|| format!("delegation-mcp requires a value after {arg}"))?;
+                // Flags can request help even after a missing value. Bare
+                // 'help' is still a valid consumed session id or URL value.
+                if matches!(value.as_str(), "--help" | "-h") {
+                    return Ok(Mode::CoordinationCli(coordination_cli_help()));
+                }
+                if arg == "--parent-session-id" {
+                    parent_session_id = Some(value);
+                } else {
+                    base_url = Some(value);
+                }
             }
-            "--base-url" => {
-                let value = args
-                    .next()
-                    .context("delegation-mcp requires a value after --base-url")?;
-                base_url = Some(value);
-            }
-            "--help" | "-h" => {
-                bail!("usage: termal delegation-mcp --parent-session-id <id> [--base-url <url>]");
+            "--help" | "-h" | "help" => {
+                return Ok(Mode::CoordinationCli(coordination_cli_help()));
             }
             other => bail!("unknown delegation-mcp argument `{other}`"),
         }
@@ -181,7 +184,10 @@ fn parse_delegation_mcp_mode_args(
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
         .context("delegation-mcp requires --parent-session-id <id>")?;
-    Ok((parent_session_id, base_url))
+    Ok(Mode::DelegationMcp {
+        parent_session_id,
+        base_url,
+    })
 }
 
 fn default_termal_http_base_url() -> String {

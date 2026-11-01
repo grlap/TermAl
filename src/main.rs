@@ -810,6 +810,26 @@ impl Mode {
     /// (`sessions` / `mailbox`), or a REPL session (`repl` / `cli` +
     /// agent name, or a bare REPL-capable agent name like `codex`).
     fn parse(args: Vec<String>) -> Result<Self> {
+        // Reuse the side-effect-free coordination help path before selecting
+        // a server, provider runtime, bridge or filesystem inspection mode.
+        let tail_requests_help = || args.iter().skip(1).any(|arg| is_cli_help_argument(arg));
+        let requests_help = match args.first().map(String::as_str) {
+            Some("--help" | "-h" | "help") => true,
+            // Complete verification commands own every positional argument,
+            // including paths named help, -h or --help.
+            Some("review-freeze-check" | "review-identity") => {
+                args.len() == 2 && tail_requests_help()
+            }
+            // These parsers distinguish options from consumed data values.
+            Some("sessions" | "mailbox" | "delegation-mcp") | None => false,
+            Some("server" | "repl" | "cli" | "--agent" | "telegram" | "telegram-bot") => {
+                tail_requests_help()
+            }
+            Some(agent) => Agent::from_str(agent).is_ok() && tail_requests_help(),
+        };
+        if requests_help {
+            return Ok(Self::CoordinationCli(coordination_cli_help()));
+        }
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
             Some("review-freeze-check") => Ok(Self::ReviewFreeze(args)),
@@ -822,14 +842,7 @@ impl Mode {
             Some("telegram") | Some("telegram-bot") => bail!(
                 "Telegram relay runs inside server mode; configure it from Settings -> Telegram"
             ),
-            Some("delegation-mcp") => {
-                let (parent_session_id, base_url) =
-                    parse_delegation_mcp_mode_args(args.into_iter().skip(1))?;
-                Ok(Self::DelegationMcp {
-                    parent_session_id,
-                    base_url,
-                })
-            }
+            Some("delegation-mcp") => parse_delegation_mcp_mode_args(args.into_iter().skip(1)),
             Some("repl") | Some("cli") => Self::repl(Agent::parse(args.into_iter().skip(1))?),
             _ => Self::repl(Agent::parse(args.into_iter())?),
         }

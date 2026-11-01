@@ -66,7 +66,26 @@ Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
 
 fn coordination_cli_usage() -> String {
-    format!("{COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}")
+    format!(
+        "TermAl commands:
+  termal [server]                         Start the HTTP server (default).
+  termal repl [--agent] <agent>            Run an interactive REPL (alias: cli).
+  termal [--agent] <agent>                REPL shortcut.
+    Agents: codex, cursor, gemini, opencode, kimi.
+    Claude sessions run through the server UI, not the REPL.
+  termal delegation-mcp --parent-session-id <id> [--base-url <url>]
+                                         Run the parent-scoped stdio MCP bridge.
+  termal review-freeze-check <root> <manifest> <expected-sha256>
+  termal review-identity <root> <request-json> [<scope-json>]
+  termal --help | -h | help               Print help without starting the host.
+    Help is also available after a subcommand.
+
+sessions list lists root sessions. The MCP delegation spawn tool creates
+children, not roots; it is not a CLI subcommand. Create roots through the
+server UI or POST /api/sessions (docs/architecture.md).
+
+{COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}"
+    )
 }
 
 /// `termal sessions list` needs no caller identity: the inventory tool only
@@ -246,6 +265,10 @@ fn coordination_cli_help() -> CoordinationCliInvocation {
     }
 }
 
+fn is_cli_help_argument(argument: &str) -> bool {
+    matches!(argument, "--help" | "-h" | "help")
+}
+
 fn default_termal_session_id() -> Option<String> {
     std::env::var(TERMAL_SESSION_ID_ENV)
         .ok()
@@ -296,14 +319,14 @@ fn parse_coordination_cli_args_with_default_session_id(
     let mut args = args.into_iter();
     let group = args.next().unwrap_or_default();
     let verb = args.next().unwrap_or_default();
-    if matches!(verb.as_str(), "--help" | "-h") {
+    if is_cli_help_argument(&verb) {
         return Ok(coordination_cli_help());
     }
     let mut flags = CoordinationCliFlags::default();
     let mut json = false;
     let mut base_url: Option<String> = None;
     while let Some(argument) = args.next() {
-        if matches!(argument.as_str(), "--help" | "-h") {
+        if is_cli_help_argument(&argument) {
             return Ok(coordination_cli_help());
         }
         let (name, inline_value) = split_coordination_cli_flag(&argument);
