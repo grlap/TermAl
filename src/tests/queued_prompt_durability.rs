@@ -8,8 +8,63 @@
 // as before. Does not own the persist fence's other targets (persist_fence.rs
 // tests) or any producer of held prompts. New module beside
 // src/queued_prompt_durability.rs.
+use super::delegation_support::boot_on_delegation_root;
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+#[test]
+fn a_persisted_queued_prompt_state_keeps_its_root_until_the_last_continuation() {
+    let (temp_root, project_root, persistence_path, templates_path) =
+        super::delegation_support::temp_delegation_state_paths();
+    let root_path = temp_root.path().to_owned();
+    let cleaned = temp_root.observe_cleanup();
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path,
+            templates_path,
+        )
+        .expect("state should boot")
+    );
+    state.shutdown_persist_blocking();
+
+    // Hold a real state owner until after the test-local owner is gone.
+    // The late write uses the existing synchronous path after writer shutdown.
+    let continuation = state.clone();
+    let continuation_root = root_path.clone();
+    let (release, released) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        phase_sync::receive(&released, "release the retained state continuation");
+        let root_survived = continuation_root.is_dir();
+        let result = {
+            let inner = continuation.inner.lock().expect("state mutex poisoned");
+            continuation.persist_synchronous_locked(&inner).map(|_| ())
+        };
+        drop(continuation);
+        (root_survived, result)
+    });
+    drop(state);
+    drop(temp_root);
+    let root_survived_local_owner = root_path.is_dir();
+    let early_cleanup = cleaned.try_recv();
+    let cleaned_before_continuation = early_cleanup.is_ok();
+    release.send(()).expect("release the continuation");
+    let (root_survived_continuation, result) = worker.join().expect("continuation should join");
+    result.expect("the retained state's write should succeed");
+    assert!(!cleaned_before_continuation, "a cloned state must retain the fixture root");
+    match early_cleanup {
+        Ok(outcome) => outcome,
+        Err(mpsc::TryRecvError::Empty) => {
+            phase_sync::receive(&cleaned, "the last state owner removes the fixture root")
+        }
+        Err(mpsc::TryRecvError::Disconnected) => panic!("fixture cleanup receipt disconnected"),
+    }
+    .expect("fixture root should be removed");
+    assert!(root_survived_local_owner, "a cloned state must retain the fixture root");
+    assert!(root_survived_continuation, "the late write must use the existing root");
+    assert!(!root_path.exists(), "the last owner must remove the late writer's files");
+    assert!(!TestTempRoot::owner_marker(&root_path).exists());
+}
 
 /// A persist writer that writes nothing and acknowledges every fence at once,
 /// except a queued prompt's durability fence: that one is handed to the test,
@@ -365,29 +420,33 @@ fn a_prompt_without_a_hold_dispatches_exactly_as_before() {
 
 #[test]
 fn a_held_entry_read_back_after_a_restart_is_eligible() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
     let session;
     let held;
     {
-        let state = AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
-        )
-        .expect("state should boot");
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         let fixture = Fixture::new(state, "restart");
         held = fixture.enqueue_held("held across a restart");
         session = fixture.session.clone();
         // Durable, never acknowledged in this process.
         fixture.state.shutdown_persist_blocking();
     }
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path,
-        templates_path,
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path,
+            templates_path,
+        )
+        .expect("state should reload")
+    );
     let prompts = {
         let mut inner = restarted.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -420,14 +479,16 @@ fn a_held_entry_read_back_after_a_restart_is_eligible() {
 /// exact held entry back from the durable session row.
 #[test]
 fn the_production_writer_acknowledges_the_exact_held_entry_from_the_durable_row() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
-    let state = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path,
-        templates_path,
-    )
-    .expect("state should boot");
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path,
+            templates_path,
+        )
+        .expect("state should boot")
+    );
     let fixture = Fixture::new(state, "production");
     let held = fixture.enqueue_held("released by the real writer");
     assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
@@ -446,14 +507,16 @@ fn the_production_writer_acknowledges_the_exact_held_entry_from_the_durable_row(
 /// exact entry: another nonce, other content or another prompt never match.
 #[test]
 fn the_durable_row_read_back_matches_only_the_exact_hold_and_entry() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
+    let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
-    let state = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path,
-    )
-    .expect("state should boot");
+    let state = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path,
+        )
+        .expect("state should boot")
+    );
     let fixture = Fixture::new(state, "read-back");
     let held = fixture.enqueue_held("only this exact entry");
     let hold = fixture.hold(&held).unwrap();

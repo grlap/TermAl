@@ -20,6 +20,63 @@ fn fixture_git_discovery_stops_before_the_enclosing_checkout() {
     );
 }
 
+// A state booted on a `temp_delegation_state_paths` root must hold that root
+// from construction: otherwise the test's own guard removes it while a clone,
+// one that boot handed to a worker included, can still commit, and that late
+// commit recreates the store under the removed root. Every such boot runs as
+// `boot_on_delegation_root(root, || <boot>)`, which also asserts at run time
+// that the booted state holds that very root. So each `AppState::new_with_paths*`
+// call in a file that takes such a root must be the closure's body.
+//
+// The lock is textual and scoped: it reads only test files that call the
+// root helper, and only the `new_with_paths*` constructors. A boot helper in
+// another file, another entry point (`new_before_listen_with_paths`,
+// `new_server`) or a boot on an unrelated root in such a file is outside it;
+// none exists today, and the run-time assertion covers a wrong root.
+#[test]
+fn every_state_booted_on_a_delegation_root_holds_that_root() {
+    fn unattached_boots(root: &FsPath, found: &mut Vec<String>) {
+        let uses_root = ["temp_delegation_state", "_paths()"].concat();
+        let boot = ["AppState::", "new_with_paths"].concat();
+        let wrapper = ["boot_on_delegation", "_root("].concat();
+        for entry in fs::read_dir(root).expect("test source directory should be readable") {
+            let path = entry.expect("test source entry should be readable").path();
+            if path.is_dir() {
+                unattached_boots(&path, found);
+                continue;
+            }
+            if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = fs::read_to_string(&path).expect("Rust test source should be readable");
+            if !source.contains(&uses_root) {
+                continue;
+            }
+            for (offset, _) in source.match_indices(&boot) {
+                // Between the wrapper's parenthesis and the constructor stands
+                // only the root argument and the closure's `||`.
+                let before = &source[..offset];
+                let wrapped = before.rfind(&wrapper).is_some_and(|start| {
+                    let between = &before[start + wrapper.len()..];
+                    between.trim_end().ends_with("||")
+                        && !between.contains(|c| matches!(c, '(' | ')' | '{' | '}' | ';'))
+                });
+                if !wrapped {
+                    let line = before.lines().count().max(1);
+                    found.push(format!("{}:{line}", path.display()));
+                }
+            }
+        }
+    }
+
+    let mut found = Vec::new();
+    unattached_boots(&FsPath::new(env!("CARGO_MANIFEST_DIR")).join("src/tests"), &mut found);
+    assert!(
+        found.is_empty(),
+        "these boots on a delegation root do not hold it; run each in boot_on_delegation_root: {found:#?}"
+    );
+}
+
 fn age_test_directory(path: &FsPath) {
     let mut options = fs::OpenOptions::new();
     options.read(true);

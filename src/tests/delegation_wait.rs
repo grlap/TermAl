@@ -5,9 +5,9 @@
 //! delta, read-only enforcement, or result recovery tests.
 
 use super::delegation_support::{
-    finish_delegation_child_with_assistant_text, install_delegation_codex_runtime,
-    mark_delegation_as_unstructured_explorer, temp_delegation_state_paths,
-    test_app_state_with_delegation_codex_runtime,
+    boot_on_delegation_root, finish_delegation_child_with_assistant_text,
+    install_delegation_codex_runtime, mark_delegation_as_unstructured_explorer,
+    temp_delegation_state_paths, test_app_state_with_delegation_codex_runtime,
     test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::*;
@@ -645,17 +645,18 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
 
 #[test]
 fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_target() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let wait_id = "delegation-wait-removed-parent-unsatisfied".to_owned();
     let delegation_id;
     {
-        let state = AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
-        )
-        .expect("state should boot");
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         install_delegation_codex_runtime(&state, "delegation-wait-missing-parent-target");
         let other_parent_session_id = test_session_id(&state, Agent::Codex);
         let other_delegation = state
@@ -703,12 +704,14 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
         state.shutdown_persist_blocking();
     }
 
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should reload")
+    );
 
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     assert!(
@@ -726,14 +729,8 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
     assert_eq!(delegation.status, DelegationStatus::Running);
     drop(inner);
     restarted.shutdown_persist_blocking();
+    // The guarded root removes the project and the store with its last owner.
     drop(restarted);
-
-    let state_root = persistence_path
-        .parent()
-        .expect("persistence path should have a parent")
-        .to_path_buf();
-    remove_test_directory(project_root);
-    remove_test_directory(state_root);
 }
 
 #[test]
@@ -1399,18 +1396,19 @@ fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
 
 #[test]
 fn delegation_wait_reconciles_after_restart_recovery() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let parent_session_id;
     let delegation_id;
     let mailbox_id;
     {
-        let state = AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
-        )
-        .expect("state should boot");
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         install_delegation_codex_runtime(&state, "delegation-wait-restart-runtime");
         parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1467,12 +1465,14 @@ fn delegation_wait_reconciles_after_restart_recovery() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should reload")
+    );
     {
         let inner = restarted.inner.lock().expect("state mutex poisoned");
         assert!(inner.delegation_waits.is_empty());
@@ -1539,28 +1539,23 @@ fn delegation_wait_reconciles_after_restart_recovery() {
         );
     }
     restarted.shutdown_persist_blocking();
+    // The guarded root removes the project and the store with its last owner.
     drop(restarted);
-
-    let state_root = persistence_path
-        .parent()
-        .expect("persistence path should have a parent")
-        .to_path_buf();
-    remove_test_directory(project_root);
-    remove_test_directory(state_root);
 }
 
 #[test]
 fn delegation_wait_reconciles_missing_parent_after_restart() {
-    let (_temp_root, project_root, persistence_path, templates_path) =
-        temp_delegation_state_paths();
+    let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let wait_id = "delegation-wait-restart-missing-parent".to_owned();
     {
-        let state = AppState::new_with_paths(
-            project_root.to_string_lossy().into_owned(),
-            persistence_path.clone(),
-            templates_path.clone(),
-        )
-        .expect("state should boot");
+        let state = boot_on_delegation_root(&temp_root, ||
+            AppState::new_with_paths(
+                project_root.to_string_lossy().into_owned(),
+                persistence_path.clone(),
+                templates_path.clone(),
+            )
+            .expect("state should boot")
+        );
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             inner.delegation_waits.push(DelegationWaitRecord {
@@ -1576,12 +1571,14 @@ fn delegation_wait_reconciles_missing_parent_after_restart() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = AppState::new_with_paths(
-        project_root.to_string_lossy().into_owned(),
-        persistence_path.clone(),
-        templates_path.clone(),
-    )
-    .expect("state should reload");
+    let restarted = boot_on_delegation_root(&temp_root, ||
+        AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should reload")
+    );
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     assert!(
         inner
@@ -1592,14 +1589,8 @@ fn delegation_wait_reconciles_missing_parent_after_restart() {
     );
     drop(inner);
     restarted.shutdown_persist_blocking();
+    // The guarded root removes the project and the store with its last owner.
     drop(restarted);
-
-    let state_root = persistence_path
-        .parent()
-        .expect("persistence path should have a parent")
-        .to_path_buf();
-    remove_test_directory(project_root);
-    remove_test_directory(state_root);
 }
 
 #[test]
