@@ -251,6 +251,7 @@ fn test_run_wait_run_section(
     summary: Option<&TestRunSummary>,
     verdict: Option<TestRunWaitVerdict>,
     failure: Option<&TestRunCardFailure>,
+    evidence: Option<&TestRunWaitEvidence>,
 ) -> String {
     let optional = |value: Option<&str>| value.map_or_else(|| "unknown".to_owned(), str::to_owned);
     let run_dir = summary.map_or(label.run_dir.as_str(), |summary| summary.run_dir.as_str());
@@ -295,6 +296,16 @@ fn test_run_wait_run_section(
     if let Some(fingerprint) = &label.expected_fingerprint {
         lines.push(format!("- Frozen input fingerprint: `{fingerprint}`"));
     }
+    let totals = |counts: Option<[usize; 6]>| counts.map_or_else(
+        || "unknown (results unavailable)".to_owned(),
+        |[passed, failed, interrupted, running, unrun, unknown]| format!(
+            "passed {passed}, failed {failed}, interrupted {interrupted}, running {running}, unrun {unrun}, unknown {unknown}"
+        ),
+    );
+    lines.push(format!("- Stage totals: {}", totals(evidence.and_then(|value| value.stages))));
+    lines.push(format!("- Preflight totals: {}", totals(evidence.and_then(|value| value.preflight))));
+    lines.push(format!("- Before/after fingerprint: {}",
+        evidence.map_or("unknown", |value| value.fingerprint_comparison)));
     match verdict {
         Some(TestRunWaitVerdict::Fail) => {
             // The read names a preflight check or a stage past the summary's
@@ -401,6 +412,7 @@ fn build_test_run_wait_prompt(
     summaries: &[Option<&TestRunSummary>],
     verdicts: &[Option<TestRunWaitVerdict>],
     failures: &HashMap<String, TestRunCardFailureRead>,
+    evidence: &HashMap<String, TestRunWaitEvidence>,
 ) -> String {
     let head = test_run_wait_prompt_head(wait, verdicts);
     let sections: Vec<String> = wait
@@ -414,6 +426,7 @@ fn build_test_run_wait_prompt(
                 *summary,
                 *verdict,
                 test_run_wait_failure(failures, &label.run_id),
+                evidence.get(&label.run_id),
             )
         })
         .collect();
@@ -769,6 +782,7 @@ impl AppState {
                             inner.test_runs.find(&label.run_id).map(|entry| &entry.summary),
                             worst_verdict,
                             None,
+                            Some(&TestRunWaitEvidence::mandatory_bound()),
                         )
                         .len()
                             + 8
@@ -1055,7 +1069,17 @@ impl AppState {
                     remaining.push(wait);
                     continue;
                 }
-                let prompt = build_test_run_wait_prompt(&wait, &summaries, &verdicts, &failures);
+                // Use the identity-matching index observation, never a fresh
+                // read of a possibly replaced run directory under this lock.
+                let evidence = wait.runs.iter().filter_map(|label| {
+                    let entry = inner.test_runs.find(&label.run_id)?;
+                    if !test_run_wait_identity_matches(label, &entry.disk)
+                        || entry.disk.read_failures > 0 {
+                        return None;
+                    }
+                    Some((label.run_id.clone(), entry.disk.results.as_ref()?.wait_evidence.clone()))
+                }).collect();
+                let prompt = build_test_run_wait_prompt(&wait, &summaries, &verdicts, &failures, &evidence);
                 let queued = queue_delegation_wait_resume_locked(&mut inner, &wait.session_id, prompt);
                 if queued.dispatch_requested {
                     refresh.dispatch_sessions.push(wait.session_id.clone());

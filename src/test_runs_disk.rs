@@ -289,12 +289,77 @@ fn test_run_pid(value: &Value, key: &str) -> Option<u32> {
         .filter(|pid| *pid > 0)
 }
 
+/// Fixed-size diagnostics from the same bounded results read as the index.
+/// Counts include every entry, including unnamed/unknown entries; unlike the
+/// stage summary they are not limited to the first 64 valid stage names.
+#[derive(Clone, Debug)]
+struct TestRunWaitEvidence {
+    stages: Option<[usize; 6]>,
+    preflight: Option<[usize; 6]>,
+    fingerprint_comparison: &'static str,
+}
+
+impl TestRunWaitEvidence {
+    fn from_results(results: &Value) -> Self {
+        let totals = |key: &str, infer_code: bool| {
+            results.get(key).and_then(Value::as_array).map(|items| {
+                let mut counts = [0; 6];
+                for item in items {
+                    let state = item.get("state").and_then(Value::as_str);
+                    let bucket = if item.get("interrupted").and_then(Value::as_bool) == Some(true) {
+                        2
+                    } else {
+                        match state {
+                            Some("passed") => 0,
+                            Some("failed") => 1,
+                            Some("interrupted") => 2,
+                            Some("running") => 3,
+                            Some("unrun") => 4,
+                            None if infer_code && item.get("state").is_none() => match item.get("code").and_then(Value::as_i64) {
+                                Some(0) => 0,
+                                Some(_) => 1,
+                                None => 5,
+                            },
+                            _ => 5,
+                        }
+                    };
+                    counts[bucket] += 1;
+                }
+                counts
+            })
+        };
+        let fingerprint = |key| results.get(key).and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty() && text.len() <= TEST_RUN_TEXT_MAX_BYTES);
+        let fingerprint_comparison = match (fingerprint("before"), fingerprint("after")) {
+            (Some(before), Some(after)) if before == after => "matched",
+            (Some(_), Some(_)) => "mismatched",
+            _ => "unknown",
+        };
+        Self {
+            stages: totals("stages", false),
+            preflight: totals("preflight", true),
+            fingerprint_comparison,
+        }
+    }
+
+    /// Admission reserves the largest numeric representation, even for a run
+    /// with no published results yet. Actual counts are bounded by the JSON cap.
+    fn mandatory_bound() -> Self {
+        Self {
+            stages: Some([usize::MAX; 6]),
+            preflight: Some([usize::MAX; 6]),
+            fingerprint_comparison: "mismatched",
+        }
+    }
+}
+
 /// What the index keeps of a run's `results.json`: the summary fields, each
 /// bounded, and never the parsed file. The detail and log routes read the
 /// file afresh. What is kept per run is bounded, listed or not; the total
 /// grows with the number of run directories.
 #[derive(Clone, Debug)]
 struct TestRunResultsExtract {
+    wait_evidence: TestRunWaitEvidence,
     /// The digest of the bytes this extract was read from (`detailVersion`).
     digest: String,
     /// `Passed` or `Failed` when the results are terminal.
@@ -331,6 +396,7 @@ impl TestRunResultsExtract {
                 .filter(|stage| test_run_valid_stage_name(&stage.name))
         };
         Self {
+            wait_evidence: TestRunWaitEvidence::from_results(results),
             digest,
             terminal_state: test_run_terminal_state(results),
             current_stage: valid_stages()

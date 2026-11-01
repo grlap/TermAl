@@ -1145,6 +1145,13 @@ cap is 64 KiB. For each run it contains:
 
 - a header: runId, preset, verdict (`PASS`, `FAIL` or `UNKNOWN (reason)`),
   `interrupted`, exit code, start and end times, and the run directory;
+- separate stage and preflight totals for passed, failed, interrupted,
+  running, unrun and unknown entries, including entries beyond the stage
+  summary's display limit. Unavailable results or a missing collection are
+  stated as unknown; an available empty collection has zero totals;
+- the recorded before/after fingerprint comparison: `matched`, `mismatched`
+  or `unknown` when either fingerprint is unavailable. This describes the
+  observed results and does not change the verdict or grant verification credit;
 - for `FAIL`, the first failing stage or preflight check with its
   diagnostics excerpt (`First failing: stage NAME` or `First failing:
   preflight NAME`). Both come from reading results.json, which names a
