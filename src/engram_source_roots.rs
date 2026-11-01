@@ -2210,7 +2210,7 @@ impl AppState {
             let saved = if save_fails {
                 Err(anyhow!("the naming bind's save failed"))
             } else {
-                self.persist_internal_locked(&inner)
+                self.persist_session_internal_locked(&inner, session_id)
             };
             if let Err(error) = saved {
                 let state = &mut inner.sessions[index].engram;

@@ -611,8 +611,13 @@ impl AppState {
                 prioritize_user_queued_prompts(record);
             }
             inner.stamp_session_at_index(index);
-            if let Err(error) = self.commit_followup_prompt_locked(&mut inner, followup, &id, true)
-            {
+            if let Err(error) = self.commit_followup_prompt_locked_for_session(
+                &mut inner,
+                followup,
+                &id,
+                true,
+                Some(session_id),
+            ) {
                 // Nothing has been promoted or handed off. An error response
                 // leaves the draft with the caller, never an executable copy.
                 // The follow-up helper owns its delegation/runtime rollback;
@@ -979,11 +984,12 @@ impl AppState {
             sync_pending_prompts(record);
             EngramHost::turn_started(&mut inner, index);
             inner.stamp_session_at_index(index);
-            let revision = match self.commit_followup_prompt_locked(
+            let revision = match self.commit_followup_prompt_locked_for_session(
                 &mut inner,
                 None,
                 &queued.pending_prompt.id,
                 false,
+                Some(session_id),
             ) {
                 Ok(revision) => revision,
                 Err(error) => {

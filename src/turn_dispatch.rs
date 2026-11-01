@@ -1604,7 +1604,8 @@ impl AppState {
             }
             return Err(anyhow!("queued prompt disappeared before dispatch"));
         };
-        match self.commit_followup_prompt_locked(inner, followup, prompt_id, false) {
+        let session_id = inner.sessions[index].session.id.clone();
+        match self.commit_followup_prompt_locked_for_session(inner, followup, prompt_id, false, Some(&session_id)) {
             Ok(revision) => Ok(Some((revision, started))),
             Err(error) => {
                 // A live follow-up admission has its own failure owner. For
@@ -1862,7 +1863,7 @@ impl AppState {
                 else {
                     return Ok(None);
                 };
-                let revision = match self.commit_persisted_delta_locked(&mut inner) {
+                let revision = match self.commit_persisted_session_delta_locked(&mut inner, session_id) {
                     Ok(revision) => revision,
                     Err(err) => {
                         // The promotion is only real once it is durable. Put
@@ -2212,7 +2213,7 @@ impl AppState {
                 }
                 return Ok(None);
             };
-            let revision = match self.commit_persisted_delta_locked(&mut inner) {
+            let revision = match self.commit_persisted_session_delta_locked(&mut inner, session_id) {
                 Ok(revision) => revision,
                 Err(err) => {
                     // Same rollback as the zero-transport path: an undurable
@@ -2659,7 +2660,7 @@ impl AppState {
                 id:message_id.clone(), timestamp:stamp_now(), text:prompt,
                 expanded_text:expanded_prompt, source,
             }, attachments, queued_prompt_source);
-            self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+            self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
                 .map_err(|error|ApiError::internal(format!("failed to persist ordinary prompt behind retained relay: {error:#}")))?;
             return Ok(DispatchTurnResult::Queued);
         }
@@ -2703,7 +2704,7 @@ impl AppState {
                     attachments,
                     queued_prompt_source,
                 );
-                self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+                self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
                     .map_err(|error| {
                         ApiError::internal(format!(
                             "failed to persist prompt behind held authorization: {error:#}"
@@ -2754,7 +2755,7 @@ impl AppState {
                         message_id = existing.pending_prompt.id.clone();
                         note_mailbox_continuation_boundary(record, &message_id);
                         sync_pending_prompts(record);
-                        self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+                        self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
                             .map_err(|err| {
                                 ApiError::internal(format!(
                                     "failed to persist mailbox notification: {err:#}"
@@ -2857,7 +2858,7 @@ impl AppState {
                         .session_mut_by_index(index)
                         .expect("session index should be valid"),
                 );
-                self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+                self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
                     .map_err(|err| {
                         ApiError::internal(format!("failed to persist session state: {err:#}"))
                     })?;
@@ -2900,7 +2901,7 @@ impl AppState {
                 )?;
                 EngramHost::turn_started(&mut inner, index);
                 let revision = self
-                    .commit_followup_prompt_locked(&mut inner, followup, &message_id, false)
+                    .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
                     .map_err(|err| {
                         ApiError::internal(format!("failed to persist session state: {err:#}"))
                     })?;
@@ -2937,7 +2938,7 @@ impl AppState {
                             .expect("session index should be valid"),
                     );
                 }
-                self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+                self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
                     .map_err(|err| {
                         ApiError::internal(format!("failed to persist session state: {err:#}"))
                     })?;
@@ -2982,7 +2983,7 @@ impl AppState {
             )?;
             EngramHost::turn_started(&mut inner, index);
             let revision = self
-                .commit_followup_prompt_locked(&mut inner, followup, &message_id, false)
+                .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
                 .map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
@@ -3043,7 +3044,7 @@ impl AppState {
                     }
                     message_id = existing.pending_prompt.id.clone();
                     sync_pending_prompts(record);
-                    self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+                    self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
                         .map_err(|err| {
                             ApiError::internal(format!(
                                 "failed to persist mailbox notification: {err:#}"
@@ -3130,7 +3131,7 @@ impl AppState {
                     .expect("session index should be valid"),
             );
         }
-        self.commit_followup_prompt_locked(&mut inner, followup, &message_id, true)
+        self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
             .map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;

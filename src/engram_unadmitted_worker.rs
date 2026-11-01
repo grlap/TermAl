@@ -395,9 +395,9 @@ impl AppState {
         }
         inner.stamp_session_at_index(index);
         if has_diagnostic {
-            self.commit_locked(&mut inner)?;
+            self.commit_session_locked(&mut inner, session_id)?;
         } else {
-            self.persist_internal_locked(&inner)?;
+            self.persist_session_internal_locked(&inner, session_id)?;
         }
         drop(inner);
         #[cfg(test)]
@@ -490,7 +490,7 @@ impl AppState {
         if let Some((message, message_index, message_count, preview, status, stamp, session_seq)) =
             event
         {
-            let revision = self.commit_persisted_delta_locked(&mut inner)?;
+            let revision = self.commit_persisted_session_delta_locked(&mut inner, session_id)?;
             self.publish_delta_locked(
                 &inner,
                 DeltaEvent::MessageCreated {
@@ -509,7 +509,7 @@ impl AppState {
                 },
             );
         } else {
-            self.persist_internal_locked(&inner)?;
+            self.persist_session_internal_locked(&inner, session_id)?;
         }
         Ok(())
     }

@@ -1316,15 +1316,22 @@ fn persist_created_session(
     path: &FsPath,
     inner: &StateInner,
     _record: &SessionRecord,
-) -> Result<()> {
-    persist_locked_state_to_sqlite(path, inner)?;
-    Ok(())
+) -> Result<Vec<PersistSessionRejection>> {
+    persist_locked_state_to_sqlite_report(path, inner).map(|(_, rejected)| rejected)
 }
 
 // The caller holds StateInner throughout this operation. Admit this writer
 // before capturing its predecessor: an earlier background commit can publish
 // that predecessor while we wait, without needing to acquire StateInner.
+#[cfg(test)]
 fn persist_locked_state_to_sqlite(path: &FsPath, inner: &StateInner) -> Result<u64> {
+    persist_locked_state_to_sqlite_report(path, inner).map(|(generation, _)| generation)
+}
+
+fn persist_locked_state_to_sqlite_report(
+    path: &FsPath,
+    inner: &StateInner,
+) -> Result<(u64, Vec<PersistSessionRejection>)> {
     if let Some(parent) = path.parent() {
         create_local_state_directory(parent)?;
     }
@@ -1389,7 +1396,7 @@ fn persist_state_parts_to_sqlite(
         quarantined_delegation_ids,
         guard,
         false,
-    )
+    ).map(|(generation, _)| generation)
 }
 
 /// Applies one persist transaction to an already-open SQLite connection.
@@ -1410,9 +1417,10 @@ fn persist_state_parts_via_connection(
     quarantined_delegation_ids: &BTreeSet<String>,
     write_guard: SqliteStateWriterGuard<'_>,
     adopt_locked_source: bool,
-) -> Result<u64> {
+) -> Result<(u64, Vec<PersistSessionRejection>)> {
     let metadata_units = project_metadata_units(metadata)?;
-    let serialized_sessions = serialize_persisted_sessions_with_isolation(sessions);
+    let mut rejected_sessions = Vec::new();
+    let serialized_sessions = serialize_persisted_sessions_with_isolation(sessions, &mut rejected_sessions);
     let serialized_delegations = delegations
         .iter()
         .map(|delegation| {
@@ -1448,9 +1456,12 @@ fn persist_state_parts_via_connection(
             .with_context(|| format!("failed to replace sessions in `{}`", path.display()))?;
     }
     for session in &serialized_sessions {
-        write_serialized_persisted_session(&tx, session).with_context(|| {
+        let rejected = write_serialized_persisted_session_isolated(&tx, session).with_context(|| {
             format!("failed to write persisted session to `{}`", path.display())
         })?;
+        if let Some(rejected) = rejected {
+            rejected_sessions.push(rejected);
+        }
     }
     if replace_delegations {
         let retained_delegation_ids = serialized_delegations
@@ -1499,7 +1510,7 @@ fn persist_state_parts_via_connection(
     // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
     // accepts insecure state-file modes.
     verify_persist_commit_integrity(path)?;
-    Ok(committed_metadata.generation)
+    Ok((committed_metadata.generation, rejected_sessions))
 }
 
 /// Body identities at absolute transcript positions after a verified COMMIT.
@@ -1756,6 +1767,7 @@ fn persist_delta_via_cache_inner(
         cache.transcripts.clear();
     }
     let used_baseline = !cache.transcripts.is_empty();
+    let mut rejected_sessions = Vec::new();
     let serialized = (|| -> Result<_> {
         let metadata_units = project_metadata_units(&delta.metadata)?;
         // A baseline belongs to the exact cached store connection. A reopen
@@ -1769,6 +1781,7 @@ fn persist_delta_via_cache_inner(
                 match serialize_persisted_session_since(record, previous) {
                     Ok(row) => Some(row),
                     Err(error) => {
+                        rejected_sessions.push(PersistSessionRejection::new(&record.session.id, &error));
                         eprintln!(
                             "persist> preserving invalid session `{}`: {error:#}",
                             record.session.id
@@ -1794,10 +1807,7 @@ fn persist_delta_via_cache_inner(
     timings.serialize = serialize_started.elapsed();
     let (metadata_units, serialized_sessions, serialized_delegations) = serialized?;
     persist_observe_payload("", &serialized_sessions, &serialized_delegations);
-    let persisted_session_ids = serialized_sessions
-        .iter()
-        .map(|session| session.session_id.clone())
-        .collect::<Vec<_>>();
+    let mut persisted_session_ids = Vec::new();
     // Opening covers a reopen after an invalidated cache (schema setup and
     // hardening, under the same writer lock) and the redirection check.
     persist_observe_phase("open");
@@ -1877,12 +1887,13 @@ fn persist_delta_via_cache_inner(
                         .is_some_and(|rows| !rows.is_empty())
                     || !delta.removed_delegation_ids.is_empty(),
             )?;
-            write_persist_delta_statements(
+            persisted_session_ids = write_persist_delta_statements(
                 &tx,
                 path,
                 delta,
                 &serialized_sessions,
                 serialized_delegations,
+                &mut rejected_sessions,
             )?;
             validate_sqlite_checkpoint_write_cut(&tx, &committed_metadata, &serialized_sessions)
                 .context("refusing incoherent checkpoint persistence cut")?;
@@ -1929,12 +1940,17 @@ fn persist_delta_via_cache_inner(
     verified?;
     cache.metadata_units = Some(committed_metadata);
     cache.transcript_data_version = Some(committed_transcript_version);
+    persist_observe_session_rejections(&rejected_sessions);
     // Publish only snapshots whose transaction and integrity checks succeeded.
     // Weak identities prevent allocation-address ABA without retaining bodies.
     for id in &delta.removed_session_ids {
         cache.transcripts.remove(id);
     }
-    for row in &serialized_sessions {
+    let committed_ids = persisted_session_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    // A rejected row made no SQL changes, or its savepoint rolled them back.
+    // Its prior baseline still describes the last verified durable bodies.
+    // Only a successfully written row may replace that predecessor.
+    for row in serialized_sessions.iter().filter(|row| committed_ids.contains(row.session_id.as_str())) {
         cache.transcripts.insert(
             row.session_id.clone(),
             PersistTranscriptBaseline {
@@ -1953,7 +1969,9 @@ fn write_persist_delta_statements(
     delta: &PersistDelta,
     serialized_sessions: &[SerializedPersistedSession],
     serialized_delegations: Vec<(&str, String)>,
-) -> Result<()> {
+    rejected_sessions: &mut Vec<PersistSessionRejection>,
+) -> Result<Vec<String>> {
+    let mut persisted_session_ids = Vec::new();
     for session_id in &delta.removed_session_ids {
         tx.execute(
             "DELETE FROM sessions WHERE id = ?1",
@@ -1968,13 +1986,18 @@ fn write_persist_delta_statements(
         })?;
     }
     for session in serialized_sessions {
-        write_serialized_persisted_session(tx, session).with_context(|| {
+        let rejected = write_serialized_persisted_session_isolated(tx, session).with_context(|| {
             format!(
                 "failed to write persisted session `{}` to `{}`",
                 session.session_id,
                 path.display()
             )
         })?;
+        if let Some(rejected) = rejected {
+            rejected_sessions.push(rejected);
+        } else {
+            persisted_session_ids.push(session.session_id.clone());
+        }
     }
     for delegation_id in &delta.removed_delegation_ids {
         tx.execute(
@@ -2003,7 +2026,7 @@ fn write_persist_delta_statements(
             )
         })?;
     }
-    Ok(())
+    Ok(persisted_session_ids)
 }
 
 /// Persists state from a pre-built `PersistedState` snapshot.

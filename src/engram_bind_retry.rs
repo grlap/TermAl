@@ -585,7 +585,7 @@ impl AppState {
                     None
                 }
             }).and_then(|waiter| {
-                if waiter.is_none() { self.persist_internal_locked(&inner)?; }
+                if waiter.is_none() { self.persist_session_internal_locked(&inner, session_id)?; }
                 Ok(waiter)
             });
             (settlement, may_continue)

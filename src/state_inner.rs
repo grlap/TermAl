@@ -1115,6 +1115,33 @@ fn collect_persist_delta_from_shared_state(
     )
 }
 
+/// Reuse the session mutation owner for rejected rows. The successful global
+/// watermark may advance, but neither their bodies nor prompt history was saved.
+fn retain_unpersisted_session_changes(
+    inner: &StateMutex<StateInner>,
+    delta: &PersistDelta,
+    persisted_session_ids: &[String],
+) {
+    let committed = persisted_session_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    for captured in &delta.changed_sessions {
+        if committed.contains(captured.session.id.as_str()) {
+            continue;
+        }
+        let mut state = inner.lock().expect("state mutex poisoned");
+        let Some(index) = state.find_session_index(&captured.session.id) else { continue };
+        if state.sessions[index].hidden { continue; }
+        if state.sessions[index].mutation_stamp <= delta.watermark {
+            // No successor change is overwritten, and no rejected content is
+            // installed. Only the existing dirty-row selection clock advances.
+            let _ = state.session_mut_by_index(index);
+        }
+        if captured.persist_prompt_history {
+            let record = &mut state.sessions[index];
+            record.prompt_history_mutation_stamp = record.mutation_stamp;
+        }
+    }
+}
+
 fn collect_persist_delta_from_shared_state_with_prompt_history_carry(
     inner: &StateMutex<StateInner>,
     watermark: u64,

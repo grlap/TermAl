@@ -12,6 +12,26 @@ struct SerializedPersistedMessage {
     is_user: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistSessionRejection {
+    session_id: String,
+    error: String,
+}
+
+impl PersistSessionRejection {
+    fn new(session_id: &str, error: &anyhow::Error) -> Self {
+        Self { session_id: session_id.to_owned(), error: format!("{error:#}") }
+    }
+
+    fn bounded_observation(&self) -> Self {
+        Self {
+            session_id: self.session_id.chars().take(128).collect(),
+            error: self.error.chars().take(1024).collect(),
+        }
+    }
+}
+
 struct SerializedPersistedSession {
     session_id: String,
     // Remote-proxy transcript IDs belong to the peer, never our allocators.
@@ -57,6 +77,14 @@ fn serialize_persisted_session_since(
             record.session.id
         )
     })?;
+    // Validate the complete captured window, including bodies omitted by the
+    // differential baseline. A sparse write cannot prove identity uniqueness.
+    let mut identities = HashSet::new();
+    for message in &record.session.messages {
+        if !identities.insert(message.id()) {
+            bail!("persisted session `{}` has duplicate transcript identity", record.session.id);
+        }
+    }
     let mut metadata = record.clone_without_messages();
     let retained_end = record
         .message_start_index
@@ -150,6 +178,7 @@ fn serialize_persisted_session_since(
 
 fn serialize_persisted_sessions_with_isolation(
     sessions: &[PersistedSessionRecord],
+    rejected: &mut Vec<PersistSessionRejection>,
 ) -> Vec<SerializedPersistedSession> {
     let mut serialized_sessions = Vec::with_capacity(sessions.len());
     let mut skipped = 0_usize;
@@ -158,6 +187,7 @@ fn serialize_persisted_sessions_with_isolation(
             Ok(session) => serialized_sessions.push(session),
             Err(err) => {
                 skipped += 1;
+                rejected.push(PersistSessionRejection::new(&record.session.id, &err));
                 eprintln!(
                     "persist> preserving the last good row for invalid in-memory session `{}`: {err:#}",
                     record.session.id
@@ -281,6 +311,26 @@ fn write_serialized_persisted_session(
         )
     })?;
     Ok(())
+}
+
+/// Reject only a transcript identity collision, retaining the complete last
+/// good session row, history, messages and overview inside the outer transaction.
+fn write_serialized_persisted_session_isolated(
+    tx: &rusqlite::Transaction<'_>,
+    session: &SerializedPersistedSession,
+) -> Result<Option<PersistSessionRejection>> {
+    tx.execute_batch("SAVEPOINT transcript_session_write")?;
+    match write_serialized_persisted_session(tx, session) {
+        Ok(()) => {
+            tx.execute_batch("RELEASE transcript_session_write")?;
+            Ok(None)
+        }
+        Err(error) if error.is::<PersistTranscriptIdentityConflict>() => {
+            tx.execute_batch("ROLLBACK TO transcript_session_write; RELEASE transcript_session_write")?;
+            Ok(Some(PersistSessionRejection::new(&session.session_id, &error)))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn remove_missing_persisted_sessions(

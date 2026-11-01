@@ -6199,8 +6199,8 @@ impl AppState {
                 },
             );
             let creates = message_created_delta_parts_for_indices(record, vec![message_index]);
-            let (revision, dispatch) = match self
-                .bump_revision_and_persist_locked_with_dispatch(&mut inner)
+            let (revision, outcome) = match self
+                .bump_revision_and_persist_locked_with_outcome(&mut inner)
             {
                 Ok(committed) => committed,
                 Err(error) => {
@@ -6222,7 +6222,7 @@ impl AppState {
                 &inner,
                 session_id,
                 message_index,
-                dispatch,
+                &outcome,
             );
             (revision, creates, publication)
         };
@@ -7793,7 +7793,7 @@ impl AppState {
                     inner
                         .stamp_session_at_index(index)
                         .expect("session index should be valid");
-                    if let Err(error) = self.persist_internal_locked(&inner) {
+                    if let Err(error) = self.persist_session_internal_locked(&inner, session_id) {
                         eprintln!(
                             "engram> session={session_id} failed persisting the stale begin \
                              settlement: {error:#}"
@@ -7833,7 +7833,7 @@ impl AppState {
                 // The marker was the only evidence of that begin. A finished
                 // child's boot recovery relies on the record alone, so the
                 // evidence must not wait for a later commit.
-                if recorded && let Err(error) = self.persist_internal_locked(&inner) {
+                if recorded && let Err(error) = self.persist_session_internal_locked(&inner, session_id) {
                     eprintln!(
                         "engram> session={session_id} failed persisting the released begin: \
                          {error:#}"
@@ -8111,7 +8111,7 @@ impl AppState {
                 }
             }
             record_contained_admission_begun_progress(&mut inner, session_id);
-            let (revision, dispatch) = match self.bump_revision_and_persist_locked_with_dispatch(&mut inner) {
+            let (revision, outcome) = match self.bump_revision_and_persist_locked_with_outcome(&mut inner) {
                 Ok(committed) => committed,
                 Err(error) => {
                     // An ambiguous durable write never grants permission to
@@ -8192,7 +8192,7 @@ impl AppState {
                 }
             };
             let publication = self.prepare_engram_causal_publication_locked(
-                &inner, session_id, message_index, dispatch,
+                &inner, session_id, message_index, &outcome,
             );
             (revision, creates, publication)
         };
@@ -9005,7 +9005,7 @@ impl AppState {
                                     ),
                                 );
                                 if mirrored_active || mirrored_uncertain || settled {
-                                    self.persist_internal_locked(&inner).map_err(
+                                    self.persist_session_internal_locked(&inner, &target.connection.session_id).map_err(
                                         |error| {
                                             EngramTransportError::transport(format!(
                                                 "failed persisting recovered Engram checkpoint: {error:#}"
@@ -9341,7 +9341,7 @@ impl AppState {
             record.engram.rebind_required = false;
             record.engram.disabled_reason = None;
             if retention_changed {
-                if let Err(error) = self.commit_locked(&mut inner) {
+                if let Err(error) = self.commit_session_locked(&mut inner, &target.connection.session_id) {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
@@ -9356,7 +9356,7 @@ impl AppState {
                         "failed persisting Engram binding retirement: {error:#}"
                     )));
                 }
-            } else if let Err(error) = self.persist_internal_locked(&inner) {
+            } else if let Err(error) = self.persist_session_internal_locked(&inner, &target.connection.session_id) {
                 return Err(EngramTransportError::transport(format!(
                     "failed persisting Engram binding: {error:#}"
                 )));
@@ -9417,7 +9417,7 @@ impl AppState {
         record.engram.active_grant_id = None;
         record.engram.uncertain_grant_id = None;
         record.engram.retained_checkpoint = None;
-        self.persist_internal_locked(&inner).map_err(|error| {
+        self.persist_session_internal_locked(&inner, session_id).map_err(|error| {
             EngramTransportError::transport(format!(
                 "failed persisting stale Engram binding cleanup: {error:#}"
             ))

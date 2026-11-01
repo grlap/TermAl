@@ -34,8 +34,12 @@ impl AppState {
         record: &SessionRecord,
     ) -> Result<u64> {
         let publish_recovered_snapshot = inner.remote_delta_persist_dirty;
-        match self.commit_session_created_locked(inner, record) {
-            Ok(revision) => {
+        match self.commit_session_created_locked_with_outcome(inner, record) {
+            Ok((revision, outcome)) => {
+                if let Err(error) = outcome.require_remote_rows_saved(inner) {
+                    inner.remote_delta_persist_dirty = true;
+                    return Err(error);
+                }
                 inner.remote_delta_persist_dirty = false;
                 // The synchronous create fallback persists the full current
                 // snapshot. If that write also discharged an earlier remote
@@ -60,8 +64,12 @@ impl AppState {
     /// risk inverting memory and SQLite; a full-snapshot retry is safe in both
     /// the pre-commit and post-commit failure cases.
     fn commit_remote_delta_persisted_locked(&self, inner: &mut StateInner) -> Result<u64> {
-        match self.commit_persisted_delta_locked(inner) {
-            Ok(revision) => {
+        match self.commit_persisted_delta_locked_with_outcome(inner) {
+            Ok((revision, outcome)) => {
+                if let Err(error) = outcome.require_remote_rows_saved(inner) {
+                    inner.remote_delta_persist_dirty = true;
+                    return Err(error);
+                }
                 inner.remote_delta_persist_dirty = false;
                 Ok(revision)
             }
@@ -104,7 +112,8 @@ impl AppState {
         if !inner.remote_delta_persist_dirty {
             return Ok(());
         }
-        self.persist_internal_locked(inner)?;
+        let outcome = self.persist_internal_locked_with_outcome(inner)?;
+        outcome.require_remote_rows_saved(inner)?;
         inner.remote_delta_persist_dirty = false;
         self.publish_state_locked(inner);
         Ok(())

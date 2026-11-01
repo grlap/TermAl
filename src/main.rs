@@ -239,7 +239,11 @@ async fn run_server() -> Result<()> {
     // last streamed message". Hard kills (SIGKILL, power loss) still
     // race the same window — graceful shutdown only covers the
     // user-initiated restart path.
-    shutdown_state.shutdown_persist_blocking();
+    let persist_result = shutdown_state.shutdown_persist_checked();
+    if let Err(err) = &persist_result {
+        eprintln!("[termal] final synchronous persist failed during graceful shutdown: {err:#}");
+    }
+    let result = result.and(persist_result);
     shutdown_state.shutdown_state_broadcast_blocking();
     if let Some(lifecycle) = host_lifecycle {
         let outcome = if result.is_ok() { HostShutdownOutcome::Graceful } else { HostShutdownOutcome::Fatal };

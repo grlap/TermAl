@@ -732,6 +732,11 @@ impl AppState {
                                 return Err(err);
                             }
                         };
+                        retain_unpersisted_session_changes(
+                            &inner_for_persist,
+                            &delta,
+                            &persisted_session_ids,
+                        );
                         trim_persisted_session_tails_from_shared_state(
                             &inner_for_persist,
                             next_watermark,

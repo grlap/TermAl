@@ -516,7 +516,7 @@ impl AppState {
             // Test/shutdown fallback: commit calls used synchronous persistence.
             // Recheck via the same persistence path rather than assume success.
             let inner = self.inner.lock().expect("state mutex poisoned");
-            self.persist_internal_locked(&inner).map_err(|error| {
+            self.persist_session_internal_locked(&inner, session_id).map_err(|error| {
                 local(EngramTransportError::local_state(format!(
                     "Engram admission persistence failed: {error:#}"
                 )))
@@ -741,7 +741,7 @@ impl AppState {
                     .front()
                     .is_some_and(QueuedPromptRecord::is_engram_retained);
             if retention_changed {
-                if let Err(error) = self.commit_locked(&mut inner) {
+                if let Err(error) = self.commit_session_locked(&mut inner, session_id) {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
@@ -757,7 +757,7 @@ impl AppState {
                     )));
                 }
             } else {
-                self.persist_internal_locked(&inner).map_err(|error| {
+                self.persist_session_internal_locked(&inner, session_id).map_err(|error| {
                     EngramTransportError::local_state(format!(
                         "Failed to retire terminal evaluation: {error:#}"
                     ))
@@ -1085,11 +1085,11 @@ impl AppState {
         clear_active_turn_file_change_tracking(record);
         sync_pending_prompts(record);
         let updates = message_updated_delta_parts_for_indices(record, latest_card.into_iter().collect());
-        let persisted = self.commit_locked_with_persist_dispatch(&mut inner);
-        let publication = if let Ok((revision, dispatch)) = &persisted {
+        let persisted = self.commit_locked_with_persist_outcome(&mut inner);
+        let publication = if let Ok((revision, outcome)) = &persisted {
             self.publish_message_updated_delta_parts(&inner, *revision, updates);
             latest_card.and_then(|message_index| self.prepare_engram_causal_publication_locked(
-                &inner, session_id, message_index, *dispatch,
+                &inner, session_id, message_index, outcome,
             ))
         } else { None };
         if scheduled {
@@ -1549,7 +1549,7 @@ impl AppState {
             let retention_became_visible = !retained_before && current.is_engram_retained();
             sync_pending_prompts(record);
             if retention_became_visible {
-                if let Err(error) = self.commit_locked(&mut inner) {
+                if let Err(error) = self.commit_session_locked(&mut inner, &target.connection.session_id) {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
@@ -1565,7 +1565,7 @@ impl AppState {
                     )));
                 }
             } else {
-                self.persist_internal_locked(&inner).map_err(|error| {
+                self.persist_session_internal_locked(&inner, &target.connection.session_id).map_err(|error| {
                     EngramTransportError::local_state(format!(
                         "Failed to persist prepared bind: {error:#}"
                     ))
@@ -1688,7 +1688,7 @@ impl AppState {
         let retention_became_visible = !retained_before && queued.is_engram_retained();
         sync_pending_prompts(record);
         if retention_became_visible {
-            if let Err(error) = self.commit_locked(&mut inner) {
+            if let Err(error) = self.commit_session_locked(&mut inner, &intent.session_id) {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -1704,7 +1704,7 @@ impl AppState {
                 )));
             }
         } else {
-            self.persist_internal_locked(&inner).map_err(|error| {
+            self.persist_session_internal_locked(&inner, &intent.session_id).map_err(|error| {
                 EngramTransportError::local_state(format!(
                     "Failed to persist prepared evaluate: {error:#}"
                 ))

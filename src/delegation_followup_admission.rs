@@ -414,6 +414,23 @@ impl AppState {
         prompt_id: &str,
         full_snapshot: bool,
     ) -> Result<u64> {
+        self.commit_followup_prompt_locked_for_session(
+            inner, previous, prompt_id, full_snapshot,
+            previous.map(|row| row.child_session_id.as_str()),
+        )
+    }
+
+    // Keep the existing follow-up custody and error rollback owner. Ordinary
+    // dispatch supplies its session too; callers with a separate exact fence
+    // keep the existing interface above.
+    fn commit_followup_prompt_locked_for_session(
+        &self,
+        inner: &mut StateInner,
+        previous: Option<&DelegationRecord>,
+        prompt_id: &str,
+        full_snapshot: bool,
+        session_id: Option<&str>,
+    ) -> Result<u64> {
         if let Some(previous) = previous {
             if previous.mode == DelegationMode::Reviewer {
                 let admission = inner.delegation_followup_admissions.get(&previous.id);
@@ -463,10 +480,18 @@ impl AppState {
             })
         });
         let committed = if full_snapshot {
-            self.commit_locked(inner)
+            self.commit_persisted_delta_locked_with_outcome(inner)
         } else {
-            self.commit_persisted_delta_locked(inner)
-        };
+            self.bump_revision_and_persist_locked_with_outcome(inner)
+        }.and_then(|(revision, outcome)| {
+            if let Some(session_id) = session_id {
+                outcome.require_session_saved(session_id)?;
+            }
+            if full_snapshot {
+                self.publish_state_locked(inner);
+            }
+            Ok(revision)
+        });
         let revision = match committed {
             Ok(revision) => revision,
             Err(error) => {

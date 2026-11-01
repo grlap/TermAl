@@ -1829,7 +1829,7 @@ impl AppState {
                 (updated_parts, created_parts)
             };
 
-            match self.commit_locked(&mut inner) {
+            match self.commit_session_locked(&mut inner, session_id) {
                 Ok(revision) => Ok((
                     {
                         self.publish_test_run_waits_consumed(

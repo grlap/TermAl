@@ -144,6 +144,16 @@ fn rebuild_sqlite_message_rowid_storage(connection: &rusqlite::Connection) -> Re
     Ok(())
 }
 
+#[derive(Debug)]
+struct PersistTranscriptIdentityConflict;
+
+impl std::fmt::Display for PersistTranscriptIdentityConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("transcript identity conflicts with another retained position")
+    }
+}
+impl std::error::Error for PersistTranscriptIdentityConflict {}
+
 fn write_serialized_persisted_messages(
     tx: &rusqlite::Transaction<'_>,
     session: &SerializedPersistedSession,
@@ -191,6 +201,19 @@ fn write_serialized_persisted_messages(
                 i64::try_from(conversation_overview_kind_index(message.overview_kind))?,
                 i64::from(message.is_user),
             ])
+            .map_err(|error| {
+                // Only this exact constraint at this message upsert is a
+                // session-local identity rejection. Triggers, other tables,
+                // I/O and all other integrity errors remain fatal.
+                if matches!(&error, rusqlite::Error::SqliteFailure(code, Some(message))
+                    if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                    && message == "UNIQUE constraint failed: messages.session_id, messages.message_id")
+                {
+                    anyhow::Error::new(PersistTranscriptIdentityConflict).context(error)
+                } else {
+                    anyhow::Error::new(error)
+                }
+            })
             .with_context(|| {
                 format!(
                     "failed to write transcript position {} for `{}`",

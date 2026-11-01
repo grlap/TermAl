@@ -19,6 +19,9 @@ mod checkpoint_race;
 #[path = "engram_import_reconciliation_persist.rs"]
 mod import_reconciliation;
 
+#[path = "persist_transcript_conflict.rs"]
+mod transcript_conflict;
+
 struct FenceFixture {
     cache: SqlitePersistConnectionCache,
     root: TestTempRoot,

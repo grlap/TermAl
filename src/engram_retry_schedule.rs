@@ -458,7 +458,8 @@ impl AppState {
         // content is the acknowledgement, as the admission fence falls back
         // to it.
         record.engram.abort_retry_fence = None;
-        let saved = self.persist_internal_locked(inner);
+        let session_id = record.session.id.clone();
+        let saved = self.persist_session_internal_locked(inner, &session_id);
         let record = &mut inner.sessions[index];
         match saved {
             Ok(()) => record.engram.abort_retry_saved = true,

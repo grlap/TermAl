@@ -367,7 +367,7 @@ impl AppState {
                 .as_mut()
                 .unwrap()
                 .fence = Some(EngramAbortAckWaiter(Arc::new(waiter)));
-        } else if self.persist_internal_locked(inner).is_ok() {
+        } else if self.persist_session_internal_locked(inner, &inner.sessions[index].session.id).is_ok() {
             inner.sessions[index]
                 .provider_capacity_retry
                 .as_mut()

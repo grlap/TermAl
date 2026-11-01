@@ -180,9 +180,9 @@ impl AppState {
         self.queue_runtime_observation_close_locked(&mut inner, index);
         inner.stamp_session_at_index(index);
         if session_message_count(&inner.sessions[index]) != messages_before {
-            self.commit_locked(&mut inner)?;
+            self.commit_session_locked(&mut inner, session_id)?;
         } else {
-            self.persist_internal_locked(&inner)?;
+            self.persist_session_internal_locked(&inner, session_id)?;
         }
         Ok(())
     }

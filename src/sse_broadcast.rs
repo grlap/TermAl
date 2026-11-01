@@ -69,7 +69,38 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PersistDispatch {
     BackgroundQueued,
+    // Global metadata committed. Session-bound owners still require their
+    // exact row proof; an isolated sibling is not a failed metadata write.
     Synchronous,
+}
+
+#[derive(Debug)]
+struct PersistDispatchOutcome {
+    dispatch: PersistDispatch,
+    rejected_sessions: Vec<PersistSessionRejection>,
+}
+
+impl PersistDispatchOutcome {
+    fn require_session_saved(&self, session_id: &str) -> Result<()> {
+        if let Some(rejected) = self.rejected_sessions.iter().find(|row| row.session_id == session_id) {
+            bail!("session `{}` was not saved: {}", rejected.session_id, rejected.error);
+        }
+        Ok(())
+    }
+
+    fn rejected_remote_session<'a>(&'a self, inner: &StateInner) -> Option<&'a PersistSessionRejection> {
+        self.rejected_sessions.iter().find(|row| {
+            inner.find_session_index(&row.session_id)
+                .is_some_and(|index| inner.sessions[index].remote_id.is_some())
+        })
+    }
+
+    fn require_remote_rows_saved(&self, inner: &StateInner) -> Result<()> {
+        if let Some(rejected) = self.rejected_remote_session(inner) {
+            bail!("remote session `{}` was not saved: {}", rejected.session_id, rejected.error);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -94,6 +125,26 @@ impl AppState {
         Ok(revision)
     }
 
+    /// A row-bound commit keeps the ordinary queueing contract, but a
+    /// synchronous fallback must have saved this session before reporting
+    /// success. A rejected sibling does not invalidate this row or metadata.
+    fn commit_session_locked(&self, inner: &mut StateInner, session_id: &str) -> Result<u64> {
+        let (revision, outcome) = self.commit_persisted_delta_locked_with_outcome(inner)?;
+        outcome.require_session_saved(session_id)?;
+        self.publish_state_locked(inner);
+        Ok(revision)
+    }
+
+    fn commit_persisted_session_delta_locked(
+        &self,
+        inner: &mut StateInner,
+        session_id: &str,
+    ) -> Result<u64> {
+        let (revision, outcome) = self.bump_revision_and_persist_locked_with_outcome(inner)?;
+        outcome.require_session_saved(session_id)?;
+        Ok(revision)
+    }
+
     /// Central commit path with an explicit persistence disposition.
     ///
     /// Most callers only need [`Self::commit_locked`]. Project deletion also
@@ -105,7 +156,15 @@ impl AppState {
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
-        let committed = self.commit_persisted_delta_locked_with_dispatch(inner)?;
+        let (revision, outcome) = self.commit_locked_with_persist_outcome(inner)?;
+        Ok((revision, outcome.dispatch))
+    }
+
+    fn commit_locked_with_persist_outcome(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<(u64, PersistDispatchOutcome)> {
+        let committed = self.commit_persisted_delta_locked_with_outcome(inner)?;
         self.publish_state_locked(inner);
         Ok(committed)
     }
@@ -118,8 +177,16 @@ impl AppState {
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
+        let (revision, outcome) = self.commit_persisted_delta_locked_with_outcome(inner)?;
+        Ok((revision, outcome.dispatch))
+    }
+
+    fn commit_persisted_delta_locked_with_outcome(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<(u64, PersistDispatchOutcome)> {
         inner.retain_hidden_source_observation_sessions();
-        let (revision, dispatch) = self.bump_revision_and_persist_locked_with_dispatch(inner)?;
+        let (revision, outcome) = self.bump_revision_and_persist_locked_with_outcome(inner)?;
         // Dirty settings markers arise only when the disconnected-channel
         // synchronous fallback failed. If any later commit reaches the same
         // synchronous persistence path successfully, the full preferences
@@ -127,15 +194,15 @@ impl AppState {
         // The production receiver is owned by one worker and `persist_tx` is
         // never replaced, so a disconnected queue cannot later recover into a
         // background-queued path that would leave these markers stale.
-        if dispatch == PersistDispatch::Synchronous {
+        if outcome.dispatch == PersistDispatch::Synchronous {
             inner.settings_persist_dirty = false;
             inner.remote_settings_persist_dirty = false;
             // A failed remote-delta fallback also leaves memory authoritative.
-            // This successful full snapshot makes every such mutation durable,
-            // regardless of which later commit supplied the retry.
-            inner.remote_delta_persist_dirty = false;
+            // Metadata committed, but an isolated proxy row may still need its
+            // existing retry owner. Sibling metadata success cannot clear it.
+            inner.remote_delta_persist_dirty = outcome.rejected_remote_session(inner).is_some();
         }
-        Ok((revision, dispatch))
+        Ok((revision, outcome))
     }
 
     /// Commits a newly visible session and wakes the background persist
@@ -173,6 +240,14 @@ impl AppState {
         inner: &mut StateInner,
         record: &SessionRecord,
     ) -> Result<u64> {
+        self.commit_session_created_locked_with_outcome(inner, record).map(|(revision, _)| revision)
+    }
+
+    fn commit_session_created_locked_with_outcome(
+        &self,
+        inner: &mut StateInner,
+        record: &SessionRecord,
+    ) -> Result<(u64, PersistDispatchOutcome)> {
         // Ordering note: the revision tick happens before the
         // persist-route selection to match `persist_internal_locked`
         // (see [`Self::persist_internal_locked`] / `bump_revision_and_persist_locked`).
@@ -187,10 +262,15 @@ impl AppState {
         // durability posture.
         inner.finish_body_sequence_commits();
         inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
-        if self.persist_tx.send(PersistRequest::Delta).is_err() {
-            persist_created_session(&self.persistence_path, inner, record)?;
-        }
-        Ok(inner.revision)
+        let outcome = if self.persist_tx.send(PersistRequest::Delta).is_err() {
+            let rejected_sessions = persist_created_session(&self.persistence_path, inner, record)?;
+            self.persist_observer.record_session_rejections(&rejected_sessions);
+            PersistDispatchOutcome { dispatch: PersistDispatch::Synchronous, rejected_sessions }
+        } else {
+            PersistDispatchOutcome { dispatch: PersistDispatch::BackgroundQueued, rejected_sessions: Vec::new() }
+        };
+        outcome.require_session_saved(&record.session.id)?;
+        Ok((inner.revision, outcome))
     }
 
     // Internal bookkeeping changes should be persisted without advancing the
@@ -215,16 +295,34 @@ impl AppState {
             .map(|_| ())
     }
 
+    /// Session-bound bookkeeping and synchronous fence fallbacks must not
+    /// mistake a partial full-state write for acknowledgement of their row.
+    /// A live worker still acknowledges exact content through its fence.
+    fn persist_session_internal_locked(&self, inner: &StateInner, session_id: &str) -> Result<()> {
+        self.persist_internal_locked_with_outcome(inner)?.require_session_saved(session_id)
+    }
+
     fn persist_internal_locked_with_dispatch(&self, inner: &StateInner) -> Result<PersistDispatch> {
+        // Metadata/delegation consumers retain their existing disposition.
+        // Session-row retry owners use the detailed outcome below instead.
+        self.persist_internal_locked_with_outcome(inner).map(|outcome| outcome.dispatch)
+    }
+
+    fn persist_synchronous_locked(&self, inner: &StateInner) -> Result<PersistDispatchOutcome> {
+        let (_, rejected_sessions) = persist_locked_state_to_sqlite_report(&self.persistence_path, inner)?;
+        self.persist_observer.record_session_rejections(&rejected_sessions);
+        Ok(PersistDispatchOutcome { dispatch: PersistDispatch::Synchronous, rejected_sessions })
+    }
+
+    fn persist_internal_locked_with_outcome(&self, inner: &StateInner) -> Result<PersistDispatchOutcome> {
         if self.persist_tx.send(PersistRequest::Delta).is_err() {
             // Channel disconnected — synchronous fallback for tests
             // and any shutdown path where the persist thread has
             // already exited. Build the full persist payload here
             // because we have no background worker to do it.
-            persist_locked_state_to_sqlite(&self.persistence_path, inner)?;
-            return Ok(PersistDispatch::Synchronous);
+            return self.persist_synchronous_locked(inner);
         }
-        Ok(PersistDispatch::BackgroundQueued)
+        Ok(PersistDispatchOutcome { dispatch: PersistDispatch::BackgroundQueued, rejected_sessions: Vec::new() })
     }
 
     /// Drains any pending persist work and joins the background persist
@@ -265,7 +363,22 @@ impl AppState {
     /// inference can lag while other `AppState` clones still hold senders,
     /// so callers that need strict durability for those variants should
     /// quiesce their producers before invoking this method.
+    #[cfg(test)]
     fn shutdown_persist_blocking(&self) {
+        // Fixture constructors intentionally own no worker. Preserve their
+        // no-op teardown while production always checks the final full cut.
+        if let Err(err) = self.shutdown_persist_result(false) {
+            eprintln!("[termal] final synchronous persist failed during graceful shutdown: {err:#}");
+        }
+    }
+
+    /// Retire the worker and prove the final full cut, including any session
+    /// the normal writer isolated. A partial save cannot prove graceful exit.
+    fn shutdown_persist_checked(&self) -> Result<()> {
+        self.shutdown_persist_result(true)
+    }
+
+    fn shutdown_persist_result(&self, require_final_cut: bool) -> Result<()> {
         // This only retires the writer (tests also swap it while the host
         // keeps running). Real host retirement is owned by
         // trigger_shutdown_signal, which joins observation installs first.
@@ -278,14 +391,10 @@ impl AppState {
             .expect("persist thread handle mutex poisoned");
         let handle = guard.take();
         let _shutdown_guard = guard;
-        let Some(handle) = handle else {
-            // Idempotent: any previous join owner held this mutex until
-            // `handle.join()` returned and the alive flag was flipped, so
-            // observing `None` here means the worker is truly stopped.
-            self.persist_worker_alive
-                .store(false, std::sync::atomic::Ordering::Release);
-            return;
-        };
+        if handle.is_none() && !require_final_cut {
+            self.persist_worker_alive.store(false, std::sync::atomic::Ordering::Release);
+            return Ok(());
+        }
         // Best-effort signal: if the channel is already disconnected
         // (worker panicked or exited early) there is nothing to drain
         // — the join below still waits for the OS thread to fully exit.
@@ -299,10 +408,14 @@ impl AppState {
         // guaranteed not to drain anything. See bugs.md "Post-shutdown
         // persistence writes are not durably ordered" for the failure
         // mode this ordering closes.
-        let _ = self.persist_tx.send(PersistRequest::Shutdown);
-        if let Err(err) = handle.join() {
-            eprintln!("[termal] persist worker join failed during graceful shutdown: {err:?}");
-        }
+        let join_result = if let Some(handle) = handle {
+            let _ = self.persist_tx.send(PersistRequest::Shutdown);
+            handle.join().map_err(|err| anyhow!("persist worker join failed during shutdown: {err:?}"))
+        } else {
+            // A repeated caller must prove its current cut as well: a prior
+            // call may have failed, and handle absence proves no durability.
+            Ok(())
+        };
         // Worker has now exited (join returned). Persist one final
         // full-state snapshot while holding `inner`, then publish
         // `alive == false` before releasing that lock. This makes
@@ -312,15 +425,25 @@ impl AppState {
         // fallback in `commit_delta_locked`.
         let final_persist_result = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let result = persist_locked_state_to_sqlite(&self.persistence_path, &inner);
+            let result = self.persist_synchronous_locked(&inner)
+                .and_then(|outcome| {
+                    let rejected = outcome.rejected_sessions;
+                    if rejected.is_empty() {
+                        Ok(())
+                    } else {
+                        bail!("final persistence retained last-good rows for {} rejected session(s): {}",
+                            rejected.len(), rejected.iter().take(8)
+                                .map(|row| format!("{}: {}", row.session_id, row.error)).collect::<Vec<_>>().join(", "))
+                    }
+                });
             self.persist_worker_alive
                 .store(false, std::sync::atomic::Ordering::Release);
             result
         };
-        if let Err(err) = final_persist_result {
-            eprintln!(
-                "[termal] final synchronous persist failed during graceful shutdown: {err:#}"
-            );
+        match (join_result, final_persist_result) {
+            (Err(join), Err(persist)) => Err(persist.context(format!("{join:#}"))),
+            (Err(join), Ok(())) => Err(join),
+            (Ok(()), result) => result,
         }
     }
 
@@ -367,7 +490,10 @@ impl AppState {
             .persist_worker_alive
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            persist_locked_state_to_sqlite(&self.persistence_path, inner)?;
+            let outcome = self.persist_synchronous_locked(inner)?;
+            if outcome.rejected_remote_session(inner).is_some() {
+                inner.remote_delta_persist_dirty = true;
+            }
         }
         Ok(inner.revision)
     }
@@ -394,10 +520,18 @@ impl AppState {
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
+        let (revision, outcome) = self.bump_revision_and_persist_locked_with_outcome(inner)?;
+        Ok((revision, outcome.dispatch))
+    }
+
+    fn bump_revision_and_persist_locked_with_outcome(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<(u64, PersistDispatchOutcome)> {
         inner.finish_body_sequence_commits();
         inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
-        let dispatch = self.persist_internal_locked_with_dispatch(inner)?;
-        Ok((inner.revision, dispatch))
+        let outcome = self.persist_internal_locked_with_outcome(inner)?;
+        Ok((inner.revision, outcome))
     }
 
     /// Returns a receiver on the test-only `state_events` broadcast channel

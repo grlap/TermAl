@@ -1,7 +1,8 @@
 // Bounded in-memory persistence telemetry beside persist_tick_timings.rs.
 // Owns numeric observations and a read-only HTTP projection, not scheduling,
 // deadlines, acknowledgements, durable data or retry decisions. No paths,
-// payloads, persisted identifiers or error text enter this observer.
+// transcript payloads enter this observer. Session-local write rejections have
+// one bounded diagnostic (session id and concrete error), never a history store.
 
 const PERSIST_OBSERVER_RECENT_LIMIT: usize = 16;
 const PERSIST_OBSERVER_SLOWEST_LIMIT: usize = 8;
@@ -209,6 +210,8 @@ struct PersistObserverState {
     next_tick: u64,
     completed_ticks: u64,
     failed_ticks: u64,
+    rejected_session_writes: u64,
+    last_session_rejection: Option<PersistSessionRejection>,
     active: Option<PersistObservedActive>,
     recent: std::collections::VecDeque<PersistObservedTick>,
     slowest: Vec<PersistObservedTick>,
@@ -243,6 +246,8 @@ struct PersistObserverSnapshot {
     slowest_limit: usize,
     completed_ticks: u64,
     failed_ticks: u64,
+    rejected_session_writes: u64,
+    last_session_rejection: Option<PersistSessionRejection>,
     /// std::sync::mpsc has no instantaneous depth; do not mislabel the
     /// drained-request or accepted-fence counts as a channel depth.
     channel_queue_depth: Option<usize>,
@@ -262,6 +267,14 @@ struct PersistObserverCurrent {
 }
 
 impl PersistObserver {
+    fn record_session_rejections(&self, rejected: &[PersistSessionRejection]) {
+        let Some(last) = rejected.last() else { return };
+        self.with_state(|state| {
+            state.rejected_session_writes = state.rejected_session_writes.saturating_add(rejected.len() as u64);
+            state.last_session_rejection = Some(last.bounded_observation());
+        });
+    }
+
     fn with_state<R>(&self, work: impl FnOnce(&mut PersistObserverState) -> R) -> R {
         // Diagnostic poisoning must not change the writer's result.
         work(&mut self.state.lock().unwrap_or_else(|error| error.into_inner()))
@@ -381,6 +394,8 @@ impl PersistObserver {
             slowest_limit: PERSIST_OBSERVER_SLOWEST_LIMIT,
             completed_ticks: state.completed_ticks,
             failed_ticks: state.failed_ticks,
+            rejected_session_writes: state.rejected_session_writes,
+            last_session_rejection: state.last_session_rejection.clone(),
             channel_queue_depth: None,
             current: state.active.as_ref().map(|active| PersistObserverCurrent {
                 phase: active.phase,
@@ -410,6 +425,10 @@ fn persist_observe(work: impl FnOnce(&PersistObserver)) {
 
 fn persist_observe_phase(phase: &'static str) {
     persist_observe(|observer| observer.phase(phase));
+}
+
+fn persist_observe_session_rejections(rejected: &[PersistSessionRejection]) {
+    persist_observe(|observer| observer.record_session_rejections(rejected));
 }
 
 struct PersistObservationScope {

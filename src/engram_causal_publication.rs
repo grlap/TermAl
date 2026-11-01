@@ -4,8 +4,8 @@
 // Publication never blocks the caller. With the background writer, the exact
 // message's fence carries a completion hook, and the writer runs it in the
 // tick that acknowledges that content. With the synchronous fallback, the
-// message already committed while StateInner was held, so the caller publishes
-// after releasing it. Lock order: the hook runs on the writer thread after
+// message's own session must have committed while StateInner was held. The
+// caller publishes after releasing it. Lock order: the hook runs on the writer thread after
 // COMMIT and read-back, with the fence's completion mutex released and no
 // other lock held. It then takes StateInner, the same lock the writer already
 // takes after each write, so this adds no lock-order edge. Nothing here retries
@@ -33,8 +33,9 @@ impl AppState {
         inner: &StateInner,
         session_id: &str,
         message_index: usize,
-        dispatch: PersistDispatch,
+        outcome: &PersistDispatchOutcome,
     ) -> Option<EngramCausalPublication> {
+        outcome.require_session_saved(session_id).ok()?;
         let index = inner.find_session_index(session_id)?;
         let message = inner.sessions[index].session.messages.get(message_index)?;
         let Message::EngramControl { card, .. } = message else { return None; };
@@ -45,7 +46,7 @@ impl AppState {
             message_id: message.id().to_owned(),
             cause,
         };
-        if dispatch != PersistDispatch::BackgroundQueued {
+        if outcome.dispatch != PersistDispatch::BackgroundQueued {
             // The successful synchronous fallback committed this unchanged
             // normalized message while StateInner was still held.
             return Some(publication);

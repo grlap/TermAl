@@ -514,7 +514,7 @@ impl AppState {
         record.active_codex_sandbox_mode = Some(sandbox_mode);
         record.active_codex_approval_policy = Some(approval_policy);
         record.active_codex_reasoning_effort = Some(reasoning_effort);
-        self.persist_internal_locked(&inner)?;
+        self.persist_session_internal_locked(&inner, session_id)?;
         Ok(RuntimeMatchOutcome::Applied)
     }
 }
