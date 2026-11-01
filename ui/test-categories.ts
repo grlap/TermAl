@@ -256,6 +256,7 @@ export const DOM_TS_TEST_FILES: readonly string[] = [
   "src/session-history.test.ts",
   "src/session-hydration-performance.test.ts",
   "src/session-pane-detached-restore.test.ts",
+  "src/session-reconcile-metadata-flags.test.ts",
   "src/session-reconcile.test.ts",
   "src/shared-live-events.test.ts",
   "src/source-renderers.test.ts",

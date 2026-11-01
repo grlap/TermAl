@@ -267,6 +267,7 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.queueProjectionHash === next.queueProjectionHash &&
     sameQueueHold(previous.queueHold, next.queueHold) &&
+    sameSessionControlFlags(previous, next) &&
     previous.engramBootRecoveryPending === next.engramBootRecoveryPending &&
     previous.status === next.status &&
     previous.preview === next.preview &&
@@ -285,6 +286,16 @@ function sameQueueHold(previous: Session["queueHold"], next: Session["queueHold"
     (previous?.kind ?? null) === (next?.kind ?? null) &&
     (previous?.cause ?? null) === (next?.cause ?? null) &&
     (previous?.retryAt ?? null) === (next?.retryAt ?? null)
+  );
+}
+
+// These flags affect pane controls even when a legacy peer has no stamp or
+// record-derived state changes under the same stamp. Omission means false.
+function sameSessionControlFlags(previous: Session, next: Session) {
+  return (
+    Boolean(previous.queuePaused) === Boolean(next.queuePaused) &&
+    Boolean(previous.providerCapacityWaiting) === Boolean(next.providerCapacityWaiting) &&
+    Boolean(previous.sourceTrackingRecovery) === Boolean(next.sourceTrackingRecovery)
   );
 }
 
@@ -341,6 +352,7 @@ function reconcileSession(
     sameOptionalStringArray(previous.promptHistory, nextSession.promptHistory) &&
     // The hold is derived from retry state that can change under one stamp.
     sameQueueHold(previous.queueHold, nextSession.queueHold) &&
+    sameSessionControlFlags(previous, nextSession) &&
     (nextSession.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
@@ -389,7 +401,8 @@ function reconcileSummarySession(
     previous.remoteId === next.remoteId &&
     sameOptionalStringArray(previous.promptHistory, next.promptHistory) &&
     // The hold is derived from retry state that can change under one stamp.
-    sameQueueHold(previous.queueHold, next.queueHold)
+    sameQueueHold(previous.queueHold, next.queueHold) &&
+    sameSessionControlFlags(previous, next)
   ) {
     return previous;
   }

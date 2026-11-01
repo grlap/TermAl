@@ -1289,23 +1289,41 @@ fn claude_cd_segment_targets_cwd(segment: &str, cwd: &str) -> bool {
     // Compare as directory keys, not raw strings: `normalize_user_facing_path` does
     // NOT unify `/` vs `\` or case, but the agent writes `cd` with forward slashes
     // while the runtime cwd is stored with backslashes on Windows. A raw `==` then
-    // rejects a genuine same-folder `cd`. The key folds separators (and case on
-    // Windows, which is case-insensitive), so `cd "C:/repo"` matches cwd `C:\repo`.
-    claude_local_dir_match_key(&normalize_local_user_facing_path(target))
-        == claude_local_dir_match_key(cwd)
+    // rejects a genuine same-folder `cd`. On Windows the key folds separators
+    // and case, so `cd "C:/repo"` matches cwd `C:\repo`. On POSIX a backslash
+    // is a filename character and must remain distinct from a slash.
+    let style = if cfg!(windows) {
+        ClaudeLocalPathStyle::Windows
+    } else {
+        ClaudeLocalPathStyle::Posix
+    };
+    claude_local_dir_match_key(&normalize_local_user_facing_path(target), style)
+        == claude_local_dir_match_key(cwd, style)
+}
+
+#[derive(Clone, Copy)]
+enum ClaudeLocalPathStyle {
+    Posix,
+    Windows,
 }
 
 /// Normalizes a user-facing directory path to a comparison key that is
-/// separator-insensitive (`\` folded to `/`, one trailing separator dropped) and,
-/// on Windows, case-insensitive. Used only to decide whether a `cd` target is the
-/// delegation's own `cwd`; it never touches the filesystem.
-fn claude_local_dir_match_key(path: &str) -> String {
+/// insensitive to one trailing separator and, on Windows only, separator spelling
+/// and case. POSIX backslashes are preserved. Used only to decide whether a `cd`
+/// target is the delegation's own `cwd`; it never touches the filesystem.
+fn claude_local_dir_match_key(path: &str, style: ClaudeLocalPathStyle) -> String {
     let unified: String = path
         .chars()
-        .map(|character| if character == '\\' { '/' } else { character })
+        .map(|character| {
+            if matches!(style, ClaudeLocalPathStyle::Windows) && character == '\\' {
+                '/'
+            } else {
+                character
+            }
+        })
         .collect();
     let trimmed = unified.strip_suffix('/').unwrap_or(&unified);
-    if cfg!(windows) {
+    if matches!(style, ClaudeLocalPathStyle::Windows) {
         trimmed.to_lowercase()
     } else {
         trimmed.to_owned()

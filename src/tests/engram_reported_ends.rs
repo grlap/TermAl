@@ -204,11 +204,125 @@ fn assert_carried_at_close(turn: &CheckedTurn) {
     );
 }
 
+#[test]
+fn a_legacy_carried_terminal_requires_its_exact_item_thread_and_terminal_state() {
+    let (turn, worktree) = two_turns("reported-end-legacy-identity");
+    start_test(&turn, &worktree, ITEM);
+    assert_carried_at_close(&turn);
+    let terminal = json!({
+        "method": "codex/event/item_completed",
+        "params": {
+            "conversationId": THREAD,
+            "msg": { "item": {
+                "type": "CommandExecution", "id": ITEM, "command": SIZE_TEST,
+                "status": "completed", "exitCode": 0, "aggregatedOutput": PASSING
+            }}
+        }
+    });
+    for (pointer, replacement) in [
+        ("/params/conversationId", json!("another-thread")),
+        ("/params/conversationId", Value::Null),
+        ("/params/msg/item/id", json!("another-item")),
+        ("/params/msg/item/id", Value::Null),
+        ("/params/msg/item/command", Value::Null),
+        ("/params/msg/item/type", json!("AgentMessage")),
+        ("/params/msg/item/status", json!("inProgress")),
+    ] {
+        let mut rejected = terminal.clone();
+        *rejected.pointer_mut(pointer).unwrap() = replacement;
+        assert!(!take_shared_codex_late_command_end(
+            &turn.state,
+            &turn.session_id,
+            Some(THREAD),
+            &rejected,
+            rejected.pointer("/params/msg/item").unwrap(),
+        ), "{rejected:#}");
+        turn.record(|record| {
+            assert!(record.engram.carried_checks[0].check.end.is_none());
+            assert!(!record.engram.running_codex_tests.is_empty());
+        });
+    }
+}
+
 /// A Codex test that outlives its turn (its exec session polled after the
 /// tool's initial yield) ends after that turn closed; Codex reports the end
 /// tagged with the closed turn, which the turn's events drop. The test is
 /// carried at the close, takes that end, and is credited with its real
 /// outcome at the next checkpoint on the claim.
+#[test]
+fn a_legacy_terminal_across_turns_closes_the_original_check_before_a_later_edit() {
+    let (turn, worktree) = two_turns("reported-end-legacy-next-turn-edit");
+    start_test(&turn, &worktree, ITEM);
+    assert_carried_at_close(&turn);
+    dispatch_next_turn(&turn);
+    let runtime = shared_runtime(&turn);
+    {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        let shared = sessions.get_mut(&turn.session_id).unwrap();
+        shared.turn_id = Some("turn-next".to_owned());
+        shared.turn_started = true;
+        shared.completed_turn_id = None;
+    }
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "codex/event/item_completed",
+            "params": {
+                "conversationId": THREAD,
+                "msg": {
+                    "turn_id": "turn-gone",
+                    "item": {
+                        "type": "CommandExecution",
+                        "id": ITEM,
+                        "command": SIZE_TEST,
+                        "status": "completed",
+                        "exitCode": 0,
+                        "aggregatedOutput": PASSING
+                    }
+                }
+            }
+        }),
+        &turn.state,
+        &runtime.runtime_id,
+        &Arc::new(Mutex::new(HashMap::new())),
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .expect("the runtime terminal is handled");
+    turn.record(|record| {
+        assert!(
+            record.engram.carried_checks[0].check.end.is_some(),
+            "the exact legacy terminal must reach the original carried check"
+        );
+        assert!(record.engram.running_codex_tests.is_empty());
+    });
+    wait_for_carried_snapshots(&turn);
+    turn.record(|record| {
+        assert!(!record.engram.carried_checks[0].check.open_to_writes());
+        assert!(record.engram.carried_checks[0].fence.is_none());
+    });
+
+    let edited = fs::canonicalize(&worktree).unwrap().join("README.md");
+    fs::write(&edited, "a source change after the terminal and closing capture\n").unwrap();
+    // Report the new turn's own edit through its recorder. An untimed
+    // watcher notification could describe an earlier write delivered late
+    // and deliberately remains conservative even after a check has ended.
+    turn.recorder().push_diff(
+        &edited.to_string_lossy(),
+        "Edit after the carried command's closing capture",
+        "+a source change after the terminal and closing capture",
+        ChangeType::Edit,
+    ).unwrap();
+    turn.record(|record| assert!(record.engram.carried_checks[0].fence.is_none()));
+    let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+    turn.state.finish_turn_ok_if_runtime_matches(&turn.session_id, &token).unwrap();
+    let checkpoint = turn.transport.requests().into_iter()
+        .filter(|request| request.request["operation"] == "turn_checkpoint")
+        .last().unwrap().request;
+    assert_eq!(checkpoint["verification_evidence"].as_array().map(Vec::len), Some(1));
+    assert!(observations(&checkpoint).iter().any(|row| row["outcome"] == "succeeded"));
+}
+
 #[test]
 fn a_codex_test_that_outlives_its_turn_is_recorded_from_its_late_end() {
     let (turn, worktree) = two_turns("reported-end-credited");

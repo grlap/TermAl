@@ -18,6 +18,9 @@
 
 use super::*;
 
+#[path = "session_projection_contract.rs"]
+mod session_projection_contract;
+
 // The route body includes legal keep-alive comments. Exercise the reader
 // deterministically instead of depending on wall-clock load to produce one.
 #[tokio::test]

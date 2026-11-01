@@ -1216,6 +1216,20 @@ fn handle_shared_codex_app_server_notification(
             }
         }
         "codex/event/item_completed" => {
+            // The legacy completion can name a turn older than the visible
+            // one too. Give its exact carried item the same terminal handoff
+            // as the typed event before applying transcript turn filtering.
+            if let Some(item) = message.pointer("/params/msg/item") {
+                if take_shared_codex_late_command_end(
+                    state,
+                    session_id,
+                    session_thread_id.as_deref(),
+                    message,
+                    item,
+                ) {
+                    return Ok(());
+                }
+            }
             handle_shared_codex_event_item_completed(
                 message,
                 state,
@@ -1367,7 +1381,7 @@ fn handle_shared_codex_task_complete(
     Ok(())
 }
 
-/// Hands the end in `message`, of a `commandExecution` `item`, whichever turn
+/// Hands the end in a typed or legacy command `item`, whichever turn
 /// it names, to the Engram host, which takes it only for a test a turn's close
 /// carried under exactly this item's id (`EngramHost::codex_reported_end`).
 /// Only an end on the session's own thread, of an item with an id, that
@@ -1380,10 +1394,15 @@ fn take_shared_codex_late_command_end(
     message: &Value,
     item: &Value,
 ) -> bool {
-    if item.get("type").and_then(Value::as_str) != Some("commandExecution") {
+    let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+    if !matches!(
+        (method, item.get("type").and_then(Value::as_str)),
+        ("item/completed", Some("commandExecution"))
+            | ("codex/event/item_completed", Some("CommandExecution"))
+    ) {
         return false;
     }
-    let thread = codex_message_thread_id(message);
+    let thread = shared_codex_session_thread_id(method, message);
     if thread.is_none() || thread != session_thread_id {
         return false;
     }

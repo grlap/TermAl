@@ -1854,6 +1854,7 @@ fn read_only_git_content_checker_allows_reviewer_git_and_hashers() {
 // separator-insensitively (and case-insensitively on Windows). A raw string `==`
 // rejected the exact reviewer command `cd "C:/github/Personal/PhoenixCodeNav" && git ...`.
 #[test]
+#[cfg(windows)]
 fn read_only_checker_same_folder_cd_matches_across_separator() {
     let backslash_cwd = "C:\\github\\Personal\\PhoenixCodeNav";
     // Forward-slash `cd` into a backslash cwd — the exact denied shape from the field.
@@ -1895,6 +1896,60 @@ fn read_only_checker_same_folder_cd_matches_across_separator() {
         ),
         "a subdirectory must stay denied"
     );
+}
+
+#[test]
+fn read_only_cwd_keys_preserve_posix_backslashes() {
+    let style = ClaudeLocalPathStyle::Posix;
+    for (literal, slash) in [
+        (r"/review/project\child", "/review/project/child"),
+        (r"/review/project\", "/review/project/"),
+    ] {
+        assert_ne!(
+            claude_local_dir_match_key(literal, style),
+            claude_local_dir_match_key(slash, style),
+            "a POSIX backslash is part of the directory name"
+        );
+    }
+    assert_ne!(
+        claude_local_dir_match_key("/review/Project", style),
+        claude_local_dir_match_key("/review/project", style)
+    );
+    assert_eq!(
+        claude_local_dir_match_key(r"/review/project\child/", style),
+        r"/review/project\child"
+    );
+}
+
+#[test]
+fn read_only_cwd_keys_keep_windows_separator_and_case_folding() {
+    let style = ClaudeLocalPathStyle::Windows;
+    assert_eq!(
+        claude_local_dir_match_key(r"C:\Review\Project\", style),
+        claude_local_dir_match_key("c:/review/project/", style)
+    );
+    assert_ne!(
+        claude_local_dir_match_key(r"C:\Review\Project\child", style),
+        claude_local_dir_match_key("c:/review/project", style)
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn read_only_checker_posix_cd_preserves_literal_backslash() {
+    let command = r"cd '/review/project\child' && git status";
+    assert!(!claude_bash_is_read_only_for_test(
+        command,
+        "/review/project/child"
+    ));
+    assert!(claude_bash_is_read_only_for_test(
+        command,
+        r"/review/project\child"
+    ));
+    assert!(claude_bash_is_read_only_for_test(
+        "cd '/review/project/' && git status",
+        "/review/project"
+    ));
 }
 
 // Windows filesystems are case-insensitive, so a case-only difference is the same dir.

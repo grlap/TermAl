@@ -2033,6 +2033,18 @@ reports.
   command stops counting as running. A launcher full gate launched in the
   background, or detached with `--detach`, is instead carried past its
   turn and settled when its run ends (Carried background gates, below).
+  A Codex command that outlives its turn is identified by its original
+  command item and session thread. Its typed `item/completed` or legacy
+  `codex/event/item_completed` terminal event reaches that carried check
+  before transcript turn filtering, even when it names an older turn.
+  Polling an exec session with `write_stdin` does not itself prove that
+  TermAl received this provider event; the numeric exec session id and a
+  repeated command line are not substitutes for the original item id.
+  Claude's background Bash launch result is likewise not an exit: a carried
+  launcher gate uses its matching terminal run record. Neither path settles
+  merely because time passed. After an exit is received, closing source
+  capture must still finish before writes stop fencing the check; credit
+  is published at a checkpoint on the original claim.
 - **Passed needs evidence.** A run that tested nothing can exit 0, so a check
   claims success only when a result line shows tests passed: cargo's
   `test result:` or nextest's `Summary` with more than zero passed, pytest's
