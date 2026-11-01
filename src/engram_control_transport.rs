@@ -20,9 +20,21 @@ struct EngramControlProcessEvidence {
 }
 
 fn engram_control_cleanup_pending() -> EngramTransportError {
-    let mut error = EngramTransportError::local_state(
-        "Previous Engram control cleanup is unconfirmed; its exact process remains retained",
-    );
+    engram_control_cleanup_pending_because(None)
+}
+
+/// `engram_control_cleanup_pending`, naming why the previous child's cleanup
+/// is unconfirmed when that is known.
+fn engram_control_cleanup_pending_because(cause: Option<&str>) -> EngramTransportError {
+    let mut message =
+        "Previous Engram control cleanup is unconfirmed; its exact process remains retained"
+            .to_owned();
+    if let Some(cause) = cause {
+        message.push_str(" (");
+        message.push_str(cause);
+        message.push(')');
+    }
+    let mut error = EngramTransportError::local_state(message);
     error.code = Some("control_cleanup_pending".to_owned());
     // The old child exists; only this successor request is provably unsent.
     error.process_never_started = false;
@@ -63,6 +75,10 @@ struct EngramControlProcess {
     worker_finished: Arc<AtomicBool>,
     retiring: AtomicBool,
     cleanup_finished: Arc<AtomicBool>,
+    /// Why the worker could not confirm its cleanup, once it has given up:
+    /// the termination or reap error, or a group still present after the
+    /// reap. A successor's refusal names it.
+    cleanup_failure: Arc<Mutex<Option<String>>>,
 }
 
 impl EngramControlProcess {
@@ -211,12 +227,26 @@ impl ProcessEngramControlTransport {
                 break;
             };
             drop(processes);
-            stale
-                .request_termination()
-                .map_err(|_| engram_control_cleanup_pending())?;
+            stale.request_termination().map_err(|error| {
+                engram_control_cleanup_pending_because(Some(&format!(
+                    "terminating it failed: {error:#}"
+                )))
+            })?;
             while !stale.cleanup_finished.load(Ordering::Acquire) {
                 if std::time::Instant::now() >= deadline {
-                    return Err(engram_control_cleanup_pending());
+                    let failure = stale
+                        .cleanup_failure
+                        .lock()
+                        .expect("Engram control cleanup failure mutex poisoned")
+                        .clone();
+                    let cause = failure.unwrap_or_else(|| {
+                        if stale.worker_finished.load(Ordering::Acquire) {
+                            "its worker has not finished cleaning up".to_owned()
+                        } else {
+                            "its worker is still running".to_owned()
+                        }
+                    });
+                    return Err(engram_control_cleanup_pending_because(Some(&cause)));
                 }
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -567,6 +597,8 @@ fn spawn_engram_control_process(
     let worker_finished_signal = worker_finished.clone();
     let cleanup_finished = Arc::new(AtomicBool::new(false));
     let worker_cleanup_finished = cleanup_finished.clone();
+    let cleanup_failure = Arc::new(Mutex::new(None));
+    let worker_cleanup_failure = cleanup_failure.clone();
     let (request_tx, request_rx) = mpsc::channel::<EngramProcessRequest>();
     let (startup_tx, startup_rx) = mpsc::sync_channel(1);
     std::thread::Builder::new()
@@ -579,11 +611,12 @@ fn spawn_engram_control_process(
                 let _ = startup_tx.send(startup_result);
                 if startup_failed {
                     worker_finished_signal.store(true, Ordering::Release);
-                    let terminated = worker_process_tree.terminate(&worker_process).is_ok();
-                    let reaped = worker_process.wait().is_ok();
-                    if terminated && reaped {
-                        worker_cleanup_finished.store(true, Ordering::Release);
-                    }
+                    finish_engram_control_cleanup(
+                        &worker_process_tree,
+                        &worker_process,
+                        &worker_cleanup_finished,
+                        &worker_cleanup_failure,
+                    );
                     return;
                 }
             }
@@ -619,11 +652,12 @@ fn spawn_engram_control_process(
                     }
                 }
             }
-            let terminated = worker_process_tree.terminate(&worker_process).is_ok();
-            let reaped = worker_process.wait().is_ok();
-            if terminated && reaped {
-                worker_cleanup_finished.store(true, Ordering::Release);
-            }
+            finish_engram_control_cleanup(
+                &worker_process_tree,
+                &worker_process,
+                &worker_cleanup_finished,
+                &worker_cleanup_failure,
+            );
         })
         .map_err(|err| {
             let _ = process_tree.terminate(&process);
@@ -665,7 +699,38 @@ fn spawn_engram_control_process(
         worker_finished,
         retiring: AtomicBool::new(false),
         cleanup_finished,
+        cleanup_failure,
     })
+}
+
+/// The control worker's last step for its child: terminate the tree, reap
+/// the child, and confirm the tree is gone. Cleanup is published only when
+/// all three hold; otherwise the first unmet step is kept for a successor's
+/// refusal to name.
+fn finish_engram_control_cleanup(
+    process_tree: &EngramProcessTree,
+    process: &Arc<SharedChild>,
+    cleanup_finished: &AtomicBool,
+    cleanup_failure: &Mutex<Option<String>>,
+) {
+    let terminated = process_tree.terminate(process);
+    let reaped = process.wait();
+    let failure = match (&terminated, &reaped) {
+        (Err(error), _) => Some(format!("terminating it failed: {error:#}")),
+        (_, Err(error)) => Some(format!("reaping it failed: {error}")),
+        _ if !process_tree.confirmed_after_reap() => {
+            Some("its process group was still present after the reap".to_owned())
+        }
+        _ => None,
+    };
+    match failure {
+        None => cleanup_finished.store(true, Ordering::Release),
+        Some(failure) => {
+            *cleanup_failure
+                .lock()
+                .expect("Engram control cleanup failure mutex poisoned") = Some(failure);
+        }
+    }
 }
 
 fn read_engram_control_startup_handshake(

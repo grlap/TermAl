@@ -2075,14 +2075,16 @@ impl EngramControlTransport for StatefulEngramControlTransport {
 
 struct EngramProcessTree {
     inner: TerminalProcessTree,
-    terminated: Mutex<bool>,
+    /// Whether the tree has been signalled, and what that signal left to
+    /// confirm after the reap (`TerminalGroupSignal`).
+    terminated: Mutex<Option<TerminalGroupSignal>>,
 }
 
 impl EngramProcessTree {
     fn attach(process: &Arc<SharedChild>) -> Result<Self> {
         Ok(Self {
             inner: TerminalProcessTree::attach(process)?,
-            terminated: Mutex::new(false),
+            terminated: Mutex::new(None),
         })
     }
 
@@ -2091,12 +2093,31 @@ impl EngramProcessTree {
             .terminated
             .lock()
             .expect("Engram process-tree mutex poisoned");
-        if *terminated {
+        if terminated.is_some() {
             return Ok(());
         }
-        self.inner.kill_before_reap(process, "Engram control")?;
-        *terminated = true;
+        *terminated = Some(self.inner.kill_before_reap(process, "Engram control")?);
         Ok(())
+    }
+
+    /// Whether the tree, terminated and then reaped by its worker, is gone. A
+    /// group that refused its signal because every member had already exited
+    /// must be absent now; any other terminated tree is.
+    fn confirmed_after_reap(&self) -> bool {
+        match *self
+            .terminated
+            .lock()
+            .expect("Engram process-tree mutex poisoned")
+        {
+            None => false,
+            Some(TerminalGroupSignal::Delivered) => true,
+            #[cfg(not(windows))]
+            Some(TerminalGroupSignal::ConfirmAbsenceAfterReap(pgid)) => {
+                terminal_process_group_absent_after_reap(pgid)
+            }
+            #[cfg(windows)]
+            Some(TerminalGroupSignal::ConfirmAbsenceAfterReap(_)) => false,
+        }
     }
 
     fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {

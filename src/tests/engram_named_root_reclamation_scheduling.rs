@@ -25,6 +25,7 @@ impl WarmRequestGate {
             worker_finished: original.worker_finished.clone(),
             retiring: AtomicBool::new(false),
             cleanup_finished: original.cleanup_finished.clone(),
+            cleanup_failure: original.cleanup_failure.clone(),
         });
         let (release, released) = std::sync::mpsc::channel();
         let (ready, waiting) = std::sync::mpsc::channel();

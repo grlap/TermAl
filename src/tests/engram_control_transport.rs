@@ -667,6 +667,7 @@ fn real_process_reset_cleanup_deadline_retains_the_exact_child_and_refuses_a_suc
         process_tree: original.process_tree.clone(), requests: original.requests.clone(),
         worker_finished: original.worker_finished.clone(), retiring: AtomicBool::new(false),
         cleanup_finished: Arc::new(AtomicBool::new(false)),
+        cleanup_failure: Arc::new(std::sync::Mutex::new(None)),
     });
     transport.processes.lock().unwrap().insert(connection.session_id.clone(), Some(retained.clone()));
     let clock = EngramBudgetClock::scripted();

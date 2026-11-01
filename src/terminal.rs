@@ -677,6 +677,17 @@ fn run_terminal_shell_command_with_timeout_and_stream(
     })
 }
 
+/// What a signal sent before the reap leaves to confirm after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalGroupSignal {
+    /// The tree was signalled, or was already gone.
+    Delivered,
+    /// The group refused the signal because all its members had exited
+    /// (Darwin); it must be absent after the leader's reap.
+    #[cfg_attr(windows, allow(dead_code))]
+    ConfirmAbsenceAfterReap(i32),
+}
+
 #[cfg(windows)]
 struct TerminalProcessTree {
     job: TerminalJobObject,
@@ -701,8 +712,13 @@ impl TerminalProcessTree {
         kill_child_process(process, label)
     }
 
-    fn kill_before_reap(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
-        self.kill(process, label)
+    fn kill_before_reap(
+        &self,
+        process: &Arc<SharedChild>,
+        label: &str,
+    ) -> Result<TerminalGroupSignal> {
+        self.kill(process, label)?;
+        Ok(TerminalGroupSignal::Delivered)
     }
 
     fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {
@@ -885,14 +901,42 @@ impl TerminalProcessTree {
         kill_child_process(process, label)
     }
 
-    fn kill_before_reap(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    fn kill_before_reap(
+        &self,
+        process: &Arc<SharedChild>,
+        label: &str,
+    ) -> Result<TerminalGroupSignal> {
         // Engram's worker calls this before its only `wait`, including after
         // EOF. The unreaped process retains its PID, so its process-group id
         // cannot be recycled between this signal and the later reap. This is
         // intentionally stronger than terminal clean-exit cleanup, which is
         // invoked only after the shell has already been reaped.
-        terminate_terminal_process_group(terminal_process_group_id(process.id(), label)?, label)?;
-        kill_child_process(process, label)
+        let pgid = terminal_process_group_id(process.id(), label)?;
+        let mut signal = TerminalGroupSignal::Delivered;
+        if unsafe { libc::killpg(pgid, libc::SIGKILL) } == -1 {
+            let err = io::Error::last_os_error();
+            match err.raw_os_error() {
+                Some(libc::ESRCH) => {}
+                // Darwin answers EPERM rather than ESRCH for a group whose
+                // members have all exited, the leader included, and for a
+                // leader still in the middle of exiting. That alone confirms
+                // nothing: it is accepted only once the leader is seen to
+                // have exited, within a bounded look, and the group must then
+                // be absent after the reap (`bounded_read_cleanup.rs` applies
+                // the same rule). Nothing is signalled after that look, so
+                // the group id is only ever observed from then on.
+                Some(libc::EPERM) if terminal_leader_exit_observed(process) => {
+                    signal = TerminalGroupSignal::ConfirmAbsenceAfterReap(pgid);
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "failed to terminate {label} process group {pgid}: {err}"
+                    ));
+                }
+            }
+        }
+        kill_child_process(process, label)?;
+        Ok(signal)
     }
 
     fn resume_after_attach(&self, _process: &Arc<SharedChild>) -> Result<()> {
@@ -948,6 +992,53 @@ fn terminate_terminal_process_group(pgid: libc::pid_t, label: &str) -> Result<()
     }
 
     Ok(())
+}
+
+/// How long the absence of a zombie-only group is probed for after its
+/// leader's reap: once the leader is reaped, any remaining exited members
+/// are reaped by their new parent, briefly.
+#[cfg(not(windows))]
+const TERMINAL_GROUP_ABSENCE_PROBE: Duration = Duration::from_millis(250);
+
+/// Whether the leader `process` is seen to have exited, looking for at most
+/// `TERMINAL_GROUP_ABSENCE_PROBE`: a leader that has begun exiting becomes
+/// observable as exited only once its exit completes. `SharedChild::try_wait`
+/// sees both a leader that has just exited, which it reaps, and one its owner
+/// has already reaped, whose status it keeps. An error observing it counts as
+/// not seen.
+#[cfg(not(windows))]
+fn terminal_leader_exit_observed(process: &Arc<SharedChild>) -> bool {
+    let deadline = std::time::Instant::now() + TERMINAL_GROUP_ABSENCE_PROBE;
+    loop {
+        match process.try_wait().map(|status| status.is_some()) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(_) => return false,
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Whether the process group `pgid`, signalled before its leader's reap, is
+/// gone now that the leader is reaped. The group is only observed, never
+/// signalled: its numeric id may already belong to another group.
+#[cfg(not(windows))]
+fn terminal_process_group_absent_after_reap(pgid: libc::pid_t) -> bool {
+    let deadline = std::time::Instant::now() + TERMINAL_GROUP_ABSENCE_PROBE;
+    loop {
+        if unsafe { libc::kill(-pgid, 0) } == -1
+            && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[cfg(not(windows))]
