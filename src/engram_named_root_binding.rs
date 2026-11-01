@@ -2,6 +2,19 @@
 // receipts, authoritative lifecycle reconciliation and capture provenance.
 // Path validation and the agent's naming request live in engram_source_roots.rs.
 
+/// The reason Engram gives, inside a `named_root_binding_refused` refusal,
+/// when the session's control session is not active: it is exited, or acts
+/// for another session. Engram's other causes for that code carry other
+/// reasons, and only this one is cured by re-binding the session.
+const ENGRAM_INACTIVE_CONTROL_SESSION_REASON: &str = "requires an active host session";
+
+/// The precondition and remedy a refused named-root bind names when the
+/// session's binding token was replaced while that bind was in flight: the
+/// refusal was for a token the session no longer holds, so nothing is flagged.
+const ENGRAM_NAMED_ROOT_TOKEN_REPLACED_REMEDY: &str = "The session's Engram binding token was \
+     replaced while this naming's bind was in flight, so the refusal was for a token the \
+     session no longer holds; name the root again to use its current binding.";
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EngramNamedRootKind {
@@ -1795,6 +1808,91 @@ impl AppState {
         )
     }
 
+    /// The remedy for a `named_root_binding_refused` answer that a re-bind of
+    /// this session does not apply to, decided before the session's token is
+    /// considered: a refusal for another cause than an inactive control
+    /// session, or one under turn-gated control. `None` is an inactive control
+    /// session under control off, which the session's token then decides.
+    fn engram_named_root_refusal_remedy_without_rebind(
+        refusal: &EngramTransportError,
+        target: &EngramBindingTarget,
+    ) -> Option<&'static str> {
+        if !refusal
+            .message
+            .contains(ENGRAM_INACTIVE_CONTROL_SESSION_REASON)
+        {
+            return Some(
+                "Re-binding the session does not cure this refusal; address Engram's \
+                 reason above, then name the root again.",
+            );
+        }
+        if target.settings.turn_gated_control {
+            return Some(
+                "The named-root binding needs an active Engram control session acting \
+                 for this session on the claim's live run. Under turn-gated control the \
+                 session's own binder re-establishes it; name the root again once the \
+                 session has been re-bound.",
+            );
+        }
+        None
+    }
+
+    /// What a session whose named-root bind Engram refused with
+    /// `named_root_binding_refused` should do next, applying the one remedy
+    /// TermAl can apply itself.
+    ///
+    /// Engram uses that code for several causes: malformed fields, a claim
+    /// that is no longer current or active, a stale generation, and a
+    /// session whose control session is not active. Only the last is cured
+    /// by re-binding, and Engram names it by
+    /// `ENGRAM_INACTIVE_CONTROL_SESSION_REASON`. A session bound before
+    /// turn-gated control was switched off keeps that exited control session,
+    /// and with control off nothing else re-binds it. So under control off,
+    /// for that reason only and while the reporting session still holds the
+    /// token Engram refused, the token is flagged for rebinding; the
+    /// session's next naming then sends its flagged-token naming bind, which
+    /// leaves Engram with an active control session under a new token.
+    /// Engram grants no turn authority for a bind. Every other refusal keeps
+    /// the binding as it is: under turn-gated control the session's binder
+    /// owns it, a token that changed meanwhile is no longer the refused one,
+    /// and any other cause is not cured by a bind.
+    fn engram_named_root_refusal_remedy_locked(
+        inner: &mut StateInner,
+        target: &EngramBindingTarget,
+        caller_session_id: &str,
+        refused_token: &str,
+        refusal: &EngramTransportError,
+    ) -> String {
+        if let Some(remedy) = Self::engram_named_root_refusal_remedy_without_rebind(refusal, target)
+        {
+            return remedy.to_owned();
+        }
+        let reporter = &target.connection.session_id;
+        let Some(index) = inner.find_session_index(reporter).filter(|&index| {
+            inner.sessions[index].engram.routing_token.as_deref() == Some(refused_token)
+        }) else {
+            return ENGRAM_NAMED_ROOT_TOKEN_REPLACED_REMEDY.to_owned();
+        };
+        inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .engram
+            .rebind_required = true;
+        if reporter == caller_session_id {
+            "This session's Engram control session is no longer active, which happens to a \
+             session bound before turn-gated control was switched off. Its binding is now \
+             marked for renewal: name the root again to re-bind the session and bind the root."
+                .to_owned()
+        } else {
+            format!(
+                "The Engram control session of session {reporter}, which reported this root, \
+                 is no longer active, which happens to a session bound before turn-gated \
+                 control was switched off. Its binding is now marked for renewal: name the \
+                 root again from session {reporter} to re-bind it and bind the root."
+            )
+        }
+    }
+
     fn send_engram_root_event_until(
         &self,
         target: &EngramBindingTarget,
@@ -1815,6 +1913,7 @@ impl AppState {
             })?
         };
         let owner = self.prepare_engram_root_event_authority_until(event, &binding, deadline)?;
+        let caller_session_id = target.connection.session_id.clone();
         let original_reporter;
         let target = if target.connection.session_id == event.reporter {
             target
@@ -1852,8 +1951,37 @@ impl AppState {
                 // A definitive lifecycle refusal has no event to retry. A
                 // timeout, malformed receipt or persistence failure does.
                 if error.code.as_deref() == Some("named_root_binding_refused") {
-                    let proof =
-                        self.read_engram_authority_fact_until(target, &binding, deadline)?;
+                    let proof = match self.read_engram_authority_fact_until(
+                        target, &binding, deadline,
+                    ) {
+                        Ok(proof) => proof,
+                        // The authority read refuses a token that is no longer the
+                        // session's. When that is why it failed, the refusal says so
+                        // and what to do, as the remedy below does for a token
+                        // replaced after the read.
+                        Err(read_error) => {
+                            let inner = self.inner.lock().expect("state mutex poisoned");
+                            let still_held = inner
+                                .find_session_index(&target.connection.session_id)
+                                .is_some_and(|index| {
+                                    inner.sessions[index].engram.routing_token.as_deref()
+                                        == Some(token)
+                                });
+                            drop(inner);
+                            if still_held {
+                                return Err(read_error);
+                            }
+                            let remedy = Self::engram_named_root_refusal_remedy_without_rebind(
+                                &error, target,
+                            )
+                            .unwrap_or(ENGRAM_NAMED_ROOT_TOKEN_REPLACED_REMEDY);
+                            return Err(ApiError::conflict(format!(
+                                "named_root_binding_refused: {error}. {remedy} (The authority \
+                                 read for the refused token reported: {})",
+                                read_error.message
+                            )));
+                        }
+                    };
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     Self::learn_engram_authority_locked(
                         &mut inner,
@@ -1861,6 +1989,13 @@ impl AppState {
                         &owner,
                         &proof,
                     )?;
+                    let remedy = Self::engram_named_root_refusal_remedy_locked(
+                        &mut inner,
+                        target,
+                        &caller_session_id,
+                        token,
+                        &error,
+                    );
                     if let Some(index) = inner
                         .engram_named_root_journal
                         .iter()
@@ -1878,7 +2013,7 @@ impl AppState {
                     drop(inner);
                     self.publish_engram_authority_until(&event.root.store, &owner, deadline)?;
                     return Err(ApiError::conflict(format!(
-                        "named_root_binding_refused: {error}"
+                        "named_root_binding_refused: {error}. {remedy}"
                     )));
                 }
                 return Err(ApiError::bad_gateway(format!(

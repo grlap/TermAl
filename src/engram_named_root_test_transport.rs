@@ -13,6 +13,13 @@ struct TestEngramNamedRoots {
     seen: BTreeMap<(String, String), (Value, Value)>,
     lose_next_reply: bool,
     refuse_next: bool,
+    // Sessions whose Engram control session is not active (exited): their
+    // named-root binds are refused with Engram's inactive-session reason
+    // until a session_bind for the session makes it active again.
+    inactive_sessions: BTreeSet<String>,
+    // Runs once, inside the model, as an inactive-session refusal is made:
+    // what changes in the host between a bind's send and its refusal.
+    on_inactive_refusal: Option<Box<dyn FnOnce() + Send>>,
     fail_next_status: bool,
     root_reads: BTreeMap<String, Value>,
     root_read_failures: BTreeSet<String>,
@@ -219,6 +226,7 @@ impl TestEngramNamedRoots {
             ));
         }
         if wire["operation"] == "session_bind" {
+            self.inactive_sessions.remove(session);
             if let Some(claim) = wire["work_binding"]["claim_id"].as_str() {
                 self.bindings.insert(session.to_owned(), claim.to_owned());
                 self.register(&serde_json::from_value(wire["work_binding"].clone()).unwrap());
@@ -228,6 +236,15 @@ impl TestEngramNamedRoots {
         }
         if wire["operation"] != "named_root_bind" {
             return None;
+        }
+        if self.inactive_sessions.contains(session) {
+            if let Some(meanwhile) = self.on_inactive_refusal.take() {
+                meanwhile();
+            }
+            return Some(Err(EngramTransportError::remote(EngramControlErrorBody {
+                code: "named_root_binding_refused".to_owned(),
+                message: "named-root binding requires an active host session".to_owned(),
+            })));
         }
         wire.as_object_mut().unwrap().remove("routing_token");
         let key = (
