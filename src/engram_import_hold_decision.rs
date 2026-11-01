@@ -41,7 +41,8 @@ enum EngramImportHoldUnknownReason {
     /// The candidate's owner is not positively covered.
     OwnerCoverageUnknown,
     /// An owner-scoped fence's owner is not enrolled in the candidate's
-    /// scope with exact bindings other than the candidate's, so the
+    /// scope with exact bindings other than the candidate's, or has a live
+    /// responsibility entry there whose binding is unknown or legacy, so the
     /// candidate cannot be shown to be another owner's work.
     FenceOwnerUnproven,
 }
@@ -65,7 +66,10 @@ enum EngramImportHoldDisposition {
 /// binding resolves to that owner; a candidate that cannot be shown to belong
 /// to a different, positively covered owner is unknown, and so is one under
 /// a fence whose own owner is not enrolled in the scope with exact bindings
-/// other than the candidate's. Any covering fence
+/// other than the candidate's. An owner-scoped fence also covers a candidate
+/// whose exact binding a live responsibility entry of the fence's owner
+/// names, and a live entry of that owner with an unknown or legacy binding
+/// leaves the candidate unknown rather than admitted. Any covering fence
 /// holds, whatever its phase: only removing its record releases the guard.
 /// Held wins over unknown, and both refuse dispatch.
 fn engram_import_hold_disposition<E>(
@@ -96,20 +100,33 @@ fn engram_import_hold_disposition<E>(
         }
         let covers = match fence.scope.owner_id.as_deref() {
             None => Ok(true),
-            Some(fence_owner) => match owner
-                .get_or_insert_with(|| engram_import_candidate_owner(journal, candidate))
-            {
-                Err(reason) => Err(*reason),
-                Ok(owner) if owner.owner_id == fence_owner => Ok(true),
-                Ok(owner) if owner.fully_covered => {
-                    if engram_import_fence_owner_is_another(journal, candidate, fence_owner) {
-                        Ok(false)
-                    } else {
-                        Err(EngramImportHoldUnknownReason::FenceOwnerUnproven)
+            Some(fence_owner) => {
+                let entries = engram_import_fence_owner_entries(journal, candidate, fence_owner);
+                if entries == EngramImportFenceOwnerEntries::NamesTheCandidate {
+                    Ok(true)
+                } else {
+                    match owner
+                        .get_or_insert_with(|| engram_import_candidate_owner(journal, candidate))
+                    {
+                        Err(reason) => Err(*reason),
+                        Ok(owner) if owner.owner_id == fence_owner => Ok(true),
+                        Ok(owner) if owner.fully_covered => {
+                            if entries == EngramImportFenceOwnerEntries::NoBearing
+                                && engram_import_fence_owner_is_another(
+                                    journal,
+                                    candidate,
+                                    fence_owner,
+                                )
+                            {
+                                Ok(false)
+                            } else {
+                                Err(EngramImportHoldUnknownReason::FenceOwnerUnproven)
+                            }
+                        }
+                        Ok(_) => Err(EngramImportHoldUnknownReason::OwnerCoverageUnknown),
                     }
                 }
-                Ok(_) => Err(EngramImportHoldUnknownReason::OwnerCoverageUnknown),
-            },
+            }
         };
         match covers {
             Ok(true) => held.push(EngramImportHeldFence {
@@ -158,6 +175,58 @@ fn engram_import_fence_owner_is_another(
         enrolled = true;
     }
     enrolled
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+/// What a fence owner's live responsibility entries say about a candidate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngramImportFenceOwnerEntries {
+    /// No live entry of the fence owner bears on the candidate.
+    NoBearing,
+    /// A live entry of the fence owner has an unknown or legacy binding, so
+    /// it may be the candidate's work.
+    Unbound,
+    /// A live entry of the fence owner names the candidate's exact binding,
+    /// so the owner's fence covers the candidate.
+    NamesTheCandidate,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+/// Read the fence owner's live (not terminal) responsibility entries in the
+/// candidate's store and project. An entry with the candidate's exact
+/// binding ties the fence to the candidate, whatever else is enrolled; an
+/// entry whose binding is unknown or legacy may be the candidate's work.
+/// Terminal entries, other owners' entries and other exact bindings say
+/// nothing about the candidate. The fence owner's own enrollment,
+/// association and coverage are not read: its entries count without them.
+fn engram_import_fence_owner_entries(
+    journal: &EngramImportReconciliationJournal,
+    candidate: &EngramImportDispatchCandidate,
+    fence_owner: &str,
+) -> EngramImportFenceOwnerEntries {
+    let mut found = EngramImportFenceOwnerEntries::NoBearing;
+    for (_, record) in journal.records() {
+        let EngramImportReconciliationRecord::ResponsibilityEntry(entry) = record else {
+            continue;
+        };
+        if entry.owner_id != fence_owner
+            || entry.state == EngramImportEntryState::Terminal
+            || !engram_import_scope_matches(&entry.scope, candidate)
+        {
+            continue;
+        }
+        match entry.original_binding {
+            // An exact entry equal to the candidate's binding implies the
+            // candidate is exactly bound too.
+            EngramImportOriginalBinding::Exact(_) => {
+                if entry.original_binding == candidate.original_binding {
+                    return EngramImportFenceOwnerEntries::NamesTheCandidate;
+                }
+            }
+            _ => found = EngramImportFenceOwnerEntries::Unbound,
+        }
+    }
+    found
 }
 
 #[cfg_attr(not(test), allow(dead_code))]

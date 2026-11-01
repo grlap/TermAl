@@ -112,6 +112,67 @@ fn fence(spec: FenceSpec<'_>) -> EngramImportReconciliationRecord {
     })
 }
 
+fn entry(
+    record_id: &str,
+    owner_id: &str,
+    binding: EngramImportOriginalBinding,
+    state: EngramImportEntryState,
+) -> EngramImportReconciliationRecord {
+    entry_in(STORE, PROJECT, record_id, owner_id, binding, state)
+}
+
+fn entry_in(
+    store: &str,
+    project: &str,
+    record_id: &str,
+    owner_id: &str,
+    binding: EngramImportOriginalBinding,
+    state: EngramImportEntryState,
+) -> EngramImportReconciliationRecord {
+    EngramImportReconciliationRecord::ResponsibilityEntry(EngramImportResponsibilityEntry {
+        schema_version: ENGRAM_IMPORT_RECONCILIATION_RECORD_VERSION,
+        record_id: record_id.to_owned(),
+        scope: scope(store, project, Some(owner_id)),
+        owner_id: owner_id.to_owned(),
+        class: EngramImportResponsibilityClass::RetainedHead,
+        original_binding: binding,
+        existing_ref: format!("existing-{record_id}"),
+        revision: 1,
+        state,
+        terminal_evidence_ref: (state == EngramImportEntryState::Terminal)
+            .then(|| format!("terminal-evidence-{record_id}")),
+    })
+}
+
+/// Two fully covered owners and a fence of owner-2, which a candidate of
+/// owner-1 passes, plus `entries`.
+fn owner_two_fence_with(
+    entries: Vec<EngramImportReconciliationRecord>,
+) -> EngramImportReconciliationState {
+    owner_two_fence(
+        Some(covered_owner("owner-record-2", "owner-2", exact(2))),
+        entries,
+    )
+}
+
+/// A fully covered owner-1, a fence of owner-2, owner-2's enrollment if any,
+/// and `entries`.
+fn owner_two_fence(
+    owner_two: Option<EngramImportReconciliationRecord>,
+    entries: Vec<EngramImportReconciliationRecord>,
+) -> EngramImportReconciliationState {
+    let mut records = vec![
+        covered_owner("owner-record-1", "owner-1", exact(1)),
+        fence(FenceSpec {
+            owner_id: Some("owner-2"),
+            ..whole_scope_fence("fence-1")
+        }),
+    ];
+    records.extend(owner_two);
+    records.extend(entries);
+    activated(records)
+}
+
 fn activated(records: Vec<EngramImportReconciliationRecord>) -> EngramImportReconciliationState {
     let mut journal = EngramImportReconciliationJournal::activated_empty();
     for record in records {
@@ -493,5 +554,192 @@ fn a_journal_that_cannot_be_established_is_unknown() {
                 EngramImportHoldUnknownReason::JournalNotEstablished
             ),
         );
+    }
+}
+
+#[test]
+fn a_live_entry_of_the_fence_owner_naming_the_candidate_holds_it() {
+    let held_by_fence = held(&[("fence-1", EngramImportFencePhase::Installing, true)]);
+    assert_eq!(
+        decide(&owner_two_fence_with(Vec::new()), &candidate(STORE, PROJECT, exact(1))),
+        EngramImportHoldDisposition::Admitted,
+        "without the entry, owner-1's candidate passes owner-2's fence",
+    );
+    for state in [EngramImportEntryState::Outstanding, EngramImportEntryState::Unknown] {
+        let journal =
+            owner_two_fence_with(vec![entry("entry-1", "owner-2", exact(1), state)]);
+        assert_eq!(
+            decide(&journal, &candidate(STORE, PROJECT, exact(1))),
+            held_by_fence,
+            "{state:?} entry of owner-2 naming exact(1)",
+        );
+    }
+    // The entry ties the fence to the candidate even when the candidate's own
+    // owner does not resolve.
+    let journal = owner_two_fence_with(vec![entry(
+        "entry-1",
+        "owner-2",
+        exact(3),
+        EngramImportEntryState::Outstanding,
+    )]);
+    assert_eq!(
+        decide(&journal, &candidate(STORE, PROJECT, exact(3))),
+        held_by_fence,
+    );
+}
+
+#[test]
+fn a_live_unbound_entry_of_the_fence_owner_leaves_the_candidate_unknown() {
+    for binding in [
+        EngramImportOriginalBinding::Unknown,
+        EngramImportOriginalBinding::Legacy,
+    ] {
+        for state in [EngramImportEntryState::Outstanding, EngramImportEntryState::Unknown] {
+            let journal = owner_two_fence_with(vec![entry(
+                "entry-1",
+                "owner-2",
+                binding.clone(),
+                state,
+            )]);
+            assert_eq!(
+                decide(&journal, &candidate(STORE, PROJECT, exact(1))),
+                EngramImportHoldDisposition::Unknown(
+                    EngramImportHoldUnknownReason::FenceOwnerUnproven
+                ),
+                "{state:?} entry of owner-2 with {binding:?}",
+            );
+        }
+    }
+}
+
+#[test]
+fn terminal_other_owner_and_other_binding_entries_change_nothing() {
+    let cases = vec![
+        (
+            "terminal entry naming the candidate",
+            entry("entry-1", "owner-2", exact(1), EngramImportEntryState::Terminal),
+        ),
+        (
+            "terminal unbound entry",
+            entry(
+                "entry-1",
+                "owner-2",
+                EngramImportOriginalBinding::Unknown,
+                EngramImportEntryState::Terminal,
+            ),
+        ),
+        (
+            "another owner's entry naming the candidate",
+            entry("entry-1", "owner-3", exact(1), EngramImportEntryState::Outstanding),
+        ),
+        (
+            "another owner's unbound entry",
+            entry(
+                "entry-1",
+                "owner-3",
+                EngramImportOriginalBinding::Legacy,
+                EngramImportEntryState::Outstanding,
+            ),
+        ),
+        (
+            "the fence owner's entry with another exact binding",
+            entry("entry-1", "owner-2", exact(4), EngramImportEntryState::Outstanding),
+        ),
+        (
+            "the fence owner's entry naming the candidate in another store association",
+            entry_in(
+                "store-association-2",
+                PROJECT,
+                "entry-1",
+                "owner-2",
+                exact(1),
+                EngramImportEntryState::Outstanding,
+            ),
+        ),
+        (
+            "the fence owner's unbound entry in another project",
+            entry_in(
+                STORE,
+                "github.com/example/other-project",
+                "entry-1",
+                "owner-2",
+                EngramImportOriginalBinding::Unknown,
+                EngramImportEntryState::Outstanding,
+            ),
+        ),
+    ];
+    for (label, record) in cases {
+        assert_eq!(
+            decide(&owner_two_fence_with(vec![record]), &candidate(STORE, PROJECT, exact(1))),
+            EngramImportHoldDisposition::Admitted,
+            "{label}",
+        );
+    }
+}
+
+#[test]
+fn the_fence_owners_coverage_and_association_are_not_consulted() {
+    use EngramImportAssociationState::*;
+    let held_by_fence = held(&[("fence-1", EngramImportFencePhase::Installing, true)]);
+    let unproven = EngramImportHoldDisposition::Unknown(
+        EngramImportHoldUnknownReason::FenceOwnerUnproven,
+    );
+    let enrolled = |association| {
+        Some(owner(
+            "owner-record-2",
+            "owner-2",
+            exact(2),
+            association,
+            EngramImportCoverage::Unknown,
+        ))
+    };
+    // Without entries, an enrolled owner-2 with another exact binding lets
+    // owner-1's candidate through whatever its coverage and association; an
+    // unenrolled owner-2 does not.
+    let fence_owners = [
+        ("admitted, coverage unknown", enrolled(Admitted), EngramImportHoldDisposition::Admitted),
+        ("pending", enrolled(Pending), EngramImportHoldDisposition::Admitted),
+        ("legacy association", enrolled(Legacy), EngramImportHoldDisposition::Admitted),
+        ("foreign", enrolled(Foreign), EngramImportHoldDisposition::Admitted),
+        ("not enrolled", None, unproven.clone()),
+    ];
+    for (label, owner_two, without_entries) in fence_owners {
+        let with = |entries| owner_two_fence(owner_two.clone(), entries);
+        assert_eq!(
+            decide(&with(Vec::new()), &candidate(STORE, PROJECT, exact(1))),
+            without_entries,
+            "{label} fence owner without entries",
+        );
+        assert_eq!(
+            decide(
+                &with(vec![entry(
+                    "entry-1",
+                    "owner-2",
+                    exact(1),
+                    EngramImportEntryState::Outstanding,
+                )]),
+                &candidate(STORE, PROJECT, exact(1)),
+            ),
+            held_by_fence,
+            "{label} fence owner with a live entry naming the candidate",
+        );
+        for binding in [
+            EngramImportOriginalBinding::Unknown,
+            EngramImportOriginalBinding::Legacy,
+        ] {
+            assert_eq!(
+                decide(
+                    &with(vec![entry(
+                        "entry-1",
+                        "owner-2",
+                        binding.clone(),
+                        EngramImportEntryState::Outstanding,
+                    )]),
+                    &candidate(STORE, PROJECT, exact(1)),
+                ),
+                unproven,
+                "{label} fence owner with a live {binding:?} entry",
+            );
+        }
     }
 }
