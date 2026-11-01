@@ -177,6 +177,9 @@ fn write_serialized_persisted_messages(
             message.message_id
         ])?;
     }
+    if !session.local_identity_namespace {
+        release_relocated_peer_identities(tx, session)?;
+    }
     let mut upsert = tx.prepare_cached(
         "INSERT INTO messages(session_id, position, message_id, value_json, overview_kind, is_user)
          VALUES(?1, ?2, ?3, ?4, ?5, ?6)
@@ -220,6 +223,73 @@ fn write_serialized_persisted_messages(
                     message.position, session.session_id,
                 )
             })?;
+    }
+    Ok(())
+}
+
+/// A peer that inserts before a remote proxy's retained window shifts that
+/// window, so a peer message can arrive at a new position while its durable
+/// row lies in the omitted history outside the window. Release only that row,
+/// and only when it is the same message relocated: the same peer id, embedded
+/// in both bodies, the same message type and the same author. Its body may
+/// differ, as streaming and completion change it. A missing or unreadable
+/// field never counts as a match, every other omitted row stays, and a
+/// duplicate inside the window still fails on the identity constraint. The
+/// release runs in the caller's transaction, so a failed write rolls it back.
+fn release_relocated_peer_identities(
+    tx: &rusqlite::Transaction<'_>,
+    session: &SerializedPersistedSession,
+) -> Result<()> {
+    let window_start = i64::try_from(session.message_start_index)
+        .context("persisted transcript position exceeds SQLite integer range")?;
+    let window_end = session
+        .message_start_index
+        .checked_add(session.snapshot.len())
+        .context("persisted transcript position overflow")?;
+    let window_end = i64::try_from(window_end)
+        .context("persisted transcript position exceeds SQLite integer range")?;
+    let mut release = tx
+        .prepare_cached(
+            "DELETE FROM messages
+             WHERE session_id = ?1 AND message_id = ?2
+               AND (position < ?3 OR position >= ?4)
+               AND json_valid(value_json) AND json_valid(?5)
+               AND json_extract(value_json, '$.id') = ?2
+               AND json_extract(?5, '$.id') = ?2
+               AND json_type(value_json, '$.type') = 'text'
+               AND json_type(value_json, '$.author') = 'text'
+               AND json_extract(value_json, '$.type') = json_extract(?5, '$.type')
+               AND json_extract(value_json, '$.author') = json_extract(?5, '$.author')
+             RETURNING position",
+        )
+        .context("failed to prepare relocated peer transcript release")?;
+    for message in &session.messages {
+        let released = release
+            .query_map(
+                rusqlite::params![
+                    session.session_id,
+                    message.message_id,
+                    window_start,
+                    window_end,
+                    message.value_json,
+                ],
+                |row| row.get::<_, i64>(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .with_context(|| {
+                format!(
+                    "failed to release relocated transcript identity for `{}`",
+                    session.session_id
+                )
+            })?;
+        for old_position in released {
+            // Staged inside the transaction; the commit may still fail.
+            let message_id: String = message.message_id.chars().take(128).collect();
+            eprintln!(
+                "persist> staged remote proxy transcript move in {:?}: {:?} from position {} to {}",
+                session.session_id, message_id, old_position, message.position
+            );
+        }
     }
     Ok(())
 }

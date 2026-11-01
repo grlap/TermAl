@@ -213,6 +213,7 @@ mod federation_bounds;
 mod remote_authority_races;
 mod remote_delta_replay;
 mod remote_hydration;
+mod remote_proxy_rebase_collision;
 mod remote_orchestrator;
 mod remote_state_events;
 mod remote_terminal;

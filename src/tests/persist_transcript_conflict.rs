@@ -16,6 +16,20 @@ fn message(id: &str) -> Message {
     }
 }
 
+/// Another message under an already durable id: a remote proxy still refuses
+/// it, while the same message relocated would move to its new position.
+fn other_message(id: &str) -> Message {
+    Message::Text {
+        id: id.to_owned(),
+        timestamp: "2026-11-01T00:00:00Z".into(),
+        author: Author::You,
+        text: format!("another message under {id}"),
+        expanded_text: None,
+        source: None,
+        attachments: Vec::new(),
+    }
+}
+
 fn conflict_does_not_fail_sibling_admission(sparse: bool) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let mut fixture = FenceFixture::new();
@@ -300,7 +314,7 @@ fn partial_synchronous_fixture(remote_conflict: bool) -> (FenceFixture, AppState
         record.session.messages.remove(0);
         record.message_start_index = 2;
         record.session.messages_loaded = false;
-        record.session.messages[0] = message("body-0");
+        record.session.messages[0] = other_message("body-0");
         record.message_positions = build_message_positions(&record.session.messages);
         push_message_on_record(inner.session_mut(&good).unwrap(), message("healthy-proxy-body"));
         inner.settings_persist_dirty = true;
